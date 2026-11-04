@@ -5,7 +5,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { fittingPhrases, fullSummary, summary } from "../src/lib/phrase-fit.ts"
+import { fittingPhrases, summary } from "../src/lib/phrase-fit.ts"
 
 const PARTS = ["Ran a command", "read 4 files", "edited 2 files", "checked a pull request"]
 /** A row whose every character is 8px wide, so a candidate's length is its width. */
@@ -13,10 +13,9 @@ const width = (text) => text.length * 8
 const fits = (room) => fittingPhrases(PARTS, room, width)
 
 test("the summary is a sentence, lower-casing what follows the first phrase", () => {
-  assert.equal(fullSummary(PARTS), "Ran a command, read 4 files, edited 2 files, checked a pull request")
+  assert.equal(summary(PARTS), "Ran a command, read 4 files, edited 2 files, checked a pull request")
   assert.equal(summary(PARTS, 2), "Ran a command, read 4 files (+2)")
   assert.equal(summary(PARTS, 1), "Ran a command (+3)")
-  assert.equal(summary(PARTS), fullSummary(PARTS), "everything, with no count")
 })
 
 test("as many phrases as fit, and a count for the rest", () => {
@@ -27,6 +26,18 @@ test("as many phrases as fit, and a count for the rest", () => {
   const two = width("Ran a command, read 4 files (+2)")
   assert.equal(fits(two), 2)
   assert.equal(fits(10), 1, "a narrow row still says one phrase and its count")
+})
+
+test("the search measures a handful of candidates, not every one", () => {
+  const many = Array.from({ length: 20 }, (_, index) => `call ${index}`)
+  let probes = 0
+  const counted = (text) => {
+    probes++
+    return text.length * 8
+  }
+  const shown = fittingPhrases(many, width(summary(many, 6)), counted)
+  assert.equal(shown, 6, "the widest count that fits")
+  assert.ok(probes <= 5, `a twenty-call group is five measurements, not nineteen (${probes})`)
 })
 
 test("a row with no room measured yet says nothing, rather than guessing", () => {

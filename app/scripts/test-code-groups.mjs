@@ -87,7 +87,6 @@ const mixed = [
   { id: "b", at: 1, act: 20, title: "apple" },
   { id: "c", at: 2, act: 15, title: "Mango" },
 ]
-/** A key at the arrow it reads best in, which is what a fresh pick of it means. */
 const at = (key) => ({ key, dir: key === "title" ? "asc" : "desc" })
 const ids = (sort, rows = mixed) =>
   [...rows].sort(codeOrder(typeof sort === "string" ? at(sort) : sort, pick)).map((r) => r.id)

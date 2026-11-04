@@ -8,9 +8,6 @@ await flow("chat-message", async ({ page, send, lastReply, until, shot }) => {
   await composer.press("Enter")
   assert.equal(await composer.inputValue(), "a first line\n", "Enter inserted a line, not a send")
   assert.ok(!/\/c\//.test(page.url()), "and no chat was started")
-  // The chord is the send with the switch off, in a browser and not only in jsdom (ADR 0078): the
-  // field's own default action is what inserts the line above, so only a real key proves the send
-  // prevented it.
   await composer.fill("sent by the chord")
   await composer.press("Control+Enter")
   await page.waitForURL("**/c/**", { timeout: 15_000 })

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import type { KeyboardEvent, ReactNode, Ref } from "react"
 import { ChevronUpIcon, SearchIcon, XIcon } from "lucide-react"
 import { Link } from "react-router"
 
@@ -62,8 +62,6 @@ export function ItemGroup({
       defaultOpen={false}
       render={<section className="flex flex-col gap-1" aria-label={group.label} />}
     >
-      {/* The sticky box is the heading's, exactly as a list's other groups draw it: folding a group
-          away is the trigger's job, and it never changed whether its heading pins. */}
       <h2 className={cn("flex", stickyClass)}>
         <CollapsibleTrigger
           className={cn(
@@ -201,25 +199,41 @@ export function ItemRow({
   )
 }
 
-/** The search field at the top of a list. */
-export function ItemSearch({
+/**
+ * The search field itself, where a screen puts it in its own chrome: the list's bar passes it to
+ * `InputGroup`, and Code's header animates it in place of the title (ADR 0093). One field, so the
+ * placeholder, the clear button and the frame cannot drift between the two.
+ */
+export function SearchField({
   value,
   onChange,
   label,
+  inputRef,
+  onKeyDown,
+  className,
+  tabIndex,
 }: {
   value: string
   onChange: (value: string) => void
   label: string
+  inputRef?: Ref<HTMLInputElement>
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
+  className?: string
+  /** A field drawn before it is the reader's — one animating in — stays out of the tab order. */
+  tabIndex?: number
 }) {
   return (
-    <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
+    <InputGroup className={cn("h-11 rounded-full bg-background dark:bg-input/30", className)}>
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>
       <InputGroupInput
+        ref={inputRef}
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        tabIndex={tabIndex}
         placeholder={label}
         aria-label={label}
         autoComplete="off"
@@ -239,4 +253,17 @@ export function ItemSearch({
       )}
     </InputGroup>
   )
+}
+
+/** The search field at the top of a list. */
+export function ItemSearch({
+  value,
+  onChange,
+  label,
+}: {
+  value: string
+  onChange: (value: string) => void
+  label: string
+}) {
+  return <SearchField value={value} onChange={onChange} label={label} />
 }

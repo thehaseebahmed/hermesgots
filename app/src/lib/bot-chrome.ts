@@ -12,14 +12,15 @@ export function threadsLine(count: number): string {
 
 /**
  * What the sidebar's bot row previews. A bot with something to say shows it: what Main last said
- * where this device has Main's thread, else the newest thread's name — never another thread's name
- * under the chat the row leads to when Main has words of its own. A bot with neither a message nor
- * a thread has nothing to preview, so the line says whether its host is checking in, which is the
- * one fact about a quiet bot a reader can act on (ADR 0090).
+ * where this device has Main's thread, else what the newest thread last said, and only its name
+ * where that thread holds no words yet — never another thread's words under the chat the row leads
+ * to. A bot with neither a message nor a thread has nothing to preview, so the line says whether its
+ * host is checking in, which is the one fact about a quiet bot a reader can act on (ADR 0090).
  */
 export function previewLine({
   main,
   line,
+  thread,
   latest,
   online,
 }: {
@@ -27,12 +28,14 @@ export function previewLine({
   main: boolean
   /** Main's latest message, cut to a line. */
   line?: string
-  /** Its newest thread's title, for a bot with nothing said in Main yet. */
+  /** The newest thread's latest message, cut to a line. */
+  thread?: string
+  /** That thread's title, for one holding no words yet. */
   latest?: string
   /** Whether the bot's host is checking in; `undefined` when this device can't tell. */
   online?: boolean
 }): string | undefined {
-  const said = (main ? line : undefined) ?? latest
+  const said = (main ? line : undefined) ?? thread ?? latest
   if (said) return said
   if (online === undefined) return undefined
   return online ? "Online" : "Offline"

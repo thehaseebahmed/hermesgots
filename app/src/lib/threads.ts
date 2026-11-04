@@ -9,14 +9,15 @@ import {
   listEnabledProfiles,
   mainThreadId,
   mainThreadProfile,
-  saveSettings,
   type BotSort,
   type Conversation,
   type Profile,
 } from "@/lib/db"
 import { useXLarge } from "@/lib/media"
 import { byName } from "@/lib/compare"
-import { readSort, withDir, type Sort, type SortKey } from "@/lib/sort"
+import { oneLine } from "@/lib/words"
+import { withDir, type Sort, type SortKey } from "@/lib/sort"
+import { useStoredSort } from "@/lib/use-sort"
 import { threadState, type ThreadState } from "@/lib/session-work"
 import {
   useAllLiveRuns,
@@ -58,7 +59,7 @@ export interface Thread {
   reason?: WaitingReason
 }
 
-const line = (text?: string) => text?.replace(/\s+/g, " ").trim() || undefined
+const line = (text?: string) => (text === undefined ? undefined : oneLine(text))
 
 async function latestLine(conversationId: string) {
   const newest = await db.messages
@@ -124,8 +125,6 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
               : undefined
         return {
           chat,
-          // What this device holds is the message itself; a thread it never opened still has the
-          // one the host recorded when it made the thread (ADR 0090).
           opener: line(opener?.content) ?? line(chat.opener),
           last: line(last?.content),
           replies,
@@ -170,6 +169,8 @@ export interface BotSummary {
   /** Its Main thread, once this device has opened it. */
   main?: Conversation
   preview?: string
+  /** The newest thread's latest message, cut to a line, for a bot with nothing said in Main. */
+  threadLine?: string
   /** Threads waiting on the user. */
   waiting: number
 }
@@ -182,27 +183,14 @@ export const BOT_SORTS: readonly SortKey<BotSort>[] = [
   { key: "added", label: "Added", dir: "asc" },
 ]
 
-/** What an older build wrote, and the key and arrow it meant. */
-const LEGACY_BOT_SORTS: Record<string, Sort<BotSort>> = {
-  recent: { key: "recent", dir: "desc" },
-  waiting: { key: "waiting", dir: "desc" },
-  name: { key: "name", dir: "asc" },
-  added: { key: "added", dir: "asc" },
-}
-
 /** The sidebar's bot order, kept on this device. */
 export function useBotSort(): [Sort<BotSort>, (sort: Sort<BotSort>) => void] {
-  const stored =
-    useLiveQuery(async () => {
-      const settings = await getSettings()
-      return { key: settings.botSort, dir: settings.botSortDir }
-    }, []) ?? {}
-  const sort = readSort(BOT_SORTS, stored, LEGACY_BOT_SORTS)
-  return [sort, (next) => void saveSettings({ botSort: next.key, botSortDir: next.dir })]
+  return useStoredSort(BOT_SORTS, ["botSort", "botSortDir"])
 }
 
 const active = (summary: BotSummary) => (summary.main ?? summary.latest)?.updatedAt ?? -Infinity
-const byRecent = (a: BotSummary, b: BotSummary) => active(b) - active(a)
+const byRecent = (a: BotSummary, b: BotSummary) => active(a) - active(b)
+const byAdded = (a: BotSummary, b: BotSummary) => a.bot.createdAt - b.bot.createdAt
 const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.name)
 
 /**
@@ -213,9 +201,9 @@ const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.nam
 export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] {
   const rank = (a: BotSummary, b: BotSummary) => {
     if (sort.key === "recent") return byRecent(a, b) || byBotName(a, b)
-    if (sort.key === "waiting") return b.waiting - a.waiting || byRecent(a, b) || byBotName(a, b)
+    if (sort.key === "waiting") return a.waiting - b.waiting || byRecent(a, b) || byBotName(a, b)
     if (sort.key === "name") return byBotName(a, b)
-    return 0
+    return byAdded(a, b)
   }
   return [...bots].sort((a, b) => withDir(rank(a, b), sort.dir))
 }
@@ -257,15 +245,29 @@ export function useBotSummaries(): BotSummary[] | undefined {
             .map((m) => m!.conversationId),
         )
         const main = await db.conversations.get(mainThreadId(bot.id))
-        return { bot, chats, local, main, preview: main ? await latestLine(main.id) : undefined }
+        // What the row previews: Main's last words, and where Main has none, its newest thread's —
+        // a name says what a thread is called, not what the bot last said (ADR 0090). Main is not
+        // one of those threads: it sits in the same table, so an empty Main would answer with its
+        // own title, "Main", where the newest thread had words to show.
+        const threads = chats.filter((chat) => chat.id !== main?.id)
+        const newestThread = threads[0]
+        return {
+          bot,
+          chats,
+          local,
+          main,
+          preview: main ? await latestLine(main.id) : undefined,
+          threadLine: newestThread ? await latestLine(newestThread.id) : undefined,
+        }
       }),
     )
   }, [])
-  return rows?.map(({ bot, chats, local, main, preview }) => ({
+  return rows?.map(({ bot, chats, local, main, preview, threadLine }) => ({
     bot,
-    latest: chats[0],
+    latest: chats[0] && chats[0].id !== main?.id ? chats[0] : chats.find((c) => c.id !== main?.id),
     main,
     preview,
+    threadLine,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,
   }))
 }

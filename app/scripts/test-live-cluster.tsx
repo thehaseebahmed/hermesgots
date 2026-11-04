@@ -210,10 +210,9 @@ test("a reply thinking with subagents at work turns one loader, in the row's own
   assert.ok(counted, "holding only the count of subagents at work")
   assert.equal(turning, 0, "no sign turns in the reply at all: the rows pulse their own words")
   assert.match(row!.className, /(^|\s)text-muted-foreground(\s|$)/, "in the row's muted colour")
-  assert.match(
-    row!.className,
-    /animate-work-pulse/,
-    "and the row's own words are what pulse: it carries no sign (ADR 0092)",
+  assert.ok(
+    row!.hasAttribute("data-working"),
+    "and the row is at work, its own words pulsing: it carries no sign (ADR 0092)",
   )
 })
 

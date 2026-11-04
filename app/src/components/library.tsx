@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
 
 import { SortMenu } from "@/components/sort-menu"
@@ -7,8 +6,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { byName } from "@/lib/compare"
 import { connectionKey } from "@/lib/connection"
-import { getSettings, saveSettings, type LibrarySort } from "@/lib/db"
-import { readSort, type Sort, type SortKey } from "@/lib/sort"
+import type { LibrarySort } from "@/lib/db"
+import { useStoredSort } from "@/lib/use-sort"
+import { defaultSort, withDir, type Sort, type SortKey } from "@/lib/sort"
 import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
@@ -33,7 +33,7 @@ const TEXT_FILE = /\.(md|markdown|txt|csv|json|pdf)$/i
 
 /** The keys the tree ranks by, each with the way it reads best (ADR 0091). */
 const LIBRARY_SORTS: readonly SortKey<LibrarySort>[] = [
-  { key: "date", label: "Newest", dir: "desc" },
+  { key: "date", label: "Date", dir: "desc" },
   { key: "name", label: "Name", dir: "asc" },
 ]
 
@@ -47,16 +47,11 @@ const LEGACY_LIBRARY_SORTS: Record<string, Sort<LibrarySort>> = {
 
 /** The Library tab's order, kept on this device. */
 function useLibrarySort(): [Sort<LibrarySort>, (sort: Sort<LibrarySort>) => void] {
-  const stored =
-    useLiveQuery(async () => {
-      const settings = await getSettings()
-      return { key: settings.librarySort, dir: settings.librarySortDir }
-    }, []) ?? {}
-  return [
-    readSort(LIBRARY_SORTS, stored, LEGACY_LIBRARY_SORTS),
-    (next) => void saveSettings({ librarySort: next.key, librarySortDir: next.dir }),
-  ]
+  return useStoredSort(LIBRARY_SORTS, ["librarySort", "librarySortDir"], LEGACY_LIBRARY_SORTS)
 }
+
+/** A session's library draws no sort control; its files read newest first, as they always have. */
+const NEWEST_FIRST: Sort<LibrarySort> = defaultSort(LIBRARY_SORTS)
 
 /** A library file's kind, for its icon and how it opens. */
 function kindOf(name: string) {
@@ -118,16 +113,13 @@ function newestAt(folder: LibraryFolder) {
  */
 function sortFolders(folders: LibraryFolder[], sort: Sort<LibrarySort>): LibraryFolder[] {
   const alphabetical = sort.key === "name"
-  const desc = sort.dir === "desc"
-  const name = (a: string, b: string) => byName(a, b) * (desc ? -1 : 1)
+  const by = (compare: number) => withDir(compare, sort.dir)
   const files = (folder: LibraryFolder) =>
     [...folder.files].sort((a, b) =>
-      alphabetical ? name(a.name, b.name) : (a.at - b.at) * (desc ? -1 : 1),
+      alphabetical ? by(byName(a.name, b.name)) : by(a.at - b.at),
     )
   return [...folders]
-    .sort((a, b) =>
-      alphabetical ? name(a.name, b.name) : (newestAt(a) - newestAt(b)) * (desc ? -1 : 1),
-    )
+    .sort((a, b) => (alphabetical ? by(byName(a.name, b.name)) : by(newestAt(a) - newestAt(b))))
     .map((folder) => ({ ...folder, files: files(folder) }))
 }
 
@@ -308,5 +300,5 @@ export function SessionLibrary({
     [config, sessionId],
   )
   const folders = useLibraryRead(config, load, active)
-  return <LibraryTree config={config} folders={folders} own order={{ key: "date", dir: "desc" }} />
+  return <LibraryTree config={config} folders={folders} own order={NEWEST_FIRST} />
 }

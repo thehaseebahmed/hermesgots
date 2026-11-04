@@ -15,6 +15,7 @@
 
 import type { ToolEvent } from "@/lib/db"
 import { readEnvelope } from "./json-envelope.ts"
+import { oneLine } from "./words.ts"
 
 export const DELEGATE_TOOL = "delegate_task"
 
@@ -82,7 +83,7 @@ export function controlWords(args: unknown): string | undefined {
 }
 
 /** Whitespace and newlines collapsed to single spaces, as Hermes's `_oneline` does. */
-const oneline = (text: string) => text.replace(/\s+/g, " ").trim()
+const oneline = (text: string) => oneLine(text) ?? ""
 
 /** How much of each goal a batch preview shows: `_preview_delegate_task`'s per-goal cut. */
 const GOAL_PREVIEW_CHARS = 40

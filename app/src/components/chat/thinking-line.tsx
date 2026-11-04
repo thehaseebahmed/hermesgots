@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
-import { WorkLabel, WorkRow, WORK_PULSE } from "@/components/chat/work-row"
+import { WorkLabel, WorkRow } from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { COLUMN } from "@/lib/layout"
 import { prefersReducedMotion } from "@/lib/media"
@@ -48,8 +48,8 @@ function watchAway(view: HTMLElement, away: () => void) {
 
 /**
  * One stretch of a reply's thinking. The row says what it is doing in its own word: while the
- * thinking still arrives it turns a loader beside the word "Thinking", both in the row's own muted
- * colour, and wears no sign at all once this device has measured how long the run took.
+ * thinking still arrives its words breathe and it wears no sign ahead of them (ADR 0092), and once
+ * this device has measured how long the run took it says the span instead.
  * The rotating words belong to the status line alone (ADR 0070). It opens the working-out in the
  * same sheet the tool row opens, so the thread's two accounts of the work read and open the same
  * way. A live run opened in the sheet lands on its newest words and keeps them in view while they
@@ -147,7 +147,7 @@ export const ThinkingLine = memo(function ThinkingLine({
         aria-expanded={open}
         aria-label={label}
         onClick={() => setOpen(true)}
-        className={thinking ? WORK_PULSE : undefined}
+        working={thinking}
         after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
       >
         <WorkLabel>{words}</WorkLabel>

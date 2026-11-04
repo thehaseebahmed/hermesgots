@@ -17,30 +17,38 @@ carries before pressing it.
 
 **Undo is the one thing that survives, and it stands outside the card.** It is the only fact a
 triage-opened card has that a `/thread` card does not — the move can still be taken back until the
-thread replies — so it stays, drawn as it was: the undo sign and the word, in the info colour. What
-changes is where it stands. It rode the system line, under the card, in a row that had to hold a
-sentence, a reply count and a control at once; on the line it crowded the words and pushed a second
-line of chrome under every triage card. It now trails the card: the card and Undo share one row, with
-the card taking the room and Undo pinned to the row's end, level with the card's middle, the pair
-still ending on the bubble's own edge above. The target keeps its 44px height from its own padding
-rather than from the row growing to fit it.
+thread replies — so it stays. What changes is where it stands and how much room it takes. It rode the
+system line, under the card, in a row that had to hold a sentence, a reply count and a control at
+once; on the line it crowded the words and pushed a second line of chrome under every triage card. It
+now trails the card: the card and the control share one row, the card taking the room and the control
+pinned to the row's end, level with the card's middle, the pair still ending on the bubble's own edge
+above.
 
-**And the row keeps Undo's own track whether or not a card carries one.** A row that sized itself to
-its contents made a triage card narrower than a `/thread` card beside it, so a bot's Main was a column
-of cards of two widths telling the reader something by their edges that is not true — the difference
-is a control on one card, not a different kind of card. The row is two tracks now, the card in the
-first and a second the width of Undo — the control itself, or the same mark hidden, so the track costs
-the button's own width and not a guess at it; a card with nothing to undo leaves that track empty
-rather than taking its room. Every card in a Main is the same width, and Undo appears inside a column
-that was always there.
+**And the control is its mark alone.** The undo arrow in the info colour, on a 44px round target, and
+no word beside it. A word there is read twice, since the card's own arrow and its move already say a
+thread left this flow, and in a flow of cards a repeated word is the loudest thing on the screen for
+the one control that is an action rather than a description. The mark carries the name for assistive
+technology and nothing on the glass, so the row reads as words with one control at its end.
 
-**And the track is the control's own width, not a guess at it.** Reserved as a measured `4.5rem` it
-held more room than the control needed, so the slack showed up as a gap between the card and Undo —
-space taken from the card for nothing. The row's second track is the control's own box now: the live
-button where there is something to undo, and the same mark `invisible` where there is not, which keeps
-the box, keeps the column's width identical card to card, and takes the words out of the reading order.
-The row still takes the 85% a bubble above it takes — the card is a card, not a message, and its size
-is the size a decent card wants rather than the measure of the column.
+**And the row is the column's width, whose second track is the control's own.** A row that sized
+itself to its contents made a triage card narrower than a `/thread` card beside it, so a bot's Main
+was a column of cards of two widths telling the reader something by their edges that is not true. The
+difference is a control on one card, not a different kind of card. The row is two tracks now, the card
+in the first and the second the width of Undo, and that second track is held whether or not the card
+can be undone: the live button where there is something to undo, the same mark `invisible` where there
+is not, which keeps the box, keeps the column's width identical card to card, and takes the words out
+of the reading order and out of reach of a press.
+
+The row also carries the 85% a message bubble caps itself at, and must not. That is a bubble's rule,
+since a bubble is only as wide as its words, while a card fills its row by definition: the cap left a
+strip of nothing down the right of every card, 52px of it at a phone's width. The row spans the column
+now, so a card ends where a message above it ends.
+
+Two things the track must never be. Not a measured constant, because a font scale or a longer word
+would clip the control or reopen the band the rule exists to close, and nothing would notice. Not an
+`auto` track sized only when a card can be undone, because then the width depends on the control again.
+The hidden twin is what makes the second track the control's own size on its own, with no number in the
+code and nothing to keep in step.
 
 ## Considered options
 

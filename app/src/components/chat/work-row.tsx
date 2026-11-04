@@ -14,12 +14,7 @@ import { cn } from "@/lib/utils"
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
-/**
- * A row still at work: its own label pulses in the muted colour it already wears, so the row starts
- * on the reply's edge whether it runs, is finished or failed (ADR 0092). It is the reduced-motion
- * safe animation, so a reader who asked for stillness gets still words rather than none.
- */
-export const WORK_PULSE = "motion-safe:animate-work-pulse"
+
 
 /**
  * The sign the status line wears ahead of its words — a spinner while the line is live. It is hidden
@@ -40,14 +35,23 @@ export function WorkSign() {
 
 /**
  * A work row's words: the one box they are bounded by, whichever row draws them, so a long label
- * truncates in the row's shape rather than pushing what follows it (ADR 0050).
+ * truncates in the row's shape rather than pushing what follows it (ADR 0050). It takes the room left
+ * in the row: a shrink-wrapped box answers its text's width, so the fit would never learn the pane had
+ * widened and a cut count would stay cut.
  */
 export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(function WorkLabel(
   { className, ...props },
   ref,
 ) {
   const face = useCodeFace()
-  return <span ref={ref} className={cn("min-w-0 truncate", face, className)} {...props} />
+  return (
+    <span
+      ref={ref}
+      data-slot="work-label"
+      className={cn("min-w-0 flex-1 truncate", face, className)}
+      {...props}
+    />
+  )
 })
 
 /**
@@ -58,10 +62,16 @@ export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(fun
  */
 export const WorkRow = forwardRef<
   HTMLButtonElement,
-  ComponentProps<"button"> & { after?: ReactNode }
->(function WorkRow({ after, children, className, ...props }, ref) {
+  ComponentProps<"button"> & { after?: ReactNode; working?: boolean }
+>(function WorkRow({ after, children, className, working = false, ...props }, ref) {
   return (
-    <button ref={ref} type="button" className={cn(WORK_ROW_CLASS, className)} {...props}>
+    <button
+      ref={ref}
+      type="button"
+      data-working={working || undefined}
+      className={cn(WORK_ROW_CLASS, className)}
+      {...props}
+    >
       {children}
       {after}
     </button>

@@ -13,8 +13,8 @@ reply's own left edge for a sign that is absent most of the time. Two rows that 
 whether they are still working then start in two different places, which is the jump the empty box
 was meant to prevent.
 
-**The row starts at its words, and works by them.** A row at work pulses its own label — a gentle
-shimmer of the muted colour it already wears — and its label alone: no box, no mark, and the same
+**The row starts at its words, and works by them.** A row at work pulses its own label — the muted
+colour it already wears, breathing rather than shimmering — and its label alone: no box, no mark, and the same
 left edge whether it is running, finished or failed. A failure keeps its own line under the row (the
 reason it already draws) and turns that row's words destructive, so the state is said by something
 that does not sit in the flow's start. A thought row pulsing reads as the same shape a tool group
@@ -42,7 +42,7 @@ own edge).
 
 - `WorkRow` (`components/chat/work-row.tsx`) takes no `before`; `WorkSign` stays for the status line
   and `WorkNote` loses its dent.
-- `ThinkingLine` and `ToolGroup` pulse while they work — `data-working` on the row, with the shimmer
+- `ThinkingLine` and `ToolGroup` pulse while they work — `data-working` on the row, with the pulse
   in `index.css` and honouring `prefers-reduced-motion` — and a failed group's words are
   destructive.
 - `scripts/test-work-row-slot.tsx` is rewritten around the absence of a slot: every work row starts

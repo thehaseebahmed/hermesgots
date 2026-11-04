@@ -70,8 +70,6 @@ async function seed({ without = [] }: { without?: string[] } = {}) {
       updatedAt: createdAt,
       changedAt: 0,
       muted,
-      // As the host records them when it makes the thread (ADR 0090): the message that began it and
-      // the moment the reader sent it.
       opener,
       openerAt: createdAt,
     })),
@@ -198,8 +196,6 @@ test("a card keeps its message in the bubble and its name on the card, with no a
 
 test("a card stands where its opener was sent, not where the record was made", async () => {
   await seed()
-  // The host writes the thread's record a little after the message that began it: the record's own
-  // clock would stand the card a day later than the words the reader typed (ADR 0089).
   await db.conversations.update("t-d", { createdAt: at(0, 8), openerAt: at(-2, 13) })
   globalThis.fetch = async () => json({})
   await mount(chatScreen(mainThreadId(bot.id)), async () => {

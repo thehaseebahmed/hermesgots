@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
-import { isOnline } from "@/lib/registry"
+import { presence } from "@/lib/registry"
 import type { Message } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -221,7 +221,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, latest, main, preview, waiting }) => {
+        {bots?.map(({ bot, latest, main, preview, threadLine, waiting }) => {
           const age = (main ?? latest)?.updatedAt
           return (
             <li key={bot.id}>
@@ -257,8 +257,9 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                         {previewLine({
                           main: Boolean(main),
                           line: preview,
+                          thread: threadLine,
                           latest: latest?.title,
-                          online: bot.hostId && !bot.disabled ? isOnline(bot, now) : undefined,
+                          online: presence(bot, now),
                         })}
                       </span>
                       {waiting > 0 && (

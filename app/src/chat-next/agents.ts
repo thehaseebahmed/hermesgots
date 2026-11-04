@@ -1,6 +1,7 @@
 import type { DelegatedAgent } from "../lib/hermes.ts"
 
 import type { ToolCall, Turn } from "./fold"
+import { oneLine } from "../lib/words.ts"
 
 export const DELEGATE = "delegate_task"
 
@@ -67,7 +68,7 @@ export function goalsOf(call: ToolCall): string[] {
 }
 
 /** The host lists a goal on one line and cut short, so a long goal of several lines is its prefix. */
-const words = (goal: string) => goal.replace(/\s+/g, " ").trim()
+const words = (goal: string) => oneLine(goal) ?? ""
 
 /**
  * A call the host refused spawned nothing: its result is an error object (cut short when it is

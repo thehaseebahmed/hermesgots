@@ -115,7 +115,6 @@ class TriageTests(unittest.TestCase):
         value = chats.read(self.path)[chat_id]["value"]
         self.assertEqual(value["opener"], "plan my trip", "one line, as a card's bubble holds it")
         self.assertEqual(value["openerAt"], 1_700_000_000_123)
-        # A thread opened with nothing to name draws no bubble, rather than an empty one.
         other, _ = triage.open_thread(self.path, "bot")
         self.assertNotIn("opener", chats.read(self.path)[other]["value"])
 

@@ -3,15 +3,10 @@
  * when they don't all fit the row — as many as do, with `(+N)` standing in for the rest (ADR 0050).
  * The count is the row's, never the sheet's: a reader sees at a glance that there is more, and the
  * sheet is where the calls themselves are read.
- *
- * Import-free, so it runs under plain node (`scripts/test-phrase-fit.mjs`).
  */
 
 const sentence = (parts: string[]) =>
   parts.map((part, index) => (index ? part[0].toLowerCase() + part.slice(1) : part)).join(", ")
-
-/** Every phrase, uncut. */
-export const fullSummary = (parts: string[]) => sentence(parts)
 
 /** The first `shown` phrases, and how many more there are when it is cut short. */
 export function summary(parts: string[], shown = parts.length) {
@@ -33,10 +28,14 @@ export function fittingPhrases(
   width: (text: string) => number,
 ): number | undefined {
   if (!room || !parts.length) return undefined
-  for (let count = parts.length; count > 1; count--) {
+  let fits = 1
+  let tooMany = parts.length
+  while (fits < tooMany) {
+    const count = Math.ceil((fits + tooMany) / 2)
     const measured = width(summary(parts, count))
     if (!measured) return undefined
-    if (measured <= room) return count
+    if (measured <= room) fits = count
+    else tooMany = count - 1
   }
-  return 1
+  return fits
 }

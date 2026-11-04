@@ -104,7 +104,7 @@ import {
   usePushFeatures,
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
-import { isOnline, siteUrl } from "@/lib/registry"
+import { isOnline, presence, siteUrl } from "@/lib/registry"
 import { themeLabel } from "@/lib/theme"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
@@ -353,7 +353,7 @@ function MenuScreen({
 /** A bot in the menu: its connectivity dot, then the bot itself, then its name. */
 function BotRow({ profile }: { profile: Profile }) {
   const now = useNow()
-  const online = profile.hostId && !profile.disabled ? isOnline(profile, now) : undefined
+  const online = presence(profile, now)
   return (
     <Row
       to={`bots/${profile.id}`}

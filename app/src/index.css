@@ -124,9 +124,6 @@
   --chart-5: oklch(0.76 0.11 195);
 }
 
-/* A work row at work (src/components/chat/work-row.tsx): its own words pulse, gently and slowly
-   enough to read as breathing rather than as a flash, so the row says it is live without a sign
-   ahead of it and without moving its words (ADR 0092). */
 @keyframes work-pulse {
   0%,
   100% {
@@ -134,6 +131,14 @@
   }
   50% {
     opacity: 0.45;
+  }
+}
+
+/* A work row at work breathes its own words and nothing else — the chevron beside them holds still,
+   so the row's shape reads the same whether it runs or is finished (ADR 0092). */
+@media (prefers-reduced-motion: no-preference) {
+  [data-working] [data-slot="work-label"] {
+    animation: work-pulse 1.8s ease-in-out infinite;
   }
 }
 

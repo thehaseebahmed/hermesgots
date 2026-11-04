@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import {
   ArchiveXIcon,
   CheckIcon,
@@ -17,17 +16,11 @@ import { Navigate, useNavigate } from "react-router"
 
 import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
-import { ItemGroup, ItemRow } from "@/components/item-list"
+import { ItemGroup, ItemRow, SearchField } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import {
   projectKey,
@@ -39,9 +32,7 @@ import {
 import { connectionKey } from "@/lib/connection"
 import {
   createConversation,
-  getSettings,
   prIsLive,
-  saveSettings,
   type CodeSort,
   type Conversation,
   type Profile,
@@ -76,7 +67,8 @@ import {
 import { useReadMarks } from "@/lib/read-marks"
 import { cn } from "@/lib/utils"
 import { filterByFuzzy } from "@/lib/fuzzy"
-import { readSort, type Sort, type SortKey } from "@/lib/sort"
+import { type Sort, type SortKey } from "@/lib/sort"
+import { useStoredSort } from "@/lib/use-sort"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -145,27 +137,9 @@ const CODE_SORTS: readonly SortKey<CodeSort>[] = [
   { key: "title", label: "Title", dir: "asc" },
 ]
 
-/** What an older build wrote, and the key and arrow it meant. */
-const LEGACY_CODE_SORTS: Record<string, Sort<CodeSort>> = {
-  created: { key: "created", dir: "desc" },
-  activity: { key: "activity", dir: "desc" },
-  title: { key: "title", dir: "asc" },
-}
-
 /** The Code list's order over each group, kept on this device (unset: created, newest first). */
 function useCodeSort(): [Sort<CodeSort>, (sort: Sort<CodeSort>) => void] {
-  const stored =
-    useLiveQuery(async () => {
-      const settings = await getSettings()
-      return { key: settings.codeSort, dir: settings.codeSortDir }
-    }, []) ?? {}
-  return [
-    readSort(CODE_SORTS, stored, LEGACY_CODE_SORTS),
-    (next) =>
-      void saveSettings({ codeSort: next.key, codeSortDir: next.dir }).catch(
-        quietly("Saving the sort order"),
-      ),
-  ]
+  return useStoredSort(CODE_SORTS, ["codeSort", "codeSortDir"])
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {
@@ -183,6 +157,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const field = useRef<HTMLInputElement>(null)
+  const chipRow = useRef<HTMLDivElement>(null)
+  const dock = useRef<HTMLDivElement>(null)
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
   const [sort, setSort] = useCodeSort()
@@ -247,24 +223,39 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const chips = [...projects.entries()]
     .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
-  // A query narrows the list and ranks what is left; a project chip only narrows it (ADR 0093).
-  const inProject = rows.filter((r) => !chip || r.key === chip)
-  const shown = filterByFuzzy(inProject, query, (r) => [
-    r.c.title,
-    r.project?.name,
-    r.c.worktree?.branch,
-  ])
+  useLayoutEffect(() => {
+    const row = chipRow.current
+    const sort = dock.current
+    if (!row || !sort) return
+    const fit = () => row.style.setProperty("--dock", `${sort.offsetWidth}px`)
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(sort)
+    return () => observer.disconnect()
+  }, [chips.length, sort.key])
+
+  const order = useMemo(
+    () =>
+      codeOrder<Row>(sort, {
+        created: (row) => row.c.createdAt,
+        activity: (row) => lastActivityAt(row.c),
+        title: (row) => row.c.title,
+      }),
+    [sort.key, sort.dir],
+  )
   const filtering = Boolean(query.trim() || chip)
-  const order = codeOrder<Row>(sort, {
-    created: (row) => row.c.createdAt,
-    activity: (row) => lastActivityAt(row.c),
-    title: (row) => row.c.title,
-  })
+  const shown = useMemo(() => {
+    const inProject = rows.filter((r) => !chip || r.key === chip)
+    return filterByFuzzy([...inProject].sort(order), query, (r) => [
+      r.c.title,
+      r.project?.name,
+      r.c.worktree?.branch,
+    ])
+  }, [rows, chip, query, order])
   // What waits on the user first, then working, idle and closed — deterministic, not a live
   // timestamp chasing itself.
   const grouped = filtering ? undefined : codeGroups(shown, (r) => codeGroupOf(r.state), order)
-  // Under a query the reader's own words decide what comes first; a chip alone keeps the sort.
-  const flat = filtering ? (query.trim() ? shown : [...shown].sort(order)) : undefined
+  const flat = filtering ? shown : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
     // A project with no repository has nowhere for a session to work, so it isn't offered.
@@ -280,8 +271,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
 
   useEffect(() => newSessionAsked.subscribe(() => setStarting(true)), [])
 
-  // The field takes the title's place, so it takes the focus with it; closing puts the title back
-  // and clears what it filtered by, because a filter nobody can see is rows that seem missing.
   const openSearch = () => {
     setSearching(true)
     window.requestAnimationFrame(() => field.current?.focus())
@@ -344,8 +333,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           >
             <MenuIcon />
           </Button>
-          {/* The title and the field share one box, so the field slides in over the word rather
-              than pushing the header about (ADR 0093). */}
           <div className="relative flex min-w-0 flex-1 items-center">
             <h1
               className={cn(
@@ -364,37 +351,17 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
               )}
               aria-hidden={!searching}
             >
-              <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-                <InputGroupInput
-                  ref={field}
-                  type="search"
-                  value={query}
-                  tabIndex={searching ? undefined : -1}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") closeSearch()
-                  }}
-                  placeholder="Search sessions"
-                  aria-label="Search sessions"
-                  autoComplete="off"
-                  className="[&::-webkit-search-cancel-button]:hidden"
-                />
-                {query && (
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      size="icon-sm"
-                      className="size-8 rounded-full"
-                      onClick={() => setQuery("")}
-                      aria-label="Clear search"
-                    >
-                      <XIcon />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                )}
-              </InputGroup>
+              <SearchField
+                value={query}
+                onChange={(next) => (next ? setQuery(next) : closeSearch())}
+                label="Search sessions"
+                inputRef={field}
+                tabIndex={searching ? undefined : -1}
+                className={searching ? undefined : "pointer-events-none"}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") closeSearch()
+                }}
+              />
             </div>
           </div>
           <Button
@@ -413,9 +380,9 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {rows.length > 0 && (
-          <div className="relative flex min-h-11 items-center">
+          <div ref={chipRow} className="relative flex min-h-11 items-center">
             {chips.length > 1 && (
-              <ChipRow label="Projects" className="min-w-0 flex-1 pr-16">
+              <ChipRow label="Projects" className="min-w-0 flex-1 pr-[var(--dock,7rem)]">
                 <Chip active={!chip} onClick={() => setChip(undefined)}>
                   All
                 </Chip>
@@ -431,12 +398,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
                 ))}
               </ChipRow>
             )}
-            {/* The projects run the row's whole width and go on beneath this dock, so a long list
-                slides out of sight instead of being sliced at the sort's edge. The dock paints the
-                page's ground under the button — nothing shows through it — and softens its own left
-                edge so the chips fade into it rather than disappearing between two frames. The
-                row's trailing padding is where the last chip comes to rest, clear of the dock. */}
-            <div data-slot="sort-dock" className="absolute inset-y-0 right-0 flex">
+            <div ref={dock} data-slot="sort-dock" className="absolute inset-y-0 right-0 flex">
               <div
                 aria-hidden
                 className="pointer-events-none w-10 bg-gradient-to-r from-transparent to-background"
@@ -480,9 +442,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         )}
       </div>
 
-      {/* Above the sticky group headings, not behind them: with the keyboard up the viewport
-          shrinks to where a heading pins, and the button must stay the thing on top (ADR 0093).
-          The fade under it keeps rows and headings from reading as part of the button. */}
       <div className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto flex w-full max-w-2xl justify-end">
           <Button

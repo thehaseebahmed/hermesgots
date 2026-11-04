@@ -3,8 +3,6 @@
  * `asc` is A→Z, oldest→newest, cheapest→dearest; `desc` is the other way. Each key carries the
  * way it reads best, which is what picking it in the menu is understood to mean, and a second tap
  * on the key already chosen flips the arrow instead of choosing it again.
- *
- * Import-free, so it runs under plain node (`scripts/test-sort.mjs`).
  */
 
 export type SortDir = "asc" | "desc"
@@ -25,6 +23,9 @@ export interface Sort<K extends string> {
 
 /** The opposite arrow. */
 export const flipped = (dir: SortDir): SortDir => (dir === "asc" ? "desc" : "asc")
+
+/** The arrow in words, for a name a screen reader hears: the same two spellings everywhere. */
+export const dirWord = (dir: SortDir) => (dir === "asc" ? "ascending" : "descending")
 
 /** Where a key reads best, or the first key's own when a stored value names none of them. */
 export function defaultSort<K extends string>(keys: readonly SortKey<K>[], key?: string): Sort<K> {

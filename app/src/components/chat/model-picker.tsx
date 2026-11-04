@@ -1,10 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
 import {
-  ArrowDownNarrowWideIcon,
   ArrowLeftIcon,
-  ArrowUpDownIcon,
-  ArrowUpNarrowWideIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -15,18 +12,12 @@ import {
 import { toast } from "sonner"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
-import { defaultSort, toggleSort, type Sort } from "@/lib/sort"
+import { SortMenu } from "@/components/sort-menu"
+import { defaultSort, type Sort } from "@/lib/sort"
 import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
@@ -149,7 +140,7 @@ export function ModelPicker({
               </InputGroup>
             )}
             {/* Only a flat list sorts: the providers list stays A to Z, so it shows no menu. */}
-            {flat && <SortMenu sort={sort} onSort={setSort} />}
+            {flat && <ModelSortMenu sort={sort} onSort={setSort} />}
           </div>
         )}
         {top && (
@@ -298,7 +289,7 @@ function ProviderModels({
               aria-label={`Search ${provider.name}`}
             />
           </InputGroup>
-          <SortMenu sort={sort} onSort={setSort} />
+          <ModelSortMenu sort={sort} onSort={setSort} />
         </div>
         {models.length ? (
           <ModelList>
@@ -320,51 +311,9 @@ function ProviderModels({
   )
 }
 
-/**
- * The sheet's own sort control: the shared menu's key-and-arrow rule (ADR 0091) behind an icon, so
- * a flat list reads the same way here as it does on a list screen.
- */
-function SortMenu({
-  sort,
-  onSort,
-}: {
-  sort: Sort<ModelSort>
-  onSort: (sort: Sort<ModelSort>) => void
-}) {
+function ModelSortMenu({ sort, onSort }: { sort: Sort<ModelSort>; onSort: (sort: Sort<ModelSort>) => void }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 shrink-0 rounded-full text-muted-foreground"
-            aria-label={`Sort models by ${MODEL_SORTS.find((one) => one.key === sort.key)?.label}`}
-          />
-        }
-      >
-        <ArrowUpDownIcon />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-        {MODEL_SORTS.map((option) => {
-          const picked = option.key === sort.key
-          const Mark = sort.dir === "asc" ? ArrowUpNarrowWideIcon : ArrowDownNarrowWideIcon
-          return (
-            <DropdownMenuItem
-              key={option.key}
-              className="min-h-11 justify-between gap-3"
-              onClick={() => onSort(toggleSort(sort, option.key, MODEL_SORTS))}
-            >
-              {option.label}
-              <span className="flex size-4 shrink-0 items-center justify-center">
-                {picked && <Mark className="size-4" aria-hidden />}
-              </span>
-            </DropdownMenuItem>
-          )
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SortMenu by="models" options={MODEL_SORTS} value={sort} onSort={onSort} compact />
   )
 }
 

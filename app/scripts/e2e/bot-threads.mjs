@@ -40,10 +40,12 @@ const count = (page, selector) => page.locator(selector).count()
 
 /**
  * A card's way into its thread. The link's words are "View thread" but its accessible name is what
- * it names — `View <thread title>`, which is what a reader hears — so a card is asked for by that.
+ * it names — `View <thread title>`, which is what a reader hears — so a card is asked for by that
+ * name as a string: a title is data, and one holding a bracket would turn a pattern into a different
+ * question.
  */
 const viewLink = (card, title) =>
-  card.getByRole("link", { name: title ? new RegExp(`^View ${title}`) : /^View / })
+  card.getByRole("link", { name: title ? `View ${title}` : /^View / })
 
 function sequence(page) {
   return page.evaluate(
@@ -82,6 +84,11 @@ function seed(
     async ({ threads, messages, hour, day, long, note }) => {
       const { db, ensureMainThread, mainThreadId } = await import("/src/lib/db.ts")
       const profile = (await db.profiles.toArray())[0]
+      // Whatever this device merged from its host before the seed is not part of what the flow
+      // asserts: a chat that arrived from the host would stand beside the seeded threads and make
+      // "exactly these" untrue, on a run that happens to sync first.
+      await db.messages.clear()
+      await db.conversations.clear()
       await ensureMainThread(profile.id)
       const mainId = mainThreadId(profile.id)
       const now = Date.now()
@@ -212,9 +219,6 @@ function watchFrames(page, { lanes }) {
               ? Math.round(mine.at(-1)?.getBoundingClientRect().bottom ?? 0)
               : 0,
           count: mine.length,
-          // How tall the chat's content is in this frame. The first paintings of a chat whose items
-          // are still at their `content-visibility` estimate answer a different height from the one
-          // it lands on, and the scroller has not settled until that number stops changing.
           height: content ? Math.round(content.getBoundingClientRect().height) : 0,
         }
       }
@@ -329,8 +333,6 @@ function assertSwitchFrames(frames, { what }) {
       .map((frame) => `${frame.scrollTop} of ${frame.count}`)
       .join(", ")})`,
   )
-  // Measured across the frames that hold the height the chat settles at: a frame still answering an
-  // estimate is the chat arriving, not the chat moving, and the reader never saw it painted.
   const settledHeight = after.at(-1)?.height
   const steady = after.filter((frame) => frame.height === settledHeight)
   assert.ok(steady.length > 1, `${what}: the settled chat was sampled more than once`)
@@ -403,9 +405,6 @@ async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] 
     { pane, says: chats[1].says },
     { timeout: 15_000 },
   )
-  // A lane swaps with the pane it sits beside, and on its own slower clock: the sampling stops only
-  // once every lane holds the chat it was asked for, or the last frame read is one of the frames
-  // before the switch landed, and the assertion blames the app for the flow's own timing.
   for (const lane of also)
     await page.waitForFunction(
       ({ pane, title }) =>
@@ -421,10 +420,9 @@ async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] 
     timeout: 15_000,
     polling: "raf",
   })
-  // A quarter second more after the switch has gone quiet, so the settled chat is sampled several
-  // times rather than once: a chat whose last frame is also its first settled one proves nothing
-  // about whether it moved afterwards.
-  await page.waitForTimeout(260)
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  )
   const frames = await stopFrames(page)
   assertSwitchFrames(frames[pane], { what })
   for (const lane of also)
@@ -693,16 +691,12 @@ await flow(
       true,
       "and its Undo stands outside the card, at the end of the row",
     )
-    // One card is as wide as the next, whether or not it carries Undo: the row keeps the control's
-    // own track empty where there is nothing to undo (ADR 0094).
     const widths = await page.evaluate(() =>
       [...document.querySelectorAll('[data-slot="thread-card-body"]')].map((body) =>
         Math.round(body.getBoundingClientRect().width),
       ),
     )
     assert.ok(widths.length > 1, "more than one card is drawn")
-    // And the room the control holds is the control's own: the card's right edge and Undo's left one
-    // are the row's gap apart, not a guess at the button's width with the slack left in it.
     const gap = await page.evaluate(() => {
       const card = [...document.querySelectorAll('[data-slot="thread-card"]')].find((one) =>
         one.querySelector('button[aria-label="Undo"]'),

@@ -41,16 +41,15 @@ export function sortByFacts(
   if (sort.key === "name")
     return [...models].sort((a, b) => withDir(byName.compare(a, b), sort.dir))
   const valueOf = SORT_VALUE[sort.key]
-  const asc = sort.dir === "asc"
-  const keyed = models.map((model) => ({ model, value: valueOf(facts(model)) }))
   // Listed models first, in the picked order; the unlisted ones follow in A to Z order.
-  const [listed, unlisted] = keyed.reduce<[typeof keyed, typeof keyed]>(
-    ([yes, no], row) => (row.value === undefined ? [yes, [...no, row]] : [[...yes, row], no]),
-    [[], []],
-  )
-  listed.sort((a, b) =>
-    asc ? a.value! - b.value! : b.value! - a.value! || byName.compare(a.model, b.model),
-  )
-  unlisted.sort((a, b) => byName.compare(a.model, b.model))
-  return [...listed, ...unlisted].map((row) => row.model)
+  const listed: { model: string; value: number }[] = []
+  const unlisted: string[] = []
+  for (const model of models) {
+    const value = valueOf(facts(model))
+    if (value === undefined) unlisted.push(model)
+    else listed.push({ model, value })
+  }
+  listed.sort((a, b) => withDir(a.value - b.value, sort.dir) || byName.compare(a.model, b.model))
+  unlisted.sort((a, b) => byName.compare(a, b))
+  return [...listed.map((row) => row.model), ...unlisted]
 }

@@ -10,14 +10,13 @@ import test from "node:test"
 
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { StatusLine } from "@/components/chat/status-line"
-import { WORK_PULSE } from "@/components/chat/work-row"
 import { THINKING_ACTIVITY } from "@/lib/format"
 import { THINKING_WORD } from "@/lib/thinking"
 
 import { mount } from "./component-kit.tsx"
 
 const rowOf = () => document.querySelector('[data-slot="thinking-line"] button')!
-const pulses = (row: Element) => (row.getAttribute("class") ?? "").includes(WORK_PULSE)
+const pulses = (row: Element) => row.hasAttribute("data-working")
 
 test("a thought row begins at its words, running or finished", async () => {
   await mount(<ThinkingLine reasoning="I read the parser." thinking={false} spanMs={1200} />, async () => {

@@ -98,9 +98,9 @@ export function codeGroups<T>(
 }
 
 /**
- * The sort-by dropdown's three orders over a group's rows (ADR 0046): created, newest first by
- * default; last activity, newest first; or the title A–Z. Every group runs on the same one, and a
- * filtered list runs it flat.
+ * The sort-by dropdown's orders over a group's rows: created, last activity or title, each in the
+ * arrow the reader picked (ADR 0091). Every group runs on the same one, and a filtered list runs it
+ * flat.
  */
 export function codeOrder<T>(
   sort: Sort<CodeSort>,
@@ -110,14 +110,13 @@ export function codeOrder<T>(
     title: (item: T) => string
   },
 ): (a: T, b: T) => number {
-  // Ascending, and the arrow turns it: one rank per key, one direction for every list (ADR 0091).
-  const rank = (a: T, b: T) => {
-    if (sort.key === "title") return byName(fields.title(a), fields.title(b))
-    const value: Record<Exclude<CodeSort, "title">, (item: T) => number> = {
-      created: fields.created,
-      activity: fields.activity,
-    }
-    return value[sort.key](a) - value[sort.key](b)
+  const of: Record<Exclude<CodeSort, "title">, (item: T) => number> = {
+    created: fields.created,
+    activity: fields.activity,
   }
+  const rank = (a: T, b: T) =>
+    sort.key === "title"
+      ? byName(fields.title(a), fields.title(b))
+      : of[sort.key](a) - of[sort.key](b)
   return (a, b) => withDir(rank(a, b), sort.dir)
 }

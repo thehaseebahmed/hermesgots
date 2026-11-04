@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # a session's close and the report it ends with (`closes.py`, ADR 0080): one new table, so nothing
 # already written has to move. 51 adds the routine messages a chat holds and the one that is still
 # waiting for its chat to be free (`platform_gots.py`, ADR 0081): two indexes beside one new table.
-SCHEMA_VERSION = 52
+SCHEMA_VERSION = 53
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -839,4 +839,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for column, kind in (("model", "TEXT"), ("seconds", "REAL")):
             if column not in routine_columns:
                 conn.execute(f"ALTER TABLE routine_messages ADD COLUMN {column} {kind}")
+        # v53: when the host wrote a move, beside the time the reader sent it. `at` is the reader's
+        # clock (ADR 0089), so retention — which asks how old a row is on this host — cannot read it:
+        # a device an hour behind would have its own move's body dropped the moment it landed. Rows
+        # written before this column keep `at`, which is what the sweep pruned by then.
+        move_columns = {row[1] for row in conn.execute("PRAGMA table_info(main_moves)")}
+        if "recorded_at" not in move_columns:
+            conn.execute("ALTER TABLE main_moves ADD COLUMN recorded_at INTEGER")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -156,10 +156,9 @@ test("a reply told what its line says draws that, and none of its own words", as
     null,
     "and no sign beside it: the count is a work row, and its own words pulse (ADR 0092)",
   )
-  assert.match(
-    line!.querySelector("button")?.getAttribute("class") ?? "",
-    /animate-work-pulse/,
-    "in the blue it wears",
+  assert.ok(
+    line!.querySelector("button")?.hasAttribute("data-working"),
+    "at work, in the blue it wears",
   )
 })
 
@@ -248,10 +247,9 @@ test("a finished turn's count is the line's only words, pulsing in the blue", as
   )
   assert.equal(row!.querySelector('[role="status"]'), null, "with no sign ahead of the words")
   assert.match(row!.getAttribute("class") ?? "", /(^|\s)text-info(\s|$)/, "in the info blue")
-  assert.match(
-    row!.getAttribute("class") ?? "",
-    /animate-work-pulse/,
-    "and the words themselves pulse, in that same blue rather than a colour of their own",
+  assert.ok(
+    row!.hasAttribute("data-working"),
+    "and it is the row at work, in that same blue rather than a colour of their own",
   )
   assert.equal(counts, 1, "and it is drawn once, never twice")
 })

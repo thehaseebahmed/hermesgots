@@ -61,9 +61,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.equal(await countIn(page, "Closed"), "2", "the closed count")
   pass("groups run Waiting for You, Idle, Closed with their counts, and the empty one stays hidden")
 
-  // A turn starting moves the session's own clock as well as writing its reply: the list re-reads a
-  // session's tail only when that clock has moved past the read it keeps (`needsTailRead`), so a row
-  // written alone leaves the screen reading the tail it already had.
   await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
     const at = Date.now()
@@ -103,15 +100,11 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   pass("Closed collapses by default and holds Resolved and Discarded under their own icons")
 
   const sortButton = () => page.getByRole("button", { name: /^Sort sessions by/ })
-  // One sign and one name (ADR 0095): the direction arrow, then the key. A second icon in the
-  // trigger is the pair-down that used to say "this is a sort" beside the arrow already saying it.
   assert.equal(
     await sortButton().locator("svg").count(),
     1,
     "the sort trigger carries one sign",
   )
-  // The projects run the row's whole width and go on beneath the sort's dock, which paints the
-  // page's ground: a chip reaching it goes out of sight instead of showing through the button.
   const row = await sortButton().locator("xpath=../../..").boundingBox()
   const dock = await page.locator('[data-slot="sort-dock"]').boundingBox()
   const trigger = await sortButton().boundingBox()
@@ -136,7 +129,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await shot("sorted")
   pass("the sort menu orders each group by title and says which way it reads")
 
-  // The chosen row carries the arrow, and picking it again turns it round (ADR 0091).
   await sortButton().click()
   await page.getByRole("menuitem", { name: /Title/ }).click()
   await until(async () => {
@@ -162,7 +154,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.ok(flat[0]?.includes("Working turn") && flat[1]?.includes("Finished work") &&
     flat[2]?.includes("Dropped work"),
     "flat, every hit at the same rank so the chosen order still runs")
-  // The field is behind the header's button: closing it puts the title back and clears the query.
   await page.getByRole("button", { name: "Close search" }).click()
   await until(async () => (await group(page, "Idle").count()) > 0, 5_000, "the headers back")
   assert.equal(await page.getByRole("heading", { name: "Code", exact: true }).isVisible(), true,

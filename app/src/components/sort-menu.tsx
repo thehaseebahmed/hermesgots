@@ -8,7 +8,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { toggleSort, type Sort, type SortKey } from "@/lib/sort"
+import { dirWord, toggleSort, type Sort, type SortKey } from "@/lib/sort"
 
 /**
  * The one sort control: a button reading the list's order as one sign and one name, and a menu of
@@ -16,9 +16,7 @@ import { toggleSort, type Sort, type SortKey } from "@/lib/sort"
  * down for newest-first — and it stands at the button's start, ahead of the name, so the control is a
  * sign and a word rather than three icons in a row. The row that is the list's order carries the same
  * arrow, and picking that row again turns it round while picking another row takes that key's own
- * direction (ADR 0091, amended by 0094). Code's sessions, the sidebar's
- * bots, the Library's tree and the model sheet all draw this; each keeps its own `by` and `label`
- * wording, the control and its rule are one.
+ * direction (ADR 0091, amended by 0095).
  */
 export function SortMenu<K extends string>({
   by,
@@ -26,6 +24,7 @@ export function SortMenu<K extends string>({
   options,
   value,
   onSort,
+  compact = false,
 }: {
   /** What is being sorted, named: the trigger reads "Sort <by> by <choice>". */
   by: string
@@ -34,6 +33,8 @@ export function SortMenu<K extends string>({
   options: readonly SortKey<K>[]
   value: Sort<K>
   onSort: (sort: Sort<K>) => void
+  /** A surface with no room for a word — a sheet's header — wears the sign alone. */
+  compact?: boolean
 }) {
   const chosen = options.find((option) => option.key === value.key) ?? options[0]
   const Arrow = value.dir === "asc" ? ArrowUpNarrowWideIcon : ArrowDownNarrowWideIcon
@@ -43,20 +44,23 @@ export function SortMenu<K extends string>({
         render={
           <Button
             variant="ghost"
-            className="h-11 shrink-0 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-            aria-label={`Sort ${by} by ${chosen.label}, ${value.dir === "asc" ? "ascending" : "descending"}`}
+            className={
+              compact
+                ? "size-11 shrink-0 rounded-full text-muted-foreground"
+                : "h-11 shrink-0 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
+            }
+            aria-label={`Sort ${by} by ${chosen.label}, ${dirWord(value.dir)}`}
           />
         }
       >
         <Arrow className="size-4" aria-hidden />
-        {chosen.label}
+        {!compact && chosen.label}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{label}</DropdownMenuLabel>
           {options.map((option) => {
             const picked = option.key === value.key
-            const Mark = value.dir === "asc" ? ArrowUpNarrowWideIcon : ArrowDownNarrowWideIcon
             return (
               <DropdownMenuItem
                 key={option.key}
@@ -66,15 +70,11 @@ export function SortMenu<K extends string>({
                 data-sort-dir={picked ? value.dir : undefined}
               >
                 {option.label}
-                {/* The list's own order says its arrow; every other row holds the same space, so a
-                    tap never moves the words sideways. */}
                 <span className="flex size-4 shrink-0 items-center justify-center">
-                  {picked && <Mark className="size-4" aria-hidden />}
+                  {picked && <Arrow className="size-4" aria-hidden />}
                 </span>
                 {picked && (
-                  <span className="sr-only">
-                    {value.dir === "asc" ? "ascending" : "descending"}, tap again to flip
-                  </span>
+                  <span className="sr-only">{dirWord(value.dir)}, tap again to flip</span>
                 )}
               </DropdownMenuItem>
             )

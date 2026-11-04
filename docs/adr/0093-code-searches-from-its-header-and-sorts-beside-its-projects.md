@@ -40,6 +40,8 @@ chip nor the sort — and the sort is never in the header beside the search.
 
 - `lib/fuzzy.ts` is the matcher and the ranker, and `scripts/test-fuzzy.mjs` pins a subsequence hit,
   a scattered hit ranking below a contiguous one, and a miss.
-- `ItemSearch` gets the header form (`SearchField`) the Code list animates into, and the list's own
-  layout moves the chips and the sort into one scrolling row (`ChipRow` takes a trailing slot).
+- The list's field is `SearchField`, exported from `components/item-list.tsx` and drawn by both — the
+  list's bar through `ItemSearch`, and Code's header, which animates it in place of the title. The
+  chips run under the sort on a dock of their own, and the room they leave at the end is measured from
+  that dock (`--dock`) rather than guessed at.
 - `scripts/e2e/code-list.mjs` drives the button, the field, a fuzzy query and the chip row's sort.

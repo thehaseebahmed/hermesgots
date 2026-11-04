@@ -130,8 +130,7 @@ async function read(row: Element) {
 }
 
 /** Whether the row is at work: its own words pulse rather than a sign leading them (ADR 0092). */
-const pulses = (line: Element) =>
-  (line.getAttribute("class") ?? "").includes("animate-work-pulse")
+const pulses = (line: Element) => line.hasAttribute("data-working")
 
 const screenText = () => document.body.textContent ?? ""
 
@@ -185,7 +184,7 @@ test("a working row says its own word and pulses it, muted, and the footer never
       "the row owns its word: its own, in sentence case, not the pool's",
     )
     assert.equal(line.querySelector("[data-slot=spinner]"), null, "no sign ahead of the words")
-    assert.match(line.className, /animate-work-pulse/, "the words themselves say the row is at work")
+    assert.ok(pulses(line), "the row is at work, and its own words are what pulse")
     assert.match(
       line.className,
       /(^|\s)text-muted-foreground(\s|$)/,
@@ -611,10 +610,9 @@ test("reduced motion stills the pulse rather than taking the words away", async 
       await stream(id)
       const line = onlyThinkingLine()
       assert.ok(saysThinking(lineLabel(line)), "the row still says what the turn is doing")
-      assert.match(
-        line.className,
-        /motion-safe:animate-work-pulse/,
-        "and the stillness is motion-safe's to say, which is the one place it is decided",
+      assert.ok(
+        line.querySelector('[data-slot="work-label"]'),
+        "and the words are the marked box the stylesheet breathes, which is where motion-safe decides it",
       )
     })
   })

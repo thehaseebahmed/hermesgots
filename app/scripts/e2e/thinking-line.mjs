@@ -110,8 +110,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
           count: count?.textContent?.trim() ?? "",
           countColour: count ? getComputedStyle(count).color : "",
           countLoaders: count?.querySelectorAll("[data-slot=spinner]").length ?? 0,
-          // A work row at work pulses its own words rather than wearing a sign (ADR 0092).
-          countPulses: (count?.className ?? "").includes("animate-work-pulse"),
+          countPulses: Boolean(count?.hasAttribute("data-working")),
           // The count rides the end of the words, never the head of them.
           after:
             span && count
@@ -167,10 +166,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             return {
               label: control?.textContent?.trim() ?? null,
               expanded: control?.getAttribute("aria-expanded") ?? null,
-              // A work row carries no sign: while it works its own words pulse, and both read the
-              // row's muted colour, never the accent (ADR 0070, ADR 0092).
               spins: Boolean(spinner),
-              pulses: (control?.className ?? "").includes("animate-work-pulse"),
+              pulses: Boolean(control?.hasAttribute("data-working")),
               colour: control ? getComputedStyle(control).color : "",
               loaderColour: spinner ? getComputedStyle(spinner).color : "",
             }

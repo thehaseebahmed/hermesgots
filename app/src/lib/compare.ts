@@ -4,6 +4,8 @@
  * Kept apart from `format.ts` with no imports of its own: a pure rule can pull it in under
  * `node --test` without a package alias to resolve.
  */
+const BY_NAME: Intl.CollatorOptions = { sensitivity: "base", numeric: true }
+
 export function byName(a: string, b: string) {
-  return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
+  return a.localeCompare(b, undefined, BY_NAME)
 }

@@ -16,8 +16,6 @@ import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
 
-/** Which way a list reads; the rule is `lib/sort.ts`'s, and settings store it beside the key. */
-export type { SortDir } from "@/lib/sort"
 import type { SortDir } from "@/lib/sort"
 
 export type BotSort = "recent" | "waiting" | "name" | "added"

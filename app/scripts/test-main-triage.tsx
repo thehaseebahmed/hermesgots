@@ -129,10 +129,6 @@ async function seed(
 }
 
 const messagesOf = (id: string) => db.messages.where("conversationId").equals(id).toArray()
-/**
- * A move the host recorded a moment ago: since the ask carries the message's own time (ADR 0089),
- * a move's stamp is the sending device's clock — never a host clock that could run ahead of it.
- */
 const recordedMove = (overrides: Partial<Move> = {}): Move => ({
   id: "m1",
   text: "more on Lisbon",

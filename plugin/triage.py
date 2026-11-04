@@ -287,7 +287,11 @@ def open_thread(
         # waiting in the queue as one nothing happened in.
         "updatedAt": now + 1,
         "changedAt": now,
-        **(dict(opener=_line(opener, MAX_TEXT), openerAt=opener_at) if opener else {}),
+        **(
+            {"opener": _line(opener, MAX_TEXT), **({"openerAt": opener_at} if opener_at else {})}
+            if opener
+            else {}
+        ),
         **({"modelChoice": model_choice} if model_choice else {}),
     }
     chats.merge(path, {chat_id: {"at": now, "value": value}})

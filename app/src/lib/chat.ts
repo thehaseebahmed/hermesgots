@@ -46,7 +46,7 @@ import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
 import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
-import { NOT_SENT } from "@/lib/words"
+import { NOT_SENT, oneLine } from "@/lib/words"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
@@ -1078,8 +1078,8 @@ function nextAt(messages: readonly Message[]) {
   )
 }
 
-/** A message's words as one line, the way a card's bubble holds them. */
-const oneLine = (text: string) => text.replace(/\s+/g, " ").trim() || undefined
+/** The host's cap (`_line`'s limit in `plugin/triage.py`): a record over its byte cap fails the whole chat merge. */
+const OPENER_CHARS = 2000
 
 /** Writes the user's message and the empty reply, before the turn opens. */
 async function prepareSend(
@@ -1129,10 +1129,8 @@ async function prepareSend(
         ...(history.length === 0 && !conversation.titleEdited
           ? { title: titleFrom(content || attachments[0].name) }
           : {}),
-        // A thread this device starts says which message began it, so its card draws that bubble on
-        // every device and stands at that message's time (ADR 0090). Main never needs one.
         ...(history.length === 0 && !pinned.main && !pinned.opener && content
-          ? { opener: oneLine(content), openerAt: now }
+          ? { opener: oneLine(content, OPENER_CHARS), openerAt: now }
           : {}),
       })
     })
@@ -1489,7 +1487,6 @@ export async function sendFromMain(
       sent,
       steer: options.steer,
       id: held.id,
-      // The row's own stamp, so the marker and the card stand where the message was typed.
       at: held.createdAt,
     })
     if (moved) return moved

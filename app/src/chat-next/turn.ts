@@ -172,7 +172,6 @@ export async function triageTurn(
       : attachments
     const moved = await askTriage(
       { conversation, profile, config },
-      // The moment the reader sent it: the row this message becomes is stamped after the ask.
       { content, sent, steer, at: Date.now() },
     )
     if (!moved) return sent

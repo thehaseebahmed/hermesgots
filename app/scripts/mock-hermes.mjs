@@ -3243,6 +3243,12 @@ const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 // enough for it (the new chat screen needs 0.22.5). A host older than that answers with its own;
 // the mock models one host and says so.
 const HERMES_VERSION = "0.25.0"
+const MAX_OPENER = 2000
+
+function oneLine(text, max = Number.POSITIVE_INFINITY) {
+  const flat = String(text).replace(/\s+/g, " ").trim()
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
+}
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
 function tidyWhole(text) {
@@ -5836,8 +5842,6 @@ http
         return json(res, 200, { object: "memento.triage", decision: "main" })
       if (TRIAGE === "thread" && !thread)
         return json(res, 200, { object: "memento.triage", decision: "main" })
-      // The reader's own time, carried by the ask (ADR 0089): the marker and the new card stand
-      // there rather than where this host got round to the message.
       const sentAt = Number.isInteger(at) && at > 0 ? at : Date.now()
       let made
       if (TRIAGE === "new") {
@@ -5853,10 +5857,7 @@ http
             createdAt: now,
             updatedAt: now,
             changedAt: now,
-            // As plugin/triage.py's open_thread records it (ADR 0090): the message that began the
-            // thread and when the reader sent it, so a device that never opens it still draws its
-            // card's bubble and stands the card there.
-            ...(text ? { opener: String(text).slice(0, 2000), openerAt: sentAt } : {}),
+            ...(text ? { opener: oneLine(text, MAX_OPENER), openerAt: sentAt } : {}),
           },
         }
         ;(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).set(chatId, {
@@ -5885,7 +5886,6 @@ http
           id: String(askId ?? randomUUID()),
           text: String(text ?? ""),
           thread: made ? made.id : thread[0],
-          // The reader's own time, carried by the ask, not the moment this host got round to it.
           at: sentAt,
           undone: false,
           // As plugin/moves.py records it: the host opened this thread for the message.

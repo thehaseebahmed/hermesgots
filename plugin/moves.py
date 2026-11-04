@@ -47,26 +47,30 @@ def record(
     if not key:
         return
     now = int(time.time() * 1000)
-    # When the reader sent the message, which is when Main's marker stands (ADR 0089). The ask
-    # carries it, so a host that takes a second to decide does not move the marker a second later;
-    # a caller that sends none gets the moment this row was written.
+    # The reader's clock where the ask carries one, so the marker stands when the message was sent
+    # rather than when this host got to it (ADR 0089); a caller that sends none gets the write time.
     sent_at = at if isinstance(at, int) and not isinstance(at, bool) and at > 0 else now
     conn = connect(path)
     try:
         # Undo ends when the outbox forgets the sent item, so older moves keep no body to resend.
+        # Age is measured on this host's clock (`recorded_at`), never on `at`: that is the reader's
+        # clock, and a device an hour behind would lose its own move's body as it landed (ADR 0089).
         conn.execute(
-            "UPDATE main_moves SET main_body = NULL, files = NULL WHERE at < ?", (now - KEEP_SENT_MS,)
+            """UPDATE main_moves SET main_body = NULL, files = NULL
+               WHERE COALESCE(recorded_at, at) < ?""",
+            (now - KEEP_SENT_MS,),
         )
         conn.execute(
             """INSERT OR IGNORE INTO main_moves
-               (id, session_id, text, thread, at, thread_session, item, new, main_body, files)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, session_id, text, thread, at, recorded_at, thread_session, item, new, main_body, files)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 key,
                 session_id,
                 text[:MAX_TEXT],
                 thread,
                 sent_at,
+                now,
                 thread_session,
                 item,
                 1 if new else 0,

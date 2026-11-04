@@ -2530,10 +2530,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not isinstance(text, str):
             return _error(web, "text must be a string", 400)
         key = body.get("id") if isinstance(body.get("id"), str) else None
-        # When the reader sent it, on the sending device's clock: Main's marker and the new thread's
-        # card stand there rather than where the host got round to handling it (ADR 0089).
         at = body.get("at")
-        at = at if isinstance(at, int) and not isinstance(at, bool) and at > 0 else None
         memo = f"{session_id}:{key}" if key else None
         # A repeat of an ask still being decided waits for it and gets its answer, so the message
         # is queued once however the app's retry races the first request.

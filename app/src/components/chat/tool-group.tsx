@@ -20,7 +20,7 @@ import {
 import { useCodeFace, useMonoFace } from "@/components/chat/code-face"
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
-import { WorkRow, WorkNote, WorkLabel, WORK_PULSE } from "@/components/chat/work-row"
+import { WorkRow, WorkNote, WorkLabel } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -38,7 +38,7 @@ import {
   type KindId,
 } from "@/lib/tools"
 import { cn } from "@/lib/utils"
-import { fittingPhrases, fullSummary, summary } from "@/lib/phrase-fit"
+import { fittingPhrases, summary } from "@/lib/phrase-fit"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -70,15 +70,8 @@ const ICONS: Record<KindId, LucideIcon> = {
 
 /**
  * How many phrases of the summary fit on the row's line, with "(+N)" standing in for the rest.
- *
- * The label's own box is the room: it is the flex child that truncates, so asking it how wide it is
- * needs no arithmetic over its siblings, their gaps or the row's padding — and that arithmetic is
- * what went wrong. Measured against a room it had misjudged, a row kept every phrase and let CSS cut
- * the line, so it read as an ellipsis with no count at all; on a New Chat first, where the reply is
- * still being placed in its scroller and answers no width until it lands.
  */
 function useFittingPhrases(parts: string[], deps: unknown[] = []) {
-  const row = useRef<HTMLButtonElement>(null)
   const text = useRef<HTMLSpanElement>(null)
   const ruler = useRef<HTMLSpanElement>(null)
   const [shown, setShown] = useState(parts.length)
@@ -89,8 +82,6 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
     const measure = ruler.current
     if (!label || !measure) return
     fit.current = () => {
-      // A row the browser hasn't laid out — a scroller item being placed, a pane still held — has
-      // no width to fit against, and settling on that keeps every phrase. Wait for a real box.
       const count = fittingPhrases(parts, label.clientWidth, (text) => {
         measure.textContent = text
         return measure.offsetWidth
@@ -98,11 +89,7 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
       if (count !== undefined) setShown(count)
     }
     fit.current()
-    // `parts` is rebuilt every render; its content is what `key` stands for.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, ...deps])
-  // The label is what the phrases are fitted into, so it is what is watched: a row widening as its
-  // pane arrives, or narrowing under a phone's keyboard, refits once.
   useLayoutEffect(() => {
     const label = text.current
     if (!label) return
@@ -110,7 +97,7 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
     observer.observe(label)
     return () => observer.disconnect()
   }, [])
-  return { row, text, ruler, shown: Math.min(shown, parts.length) }
+  return { text, ruler, shown: Math.min(shown, parts.length) }
 }
 
 /** Why a failed call failed: what Hermes said, else its result's error, for the row under its name. */
@@ -286,9 +273,9 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const failures = tools.filter((t) => t.status === "failed")
   const failed = failures.length > 0
   const parts = phrases(tools)
-  const { row, text, ruler, shown } = useFittingPhrases(parts, [running, failed])
+  const { text, ruler, shown } = useFittingPhrases(parts, [running, failed])
   // One line for the row and the header of the pop-up it opens, so the two never disagree.
-  const full = fullSummary(parts)
+  const full = summary(parts)
   const label = summary(parts, shown)
   // From tablet width up the details open in the same sheet, behind a back button; on a phone they
   // open as a sheet stacked on the list's, dismissed back to it.
@@ -302,11 +289,10 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   return (
     <>
       <WorkRow
-        ref={row}
         data-slot="tool-group"
         aria-label={failed ? `${full}, failed` : full}
         onClick={() => setOpen(true)}
-        className={running ? WORK_PULSE : undefined}
+        working={running}
         after={
           <>
             <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />

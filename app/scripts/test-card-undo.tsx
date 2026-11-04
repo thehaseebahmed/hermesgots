@@ -167,8 +167,6 @@ test("a triage-opened thread's card reads like any other, with Undo beside it", 
     const drawn = card("n1")
     assert.ok(drawn, "the thread triage opened is a card in Main's flow")
     assert.ok(drawn.textContent?.includes(MOVED), "its opener shows the message that left Main")
-    // One card, one shape (ADR 0094): the way in is the ordinary line, and nothing anywhere says
-    // where the message went — the card standing where the message was is that sentence.
     assert.match(drawn.textContent ?? "", /View thread/, "its way in reads as a /thread card's does")
     assert.doesNotMatch(drawn.textContent ?? "", /Moved to/, "and it does not say where the message went")
     assert.equal(findAll("p").filter((one) => one.textContent?.startsWith("Moved to")).length, 0)
