@@ -46,7 +46,7 @@ import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
 import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
-import { NOT_SENT, oneLine } from "@/lib/words"
+import { NOT_SENT } from "@/lib/words"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
@@ -75,6 +75,7 @@ import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
 import {
   AttachmentError,
+  openerFor,
   pinFromHost,
   pinModel,
   titleFrom,
@@ -1084,15 +1085,14 @@ function nextAt(messages: readonly Message[]) {
   )
 }
 
-/** The host's cap (`_line`'s limit in `plugin/triage.py`): a record over its byte cap fails the whole chat merge. */
-const OPENER_CHARS = 2000
-
 /** Writes the user's message and the empty reply, before the turn opens. */
 async function prepareSend(
   conversationId: string,
   queuedId: string | undefined,
   content: string,
   attachments: Attachment[],
+  /** When the reader sent it, where the screen knows and this one is opened later (a thread's first turn). */
+  sentAt?: number,
 ) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return undefined
@@ -1101,7 +1101,9 @@ async function prepareSend(
   // The first send is what fixes the chat's model; every send after it reads the pick it left.
   const { conversation: pinned, release } = await pinModel(conversation, profile)
   const history = await getMessages(conversationId)
-  const now = nextAt(history)
+  // A thread opened on a message typed a moment before it draws there: its own time, unless rows the
+  // chat already holds would run past it.
+  const now = Math.max(sentAt ?? 0, nextAt(history))
   // The pick in effect, not the profile's advertised default name, which isn't a model id.
   const sent = pickOf(pinned, profile)
   const userMessage: Message = {
@@ -1135,9 +1137,7 @@ async function prepareSend(
         ...(history.length === 0 && !conversation.titleEdited
           ? { title: titleFrom(content || attachments[0].name) }
           : {}),
-        ...(history.length === 0 && !pinned.main && !pinned.opener && content
-          ? { opener: oneLine(content, OPENER_CHARS), openerAt: now }
-          : {}),
+        ...openerFor(pinned, { first: history.length === 0, text: content, at: now }),
       })
     })
   } catch (error) {
@@ -1167,7 +1167,7 @@ function stopIfAborted(turn: Turn) {
 export async function sendMessage(
   conversationId: string,
   text: string,
-  options: { queuedId?: string; attachments?: Attachment[] } = {},
+  options: { queuedId?: string; attachments?: Attachment[]; at?: number } = {},
 ) {
   const { queuedId } = options
   const content = text.trim()
@@ -1179,12 +1179,16 @@ export async function sendMessage(
   controllers.set(conversationId, controller)
   // Until the turn opens and owns the guard, a throw (say IndexedDB's quota) must release it, or
   // the chat can't send again until a reload.
-  const prepared = await prepareSend(conversationId, queuedId, content, attachments).catch(
-    (error: unknown) => {
-      controllers.delete(conversationId)
-      throw error
-    },
-  )
+  const prepared = await prepareSend(
+    conversationId,
+    queuedId,
+    content,
+    attachments,
+    options.at,
+  ).catch((error: unknown) => {
+    controllers.delete(conversationId)
+    throw error
+  })
   if (!prepared) {
     controllers.delete(conversationId)
     return

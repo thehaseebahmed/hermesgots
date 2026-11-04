@@ -35,6 +35,7 @@ import {
   type Unsent,
 } from "@/lib/db"
 import { randomId } from "@/lib/utils"
+import type { ThreadStart } from "@/lib/threads"
 import { toast } from "sonner"
 
 import { equal } from "@/lib/equal"
@@ -598,7 +599,8 @@ export interface ComposerControls {
 
 interface ThreadOptions {
   /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
-  prepareTurn?: (text: string, attachments: Attachment[]) => Promise<PreparedTurn>
+  /** `at` is when the reader sent it, which a thread's first turn is stamped with. */
+  prepareTurn?: (text: string, attachments: Attachment[], at?: number) => Promise<PreparedTurn>
   /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. */
   queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /**
@@ -624,6 +626,12 @@ interface ThreadOptions {
   onAway?: (away: boolean) => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
+  /**
+   * The message the screen that opened this thread was asked to send (a thread Main started with
+   * `/thread`): sent once, as this thread's first turn, so the message is drawn where it went and
+   * the record keeps the opener Main's card shows (ADR 0096).
+   */
+  start?: ThreadStart
   /** What draws the prompt a run is held up on; without it, chat-next's own bare cards. */
   Prompt?: ComponentType<PromptProps>
   /** What draws the thread; without it, chat-next's own plain markup. */
@@ -673,6 +681,7 @@ export function ChatNextThread({
   Composer,
   Prompt,
   View = PlainView,
+  start,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
   // says what the page is doing.
@@ -1008,7 +1017,8 @@ export function ChatNextThread({
   // pace — a chat that only catches up when it is opened again.
   const [live, setLive] = useState(false)
 
-  const busy = live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
+  const busy =
+    live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
   // What the poll reads, held so a state object the reducer hands back new does not restart the
   // timer before it ever fires.
   const now = useRef({ busy, waiting: doing.waiting })
@@ -1329,10 +1339,15 @@ export function ChatNextThread({
    * in the app's not-sent shape, with the files it was sent with — `retrying` is the row it is, sent
    * again — so the words never go back to the field and nothing has to be typed twice (ADR 0071).
    */
-  async function sendTurn(text: string, attachments: Attachment[] = [], retrying?: Unsent) {
+  async function sendTurn(
+    text: string,
+    attachments: Attachment[] = [],
+    retrying?: Unsent,
+    sentAt?: number,
+  ) {
     const words = text.trim()
     if ((!words && !attachments.length) || !server || !key || !session) return
-    const at = retrying?.at ?? Date.now()
+    const at = retrying?.at ?? sentAt ?? Date.now()
     // The message's own id is the run's idempotency key too, so a send that timed out but reached
     // the host is answered by the run it started rather than run a second time.
     const id = retrying?.id ?? randomId()
@@ -1362,7 +1377,7 @@ export function ChatNextThread({
         streaming.current = false
         return dispatch({ type: "moved" })
       }
-      prepared = prepareTurn ? await prepareTurn(words, kept) : undefined
+      prepared = prepareTurn ? await prepareTurn(words, kept, at) : undefined
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1416,6 +1431,18 @@ export function ChatNextThread({
     setDraft("")
     await sendTurn(text)
   }
+
+  // A thread Main opened with `/thread` is sent from here, not from Main: the turn is drawn in the
+  // thread as its reader arrives and the run is followed by the screen that owns it, where posting
+  // it from Main left the thread blank until something opened it again (ADR 0096). Taken once, so a
+  // remount cannot send it twice, and only with a host to send it to.
+  const pendingStart = useRef(start)
+  useEffect(() => {
+    const first = pendingStart.current
+    if (!first || !ready || !server || !key || !session) return
+    pendingStart.current = undefined
+    void sendTurn(first.text, first.attachments, undefined, first.at)
+  }, [ready, server, key, session])
 
   function retryUnsent(id: string) {
     const row = store.get().unsent?.find((one) => one.id === id)

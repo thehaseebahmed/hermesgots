@@ -23,7 +23,7 @@ import { Markdown } from "@/components/chat/markdown"
 import { MessageItem } from "@/components/chat/message-item"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
-import { Compacted, ModelChange } from "@/components/chat/model-change"
+import { ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
 import { LineRow } from "@/components/chat/status-line"
@@ -205,12 +205,12 @@ export function AppThreadView({
     () => compactionMarks(messages, record.compactions),
     [messages, record.compactions],
   )
-  const { flow, markersAbove, moveThatOpenedThread, undo, marker, tailRow } = useMainFlow({
+  const { flow, moveThatOpenedThread, undo, itemRow } = useMainFlow({
     chatId,
     profileId: main?.profileId ?? "",
     thread: messages,
     moves,
-    compaction: compacted.trailing,
+    compacted,
     on: Boolean(main),
     routeChat: main?.routeChat,
   })
@@ -297,16 +297,12 @@ export function AppThreadView({
                             onUndo={undo}
                           />
                         )
-                      if (entry.kind !== "message") return tailRow(entry)
+                      if (entry.kind !== "message") return itemRow(entry)
                       const message = entry.message
                       // A model change is a project session's mark; a chat draws none (ADR 0087).
                       const change = code ? changes.get(message.id) : undefined
                       return (
                         <MessageScrollerItem key={message.id} messageId={message.id}>
-                          {markersAbove.get(message.id)?.map(marker)}
-                          {compacted.before.has(message.id) && (
-                            <Compacted compaction={compacted.before.get(message.id)!} />
-                          )}
                           {change && <ModelChange model={change} />}
                           <MessageItem
                             message={message}

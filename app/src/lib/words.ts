@@ -11,6 +11,13 @@ export const FAILED = "Failed"
 /** A call nobody ran: never a failure (ADR 0098). */
 export const REFUSED = "Refused"
 
+/**
+ * How much of the message that opened a thread a chat's record keeps: matched to the host's own cut
+ * (`_line`'s `MAX_TEXT` in `plugin/triage.py`), so a card reads the same whichever side wrote the
+ * opener (ADR 0090, ADR 0096).
+ */
+export const OPENER_CHARS = 2000
+
 export function oneLine(text: string, max = Number.POSITIVE_INFINITY): string | undefined {
   const flat = text.replace(/\s+/g, " ").trim()
   if (!flat) return undefined

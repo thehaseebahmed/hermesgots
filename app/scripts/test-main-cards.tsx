@@ -10,6 +10,7 @@ import {
   click,
   find,
   findAll,
+  flowRows,
   json,
   mount,
   seedSettings,
@@ -85,12 +86,8 @@ async function seed({ without = [] }: { without?: string[] } = {}) {
   )
 }
 
-const content = () => find('[data-slot="message-scroller-content"]')
-
 function flow(bodies = MAIN_MESSAGES) {
-  return [...(content()?.children ?? [])]
-    .filter((child) => !child.hasAttribute("data-message-scroller-spacer"))
-    .map((child) => {
+  return flowRows().map((child) => {
       const slot = child.getAttribute("data-slot")
       const said = child.textContent?.trim() ?? ""
       if (slot === "day-heading") return `day:${said}`
@@ -250,6 +247,48 @@ test("tapping a card opens its thread, and back returns to Main", async () => {
     await click(find('[aria-label="Back to Cards"]'))
     await until(async () => text().includes(MAIN_MESSAGES[2]), "back on Main")
     assert.ok(cards().length === THREADS.length, "with its cards in place")
+  })
+})
+
+test("a card and a marker in one gap stand by their own times, not one producer's list", async () => {
+  // One message after both, so neither is a tail: the bucket above it holds a move sent first and a
+  // thread begun second, and the flow reads them in the order they happened (ADR 0080, ADR 0097).
+  const mainId = await reset()
+  await db.messages.put(msg("m1", mainId, "user", "the one message", at(-1, 9)))
+  await db.conversations.put({
+    id: "t-late",
+    profileId: bot.id,
+    title: "A thread begun this morning",
+    hermesSessionId: "memento-t-late",
+    createdAt: at(-2, 12),
+    updatedAt: at(-2, 12),
+    changedAt: 0,
+    opener: "The thread's opener",
+    openerAt: at(-2, 12),
+  })
+  await db.conversations.update(mainId, {
+    moves: [
+      {
+        id: "mv1",
+        text: "The words that left Main first",
+        threadId: "t-keeper",
+        at: at(-2, 10),
+        undone: false,
+        undoable: false,
+        new: false,
+      },
+    ],
+  })
+  globalThis.fetch = async () => json({})
+  await mount(chatScreen(mainId), async () => {
+    await until(async () => cards().length === 1, "the thread's card")
+    assert.deepEqual(flow(), [
+      heading(at(-2, 10)),
+      "marker:mv1",
+      "card:t-late",
+      heading(at(-1, 9)),
+      "message:the one message",
+    ])
   })
 })
 

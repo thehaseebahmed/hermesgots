@@ -1,5 +1,10 @@
 # A thread's card draws the opener the host recorded
 
+**Amended in who writes it by [ADR 0096](0096-a-thread-is-sent-by-its-own-screen-and-the-command-lands-in-the-field.md)**
+(2026-11-04): the *sending screen* writes the opener, on both of the app's send paths, because a
+`/thread` never reaches the plugin at all. What a bubble says, and the order it falls back in, stand
+as this ADR decided.
+
 **Amends [ADR 0082](0082-a-threads-card-keeps-the-message-in-its-bubble-and-the-name-on-the-card.md)**,
 which settled that a card's bubble holds the message that opened the thread and that "a thread this
 device holds no message of draws no bubble at all". The second half does not stand: the reason it

@@ -535,7 +535,7 @@ function threadFor(page, profileId, { id, title, says }) {
 
 await flow(
   "bot-threads",
-  async ({ page, profileId, send, until, shot }) => {
+  async ({ page, profileId, send, composer, until, shot }) => {
     const mainId = `main-${profileId}`
     const mainPath = `/c/${mainId}`
 
@@ -595,6 +595,24 @@ await flow(
     })
     await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
     pass("back returns to Main through no frame but Main and the thread it left")
+
+    // Tapping the command in the composer's own menu puts it in the field rather than opening a
+    // thread on the spot (ADR 0096): the message typed after it is what the thread is started with.
+    await composer.click()
+    await composer.pressSequentially("/thread")
+    await page.locator('[role="option"]').filter({ hasText: "/thread" }).first().click()
+    await until(
+      async () => (await composer.inputValue()) === "/thread ",
+      15_000,
+      "the command in the field",
+    )
+    assert.equal(
+      await count(page, '[data-slot="thread-card"]'),
+      2,
+      "a pick starts nothing: the thread is the Send's to make",
+    )
+    await composer.fill("")
+    pass("the menu's /thread lands in the field and opens no thread")
 
     await send(`/thread ${STARTED}`)
     const threadId = await startedThread(page, mainPath, until)

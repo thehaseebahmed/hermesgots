@@ -1,5 +1,10 @@
 # A card, a marker and a divider where Main's messages run out read one clock
 
+**Amended in its dot sentence by [ADR 0097](0097-a-gap-in-mains-flow-is-one-timeline-not-one-list-after-another.md)**
+(2026-11-04): the three are one timeline in the gaps between Main's messages too, not only at the
+foot, and a divider is an entry of the flow rather than something drawn inside a message's row.
+Where the foot ends and each item is anchored stand as this ADR decided.
+
 **Amends [ADR 0034](0034-the-bot-opens-main-and-its-threads-are-cards-in-it.md)**, which settled
 that every thread's card is drawn "at the time that thread was started" and rejected collecting the
 cards in one block at the end of Main. Both stand: a card still sits where its thread began, against

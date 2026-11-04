@@ -15,6 +15,7 @@ import { setUploading } from "@/lib/attachments"
 import { HermesError, uploadAttachment, type HermesConfig } from "@/lib/hermes"
 import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
 import { pinOf, samePick, storedPick, wantsPin } from "@/lib/model-pick"
+import { OPENER_CHARS, oneLine } from "@/lib/words"
 
 /** A turn that never started because an attachment couldn't be saved on the host. */
 export class AttachmentError extends HermesError {}
@@ -136,6 +137,21 @@ export async function pinFromHost(conversationId: string, profile: Profile) {
     if (!row || !wantsPin(row)) return
     await updateConversation(conversationId, { modelChoice: storedPick(pinOf(row, host)) })
   })
+}
+
+/**
+ * The opener a chat's record keeps, for Main's card: the message a thread began with, and the time
+ * the reader sent it (ADR 0090, ADR 0096). Asked by both send paths on a chat's first turn, each
+ * with its own idea of when that is, so the pair is written the same way whichever screen sent it;
+ * nothing for a chat that already has one, for Main, or for a message with no words.
+ */
+export function openerFor(
+  chat: Pick<Conversation, "main" | "opener">,
+  { first, text, at }: { first: boolean; text: string; at: number },
+) {
+  if (!first || chat.main || chat.opener) return {}
+  const opener = oneLine(text, OPENER_CHARS)
+  return opener ? { opener, openerAt: at } : {}
 }
 
 /** A chat's title from its first message: the first line, cut to fit a row. */

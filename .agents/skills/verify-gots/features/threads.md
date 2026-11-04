@@ -14,7 +14,8 @@ went, with the host's own undo.
 - `threads-card-open` — a card's "View thread" opens that thread and back returns to Main where it
   was; the card's opener text sends into the thread and lands there (`bot-threads`).
 - `threads-start-command` — the composer offers `/thread`, and `/new` where the switch is off,
-  never both names (`bot-threads`).
+  never both names, and picking `/thread` from the menu types it into the field rather than starting
+  a thread on the press (`bot-threads`, ADR 0096).
 - `threads-move-new` — a message that opened a new thread leaves Main as that thread's card, with
   Undo and no marker (`bot-threads` on `triage-new`).
 - `threads-move-older` — a message moved into an older thread keeps a `Moved to` line linking it,
@@ -63,8 +64,14 @@ Preconditions:
   thread and the thread opens holding it; back on Main the thread's card now sits at that message's
   time, drawn with no marker. Proof: `PASS: back on Main, the started thread's card sits at its
   start time`.
-- **`/thread` with text.** Type `/thread <text>` into the composer and press Enter. A thread opens
-  holding that message. Proof: `PASS: /thread with text opened a thread with that message`.
+- **Picking the command.** Type `/thread` into the composer so the `/` menu offers it, then press the
+  row (or Enter on it). The field reads `/thread ` with the caret after it, no thread is made, and
+  nothing is sent. Proof: `PASS: the menu's /thread lands in the field and opens no thread`.
+- **`/thread` with text.** Type `/thread <text>` into the composer and press Enter — or pick the
+  command as above, type the message and send. A thread opens holding that message, drawn as the
+  thread's own first turn as the screen arrives, and back on Main its card carries that message
+  (ADR 0090, ADR 0096). Proof: `PASS: /thread with text opened a thread with that message` and
+  `PASS: back on Main, the started thread's card sits at its start time`.
 - **A message that opens a thread.** Send on a host answering `MOCK_TRIAGE=new` (the CLI starts
   that mock for this flow). The message leaves Main as its new thread's card, carrying an `Undo`
   control and no marker. Proof: `PASS: triage's new thread draws a card with Undo and no marker` and
@@ -103,6 +110,10 @@ Preconditions:
   thread list address still lands somewhere sensible, and that is the degradation, not a bug.
 - A card is drawn where its message was written, so Main's own replies and day headings stay in the
   flow between the cards. A check that only counts what is on screen will double-count a thread.
+- A card and a moved marker above the same message stand by their own times, each under the day
+  heading of its own day (ADR 0097): a move sent before a thread began draws above that thread's
+  card, never grouped below it. The rule itself is pinned without a browser in
+  `scripts/test-main-cards.tsx` and `scripts/test-main-tail.mjs`.
 - A marker's Undo is offered only while the thread it moved into has not replied. Once it replies
   the control is gone; do not wait for it later in a drive.
 - The sidebar's bot row previews what Main last said. Where Main has said nothing that preview

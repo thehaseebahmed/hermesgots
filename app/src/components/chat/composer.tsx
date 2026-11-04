@@ -52,6 +52,7 @@ import { waitInserted, type TakeId } from "@/lib/dictation-wait"
 import { writeDictation } from "@/lib/dictations"
 import {
   SEND_COMMANDS,
+  carriesMessage,
   isSendMode,
   localCommand,
   localCommands,
@@ -327,7 +328,7 @@ export function Composer({
   }, [value, caret])
 
   const runCommand = (command: LocalCommand, text = "") => {
-    const carried = command === "thread" ? attachments : []
+    const carried = carriesMessage(command) ? attachments : []
     setValue("")
     if (carried.length) setAttachments([])
     void Promise.resolve(onCommand(command, { text, attachments: carried })).catch(() => {
@@ -337,7 +338,10 @@ export function Composer({
   }
 
   const pick = (item: SlashItem) => {
-    if (item.kind === "command" && !isSendMode(item.name)) {
+    // A command that takes the rest of the message as its own says where the next message goes
+    // rather than doing something on the press: it lands in the field like a skill's name, and Send
+    // carries it out with whatever was typed after it (ADR 0096).
+    if (item.kind === "command" && !isSendMode(item.name) && !carriesMessage(item.name)) {
       const run = localCommand(value, main)
       return runCommand(item.name, run?.command === item.name ? run.text : "")
     }

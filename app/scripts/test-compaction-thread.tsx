@@ -1,7 +1,7 @@
 /**
  * The divider a thread draws where the host compacted a chat's context: the device reads the host's
- * list when the chat opens, keeps it on the conversation, and the first message written after the
- * compaction carries the divider above it.
+ * list when the chat opens, keeps it on the conversation, and the divider stands above the first
+ * message written after the compaction, as one entry of the flow.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -9,7 +9,16 @@ import test from "node:test"
 import { db, type Message } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
 
-import { botProfile, chatScreen, findAll, json, mount, seedChat, until } from "./component-kit.tsx"
+import {
+  botProfile,
+  chatScreen,
+  findAll,
+  flowRows,
+  json,
+  mount,
+  seedChat,
+  until,
+} from "./component-kit.tsx"
 
 const bot = botProfile("compaction")
 const FIRST = "first turn's work"
@@ -65,7 +74,7 @@ const turn: Message[] = [
 /** What the thread drew, read while it is on the page: its dividers, and where one landed. */
 interface Drawn {
   dividers: number
-  /** The row holding the divider, and the row holding the turn after the compaction. */
+  /** The flow entry holding the divider, and the one holding the turn after the compaction. */
   place: { divider: number; second: number }
 }
 
@@ -81,12 +90,14 @@ async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
     await import("@/components/chat/markdown-renderer")
     if (compactions.length) await until(async () => dividers().length > 0, "the divider")
     const drawn = dividers()
-    const items = findAll("[data-slot=message-scroller-item]")
+    // The divider is a flow entry of its own, so a card or a marker made in the same gap can stand
+    // on the other side of it (ADR 0097): its place is read among the flow's rows, not inside one.
+    const rows = flowRows()
     seen = {
       dividers: drawn.length,
       place: {
-        divider: items.findIndex((item) => drawn.some((one) => item.contains(one))),
-        second: items.findIndex((item) => item.textContent?.includes(SECOND)),
+        divider: rows.findIndex((row) => drawn.some((one) => row.contains(one))),
+        second: rows.findIndex((row) => row.textContent?.includes(SECOND)),
       },
     }
   })
@@ -96,8 +107,8 @@ async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
 test("the compaction the host recorded draws its divider above the next message", async () => {
   const drawn = await screen([{ at: AT, tokens: 168_000, window: 200_000 }], "chat-divided")
   assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
-  // Above the first message written after it, in that message's own row.
-  assert.equal(drawn.place.divider, drawn.place.second, "it sits on the turn after the compaction")
+  // Its own entry in the flow, not something drawn inside a message's row (ADR 0097).
+  assert.equal(drawn.place.divider + 1, drawn.place.second, "it sits just above the next turn")
   // And the device keeps the host's list, so a reload draws it again from what it has.
   const conversation = await db.conversations.get("chat-divided")
   assert.deepEqual(
@@ -113,6 +124,7 @@ test("a device that loaded the chat after it was compacted still marks it", asyn
   const drawn = await screen([{ at: 900 }], "chat-fresh")
   assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
   assert.equal(drawn.place.divider, 0, "it stands above the first message the device holds")
+  assert.ok(drawn.place.second > drawn.place.divider, "which is the row under it")
 })
 
 test("a chat the host never compacted draws nothing", async () => {

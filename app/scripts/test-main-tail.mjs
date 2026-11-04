@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { mainTail } from "../src/lib/main-tail.ts"
+import { mainTail, orderTail } from "../src/lib/main-tail.ts"
 
 const thread = (id, createdAt, extra = {}) => ({
   chat: {
@@ -77,4 +77,16 @@ test("nothing trailing, or nothing handed in at all, draws nothing", () => {
   assert.deepEqual(mainTail({}), [])
   assert.deepEqual(mainTail({ cards: [], moves: [] }), [])
   assert.deepEqual(mainTail({ moves: [move("m10", 10)] }).length, 1)
+})
+
+test("what stands above one message is one timeline too, by the same order", () => {
+  // The same three producers, anchored instead of trailing: a flow hands their bucket to this, so a
+  // card begun after a move can never be drawn above it (ADR 0097).
+  const above = orderTail([
+    { kind: "card", at: 40, thread: thread("t40", 40) },
+    { kind: "move", at: 10, move: move("m10", 10) },
+    { kind: "compaction", at: 20, compaction: compaction(20) },
+  ])
+  assert.deepEqual(drawn(above), ["move:m10@10", "compaction:20@20", "card:t40@40"])
+  assert.deepEqual(orderTail([]), [])
 })

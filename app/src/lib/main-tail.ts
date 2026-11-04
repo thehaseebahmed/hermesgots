@@ -15,7 +15,8 @@ export type TailItem =
   | { kind: "move"; at: number; move: Move }
   | { kind: "compaction"; at: number; compaction: Compaction }
 
-const idOf = (item: TailItem) =>
+/** An item's id: how the order keeps two items at one moment apart, and how its row is keyed. */
+export const tailId = (item: TailItem) =>
   item.kind === "card"
     ? item.thread.chat.id
     : item.kind === "move"
@@ -23,15 +24,39 @@ const idOf = (item: TailItem) =>
       : `compaction-${compactionAt(item.compaction)}`
 
 /**
- * The end of a Main's flow, as one timeline. A card is placed by the time its thread began, a marker
- * and a divider by the host's own record, and each producer hands back what no message follows;
- * stacking those lists one after another is what puts every card above every marker — a move made
- * this morning drawn under a card begun yesterday, which is a thread's order read off the wrong
- * clock. Ties keep a total order by id, so nothing swaps places between renders.
+ * The items a set of producers hands over, each carrying its own clock: a card the time its thread
+ * began (`cardAt`), a marker the time the reader sent the message (`moveAt`), a divider the host's
+ * own `at`. The one place the three become flow items, so a fourth producer, or a clock that reads
+ * differently, is a change here and nowhere else (ADR 0097).
  */
+export function tailItems({
+  cards,
+  moves,
+  compaction,
+}: {
+  cards?: readonly Thread[]
+  moves?: readonly Move[]
+  compaction?: Compaction
+}): TailItem[] {
+  const items: TailItem[] = [
+    ...(cards ?? []).map((thread): TailItem => ({ kind: "card", at: cardAt(thread), thread })),
+    ...(moves ?? []).map((move): TailItem => ({ kind: "move", at: moveAt(move), move })),
+  ]
+  if (compaction) items.push({ kind: "compaction", at: compactionAt(compaction), compaction })
+  return items
+}
+
+/**
+ * The one order a flow draws its items in — at the foot of Main and in the gap above one of its
+ * messages alike (ADR 0097).
+ */
+export const orderTail = (items: readonly TailItem[]): TailItem[] =>
+  [...items].sort(byTimeThenId((item) => item.at, tailId))
+
+/** What no message follows in Main's flow: its cards, its markers and a divider, by their own times. */
 export function mainTail({
-  cards = [],
-  moves = [],
+  cards,
+  moves,
   compaction,
 }: {
   /** The threads no message follows, from `threadCards`' own trailing. */
@@ -41,10 +66,5 @@ export function mainTail({
   /** A compaction made after everything Main shows, from `compactionMarks`' trailing. */
   compaction?: Compaction
 }): TailItem[] {
-  const items: TailItem[] = [
-    ...cards.map((thread): TailItem => ({ kind: "card", at: cardAt(thread), thread })),
-    ...moves.map((move): TailItem => ({ kind: "move", at: moveAt(move), move })),
-  ]
-  if (compaction) items.push({ kind: "compaction", at: compactionAt(compaction), compaction })
-  return items.sort(byTimeThenId((item) => item.at, idOf))
+  return orderTail(tailItems({ cards, moves, compaction }))
 }

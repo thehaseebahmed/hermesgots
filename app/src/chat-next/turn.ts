@@ -5,11 +5,9 @@ import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/her
 import { modelOf, wantsPin } from "@/lib/model-pick"
 import { announceMove, askTriage, canTriage, triaging } from "@/lib/triage"
 import { quietly } from "@/lib/report"
-import { pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
+import { openerFor, pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
 
-import { postRun } from "./api"
 import { ensureSessionWorkspace } from "@/lib/workspace"
-import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
 /** A turn ready to post: its run's body and key, and what to do once the post is settled. */
@@ -31,11 +29,13 @@ export async function prepareTurn(
   chatId: string,
   text: string,
   attachments: Attachment[],
+  at = Date.now(),
 ): Promise<PreparedTurn> {
-  return (await built(chatId, text, attachments)).turn
+  return (await built(chatId, text, attachments, at)).turn
 }
 
-async function built(chatId: string, text: string, attachments: Attachment[]) {
+/** `at` is when the reader sent the message, which the record's opener is stamped with. */
+async function built(chatId: string, text: string, attachments: Attachment[], at: number) {
   const chat = await db.conversations.get(chatId)
   const bot = chat && (await db.profiles.get(chat.profileId))
   if (!chat || !bot) throw new Error("This chat is gone.")
@@ -74,6 +74,10 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
         void updateConversation(chatId, {
           updatedAt: Date.now(),
           ...(first && !chat.titleEdited ? { title: titleFrom(words || attachments[0].name) } : {}),
+          // The message that opened a thread, for Main's card, stamped when the reader sent it: a
+          // thread is read on the devices that did not type it, so the card cannot rely on this one
+          // holding the row (ADR 0090, ADR 0096).
+          ...openerFor(chat, { first, text: words, at }),
         }).catch(quietly("Marking a chat as sent in"))
         // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
         if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
@@ -82,21 +86,6 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
     return { turn, config, session: chat.hermesSessionId, sent }
   } catch (error) {
     await release?.()
-    throw error
-  }
-}
-
-/**
- * Starts a chat's turn from outside its own screen — the thread `/thread` opens from Main — built
- * and posted as every send is, so the thread's screen finds its run when it opens.
- */
-export async function startTurn(chatId: string, text: string, attachments: Attachment[]) {
-  const { turn, config } = await built(chatId, text, attachments)
-  try {
-    await postRun({ server: config.baseUrl, key: config.apiKey }, turn.body, randomId())
-    turn.settled(true)
-  } catch (error) {
-    turn.settled(false)
     throw error
   }
 }
@@ -111,7 +100,7 @@ export async function queueTurn(chatId: string, text: string, attachments: Attac
   const bot = chat && (await db.profiles.get(chat.profileId))
   if (!bot || !(await hasPluginFeature(serverConfig(bot), "queue")))
     throw new Error("This bot's plugin can't hold a message until the reply is over.")
-  const { turn, config, session, sent } = await built(chatId, text, attachments)
+  const { turn, config, session, sent } = await built(chatId, text, attachments, Date.now())
   try {
     const item = await addToQueue(config, session, {
       text: text.trim(),

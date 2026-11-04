@@ -27,7 +27,7 @@ import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
-import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
+import { prepareTurn, queueTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
@@ -43,7 +43,7 @@ import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
-import { Compacted, ModelChange } from "@/components/chat/model-change"
+import { ModelChange } from "@/components/chat/model-change"
 import { DayHeading } from "@/components/chat/day-heading"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { ThreadCard } from "@/components/chat/thread-card"
@@ -138,7 +138,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { useBotThreads, useThreads } from "@/lib/threads"
+import { beginThread, takeHandover, useBotThreads, useThreads } from "@/lib/threads"
 import { EmptyState, MainEmptyState, MissingThread } from "@/components/chat/empty-states"
 import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
@@ -271,6 +271,9 @@ export function ChatPage(props: ChatPageProps) {
   const screen =
     kind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat
+        // Keyed by the chat it draws: a thread opened from Main is a fresh instance, which is what
+        // lets it take the handover meant for its own id (ADR 0096).
+        key={id}
         id={id}
         slot={props.slot}
         pinned={Boolean(props.chatId)}
@@ -316,8 +319,11 @@ function NextChat({
   )
   const ready = Boolean(chat && bot && chat.id === id)
   const botThreads = useBotThreads()
-  const { pathname } = useLocation()
+  const { pathname, state: address } = useLocation()
   const { root, up } = useNav()
+  // A thread Main opened with `/thread` is handed the message it was opened for, by its own id: taken
+  // once, here, so the screen that draws this thread is the one that sends it (ADR 0096).
+  const [start] = useState(() => takeHandover(id))
   const routeChat = matchPath("/c/:id", pathname)?.params.id
   const isMain = Boolean(chat?.main)
   const mainOn = Boolean(botThreads && isMain)
@@ -355,7 +361,7 @@ function NextChat({
     unsent: isUnsent,
   })
   // The repos a session not started yet will work in; the project screen hands its project over.
-  const handed = (useLocation().state as { project?: HermesProject } | null)?.project
+  const handed = (address as { project?: HermesProject } | null)?.project
   const projectId = session?.projectId
   const projects = useProjects(
     projectId && bot?.baseUrl && bot.apiKey !== undefined
@@ -495,7 +501,8 @@ function NextChat({
                 server={bot.baseUrl}
                 apiKey={bot.apiKey}
                 session={chat.hermesSessionId}
-                prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+                start={start}
+                prepareTurn={(text, attachments, at) => prepareTurn(id, text, attachments, at)}
                 queueTurn={async (text, attachments) =>
                   void (await queueTurn(id, text, attachments))
                 }
@@ -696,13 +703,18 @@ function NextComposerBody({
     : project
       ? projectRepos(project)
       : []
-  // `/thread` from Main: a thread of its own, with Main's pick and the message as its first turn.
+  // `/thread` from Main: a thread of its own, with Main's pick, opened on the message the reader
+  // typed with it. The thread's own screen sends that message, so the turn is drawn there as it
+  // arrives and Main's card has the opener to show (ADR 0096).
   const startThread = async (text: string, attachments: Attachment[]) => {
     try {
       const from = await db.conversations.get(chatId)
-      const thread = await createConversation(botId, { modelChoice: chosenOf(from?.modelChoice) })
+      const thread = await beginThread(botId, {
+        modelChoice: chosenOf(from?.modelChoice),
+        text,
+        attachments,
+      })
       navigate(`/c/${thread.id}`, { state: { bot: botId } })
-      if (text.trim() || attachments.length) await startTurn(thread.id, text, attachments)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
       throw error
@@ -806,7 +818,7 @@ function NextComposerBody({
 
 function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const params = useParams()
-  const { pathname } = useLocation()
+  const { pathname, state: address } = useLocation()
   const id = chatId ?? params.id
   // The id the address names, which differs from this instance's own: a Main drawn beside a
   // thread is keyed to the Main while the address holds the thread.
@@ -889,17 +901,15 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const {
     threadList,
     flow,
-    markersAbove,
     moveThatOpenedThread,
     undo: undoMoveOutMain,
-    marker: moveMarker,
-    tailRow,
+    itemRow,
   } = useMainFlow({
     chatId: id,
     profileId: conversation?.profileId ?? "",
     thread,
     moves: conversation?.moves,
-    compaction: compacted.trailing,
+    compacted,
     on: Boolean(botThreads && conversation?.main),
     listFor: gone ? profile?.id : undefined,
     afterUndo: refreshQueue,
@@ -1173,7 +1183,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
 
   // A session not started yet names the repos it will work in; the project screen hands its project
   // over, and it's read again here regardless.
-  const handed = (useLocation().state as { project?: HermesProject } | null)?.project
+  const handed = (address as { project?: HermesProject } | null)?.project
   const projectId = session?.projectId
   const projects = useProjects(
     projectId && baseUrl && apiKey !== undefined ? { baseUrl, apiKey } : undefined,
@@ -1266,7 +1276,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       })
 
-  const send = async (text: string, attachments: Attachment[] = []) => {
+  const send = async (text: string, attachments: Attachment[] = [], at?: number) => {
     try {
       let conversationId = id
       if (conversationId) {
@@ -1283,26 +1293,44 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       // Main's messages are triaged by the host first; a thread and a new chat never are.
       if (conversation?.main)
         await announceMove(await sendFromMain(conversationId, text, attachments))
-      else await sendMessage(conversationId, text, { attachments })
+      else await sendMessage(conversationId, text, { attachments, at })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
     }
   }
 
+  // The thread opens on the message the reader typed with `/thread`, and sends it from its own
+  // screen — the same handover chat-next's Main makes (ADR 0096).
   const startThread = async (text: string, attachments: Attachment[] = []) => {
     if (!profile || !conversation?.main) return
     try {
       // A pick made in Main comes with the thread; the Default row's marker doesn't, or the thread
       // would follow the default without ever fixing the model it started on.
-      const thread = await createConversation(profile.id, { modelChoice: chosenOf(keptModel) })
+      const thread = await beginThread(profile.id, {
+        modelChoice: chosenOf(keptModel),
+        text,
+        attachments,
+      })
       navigate(`/c/${thread.id}`, { state: { bot: profile.id } })
-      if (text.trim() || attachments.length) await sendMessage(thread.id, text, { attachments })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
       throw error
     }
   }
+
+  // The message Main handed this thread with `/thread`, sent here as the thread's first turn: the
+  // same handover chat-next's screen takes, so the thread draws its message as it opens (ADR 0096).
+  // Read by the address's id, because this screen keeps its instance as the address moves from Main
+  // to the thread it just made; the take is once, so a second run of this effect finds nothing.
+  useEffect(() => {
+    if (!ready || !id) return
+    const first = takeHandover(id)
+    if (!first) return
+    void send(first.text, first.attachments, first.at).catch(
+      quietly("Sending a thread's first message"),
+    )
+  }, [ready, id, send])
 
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
@@ -1414,16 +1442,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                           onUndo={undoMoveOutMain}
                         />
                       )
-                    if (entry.kind !== "message") return tailRow(entry)
+                    if (entry.kind !== "message") return itemRow(entry)
                     const message = entry.message
                     // A model change is a project session's mark; a chat draws none (ADR 0087).
                     const change = session ? changes.get(message.id) : undefined
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
-                        {markersAbove.get(message.id)?.map(moveMarker)}
-                        {compacted.before.has(message.id) && (
-                          <Compacted compaction={compacted.before.get(message.id)!} />
-                        )}
                         {change && <ModelChange model={change} />}
                         <MessageItem
                           message={message}

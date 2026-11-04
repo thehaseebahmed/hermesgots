@@ -496,6 +496,8 @@ export async function dragBy(page, at, dx, dy) {
 function helpers(page) {
   const composer = page.getByRole("textbox").last()
   return {
+    /** The chat's field, as `send` types into it: one owner for "the last textbox is the composer". */
+    composer,
     centreOf: (selector) => centreOf(page, selector),
     drag: (at, dx, dy) => dragBy(page, at, dx, dy),
     /** A thread's message row holding `text`. */

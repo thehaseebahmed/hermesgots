@@ -156,6 +156,15 @@ test("/thread from Main starts a thread with the message as its first turn", asy
     assert.equal(path(), `/c/${made.id}`, "and opened")
     assert.equal(host.latest.body?.session_id, made.hermesSessionId, "on the thread's own session")
     assert.equal(host.triage.asked.length, 0, "a thread's message is never triaged")
+    // The thread's own screen sent it, so the message is drawn where it went without a reopen, and
+    // Main's card has the opener to show under the thread's name (ADR 0090, ADR 0096).
+    await until(
+      () => requests().includes("Plan the itinerary"),
+      "the message drawn in the thread it opened",
+    )
+    const opened = await db.conversations.get(made.id)
+    assert.equal(opened?.opener, "Plan the itinerary", "the opener Main's card will draw")
+    assert.equal(typeof opened?.openerAt, "number", "stamped when the reader sent it")
   })
 })
 

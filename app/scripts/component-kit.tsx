@@ -497,6 +497,15 @@ export const findAll = (selector: string) => [...document.querySelectorAll(selec
  */
 export const threadCard = (threadId: string) =>
   find(`[data-slot="thread-card"][data-thread="${threadId}"]`)
+/**
+ * A chat's flow as rows, in the order it draws them: the scroller's own children, never its spacer.
+ * Messages, cards, Moved markers and compaction dividers are all rows of this one list (ADR 0097).
+ */
+export function flowRows() {
+  return [...(find('[data-slot="message-scroller-content"]')?.children ?? [])].filter(
+    (row) => !row.hasAttribute("data-message-scroller-spacer"),
+  )
+}
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
 /** The one element a selector reaches whose `aria-label` is exactly this: a Gallery cell, a row. */

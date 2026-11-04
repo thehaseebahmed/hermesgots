@@ -134,7 +134,7 @@ test("Main's menu offers /thread and never /new", async () => {
   })
 })
 
-test("/thread alone starts an empty thread and opens it", async () => {
+test("tapping /thread in the menu puts it in the field, and starts nothing", async () => {
   await seed()
   const seen = host("bot-thread")
   await mount(screen(MAIN), async () => {
@@ -142,6 +142,45 @@ test("/thread alone starts an empty thread and opens it", async () => {
     await type(composerField(), "/thread")
     await until(async () => offersCommand("/thread"), "the command in the menu")
     await pickPress()
+    await settle()
+    assert.equal(composerField()?.value, "/thread ", "the command is the field's, to type after")
+    assert.equal(where(), `/c/${MAIN}`, "and nothing was opened")
+    assert.deepEqual(await started(), [], "no thread was made")
+    assert.deepEqual(triaged(seen), [], "and nothing was sent")
+  })
+})
+
+test("/thread with text is sent as a thread's first message, from the field it lands in", async () => {
+  await seed()
+  const seen = host("bot-thread")
+  await mount(screen(MAIN), async () => {
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/thr")
+    await until(async () => offersCommand("/thread"), "the command in the menu")
+    await pickPress()
+    await type(composerField(), "/thread plan the move")
+    await sendPress()
+    await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
+    const [thread] = await started()
+    assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
+    await until(async () => runs(seen).length > 0, "the thread's turn to run")
+    assert.match(JSON.stringify(runs(seen)[0]?.body?.input), /plan the move/)
+    // Written with the turn's settle, so it lands a moment after the post.
+    await until(
+      async () => (await db.conversations.get(thread.id))?.opener === "plan the move",
+      "the opener Main's card draws",
+    )
+    assert.deepEqual(triaged(seen), [], "the host was never asked where it goes")
+  })
+})
+
+test("/thread alone, sent, starts an empty thread and opens it", async () => {
+  await seed()
+  const seen = host("bot-thread")
+  await mount(screen(MAIN), async () => {
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/thread")
+    await sendPress()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")

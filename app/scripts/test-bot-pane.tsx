@@ -5,7 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router"
 import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
-import { lastThreadKey } from "@/lib/threads"
+import { handOver, lastThreadKey, takeHandover } from "@/lib/threads"
 import {
   botProfile,
   click,
@@ -66,6 +66,10 @@ const screen = (entry: string) => (
     {/* The way back to Main, which the thread beside it deliberately no longer draws. */}
     <Link to={`/c/${MAIN}`} data-to-main>
       Main
+    </Link>
+    {/* The way to a thread, as a card in Main leads there. */}
+    <Link to="/c/t-a" data-to-thread>
+      Thread t-a
     </Link>
     {/* The way to another bot's Main, which is a switch of every pane the shell draws. */}
     <Link to={`/c/${mainThreadId(other.id)}`} data-to-other>
@@ -129,6 +133,41 @@ function holdThreadCount() {
     },
   }
 }
+
+test(
+  "a message Main handed a thread is taken by that thread's screen, once, and never by Main",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    // What `/thread` leaves behind: a message for a thread that has just been made (ADR 0096).
+    handOver("t-a", { text: "Plan the move", attachments: [] })
+    const runs: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input))
+      if (url.pathname.endsWith("/v1/runs") && init?.method === "POST") {
+        runs.push(String(JSON.parse(String(init.body)).session_id))
+        return json({ error: { message: "stopped here" } }, 500)
+      }
+      if (url.pathname.endsWith("/capabilities"))
+        return json({ features: { run_submission: true, run_events_sse: true } })
+      if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["queue", "moves"] })
+      if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
+      return json({})
+    }) as typeof fetch
+    await mount(screen(`/c/${MAIN}`), async () => {
+      // Main is drawn beside the thread the address names, and its screen reads the same handover:
+      // it must leave it alone, or the reader is sent back to Main and the message is lost.
+      await until(async () => titles().includes("Mainly"), "Main's own pane")
+      await settle()
+      assert.deepEqual(runs, [], "Main took nothing: the handover is the thread's, by its id")
+      await click(find("[data-to-thread]"))
+      await until(async () => path() === "/c/t-a", "the thread's own address")
+      await until(async () => runs.length === 1, "the thread's first turn, posted once")
+      assert.equal(runs[0], "memento-t-a", "on the thread's own session")
+      assert.equal(takeHandover("t-a"), undefined, "and taken, so a remount sends nothing again")
+    })
+  }),
+)
 
 test(
   "a thread opened for a bot is the one its pane keeps",

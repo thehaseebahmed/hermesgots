@@ -5,13 +5,13 @@ import { toast } from "sonner"
 import { Compacted } from "@/components/chat/model-change"
 import { MovedMarker } from "@/components/chat/moved-marker"
 import { db, type Message } from "@/lib/db"
-import type { Compaction, Move } from "@/lib/hermes"
-import { compactionAt } from "@/lib/compactions"
-import { dayOf } from "@/lib/days"
-import { mainTail, type TailItem } from "@/lib/main-tail"
+import type { Move } from "@/lib/hermes"
+import { type CompactionMarks } from "@/lib/compactions"
+import { dayKey, dayOf } from "@/lib/days"
+import { mainTail, orderTail, tailId, tailItems, type TailItem } from "@/lib/main-tail"
 import { moveMarks, openedThread } from "@/lib/move-marks"
 import { undoMove } from "@/lib/moves"
-import { drawnThreadIds, cardAt, threadCards } from "@/lib/thread-cards"
+import { drawnThreadIds, threadCards } from "@/lib/thread-cards"
 import { useNow, useThreads } from "@/lib/threads"
 
 export type FlowEntry =
@@ -32,7 +32,7 @@ export function useMainFlow({
   profileId,
   thread,
   moves,
-  compaction,
+  compacted,
   on,
   listFor,
   afterUndo,
@@ -42,8 +42,8 @@ export function useMainFlow({
   profileId: string
   thread: Message[] | undefined
   moves: Move[] | undefined
-  /** What closes the flow: `compactionMarks`' own trailing, when the host left one. */
-  compaction?: Compaction
+  /** Where the host compacted this chat, from `compactionMarks`: a divider above a message, or the end. */
+  compacted?: CompactionMarks
   /** Main draws its threads as cards. */
   on: boolean
   /** The bot whose threads are read, where something other than the cards needs the list. */
@@ -63,32 +63,45 @@ export function useMainFlow({
     () => moveMarks(thread ?? NO_ROWS, moves, drawnAsCards),
     [thread, moves, drawnAsCards],
   )
+  // Read by `thread`, which is undefined exactly until the chat's own read answers: a divider drawn
+  // over a chat still reading leads the rows about to arrive, then jumps above them.
   const tail = useMemo(
     () =>
       mainTail({
         cards: cards?.trailing,
         moves: marks.trailing,
-        // Held until the chat's own read answers: a divider over a chat still reading leads the rows
-        // about to arrive, then jumps above them. `thread` is undefined exactly until it has answered.
-        compaction: thread ? compaction : undefined,
+        compaction: thread ? compacted?.trailing : undefined,
       }),
-    [cards, marks, compaction, thread],
+    [cards, marks, compacted, thread],
   )
   const now = useNow()
   const flow = useMemo(() => {
     const entries: FlowEntry[] = []
-    let day: string | undefined
+    let day: number | undefined
     const heading = (at: number) => {
       if (!cards) return
-      const label = dayOf(at, now)
-      if (label === day) return
-      day = label
-      entries.push({ kind: "heading", day: label, at })
+      const key = dayKey(at)
+      if (key === day) return
+      day = key
+      entries.push({ kind: "heading", day: dayOf(at, now), at })
+    }
+    /**
+     * What stands above one message: the cards, the markers and a divider each producer placed
+     * there, in the one order their own times give — three lists stacked is a card begun after a
+     * move drawn above it (ADR 0097).
+     */
+    const above = (message: Message): TailItem[] => {
+      const items = tailItems({
+        cards: cards?.before.get(message.id),
+        moves: marks.before.get(message.id),
+        compaction: thread ? compacted?.before.get(message.id) : undefined,
+      })
+      return items.length > 1 ? orderTail(items) : items
     }
     for (const message of thread ?? NO_ROWS) {
-      for (const card of cards?.before.get(message.id) ?? []) {
-        heading(cardAt(card))
-        entries.push({ kind: "card", at: cardAt(card), thread: card })
+      for (const item of above(message)) {
+        heading(item.at)
+        entries.push(item)
       }
       heading(message.createdAt)
       entries.push({ kind: "message", message })
@@ -98,7 +111,7 @@ export function useMainFlow({
       entries.push(item)
     }
     return entries
-  }, [cards, thread, tail, now])
+  }, [cards, compacted, marks, thread, tail, now])
   const moveThatOpenedThread = useMemo(() => {
     const found = new Map<string, Move>()
     for (const move of moves ?? []) {
@@ -124,30 +137,28 @@ export function useMainFlow({
       .catch((error) =>
         toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
       )
-  const marker = (move: Move) => (
-    <MovedMarker
-      key={move.id}
-      move={move}
-      title={movedTitles?.get(move.threadId)}
-      profileId={profileId}
-      current={move.threadId === routeChat}
-      onUndo={undo}
-    />
-  )
-  /** A tail entry that is not a card: a Moved marker, or the divider closing the flow. */
-  const tailRow = (item: Exclude<TailItem, { kind: "card" }>) =>
+  /**
+   * A flow entry that is not a card: a Moved marker, or a compaction's divider. Its key is the id the
+   * flow orders by, so two items at one moment keep their places between renders (ADR 0097).
+   */
+  const itemRow = (item: Exclude<TailItem, { kind: "card" }>) =>
     item.kind === "move" ? (
-      marker(item.move)
+      <MovedMarker
+        key={tailId(item)}
+        move={item.move}
+        title={movedTitles?.get(item.move.threadId)}
+        profileId={profileId}
+        current={item.move.threadId === routeChat}
+        onUndo={undo}
+      />
     ) : (
-      <Compacted key={`compaction-${compactionAt(item.compaction)}`} compaction={item.compaction} />
+      <Compacted key={tailId(item)} compaction={item.compaction} />
     )
   return {
     threadList,
     flow,
-    markersAbove: marks.before,
     moveThatOpenedThread,
     undo,
-    marker,
-    tailRow,
+    itemRow,
   }
 }

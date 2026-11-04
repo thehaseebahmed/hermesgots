@@ -132,9 +132,10 @@ _Avoid_: thread row, thread item, preview
 
 **Opener**:
 The message a thread began with — what its card's bubble draws, and the moment the card stands at.
-The host records its words and its time on the thread's own record, so a device that has never opened
+The screen that sends a thread's first turn records its words and its time on the thread's own
+record, and the host records them for a thread its triage opens, so a device that has never opened
 the thread still draws it; what the device holds for the thread wins where it holds something
-(ADR 0090).
+(ADR 0090, ADR 0096).
 _Avoid_: first message, preview, snippet
 
 **Sort**:
@@ -155,7 +156,7 @@ The one line under a reply that says what the turn is doing while it works — "
 _Avoid_: footer (that is where the line stands, not what it is), progress text, activity
 
 **Command**:
-Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, the Cheatsheet, or how a message sent mid-reply goes. A command never reaches the agent as a message.
+Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, the Cheatsheet, or how a message sent mid-reply goes. One that acts — settings, the Cheatsheet, opening an empty thread — never reaches the agent as a message. One that takes the rest of the message as its own (`/thread`) is a prefix instead: picked, it lands in the field, and Send opens the thread on what was typed after it (ADR 0096).
 _Avoid_: slash command, action, app skill
 
 **Skill**:
@@ -223,7 +224,7 @@ The model a bot's host makes that decision with. Nothing set means the bot's own
 _Avoid_: router model, decision model
 
 **Moved marker**:
-What the Main thread shows in place of a message triage sent into an older thread, with the way to undo it — the undo riding the same system line the thread's name stands in. A message that opened a new thread is drawn there as that thread's card instead, and the card's way in says the same "Moved to “…”".
+What the Main thread shows in place of a message triage sent into an older thread, with the way to undo it — the undo riding the same system line the thread's name stands in. A message that opened a new thread is drawn there as that thread's card instead (ADR 0094). A marker stands among the cards and the dividers by its own time, under a day heading of its own (ADR 0097).
 _Avoid_: redirect notice, forwarded message
 
 **Steer**:

@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
 import {
+  createConversation,
   db,
   getSettings,
   listEnabledProfiles,
@@ -11,7 +12,9 @@ import {
   mainThreadProfile,
   type BotSort,
   type Conversation,
+  type ModelChoice,
   type Profile,
+  type Unsent,
 } from "@/lib/db"
 import { useXLarge } from "@/lib/media"
 import { byName } from "@/lib/compare"
@@ -29,6 +32,50 @@ import {
 
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
+
+/**
+ * The message a bot's Main hands a thread it opens with `/thread`, and that thread's screen sends:
+ * its words, its files, and when the reader sent it — so a thread opened a minute later still stamps
+ * its opener, and stands its card, at the moment the words were typed.
+ */
+export type ThreadStart = Pick<Unsent, "text" | "attachments" | "at">
+
+/**
+ * Messages Main has handed the threads it opened, by thread id, until each thread's own screen takes
+ * its own. Kept beside the address rather than in it: the address is one for every screen mounted at
+ * once (a bot's Main beside its thread reads the same one), and a handover taken from it would be
+ * taken by whichever screen rendered first — stripping it before the thread could send, or sending
+ * it twice from two instances after a remount (ADR 0096).
+ */
+const handed = new Map<string, ThreadStart>()
+
+export function handOver(threadId: string, start: ThreadStart) {
+  handed.set(threadId, start)
+}
+
+/** The message this thread was opened to send, once: the caller that takes it is the one that sends. */
+export function takeHandover(threadId: string): ThreadStart | undefined {
+  const start = handed.get(threadId)
+  handed.delete(threadId)
+  return start
+}
+
+/**
+ * A thread a bot's Main starts with `/thread`: its record, made with the model the composer holds,
+ * and the message its own screen is to send as the thread's first turn.
+ */
+export async function beginThread(
+  profileId: string,
+  {
+    modelChoice,
+    text,
+    attachments = [],
+  }: { modelChoice?: ModelChoice } & Pick<ThreadStart, "text" | "attachments">,
+) {
+  const thread = await createConversation(profileId, { modelChoice })
+  if (text.trim() || attachments.length) handOver(thread.id, { text, attachments, at: Date.now() })
+  return thread
+}
 
 /** The time, moved on each minute, for "5 min ago" labels. */
 export function useNow() {
