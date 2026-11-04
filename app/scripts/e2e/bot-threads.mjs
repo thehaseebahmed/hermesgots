@@ -701,6 +701,18 @@ await flow(
       ),
     )
     assert.ok(widths.length > 1, "more than one card is drawn")
+    // And the room the control holds is the control's own: the card's right edge and Undo's left one
+    // are the row's gap apart, not a guess at the button's width with the slack left in it.
+    const gap = await page.evaluate(() => {
+      const card = [...document.querySelectorAll('[data-slot="thread-card"]')].find((one) =>
+        one.querySelector('button[aria-label="Undo"]'),
+      )
+      const body = card?.querySelector('[data-slot="thread-card-body"]')
+      const undo = card?.querySelector('button[aria-label="Undo"]')
+      if (!body || !undo) return null
+      return Math.round(undo.getBoundingClientRect().left - body.getBoundingClientRect().right)
+    })
+    assert.ok(gap !== null && gap >= 0 && gap <= 8, `Undo stands at the card's edge (${gap}px away)`)
     assert.equal(
       new Set(widths).size,
       1,

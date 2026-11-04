@@ -19,6 +19,10 @@ import type { Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
 
+/** Undo's own box, shared by the live control and the hidden mark that holds its room. */
+const UNDO =
+  "flex w-full items-center justify-end gap-1 py-3 pr-0.5 font-medium whitespace-nowrap text-info underline-offset-2"
+
 export function StateIcon({ state }: { state: Thread["state"] }) {
   if (state === "waiting") return <CircleAlertIcon className="size-5 text-warning" />
   if (state === "failed") return <CircleXIcon className="size-5 text-destructive" />
@@ -77,10 +81,12 @@ export function ThreadCard({
         </Bubble>
       )}
       {/* The card and what trails it share one row, so Undo stands beside the card rather than inside
-          it while the pair still ends on the bubble's own edge. The trailing track is always there,
-          empty where nothing is undoable, so one card is exactly as wide as the next (ADR 0094): its
-          width is the row's, less a control that a card either has or has not. */}
-      <div className="mt-1.5 grid w-full max-w-[85%] grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-1">
+          it while the pair keeps the width a bubble above it takes (85% of the column, ADR 0082). The
+          trailing track is always there — the control, or the same mark hidden — so one card is exactly
+          as wide as the next (ADR 0094), and it costs the control's own width rather than a guess at
+          it, which is what left empty room between the card and Undo on a card that could undo and a
+          strip of it on every card likewise. */}
+      <div className="mt-1.5 grid w-full max-w-[85%] grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
         <div
           data-slot="thread-card-body"
           className={cn(
@@ -97,18 +103,25 @@ export function ThreadCard({
             <BellOffIcon className="size-4 shrink-0 text-muted-foreground" aria-label="Muted" />
           )}
         </div>
-        {move?.undoable && onUndo && (
+        {move?.undoable && onUndo ? (
           // Padding carries the target to 44px tall without the row growing to fit it: the row is
           // already as tall as the card.
           <button
             type="button"
             onClick={() => onUndo(move)}
             aria-label="Undo"
-            className="flex w-full items-center justify-end gap-1 py-3 pr-0.5 font-medium whitespace-nowrap text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+            className={cn(UNDO, "outline-none hover:underline focus-visible:underline")}
           >
             <Undo2Icon className="size-3.5" />
             Undo
           </button>
+        ) : (
+          // The same mark, holding the same room without being there: `invisible` keeps the box, and
+          // takes the words out of the reading order with it, so no card is narrower for lacking it.
+          <span aria-hidden className={cn(UNDO, "invisible")}>
+            <Undo2Icon className="size-3.5" />
+            Undo
+          </span>
         )}
       </div>
       <SystemLine className="-mt-3 ml-1.5 w-full">

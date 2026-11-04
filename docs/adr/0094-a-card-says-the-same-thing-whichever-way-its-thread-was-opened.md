@@ -29,9 +29,18 @@ rather than from the row growing to fit it.
 its contents made a triage card narrower than a `/thread` card beside it, so a bot's Main was a column
 of cards of two widths telling the reader something by their edges that is not true — the difference
 is a control on one card, not a different kind of card. The row is two tracks now, the card in the
-first and a fixed second track the width of Undo; a card with nothing to undo leaves that track empty
+first and a second the width of Undo — the control itself, or the same mark hidden, so the track costs
+the button's own width and not a guess at it; a card with nothing to undo leaves that track empty
 rather than taking its room. Every card in a Main is the same width, and Undo appears inside a column
 that was always there.
+
+**And the track is the control's own width, not a guess at it.** Reserved as a measured `4.5rem` it
+held more room than the control needed, so the slack showed up as a gap between the card and Undo —
+space taken from the card for nothing. The row's second track is the control's own box now: the live
+button where there is something to undo, and the same mark `invisible` where there is not, which keeps
+the box, keeps the column's width identical card to card, and takes the words out of the reading order.
+The row still takes the 85% a bubble above it takes — the card is a card, not a message, and its size
+is the size a decent card wants rather than the measure of the column.
 
 ## Considered options
 
