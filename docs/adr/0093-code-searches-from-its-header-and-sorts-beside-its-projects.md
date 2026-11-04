@@ -1,5 +1,8 @@
 # Code searches from its header and sorts beside its projects
 
+**Superseded by [ADR 0097](0097-code-searches-under-its-title-and-sorts-beside-its-search.md)** for where
+the field and the sort stand. The matcher and the rule that closing a search clears it still hold.
+
 The Code list kept two permanent rows of chrome above a list that is often three rows long: a full
 search field, and a row of project chips. The field was the widest thing on the screen and did
 nothing until it was typed in, and every session sorted from a menu in the header that sat a whole

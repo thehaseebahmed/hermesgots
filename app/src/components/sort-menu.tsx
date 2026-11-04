@@ -33,7 +33,10 @@ export function SortMenu<K extends string>({
   options: readonly SortKey<K>[]
   value: Sort<K>
   onSort: (sort: Sort<K>) => void
-  /** A surface with no room for a word — a sheet's header — wears the sign alone. */
+  /**
+   * A strip that holds another control beside it — a sheet's header, a list's title bar — wears the
+   * sign alone, its key named in the menu and to a screen reader.
+   */
   compact?: boolean
 }) {
   const chosen = options.find((option) => option.key === value.key) ?? options[0]

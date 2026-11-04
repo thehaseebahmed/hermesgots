@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import {
   ArchiveXIcon,
   CheckIcon,
@@ -10,7 +10,6 @@ import {
   MenuIcon,
   PlusIcon,
   SearchIcon,
-  XIcon,
 } from "lucide-react"
 import { Navigate, useNavigate } from "react-router"
 
@@ -65,12 +64,12 @@ import {
   type SessionState,
 } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
-import { cn } from "@/lib/utils"
 import { filterByFuzzy } from "@/lib/fuzzy"
 import { type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 
 const DAY_MS = 86_400_000
+const SEARCH_FIELD_ID = "code-search"
 const LAST_PROJECT = "memento:last-session-project"
 
 /** Asks the list to open the New session sheet, from the empty pane beside it. */
@@ -157,8 +156,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const field = useRef<HTMLInputElement>(null)
-  const chipRow = useRef<HTMLDivElement>(null)
-  const dock = useRef<HTMLDivElement>(null)
+  const searchToggle = useRef<HTMLButtonElement>(null)
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
   const [sort, setSort] = useCodeSort()
@@ -223,16 +221,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const chips = [...projects.entries()]
     .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
-  useLayoutEffect(() => {
-    const row = chipRow.current
-    const sort = dock.current
-    if (!row || !sort) return
-    const fit = () => row.style.setProperty("--dock", `${sort.offsetWidth}px`)
-    fit()
-    const observer = new ResizeObserver(fit)
-    observer.observe(sort)
-    return () => observer.disconnect()
-  }, [chips.length, sort.key])
 
   const order = useMemo(
     () =>
@@ -243,6 +231,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
       }),
     [sort.key, sort.dir],
   )
+  const showChips = rows.length > 0 && chips.length > 1
   const filtering = Boolean(query.trim() || chip)
   const shown = useMemo(() => {
     const inProject = rows.filter((r) => !chip || r.key === chip)
@@ -278,6 +267,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const closeSearch = () => {
     setSearching(false)
     setQuery("")
+    window.requestAnimationFrame(() => searchToggle.current?.focus())
   }
 
   const start = async ({ key, profile, project }: SessionTarget) => {
@@ -333,80 +323,58 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           >
             <MenuIcon />
           </Button>
-          <div className="relative flex min-w-0 flex-1 items-center">
-            <h1
-              className={cn(
-                "min-w-0 flex-1 truncate text-xl font-semibold tracking-tight transition-opacity duration-200 motion-reduce:transition-none",
-                searching && "opacity-0",
-              )}
-            >
-              Code
-            </h1>
-            <div
-              className={cn(
-                "absolute inset-0 flex items-center transition-all duration-200 motion-reduce:transition-none",
-                searching
-                  ? "translate-x-0 opacity-100"
-                  : "pointer-events-none translate-x-3 opacity-0",
-              )}
-              aria-hidden={!searching}
-            >
-              <SearchField
-                value={query}
-                onChange={(next) => (next ? setQuery(next) : closeSearch())}
-                label="Search sessions"
-                inputRef={field}
-                tabIndex={searching ? undefined : -1}
-                className={searching ? undefined : "pointer-events-none"}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") closeSearch()
-                }}
-              />
-            </div>
-          </div>
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight">Code</h1>
           <Button
+            ref={searchToggle}
             variant="ghost"
             size="icon-lg"
             className="size-11 rounded-full text-muted-foreground"
             onClick={() => (searching ? closeSearch() : openSearch())}
-            aria-label={searching ? "Close search" : "Search"}
+            aria-label="Search"
             aria-expanded={searching}
+            aria-controls={searching ? SEARCH_FIELD_ID : undefined}
             data-search-toggle
           >
-            {searching ? <XIcon /> : <SearchIcon />}
+            <SearchIcon />
           </Button>
+          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
         </div>
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {rows.length > 0 && (
-          <div ref={chipRow} className="relative flex min-h-11 items-center">
-            {chips.length > 1 && (
-              <ChipRow label="Projects" className="min-w-0 flex-1 pr-[var(--dock,7rem)]">
-                <Chip active={!chip} onClick={() => setChip(undefined)}>
-                  All
-                </Chip>
-                {chips.map(([key, { project }]) => (
-                  <Chip
-                    key={key}
-                    active={chip === key}
-                    onClick={() => setChip(chip === key ? undefined : key)}
-                  >
-                    <FolderIcon className="size-4" />
-                    {project.name}
-                  </Chip>
-                ))}
-              </ChipRow>
-            )}
-            <div ref={dock} data-slot="sort-dock" className="absolute inset-y-0 right-0 flex">
-              <div
-                aria-hidden
-                className="pointer-events-none w-10 bg-gradient-to-r from-transparent to-background"
+        {(searching || showChips) && (
+          <div className="flex flex-col gap-3">
+            {searching && (
+              <SearchField
+                id={SEARCH_FIELD_ID}
+                value={query}
+                onChange={(next) => (next ? setQuery(next) : closeSearch())}
+                label="Search sessions"
+                inputRef={field}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") closeSearch()
+                }}
               />
-              <div className="flex items-center bg-background">
-                <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
+            )}
+            {showChips && (
+              <div className="flex min-h-11 items-center">
+                <ChipRow label="Projects" className="min-w-0 flex-1">
+                  <Chip active={!chip} onClick={() => setChip(undefined)}>
+                    All
+                  </Chip>
+                  {chips.map(([key, { project }]) => (
+                    <Chip
+                      key={key}
+                      active={chip === key}
+                      onClick={() => setChip(chip === key ? undefined : key)}
+                    >
+                      <FolderIcon className="size-4" />
+                      {project.name}
+                    </Chip>
+                  ))}
+                </ChipRow>
               </div>
-            </div>
+            )}
           </div>
         )}
 

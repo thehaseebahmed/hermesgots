@@ -200,9 +200,9 @@ export function ItemRow({
 }
 
 /**
- * The search field itself, where a screen puts it in its own chrome: the list's bar passes it to
- * `InputGroup`, and Code's header animates it in place of the title (ADR 0093). One field, so the
- * placeholder, the clear button and the frame cannot drift between the two.
+ * The search field itself, where a screen puts it in its own chrome — the list's bar and Code's field
+ * under its title bar are the same one, so the placeholder, the clear button and the frame cannot
+ * drift between them.
  */
 export function SearchField({
   value,
@@ -210,30 +210,28 @@ export function SearchField({
   label,
   inputRef,
   onKeyDown,
-  className,
-  tabIndex,
+  id,
 }: {
   value: string
   onChange: (value: string) => void
   label: string
   inputRef?: Ref<HTMLInputElement>
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
-  className?: string
-  /** A field drawn before it is the reader's — one animating in — stays out of the tab order. */
-  tabIndex?: number
+  /** The field's own name, for the control that shows and hides it (`aria-controls`). */
+  id?: string
 }) {
   return (
-    <InputGroup className={cn("h-11 rounded-full bg-background dark:bg-input/30", className)}>
+    <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>
       <InputGroupInput
         ref={inputRef}
+        id={id}
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
-        tabIndex={tabIndex}
         placeholder={label}
         aria-label={label}
         autoComplete="off"

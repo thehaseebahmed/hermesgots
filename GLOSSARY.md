@@ -141,7 +141,9 @@ _Avoid_: first message, preview, snippet
 A list's order, said as the fact it ranks by — created, last activity, title, name — and a direction
 arrow. The control reads one sign and one name: the arrow at its start, then the key's name. The
 chosen key carries the same arrow in the menu, and picking it again flips it; every list that sorts
-itself sorts this way (ADR 0091, ADR 0095).
+itself sorts this way (ADR 0091, ADR 0095). The one exception is a title bar that holds another control
+beside it — Code's search — where the sort is the arrow alone, its key named in the menu and to a
+screen reader (ADR 0097).
 _Avoid_: sort mode, order by, asc/desc toggle
 
 **Refused call**:

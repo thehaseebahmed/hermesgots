@@ -105,17 +105,35 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     1,
     "the sort trigger carries one sign",
   )
-  const row = await sortButton().locator("xpath=../../..").boundingBox()
-  const dock = await page.locator('[data-slot="sort-dock"]').boundingBox()
+  assert.equal(
+    (await sortButton().innerText()).trim(),
+    "",
+    "and no word beside it: in the header it is a sign, like the search",
+  )
+  const barBox = await page.locator("header").first().boundingBox()
   const trigger = await sortButton().boundingBox()
-  assert.ok(row && dock && trigger, "the filter row, its dock and the button")
+  const toggleBox = await page.locator("button[data-search-toggle]").boundingBox()
+  assert.ok(barBox && trigger && toggleBox, "the header, the sort and the search toggle measured")
   assert.ok(
-    dock.x < trigger.x,
-    "the dock starts left of the button, so the ground it paints is wider than the button",
+    trigger.y >= barBox.y && trigger.y + trigger.height <= barBox.y + barBox.height,
+    "both stand in the header row",
   )
   assert.ok(
-    Math.abs(dock.x + dock.width - (row.x + row.width)) < 2,
-    "and it ends on the row's own edge",
+    trigger.x >= toggleBox.x + toggleBox.width,
+    "the sort follows the search, left to right",
+  )
+  assert.ok(
+    Math.abs(trigger.x - (toggleBox.x + toggleBox.width) - 8) < 2,
+    "at the header's own gap from it",
+  )
+  assert.ok(
+    trigger.x + trigger.width <= barBox.x + barBox.width,
+    "and the pair ends on the header's right edge",
+  )
+  assert.equal(
+    await page.locator('[data-slot="sort-dock"]').count(),
+    0,
+    "and nothing pins a dock of its own beside the projects",
   )
   await sortButton().click()
   await page.getByText("Sort by").waitFor()
@@ -144,6 +162,35 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await page.locator("button[data-search-toggle]").click()
   const search = page.getByLabel("Search sessions")
   await search.waitFor()
+  const fieldBox = await search.boundingBox()
+  const headBox = await page.locator("header").first().boundingBox()
+  const chipsBox = await page.locator("[aria-label=Projects]").boundingBox()
+  assert.ok(fieldBox && headBox && chipsBox, "the field, the header and the chip row measured")
+  assert.ok(
+    fieldBox.y >= headBox.y + headBox.height - 2,
+    "the field stands under the title's bar",
+  )
+  assert.ok(
+    chipsBox.y >= fieldBox.y + fieldBox.height,
+    "and the project chips still run under it",
+  )
+  assert.equal(
+    await page.getByRole("heading", { name: "Code", exact: true }).isVisible(),
+    true,
+    "with the title still in its bar, never replaced by the field",
+  )
+  const toggle = page.locator("button[data-search-toggle]")
+  assert.equal(await toggle.getAttribute("aria-expanded"), "true", "the search reads as expanded")
+  assert.equal(
+    await toggle.locator("svg.lucide-search").count(),
+    1,
+    "and wears the search sign it wore closed",
+  )
+  assert.equal(
+    await toggle.getAttribute("aria-controls"),
+    await search.getAttribute("id"),
+    "naming the field it opened",
+  )
   await search.fill("work")
   await until(async () => (await group(page, "Idle").count()) === 0, 5_000, "the headers to drop")
   for (const label of ORDER) assert.equal(await group(page, label).count(), 0, `no ${label} while filtering`)
@@ -154,8 +201,15 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.ok(flat[0]?.includes("Working turn") && flat[1]?.includes("Finished work") &&
     flat[2]?.includes("Dropped work"),
     "flat, every hit at the same rank so the chosen order still runs")
-  await page.getByRole("button", { name: "Close search" }).click()
+  await toggle.click()
   await until(async () => (await group(page, "Idle").count()) > 0, 5_000, "the headers back")
+  assert.equal(await toggle.getAttribute("aria-expanded"), "false", "the icon reads as shut again")
+  assert.equal(await page.getByLabel("Search sessions").count(), 0, "with the field gone")
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.hasAttribute("data-search-toggle")),
+    true,
+    "and the focus back on the button that closed it, rather than on the body",
+  )
   assert.equal(await page.getByRole("heading", { name: "Code", exact: true }).isVisible(), true,
     "the title is back")
   pass("a search opens from the header, drops the group headers and closes back to the title")

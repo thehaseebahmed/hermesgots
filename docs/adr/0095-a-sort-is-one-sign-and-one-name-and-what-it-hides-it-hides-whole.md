@@ -1,5 +1,10 @@
 # A sort is one sign and one name, and what it hides it hides whole
 
+**Amended by [ADR 0097](0097-code-searches-under-its-title-and-sorts-beside-its-search.md)**: a list's
+title bar holds two signs, so its sort is the arrow alone (`SortMenu` `compact`) and its key is named
+only in the menu and the accessible name. The dock this ADR decided is gone with the sort's move into
+that bar.
+
 **A sort control reads one sign and one name, and the sign comes first.** It had three marks in a row
 — the up/down pair meaning "this is a sort", the key's name, and the direction arrow at the end —
 which is a control with two icons doing the work of one: the pair says what the control is, the arrow
