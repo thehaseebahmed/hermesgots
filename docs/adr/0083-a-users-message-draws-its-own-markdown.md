@@ -31,11 +31,20 @@ message at all, so it stays characters (ADR 0082 settles which words go in that 
 decision only says how a message in a thread is drawn).
 
 **A typed line break stays, and a block boundary is not a line break.** On the bubble the renderer's
-wrapper is `whitespace-normal` with `[&_*]:whitespace-pre-wrap`, and the bubble itself keeps
-`whitespace-pre-wrap` for the `Suspense` fallback's sake. Normal on the wrapper matters because
+wrapper is `whitespace-normal` with `[&_*:not(ul):not(ol)]:whitespace-pre-wrap`, and the bubble itself
+keeps `whitespace-pre-wrap` for the `Suspense` fallback's sake. Normal on the wrapper matters because
 react-markdown leaves a newline between one top-level block and the next: under an inherited pre-wrap
 that newline paints a blank line nobody typed, on top of the gap the blocks already get. Pre-wrap on
 the elements is what keeps the breaks inside a paragraph, so a two-line note stays two lines.
+
+**Amended 2026-11-04: a list container is the one element left normal.** The same newline appears
+*between one `<li>` and the next*, inside the list rather than between blocks, so the blanket `[&_*]`
+painted it too: three bullets in a bubble came out as three bullets and two empty lines — a gap no
+margin explained and no margin could close, which is why tightening the items' own margins left the
+bubble looking unchanged. The exception is the container only: a `<ul>` and an `<ol>` stay normal, and
+every element inside them keeps the pre-wrap, so a bullet with a typed line break in it still breaks
+where it was typed. The items' margins then drop to nothing and their line height is the only space
+between them, so a bubble's list reads as one list.
 
 **Both thread renderers draw it.** `message-item.tsx` is the row every conversation draws — a chat's,
 a coding session's, a delegated agent's sub-thread — and `chat-next/page.tsx` is the dev route whose

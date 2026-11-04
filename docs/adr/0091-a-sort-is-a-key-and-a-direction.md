@@ -1,5 +1,10 @@
 # A sort is a key and a direction
 
+**Amended by [ADR 0095]: the control shows one sign, not three.** What a sort *is* — a key and a
+direction — stands as written below; what the control *reads* changed. The up/down pair icon is gone
+and the direction arrow stands where the key's name begins, before it, so the trigger is one sign and
+one name.
+
 Every list in the app that sorts itself offers a menu of flat choices, and half of those choices are
 a direction wearing a key's clothes. Code says *Created*, *Last activity*, *Title A–Z*; the Library
 says *Newest*, *Oldest*, *A–Z*, *Z–A*; the sidebar's bots say *Recent*, *Waiting*, *Name*, *Added*;

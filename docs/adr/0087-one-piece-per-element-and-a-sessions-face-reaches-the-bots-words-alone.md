@@ -1,5 +1,9 @@
 # One piece per element, and a project session's face reaches the bot's words alone
 
+**Amended by [ADR 0094] on a card's way in.** A card reads "View thread" whichever way its thread was
+opened, and Undo stands outside it; only the marker — the mark with no card under it — still says
+"Moved to “…”". Everything below about the marker stands.
+
 **Amends [ADR 0069](0069-one-working-look-and-one-chat-face.md)** on where the code face stops: it
 now reaches the bot's own words inside a card — a question and its choices, an approval's
 description, a subagent's goal, a recorded question and its answers — and stops at every title,

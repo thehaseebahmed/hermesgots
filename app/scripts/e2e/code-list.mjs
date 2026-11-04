@@ -103,6 +103,27 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   pass("Closed collapses by default and holds Resolved and Discarded under their own icons")
 
   const sortButton = () => page.getByRole("button", { name: /^Sort sessions by/ })
+  // One sign and one name (ADR 0095): the direction arrow, then the key. A second icon in the
+  // trigger is the pair-down that used to say "this is a sort" beside the arrow already saying it.
+  assert.equal(
+    await sortButton().locator("svg").count(),
+    1,
+    "the sort trigger carries one sign",
+  )
+  // The projects run the row's whole width and go on beneath the sort's dock, which paints the
+  // page's ground: a chip reaching it goes out of sight instead of showing through the button.
+  const row = await sortButton().locator("xpath=../../..").boundingBox()
+  const dock = await page.locator('[data-slot="sort-dock"]').boundingBox()
+  const trigger = await sortButton().boundingBox()
+  assert.ok(row && dock && trigger, "the filter row, its dock and the button")
+  assert.ok(
+    dock.x < trigger.x,
+    "the dock starts left of the button, so the ground it paints is wider than the button",
+  )
+  assert.ok(
+    Math.abs(dock.x + dock.width - (row.x + row.width)) < 2,
+    "and it ends on the row's own edge",
+  )
   await sortButton().click()
   await page.getByText("Sort by").waitFor()
   await page.getByRole("menuitem", { name: "Title" }).click()

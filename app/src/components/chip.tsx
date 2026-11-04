@@ -30,10 +30,19 @@ export function Chip({
 }
 
 /** The strip a row of `Chip`s lives in: sideways, never wrapped, no scrollbar. */
-export function ChipRow({ label, children }: { label: string; children: ReactNode }) {
+export function ChipRow({
+  label,
+  children,
+  className,
+}: {
+  label: string
+  children: ReactNode
+  /** For a row that passes beneath something: the trailing padding is where the hidden chips go. */
+  className?: string
+}) {
   return (
     <div
-      className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4"
+      className={cn("-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4", className)}
       role="group"
       aria-label={label}
     >

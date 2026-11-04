@@ -413,34 +413,38 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {rows.length > 0 && (
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              {chips.length > 1 && (
-                <ChipRow label="Projects">
-                  <Chip active={!chip} onClick={() => setChip(undefined)}>
-                    All
+          <div className="relative flex min-h-11 items-center">
+            {chips.length > 1 && (
+              <ChipRow label="Projects" className="min-w-0 flex-1 pr-16">
+                <Chip active={!chip} onClick={() => setChip(undefined)}>
+                  All
+                </Chip>
+                {chips.map(([key, { project }]) => (
+                  <Chip
+                    key={key}
+                    active={chip === key}
+                    onClick={() => setChip(chip === key ? undefined : key)}
+                  >
+                    <FolderIcon className="size-4" />
+                    {project.name}
                   </Chip>
-                  {chips.map(([key, { project }]) => (
-                    <Chip
-                      key={key}
-                      active={chip === key}
-                      onClick={() => setChip(chip === key ? undefined : key)}
-                    >
-                      <FolderIcon className="size-4" />
-                      {project.name}
-                    </Chip>
-                  ))}
-                </ChipRow>
-              )}
-              {/* A long row of projects passes under the sort rather than pushing it offscreen. */}
-              {chips.length > 1 && (
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent"
-                />
-              )}
+                ))}
+              </ChipRow>
+            )}
+            {/* The projects run the row's whole width and go on beneath this dock, so a long list
+                slides out of sight instead of being sliced at the sort's edge. The dock paints the
+                page's ground under the button — nothing shows through it — and softens its own left
+                edge so the chips fade into it rather than disappearing between two frames. The
+                row's trailing padding is where the last chip comes to rest, clear of the dock. */}
+            <div data-slot="sort-dock" className="absolute inset-y-0 right-0 flex">
+              <div
+                aria-hidden
+                className="pointer-events-none w-10 bg-gradient-to-r from-transparent to-background"
+              />
+              <div className="flex items-center bg-background">
+                <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
+              </div>
             </div>
-            <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
           </div>
         )}
 

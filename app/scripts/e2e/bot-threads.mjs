@@ -671,13 +671,23 @@ await flow(
     )
     assert.equal(
       await page.getByText(/Moved to/).count(),
+      0,
+      "nothing says where the message went: the card standing where it was is that sentence",
+    )
+    const last = page.locator('[data-slot="thread-card"]').last()
+    assert.equal(
+      await last.getByText(/View thread/).count(),
       1,
-      "one line says where the message went: the card's own",
+      "a thread triage opened reads like a /thread card, with the ordinary way in",
     )
     assert.equal(
-      await page.locator('[data-slot="thread-card"]').last().getByText(/Moved to/).count(),
-      1,
-      "and it is the card that carries it, not a marker beside it",
+      await last.evaluate((card) => {
+        const body = card.querySelector('[data-slot="thread-card-body"]')
+        const undo = card.querySelector('button[aria-label="Undo"]')
+        return Boolean(body && undo) && !body.contains(undo)
+      }),
+      true,
+      "and its Undo stands outside the card, at the end of the row",
     )
     await until(
       async () => (await page.locator("[data-sonner-toast]").count()) === 0,

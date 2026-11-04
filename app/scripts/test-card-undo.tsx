@@ -159,7 +159,7 @@ const undoIn = (element: Element | null) =>
     (button) => button.getAttribute("aria-label") === "Undo",
   ) ?? null
 
-test("a triage-opened thread's card carries Undo, and no marker is drawn beside it", async () => {
+test("a triage-opened thread's card reads like any other, with Undo beside it", async () => {
   await seed([opened])
   host([opened])
   await mount(chatScreen(MAIN), async () => {
@@ -167,12 +167,15 @@ test("a triage-opened thread's card carries Undo, and no marker is drawn beside 
     const drawn = card("n1")
     assert.ok(drawn, "the thread triage opened is a card in Main's flow")
     assert.ok(drawn.textContent?.includes(MOVED), "its opener shows the message that left Main")
-    assert.ok(undoIn(drawn), "the card offers Undo")
-    // The card says where the message went, and says it once: the marker is the card, not a second
-    // line beside it (ADR 0087).
-    const said = findAll("p").filter((one) => one.textContent?.startsWith("Moved to"))
-    assert.equal(said.length, 1, "the move is said once")
-    assert.ok(drawn.contains(said[0]), "inside the card, not as a marker beside it")
+    // One card, one shape (ADR 0094): the way in is the ordinary line, and nothing anywhere says
+    // where the message went — the card standing where the message was is that sentence.
+    assert.match(drawn.textContent ?? "", /View thread/, "its way in reads as a /thread card's does")
+    assert.doesNotMatch(drawn.textContent ?? "", /Moved to/, "and it does not say where the message went")
+    assert.equal(findAll("p").filter((one) => one.textContent?.startsWith("Moved to")).length, 0)
+    const undo = undoIn(drawn)
+    assert.ok(undo, "the card offers Undo")
+    const body = drawn.querySelector('[data-slot="thread-card-body"]')
+    assert.ok(body && !body.contains(undo), "and it stands outside the card, at the end of its row")
   })
 })
 
@@ -201,8 +204,8 @@ test("the card stops offering Undo once its thread has replied", async () => {
     assert.equal(undoIn(drawn), null, "a thread that replied can't be taken back")
     assert.match(
       drawn.textContent ?? "",
-      /Moved to/,
-      "it still says where the message went, without the way to take it back",
+      /View thread/,
+      "it still says how to get in, without the way to take it back",
     )
   })
 })

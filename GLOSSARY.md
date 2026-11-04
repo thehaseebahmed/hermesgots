@@ -123,7 +123,9 @@ A bot's thread drawn inside its Main at the moment its opener was sent: the mess
 own bubble where any device can name it, and under it the thread's state, its name and the way in. A
 card is not a turn and wears no avatar. Its bubble says the message and its line says the thread's
 name, never the other way round, and a thread whose opener nothing can name draws no bubble rather
-than the name (ADR 0082, ADR 0090).
+than the name (ADR 0082, ADR 0090). It wears one shape whichever way it was opened: the line reads
+"View thread", and a thread triage opened carries Undo outside the card, at the end of its row
+(ADR 0094).
 _Avoid_: thread row, thread item, preview
 
 **Opener**:
@@ -135,8 +137,9 @@ _Avoid_: first message, preview, snippet
 
 **Sort**:
 A list's order, said as the fact it ranks by — created, last activity, title, name — and a direction
-arrow. The chosen key carries the arrow in the menu, and picking it again flips it; every list that
-sorts itself sorts this way (ADR 0091).
+arrow. The control reads one sign and one name: the arrow at its start, then the key's name. The
+chosen key carries the same arrow in the menu, and picking it again flips it; every list that sorts
+itself sorts this way (ADR 0091, ADR 0095).
 _Avoid_: sort mode, order by, asc/desc toggle
 
 **Refused call**:
@@ -200,7 +203,7 @@ One Hermes profile the user has linked to Gots: its own agent, skills and settin
 _Avoid_: profile, agent, assistant
 
 **Thread card**:
-One of a bot's chats, drawn as a card inside its Main thread at the time it was started. A project session is not one. The message that opened it is drawn whole above the card; the card's way in says "Moved to “…”" where a move opened it and "View thread" otherwise, with the replies it has beside that, and Undo on the same line.
+One of a bot's chats, drawn as a card inside its Main thread at the time it was started. A project session is not one. The message that opened it is drawn whole above the card; the card's way in reads "View thread" whichever way the thread was opened, with the replies it has beside that line, and a thread triage opened carries Undo outside the card at the end of its row.
 _Avoid_: conversation, session, thread row
 
 **Main thread**:

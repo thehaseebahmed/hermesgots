@@ -79,7 +79,9 @@ test("the typed line breaks ride the elements, not the blank lines between them"
     // are the browser flow's.
     const words = find("[data-slot=markdown]")
     assert.match(words?.className ?? "", /whitespace-normal/)
-    assert.match(words?.className ?? "", /\[&_\*\]:whitespace-pre-wrap/)
+    // On the elements but not on a list's container: react-markdown leaves a newline between one
+    // `<li>` and the next, and pre-wrap there paints it as an empty line between bullets.
+    assert.match(words?.className ?? "", /\[&_\*:not\(ul\):not\(ol\)\]:whitespace-pre-wrap/)
     assert.equal(
       words?.querySelector("p")?.textContent,
       "one\ntwo",
@@ -91,7 +93,7 @@ test("the typed line breaks ride the elements, not the blank lines between them"
 test("a bubble's bullets sit tight, and a reply's keep the page's rhythm", async () => {
   await mounted(<MessageItem message={ask("- one\n- two\n- three")} showStats />, () => {
     const words = find("[data-slot=markdown]")
-    assert.match(words?.className ?? "", /\[&_li\]:my-0\.5/, "bullets a hair apart")
+    assert.match(words?.className ?? "", /\[&_li\]:my-0\b/, "bullets on their line height alone")
     assert.match(words?.className ?? "", /\[&_ul\]:my-0/, "and no block gap of their own")
     assert.equal(words?.querySelectorAll("li").length, 3, "the list is drawn")
   })

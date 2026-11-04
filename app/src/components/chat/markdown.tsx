@@ -33,15 +33,17 @@ export const Markdown = memo(function Markdown({
       className={cn(
         face,
         "min-w-0 space-y-3 break-words [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:italic [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5",
-        // On a bubble a list keeps the bubble's own rhythm: the block gap above it drops to the
-        // line spacing and the items sit a hair apart, so three bullets read as one thought rather
-        // than as three paragraphs with dots (ADR 0083).
-        tone === "fill" &&
-          "space-y-2 [&_li]:my-0.5 [&_ol]:my-0 [&_ol]:pl-4 [&_ul]:my-0 [&_ul]:pl-4",
+        // On a bubble a list keeps the bubble's own rhythm: the block gap above it drops to the line
+        // spacing and the items sit on nothing but their own line height, so three bullets read as
+        // one list rather than as three paragraphs with dots (ADR 0083, amended 2026-11-04).
+        tone === "fill" && "space-y-2 [&_li]:my-0 [&_ol]:my-0 [&_ol]:pl-4 [&_ul]:my-0 [&_ul]:pl-4",
         // On a bubble the fill inherits `whitespace-pre-wrap`, so the lines someone typed keep their
         // breaks — but react-markdown also leaves a newline between one block and the next, and under
         // pre-wrap that paints as a blank line nobody typed. Normal here, pre-wrap on the elements.
-        tone === "fill" && "whitespace-normal [&_*]:whitespace-pre-wrap",
+        // The list containers are the exception: react-markdown leaves a newline between one `<li>`
+        // and the next inside them, and pre-wrap there paints it as an empty line between bullets —
+        // which reads as a gap that no margin explains and no margin can close.
+        tone === "fill" && "whitespace-normal [&_*:not(ul):not(ol)]:whitespace-pre-wrap",
         className,
       )}
     >

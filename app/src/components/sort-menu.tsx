@@ -1,4 +1,4 @@
-import { ArrowDownNarrowWideIcon, ArrowDownUpIcon, ArrowUpNarrowWideIcon } from "lucide-react"
+import { ArrowDownNarrowWideIcon, ArrowUpNarrowWideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -11,10 +11,12 @@ import {
 import { toggleSort, type Sort, type SortKey } from "@/lib/sort"
 
 /**
- * The one sort control: an icon button naming what the list is sorted by, and a menu of every key
- * it can rank by. The row that is the list's order carries the arrow it reads in — up for A→Z and
- * oldest-first, down for newest-first — and picking that row again turns the arrow round, while
- * picking another row takes that key's own direction (ADR 0091). Code's sessions, the sidebar's
+ * The one sort control: a button reading the list's order as one sign and one name, and a menu of
+ * every key it can rank by. The sign is the direction arrow alone — up for A→Z and oldest-first,
+ * down for newest-first — and it stands at the button's start, ahead of the name, so the control is a
+ * sign and a word rather than three icons in a row. The row that is the list's order carries the same
+ * arrow, and picking that row again turns it round while picking another row takes that key's own
+ * direction (ADR 0091, amended by 0094). Code's sessions, the sidebar's
  * bots, the Library's tree and the model sheet all draw this; each keeps its own `by` and `label`
  * wording, the control and its rule are one.
  */
@@ -46,9 +48,8 @@ export function SortMenu<K extends string>({
           />
         }
       >
-        <ArrowDownUpIcon />
+        <Arrow className="size-4" aria-hidden />
         {chosen.label}
-        <Arrow className="size-3.5" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuGroup>
