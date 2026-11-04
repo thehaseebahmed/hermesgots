@@ -21,9 +21,17 @@ thread replies — so it stays, drawn as it was: the undo sign and the word, in 
 changes is where it stands. It rode the system line, under the card, in a row that had to hold a
 sentence, a reply count and a control at once; on the line it crowded the words and pushed a second
 line of chrome under every triage card. It now trails the card: the card and Undo share one row, with
-the card taking the room it needs and Undo pinned to the row's end, level with the card's middle, the
-pair still ending on the bubble's own edge above. The target keeps its 44px height from its own
-padding rather than from the row growing to fit it.
+the card taking the room and Undo pinned to the row's end, level with the card's middle, the pair
+still ending on the bubble's own edge above. The target keeps its 44px height from its own padding
+rather than from the row growing to fit it.
+
+**And the row keeps Undo's own track whether or not a card carries one.** A row that sized itself to
+its contents made a triage card narrower than a `/thread` card beside it, so a bot's Main was a column
+of cards of two widths telling the reader something by their edges that is not true — the difference
+is a control on one card, not a different kind of card. The row is two tracks now, the card in the
+first and a fixed second track the width of Undo; a card with nothing to undo leaves that track empty
+rather than taking its room. Every card in a Main is the same width, and Undo appears inside a column
+that was always there.
 
 ## Considered options
 

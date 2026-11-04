@@ -421,6 +421,10 @@ async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] 
     timeout: 15_000,
     polling: "raf",
   })
+  // A quarter second more after the switch has gone quiet, so the settled chat is sampled several
+  // times rather than once: a chat whose last frame is also its first settled one proves nothing
+  // about whether it moved afterwards.
+  await page.waitForTimeout(260)
   const frames = await stopFrames(page)
   assertSwitchFrames(frames[pane], { what })
   for (const lane of also)
@@ -688,6 +692,19 @@ await flow(
       }),
       true,
       "and its Undo stands outside the card, at the end of the row",
+    )
+    // One card is as wide as the next, whether or not it carries Undo: the row keeps the control's
+    // own track empty where there is nothing to undo (ADR 0094).
+    const widths = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-slot="thread-card-body"]')].map((body) =>
+        Math.round(body.getBoundingClientRect().width),
+      ),
+    )
+    assert.ok(widths.length > 1, "more than one card is drawn")
+    assert.equal(
+      new Set(widths).size,
+      1,
+      `every card is the same width, with or without Undo (found ${widths.join(", ")})`,
     )
     await until(
       async () => (await page.locator("[data-sonner-toast]").count()) === 0,

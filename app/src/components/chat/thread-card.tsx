@@ -77,12 +77,14 @@ export function ThreadCard({
         </Bubble>
       )}
       {/* The card and what trails it share one row, so Undo stands beside the card rather than inside
-          it while the pair still ends on the bubble's own edge. */}
-      <div className="mt-1.5 flex w-full max-w-[85%] items-center gap-1">
+          it while the pair still ends on the bubble's own edge. The trailing track is always there,
+          empty where nothing is undoable, so one card is exactly as wide as the next (ADR 0094): its
+          width is the row's, less a control that a card either has or has not. */}
+      <div className="mt-1.5 grid w-full max-w-[85%] grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-1">
         <div
           data-slot="thread-card-body"
           className={cn(
-            "flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-2xl border bg-card px-4 py-2",
+            "flex min-h-14 min-w-0 items-center gap-3 rounded-2xl border bg-card px-4 py-2",
             open && "border-foreground/20 bg-muted",
           )}
         >
@@ -102,7 +104,7 @@ export function ThreadCard({
             type="button"
             onClick={() => onUndo(move)}
             aria-label="Undo"
-            className="flex shrink-0 items-center gap-1 py-3 pr-0.5 pl-2 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+            className="flex w-full items-center justify-end gap-1 py-3 pr-0.5 font-medium whitespace-nowrap text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
           >
             <Undo2Icon className="size-3.5" />
             Undo
