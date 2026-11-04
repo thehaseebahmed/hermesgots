@@ -1685,6 +1685,12 @@ export async function triageMessage(
     attachments: { name: string; type: string; size: number; path?: string }[]
     /** Whether a message for a thread that is mid-reply steers it, else it waits in that thread's queue. */
     steer?: boolean
+    /**
+     * When the reader sent the message, on this device's clock. The host records it as the move's
+     * own time and as the opener's, so Main draws the marker and the card where the message was
+     * typed rather than where the host got round to it (ADR 0089).
+     */
+    at?: number
   },
   signal?: AbortSignal,
 ): Promise<Triage> {
@@ -1699,6 +1705,7 @@ export async function triageMessage(
         body: item.run,
         attachments: item.attachments,
         steer: item.steer === true,
+        ...(item.at === undefined ? {} : { at: item.at }),
       }),
       signal,
     },

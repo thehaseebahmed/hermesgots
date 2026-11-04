@@ -41,11 +41,16 @@ def record(
     new: bool = False,
     body: Any = None,
     files: Optional[List[Dict[str, Any]]] = None,
+    at: Optional[int] = None,
 ) -> None:
     # The app's message id keys the row, so a repeated ask is one move.
     if not key:
         return
     now = int(time.time() * 1000)
+    # When the reader sent the message, which is when Main's marker stands (ADR 0089). The ask
+    # carries it, so a host that takes a second to decide does not move the marker a second later;
+    # a caller that sends none gets the moment this row was written.
+    sent_at = at if isinstance(at, int) and not isinstance(at, bool) and at > 0 else now
     conn = connect(path)
     try:
         # Undo ends when the outbox forgets the sent item, so older moves keep no body to resend.
@@ -61,7 +66,7 @@ def record(
                 session_id,
                 text[:MAX_TEXT],
                 thread,
-                now,
+                sent_at,
                 thread_session,
                 item,
                 1 if new else 0,

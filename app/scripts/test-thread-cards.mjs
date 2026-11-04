@@ -119,6 +119,13 @@ test("a card's bubble says the move that opened its thread before anything else"
   assert.equal(openerWords(opened, { text: "What triage moved in" }), "What triage moved in")
 })
 
+test("a card stands at its opener's own time, not the record's", () => {
+  const baz = thread("t20", 20, { chat: chat("t20", 20, { opener: "typed at nine", openerAt: 9 }) })
+  const cards = threadCards([message("m10", 10), message("m12", 12), message("m30", 30)], [baz])
+  assert.deepEqual(above(cards, "m10"), ["t20"], "the card stands by the message the reader sent")
+  assert.deepEqual(above(cards, "m30"), [])
+})
+
 test("a card's bubble says the first message the user sent, and nothing without one", () => {
   assert.equal(
     openerWords(thread("t30", 30, { opener: "What the user typed in it" })),

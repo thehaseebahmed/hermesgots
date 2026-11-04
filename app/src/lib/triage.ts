@@ -52,7 +52,8 @@ export async function askTriage(
     sent,
     steer,
     id = randomId(),
-  }: { content: string; sent: Attachment[]; steer?: boolean; id?: string },
+    at,
+  }: { content: string; sent: Attachment[]; steer?: boolean; id?: string; at?: number },
 ): Promise<Moved | undefined> {
   const { conversation, profile, config } = host
   try {
@@ -66,7 +67,7 @@ export async function askTriage(
       triageMessage(
         config,
         conversation.hermesSessionId,
-        { id, text: content, run, attachments, steer },
+        { id, text: content, run, attachments, steer, at },
         AbortSignal.timeout(ms),
       )
     const answer = await ask(TRIAGE_MS * 0.7).catch(() => ask(TRIAGE_MS * 0.3))

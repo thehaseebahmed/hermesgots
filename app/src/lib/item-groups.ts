@@ -1,6 +1,7 @@
 import type { SessionState } from "@/lib/session-work"
 import type { CodeSort } from "@/lib/db"
 import { byName } from "./compare.ts"
+import { withDir, type Sort } from "./sort.ts"
 
 /** What an item needs, which puts it ahead of the dated groups (or, closed, after them). */
 export type ItemNeed = "waiting" | "working" | "closed" | undefined
@@ -31,10 +32,12 @@ function groupsOf<T, K extends string>(
   order?: (a: T, b: T) => number,
 ) {
   const placed = items.map((item) => ({ item, key: keyOf(item) }))
-  return (Object.keys(labels) as K[]).map((key) => {
-    const members = placed.filter((p) => p.key === key).map((p) => p.item)
-    return { key, label: labels[key], items: order ? members.sort(order) : members }
-  }).filter((group) => group.items.length)
+  return (Object.keys(labels) as K[])
+    .map((key) => {
+      const members = placed.filter((p) => p.key === key).map((p) => p.item)
+      return { key, label: labels[key], items: order ? members.sort(order) : members }
+    })
+    .filter((group) => group.items.length)
 }
 
 /**
@@ -100,17 +103,21 @@ export function codeGroups<T>(
  * filtered list runs it flat.
  */
 export function codeOrder<T>(
-  sort: CodeSort,
+  sort: Sort<CodeSort>,
   fields: {
     created: (item: T) => number
     activity: (item: T) => number
     title: (item: T) => string
   },
 ): (a: T, b: T) => number {
-  if (sort === "title") return (a, b) => byName(fields.title(a), fields.title(b))
-  const newest: Record<Exclude<CodeSort, "title">, (item: T) => number> = {
-    created: fields.created,
-    activity: fields.activity,
+  // Ascending, and the arrow turns it: one rank per key, one direction for every list (ADR 0091).
+  const rank = (a: T, b: T) => {
+    if (sort.key === "title") return byName(fields.title(a), fields.title(b))
+    const value: Record<Exclude<CodeSort, "title">, (item: T) => number> = {
+      created: fields.created,
+      activity: fields.activity,
+    }
+    return value[sort.key](a) - value[sort.key](b)
   }
-  return (a, b) => newest[sort](b) - newest[sort](a)
+  return (a, b) => withDir(rank(a, b), sort.dir)
 }

@@ -16,6 +16,7 @@ import {
 } from "@/lib/db"
 import { useXLarge } from "@/lib/media"
 import { byName } from "@/lib/compare"
+import { readSort, withDir, type Sort, type SortKey } from "@/lib/sort"
 import { threadState, type ThreadState } from "@/lib/session-work"
 import {
   useAllLiveRuns,
@@ -123,7 +124,9 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
               : undefined
         return {
           chat,
-          opener: line(opener?.content),
+          // What this device holds is the message itself; a thread it never opened still has the
+          // one the host recorded when it made the thread (ADR 0090).
+          opener: line(opener?.content) ?? line(chat.opener),
           last: line(last?.content),
           replies,
           streaming: latest?.status === "streaming",
@@ -171,17 +174,31 @@ export interface BotSummary {
   waiting: number
 }
 
-export const BOT_SORTS: Record<BotSort, string> = {
-  recent: "Recent",
-  waiting: "Waiting",
-  name: "Name",
-  added: "Added",
+/** The keys the sidebar's bots rank by, each with the way it reads best (ADR 0091). */
+export const BOT_SORTS: readonly SortKey<BotSort>[] = [
+  { key: "recent", label: "Recent", dir: "desc" },
+  { key: "waiting", label: "Waiting", dir: "desc" },
+  { key: "name", label: "Name", dir: "asc" },
+  { key: "added", label: "Added", dir: "asc" },
+]
+
+/** What an older build wrote, and the key and arrow it meant. */
+const LEGACY_BOT_SORTS: Record<string, Sort<BotSort>> = {
+  recent: { key: "recent", dir: "desc" },
+  waiting: { key: "waiting", dir: "desc" },
+  name: { key: "name", dir: "asc" },
+  added: { key: "added", dir: "asc" },
 }
 
 /** The sidebar's bot order, kept on this device. */
-export function useBotSort(): [BotSort, (sort: BotSort) => void] {
-  const sort = useLiveQuery(async () => (await getSettings()).botSort, []) ?? "recent"
-  return [sort, (botSort) => void saveSettings({ botSort })]
+export function useBotSort(): [Sort<BotSort>, (sort: Sort<BotSort>) => void] {
+  const stored =
+    useLiveQuery(async () => {
+      const settings = await getSettings()
+      return { key: settings.botSort, dir: settings.botSortDir }
+    }, []) ?? {}
+  const sort = readSort(BOT_SORTS, stored, LEGACY_BOT_SORTS)
+  return [sort, (next) => void saveSettings({ botSort: next.key, botSortDir: next.dir })]
 }
 
 const active = (summary: BotSummary) => (summary.main ?? summary.latest)?.updatedAt ?? -Infinity
@@ -190,15 +207,17 @@ const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.nam
 
 /**
  * `recent`: the newest thread first, bots without one last. `waiting`: the most threads waiting on
- * the user first, then recent. `name`: A to Z. `added`: the order the bots were linked in.
+ * the user first, then recent. `name`: A to Z. `added`: the order the bots were linked in. The arrow
+ * turns the result round, and each key keeps its own tie-break, which the arrow turns with it.
  */
-export function sortBots(bots: BotSummary[], sort: BotSort): BotSummary[] {
-  const sorted = [...bots]
-  if (sort === "recent") sorted.sort((a, b) => byRecent(a, b) || byBotName(a, b))
-  if (sort === "waiting")
-    sorted.sort((a, b) => b.waiting - a.waiting || byRecent(a, b) || byBotName(a, b))
-  if (sort === "name") sorted.sort(byBotName)
-  return sorted
+export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] {
+  const rank = (a: BotSummary, b: BotSummary) => {
+    if (sort.key === "recent") return byRecent(a, b) || byBotName(a, b)
+    if (sort.key === "waiting") return b.waiting - a.waiting || byRecent(a, b) || byBotName(a, b)
+    if (sort.key === "name") return byBotName(a, b)
+    return 0
+  }
+  return [...bots].sort((a, b) => withDir(rank(a, b), sort.dir))
 }
 
 /**

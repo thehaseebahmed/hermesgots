@@ -108,6 +108,17 @@ class TriageTests(unittest.TestCase):
         self.assertNotIn("main", value)
         self.assertNotIn("projectId", value)
 
+    def test_open_thread_keeps_the_message_that_began_it(self):
+        chat_id, _ = triage.open_thread(
+            self.path, "bot", None, opener="  plan my   trip ", opener_at=1_700_000_000_123
+        )
+        value = chats.read(self.path)[chat_id]["value"]
+        self.assertEqual(value["opener"], "plan my trip", "one line, as a card's bubble holds it")
+        self.assertEqual(value["openerAt"], 1_700_000_000_123)
+        # A thread opened with nothing to name draws no bubble, rather than an empty one.
+        other, _ = triage.open_thread(self.path, "bot")
+        self.assertNotIn("opener", chats.read(self.path)[other]["value"])
+
     def test_a_new_thread_is_started_with_only_the_message_and_its_files(self):
         body = {
             "model": "m",

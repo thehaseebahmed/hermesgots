@@ -88,6 +88,20 @@ test("the typed line breaks ride the elements, not the blank lines between them"
   })
 })
 
+test("a bubble's bullets sit tight, and a reply's keep the page's rhythm", async () => {
+  await mounted(<MessageItem message={ask("- one\n- two\n- three")} showStats />, () => {
+    const words = find("[data-slot=markdown]")
+    assert.match(words?.className ?? "", /\[&_li\]:my-0\.5/, "bullets a hair apart")
+    assert.match(words?.className ?? "", /\[&_ul\]:my-0/, "and no block gap of their own")
+    assert.equal(words?.querySelectorAll("li").length, 3, "the list is drawn")
+  })
+  await mount(<MessageItem message={reply("r-2", "- one\n- two")} showStats />, async () => {
+    await settle()
+    const page = find("[data-slot=markdown]")
+    assert.match(page?.className ?? "", /\[&_li\]:my-1/, "a reply keeps the page's item spacing")
+  })
+})
+
 test("a reply's code keeps the page's fill, so the two tones can disagree", async () => {
   await mounted(<MessageItem message={reply("r-1", "Run `npm test`")} showStats />, () => {
     const block = codeIn(find("[data-slot=markdown]"))

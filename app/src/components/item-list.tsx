@@ -62,11 +62,12 @@ export function ItemGroup({
       defaultOpen={false}
       render={<section className="flex flex-col gap-1" aria-label={group.label} />}
     >
-      <h2>
+      {/* The sticky box is the heading's, exactly as a list's other groups draw it: folding a group
+          away is the trigger's job, and it never changed whether its heading pins. */}
+      <h2 className={cn("flex", stickyClass)}>
         <CollapsibleTrigger
           className={cn(
-            "group -mx-1 flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-            stickyClass,
+            "group -mx-1 flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
           {heading}

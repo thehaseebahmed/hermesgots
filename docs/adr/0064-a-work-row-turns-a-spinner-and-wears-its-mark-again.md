@@ -1,5 +1,7 @@
 # A work row turns a spinner and wears its mark again
 
+**Superseded in its sign by [ADR 0092](0092-a-work-row-carries-no-leading-sign.md)**: a work row carries no sign at its start any more — no spinner, no failure mark, no reserved box — and says it is working by pulsing its own words. What this ADR says about the status line, and about the reason standing under the row it explains, still stands.
+
 **Supersedes [ADR 0061](0061-a-working-row-waves-and-the-status-line-types-itself.md) and
 [ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md)** — all of 0061, and 0062's
 mark-free row with it. What 0062 decided about the status line's words, its colour and its waiting

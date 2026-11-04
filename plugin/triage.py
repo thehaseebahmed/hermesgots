@@ -259,12 +259,20 @@ def decide(
 
 
 def open_thread(
-    path: Path, profile_id: Optional[str], model_choice: Optional[Dict[str, str]] = None
+    path: Path,
+    profile_id: Optional[str],
+    model_choice: Optional[Dict[str, str]] = None,
+    *,
+    opener: Optional[str] = None,
+    opener_at: Optional[int] = None,
 ) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
     The id is the app's own kind (a UUID) and the session is ``memento-<id>``, so every device and
     the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs.
+    ``opener`` is the message that began the thread and ``opener_at`` when the reader sent it: with
+    them on the record, a device that never opens the thread still draws its card's bubble and
+    stands the card at that message's time (ADR 0090).
     """
     chat_id = str(uuid.uuid4())
     session_id = f"{MEMENTO_ID_PREFIX}{chat_id}"
@@ -279,6 +287,7 @@ def open_thread(
         # waiting in the queue as one nothing happened in.
         "updatedAt": now + 1,
         "changedAt": now,
+        **(dict(opener=_line(opener, MAX_TEXT), openerAt=opener_at) if opener else {}),
         **({"modelChoice": model_choice} if model_choice else {}),
     }
     chats.merge(path, {chat_id: {"at": now, "value": value}})
@@ -292,6 +301,7 @@ def start_thread(
     text: str,
     files: List[Dict[str, Any]],
     body: Any,
+    at: Optional[int] = None,
 ) -> Dict[str, Any]:
     """A new thread with the message queued as its first turn: ``{ thread, session_id, item }``.
 
@@ -303,7 +313,11 @@ def start_thread(
     # The run goes out on the model it names, so the thread says so too.
     run = body if isinstance(body, dict) else {}
     chat_id, session_id = open_thread(
-        path, profile_id, chats.pick(run.get("provider"), run.get("model"))
+        path,
+        profile_id,
+        chats.pick(run.get("provider"), run.get("model")),
+        opener=text,
+        opener_at=at,
     )
     try:
         item = outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))

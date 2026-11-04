@@ -5819,7 +5819,7 @@ http
     const triageRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && triageRoute) {
       const id = decodeURIComponent(triageRoute[1])
-      const { id: askId, text, attachments, body } = await readBody(req)
+      const { id: askId, text, attachments, body, at } = await readBody(req)
       if (TRIAGE === "fail") return json(res, 500, { error: { message: "Triage failed." } })
       if (TRIAGE === "slow") await new Promise((resolve) => setTimeout(resolve, 10_000))
       const entries = [...(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).entries()]
@@ -5836,6 +5836,9 @@ http
         return json(res, 200, { object: "memento.triage", decision: "main" })
       if (TRIAGE === "thread" && !thread)
         return json(res, 200, { object: "memento.triage", decision: "main" })
+      // The reader's own time, carried by the ask (ADR 0089): the marker and the new card stand
+      // there rather than where this host got round to the message.
+      const sentAt = Number.isInteger(at) && at > 0 ? at : Date.now()
       let made
       if (TRIAGE === "new") {
         const chatId = randomUUID()
@@ -5850,6 +5853,10 @@ http
             createdAt: now,
             updatedAt: now,
             changedAt: now,
+            // As plugin/triage.py's open_thread records it (ADR 0090): the message that began the
+            // thread and when the reader sent it, so a device that never opens it still draws its
+            // card's bubble and stands the card there.
+            ...(text ? { opener: String(text).slice(0, 2000), openerAt: sentAt } : {}),
           },
         }
         ;(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).set(chatId, {
@@ -5878,7 +5885,8 @@ http
           id: String(askId ?? randomUUID()),
           text: String(text ?? ""),
           thread: made ? made.id : thread[0],
-          at: Date.now(),
+          // The reader's own time, carried by the ask, not the moment this host got round to it.
+          at: sentAt,
           undone: false,
           // As plugin/moves.py records it: the host opened this thread for the message.
           new: Boolean(made),

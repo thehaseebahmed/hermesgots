@@ -124,7 +124,21 @@
   --chart-5: oklch(0.76 0.11 195);
 }
 
+/* A work row at work (src/components/chat/work-row.tsx): its own words pulse, gently and slowly
+   enough to read as breathing rather than as a flash, so the row says it is live without a sign
+   ahead of it and without moving its words (ADR 0092). */
+@keyframes work-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 @theme inline {
+  --animate-work-pulse: work-pulse 1.8s ease-in-out infinite;
   --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
   /* What a project session is said in (`CODE_FACE`). */

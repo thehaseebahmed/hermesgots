@@ -1,12 +1,6 @@
 import { useCallback, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  ChevronDownIcon,
-  FileIcon,
-  FileTextIcon,
-  FolderIcon,
-  ImageIcon,
-} from "lucide-react"
+import { ChevronDownIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
 
 import { SortMenu } from "@/components/sort-menu"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -14,6 +8,7 @@ import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { byName } from "@/lib/compare"
 import { connectionKey } from "@/lib/connection"
 import { getSettings, saveSettings, type LibrarySort } from "@/lib/db"
+import { readSort, type Sort, type SortKey } from "@/lib/sort"
 import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
@@ -36,17 +31,31 @@ const unsupported = cooldown()
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 const TEXT_FILE = /\.(md|markdown|txt|csv|json|pdf)$/i
 
-const LIBRARY_SORTS: Record<LibrarySort, string> = {
-  new: "Newest",
-  old: "Oldest",
-  az: "A–Z",
-  za: "Z–A",
+/** The keys the tree ranks by, each with the way it reads best (ADR 0091). */
+const LIBRARY_SORTS: readonly SortKey<LibrarySort>[] = [
+  { key: "date", label: "Newest", dir: "desc" },
+  { key: "name", label: "Name", dir: "asc" },
+]
+
+/** What an older build wrote — the direction baked into the key — and what it meant. */
+const LEGACY_LIBRARY_SORTS: Record<string, Sort<LibrarySort>> = {
+  new: { key: "date", dir: "desc" },
+  old: { key: "date", dir: "asc" },
+  az: { key: "name", dir: "asc" },
+  za: { key: "name", dir: "desc" },
 }
 
 /** The Library tab's order, kept on this device. */
-function useLibrarySort(): [LibrarySort, (sort: LibrarySort) => void] {
-  const sort = useLiveQuery(async () => (await getSettings()).librarySort, []) ?? "new"
-  return [sort, (librarySort) => void saveSettings({ librarySort })]
+function useLibrarySort(): [Sort<LibrarySort>, (sort: Sort<LibrarySort>) => void] {
+  const stored =
+    useLiveQuery(async () => {
+      const settings = await getSettings()
+      return { key: settings.librarySort, dir: settings.librarySortDir }
+    }, []) ?? {}
+  return [
+    readSort(LIBRARY_SORTS, stored, LEGACY_LIBRARY_SORTS),
+    (next) => void saveSettings({ librarySort: next.key, librarySortDir: next.dir }),
+  ]
 }
 
 /** A library file's kind, for its icon and how it opens. */
@@ -107,16 +116,18 @@ function newestAt(folder: LibraryFolder) {
  * The tree in the chosen order: folders by their newest file or their name, and each folder's own
  * files the same way. Names compare the way the sidebar's do — case-blind, digits as numbers.
  */
-function sortFolders(folders: LibraryFolder[], sort: LibrarySort): LibraryFolder[] {
-  const alphabetical = sort === "az" || sort === "za"
-  const desc = sort === "new" || sort === "za"
+function sortFolders(folders: LibraryFolder[], sort: Sort<LibrarySort>): LibraryFolder[] {
+  const alphabetical = sort.key === "name"
+  const desc = sort.dir === "desc"
   const name = (a: string, b: string) => byName(a, b) * (desc ? -1 : 1)
   const files = (folder: LibraryFolder) =>
     [...folder.files].sort((a, b) =>
       alphabetical ? name(a.name, b.name) : (a.at - b.at) * (desc ? -1 : 1),
     )
   return [...folders]
-    .sort((a, b) => (alphabetical ? name(a.name, b.name) : (newestAt(a) - newestAt(b)) * (desc ? -1 : 1)))
+    .sort((a, b) =>
+      alphabetical ? name(a.name, b.name) : (newestAt(a) - newestAt(b)) * (desc ? -1 : 1),
+    )
     .map((folder) => ({ ...folder, files: files(folder) }))
 }
 
@@ -216,9 +227,9 @@ export function LibraryTree({
   /** A session's own files, rather than a project's across its sessions. */
   own?: boolean
   /** The order its folders and files are shown in. */
-  order: LibrarySort
+  order: Sort<LibrarySort>
   /** Changes the order; left out, the tree carries no sort menu. */
-  onSort?: (sort: LibrarySort) => void
+  onSort?: (sort: Sort<LibrarySort>) => void
 }) {
   const ordered = useMemo(() => sortFolders(folders, order), [folders, order])
   if (!folders.length) {
@@ -230,12 +241,7 @@ export function LibraryTree({
     <div className="px-3 pb-4 sm:px-4">
       {onSort && (
         <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
-          <SortMenu
-            by="the library"
-            options={LIBRARY_SORTS}
-            value={order}
-            onSort={onSort}
-          />
+          <SortMenu by="the library" options={LIBRARY_SORTS} value={order} onSort={onSort} />
         </div>
       )}
       <div className={cn("space-y-6", own && "space-y-1 pt-2")}>
@@ -302,5 +308,5 @@ export function SessionLibrary({
     [config, sessionId],
   )
   const folders = useLibraryRead(config, load, active)
-  return <LibraryTree config={config} folders={folders} own order="new" />
+  return <LibraryTree config={config} folders={folders} own order={{ key: "date", dir: "desc" }} />
 }

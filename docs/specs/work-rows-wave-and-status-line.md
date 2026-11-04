@@ -14,6 +14,11 @@ stories, rules and tests go with it.
 spinner ahead of its label again, hidden from assistive tech, and a failed group wears its X with the
 reason dented under it. Everything struck through below is the passage that shipped and came out.
 
+**Amended 2026-11-04:** the sign in the row's slot is gone. A work row carries no spinner, no
+failure mark and no reserved box: it says it is working by pulsing its own words, and its start edge
+is its words' ([ADR 0092](adr/0092-a-work-row-carries-no-leading-sign.md)). The status line is the one
+row that keeps its sign. The colours below still stand.
+
 **Amended 2026-10-30:** the colours and the loaders below are now
 [ADR 0070](adr/0070-the-status-line-is-muted-and-the-count-is-the-only-blue.md)'s, and the code has
 not moved yet. The status line and its loader are muted rather than accent, a waiting line keeps its

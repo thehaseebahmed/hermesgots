@@ -5,14 +5,18 @@ import type { Thread } from "@/lib/threads"
 
 export type ThreadCards = Placed<Thread>
 
-/** When a card is drawn: the time its thread began. */
-export const cardAt = (thread: Thread) => thread.chat.createdAt
+/**
+ * When a card is drawn: the time the thread's opener was sent, as the host recorded it when it made
+ * the thread, falling back to the record's own creation time for a thread nothing named an opener
+ * for (ADR 0089, ADR 0090).
+ */
+export const cardAt = (thread: Thread) => thread.chat.openerAt ?? thread.chat.createdAt
 
 /**
  * The words in a thread's own bubble: the message triage moved out of Main when it opened this
- * thread, else the first message the user sent in it that this device holds. Nothing when the device
- * holds neither — the thread's name is the card's line and never stands in for a message nobody here
- * has (ADR 0082).
+ * thread, else the first message this device holds in it, else the opener the host recorded when it
+ * made the thread (ADR 0090). Nothing when there is none of those — the thread's name is the card's
+ * line and never stands in for a message nobody holds (ADR 0082).
  */
 export function openerWords(thread: Pick<Thread, "opener">, move?: Pick<Move, "text">) {
   return move?.text ?? thread.opener

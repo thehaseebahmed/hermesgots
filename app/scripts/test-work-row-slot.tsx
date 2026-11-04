@@ -1,39 +1,50 @@
 /**
- * A work row holds its sign's slot whether or not it has a sign (ADR 0087), so a finished thought or
- * tool row never slides its words sideways when the work ends; and the status line's rotating word is
- * flavour, so what a screen reader hears is the plain state instead.
+ * A work row starts at its own words (ADR 0092): no sign, no reserved box, the same left edge while
+ * it runs, once it is finished and when it failed — so nothing slides sideways as a row's state
+ * changes. A row at work pulses its words instead, and the status line — the one row whose loader is
+ * the whole line — keeps its spinner. Its rotating word stays flavour, so what a screen reader hears
+ * is the plain state.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { StatusLine } from "@/components/chat/status-line"
+import { WORK_PULSE } from "@/components/chat/work-row"
 import { THINKING_ACTIVITY } from "@/lib/format"
 import { THINKING_WORD } from "@/lib/thinking"
 
 import { mount } from "./component-kit.tsx"
 
-/** The box a work row keeps ahead of its words, whether a sign stands in it or not. */
-const slotOf = (row: Element) => row.firstElementChild as HTMLElement
-const spins = (row: Element) => Boolean(row.querySelector("[data-slot=spinner]"))
+const rowOf = () => document.querySelector('[data-slot="thinking-line"] button')!
+const pulses = (row: Element) => (row.getAttribute("class") ?? "").includes(WORK_PULSE)
 
-test("a thought row that has finished keeps the sign's empty box", async () => {
+test("a thought row begins at its words, running or finished", async () => {
   await mount(<ThinkingLine reasoning="I read the parser." thinking={false} spanMs={1200} />, async () => {
-    const row = document.querySelector('[data-slot="thinking-line"] button')!
-    const slot = slotOf(row)
-    assert.equal(spins(row), false, "no loader once the run is measured")
-    assert.equal(slot.getAttribute("aria-hidden"), "true", "and no sign to read")
-    assert.equal(slot.getAttribute("class")?.includes("size-4"), true, "the sign's own 16px box")
-    assert.equal(slot.textContent, "", "empty, but holding the place")
+    const row = rowOf()
+    assert.equal(row.firstElementChild?.tagName, "SPAN", "the label is the first thing in the row")
+    assert.equal(row.firstElementChild?.textContent, "Thought for 1s")
+    assert.equal(row.querySelector('[data-slot="work-sign"]'), null, "no sign ahead of the words")
+    assert.equal(pulses(row), false, "and nothing pulses once the run is measured")
   })
 })
 
-test("a thought row that still thinks turns its loader in that same slot", async () => {
+test("a thought row still thinking pulses the same words in the same place", async () => {
   await mount(<ThinkingLine reasoning="I am still reading." thinking />, async () => {
-    const row = document.querySelector('[data-slot="thinking-line"] button')!
-    assert.equal(spins(row), true)
-    assert.equal(row.textContent?.trim(), THINKING_WORD, "beside the row's own word")
+    const row = rowOf()
+    assert.equal(row.firstElementChild?.textContent, THINKING_WORD, "the row's own word")
     assert.equal(THINKING_WORD, "Thinking", "which is said in sentence case like the rest")
+    assert.equal(row.querySelector('[data-slot="work-sign"]'), null, "still no sign")
+    assert.equal(pulses(row), true, "the words say the row is at work")
+  })
+})
+
+test("the status line keeps the sign a work row gave up", async () => {
+  await mount(<StatusLine text="Running bash" />, async () => {
+    const line = document.querySelector('[data-slot="status-line"]')!
+    const sign = line.firstElementChild
+    assert.equal(sign?.getAttribute("data-slot"), "work-sign", "the line leads with its spinner")
+    assert.equal(sign?.getAttribute("aria-hidden"), "true", "which is hidden from assistive tech")
   })
 })
 

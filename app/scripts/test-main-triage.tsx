@@ -129,12 +129,15 @@ async function seed(
 }
 
 const messagesOf = (id: string) => db.messages.where("conversationId").equals(id).toArray()
-/** A move the host recorded while its clock ran two minutes ahead of this device's. */
-const skewedMove = (overrides: Partial<Move> = {}): Move => ({
+/**
+ * A move the host recorded a moment ago: since the ask carries the message's own time (ADR 0089),
+ * a move's stamp is the sending device's clock — never a host clock that could run ahead of it.
+ */
+const recordedMove = (overrides: Partial<Move> = {}): Move => ({
   id: "m1",
   text: "more on Lisbon",
   threadId: "t1",
-  at: Date.now() + 120_000,
+  at: Date.now() - 1_000,
   undone: false,
   undoable: true,
   new: false,
@@ -420,10 +423,10 @@ test("markers sit in time order among Main's messages, and an undone move has no
   )
 })
 
-test("a message typed after a move is stamped after it, the held row and all", async () => {
+test("the ask carries the message's own send time, and the held row keeps it", async () => {
   await seed("route-skew")
-  host("route-skew", "stay")
-  const move = skewedMove()
+  const seen = host("route-skew", "stay")
+  const move = recordedMove()
   await db.conversations.update(MAIN, { moves: [move] })
   await db.messages.add({
     id: "r0",
@@ -443,9 +446,15 @@ test("a message typed after a move is stamped after it, the held row and all", a
   const sending = sendFromMain(MAIN, "and this stays")
   const held = async () => (await messagesOf(MAIN)).find((m) => m.status === "triaging")
   await until(async () => Boolean((await held()) && answer), "the held row and its ask")
-  assert.ok((await held())!.createdAt > move.at, "the held row sorts after the move it follows")
+  const heldAt = (await held())!.createdAt
+  assert.ok(heldAt > move.at, "the held row sorts after the move it follows")
   answer!()
   assert.equal(await sending, undefined)
+  assert.equal(
+    triaged(seen).at(-1)?.body.at,
+    heldAt,
+    "and the ask said when it was sent, so the marker stands there (ADR 0089)",
+  )
   const rows = (await messagesOf(MAIN)).sort((a, b) => a.createdAt - b.createdAt)
   const sent = rows.find((m) => m.content === "and this stays")
   // The refused run takes its empty reply with it, so the message is the last row drawn.
@@ -458,20 +467,20 @@ test("a message typed after a move is stamped after it, the held row and all", a
   assert.deepEqual(marks.trailing, [])
 })
 
-test("a plain Main send, with no triage behind it, is stamped after the move too", async () => {
+test("a plain Main send keeps its own time, and stands after an older move", async () => {
   await seed("route-skew-plain")
   host("route-skew-plain", "stay")
-  const move = skewedMove()
+  const move = recordedMove()
   await db.conversations.update(MAIN, { moves: [move] })
   await sendMessage(MAIN, "typed later")
   const sent = (await messagesOf(MAIN)).find((m) => m.content === "typed later")
   assert.ok(sent && sent.createdAt > move.at, "the message sorts after the move")
 })
 
-test("a message waiting in the queue sorts after the move too, so the marker stays put", async () => {
+test("a message waiting in the queue keeps its own time, so the marker stays put", async () => {
   await seed("route-skew-queued")
   host("route-skew-queued", "stay", ["triage", "moves"])
-  const move = skewedMove()
+  const move = recordedMove()
   await db.conversations.update(MAIN, { moves: [move] })
   await queueMessage(MAIN, "typed while it runs")
   const rows = await messagesOf(MAIN)
@@ -485,10 +494,10 @@ test("a message waiting in the queue sorts after the move too, so the marker sta
 /** A second chat, so a sync that leaves two replies streaming leaves them here, not in Main. */
 const ADOPTED = "main-adopt"
 
-test("two turns the host started in one pass take a time each, above the move", async () => {
+test("two turns the host started in one pass take a time each, after the move", async () => {
   await seed("route-skew-adopt")
   host("route-skew-adopt", "stay")
-  const move = skewedMove()
+  const move = recordedMove()
   await db.conversations.put({
     id: ADOPTED,
     profileId: (await db.profiles.toArray())[0].id,

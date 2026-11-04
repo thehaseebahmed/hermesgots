@@ -105,12 +105,39 @@ A host this device could not reach — a read got no answer, or none in time —
 _Avoid_: offline (for the host), disconnected, down, unreachable
 
 **Thinking**:
-What a model worked out before it answered, kept with the reply and drawn as rows in the thread: one per run — a run being one contiguous stretch of thinking between tool calls — each drawn above the tool row whose call it follows and touching it — one block, on the reply's own left edge with its text — so a tool row never lands between two thought rows and a turn that ran something reads as its working-out over the work it led into. Rows with nothing between them but tool rows are one row, holding their stretches together; text, media, a card, a steer, an approval or another reply still keeps rows apart. A turn that has had no word of thinking yet draws no row of its own — the status line says the turn is thinking — and a stretch that follows a question or a delegated agent's card sits after that card. A row says what the turn is doing: a spinner ahead of the word "Thinking" while the thinking still arrives, both in the row's own muted colour, and never while a call runs (the tool row says that) or while the turn waits on the reader (the status line says that); its measured label once the thinking is written down, and its sign's empty box kept so the words do not move when the run ends. The colour is the row's while it works and after: a row says its state by its loader, never by its grey. It is the one place a working turn says it is thinking, so the status line below never says it too and turns no loader of its own while the row is turning one. It opens in the same sheet a call's details open in, holding the whole working-out as the reply's own markdown; the sheet never closes itself, a live run opened in it lands on its newest words and keeps them in view until the reader scrolls away inside it, and a run already written opens at the top. While it thinks it says that one word, not the status line's rotating one (its name for assistive tech and its sheet's heading stay "Thinking…"); it reads "Thought for 12s" where this device measured every stretch it holds, the spans added, and "Thought it through" where it did not; the thinking is kept with the reply on every device, the span only on the device's own row that measured it. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
+What a model worked out before it answered, kept with the reply and drawn as rows in the thread: one per run — a run being one contiguous stretch of thinking between tool calls — each drawn above the tool row whose call it follows and touching it — one block, on the reply's own left edge with its text — so a tool row never lands between two thought rows and a turn that ran something reads as its working-out over the work it led into. Rows with nothing between them but tool rows are one row, holding their stretches together; text, media, a card, a steer, an approval or another reply still keeps rows apart. A turn that has had no word of thinking yet draws no row of its own — the status line says the turn is thinking — and a stretch that follows a question or a delegated agent's card sits after that card. A row says what the turn is doing: the word "Thinking" pulsing in the row's own muted colour while the thinking still arrives — no sign ahead of it, the row starting on the reply's edge whether it runs or is finished (ADR 0092) — and never while a call runs (the tool row says that) or while the turn waits on the reader (the status line says that); its measured label once the thinking is written down. The colour is the row's while it works and after: a row says its state by its loader, never by its grey. It is the one place a working turn says it is thinking, so the status line below never says it too and turns no loader of its own while the row is turning one. It opens in the same sheet a call's details open in, holding the whole working-out as the reply's own markdown; the sheet never closes itself, a live run opened in it lands on its newest words and keeps them in view until the reader scrolls away inside it, and a run already written opens at the top. While it thinks it says that one word, not the status line's rotating one (its name for assistive tech and its sheet's heading stay "Thinking…"); it reads "Thought for 12s" where this device measured every stretch it holds, the spans added, and "Thought it through" where it did not; the thinking is kept with the reply on every device, the span only on the device's own row that measured it. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Work row**:
-The shape a reply draws its own work in: one line 29px tall on the reply's own edge, holding the sign that it is working and the label that says what the work is doing, and opening when there is something to open. A row at work turns a spinner ahead of its label — hidden from assistive tech, since the label already says it — and a group whose calls failed wears a mark in that same slot, with the reason dented under the words. A row with neither keeps that slot's empty box, so a finished row's words stand where they stood while it worked. A thought row and the tool group its calls merged into are both work rows; a turn that has said nothing yet draws neither.
+The shape a reply draws its own work in: one line 29px tall on the reply's own edge, holding only the
+label that says what the work is doing, and opening when there is something to open. It carries no
+mark at its start: a row at work pulses its own words in the muted colour it already wears, so it
+starts and stays on the reply's edge whatever it is doing. A group whose calls failed says so on a
+line under its words, and those words are the destructive colour. A thought row and the tool group
+its calls merged into are both work rows; a turn that has said nothing yet draws neither, and the
+status line — the one row that keeps a sign — says it instead (ADR 0092).
 _Avoid_: tool row (which is a work row holding calls), step, item, log line
+
+**Thread card**:
+A bot's thread drawn inside its Main at the moment its opener was sent: the message in the reader's
+own bubble where any device can name it, and under it the thread's state, its name and the way in. A
+card is not a turn and wears no avatar. Its bubble says the message and its line says the thread's
+name, never the other way round, and a thread whose opener nothing can name draws no bubble rather
+than the name (ADR 0082, ADR 0090).
+_Avoid_: thread row, thread item, preview
+
+**Opener**:
+The message a thread began with — what its card's bubble draws, and the moment the card stands at.
+The host records its words and its time on the thread's own record, so a device that has never opened
+the thread still draws it; what the device holds for the thread wins where it holds something
+(ADR 0090).
+_Avoid_: first message, preview, snippet
+
+**Sort**:
+A list's order, said as the fact it ranks by — created, last activity, title, name — and a direction
+arrow. The chosen key carries the arrow in the menu, and picking it again flips it; every list that
+sorts itself sorts this way (ADR 0091).
+_Avoid_: sort mode, order by, asc/desc toggle
 
 **Refused call**:
 A tool call a hook turned back before it ran, whose result is the hook's note to the model rather than anything the call produced. A thread draws nothing for a progress reminder's own refused call — the note is the host talking to the model — so only the call the model repeats is the reader's, and a refusal any other hook made still shows.

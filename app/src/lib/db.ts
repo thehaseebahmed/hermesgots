@@ -16,9 +16,13 @@ import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
 
+/** Which way a list reads; the rule is `lib/sort.ts`'s, and settings store it beside the key. */
+export type { SortDir } from "@/lib/sort"
+import type { SortDir } from "@/lib/sort"
+
 export type BotSort = "recent" | "waiting" | "name" | "added"
 
-export type LibrarySort = "new" | "old" | "az" | "za"
+export type LibrarySort = "date" | "name"
 
 /** How the Code list orders each of its groups. */
 export type CodeSort = "created" | "activity" | "title"
@@ -66,14 +70,20 @@ export interface Settings {
    * default: nothing is measured or written until it is on.
    */
   netLog?: boolean
-  /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
+  /**
+   * How the bot-threads sidebar orders the bots — the key it ranks by and the arrow it reads in;
+   * unset is `recent`, newest first (ADR 0091). Local.
+   */
   botSort?: BotSort
+  botSortDir?: SortDir
   /** Whether the sidebar is shrunk to icons on tablet and wider; unset is expanded. Local. */
   sidebarCollapsed?: boolean
-  /** How the Library tab orders folders and files; unset is `new`. Local. */
+  /** How the Library tab orders folders and files; unset is newest first. Local. */
   librarySort?: LibrarySort
-  /** How the Code list orders each group; unset is `created`. Local. */
+  librarySortDir?: SortDir
+  /** How the Code list orders each group; unset is `created`, newest first. Local. */
   codeSort?: CodeSort
+  codeSortDir?: SortDir
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
@@ -221,6 +231,13 @@ export interface Conversation {
   draftAt?: number
   /** The unsent text in this chat's composer. Synced through the chat record, so another device and a reinstall see it. */
   draftText?: string
+  /**
+   * The message this thread began with, and when it was sent, as the host recorded it when it made
+   * the thread (ADR 0090). Synced through the chat record, so a device that has never opened the
+   * thread still draws its card's bubble and stands the card at that message's time.
+   */
+  opener?: string
+  openerAt?: number
   /** Marked done by the user, or by the plugin once its pull request merged; the composer gives way until it's reopened. */
   resolvedAt?: number
   /** Moved to the project's Discarded pile: its pull request closed and its branch deleted. */

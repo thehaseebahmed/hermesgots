@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
+import { isOnline } from "@/lib/registry"
 import type { Message } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -210,7 +211,13 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
           <h2 id="bots-heading" className="text-sm font-medium text-muted-foreground">
             Bots
           </h2>
-          <SortMenu by="bots" label="Sort bots by" options={BOT_SORTS} value={sort} onSort={setSort} />
+          <SortMenu
+            by="bots"
+            label="Sort bots by"
+            options={BOT_SORTS}
+            value={sort}
+            onSort={setSort}
+          />
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
@@ -247,7 +254,12 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                     </span>
                     <span className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                        {previewLine({ main: Boolean(main), line: preview, latest: latest?.title })}
+                        {previewLine({
+                          main: Boolean(main),
+                          line: preview,
+                          latest: latest?.title,
+                          online: bot.hostId && !bot.disabled ? isOnline(bot, now) : undefined,
+                        })}
                       </span>
                       {waiting > 0 && (
                         <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">

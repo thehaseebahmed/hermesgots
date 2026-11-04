@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveXIcon,
@@ -10,16 +10,24 @@ import {
   LockIcon,
   MenuIcon,
   PlusIcon,
+  SearchIcon,
+  XIcon,
 } from "lucide-react"
 import { Navigate, useNavigate } from "react-router"
 
 import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
-import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
+import { ItemGroup, ItemRow } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import {
   projectKey,
@@ -66,6 +74,9 @@ import {
   type SessionState,
 } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
+import { cn } from "@/lib/utils"
+import { filterByFuzzy } from "@/lib/fuzzy"
+import { readSort, type Sort, type SortKey } from "@/lib/sort"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -127,18 +138,33 @@ interface Row extends SessionClaim {
   key: string
 }
 
-const CODE_SORTS: Record<CodeSort, string> = {
-  created: "Created",
-  activity: "Last activity",
-  title: "Title A–Z",
+/** The keys the list ranks by, each with the way it reads best (ADR 0091). */
+const CODE_SORTS: readonly SortKey<CodeSort>[] = [
+  { key: "created", label: "Created", dir: "desc" },
+  { key: "activity", label: "Last activity", dir: "desc" },
+  { key: "title", label: "Title", dir: "asc" },
+]
+
+/** What an older build wrote, and the key and arrow it meant. */
+const LEGACY_CODE_SORTS: Record<string, Sort<CodeSort>> = {
+  created: { key: "created", dir: "desc" },
+  activity: { key: "activity", dir: "desc" },
+  title: { key: "title", dir: "asc" },
 }
 
-/** The Code list's order over each group, kept on this device (unset: created). */
-function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
-  const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
+/** The Code list's order over each group, kept on this device (unset: created, newest first). */
+function useCodeSort(): [Sort<CodeSort>, (sort: Sort<CodeSort>) => void] {
+  const stored =
+    useLiveQuery(async () => {
+      const settings = await getSettings()
+      return { key: settings.codeSort, dir: settings.codeSortDir }
+    }, []) ?? {}
   return [
-    sort,
-    (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order")),
+    readSort(CODE_SORTS, stored, LEGACY_CODE_SORTS),
+    (next) =>
+      void saveSettings({ codeSort: next.key, codeSortDir: next.dir }).catch(
+        quietly("Saving the sort order"),
+      ),
   ]
 }
 
@@ -155,6 +181,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const changes = useAnyChange("projects")
   const marks = useReadMarks()
   const [query, setQuery] = useState("")
+  const [searching, setSearching] = useState(false)
+  const field = useRef<HTMLInputElement>(null)
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
   const [sort, setSort] = useCodeSort()
@@ -219,7 +247,13 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const chips = [...projects.entries()]
     .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
-  const shown = rows.filter((r) => (!chip || r.key === chip) && matches(r, query))
+  // A query narrows the list and ranks what is left; a project chip only narrows it (ADR 0093).
+  const inProject = rows.filter((r) => !chip || r.key === chip)
+  const shown = filterByFuzzy(inProject, query, (r) => [
+    r.c.title,
+    r.project?.name,
+    r.c.worktree?.branch,
+  ])
   const filtering = Boolean(query.trim() || chip)
   const order = codeOrder<Row>(sort, {
     created: (row) => row.c.createdAt,
@@ -229,7 +263,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   // What waits on the user first, then working, idle and closed — deterministic, not a live
   // timestamp chasing itself.
   const grouped = filtering ? undefined : codeGroups(shown, (r) => codeGroupOf(r.state), order)
-  const flat = filtering ? [...shown].sort(order) : undefined
+  // Under a query the reader's own words decide what comes first; a chip alone keeps the sort.
+  const flat = filtering ? (query.trim() ? shown : [...shown].sort(order)) : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
     // A project with no repository has nowhere for a session to work, so it isn't offered.
@@ -244,6 +279,17 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const initial = chip ?? lastProject()
 
   useEffect(() => newSessionAsked.subscribe(() => setStarting(true)), [])
+
+  // The field takes the title's place, so it takes the focus with it; closing puts the title back
+  // and clears what it filtered by, because a filter nobody can see is rows that seem missing.
+  const openSearch = () => {
+    setSearching(true)
+    window.requestAnimationFrame(() => field.current?.focus())
+  }
+  const closeSearch = () => {
+    setSearching(false)
+    setQuery("")
+  }
 
   const start = async ({ key, profile, project }: SessionTarget) => {
     const conversation = await createConversation(profile.id, {
@@ -288,7 +334,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
       }
     >
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[var(--list-header-pt)] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
+        <div className="mx-auto flex max-w-2xl items-center gap-2">
           <Button
             variant="outline"
             size="icon-lg"
@@ -298,32 +344,103 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           >
             <MenuIcon />
           </Button>
-          <h1 className="flex-1 text-xl font-semibold tracking-tight">Code</h1>
-          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
+          {/* The title and the field share one box, so the field slides in over the word rather
+              than pushing the header about (ADR 0093). */}
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <h1
+              className={cn(
+                "min-w-0 flex-1 truncate text-xl font-semibold tracking-tight transition-opacity duration-200 motion-reduce:transition-none",
+                searching && "opacity-0",
+              )}
+            >
+              Code
+            </h1>
+            <div
+              className={cn(
+                "absolute inset-0 flex items-center transition-all duration-200 motion-reduce:transition-none",
+                searching
+                  ? "translate-x-0 opacity-100"
+                  : "pointer-events-none translate-x-3 opacity-0",
+              )}
+              aria-hidden={!searching}
+            >
+              <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
+                <InputGroupAddon>
+                  <SearchIcon />
+                </InputGroupAddon>
+                <InputGroupInput
+                  ref={field}
+                  type="search"
+                  value={query}
+                  tabIndex={searching ? undefined : -1}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") closeSearch()
+                  }}
+                  placeholder="Search sessions"
+                  aria-label="Search sessions"
+                  autoComplete="off"
+                  className="[&::-webkit-search-cancel-button]:hidden"
+                />
+                {query && (
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-sm"
+                      className="size-8 rounded-full"
+                      onClick={() => setQuery("")}
+                      aria-label="Clear search"
+                    >
+                      <XIcon />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                )}
+              </InputGroup>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 rounded-full text-muted-foreground"
+            onClick={() => (searching ? closeSearch() : openSearch())}
+            aria-label={searching ? "Close search" : "Search"}
+            aria-expanded={searching}
+            data-search-toggle
+          >
+            {searching ? <XIcon /> : <SearchIcon />}
+          </Button>
         </div>
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {(rows.length > 0 || chips.length > 1) && (
-          <div className="flex flex-col gap-3">
-            <ItemSearch value={query} onChange={setQuery} label="Search sessions" />
-            {chips.length > 1 && (
-              <ChipRow label="Projects">
-                <Chip active={!chip} onClick={() => setChip(undefined)}>
-                  All
-                </Chip>
-                {chips.map(([key, { project }]) => (
-                  <Chip
-                    key={key}
-                    active={chip === key}
-                    onClick={() => setChip(chip === key ? undefined : key)}
-                  >
-                    <FolderIcon className="size-4" />
-                    {project.name}
+        {rows.length > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              {chips.length > 1 && (
+                <ChipRow label="Projects">
+                  <Chip active={!chip} onClick={() => setChip(undefined)}>
+                    All
                   </Chip>
-                ))}
-              </ChipRow>
-            )}
+                  {chips.map(([key, { project }]) => (
+                    <Chip
+                      key={key}
+                      active={chip === key}
+                      onClick={() => setChip(chip === key ? undefined : key)}
+                    >
+                      <FolderIcon className="size-4" />
+                      {project.name}
+                    </Chip>
+                  ))}
+                </ChipRow>
+              )}
+              {/* A long row of projects passes under the sort rather than pushing it offscreen. */}
+              {chips.length > 1 && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent"
+                />
+              )}
+            </div>
+            <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
           </div>
         )}
 
@@ -338,7 +455,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
                 variant="outline"
                 className="h-11 rounded-full"
                 onClick={() => {
-                  setQuery("")
+                  closeSearch()
                   setChip(undefined)
                 }}
               >
@@ -359,7 +476,10 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         )}
       </div>
 
-      <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      {/* Above the sticky group headings, not behind them: with the keyboard up the viewport
+          shrinks to where a heading pins, and the button must stay the thing on top (ADR 0093).
+          The fade under it keeps rows and headings from reading as part of the button. */}
+      <div className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto flex w-full max-w-2xl justify-end">
           <Button
             data-toast-above
@@ -392,13 +512,6 @@ function lastProject() {
   } catch {
     return undefined
   }
-}
-
-function matches({ c, project }: Row, query: string) {
-  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  if (!words.length) return true
-  const text = [c.title, project?.name, c.worktree?.branch].join(" ").toLowerCase()
-  return words.every((word) => text.includes(word))
 }
 
 const names = new Intl.ListFormat(undefined, { type: "conjunction" })

@@ -87,12 +87,20 @@ const mixed = [
   { id: "b", at: 1, act: 20, title: "apple" },
   { id: "c", at: 2, act: 15, title: "Mango" },
 ]
-const ids = (sort, rows = mixed) => [...rows].sort(codeOrder(sort, pick)).map((r) => r.id)
+/** A key at the arrow it reads best in, which is what a fresh pick of it means. */
+const at = (key) => ({ key, dir: key === "title" ? "asc" : "desc" })
+const ids = (sort, rows = mixed) =>
+  [...rows].sort(codeOrder(typeof sort === "string" ? at(sort) : sort, pick)).map((r) => r.id)
 
 test("created runs newest first by default, activity newest first, title A–Z", () => {
   assert.deepEqual(ids("created"), ["a", "c", "b"], "newest created first")
   assert.deepEqual(ids("activity"), ["b", "c", "a"], "the newest activity first")
   assert.deepEqual(ids("title"), ["b", "c", "a"], "A–Z, case-insensitively")
+})
+
+test("the arrow turns a group's order round, and its tie-break with it", () => {
+  assert.deepEqual(ids({ key: "title", dir: "desc" }), ["a", "c", "b"], "Z to A")
+  assert.deepEqual(ids({ key: "created", dir: "asc" }), ["b", "c", "a"], "oldest created first")
 })
 
 test("the chosen order runs inside every group, and flat across everything filtered", () => {
@@ -103,7 +111,7 @@ test("the chosen order runs inside every group, and flat across everything filte
       { id: "c", state: "idle", at: 2, act: 15, title: "Mango" },
     ],
     (r) => codeGroupOf(r.state),
-    codeOrder("title", pick),
+    codeOrder(at("title"), pick),
   )
   assert.deepEqual(
     grouped.map((group) => [group.key, group.items.map((r) => r.id)]),
@@ -114,7 +122,7 @@ test("the chosen order runs inside every group, and flat across everything filte
     "each group A–Z on its own",
   )
   assert.deepEqual(
-    [...grouped.flatMap((group) => group.items)].sort(codeOrder("activity", pick)).map((r) => r.id),
+    [...grouped.flatMap((group) => group.items)].sort(codeOrder(at("activity"), pick)).map((r) => r.id),
     ["b", "c", "a"],
     "flat across groups under the same choice",
   )

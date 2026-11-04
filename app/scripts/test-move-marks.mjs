@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { moveMarks, movesFloor } from "../src/lib/move-marks.ts"
+import { moveMarks } from "../src/lib/move-marks.ts"
 
 const message = (id, createdAt) => ({
   id,
@@ -26,16 +26,6 @@ const cards = (...ids) => new Set(ids)
 
 const above = (marks, id) => (marks.before.get(id) ?? []).map((one) => one.id)
 const trailing = (marks) => marks.trailing.map((one) => one.id)
-
-test("a turn typed now is stamped after the newest move, so it cannot be placed above it", () => {
-  assert.equal(movesFloor([move("m10", 10), move("m30", 30)], 20), 31)
-  assert.equal(movesFloor([move("m10", 10)], 20), 20, "a move already past it changes nothing")
-  assert.equal(movesFloor(undefined, 20), 20)
-})
-
-test("an undone move floors nothing, since it draws no marker", () => {
-  assert.equal(movesFloor([move("m30", 30, { undone: true })], 20), 20)
-})
 
 test("a move into an older thread draws its marker above the next message", () => {
   const marks = moveMarks([message("m5", 5), message("m20", 20)], [move("m10", 10)], cards())

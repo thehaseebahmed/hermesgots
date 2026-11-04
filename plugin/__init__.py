@@ -2506,14 +2506,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.queued", "item": item})
 
     async def record_move(
-        path, key, session_id, text, thread, thread_session, item, body, files, new=False
+        path, key, session_id, text, thread, thread_session, item, body, files, new=False, at=None
     ) -> None:
         # Main shows a marker where the message went; it never entered Main's session. The message
         # is already on its thread, so a marker that can't be kept must not fail the answer.
         try:
             await asyncio.to_thread(
                 moves.record, path, key, session_id, text, thread,
-                thread_session=thread_session, item=item, new=new, body=body.get("body"), files=files,
+                thread_session=thread_session, item=item, new=new, body=body.get("body"),
+                files=files, at=at,
             )
         except Exception:
             logger.debug("memento: couldn't record a move", exc_info=True)
@@ -2529,6 +2530,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not isinstance(text, str):
             return _error(web, "text must be a string", 400)
         key = body.get("id") if isinstance(body.get("id"), str) else None
+        # When the reader sent it, on the sending device's clock: Main's marker and the new thread's
+        # card stand there rather than where the host got round to handling it (ADR 0089).
+        at = body.get("at")
+        at = at if isinstance(at, int) and not isinstance(at, bool) and at > 0 else None
         memo = f"{session_id}:{key}" if key else None
         # A repeat of an ask still being decided waits for it and gets its answer, so the message
         # is queued once however the app's retry races the first request.
@@ -2562,11 +2567,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         text,
                         files,
                         body.get("body"),
+                        at,
                     )
                     # Main shows a marker where the message went; it never entered Main's session.
                     await record_move(
                         path, key, session_id, text, started["thread"], started["session_id"],
-                        started["item"]["id"], body, files, new=True,
+                        started["item"]["id"], body, files, new=True, at=at,
                     )
                     events.note("session", session_id, path, True)
                     answer = {"object": "memento.triage", "decision": triage.NEW, **started}
@@ -2598,7 +2604,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     follow_queue(request, found["session_id"], path)
                     await record_move(
                         path, key, session_id, text, found["thread"], found["session_id"],
-                        delivered["item"]["id"], body, files,
+                        delivered["item"]["id"], body, files, at=at,
                     )
                     events.note("session", session_id, path, True)
                     answer = {"object": "memento.triage", "decision": triage.THREAD, **delivered}

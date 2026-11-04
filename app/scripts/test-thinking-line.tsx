@@ -129,8 +129,9 @@ async function read(row: Element) {
   return sheetText()
 }
 
-/** Whether the row spins: the sign it wears while it is still working (ADR 0064). */
-const spins = (line: Element) => Boolean(line.querySelector("[data-slot=spinner]"))
+/** Whether the row is at work: its own words pulse rather than a sign leading them (ADR 0092). */
+const pulses = (line: Element) =>
+  (line.getAttribute("class") ?? "").includes("animate-work-pulse")
 
 const screenText = () => document.body.textContent ?? ""
 
@@ -172,7 +173,7 @@ const WRITING_WHOLE = new RegExp(`^(${BUSY_WORDS.writing.join("|")})…$`)
 const ROTATING_THINKING = new RegExp(`(${BUSY_WORDS.thinking.join("|")})…`)
 const ROTATING_WHOLE = new RegExp(`^(${BUSY_WORDS.thinking.join("|")})…$`)
 
-test("a working row says its own word beside a loader, muted, and the footer never says it too", async () => {
+test("a working row says its own word and pulses it, muted, and the footer never says it too", async () => {
   host()
   const id = "streaming"
   await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
@@ -183,7 +184,8 @@ test("a working row says its own word beside a loader, muted, and the footer nev
       THINKING_WORD,
       "the row owns its word: its own, in sentence case, not the pool's",
     )
-    assert.ok(spins(line), "with a loader ahead of it: the row is at work")
+    assert.equal(line.querySelector("[data-slot=spinner]"), null, "no sign ahead of the words")
+    assert.match(line.className, /animate-work-pulse/, "the words themselves say the row is at work")
     assert.match(
       line.className,
       /(^|\s)text-muted-foreground(\s|$)/,
@@ -194,17 +196,7 @@ test("a working row says its own word beside a loader, muted, and the footer nev
       /(^|\s)text-primary(\s|$)/,
       "never the accent, which is kept for what a press does",
     )
-    assert.doesNotMatch(
-      line.querySelector("[data-slot=spinner]")?.getAttribute("class") ?? "",
-      /text-(primary|info)/,
-      "and the loader wears the row's colour with it, no colour of its own",
-    )
     assert.equal(line.getAttribute("aria-label"), "Thinking…", "named plainly for assistive tech")
-    assert.equal(
-      line.querySelector("[data-slot=spinner]")?.getAttribute("aria-hidden"),
-      "true",
-      "and the sign says nothing over the name and label that already say it",
-    )
     assert.equal(expanded(line), "false", "its sheet starts shut")
     assert.equal(sheet(), null, "with nothing of the run on the page until it is asked for")
     assert.equal(
@@ -464,7 +456,7 @@ test("a run this device measured reads in whole seconds, not the stats line's fi
   await screen(undefined, turn(reply), async () => {
     assert.equal(lineLabel(onlyThinkingLine()), "Thought for 12s", "the span this device measured")
     assert.equal(expanded(onlyThinkingLine()), "false", "its sheet starts shut over an answer")
-    assert.ok(!spins(onlyThinkingLine()), "and nothing spins for a run that ended")
+    assert.ok(!pulses(onlyThinkingLine()), "and nothing pulses for a run that ended")
     assert.match(screenText(), /12\.0s/, "and the turn's own duration stays in the stats line")
   })
 })
@@ -550,7 +542,7 @@ test("a run that already ended keeps its label while the call it broke runs", as
       await stream(id)
       const line = onlyThinkingLine()
       assert.equal(lineLabel(line), "Thought for 12s", "the number it measured is what it reads")
-      assert.ok(!spins(line), "an ended run draws no spinner while the call it broke runs")
+      assert.ok(!pulses(line), "an ended run draws no pulse while the call it broke runs")
     },
   )
 })
@@ -598,7 +590,7 @@ test("the tool group's row spins while a call runs, and is still once it lands",
     async () => {
       await stream(id)
       const group = toolRow(document.body)
-      assert.ok(spins(group), "the calls' row spins while a call runs")
+      assert.ok(pulses(group), "the calls' row pulses while a call runs")
       assert.equal(workingLine(), null, "and the footer leaves the saying to it")
 
       await db.messages.put({
@@ -606,12 +598,12 @@ test("the tool group's row spins while a call runs, and is still once it lands",
         tools: [{ ...call("call-1"), contentOffset: TEXT.length }],
       })
       await settle()
-      assert.ok(!spins(toolRow(document.body)), "and nothing spins once the call has landed")
+      assert.ok(!pulses(toolRow(document.body)), "and nothing pulses once the call has landed")
     },
   )
 })
 
-test("reduced motion stills the ring rather than taking the sign away", async () => {
+test("reduced motion stills the pulse rather than taking the words away", async () => {
   host()
   const id = "still-ring"
   await withReducedMotion(async () => {
@@ -619,11 +611,9 @@ test("reduced motion stills the ring rather than taking the sign away", async ()
       await stream(id)
       const line = onlyThinkingLine()
       assert.ok(saysThinking(lineLabel(line)), "the row still says what the turn is doing")
-      const ring = line.querySelector("[data-slot=spinner]")
-      assert.ok(ring, "the sign stays drawn rather than going with the preference")
       assert.match(
-        ring?.getAttribute("class") ?? "",
-        /motion-safe:animate-spin/,
+        line.className,
+        /motion-safe:animate-work-pulse/,
         "and the stillness is motion-safe's to say, which is the one place it is decided",
       )
     })
@@ -747,7 +737,7 @@ test("a merged row whose last stretch still streams says thinking and turns its 
     const rows = thinkingLines()
     assert.equal(rows.length, 1, "one row for the stretches that touched")
     assert.ok(saysThinking(lineLabel(rows[0])), "a stretch still thinking holds the whole row")
-    assert.ok(spins(rows[0]), "and it spins, saying the turn is at it now")
+    assert.ok(pulses(rows[0]), "and it pulses, saying the turn is at it now")
     assert.equal(expanded(rows[0]), "false", "with its sheet shut until a tap")
     assert.match(await read(rows[0]), /first call printed/, "holding the one that ended")
     assert.match(sheetText(), /blocks are what matter/, "and the one still going")
@@ -822,7 +812,7 @@ test("while the turn waits on the user, the working line says so beside the spin
   })
   await screen(undefined, messages, async () => {
     await stream(id)
-    assert.ok(spins(onlyThinkingLine()), "the thinking is still arriving, so the row spins")
+    assert.ok(pulses(onlyThinkingLine()), "the thinking is still arriving, so the row pulses")
     assert.match(screenText(), /Waiting for your approval…/, "waiting on the user is named")
     assert.equal(
       statusWords(),
@@ -877,7 +867,7 @@ test("a coding session's thread draws the same row, in place, as the same reply 
     const streaming = thinkingLines()
     assert.equal(streaming.length, 1, "a streaming session keeps the one row")
     assert.ok(saysThinking(lineLabel(streaming[0])), "its newest stretch holds the whole row")
-    assert.ok(spins(streaming[0]), "spinning, as the row spins everywhere else")
+    assert.ok(pulses(streaming[0]), "pulsing, as a work row pulses everywhere else")
     assert.equal(workingLine(), null, "and the session's footer leaves the saying to the row too")
 
     assert.match(

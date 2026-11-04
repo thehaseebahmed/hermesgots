@@ -1,7 +1,7 @@
 # Bot threads
 
 A bot's chat is its own Main: the messages the bot and the user wrote there, with every bot thread
-drawn as a card inside that flow at the time the thread began. A card opens the thread, its opener
+drawn as a card inside that flow at the time its opener was sent (ADR 0089). A card opens the thread, its opener
 sends text into it, and a message the host moved into another thread carries a line naming where it
 went, with the host's own undo.
 
@@ -51,7 +51,7 @@ Preconditions:
   `/c/<id>`, the header reads `Main` with `1 thread` or `N threads` under it (`No threads` at
   zero), and the bot's own messages are still in the thread. The proof is
   `PASS: the bot opens its Main thread` and `bot-threads-main-cards.png`.
-- **Cards at their start times.** The same drive: each thread is a card whose body is its opener,
+- **Cards at their start times.** The same drive: each thread is a card whose bubble is its opener — this device's message, else the opener the host recorded when it made the thread (ADR 0090) —
   sitting where that message was written, under a centred day heading (`Today`, `Yesterday`, else
   the date), each link reading `View thread` with `· N replies` where the thread has replies. Main's
   own replies stay between the cards. Proof: `PASS: Main draws its bot's threads as cards at their

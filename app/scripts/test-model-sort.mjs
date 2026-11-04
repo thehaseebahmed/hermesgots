@@ -16,7 +16,7 @@ const FACTS = {
 const facts = (m) => FACTS[m] ?? {}
 
 test("name sort is A to Z", () => {
-  assert.deepEqual(sortByFacts("name", facts, models), [
+  assert.deepEqual(sortByFacts({ key: "name", dir: "asc" }, facts, models), [
     "cheap-small",
     "expensive-big",
     "mid",
@@ -26,7 +26,7 @@ test("name sort is A to Z", () => {
 })
 
 test("price sort is cheapest first, unpriced models keep A to Z after", () => {
-  assert.deepEqual(sortByFacts("price", facts, models), [
+  assert.deepEqual(sortByFacts({ key: "price", dir: "asc" }, facts, models), [
     "cheap-small",
     "mid",
     "expensive-big",
@@ -36,7 +36,7 @@ test("price sort is cheapest first, unpriced models keep A to Z after", () => {
 })
 
 test("context sort is largest first, models without a window keep A to Z after", () => {
-  assert.deepEqual(sortByFacts("context", facts, models), [
+  assert.deepEqual(sortByFacts({ key: "context", dir: "desc" }, facts, models), [
     "expensive-big",
     "mid",
     "no-pricing",
@@ -46,7 +46,7 @@ test("context sort is largest first, models without a window keep A to Z after",
 })
 
 test("benchlm sort is highest score first, unscored models keep A to Z after", () => {
-  assert.deepEqual(sortByFacts("benchlm", facts, models), [
+  assert.deepEqual(sortByFacts({ key: "benchlm", dir: "desc" }, facts, models), [
     "mid",
     "expensive-big",
     "cheap-small",
@@ -56,9 +56,17 @@ test("benchlm sort is highest score first, unscored models keep A to Z after", (
 })
 
 test("an empty list stays empty", () => {
-  assert.deepEqual(sortByFacts("price", facts, []), [])
+  assert.deepEqual(sortByFacts({ key: "price", dir: "asc" }, facts, []), [])
 })
 
-test("sort menu labels", () => {
-  assert.deepEqual(Object.values(MODEL_SORTS), ["A to Z", "Price", "Context", "BenchLM Score"])
+test("sort menu labels, each with the arrow it reads best in", () => {
+  assert.deepEqual(
+    MODEL_SORTS.map((one) => [one.label, one.dir]),
+    [
+      ["Name", "asc"],
+      ["Price", "asc"],
+      ["Context", "desc"],
+      ["BenchLM Score", "desc"],
+    ],
+  )
 })

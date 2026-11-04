@@ -151,7 +151,16 @@ test("a reply told what its line says draws that, and none of its own words", as
   assert.ok(line, "the reply draws the row the thread decided on")
   assert.equal(words, 0, "with no words of its own: a streaming reply would have said Writing…")
   assert.match(line!.textContent ?? "", /1 subagent running/, "holding the count")
-  assert.ok(line!.querySelector('[role="status"]'), "and the loader that count turns")
+  assert.equal(
+    line!.querySelector('[role="status"]'),
+    null,
+    "and no sign beside it: the count is a work row, and its own words pulse (ADR 0092)",
+  )
+  assert.match(
+    line!.querySelector("button")?.getAttribute("class") ?? "",
+    /animate-work-pulse/,
+    "in the blue it wears",
+  )
 })
 
 test("a reply told to draw no line draws none, whatever its own row says", async () => {
@@ -205,7 +214,7 @@ test("a settled reply draws its stats above its line and ends on the line", asyn
   assert.equal(last, "status-line", "so nothing of the reply's follows its line")
 })
 
-test("a finished turn's count is the line's only words, its loader turning in the blue", async () => {
+test("a finished turn's count is the line's only words, pulsing in the blue", async () => {
   const done: Message = { ...reply, status: "done" }
   let line: Element | null = null
   let row: Element | null = null
@@ -237,13 +246,12 @@ test("a finished turn's count is the line's only words, its loader turning in th
     0,
     "with no words of its own",
   )
-  const loader = row!.querySelector('[role="status"]')
-  assert.ok(loader, "and its loader turns beside it")
+  assert.equal(row!.querySelector('[role="status"]'), null, "with no sign ahead of the words")
   assert.match(row!.getAttribute("class") ?? "", /(^|\s)text-info(\s|$)/, "in the info blue")
-  assert.doesNotMatch(
-    loader?.getAttribute("class") ?? "",
-    /text-(primary|muted-foreground)/,
-    "the loader takes the count's blue rather than a colour of its own",
+  assert.match(
+    row!.getAttribute("class") ?? "",
+    /animate-work-pulse/,
+    "and the words themselves pulse, in that same blue rather than a colour of their own",
   )
   assert.equal(counts, 1, "and it is drawn once, never twice")
 })

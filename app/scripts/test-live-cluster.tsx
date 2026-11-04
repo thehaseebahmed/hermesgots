@@ -208,8 +208,13 @@ test("a reply thinking with subagents at work turns one loader, in the row's own
   assert.ok(row, "the thought row is the one saying the turn is thinking")
   assert.equal(words, 0, "so the line says no words of its own")
   assert.ok(counted, "holding only the count of subagents at work")
-  assert.equal(turning, 1, "and one loader turns in the whole reply, never two")
+  assert.equal(turning, 0, "no sign turns in the reply at all: the rows pulse their own words")
   assert.match(row!.className, /(^|\s)text-muted-foreground(\s|$)/, "in the row's muted colour")
+  assert.match(
+    row!.className,
+    /animate-work-pulse/,
+    "and the row's own words are what pulse: it carries no sign (ADR 0092)",
+  )
 })
 
 test("a stopped reply says so where its line would stand, and draws no line", async () => {

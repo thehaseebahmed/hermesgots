@@ -97,19 +97,34 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await shot("closed")
   pass("Closed collapses by default and holds Resolved and Discarded under their own icons")
 
-  await page.getByRole("button", { name: /^Sort sessions by/ }).click()
+  const sortButton = () => page.getByRole("button", { name: /^Sort sessions by/ })
+  await sortButton().click()
   await page.getByText("Sort by").waitFor()
-  await page.getByRole("menuitemradio", { name: "Title A–Z" }).click()
+  await page.getByRole("menuitem", { name: "Title" }).click()
   await until(async () => {
     const titles = await group(page, "Idle").locator("li").allTextContents()
     return titles[0]?.includes("Another idle") && titles[1]?.includes("At rest")
   }, 5_000, "the idle group in title order")
-  assert.match(await page.getByRole("button", { name: /^Sort sessions by/ }).getAttribute("aria-label") ?? "",
-    /Title A–Z/, "the menu says the choice it made")
+  assert.match(await sortButton().getAttribute("aria-label") ?? "",
+    /Title, ascending/, "the row's own arrow says which way it reads")
   await shot("sorted")
-  pass("the sort menu orders each group by title and says which order it chose")
+  pass("the sort menu orders each group by title and says which way it reads")
 
+  // The chosen row carries the arrow, and picking it again turns it round (ADR 0091).
+  await sortButton().click()
+  await page.getByRole("menuitem", { name: /Title/ }).click()
+  await until(async () => {
+    const titles = await group(page, "Idle").locator("li").allTextContents()
+    return titles[0]?.includes("At rest") && titles[2]?.includes("Another idle")
+  }, 5_000, "the idle group turned round")
+  assert.match(await sortButton().getAttribute("aria-label") ?? "", /Title, descending/,
+    "the same key, the opposite arrow")
+  await shot("sorted-desc")
+  pass("picking the chosen sort again flips its arrow instead of choosing it twice")
+
+  await page.getByRole("button", { name: "Search", exact: true }).click()
   const search = page.getByLabel("Search sessions")
+  await search.waitFor()
   await search.fill("work")
   await until(async () => (await group(page, "Idle").count()) === 0, 5_000, "the headers to drop")
   for (const label of ORDER) assert.equal(await group(page, label).count(), 0, `no ${label} while filtering`)
@@ -117,11 +132,15 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     links.map((link) => link.textContent ?? "").filter((text) => /Dropped work|Finished work|Working turn/.test(text)),
   )
   assert.equal(flat.length, 3, "the three sessions the search finds")
-  assert.ok(flat[0]?.includes("Dropped work") && flat[1]?.includes("Finished work") &&
-    flat[2]?.includes("Working turn"), "flat, in the chosen title order")
-  await search.fill("")
+  assert.ok(flat[0]?.includes("Working turn") && flat[1]?.includes("Finished work") &&
+    flat[2]?.includes("Dropped work"),
+    "flat, every hit at the same rank so the chosen order still runs")
+  // The field is behind the header's button: closing it puts the title back and clears the query.
+  await page.getByRole("button", { name: "Close search" }).click()
   await until(async () => (await group(page, "Idle").count()) > 0, 5_000, "the headers back")
-  pass("a search drops the group headers for one flat list in the same order")
+  assert.equal(await page.getByRole("heading", { name: "Code", exact: true }).isVisible(), true,
+    "the title is back")
+  pass("a search opens from the header, drops the group headers and closes back to the title")
 
   // The dot's own row: an idle session with nothing new in it, read once so that its mark can age.
   // Opening the thread is what writes the mark, and the store it writes is where that is proved —
@@ -170,10 +189,10 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   // the host — so this leg runs last.
   await page.reload()
   await until(async () => (await group(page, "Idle").count()) > 0, 20_000, "the list after a reload")
-  assert.match(await page.getByRole("button", { name: /^Sort sessions by/ }).getAttribute("aria-label") ?? "",
-    /Title A–Z/, "this device remembers the sort")
+  assert.match(await sortButton().getAttribute("aria-label") ?? "",
+    /Title, descending/, "this device remembers the sort, arrow and all")
   const reloaded = await group(page, "Idle").locator("li").allTextContents()
-  assert.ok(reloaded[0]?.includes("Another idle"), "and the rows still run by it")
+  assert.ok(reloaded[0]?.includes("At rest"), "and the rows still run by it")
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed is folded again")
   pass("the sort choice is kept on this device and the groups come back folded after a reload")
 

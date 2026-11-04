@@ -93,6 +93,8 @@ const CHAT_FIELDS = [
   "discardedAt",
   "draftAt",
   "draftText",
+  "opener",
+  "openerAt",
   "mode",
   "modelChoice",
   "muted",

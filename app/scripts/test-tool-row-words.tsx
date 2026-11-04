@@ -52,7 +52,7 @@ test("a row drops an envelope's arguments but keeps words that only open on a br
   )
 })
 
-test("a failed group is marked at its head, and its reason stands under the words", async () => {
+test("a failed group says so on its own words, and its reason stands under them", async () => {
   await mount(
     <MessageItem
       message={reply([
@@ -65,13 +65,17 @@ test("a failed group is marked at its head, and its reason stands under the word
     />,
     async () => {
       const row = find('[data-slot="tool-group"]')
-      const mark = row?.firstElementChild
-      assert.equal(mark?.getAttribute("data-slot"), "work-sign", "the mark leads the row")
-      assert.match(mark?.getAttribute("class") ?? "", /text-destructive/, "in the failure's colour")
+      const label = row?.querySelector("span")
       assert.equal(
-        mark?.getAttribute("aria-hidden"),
-        "true",
-        "and says nothing over the row's name",
+        row?.firstElementChild,
+        label,
+        "the words lead the row: no mark stands ahead of them (ADR 0092)",
+      )
+      assert.equal(row?.querySelector('[data-slot="work-sign"]'), null, "and no sign is drawn")
+      assert.match(
+        label?.className ?? "",
+        /text-destructive/,
+        "the row's own words carry the failure's colour",
       )
       assert.match(
         row?.getAttribute("aria-label") ?? "",
@@ -80,10 +84,10 @@ test("a failed group is marked at its head, and its reason stands under the word
       )
       const reason = find('[data-slot="tool-group-reason"]')
       assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
-      assert.match(
+      assert.doesNotMatch(
         reason?.className ?? "",
         /pl-6/,
-        "dented past the mark, so it stands under the words",
+        "on the row's own edge: there is no sign to clear",
       )
       assert.equal(
         reason?.previousElementSibling?.getAttribute("data-slot"),
