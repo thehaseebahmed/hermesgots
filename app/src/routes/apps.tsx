@@ -1,6 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Navigate, useNavigate, useParams } from "react-router"
-import { LayoutGridIcon, MenuIcon, PlusIcon, Undo2Icon } from "lucide-react"
+import {
+  ArrowUpIcon,
+  CircleAlertIcon,
+  LayoutGridIcon,
+  MenuIcon,
+  PlusIcon,
+  Undo2Icon,
+} from "lucide-react"
 
 import { attempt } from "@/lib/attempt"
 import { BackButton } from "@/components/back-button"
@@ -9,6 +16,7 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow } from "@/components/item-list"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import { useAppPage, useApps } from "@/lib/apps"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -123,8 +131,32 @@ export function AppPage() {
   const app = apps?.find((item) => item.id === id)
   useRememberOpened("apps", app?.id)
   const root = app?.pages[0]
-  const { page, error, missing, undo } = useAppPage(id, root)
+  const { page, error, missing, undo, change, draft } = useAppPage(id, root)
   const [undoing, setUndoing] = useState(false)
+  const [asked, setAsked] = useState("")
+  const [failure, setFailure] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const running = useRef<AbortController>(undefined)
+  useEffect(() => () => running.current?.abort(), [])
+
+  const ask = async () => {
+    if (!page || !asked.trim() || busy) return
+    const controller = new AbortController()
+    running.current = controller
+    setBusy(true)
+    setFailure(undefined)
+    try {
+      await change(asked, page.source, controller.signal)
+      setAsked("")
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setFailure(
+          error instanceof Error && error.message ? error.message : "Couldn't change the page.",
+        )
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (!app)
     return (
@@ -141,7 +173,7 @@ export function AppPage() {
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight">
             {app.title}
           </h1>
-          {page?.undoable && (
+          {page?.undoable && !busy && (
             <Button
               variant="outline"
               size="sm"
@@ -163,7 +195,12 @@ export function AppPage() {
       >
         {page ? (
           <Suspense fallback={null}>
-            <OpenUIBlock source={page.source} open={false} streaming={false} draw="interface" />
+            <OpenUIBlock
+              source={draft ?? page.source}
+              open={draft !== undefined}
+              streaming={draft !== undefined}
+              draw="interface"
+            />
           </Suspense>
         ) : error ? (
           <p className="py-8 text-center text-sm text-warning">
@@ -175,6 +212,43 @@ export function AppPage() {
           </div>
         )}
       </div>
+      {page && (
+        <form
+          className="sticky bottom-0 mt-auto bg-background/80 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void ask()
+          }}
+        >
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-2">
+            {failure && (
+              <p className="flex items-start gap-2 text-sm text-destructive" role="alert">
+                <CircleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                <span className="min-w-0 break-words">{failure}</span>
+              </p>
+            )}
+            <div className="flex items-end gap-2">
+              <Textarea
+                rows={1}
+                aria-label="Change this page"
+                placeholder="Change this page…"
+                disabled={busy}
+                value={asked}
+                onChange={(event) => setAsked(event.target.value)}
+              />
+              <Button
+                type="submit"
+                size="icon-lg"
+                className="size-11 rounded-full"
+                disabled={busy || !asked.trim()}
+                aria-label="Send change"
+              >
+                {busy ? <Spinner className="size-4" /> : <ArrowUpIcon />}
+              </Button>
+            </div>
+          </div>
+        </form>
+      )}
     </div>
   )
 }

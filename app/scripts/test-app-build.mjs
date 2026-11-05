@@ -65,3 +65,14 @@ test("a title is the prompt's first line, cut at a word when long", async () => 
   const long = titleOf("a ".repeat(60))
   assert.ok(long.length <= 61 && long.endsWith("…"))
 })
+
+test("a change answering one block is its source; two blocks, none, or a broken-off one is refused", async () => {
+  const { changeOf, changePrompt } = await import("../src/lib/app-build.ts")
+  assert.deepEqual(changeOf(`Done:\n\n${block("home")}\n`), {
+    source: "# id: home\nroot = Stack([])",
+  })
+  assert.match(changeOf(`${block("home")}\n\n${block("room")}`).error, /more than one/)
+  assert.ok(changeOf("No.").error)
+  assert.match(changeOf("```openui-lang\n# id: home\nroot = Sta").error, /broke off/)
+  assert.match(changePrompt(" bigger ", "root = Stack([])"), /bigger[\s\S]*root = Stack\(\[\]\)/)
+})

@@ -35,6 +35,38 @@ export function pagesOf(output: string): BuiltPages {
   return { pages: blocks.map((block) => block.source) }
 }
 
+/** What a change's answer came to: the page's new source, or why there is nothing to write. */
+export type ChangedPage = { source: string } | { error: string }
+
+/**
+ * A finished change's one block as the page's new source. Two blocks are refused rather than
+ * guessed between, an answer with none has nothing to keep, and a block still open means the answer
+ * broke off: in each case nothing is written.
+ */
+export function changeOf(output: string): ChangedPage {
+  const blocks = openuiParts(output).filter((part) => part.kind === "openui")
+  if (blocks.length === 0) return { error: "The bot didn't answer with a page." }
+  if (blocks.length > 1) return { error: "The bot answered with more than one page." }
+  if (blocks[0].open) return { error: "The bot's answer broke off." }
+  return { source: blocks[0].source }
+}
+
+/** The source of the block a change is still streaming, for drawing over the page as it arrives. */
+export function streamedSource(output: string): string | undefined {
+  return openuiParts(output).find((part) => part.kind === "openui")?.source
+}
+
+/** The words a change is asked in, with the page's current source for the model to change. */
+export function changePrompt(request: string, source: string): string {
+  return [
+    "Change this page:",
+    request.trim(),
+    "The page's current source:",
+    "```openui-lang\n" + source + "\n```",
+    "Answer with exactly one openui-lang block: the whole page as changed.",
+  ].join("\n\n")
+}
+
 /** What an app may call, read off its own pages: reads from queries, acts from mutations. */
 export type Consent = { reads: string[]; acts: string[] }
 

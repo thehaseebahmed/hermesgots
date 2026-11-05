@@ -4537,6 +4537,21 @@ export async function getAppPage(
   return toHostAppPage((await response.json())?.page as Record<string, unknown>)
 }
 
+/** Replaces one page's whole source; the host keeps the one it replaced for one step of undo. */
+export async function writeAppPage(
+  config: HermesConfig,
+  appId: string,
+  pageId: string,
+  source: string,
+) {
+  const response = await request(appPageRoot(config, appId, pageId), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ source }),
+  })
+  return toHostAppPage((await response.json())?.page as Record<string, unknown>)
+}
+
 export async function undoAppPage(config: HermesConfig, appId: string, pageId: string) {
   const response = await request(`${appPageRoot(config, appId, pageId)}/undo`, {
     method: "POST",
