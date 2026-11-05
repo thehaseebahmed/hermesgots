@@ -13,10 +13,21 @@ the same truth (ADR 0100).
 
 from __future__ import annotations
 
+import re
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from .store import open_rows
+from .store import now_ms, open_rows
+
+# The two caps a write is held to. A source past the page cap is refused whole — never cut to fit,
+# since a cut page is a page that no longer parses — and the refusal names the cap it hit.
+PAGE_MAX_CHARS = 20_000
+TITLE_MAX_CHARS = 120
+# The library a page is written against until a build says otherwise.
+LIBRARY_VERSION = "1.0.1"
+ROOT_PAGE = "root"
+_ID_LINE = re.compile(r"\A\s*#\s*id:\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})\s*(?:\n|\Z)")
 
 
 class AppsError(Exception):
@@ -89,3 +100,119 @@ def page(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
         "source": found["source"],
         "undoable": bool(found["undoable"]),
     }
+
+
+def _checked(source: Any) -> str:
+    """A page's source as written, or a refusal: not text, empty, or past ``PAGE_MAX_CHARS``."""
+    if not isinstance(source, str) or not source.strip():
+        raise AppsError("A page needs a source.", 400)
+    if len(source) > PAGE_MAX_CHARS:
+        raise AppsError(
+            f"A page's source is capped at {PAGE_MAX_CHARS} characters (the page cap);"
+            f" this one is {len(source)}.",
+            413,
+        )
+    return source
+
+
+def page_id_of(source: str) -> str:
+    """The id a source names on its first line (``# id: home``), else the root's own name."""
+    found = _ID_LINE.match(source)
+    return found.group(1) if found else ROOT_PAGE
+
+
+def create(path: Path, title: Any, source: Any, library_version: Optional[str] = None) -> Dict[str, Any]:
+    """Saves a new app whose first page, the root, is ``source``; answers the app as the list does.
+
+    The app and its page are written in one transaction, so no reader meets an app without its
+    root. Raises ``AppsError`` (400/413) for a title or source that can't be kept.
+    """
+    if not isinstance(title, str) or not title.strip():
+        raise AppsError("An app needs a title.", 400)
+    title = title.strip()
+    if len(title) > TITLE_MAX_CHARS:
+        raise AppsError(
+            f"An app's title is capped at {TITLE_MAX_CHARS} characters (the title cap);"
+            f" this one is {len(title)}.",
+            413,
+        )
+    source = _checked(source)
+    version = library_version if isinstance(library_version, str) and library_version else LIBRARY_VERSION
+    app_id = f"app-{uuid.uuid4().hex[:12]}"
+    root = page_id_of(source)
+    conn = open_rows(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT INTO apps (id, title, library_version, created_at) VALUES (?, ?, ?, ?)",
+            (app_id, title, version, now_ms()),
+        )
+        conn.execute(
+            "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, 0, ?)",
+            (app_id, root, source),
+        )
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+    return {"id": app_id, "title": title, "library_version": version, "pages": [root]}
+
+
+def write(path: Path, app_id: str, page_id: str, source: Any) -> Dict[str, Any]:
+    """Replaces one page's whole source and keeps the one it replaced for one step of undo.
+
+    A write names a page that is there: an app or page that isn't answers not-found and creates
+    nothing, so a deleted app stays deleted. Raises ``AppsError`` (404, 400 or 413).
+    """
+    # The app and page come first: naming nothing is not-found whatever the source is.
+    page(path, app_id, page_id)
+    source = _checked(source)
+    conn = open_rows(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        changed = conn.execute(
+            "UPDATE app_pages SET previous_source = source, source = ?"
+            " WHERE app_id = ? AND page_id = ?"
+            " AND EXISTS (SELECT 1 FROM apps WHERE id = ?)",
+            (source, app_id, page_id, app_id),
+        ).rowcount
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+    if not changed:
+        raise AppsError("No such page.", 404)
+    return page(path, app_id, page_id)
+
+
+def undo(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
+    """Puts back the source a page's last write replaced; there is one step, so a second undo has
+    nothing to put back.
+
+    Raises ``AppsError`` (404 for a missing app or page, 409 for a page with nothing to undo).
+    """
+    page(path, app_id, page_id)
+    conn = open_rows(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        changed = conn.execute(
+            "UPDATE app_pages SET source = previous_source, previous_source = NULL"
+            " WHERE app_id = ? AND page_id = ? AND previous_source IS NOT NULL",
+            (app_id, page_id),
+        ).rowcount
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+    if not changed:
+        raise AppsError("Nothing to undo.", 409)
+    return page(path, app_id, page_id)

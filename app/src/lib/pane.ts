@@ -42,6 +42,7 @@ function useFeaturePane(base: string): FeaturePane | undefined {
 
 export const useMeetingsPane = () => useFeaturePane("/meetings")
 export const useResearchPane = () => useFeaturePane("/research")
+export const useAppsPane = () => useFeaturePane("/apps")
 
 /** A project is named by its bot and its id, so its pane's selection is both: `<bot>/<project>`. */
 export function useProjectsPane(): FeaturePane | undefined {
@@ -78,7 +79,7 @@ export function useCodePane(): FeaturePane | undefined {
 }
 
 /** The features whose item pane opens on the one opened last, per device. */
-type Feature = "meetings" | "research" | "code" | "projects"
+type Feature = "meetings" | "research" | "code" | "projects" | "apps"
 
 const lastKey = (feature: Feature) => `memento:last-${feature}`
 

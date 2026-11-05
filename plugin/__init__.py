@@ -3285,7 +3285,63 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
+    async def create_app(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            made = await asyncio.to_thread(
+                apps.create,
+                store_path(),
+                body.get("title"),
+                body.get("source"),
+                body.get("library_version"),
+            )
+        except apps.AppsError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.app", "app": made}, status=201)
+
+    async def write_app_page(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            found = await asyncio.to_thread(
+                apps.write,
+                store_path(),
+                request.match_info["app_id"],
+                request.match_info["page_id"],
+                body.get("source"),
+            )
+        except apps.AppsError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.app.page", "page": found})
+
+    async def undo_app_page(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                apps.undo,
+                store_path(),
+                request.match_info["app_id"],
+                request.match_info["page_id"],
+            )
+        except apps.AppsError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.app.page", "page": found})
+
     app.router.add_get(f"{PREFIX}/apps", list_apps)
+    app.router.add_post(f"{PREFIX}/apps", create_app)
+    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", write_app_page)
+    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}/undo", undo_app_page)
     app.router.add_get(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", get_app_page)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)

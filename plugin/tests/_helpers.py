@@ -155,10 +155,13 @@ def wire(case: unittest.TestCase, adapter: Any) -> Any:
     return app
 
 
-def route(app: Any, path: str) -> Any:
-    """A handler the plugin registered on a wired app, or a failure naming the missing path."""
-    for _method, registered, handler in app.router.added:
-        if registered == path:
+def route(app: Any, path: str, method: Optional[str] = None) -> Any:
+    """A handler the plugin registered on a wired app, or a failure naming the missing path.
+
+    A path that carries both a read and a write is told apart by ``method``.
+    """
+    for registered_method, registered, handler in app.router.added:
+        if registered == path and method in (None, registered_method):
             return handler
     raise AssertionError(f"the plugin registered no {path}")
 

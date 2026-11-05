@@ -227,14 +227,14 @@ class Routes(unittest.TestCase):
     def listing(self) -> Any:
         request = FakeWeb.Request()
         request.match_info, request.headers = {}, {}
-        return asyncio.run(route(self.app, plugin.PREFIX + "/apps")(request))
+        return asyncio.run(route(self.app, plugin.PREFIX + "/apps", "GET")(request))
 
     def page(self, app_id: str, page_id: str) -> Any:
         request = FakeWeb.Request()
         request.match_info = {"app_id": app_id, "page_id": page_id}
         request.headers = {}
         return asyncio.run(
-            route(self.app, plugin.PREFIX + "/apps/{app_id}/pages/{page_id}")(request)
+            route(self.app, plugin.PREFIX + "/apps/{app_id}/pages/{page_id}", "GET")(request)
         )
 
     def test_the_list_answers_every_app_without_a_source(self) -> None:
@@ -305,6 +305,102 @@ class Routes(unittest.TestCase):
         answer = asyncio.run(route(self.app, plugin.PREFIX + "/info")(request))
         self.assertEqual(answer["status"], 200)
         self.assertIn("apps", answer["payload"]["features"])
+
+
+class Writes(unittest.TestCase):
+    """Creating an app and writing, then undoing, one page's whole source over the API."""
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.path = db_path(self.home)
+        self.adapter = RouteAdapter()
+        self.app = wire(self, self.adapter)
+
+    def send(self, path: str, match: Any, body: Any) -> Any:
+        request = FakeWeb.Request()
+        request.match_info, request.headers = match, {}
+
+        async def read() -> Any:
+            return body
+
+        request.json = read
+        return asyncio.run(route(self.app, plugin.PREFIX + path, "POST")(request))
+
+    def create(self, title: Any = "House", source: Any = "# id: home\nroot = Stack([])") -> Any:
+        return self.send("/apps", {}, {"title": title, "source": source})
+
+    def write(self, app_id: str, page_id: str, source: Any) -> Any:
+        return self.send(
+            "/apps/{app_id}/pages/{page_id}", {"app_id": app_id, "page_id": page_id}, {"source": source}
+        )
+
+    def undo(self, app_id: str, page_id: str) -> Any:
+        return self.send(
+            "/apps/{app_id}/pages/{page_id}/undo", {"app_id": app_id, "page_id": page_id}, {}
+        )
+
+    def test_creating_an_app_keeps_its_source_as_the_root_page(self) -> None:
+        answer = self.create()
+        self.assertEqual(answer["status"], 201)
+        made = answer["payload"]["app"]
+        self.assertEqual((made["title"], made["pages"]), ("House", ["home"]))
+        self.assertEqual(apps.listing(self.path), [made])
+        read = apps.page(self.path, made["id"], "home")
+        self.assertEqual(read["source"], "# id: home\nroot = Stack([])")
+        self.assertFalse(read["undoable"])
+
+    def test_a_source_without_an_id_line_is_the_root_page(self) -> None:
+        made = self.create(source="root = Stack([])")["payload"]["app"]
+        self.assertEqual(made["pages"], ["root"])
+
+    def test_a_second_write_keeps_the_first_source_and_undo_answers_it(self) -> None:
+        app_id = self.create()["payload"]["app"]["id"]
+        written = self.write(app_id, "home", "# id: home\nroot = Stack([a])\na = Callout(\"info\", \"Hi\")")
+        self.assertEqual(written["status"], 200)
+        self.assertTrue(written["payload"]["page"]["undoable"])
+        undone = self.undo(app_id, "home")
+        self.assertEqual(undone["status"], 200)
+        self.assertEqual(undone["payload"]["page"]["source"], "# id: home\nroot = Stack([])")
+        self.assertFalse(undone["payload"]["page"]["undoable"], "one step, so the next has none")
+        self.assertEqual(self.undo(app_id, "home")["status"], 409)
+
+    def test_a_write_to_an_app_or_page_that_is_not_there_creates_nothing(self) -> None:
+        app_id = self.create()["payload"]["app"]["id"]
+        before = apps.listing(self.path)
+        ghost = self.write("ghost", "home", "root = Stack([])")
+        self.assertEqual((ghost["status"], ghost["payload"]["error"]["message"]), (404, "No such app."))
+        room = self.write(app_id, "cellar", "root = Stack([])")
+        self.assertEqual((room["status"], room["payload"]["error"]["message"]), (404, "No such page."))
+        self.assertEqual(self.undo("ghost", "home")["status"], 404)
+        self.assertEqual(apps.listing(self.path), before)
+        self.assertEqual(apps.listing(self.path)[0]["pages"], ["home"])
+
+    def test_a_source_past_the_page_cap_is_refused_and_names_the_cap(self) -> None:
+        app_id = self.create()["payload"]["app"]["id"]
+        big = "x" * (apps.PAGE_MAX_CHARS + 1)
+        refused = self.write(app_id, "home", big)
+        self.assertEqual(refused["status"], 413)
+        self.assertIn("page cap", refused["payload"]["error"]["message"])
+        self.assertIn(str(apps.PAGE_MAX_CHARS), refused["payload"]["error"]["message"])
+        self.assertEqual(apps.page(self.path, app_id, "home")["source"], "# id: home\nroot = Stack([])")
+        before = apps.listing(self.path)
+        self.assertEqual(self.create(source=big)["status"], 413)
+        self.assertEqual(apps.listing(self.path), before, "a refused build creates nothing")
+
+    def test_a_source_at_the_cap_is_kept_whole(self) -> None:
+        source = "x" * apps.PAGE_MAX_CHARS
+        made = self.create(source=source)["payload"]["app"]
+        self.assertEqual(apps.page(self.path, made["id"], "root")["source"], source)
+
+    def test_an_empty_source_or_title_is_refused(self) -> None:
+        self.assertEqual(self.create(source="  ")["status"], 400)
+        self.assertEqual(self.create(title="")["status"], 400)
+
+    def test_the_writes_need_the_bots_key(self) -> None:
+        self.adapter.denied = {"status": 401, "payload": {}}
+        self.assertEqual(self.create(), {"status": 401, "payload": {}})
+        self.assertEqual(self.write("a", "b", "x"), {"status": 401, "payload": {}})
+        self.assertEqual(apps.listing(self.path), [])
 
 
 if __name__ == "__main__":

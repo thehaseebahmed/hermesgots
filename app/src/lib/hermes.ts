@@ -4476,3 +4476,101 @@ export async function clearDictations(
   })
   return dictationTotals((await response.json())?.stats)
 }
+
+function appsRoot(config: HermesConfig) {
+  return `${pluginRoot(config.baseUrl)}/apps`
+}
+
+function appPageRoot(config: HermesConfig, appId: string, pageId: string) {
+  return `${appsRoot(config)}/${encodeURIComponent(appId)}/pages/${encodeURIComponent(pageId)}`
+}
+
+/** An app the bot keeps (`apps.py`): its title and its page ids, the root first, never a source. */
+export interface HostApp {
+  id: string
+  title: string
+  libraryVersion: string
+  pages: string[]
+}
+
+/** One page's whole source and whether its last change can be undone. */
+export interface HostAppPage {
+  id: string
+  appId: string
+  source: string
+  undoable: boolean
+}
+
+function toHostApp(raw: Record<string, unknown>): HostApp {
+  return {
+    id: String(raw.id),
+    title: String(raw.title ?? ""),
+    libraryVersion: String(raw.library_version ?? ""),
+    pages: Array.isArray(raw.pages) ? raw.pages.map(String) : [],
+  }
+}
+
+function toHostAppPage(raw: Record<string, unknown>): HostAppPage {
+  return {
+    id: String(raw.id),
+    appId: String(raw.app_id),
+    source: String(raw.source ?? ""),
+    undoable: raw.undoable === true,
+  }
+}
+
+/** Every app the bot keeps, newest first. */
+export async function listApps(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(appsRoot(config), { headers: headers(config), signal })
+  const body = await response.json()
+  return (Array.isArray(body?.apps) ? (body.apps as Record<string, unknown>[]) : []).map(toHostApp)
+}
+
+/** One page of an app. A page or app that isn't there is a 404 `HermesError`. */
+export async function getAppPage(
+  config: HermesConfig,
+  appId: string,
+  pageId: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(appPageRoot(config, appId, pageId), {
+    headers: headers(config),
+    signal,
+  })
+  return toHostAppPage((await response.json())?.page as Record<string, unknown>)
+}
+
+/** Saves a new app whose root page is `source`. */
+export async function createApp(config: HermesConfig, title: string, source: string) {
+  const response = await request(appsRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ title, source }),
+  })
+  return toHostApp((await response.json())?.app as Record<string, unknown>)
+}
+
+/** Replaces one page's whole source; the one it replaced is kept for an undo. */
+export async function writeAppPage(
+  config: HermesConfig,
+  appId: string,
+  pageId: string,
+  source: string,
+) {
+  const response = await request(appPageRoot(config, appId, pageId), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ source }),
+  })
+  return toHostAppPage((await response.json())?.page as Record<string, unknown>)
+}
+
+/** Puts back the source a page's last write replaced. */
+export async function undoAppPage(config: HermesConfig, appId: string, pageId: string) {
+  const response = await request(`${appPageRoot(config, appId, pageId)}/undo`, {
+    method: "POST",
+    headers: headers(config),
+    body: "{}",
+  })
+  return toHostAppPage((await response.json())?.page as Record<string, unknown>)
+}

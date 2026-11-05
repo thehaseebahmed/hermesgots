@@ -19,7 +19,13 @@ import { mainThreadId } from "@/lib/db"
 import { useBubbleMirror, useBubbleTakeaways } from "@/lib/bubble"
 import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
-import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "@/lib/pane"
+import {
+  useAppsPane,
+  useCodePane,
+  useMeetingsPane,
+  useProjectsPane,
+  useResearchPane,
+} from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -29,7 +35,7 @@ import { ChatPage } from "@/routes/chat"
 
 /**
  * A list kept on screen beside what it opened: a bot beside its thread (from `xl`), or Code's
- * sessions, the projects, the meetings or research missions beside one (where `useSplit` says
+ * sessions, the projects, the meetings, research missions or apps beside one (where `useSplit` says
  * there is room). `screen` is the list's own path, and `item` is an item the pane carries itself,
  * in place of the screen the route draws beside it.
  */
@@ -57,6 +63,7 @@ const MeetingsPane = lazy(() =>
 const ResearchPane = lazy(() =>
   import("@/routes/research").then((m) => ({ default: m.ResearchPane })),
 )
+const AppsPane = lazy(() => import("@/routes/apps").then((m) => ({ default: m.AppsPane })))
 const CodePane = lazy(() => import("@/routes/code").then((m) => ({ default: m.CodePane })))
 const ProjectsPane = lazy(() =>
   import("@/routes/projects").then((m) => ({ default: m.ProjectsPane })),
@@ -203,6 +210,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()
+  const apps = useAppsPane()
   // Keyed by the conversation it shows, so the thread the address names and the one this device
   // remembers are one pane when they are one chat: naming it in the address, or leaving it for
   // Main again, doesn't remount it. Main is the pane and is never drawn twice, so this holds the
@@ -247,12 +255,19 @@ export function AppShell({ children }: { children?: ReactNode }) {
               itemKey: meetings.selected,
               node: <MeetingsPane pane={meetings} />,
             }
-          : research && {
-              screen: "/research",
-              open: research.open,
-              itemKey: research.selected,
-              node: <ResearchPane pane={research} />,
-            }
+          : research
+            ? {
+                screen: "/research",
+                open: research.open,
+                itemKey: research.selected,
+                node: <ResearchPane pane={research} />,
+              }
+            : apps && {
+                screen: "/apps",
+                open: apps.open,
+                itemKey: apps.selected,
+                node: <AppsPane pane={apps} />,
+              }
   usePageTransition(main, pane)
 
   return (

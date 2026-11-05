@@ -42,6 +42,8 @@ const MissionPage = lazy(() =>
 const RoutinesPage = lazy(() =>
   import("@/routes/routines").then((m) => ({ default: m.RoutinesPage })),
 )
+const AppsPage = lazy(() => import("@/routes/apps").then((m) => ({ default: m.AppsPage })))
+const AppPage = lazy(() => import("@/routes/apps").then((m) => ({ default: m.AppPage })))
 const SharePage = lazy(() => import("@/routes/share").then((m) => ({ default: m.SharePage })))
 const SettingsPage = lazy(() =>
   import("@/routes/settings").then((m) => ({ default: m.SettingsPage })),
@@ -122,6 +124,8 @@ function AppRoutes() {
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:id" element={<MeetingPage />} />
         <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
+        <Route path="apps" element={<AppsPage />} />
+        <Route path="apps/:id" element={<AppPage />} />
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />

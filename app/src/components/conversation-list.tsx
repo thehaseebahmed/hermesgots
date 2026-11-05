@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   CodeXmlIcon,
   FolderKanbanIcon,
+  LayoutGridIcon,
   ListChecksIcon,
   MessageCircleQuestionMarkIcon,
   PanelLeftCloseIcon,
@@ -489,6 +490,15 @@ export function ConversationList({
           >
             <TimerIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Routines"}
+          </RootLink>
+          <RootLink
+            to="/apps"
+            onClick={onNavigate}
+            aria-label={collapsed ? "Apps" : undefined}
+            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+          >
+            <LayoutGridIcon className="size-5 text-muted-foreground" />
+            {!collapsed && "Apps"}
           </RootLink>
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
