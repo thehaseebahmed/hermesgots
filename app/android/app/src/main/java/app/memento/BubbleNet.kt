@@ -132,6 +132,44 @@ class BubbleNet(val bot: BubbleConfig.Bot) {
     }
 
     /**
+     * Writes a finished take into its bot's log, as the app writes one of its own the moment its
+     * words land: a take heard in another app is still a take this bot heard, and History is where
+     * the app reads them.
+     *
+     * Answers whether the host has it. A post that never lands is not retried here — the phone keeps
+     * the take and the page writes it the next time the app is open — so the log gains no second
+     * row from a retry, and the id makes a row handed over twice the same row (`INSERT OR IGNORE`).
+     */
+    fun record(id: String, answer: Answer): Boolean {
+        return try {
+            val connection = open("${bot.root}/dictations", "POST", WRITE_MS)
+            connection.setRequestProperty("Content-Type", "application/json")
+            val body = row(id, answer).toString().toByteArray()
+            connection.setFixedLengthStreamingMode(body.size)
+            connection.outputStream.use { it.write(body) }
+            val code = connection.responseCode
+            drain(connection)
+            code in 200..299
+        } catch (_: IOException) {
+            false
+        }
+    }
+
+    /** One dictation as the host's log takes it: the host counts the words rather than trusting one. */
+    private fun row(id: String, answer: Answer) = JSONObject()
+        .put("id", id)
+        .put("text", answer.text)
+        .put("heard", answer.heard)
+        .put("ms", answer.ms)
+        .put("at", System.currentTimeMillis())
+        .apply {
+            answer.level?.let { put("level", it) }
+            answer.cleaned?.let { put("cleaned", it) }
+            answer.provider?.let { put("provider", it) }
+            answer.model?.let { put("model", it) }
+        }
+
+    /**
      * The host's own bound on a Confirm, with a little room for the answer to travel: a host that has
      * stated one is held to it, and the floor stands in only where nothing has been asked yet.
      */
@@ -174,6 +212,8 @@ class BubbleNet(val bot: BubbleConfig.Bot) {
         const val UPLOAD_MS = 60_000
         /** How long a delete waits for the host to take the take back, as the page waits. */
         const val RELEASE_MS = 5_000
+        /** How long the log's row waits on its host: the app's own bound on a write (`WRITE_TIMEOUT_MS`). */
+        const val WRITE_MS = 15_000
         const val TRIES = 3
         const val RETRY_MS = 400L
         const val UNREACHED = "The host could not be reached."

@@ -204,12 +204,13 @@ export async function openBubbleAccessibility(): Promise<string | undefined> {
 }
 
 /**
- * Puts back what the phone could not type. A take whose words found no field is kept by the service
- * and handed over here, written as a **Dictation** so it is in the log the next time the app is
- * opened — which is what the toast that says so is promising.
+ * Puts back what the phone could not type, and writes it as a **Dictation** so it is in the log the
+ * next time the app is opened — which is what the toast that says so is promising.
  *
  * The phone is only told which takes were written. A row that failed stays on it and is handed over
- * again rather than being lost behind a promise the phone already made.
+ * again rather than being lost behind a promise the phone already made; each row keeps the id the
+ * phone gave it, so a take whose row the phone also posted to its host is that same row rather than a
+ * second one beside it.
  */
 export async function collectTakeaways(profiles?: Profile[]) {
   if (!bubbleAvailable()) return
@@ -230,7 +231,7 @@ export async function collectTakeaways(profiles?: Profile[]) {
       written.push(take.id)
       continue
     }
-    const ok = await writeDictation(serverConfig(bot), landed)
+    const ok = await writeDictation(serverConfig(bot), landed, take.id)
       .then(() => true)
       .catch(quietly("writing a kept take"))
     if (ok) written.push(take.id)

@@ -58,10 +58,10 @@ not start a take at all.
   for takes measured in seconds, and the reason a long one is not a use case this first landing takes.
 - One take at a time per bot is the host's rule, unchanged: the app and the Bubble collide on it, and
   the host's own `409` sentence is what the Bubble shows.
-- A Bubble take posts no **Dictation** row of its own: the app posts that row when a take lands in its
-  composer. The one that lands nowhere is different — the phone keeps its words and the page writes
-  them into the log the next time it opens, because a toast that promises the take is saved has to be
-  telling the truth.
+- A Bubble take posts the **Dictation** row it is, written by the phone itself just after its Confirm
+  answers (ADR 0107): History is every take its bot heard, not only the ones that landed in the app's
+  own composer. A take the phone could not type is still kept for the page as well, because the toast
+  that promises the take is saved has to be telling the truth.
 - A foreground service of the microphone type runs for as long as the Bubble is switched on, with its
   own notification channel; the device itself is opened for a take and released when it ends. That is
   the price of a microphone Android will hand over on a tap, and it is why the notification is

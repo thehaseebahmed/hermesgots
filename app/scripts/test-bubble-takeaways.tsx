@@ -43,6 +43,7 @@ test("a take the phone could not type lands in the log, under the bot that heard
 
   const rows = await db.dictationLog.toArray()
   assert.equal(rows.length, 1, "one take, one row")
+  assert.equal(rows[0].id, "kept-1", "under the id the phone gave it: a hand-over is never two rows")
   assert.equal(rows[0].text, "Send the invoice on Friday", "the tidied words are what the log keeps")
   assert.equal(rows[0].heard, "send the invoice on friday", "with what was heard beside them")
   assert.equal(rows[0].ms, 2_400)

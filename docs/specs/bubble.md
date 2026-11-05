@@ -152,6 +152,12 @@ back the ids it wrote, which is the only thing the phone forgets. A row that fai
 and is handed over again rather than being lost behind a toast that already promised it. That toast is
 what the handover is standing on.
 
+**Every take is a Dictation, typed or not.** A take that lands in another app's field posts its own row
+to its bot's log the moment its Confirm answers (ADR 0107), under the id the phone mints for it, so
+**Settings › AI Dictation › History** holds the Bubble's takes beside the composer's. A post that does
+not land leaves the take in the same handover a take with no field uses, and the page writes it — under
+that same id — the next time the app is opened.
+
 **The app's selection is the Bubble's bot.** Picking a bot on the Overview writes `activeProfileId`,
 the same field the rest of the app reads, so the two can never disagree about which bot is selected.
 
@@ -181,8 +187,6 @@ fake.
 
 - Live words while the user talks, in the Bubble or anywhere else: the host answers a take once, at
   its end, which is the app's own rule.
-- A **Dictation** row for a Bubble take that lands in a field. The one that lands nowhere is logged —
-  the phone keeps its words and the page writes the row — because the toast says so.
 - **Stop to text** for the Bubble's own end. The number stays defined where it was, ending in the
   composer.
 - Choosing a bot from the Bubble itself, a long-press menu, snoozing, and shrinking to a dot: the
@@ -197,12 +201,10 @@ A retry after an error needs nothing of the Bubble when the bot's speech provide
 retry is a new take, and a take's provider and model are resolved on the host when its first Piece
 lands, so the next tap is heard by whatever the bot now says.
 
-The asymmetry a reader will read as a bug: a Bubble take is heard by the bot's host and tidied at its
-Cleanup level, but it leaves no entry in AI Dictation's History — the app is what posts that entry, and
-a take that lands in a field never passes through it. The exception is the take the phone could not
-type: its words are kept and the row appears the next time the app opens. Likewise a bot whose host
-resolves a cloud provider lands its words untidied, exactly as the app's own take does, because Cleanup
-runs only for a take its host transcribed.
+A Bubble take is heard by the bot's host, tidied at its Cleanup level and written into **History** like
+the composer's own (ADR 0107), so the two read alike on the Dictation screen; a bot whose host resolves
+a cloud provider lands its words untidied, exactly as the app's own take does, because Cleanup runs only
+for a take its host transcribed.
 
 The Bubble needs two grants the app never asked for before, and both are the phone's: drawing over
 other apps, and the accessibility service. A phone with neither is walked through them on the tap that

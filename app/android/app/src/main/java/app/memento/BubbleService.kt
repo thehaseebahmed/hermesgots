@@ -485,24 +485,44 @@ class BubbleService : Service() {
         forget()
     }
 
-    /** Words that landed say nothing: the field they landed in is the confirmation. */
+    /**
+     * A finished take, twice over: its words into the field in front where there is one, and the take
+     * into its bot's log either way.
+     *
+     * The log is the app's record of what a bot heard, and a take heard from another app's field is
+     * one of them. Nothing else can write that row: the app posts a row when a take lands in its own
+     * composer, which a Bubble take never touches.
+     */
     private fun land(answer: BubbleNet.Answer) {
+        val client = net ?: return
+        val id = UUID.randomUUID().toString()
         val landed = MementoAccessibilityService.live?.land(answer.text)
-        if (landed?.landed == true) return
-        keep(answer)
+        if (landed?.landed == true) {
+            // Nothing is said: the words are in the field, and the row is written behind them. On a
+            // thread of its own, because a host slow to take the row must not hold the first Piece of
+            // the next take — the upload queue is the take's, not the log's.
+            Thread(
+                { if (!client.record(id, answer)) keep(client.bot, id, answer) },
+                "memento-bubble-log",
+            ).start()
+            return
+        }
+        keep(client.bot, id, answer)
         // The phone's own reason where there is one — no field, a field that refused, no service —
         // and then where the words went instead.
         toast("${landed?.why ?: NO_TYPING} This take is saved in Gots.")
     }
 
-    /** The words go to the app when the phone has nowhere to put them, so a take is never lost. */
-    private fun keep(answer: BubbleNet.Answer) {
-        val chosen = net?.bot ?: return
+    /**
+     * The take is held for the page, which writes it — under this same id, so a row the host already
+     * has is not written twice — the next time the app is open.
+     */
+    private fun keep(bot: BubbleConfig.Bot, id: String, answer: BubbleNet.Answer) {
         BubbleConfig.keep(
             this,
             BubbleConfig.Kept(
                 at = System.currentTimeMillis(),
-                profileId = chosen.profileId,
+                profileId = bot.profileId,
                 text = answer.text,
                 heard = answer.heard,
                 ms = answer.ms,
@@ -510,7 +530,7 @@ class BubbleService : Service() {
                 cleaned = answer.cleaned,
                 provider = answer.provider,
                 model = answer.model,
-                id = UUID.randomUUID().toString(),
+                id = id,
             ),
         )
     }

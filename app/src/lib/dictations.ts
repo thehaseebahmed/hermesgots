@@ -65,10 +65,11 @@ function stored(row: RowFields): DictationRecord {
   return { ...row, loggedAt: orderOf(row) }
 }
 
-function entryOf(connection: string, take: ConfirmedTake): DictationRecord {
+function entryOf(connection: string, take: ConfirmedTake, id?: string): DictationRecord {
   const asHeard = heardOf(take.heard)
   return stored({
-    id: randomId(),
+    // A row the phone already named keeps that name: a take handed over twice is one row, not two.
+    id: id ?? randomId(),
     connection,
     text: take.text.trim(),
     ...(asHeard ? { heard: asHeard } : {}),
@@ -183,10 +184,13 @@ async function askStats(config: HermesConfig, key: string): Promise<HostAnswer |
  * Writes one dictation at the moment a take's words land. The mirror takes it first and the host's
  * copy is fired without being awaited, so a host that is away — or too old to have the routes —
  * costs the take nothing, and a take the host never confirmed is posted again at the next reconcile.
+ *
+ * `id` is for a take whose row was already named somewhere else — the phone names a Bubble take's id
+ * before it writes the row itself, so a hand-over of one the host already has lands on that same row.
  */
-export async function writeDictation(config: HermesConfig, take: ConfirmedTake) {
+export async function writeDictation(config: HermesConfig, take: ConfirmedTake, id?: string) {
   if (!take.text.trim()) return
-  const row = entryOf(connectionKey(config), take)
+  const row = entryOf(connectionKey(config), take, id)
   await db.dictationLog.put(row).catch(quietly("Logging a dictation on this device"))
   void post(config, row)
     .then((posting) => applyPostings([posting]))
