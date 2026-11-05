@@ -1,5 +1,10 @@
 # A compacted chat's archived rows load as the reader reaches its top
 
+**Amended by [ADR 0107](0107-a-compaction-divider-stands-between-two-messages.md)** on the divider
+this ADR leaves standing at the top of the loaded window: a divider now needs a drawn message on each
+side, so the top of a half-loaded chat carries none, and the archive loading puts it back where the
+compaction happened. The reach, the paging and the kept rows stand as written.
+
 A chat Hermes compacted in place shows only its live window: the app reads
 `GET /api/sessions/{id}/messages?order=latest` without `include_compacted`, so the rows a compaction
 archived never arrive and the thread starts at the summary. The host already answers that read —

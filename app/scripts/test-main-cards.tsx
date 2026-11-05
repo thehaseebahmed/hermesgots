@@ -341,7 +341,8 @@ async function seedTriaged() {
       undoable: false,
       new: false,
     })),
-    // The host compacted Main after every message it holds, so the divider closes the flow too.
+    // The host compacted Main after every message it holds. No divider is drawn for it: a divider
+    // stands between two messages, and this Main holds none (compactions.ts).
     compactions: [{ at: at(0, 7), tokens: 8000, window: 200_000 }],
   })
 }
@@ -361,7 +362,7 @@ const hostWithMoves = () =>
     return json({})
   }) as typeof fetch
 
-test("a Main left with no messages reads its moves, its divider and its cards by one clock", async () => {
+test("a Main left with no messages reads its moves and its cards by one clock", async () => {
   await seedTriaged()
   globalThis.fetch = hostWithMoves()
   await mount(chatScreen(mainThreadId(bot.id)), async () => {
@@ -375,14 +376,14 @@ test("a Main left with no messages reads its moves, its divider and its cards by
         heading(at(-1, 9)),
         "card:t-memento",
         heading(at(0, 6)),
-        // Every one of these moves and the compaction were made before the first of these threads
-        // began, so all five lead the cards — the order the clock gives them, not the order the
-        // screens once appended their lists in.
+        // Every one of these moves was made before the first of these threads began, so all four lead
+        // the cards — the order the clock gives them, not the order the screens once appended their
+        // lists in. The compaction after everything draws no divider: Main holds no message for one to
+        // stand between.
         "marker:mv1",
         "marker:mv2",
         "marker:mv3",
         "marker:mv4",
-        "compaction",
         "card:t-clef",
         "card:t-compile",
         "card:t-skill",

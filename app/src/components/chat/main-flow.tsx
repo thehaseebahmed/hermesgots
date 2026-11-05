@@ -70,9 +70,8 @@ export function useMainFlow({
       mainTail({
         cards: cards?.trailing,
         moves: marks.trailing,
-        compaction: thread ? compacted?.trailing : undefined,
       }),
-    [cards, marks, compacted, thread],
+    [cards, marks],
   )
   const now = useNow()
   const flow = useMemo(() => {

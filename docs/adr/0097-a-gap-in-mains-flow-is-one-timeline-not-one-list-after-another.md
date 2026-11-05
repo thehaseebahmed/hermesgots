@@ -1,5 +1,9 @@
 # A gap in Main's flow is one timeline, not one producer's list after another
 
+**Amended by [ADR 0107](0107-a-compaction-divider-stands-between-two-messages.md)** (2026-11-05) on
+one of the three items: a compaction divider stands between two drawn messages, so the gap above a
+message still holds one, and the foot of a flow holds none. The one-timeline rule stands.
+
 **Amends [ADR 0080](0080-a-card-a-marker-and-a-divider-at-the-foot-of-main-read-one-clock.md)**, which
 merged a card, a Moved marker and a compaction's divider into one timeline *at the foot of Main* and
 left the anchored ones as they were. That stands for the foot. What it did not settle is the same

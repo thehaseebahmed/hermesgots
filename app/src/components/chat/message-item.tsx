@@ -478,6 +478,11 @@ interface MessageItemProps {
   /** The host's record of this chat's compactions, which says how full the context was at each. */
   compactions?: Compaction[]
   /**
+   * The seams whose divider another one in its gap replaces, or which have nothing drawn on one side
+   * of them: the reply draws no break for these (`replaced` from `compactionMarks`).
+   */
+  replaced?: ReadonlySet<string>
+  /**
    * What Retry and Cancel do for a message that didn't go — one object, so a row is never half
    * wired. A screen with its own send (chat-next) hands its own two in; every other row keeps the
    * current screen's.
@@ -500,6 +505,7 @@ export const MessageItem = memo(function MessageItem({
   subagentsInline,
   line,
   compactions,
+  replaced,
   actions,
 }: MessageItemProps) {
   const remindersShown = useRemindersShown(Boolean(message.reminders?.length))
@@ -636,7 +642,8 @@ export const MessageItem = memo(function MessageItem({
       toolsBefore: steer.toolsBefore,
       node: <SteerBubble text={steer.text} />,
     })
-  for (const seam of message.seams ?? [])
+  for (const seam of message.seams ?? []) {
+    if (replaced?.has(seam.id)) continue
     breaks.push({
       key: seam.id,
       offset: seam.contentOffset,
@@ -644,6 +651,7 @@ export const MessageItem = memo(function MessageItem({
       toolsBefore: seam.toolsBefore,
       node: <Compacted compaction={compactionOf(seam, compactions)} />,
     })
+  }
   breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
   const segments: Segment[] = []
   let start = 0

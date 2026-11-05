@@ -199,11 +199,12 @@ test("mid-reply too, a Main message the host sends to a thread is neither queued
   })
 })
 
-test("a Main left with nothing but what left it draws them in one timeline here too", async () => {
+test("a Main left with nothing but what left it draws its card after its marker", async () => {
   const { main, thread } = await seedMain("main-tail")
   const now = Date.now()
-  // A move this morning, the host's compaction after it, and a thread begun after that: the foot of
-  // Main is one clock, so the same order the current screen draws these in.
+  // A move this morning, the host's compaction after it, and a thread begun after that: the marker
+  // and the card read one clock, and the compaction draws no divider at the foot of a Main that holds
+  // no message for one to stand between.
   await db.conversations.update(thread, { createdAt: now - 1000 })
   await db.conversations.update(main, {
     moves: [
@@ -222,20 +223,17 @@ test("a Main left with nothing but what left it draws them in one timeline here 
   await mount(screen(main), async () => {
     await until(
       () =>
-        Boolean(
-          find('[data-slot="moved-marker"]') &&
-          find('[data-slot="compaction"]') &&
-          find('[data-slot="thread-card"]'),
-        ),
-      "the marker, the divider and the card, each of them drawn",
+        Boolean(find('[data-slot="moved-marker"]') && find('[data-slot="thread-card"]')),
+      "the marker and the card, each of them drawn",
     )
     const marker = find('[data-slot="moved-marker"]')!
-    const divider = find('[data-slot="compaction"]')!
     const card = find('[data-slot="thread-card"]')!
     // DOCUMENT_POSITION_FOLLOWING: the argument comes after the one asked about.
     const follows = (first: Element, then: Element) =>
       Boolean(first.compareDocumentPosition(then) & Node.DOCUMENT_POSITION_FOLLOWING)
-    assert.ok(follows(marker, divider), "the divider was made after the move it follows")
-    assert.ok(follows(divider, card), "and the thread began after the compaction")
+    assert.ok(follows(marker, card), "the thread began after the move")
+    // The compaction came after everything Main holds, and Main holds no message: a divider stands
+    // between two messages, so it draws none rather than closing the flow.
+    assert.equal(find('[data-slot="compaction"]'), null, "no divider closes the flow")
   })
 })

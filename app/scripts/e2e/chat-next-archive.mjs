@@ -75,8 +75,9 @@ await flow(
     const after = await startRun(sessionId, "zulu: the turn after the compaction")
     await until(async () => (await runStatus(after)) === "completed", 30_000, "the newest turn")
 
-    // The chat opens on its live window, under the compaction's divider: what a reader sees when the
-    // archived turns are not on this device.
+    // The chat opens on its live window: what a reader sees when the archived turns are not on this
+    // device. No divider stands over that window — a divider needs a message drawn above it, and the
+    // rows above it are exactly what isn't here yet (ADR 0104).
     await page.goto(`${app}/c/${chatId}`)
     await until(
       async () => (await drawn(page)).includes("zulu:"),
@@ -92,11 +93,11 @@ await flow(
         `"${name}" is not held by this device at all`,
       )
     }
-    await page.getByText("Compaction").first().waitFor({ timeout: 10_000 })
+    assert.ok(!window.includes("Compaction"), `no divider over a half-loaded window: ${window}`)
     await shot("window")
 
     assert.equal(await offers(page), 1, "the screen offers the messages the host archived")
-    pass("a compaction with no seam still offers the rows it archived")
+    pass("a compaction with no seam still offers the rows it archived, with no divider over it")
 
     await page.locator("[data-earlier]").click()
     await until(async () => whole(page, chatId), 30_000, "the archive to load")

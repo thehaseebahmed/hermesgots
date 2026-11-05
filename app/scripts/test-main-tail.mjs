@@ -54,18 +54,19 @@ test("a move made after a card follows it", () => {
   assert.deepEqual(drawn(tail), ["card:t-old@10", "move:m20@20", "card:t-new@30"])
 })
 
-test("the three producers interleave rather than one block outranking another", () => {
+test("a Main's tail is its cards and its moves, in their own time", () => {
   const tail = mainTail({
     cards: [thread("t10", 10), thread("t40", 40)],
     moves: [move("m30", 30)],
-    compaction: compaction(20),
   })
-  assert.deepEqual(drawn(tail), ["card:t10@10", "compaction:20@20", "move:m30@30", "card:t40@40"])
+  assert.deepEqual(drawn(tail), ["card:t10@10", "move:m30@30", "card:t40@40"])
 })
 
-test("a divider made after every card closes the flow, as it did when a screen appended it", () => {
-  const tail = mainTail({ cards: [thread("t10", 10)], compaction: compaction(20) })
-  assert.deepEqual(drawn(tail), ["card:t10@10", "compaction:20@20"])
+test("a compaction draws no divider at the foot of the flow", () => {
+  // `mainTail` has no compaction to hand in: a divider stands between two messages, so one made after
+  // everything written has nothing to stand between until the next message arrives (compactions.ts).
+  const tail = mainTail({ cards: [thread("t10", 10)] })
+  assert.deepEqual(drawn(tail), ["card:t10@10"])
 })
 
 test("two items at one moment keep a total order by id, not by kind", () => {

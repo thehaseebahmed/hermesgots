@@ -1,5 +1,9 @@
 # A card, a marker and a divider where Main's messages run out read one clock
 
+**Amended by [ADR 0107](0107-a-compaction-divider-stands-between-two-messages.md)** (2026-11-05): a
+compaction divider no longer draws at the foot of Main at all — it stands between two messages, and a
+Main holding none has no place for it. The cards and the markers still read one clock there.
+
 **Amended in its dot sentence by [ADR 0097](0097-a-gap-in-mains-flow-is-one-timeline-not-one-list-after-another.md)**
 (2026-11-04): the three are one timeline in the gaps between Main's messages too, not only at the
 foot, and a divider is an entry of the flow rather than something drawn inside a message's row.

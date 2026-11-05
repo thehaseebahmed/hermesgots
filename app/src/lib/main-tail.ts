@@ -53,18 +53,19 @@ export function tailItems({
 export const orderTail = (items: readonly TailItem[]): TailItem[] =>
   [...items].sort(byTimeThenId((item) => item.at, tailId))
 
-/** What no message follows in Main's flow: its cards, its markers and a divider, by their own times. */
+/**
+ * What no message follows in Main's flow: its cards and the markers of the moves, by their own times.
+ * A compaction draws no divider there: a divider stands between two messages of the thread, so one
+ * the host made after everything written has none to stand between (see `compactionMarks`).
+ */
 export function mainTail({
   cards,
   moves,
-  compaction,
 }: {
   /** The threads no message follows, from `threadCards`' own trailing. */
   cards?: readonly Thread[]
   /** The moves no message follows, from `moveMarks`' own trailing. */
   moves?: readonly Move[]
-  /** A compaction made after everything Main shows, from `compactionMarks`' trailing. */
-  compaction?: Compaction
 }): TailItem[] {
-  return orderTail(tailItems({ cards, moves, compaction }))
+  return orderTail(tailItems({ cards, moves }))
 }

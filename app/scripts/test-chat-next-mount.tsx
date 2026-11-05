@@ -881,8 +881,11 @@ test("the dividers the plugin's record places are drawn between the turns", asyn
     { user: "First", reply: "One." },
     { user: "Second", reply: "Two." },
   ])
+  // The host's clock, in the gap between the first turn and the second: that gap is the only place a
+  // divider stands, since one with nothing drawn above or below it is drawn nowhere.
+  const second = host.rows.find((row) => row.content === "Second")!
   await db.conversations.update("c-dividers", {
-    compactions: [{ at: 0, tokens: 168_000, window: 200_000 }],
+    compactions: [{ at: (second.timestamp - 0.5) * 1000, tokens: 168_000, window: 200_000 }],
   })
   await mount(chatScreen("c-dividers"), async () => {
     await until(() => replies().length === 2, "both turns are drawn")

@@ -6,6 +6,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { act } from "react"
+
 import { db, type Message } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
 
@@ -80,15 +82,22 @@ interface Drawn {
 
 const dividers = () => findAll("[role=separator]")
 
-async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
+async function screen(
+  compactions: unknown[],
+  id = "chat-1",
+  messages: Message[] = turn,
+  /** Whether a divider is drawn at all: nothing is waited for when the answer is that there is none. */
+  divided = true,
+): Promise<Drawn> {
   host(compactions)
-  await seedChat({ id, messages: turn, profile: bot })
+  await seedChat({ id, messages, profile: bot })
   let seen: Drawn = { dividers: 0, place: { divider: -1, second: -1 } }
   await mount(chatScreen(id), async () => {
     await until(async () => findAll("[data-slot=message]").length > 0, "the thread's rows")
     // The divider's words ride the markdown renderer, a lazy import on this route.
     await import("@/components/chat/markdown-renderer")
-    if (compactions.length) await until(async () => dividers().length > 0, "the divider")
+    if (compactions.length && divided) await until(async () => dividers().length > 0, "the divider")
+    else await act(async () => new Promise((resolve) => setTimeout(resolve, 200)))
     const drawn = dividers()
     // The divider is a flow entry of its own, so a card or a marker made in the same gap can stand
     // on the other side of it (ADR 0097): its place is read among the flow's rows, not inside one.
@@ -118,13 +127,43 @@ test("the compaction the host recorded draws its divider above the next message"
   )
 })
 
-test("a device that loaded the chat after it was compacted still marks it", async () => {
+test("a chat whose archive isn't loaded draws no divider at its top", async () => {
   // The second device's view: Hermes keeps the rows a compaction took away off the transcript, so
-  // everything this one loads is newer than the mark and the divider stands above the first of them.
-  const drawn = await screen([{ at: 900 }], "chat-fresh")
+  // everything this one loads is newer than the mark. A divider above the first of them would stand
+  // above every message in the thread — the app guessing at a row it hasn't read. The archive puts it
+  // back where it happened once the reader loads it (ADR 0058).
+  const drawn = await screen([{ at: 900 }], "chat-fresh", turn, false)
+  assert.equal(drawn.dividers, 0, `no divider, found ${drawn.dividers}`)
+})
+
+test("a record and a reply's own seam in one gap draw one divider", async () => {
+  // The two markers the thread reads as back to back: the reply's own seam at its foot, and the host's
+  // record standing above the next message, with nothing drawn between them.
+  const replied: Message[] = [
+    { ...turn[0], hermesAt: 1_000 },
+    {
+      ...turn[1],
+      content: "It came down fine.",
+      hermesAt: 1_010,
+      seams: [{ id: "h-c-11", row: 11, contentOffset: 18, toolsBefore: 0, at: 1_050 }],
+    },
+    { ...turn[2], hermesAt: 2_000 },
+    { ...turn[3], hermesAt: 2_010 },
+  ]
+  const drawn = await screen([{ at: 1_500 }], "chat-twice", replied)
   assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
-  assert.equal(drawn.place.divider, 0, "it stands above the first message the device holds")
-  assert.ok(drawn.place.second > drawn.place.divider, "which is the row under it")
+})
+
+test("a reply still being written draws no divider under it", async () => {
+  // A run that compacted while it writes: the divider belongs above the message written after it, and
+  // that message doesn't exist yet. Drawn at the foot of the reply, it would sit under text that keeps
+  // printing above it.
+  const typing: Message[] = [
+    { ...turn[0], hermesAt: 1_000 },
+    { ...turn[1], content: "Still writing", status: "streaming", hermesAt: 1_010 },
+  ]
+  const drawn = await screen([{ at: 2_000 }], "chat-typing", typing, false)
+  assert.equal(drawn.dividers, 0, `no divider, found ${drawn.dividers}`)
 })
 
 test("a chat the host never compacted draws nothing", async () => {

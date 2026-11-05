@@ -306,6 +306,7 @@ export function AppThreadView({
                             // Only a row that draws a seam reads these: a new array on every
                             // conversation write would wake every row's memo.
                             compactions={message.seams?.length ? record.compactions : undefined}
+                            replaced={message.seams?.length ? compacted.replaced : undefined}
                             blocks={draws.get(message.id)}
                             showStats
                             busy={streaming}
