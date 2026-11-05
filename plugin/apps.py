@@ -182,8 +182,8 @@ def create(
         pages = [source]
     if not isinstance(pages, list) or not pages:
         raise AppsError("An app needs a page.", 400)
-    sources = [_checked(one) for one in pages]
-    ids = [page_id_of(one) for one in sources]
+    pages = [(page_id_of(one), one) for one in map(_checked, pages)]
+    ids = [page_id for page_id, _ in pages]
     if len(set(ids)) != len(ids):
         raise AppsError("Two pages of an app can't share an id.", 400)
     version = (
@@ -197,7 +197,7 @@ def create(
         )
         conn.executemany(
             "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, ?, ?)",
-            [(app_id, page_id, position, one) for position, (page_id, one) in enumerate(zip(ids, sources))],
+            [(app_id, page_id, position, one) for position, (page_id, one) in enumerate(pages)],
         )
     return {"id": app_id, "title": title, "library_version": version, "pages": ids}
 

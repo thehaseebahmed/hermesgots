@@ -1,4 +1,3 @@
-/** The first app: a plus and a prompt sheet on the apps screen, with the host faked at the fetch boundary. */
 import assert from "node:assert/strict"
 import test from "node:test"
 

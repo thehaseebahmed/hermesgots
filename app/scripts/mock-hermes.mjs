@@ -80,10 +80,6 @@
 // enough to scroll a phone's thread, then a patch block reusing that id (it changes the card and
 // table in place, and draws nothing where it sits), then a block naming a component the library
 // doesn't have — which draws as the code the model sent — and a closing line.
-// Say "build an app" for a reply that is an app's pages: three `openui-lang` blocks, `home` first (the
-// root), `rooms` and `trend` after it, the first reading `light.list` and acting through `light.toggle`.
-// With `plugin` on, the bot keeps those apps: GET and POST /api/plugins/memento/apps (a POST writes
-// the app and every page at once or none), GET …/apps/{id}/pages/{page}, and POST …/apps/builds.
 // Say "routine message" for a turn whose reply is followed by a routine's own message (ADR 0081):
 // an assistant row with `display_kind: "routine_message"` and the plugin's `routine` metadata, the
 // run it came from a transcript of its own, and GET /api/plugins/memento/sessions/{id}/routines
@@ -528,8 +524,6 @@ async function readBody(req) {
 }
 
 // Cron: per profile, three jobs with a run history. Runs are { start, end, ok, provider } in ms.
-/** The apps the mock bot keeps, `{ id, title, pages: [source] }`, the first page the root. */
-const mockApps = new Map()
 const cronByProfile = new Map()
 const MINUTE = 60_000
 function cronJobs(profile = "default") {
@@ -1176,11 +1170,7 @@ function closeOutcome(id) {
   workspace.closed = true
   // The first repo keeps its tree after a turn that said "commit" (unpushed work).
   if (userTurns(id).some((r) => /commit/i.test(r.content)))
-    return {
-      removed: false,
-      kept: [{ name: workspace.repos[0].name, reason: "unpushed" }],
-      results,
-    }
+    return { removed: false, kept: [{ name: workspace.repos[0].name, reason: "unpushed" }], results }
   projectSessions.delete(id)
   return { removed: true, kept: [], results }
 }
@@ -1205,8 +1195,7 @@ function closeBody(row) {
 const PR_INSTRUCTIONS = "**pull_request** \u2014 the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. The pull request stays a draft. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend."
 
 // The plugin's base-prompt opening (prompt_builder._GOTS_OPENING), word for word.
-const GOTS_OPENING =
-  "You're a bot running on Hermes Agent, working in a project's git worktrees while the user talks to you from their phone. You read the code, make the change, check it yourself, and open a draft pull request they read when they come back. What you claim is worth only the checks you ran; what you did is visible only in what you tell them."
+const GOTS_OPENING = "You're a bot running on Hermes Agent, working in a project's git worktrees while the user talks to you from their phone. You read the code, make the change, check it yourself, and open a draft pull request they read when they come back. What you claim is worth only the checks you ran; what you did is visible only in what you tell them."
 
 // The plugin's guidelines (prompt_builder._DO_RULES and _DONT_RULES), word for word: how a run
 // carries the work and what it holds back from, told once for every session.
@@ -1354,36 +1343,12 @@ function startDelegation(parent, goal) {
   add({ role: "user", content: goal })
   noteEvent("runs")
   const steps = [
-    [
-      "terminal",
-      { command: "du -sh /var/log/* | sort -rh | head -5" },
-      JSON.stringify({ output: "2.1G\t/var/log/journal\n410M\t/var/log/nginx", exit_code: 0 }),
-    ],
-    [
-      "terminal",
-      { command: "journalctl --disk-usage" },
-      JSON.stringify({ output: "Archived and active journals take up 2.0G", exit_code: 0 }),
-    ],
-    [
-      "read_file",
-      { path: "/etc/systemd/journald.conf" },
-      JSON.stringify({ content: "[Journal]\n#SystemMaxUse=" }),
-    ],
-    [
-      "search_files",
-      { pattern: "SystemMaxUse", path: "/etc" },
-      JSON.stringify({ matches: ["/etc/systemd/journald.conf:3"] }),
-    ],
-    [
-      "terminal",
-      { command: "ls -la /var/log/journal" },
-      JSON.stringify({ output: "drwxr-sr-x 4 root systemd-journal 4096 .", exit_code: 0 }),
-    ],
-    [
-      "read_file",
-      { path: "/etc/logrotate.d/rsyslog" },
-      JSON.stringify({ content: "/var/log/syslog\n{\n\trotate 7\n}" }),
-    ],
+    ["terminal", { command: "du -sh /var/log/* | sort -rh | head -5" }, JSON.stringify({ output: "2.1G\t/var/log/journal\n410M\t/var/log/nginx", exit_code: 0 })],
+    ["terminal", { command: "journalctl --disk-usage" }, JSON.stringify({ output: "Archived and active journals take up 2.0G", exit_code: 0 })],
+    ["read_file", { path: "/etc/systemd/journald.conf" }, JSON.stringify({ content: "[Journal]\n#SystemMaxUse=" })],
+    ["search_files", { pattern: "SystemMaxUse", path: "/etc" }, JSON.stringify({ matches: ["/etc/systemd/journald.conf:3"] })],
+    ["terminal", { command: "ls -la /var/log/journal" }, JSON.stringify({ output: "drwxr-sr-x 4 root systemd-journal 4096 .", exit_code: 0 })],
+    ["read_file", { path: "/etc/logrotate.d/rsyslog" }, JSON.stringify({ content: "/var/log/syslog\n{\n\trotate 7\n}" })],
   ]
   const report =
     "The journal takes 2.0G of the 2.5G and journald has no SystemMaxUse cap. nginx is next with 410M. Capping the journals at 500M frees the most for one line."
@@ -1994,28 +1959,6 @@ const OPENUI_INTERFACE = [
   'h = Chart("bar", [{ name: "Sessions", points: [{ x: "Q1", y: 21000 }, { x: "Q2", y: 47000 }] }], "", "", "Sessions ran from 21,000 in the first quarter to 47,000 in the second.")',
   "```",
 ].join("\n")
-const APP_BUILD = [
-  "Here is the app: three pages, home first.",
-  "",
-  "```openui-lang",
-  "# id: home",
-  "root = Stack([c, q])",
-  'c = Card("Home", "Your lights, and a way into each room.")',
-  'q = Query("light.list", {}, {})',
-  "```",
-  "",
-  "```openui-lang",
-  "# id: rooms",
-  "root = Stack([c])",
-  'c = Card("Rooms", "Living room, kitchen and the hall.")',
-  "```",
-  "",
-  "```openui-lang",
-  "# id: trend",
-  "root = Stack([c])",
-  'c = Card("Trend", "Energy used over the week.")',
-  "```",
-].join("\n")
 const OPENUI_RECEIPT = [
   "What's in the number:",
   "",
@@ -2151,11 +2094,7 @@ async function playTurn(req, body, last, out) {
       role: "assistant",
       content: spoken.trimEnd(),
       tool_calls: [
-        {
-          id,
-          type: "function",
-          function: { name: "terminal", arguments: JSON.stringify({ command }) },
-        },
+        { id, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } },
       ],
     })
     noteEvent("session", session)
@@ -2272,12 +2211,6 @@ async function playTurn(req, body, last, out) {
     await say("That's the quarter, from the first read to this one.", 30)
     record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
     return { spoken, prompt_tokens: 9000, completion_tokens: pieces }
-  }
-
-  if (/\bbuild an app\b/i.test(last)) {
-    await say(APP_BUILD, 30)
-    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
-    return { spoken, prompt_tokens: 5000, completion_tokens: pieces }
   }
 
   if (/\bdraw the map\b/i.test(last)) {
@@ -3490,7 +3423,8 @@ function heardBy() {
  * the bot wrote for it, else the schema's default, and nothing where the host can name neither.
  */
 function providerModel(name) {
-  const field = ["model", "model_id"].find((one) => `stt.${name}.${one}` in STT_DEFAULTS) ?? "model"
+  const field =
+    ["model", "model_id"].find((one) => `stt.${name}.${one}` in STT_DEFAULTS) ?? "model"
   const key = `stt.${name}.${field}`
   const written = stt.values[key]
   const value = typeof written === "string" && written.trim() ? written : STT_DEFAULTS[key]
@@ -4103,7 +4037,9 @@ function streamRunEvents(req, res, run, lastSeq) {
   }
   // A withheld request is the one a late subscriber never hears: what the run's status says is all
   // there is to read.
-  replay.filter((event) => !(WITHHOLD_PROMPT && PROMPT_EVENTS.has(event.event))).forEach(send)
+  replay
+    .filter((event) => !(WITHHOLD_PROMPT && PROMPT_EVENTS.has(event.event)))
+    .forEach(send)
   // A finished run's stream ends at once, the way Hermes's does, however it finished.
   if (["completed", "cancelled", "failed"].includes(run.status))
     return res.end(": stream closed\n\n")
@@ -4277,7 +4213,6 @@ http
           "stt_settings",
           "afk",
           "afk_switch",
-          "apps",
           "afk_skills",
           "afk_workflows",
           "afk_prompt",
@@ -4345,40 +4280,6 @@ http
     // The workflow library: presets first and read-only, the account's own rows rewritten in place.
     // A write answers the whole list, which is what the sheet draws; an update of a preset forks it
     // into a copy (`workflows.save`), since a preset's body belongs to the plugin's version.
-    if (PLUGIN && !profile && url.pathname.startsWith("/api/plugins/memento/apps")) {
-      const tail = url.pathname.slice("/api/plugins/memento/apps".length)
-      const idOf = (source) => /^# id: (\S+)/.exec(source)?.[1] ?? "root"
-      const record = (made) => ({
-        id: made.id,
-        title: made.title,
-        library_version: "1.0.1",
-        pages: made.pages.map(idOf),
-      })
-      if (tail === "/builds" && req.method === "POST") {
-        await readBody(req)
-        return json(res, 201, { object: "memento.app.build", marked: true })
-      }
-      if (tail === "" && req.method === "GET")
-        return json(res, 200, { object: "memento.apps", apps: [...mockApps.values()].map(record) })
-      if (tail === "" && req.method === "POST") {
-        const body = await readBody(req)
-        const pages = Array.isArray(body.pages) ? body.pages : []
-        if (!String(body.title ?? "").trim() || !pages.length)
-          return json(res, 400, { error: { message: "An app needs a title and a page." } })
-        const made = { id: `app_${mockApps.size + 1}`, title: body.title, pages }
-        mockApps.set(made.id, made)
-        return json(res, 201, { object: "memento.app", app: record(made) })
-      }
-      const page = /^\/([^/]+)\/pages\/([^/]+)$/.exec(tail)
-      const found = page && mockApps.get(decodeURIComponent(page[1]))
-      const source = found?.pages.find((one) => idOf(one) === decodeURIComponent(page[2]))
-      if (source && req.method === "GET")
-        return json(res, 200, {
-          object: "memento.app.page",
-          page: { id: idOf(source), app_id: found.id, source, undoable: false },
-        })
-      return json(res, 404, { error: { message: "No such app or page." } })
-    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/workflows") {
       if (req.method === "GET")
         return json(res, 200, { object: "memento.workflows", workflows: workflows() })
@@ -4444,7 +4345,8 @@ http
     if (PLUGIN && SKILLS && !profile && skillEnabled && req.method === "POST") {
       const name = decodeURIComponent(skillEnabled[1])
       const row = skillRows().find((one) => one.name === name)
-      if (!row) return json(res, 400, { error: { message: `Skill '${name}' isn't on this bot.` } })
+      if (!row)
+        return json(res, 400, { error: { message: `Skill '${name}' isn't on this bot.` } })
       const { enabled } = await readBody(req)
       if (typeof enabled !== "boolean")
         return json(res, 400, {
@@ -4486,10 +4388,7 @@ http
         return json(res, 404, {
           error: { message: `Skill '${name}' has no file '${path}'.` },
         })
-      return json(res, 200, {
-        object: "skill.file",
-        data: { name, path, content: SKILL_FILES[path] },
-      })
+      return json(res, 200, { object: "skill.file", data: { name, path, content: SKILL_FILES[path] } })
     }
     if (PLUGIN && SKILLS && !profile && skillView && req.method === "DELETE") {
       const name = decodeURIComponent(skillView[1])
@@ -5553,13 +5452,7 @@ http
                   detail: null,
                   scope: "account",
                 },
-                {
-                  label: "Credits",
-                  used_percent: 0,
-                  resets_at: null,
-                  detail: "$25.00",
-                  scope: "account",
-                },
+                { label: "Credits", used_percent: 0, resets_at: null, detail: "$25.00", scope: "account" },
               ]
             : [
                 {
@@ -5615,9 +5508,8 @@ http
         agents: delegations.get(id) ?? [],
       })
     }
-    const sessionAgentsStop = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents\/stop$/.exec(
-      url.pathname,
-    )
+    const sessionAgentsStop =
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents\/stop$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && sessionAgentsStop) {
       const session = decodeURIComponent(sessionAgentsStop[1])
       const rows = []
@@ -5748,10 +5640,7 @@ http
         return json(res, 409, { error: { message: "This bot is already hearing a take." } })
       const held = dictationTake(take)
       if (!held.pieces.has(index)) {
-        held.pieces.set(index, {
-          bytes: data.length,
-          ms: Number(url.searchParams.get("ms") ?? 0) || 0,
-        })
+        held.pieces.set(index, { bytes: data.length, ms: Number(url.searchParams.get("ms") ?? 0) || 0 })
         held.order.push(index)
       }
       dictationClips.push({
@@ -5764,9 +5653,7 @@ http
       })
       return json(res, 202, { object: "memento.dictation_piece", take, index })
     }
-    const dictationConfirm = /^\/api\/plugins\/memento\/dictation\/([^/]+)\/confirm$/.exec(
-      url.pathname,
-    )
+    const dictationConfirm = /^\/api\/plugins\/memento\/dictation\/([^/]+)\/confirm$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && dictationConfirm) {
       const take = decodeURIComponent(dictationConfirm[1])
       const body = await readBody(req).catch(() => ({}))
@@ -5845,9 +5732,7 @@ http
         else if (key === "stt.provider") {
           const name = typeof body.value === "string" ? body.value.trim() : ""
           if (!STT_WRITABLE.includes(name))
-            return json(res, 400, {
-              error: { message: "That isn't a provider this host declares." },
-            })
+            return json(res, 400, { error: { message: "That isn't a provider this host declares." } })
           stt.values[key] = name
         } else if (typeof STT_DEFAULTS[key] === "number") {
           if (typeof body.value !== "number" || Number.isNaN(body.value))
@@ -5888,9 +5773,7 @@ http
           !("hearing_prompt" in body)
         )
           return json(res, 400, {
-            error: {
-              message: "Body needs a model, a cleanup_model, a cleanup_level or a hearing_prompt.",
-            },
+            error: { message: "Body needs a model, a cleanup_model, a cleanup_level or a hearing_prompt." },
           })
         if ("model" in body) {
           const name = typeof body.model === "string" ? body.model.trim().toLowerCase() : ""
@@ -5919,8 +5802,7 @@ http
           speech.cleanup = pick === null ? null : { provider: pick.provider, model: pick.model }
         }
         if ("cleanup_level" in body) {
-          const level =
-            typeof body.cleanup_level === "string" ? body.cleanup_level.trim().toLowerCase() : ""
+          const level = typeof body.cleanup_level === "string" ? body.cleanup_level.trim().toLowerCase() : ""
           if (!["none", "light", "medium", "high"].includes(level))
             return json(res, 400, {
               error: { message: "cleanup_level must be one of none, light, medium, high" },
@@ -6098,9 +5980,7 @@ http
       })
     }
     const pendingRoute =
-      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/pending(?:\/([^/]+)\/discard)?$/.exec(
-        url.pathname,
-      )
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/pending(?:\/([^/]+)\/discard)?$/.exec(url.pathname)
     if (PLUGIN && !profile && pendingRoute) {
       const id = decodeURIComponent(pendingRoute[1])
       const held = pendingOf(id)
@@ -6418,13 +6298,7 @@ http
     // Dev only: POST { session_id, rows, from } appends plain turns to a session's transcript, so a
     // flow can build a chat longer than one host page without running each of its turns.
     if (url.pathname === "/__mock/rows" && req.method === "POST") {
-      const {
-        session_id: sessionId,
-        rows = 600,
-        from = 1,
-        data,
-        compactions: marks,
-      } = await readBody(req)
+      const { session_id: sessionId, rows = 600, from = 1, data, compactions: marks } = await readBody(req)
       // A session the app hasn't opened yet has no transcript to append to; it starts empty.
       const stored = transcripts.get(sessionId) ?? []
       transcripts.set(sessionId, stored)
@@ -6553,10 +6427,7 @@ http
     const prsOf = (id) => {
       const workspace = projectSessions.get(id)
       if (PRS_FAIL)
-        return {
-          status: 502,
-          body: { error: { message: "Couldn't reach GitHub from the server." } },
-        }
+        return { status: 502, body: { error: { message: "Couldn't reach GitHub from the server." } } }
       const turns = userTurns(id)
       const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
       const pendingTurn = turns.findLast((r) => /pending/i.test(r.content))
@@ -6577,7 +6448,13 @@ http
         url: pr.url,
         state: pr.state ?? state,
         // A finished pull request's checks don't matter any more, so only the live one has them.
-        checks: pr.state ? null : said("break") ? "failure" : checksRunning ? "pending" : "success",
+        checks: pr.state
+          ? null
+          : said("break")
+            ? "failure"
+            : checksRunning
+              ? "pending"
+              : "success",
       }))
       // Like the plugin: a merge of the live one resolves the session in the chat list, once.
       if (state === "merged" && !workspace.mergeResolved) {
@@ -6620,8 +6497,7 @@ http
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}. Keep all work inside these directories:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}`
       // The plugin's library rule (prompt_builder._LIBRARY_RULES), word for word: it names no path,
       // because the folder is the tool's business.
-      const LIBRARY_RULES =
-        "**library_add** — the only way a file you made reaches the user: screenshots, images, charts, reports, markdown. Give it the file's path and one folder, kebab-case, named after the flow or change it belongs to (library-tab, library-tab-tree-view); the file keeps its own name, kebab-case, with its extension (dashboard-light.png). It creates the folder, moves the file and returns the new path; a bad name, or one already filed, is an error — fix it and call again. It owns the file handling: don't move, copy or rename anything yourself."
+      const LIBRARY_RULES = "**library_add** — the only way a file you made reaches the user: screenshots, images, charts, reports, markdown. Give it the file's path and one folder, kebab-case, named after the flow or change it belongs to (library-tab, library-tab-tree-view); the file keeps its own name, kebab-case, with its extension (dashboard-light.png). It creates the folder, moves the file and returns the new path; a bad name, or one already filed, is an error — fix it and call again. It owns the file handling: don't move, copy or rename anything yourself."
       // The session's own line, prompt_builder._scratch_line, under the last section.
       const scratchLine = (record) =>
         `For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/${record.branch}" as your temporary directory. DO NOT place your files outside of it.`

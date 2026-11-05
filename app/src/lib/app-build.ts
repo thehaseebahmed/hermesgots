@@ -56,5 +56,6 @@ export function titleOf(prompt: string): string {
   const line = prompt.trim().split("\n")[0].trim()
   if (line.length <= TITLE_CHARS) return line
   const cut = line.slice(0, TITLE_CHARS)
-  return `${cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : TITLE_CHARS)}…`
+  const space = cut.lastIndexOf(" ")
+  return `${space > 0 ? cut.slice(0, space) : cut}…`
 }

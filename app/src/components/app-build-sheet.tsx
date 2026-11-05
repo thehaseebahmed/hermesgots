@@ -15,7 +15,7 @@ import { usePluginFeature } from "@/lib/features"
 import { useHostRecord } from "@/lib/host-record"
 import { OPENUI_SWITCH, UNANSWERED_IS_ON } from "@/lib/openui-switch"
 
-const wordsOf = (error: unknown) =>
+const reasonOf = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "Couldn't build the app."
 
 type Step =
@@ -64,7 +64,7 @@ export function AppBuildSheet({
       const pages = await buildPages(profile, prompt, controller.signal)
       if (!controller.signal.aborted) setStep({ kind: "consent", pages })
     } catch (error) {
-      if (!controller.signal.aborted) setStep({ kind: "prompt", error: wordsOf(error) })
+      if (!controller.signal.aborted) setStep({ kind: "prompt", error: reasonOf(error) })
     }
   }
 
@@ -76,7 +76,7 @@ export function AppBuildSheet({
       close(false)
       navigate(`/apps/${app.id}`)
     } catch (error) {
-      setStep({ kind: "prompt", error: wordsOf(error) })
+      setStep({ kind: "prompt", error: reasonOf(error) })
     }
   }
 
