@@ -6,7 +6,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { db } from "@/lib/db"
+import { clearAllData, db } from "@/lib/db"
 import { AppPage, AppsPage } from "@/routes/apps"
 import {
   Path,
@@ -180,4 +180,49 @@ test("an app that is gone says so", async () => {
       await until(async () => text().includes("This app is gone."), "the notice")
     },
   )
+})
+
+const stopHost = () => {
+  globalThis.fetch = (async () => {
+    throw new TypeError("Failed to fetch")
+  }) as unknown as typeof globalThis.fetch
+}
+
+test("with the host stopped the list and an opened page draw from the cache", async () => {
+  await seed({ home: { source: SALES } })
+  await db.appCache.clear()
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => text().includes("Quarterly sales"), "the root page")
+    await until(async () => (await db.appCache.count()) === 2, "the list and page cached")
+  })
+  stopHost()
+  await mount(screen("/apps"), async () => {
+    await until(async () => Boolean(find('ul[aria-label="Apps"]')), "the cached list")
+    assert.match(text(), /Offline/)
+    assert.match(text(), /House/)
+  })
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => text().includes("Quarterly sales"), "the cached page")
+    assert.match(text(), /Offline/)
+  })
+})
+
+test("a page this device never opened says so rather than drawing empty", async () => {
+  await seed({ home: { source: SALES } })
+  await db.appCache.clear()
+  await mount(screen("/apps"), async () => {
+    await until(async () => Boolean(find('ul[aria-label="Apps"]')), "the list")
+    await until(async () => (await db.appCache.count()) === 1, "the list cached")
+  })
+  stopHost()
+  await mount(screen("/apps/house"), async () => {
+    await until(async () => text().includes("never opened this page"), "the notice")
+    assert.equal(find("[data-slot=app-page] [data-slot=card]"), null)
+  })
+})
+
+test("clearing all data clears the cached apps", async () => {
+  await db.appCache.put({ key: "k\napps", connection: "k", apps: [] })
+  await clearAllData()
+  assert.equal(await db.appCache.count(), 0)
 })

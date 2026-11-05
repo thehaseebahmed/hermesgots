@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { getActiveProfile, type Profile } from "@/lib/db"
 import { changeOf, changePrompt, pagesOf, streamedSource } from "@/lib/app-build"
+import { connectionKey } from "@/lib/connection"
+import { db, getActiveProfile, type Profile } from "@/lib/db"
 import {
   createApp,
   followRun,
@@ -22,7 +23,15 @@ import { createStore } from "@/lib/store"
 /** How often a screen holding apps reads them again, so a page written elsewhere draws. */
 const LIST_MS = 30_000
 
-type Listed = { profileId: string; apps?: HostApp[]; error?: string }
+type Listed = { profileId: string; apps?: HostApp[]; error?: string; offline?: boolean }
+
+const listKey = (profile: Profile) => `${connectionKey(profile)}\napps`
+const pageKey = (profile: Profile, appId: string, pageId: string) =>
+  `${connectionKey(profile)}\n${appId}/${pageId}`
+
+/** Keeps what the host answered; a device whose storage refuses it still draws what it just read. */
+const keep = (row: Parameters<typeof db.appCache.put>[0]) =>
+  void db.appCache.put(row).catch(() => {})
 
 const listed = createStore<Listed | undefined>(undefined)
 const reading = new Map<string, Promise<void>>()
@@ -38,11 +47,15 @@ function refreshApps(profile: Profile) {
   const joined = reading.get(profile.id)
   if (joined) return joined
   const read = listApps(profile)
-    .then((apps) => listed.set({ profileId: profile.id, apps }))
-    .catch((failure) => {
+    .then((apps) => {
+      keep({ key: listKey(profile), connection: connectionKey(profile), apps })
+      listed.set({ profileId: profile.id, apps })
+    })
+    .catch(async (failure) => {
       const kept = listed.get()
-      const apps = kept?.profileId === profile.id ? kept.apps : undefined
-      listed.set({ profileId: profile.id, apps, error: wordsOf(failure) })
+      const held = kept?.profileId === profile.id ? kept.apps : undefined
+      const apps = held ?? (await db.appCache.get(listKey(profile)))?.apps
+      listed.set({ profileId: profile.id, apps, error: wordsOf(failure), offline: Boolean(apps) })
     })
     .finally(() => reading.delete(profile.id))
   reading.set(profile.id, read)
@@ -146,7 +159,7 @@ export function useApps() {
   const state = listed.use()
   usePoll(() => profile && void refreshApps(profile), LIST_MS, [profile?.id])
   const mine = state && state.profileId === profile?.id ? state : undefined
-  return { apps: mine?.apps, error: mine?.error, loaded: Boolean(mine) }
+  return { apps: mine?.apps, error: mine?.error, offline: mine?.offline, loaded: Boolean(mine) }
 }
 
 export function useAppPage(appId: string, pageId: string | undefined) {
@@ -157,16 +170,24 @@ export function useAppPage(appId: string, pageId: string | undefined) {
     page?: HostAppPage
     error?: string
     missing?: boolean
+    offline?: boolean
   }>()
   usePoll(
     (signal) => {
       if (!profile || !pageId) return
       getAppPage(profile, appId, pageId, signal)
-        .then((page) => setRead({ key, page }))
-        .catch((failure) => {
+        .then((page) => {
+          keep({ key: pageKey(profile, appId, pageId), connection: connectionKey(profile), page })
+          setRead({ key, page })
+        })
+        .catch(async (failure) => {
           if (signal.aborted) return
           const missing = failure instanceof HermesError && failure.status === 404
-          setRead({ key, error: wordsOf(failure), missing })
+          const page = missing
+            ? undefined
+            : (await db.appCache.get(pageKey(profile, appId, pageId)))?.page
+          if (signal.aborted) return
+          setRead({ key, page, offline: Boolean(page), error: wordsOf(failure), missing })
         })
     },
     LIST_MS,
@@ -194,6 +215,7 @@ export function useAppPage(appId: string, pageId: string | undefined) {
     page: current?.page,
     error: current?.error,
     missing: current?.missing,
+    offline: current?.offline,
     undo,
     change,
     draft,
