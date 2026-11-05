@@ -125,16 +125,44 @@ export function PlanReadyCard({
   )
 }
 
+/**
+ * The head of a notice in the composer's slot: an icon, a line, its body, and the control beside them
+ * — one place for the icon's size, the words' voice and the 44px pill, so the notices can't drift.
+ * A card draws it at the top of its content and keeps its own layout under it.
+ */
+function NoticeHead({
+  icon,
+  title,
+  body,
+  action,
+}: {
+  icon: ReactNode
+  title: string
+  body: string
+  action?: ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="shrink-0 [&>svg]:size-6">{icon}</span>
+      <div className="min-w-0 flex-1 text-sm">
+        <p className="font-medium">{title}</p>
+        <p className="text-muted-foreground">{body}</p>
+      </div>
+      {action}
+    </div>
+  )
+}
+
 /** In place of the composer when the session can't go on: a repo it worked in left the project. */
 export function BlockedCard({ reason }: { reason: string }) {
   return (
     <Card size="sm" className={CARD}>
-      <CardContent className="flex items-center gap-3">
-        <LockIcon className="size-6 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1 text-sm">
-          <p className="font-medium">This session is read-only.</p>
-          <p className="text-muted-foreground">{reason}</p>
-        </div>
+      <CardContent>
+        <NoticeHead
+          icon={<LockIcon className="text-muted-foreground" />}
+          title="This session is read-only."
+          body={reason}
+        />
       </CardContent>
     </Card>
   )
@@ -144,15 +172,17 @@ export function BlockedCard({ reason }: { reason: string }) {
 export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
   return (
     <Card size="sm" className={CARD}>
-      <CardContent className="flex items-center gap-3">
-        <CheckCircle2Icon className="size-6 shrink-0 text-success" />
-        <div className="min-w-0 flex-1 text-sm">
-          <p className="font-medium">This session is resolved.</p>
-          <p className="text-muted-foreground">Reopen it to send more messages.</p>
-        </div>
-        <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
-          Reopen
-        </Button>
+      <CardContent>
+        <NoticeHead
+          icon={<CheckCircle2Icon className="text-success" />}
+          title="This session is resolved."
+          body="Reopen it to send more messages."
+          action={
+            <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
+              Reopen
+            </Button>
+          }
+        />
       </CardContent>
     </Card>
   )
@@ -177,13 +207,7 @@ export function QueuePausedCard({
   return (
     <Card size="sm" className={CARD}>
       <CardContent className="space-y-3">
-        <div className="flex items-start gap-3">
-          <TimerOffIcon className="mt-0.5 size-6 shrink-0 text-warning" />
-          <div className="min-w-0 flex-1 text-sm">
-            <p className="font-medium">{PAUSED_TITLE}</p>
-            <p className="text-muted-foreground">{PAUSED_BODY}</p>
-          </div>
-        </div>
+        <NoticeHead icon={<TimerOffIcon className="text-warning" />} title={PAUSED_TITLE} body={PAUSED_BODY} />
         <ul className="space-y-1.5">
           {rows.map((row) => (
             <li key={row.id} className="rounded-2xl bg-muted/50 px-3 py-2 text-sm">

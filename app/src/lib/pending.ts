@@ -13,22 +13,17 @@
 
 import { oneLine } from "./words.ts"
 
-/** One input the host holds for a session: its words, and whether it was the turn that was lost. */
+/** One input the host holds for a session: the words its sender typed. */
 export type PendingInput = {
   id: string
   text: string
-  /** `queued` waits in line; `unknown` is a turn the host can't say finished. */
-  status: "queued" | "unknown"
 }
 
 export type PendingQueue = {
   items: PendingInput[]
-  /** The row that holds the queue: the first lost turn, else null. */
+  /** The row the host can't say finished, and the one that holds everything behind it. */
   lost: string | null
-  paused: boolean
 }
-
-export const EMPTY_QUEUE: PendingQueue = { items: [], lost: null, paused: false }
 
 /** A row of the card: what the host holds, and the one word that says why it's held. */
 export type PendingRow = {
@@ -55,27 +50,33 @@ export const DISCARD_LABEL = "Discard lost turn"
 
 /**
  * What the card draws, or undefined while nothing is held: a queue still moving draws nothing,
- * since its messages are already in the thread waiting their turn.
+ * since its messages are already in the thread waiting their turn. The host names the row that
+ * holds the queue, and that name decides which row reads as lost — a later `unknown` waits its turn
+ * behind it like any other.
  */
 export function pausedQueue(queue: PendingQueue | undefined) {
-  if (!queue?.paused || !queue.items.length) return undefined
+  if (!queue?.lost) return undefined
   return {
     lost: queue.lost,
     rows: queue.items.map(
       (item): PendingRow => ({
         id: item.id,
         text: item.text,
-        state: item.status === "unknown" ? "lost" : "waiting",
-        label: item.status === "unknown" ? LOST_LABEL : WAITING_LABEL,
+        state: item.id === queue.lost ? "lost" : "waiting",
+        label: item.id === queue.lost ? LOST_LABEL : WAITING_LABEL,
       }),
     ),
   }
 }
 
-/** How many messages a discard sets free: everything waiting behind the lost turn. */
-export function releasedBy(queue: PendingQueue | undefined) {
-  if (!pausedQueue(queue)) return 0
-  return queue!.items.filter((item) => item.status === "queued").length
+/** Whether two reads of a queue say the same thing, so a poll that changed nothing draws nothing. */
+export function sameQueue(a: PendingQueue | undefined, b: PendingQueue | undefined) {
+  if (a === b) return true
+  if (!a || !b || a.lost !== b.lost || a.items.length !== b.items.length) return false
+  return a.items.every((item, place) => {
+    const other = b.items[place]
+    return item.id === other.id && item.text === other.text
+  })
 }
 
 /** The words a held message shows: its own line, or that it has none to show. */

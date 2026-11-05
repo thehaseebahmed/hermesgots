@@ -24,13 +24,13 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
-import { pausedQueue, type PendingQueue } from "@/lib/pending"
+import { pausedQueue, sameQueue, type PendingQueue } from "@/lib/pending"
 import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
 import { prepareTurn, queueTurn, steerTurn, triageTurn } from "@/chat-next/turn"
-import { quietly } from "@/lib/report"
+import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
@@ -976,27 +976,51 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     return () => window.clearInterval(timer)
   }, [id, hostWaiting])
   // The queue Hermes itself holds for this chat, and the turn a restart can lose under it
-  // (`plugin/pending.py`). Read as the chat opens and then at the idle pace: a fence is written to
-  // the ledger with no event of its own, so nothing else on this screen would ever say so.
+  // (`plugin/pending.py`). Read as the chat opens and then at the idle pace while nothing runs — a
+  // fence is written to the ledger with no event of its own, so nothing else here would say so. A
+  // read that changed nothing leaves the state it was, so the screen doesn't redraw on every tick.
   const [pending, setPending] = useState<PendingQueue>()
   const [discarding, setDiscarding] = useState(false)
+  const missed = useRef(0)
   usePoll(
-    (signal) => {
+    () => {
       if (!id) return setPending(undefined)
-      void readPending(id, signal)
-        .then(setPending)
-        .catch(quietly("Reading the host's queue"))
+      void readPending(id)
+        .then((next) => {
+          missed.current = 0
+          setPending((held) => (sameQueue(held, next) ? held : next))
+        })
+        .catch((error) => {
+          noteFailure("Reading the host's queue", error)
+          // The card says what the host holds *now*, and a read that didn't answer can't say it. Two
+          // in a row let the composer back: a card that can't be discarded must not hold a chat shut.
+          if (++missed.current >= 2) setPending(undefined)
+        })
     },
     CHAT_IDLE_MS,
     [id],
-    { active: Boolean(id) },
+    // A running turn is not a fenced one: the FIFO that a fence holds still is the one a run drains.
+    { active: Boolean(id) && !busy },
   )
   const paused = pausedQueue(pending)
+  // The one fact the render, the history read and the poll all ask: whether the host holds the queue.
+  const heldQueue = Boolean(paused)
+  // When this device last acknowledged a lost turn, which frees one that starts a beat later.
+  const freedAt = useRef(0)
+  // Bumped when that freed turn's moment has passed, so the thread is read once more and says what it
+  // finds rather than spinning on a read that already answered.
+  const [freedTick, setFreedTick] = useState(0)
   const discardLost = async () => {
-    if (!id || !pending?.lost) return
+    // The row the card drew as lost is the row acknowledged: one answer, not two readings of it.
+    if (!id || !paused) return
     setDiscarding(true)
+    // Read before the card goes: the thread read this lets through is checked against it.
+    freedAt.current = Date.now()
     try {
-      setPending(await discardLostTurn(id, pending.lost))
+      setPending(await discardLostTurn(id, paused.lost))
+      // The freed turn's first row lands within the window the thread read is held open for; past it
+      // the thread is read again, so a turn that never came draws the pane rather than a spinner.
+      setTimeout(() => setFreedTick((n) => n + 1), SEND_CAUGHT_UP_MS)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't discard the lost turn.")
     } finally {
@@ -1079,7 +1103,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     messages?.length === 0
   // A chat whose queue the host holds and whose thread is empty is waiting, not unread: the lost
   // turn never wrote its row, so neither a read that failed nor a spinner is the truth (ADR 0108).
-  const pausedEmpty = Boolean(paused) && !flow.length
+  const pausedEmpty = heldQueue && !flow.length
   const threadUnread = needsHistory && readFailure?.chat.id === id && !pausedEmpty
   const loadingHistory = needsHistory && !threadUnread && !pausedEmpty
   // A read describes the chat as it is when it fails, which is no reason for the read to run again.
@@ -1105,21 +1129,32 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       setReadFailure(failure)
       reportUnreadThread(failure)
     }
+    // Why the thread came back with nothing — an answer that read no rows, or a read that threw. A
+    // chat whose queue the host holds is empty by design (the lost turn never wrote its row), which
+    // the card states, so neither outcome is recorded as a failed read (ADR 0108). Asked through
+    // `readPending`, which the card's poll shares: one question, one request.
+    const held = async () => {
+      // A turn a discard freed starts a beat later and writes its first row then, so a thread still
+      // empty just after one is being filled rather than missing.
+      if (Date.now() - freedAt.current < SEND_CAUGHT_UP_MS) return true
+      const queue = await readPending(id).catch(() => undefined)
+      return Boolean(pausedQueue(queue))
+    }
     reconcileHistory(id)
       .then(async (count) => {
-        if (count) return
-        // Nothing came back. A chat whose queue the host holds is empty for a reason the card in the
-        // composer's slot states: the turn a restart lost never wrote its row, so an empty transcript
-        // is the state, not a read that failed (ADR 0108). Every other chat with a past and no rows
-        // is still a read this device couldn't make.
-        if (pausedQueue(await readPending(id).catch(() => undefined))) return
+        if (count || (await held())) return
         failed()
       })
-      .catch(failed)
+      .catch(async (error) => {
+        if (await held()) return
+        failed(error)
+      })
   }, [id])
   useEffect(() => {
-    if (needsHistory) readHistory()
-  }, [needsHistory, readHistory])
+    // The queue's answer belongs to the question: a fence lifted is what makes the read worth making
+    // again, and a fence still in place is what leaves the thread empty without a word.
+    if (needsHistory && !heldQueue) readHistory()
+  }, [needsHistory, heldQueue, freedTick, readHistory])
   const retryHistory = useCallback(() => {
     setReadFailure(undefined)
     readHistory()
@@ -1554,7 +1589,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         // Nothing has been written in this thread yet and nothing can be until the lost turn is
         // discarded: the card below says both, and a new session's face would say neither. The pane
         // still takes its room, so the card keeps the composer's own place at the foot.
-        <div className="flex flex-1" data-empty-thread />
+        <div className="flex flex-1" />
       ) : conversation?.main && botThreads && configured ? (
         <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
       ) : (

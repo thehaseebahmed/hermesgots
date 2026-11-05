@@ -522,6 +522,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The General page mirrors this Hermes's own Dashboard form; a host that has no schema to
         # copy advertises nothing, and the app keeps the page it has (general.py's gate).
         general_features = await asyncio.to_thread(_advertised, general.FEATURES)
+        # The session's own queue is read through Hermes's admission ledger and cleared through the
+        # authority that owns it; a host with either missing offers no card at all, rather than an
+        # empty one that reads as "nothing is waiting" (pending.available says which moved).
+        pending_gate = await asyncio.to_thread(pending.available)
         return web.json_response(
             {
                 "name": "memento",
@@ -606,7 +610,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # (pending.py): what waits there is drawn in the chat, and the lost turn is
                     # discarded from it — the TUI's `/discard`, which the app otherwise needs the
                     # terminal for.
-                    "pending",
+                    *(["pending"] if pending_gate is None else []),
                     "dictation",
                     # A bot's dictation log: the durable copy of the words a take landed, with the
                     # totals its Dictation screen counts (dictations.py, ADR 0060).

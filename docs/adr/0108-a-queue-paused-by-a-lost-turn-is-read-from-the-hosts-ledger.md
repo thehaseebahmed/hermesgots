@@ -13,8 +13,9 @@ out was a terminal on the host, which is exactly what the app exists to avoid.
 
 **The queue is read from the ledger, and the lost turn is discarded from the chat.** The plugin reads
 a session's pending rows through Hermes's own reader (`list_session_admissions`) and answers them as
-`GET sessions/{id}/pending`: the inputs still in line, in FIFO order, and which of them is the lost
-turn — the state `paused` says so without the app deriving it. `POST
+`GET sessions/{id}/pending`: the inputs still in line, in FIFO order, each carrying only the words its
+sender typed, and `lost` naming the one row the host cannot say finished — the row that holds the
+rest — rather than a per-row status the app would have to translate. `POST
 sessions/{id}/pending/{admission}/discard` acknowledges that turn through the authority that owns it
 (`resolve_unknown_as_owner`), the same resolution the gateway makes when the last viewer leaves a
 session whose turn recovered `unknown`; the row's generation is the fence, so a card that goes stale
@@ -28,8 +29,12 @@ to end. A queue with nothing holding it draws nothing: its messages are already 
 waiting their turn, and a card that said so would be a second account of the same fact.
 
 The read is gated on the plugin advertising `pending`, so a host from before this change draws no
-card at all, and it is polled at the chat's idle pace: a fence is written to the ledger with no event
-of its own, so no stream would ever announce it.
+card at all — and a host whose Hermes has no admission ledger advertises nothing either, rather than
+answering "nothing is waiting" about a session it never read. It is polled at the chat's idle pace:
+a fence is written to the ledger with no event of its own, so no stream would ever announce it. A
+read is bounded like every other on the screen, and two in a row that don't answer give the composer
+back: the card is a claim about the host right now, and one that can't be discarded must not be able
+to hold a chat shut.
 
 ## Considered options
 

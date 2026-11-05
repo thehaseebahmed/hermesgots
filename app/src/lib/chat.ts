@@ -1730,30 +1730,47 @@ function followHostQueue(conversationId: string) {
   for (const ms of HOST_QUEUE_CHECKS_MS) setTimeout(() => void refreshQueue(conversationId), ms)
 }
 
+/** The turn a discard freed starts a beat later, so it is looked for where a queued turn's is. */
+function followFreedTurn(conversationId: string) {
+  for (const ms of HOST_QUEUE_CHECKS_MS)
+    setTimeout(() => void reattachRun(conversationId).catch(quietly("Following a run")), ms)
+}
+
+const readingPending = new Map<string, Promise<PendingQueue | undefined>>()
+
 /**
- * The queue Hermes itself keeps for this chat (`plugin/pending.py`): what waits in it, and whether a
- * turn the host lost mid-restart is holding it still. `undefined` where the bot's host has no such
- * route, so an older plugin draws no card at all rather than an empty one.
+ * The queue Hermes itself keeps for this chat (`plugin/pending.py`): what waits in it, and which row
+ * a restart left unfinishable. One read at a time — the screen's poll and a history read that found
+ * nothing ask the same question, and neither should make the other's request. `undefined` where the
+ * bot's host has no such route, so an older plugin draws no card at all rather than an empty one.
  */
-export async function readPending(
-  conversationId: string,
-  signal?: AbortSignal,
-): Promise<PendingQueue | undefined> {
+export function readPending(conversationId: string): Promise<PendingQueue | undefined> {
+  let reading = readingPending.get(conversationId)
+  if (!reading) {
+    reading = loadPending(conversationId).finally(() => readingPending.delete(conversationId))
+    readingPending.set(conversationId, reading)
+  }
+  return reading
+}
+
+async function loadPending(conversationId: string): Promise<PendingQueue | undefined> {
   const host = await hostOf(conversationId)
   if (!host || !(await hasPluginFeature(host.config, "pending"))) return undefined
-  return getPending(host.config, host.conversation.hermesSessionId, signal)
+  return getPending(host.config, host.conversation.hermesSessionId)
 }
 
 /**
  * Acknowledges the lost turn holding this chat's queue, so the messages behind it run, and answers
  * what the host holds now. Its message is not replayed: it stays in the transcript, to send again.
- * The turn the discard frees is followed at once, as a queue the plugin started is.
+ * The turn it frees starts a beat later, as one a queued message starts does, so it is looked for on
+ * the same ladder.
  */
 export async function discardLostTurn(conversationId: string, admissionId: string) {
   const host = await hostOf(conversationId)
-  if (!host) return undefined
+  if (!host || !(await hasPluginFeature(host.config, "pending")))
+    throw new HermesError("This chat isn't one the app can clear.")
   const next = await discardPending(host.config, host.conversation.hermesSessionId, admissionId)
-  void reattachRun(conversationId).catch(quietly("Following a run"))
+  followFreedTurn(conversationId)
   return next
 }
 

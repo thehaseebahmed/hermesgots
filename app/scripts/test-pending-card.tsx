@@ -36,11 +36,10 @@ const turn: Message[] = [
 /** The turn a restart lost, and the message queued behind it: the state the TUI lists as `queued (2)`. */
 const held = {
   items: [
-    { id: "a", text: "a turn the server lost", status: "unknown" },
-    { id: "b", text: "the older message behind it", status: "queued" },
+    { id: "a", text: "a turn the server lost" },
+    { id: "b", text: "the older message behind it" },
   ],
   lost: "a",
-  paused: true,
 }
 
 type Seen = { path: string; method: string }
@@ -86,7 +85,7 @@ test("a chat whose queue a lost turn holds names what waits instead of the compo
 })
 
 test("a queue still moving draws no card, and the composer stays", async () => {
-  host({ items: [{ id: "b", text: "waiting its turn", status: "queued" }], lost: null, paused: false })
+  host({ items: [{ id: "b", text: "waiting its turn" }], lost: null })
   await seedChat({ id: "chat-moving", messages: turn, profile: bot })
   await mount(chatScreen("chat-moving"), async () => {
     await until(() => Boolean(composer()), "the composer")
@@ -126,12 +125,14 @@ test("Discard acknowledges the lost turn on its own route, and the composer come
 test("a fenced chat whose thread holds nothing waits, rather than claiming the thread didn't load", async () => {
   // The turn a restart lost never wrote its row, so the session's transcript is empty: a chat with a
   // past and no rows, which every other screen reads as a read that failed. The card says what it
-  // is, so neither the pane nor a new session's face is drawn — before the discard or after it.
-  host(held)
+  // is, so neither the pane nor a new session's face is drawn — and clearing the fence is what makes
+  // the read worth making again, so the thread is read once more rather than left spinning.
+  const seen = host(held)
   await seedChat({ id: "chat-empty", messages: [], profile: bot })
   // `updatedAt` past `createdAt` is the app's record that something was sent in this chat: what makes
   // an empty thread here a read it has to make, and a failed one the pane usually names.
   await db.conversations.update("chat-empty", { updatedAt: 2 })
+  const reads = () => seen.filter((one) => one.method === "GET" && /\/messages$/.test(one.path))
   await mount(chatScreen("chat-empty"), async () => {
     await until(() => Boolean(card()), "the paused-queue card")
     const words = document.body.textContent ?? ""
@@ -141,8 +142,10 @@ test("a fenced chat whose thread holds nothing waits, rather than claiming the t
     // `assert.ok` on the element, never `equal(x, null)`: a failing element assertion serializes the
     // whole node and can take the runner's heap with it.
     assert.ok(!find('[data-slot="spinner"]'), "nor a read still running, which never lands")
+    const before = reads().length
     await click(card())
     await until(() => !card(), "the card gone")
+    await until(() => reads().length > before, "the thread read again once the fence lifted")
     assert.ok(
       !(document.body.textContent ?? "").includes(THREAD_MISSING),
       "and clearing the queue does not turn it into one",

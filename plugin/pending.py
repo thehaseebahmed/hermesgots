@@ -7,20 +7,21 @@ gateway can clear, with ``prompt.resolve_unknown`` (the TUI's ``/discard`` and `
 discard``). The app reaches neither, so a session stuck this way shows a queue that never moves and
 no way to move it: this module is the app's door to the same ledger.
 
-It reads the rows the ledger itself keeps (``list_session_admissions``) and acknowledges a lost turn
-through the authority that owns them (``resolve_unknown_as_owner``), which is the same resolution the
-gateway makes when the last viewer leaves a session whose turn recovered ``unknown``. Nothing here
-requeues or replays the lost input: it stays in the transcript to be sent again, as Hermes's own
-discard leaves it.
+It reads the rows the ledger keeps (``list_session_admissions``) beside the authority serving the
+profile, and acknowledges a lost turn through that authority (``resolve_unknown_as_owner``), which is
+the same resolution the gateway makes when the last viewer leaves a session whose turn recovered
+``unknown``. Nothing here requeues or replays the lost input: it stays in the transcript to be sent
+again, as Hermes's own discard leaves it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,18 @@ logger = logging.getLogger(__name__)
 # row is the turn actually running, not something waiting behind anything.
 SHOWN = ("queued", "unknown")
 LOST = "unknown"
-# What the app reads a lost row as saying; Hermes words its own notice the same way (its canonical
-# ``lostRow``), and a client that predates the wording still reads the status this names.
-MAX_TEXT = 8_000
+# How much of each held message crosses to the app. A row draws one line of `ROW_TEXT_CHARS` (200,
+# `app/src/lib/pending.ts`) and never reads past it, so the envelope is cut here: a session at the
+# ledger's own cap would otherwise ship a quarter of a megabyte on every poll.
+WIRE_TEXT = 400
+# What this route needs from Hermes, module by module. `available` reads the list, so a host missing
+# one advertises no feature rather than answering an empty queue it never looked at.
+BUILT_INS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("hermes_state_runtime", ("get_session_admission", "list_session_admissions")),
+    ("gateway.session_authorities", ("authority_for_home",)),
+    ("gateway.session_contract", ("SessionRef",)),
+    ("gateway.session_api", ("restore_api_session",)),
+)
 
 
 class PendingError(Exception):
@@ -41,20 +51,39 @@ class PendingError(Exception):
         self.status = status
 
 
-def owner_scope(owner: Any) -> Any:
-    """``owner``'s own profile scope, for work done for the home it serves.
+def available() -> Optional[str]:
+    """Why this Hermes can't be asked, or ``None`` where it can.
 
-    A gateway hosting several profiles reads config and credentials per profile; owner-side work
-    belongs in the owning profile's scope. A single-profile gateway and a Hermes without the helper
-    both read in the ambient one, which is the same thing there.
+    The read is Hermes's admission ledger and the discard is its owner path; a host missing either
+    would answer "nothing is waiting" about a session it never read, which is the claim the app
+    draws a card from.
+    """
+    for module, names in BUILT_INS:
+        try:
+            found = importlib.import_module(module)
+        except ImportError as error:
+            return f"This Hermes has no session admission ledger ({error})."
+        for name in names:
+            if not hasattr(found, name):
+                return f"This Hermes's session ledger has moved ({module}.{name})."
+    return None
+
+
+def profile_scope(owner: Any) -> Any:
+    """The owning profile's scope for work done for the home it serves.
+
+    A gateway hosting several profiles reads config and credentials per profile, so owner-side work
+    belongs in the owning profile's scope. A single-profile gateway, and a Hermes too old to offer
+    the helper, read in the ambient one, which is the same thing there.
     """
     try:
-        from gateway.session_authorities import owner_scope as scope
+        from gateway.session_authorities import owner_scope
     except ImportError:
         return nullcontext()
     try:
-        return scope(owner)
+        return owner_scope(owner)
     except Exception:
+        logger.warning("memento: reading this session outside its own profile's scope", exc_info=True)
         return nullcontext()
 
 
@@ -92,15 +121,14 @@ def public_text(payload: Any) -> str:
         native = payload.get("native_text_v1")
         event = native.get("event") if isinstance(native, dict) else None
         text = event.get("text") if isinstance(event, dict) else None
-    return text[:MAX_TEXT] if isinstance(text, str) else ""
+    return text[:WIRE_TEXT] if isinstance(text, str) else ""
 
 
 def view(rows: Any) -> Dict[str, Any]:
-    """What the app reads of a session's pending rows: what waits, in line, and what was lost.
+    """What the app reads of a session's pending rows: what waits, in order, and which row was lost.
 
-    ``lost`` names the row the host cannot say finished — the FIFO's first ``unknown``, which is the
-    one that holds everything behind it. More than one is listed as it comes: each is its own
-    acknowledgement, and the TUI asks for each in turn the same way.
+    ``lost`` names the row the host cannot say finished — the FIFO's first ``unknown``, the one that
+    holds everything behind it. The rest wait, queued or unknown alike, each let go in its turn.
     """
     items: List[Dict[str, Any]] = []
     lost: Optional[str] = None
@@ -110,21 +138,18 @@ def view(rows: Any) -> Dict[str, Any]:
         admission_id = row.get("admission_id")
         if not isinstance(admission_id, str) or not admission_id:
             continue
-        status = str(row.get("status"))
-        items.append({"id": admission_id, "text": public_text(row.get("payload")), "status": status})
-        if status == LOST and lost is None:
+        items.append({"id": admission_id, "text": public_text(row.get("payload"))})
+        if row.get("status") == LOST and lost is None:
             lost = admission_id
-    return {"items": items, "lost": lost, "paused": lost is not None}
+    return {"items": items, "lost": lost}
 
 
 def read(owner: Any, session_id: str) -> Dict[str, Any]:
-    """A session's pending rows, read from the ledger through the authority that owns them."""
+    """A session's pending rows, read from the ledger beside the authority that owns them."""
     if owner is None:
         return view([])
-    try:
-        from hermes_state_runtime import list_session_admissions
-    except ImportError:
-        return view([])
+    from hermes_state_runtime import list_session_admissions
+
     try:
         rows = list_session_admissions(owner.db, session_id=session_id)
     except Exception:
@@ -162,18 +187,19 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
     """
     if owner is None:
         raise PendingError("This Hermes can't discard a lost turn.", 501)
-    try:
-        from gateway.session_contract import SessionRef
-        from hermes_state_runtime import get_session_admission
-    except ImportError:
-        raise PendingError("This Hermes can't discard a lost turn.", 501)
+    from gateway.session_contract import SessionRef
+    from hermes_state_runtime import get_session_admission
+
     resolve = getattr(owner, "resolve_unknown_as_owner", None)
     if not callable(resolve):
         raise PendingError("This Hermes can't discard a lost turn.", 501)
     try:
-        row = get_session_admission(owner.db, admission_id=admission_id)
+        row = await asyncio.to_thread(get_session_admission, owner.db, admission_id=admission_id)
     except Exception:
-        row = None
+        logger.warning("memento: couldn't read a lost turn on %s", session_id, exc_info=True)
+        raise PendingError("The host couldn't read this session's queue.", 502)
+    # A row of another session, or one that already settled, is the app's card gone stale: refused in
+    # the same words, since the screen's only move either way is to read the queue again.
     if (
         not isinstance(row, dict)
         or row.get("target_session_id") != session_id
@@ -181,18 +207,23 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
     ):
         raise PendingError("That turn isn't waiting to be discarded any more.", 409)
     generation = row.get("generation")
-    with owner_scope(owner):
+    with profile_scope(owner):
+        # Restoring the session is the host putting its own house in order; a failure there is the
+        # host's, never the card's (409 would tell the reader the turn moved on, which it hasn't).
         try:
             await asyncio.to_thread(ensure_live, owner, session_id)
-            ref = SessionRef(owner.profile_id, session_id)
-            await resolve(ref, admission_id, generation)
+        except Exception:
+            logger.warning("memento: couldn't restore %s to discard", session_id, exc_info=True)
+            raise PendingError("The host couldn't restore that session to discard the turn.", 502)
+        try:
+            await resolve(SessionRef(owner.profile_id, session_id), admission_id, generation)
         except Exception as error:
             reason = getattr(error, "reason", "")
             if reason in ("stale_generation", "not_found"):
                 raise PendingError("That turn isn't waiting to be discarded any more.", 409)
             logger.warning("memento: couldn't discard a lost turn on %s", session_id, exc_info=True)
             raise PendingError("The host couldn't discard that turn.", 502)
-    return read(owner, session_id)
+    return await asyncio.to_thread(read, owner, session_id)
 
 
 async def discard_for(adapter: Any, home: Path, session_id: str, admission_id: str) -> Dict[str, Any]:

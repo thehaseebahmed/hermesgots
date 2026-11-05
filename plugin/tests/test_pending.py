@@ -112,13 +112,12 @@ class ViewTest(unittest.TestCase):
             ]
         )
         self.assertEqual(found["lost"], "a")
-        self.assertTrue(found["paused"])
         self.assertEqual(
             found["items"],
             [
-                {"id": "a", "text": "", "status": "unknown"},
-                {"id": "b", "text": "the older one", "status": "queued"},
-                {"id": "c", "text": "and the newer", "status": "queued"},
+                {"id": "a", "text": ""},
+                {"id": "b", "text": "the older one"},
+                {"id": "c", "text": "and the newer"},
             ],
         )
 
@@ -126,7 +125,6 @@ class ViewTest(unittest.TestCase):
         found = pending.view([admission("a", "started", "at work"), admission("b", "queued", "next")])
         self.assertEqual([item["id"] for item in found["items"]], ["b"])
         self.assertIsNone(found["lost"])
-        self.assertFalse(found["paused"])
 
     def test_a_native_rows_words_are_its_event_text(self) -> None:
         row = admission("a", "queued", payload={"native_text_v1": {"event": {"text": "from a bot"}}})
@@ -137,8 +135,36 @@ class ViewTest(unittest.TestCase):
         self.assertEqual(found["items"], [])
 
     def test_nothing_pending_is_not_a_pause(self) -> None:
-        self.assertEqual(pending.view([]), {"items": [], "lost": None, "paused": False})
-        self.assertEqual(pending.view(None), {"items": [], "lost": None, "paused": False})
+        self.assertEqual(pending.view([]), {"items": [], "lost": None})
+        self.assertEqual(pending.view(None), {"items": [], "lost": None})
+
+    def test_a_long_message_crosses_only_as_far_as_a_row_draws_it(self) -> None:
+        # The card draws one line of 200 characters; the envelope is cut at `WIRE_TEXT`, well before
+        # the ledger's own cap, so a full queue doesn't ship megabytes on every poll.
+        row = admission("a", "queued", "x" * 20_000)
+        text = pending.view([row])["items"][0]["text"]
+        self.assertEqual(len(text), pending.WIRE_TEXT)
+
+
+class AvailableTest(unittest.TestCase):
+    def test_a_host_holding_what_the_route_reads_is_asked(self) -> None:
+        host = Host([])
+        with mock.patch.dict(sys.modules, host.modules()):
+            self.assertIsNone(pending.available())
+
+    def test_a_host_without_the_ledger_advertises_nothing(self) -> None:
+        host = Host([])
+        modules = host.modules()
+        modules["gateway.session_contract"] = types.ModuleType("gateway.session_contract")
+        with mock.patch.dict(sys.modules, modules):
+            self.assertIn("session ledger has moved", pending.available() or "")
+
+    def test_a_host_without_an_importable_module_advertises_nothing(self) -> None:
+        host = Host([])
+        modules = host.modules()
+        del modules["hermes_state_runtime"]
+        with mock.patch.dict(sys.modules, modules):
+            self.assertIn("no session admission ledger", pending.available() or "")
 
 
 class ReadTest(unittest.TestCase):
@@ -156,16 +182,8 @@ class ReadTest(unittest.TestCase):
         modules["gateway.session_authorities"].authority_for_home = lambda runner, home: None
         with mock.patch.dict(sys.modules, modules):
             found = pending.read_for(SimpleNamespace(gateway_runner=object()), Path("/home"), "s1")
-        self.assertEqual(found, {"items": [], "lost": None, "paused": False})
+        self.assertEqual(found, {"items": [], "lost": None})
         self.assertEqual(host.reads, [])
-
-    def test_a_host_without_the_ledger_reader_answers_empty(self) -> None:
-        host = Host([admission("a", "unknown")])
-        modules = host.modules()
-        del modules["hermes_state_runtime"].list_session_admissions
-        with mock.patch.dict(sys.modules, modules):
-            found = pending.read(host.authority, "s1")
-        self.assertEqual(found["items"], [])
 
 
 class DiscardTest(unittest.TestCase):
@@ -180,7 +198,7 @@ class DiscardTest(unittest.TestCase):
         found = self.discard(host)
         self.assertEqual(host.resolved, [("s1", "a", 7)])
         self.assertEqual(host.refs, [("default", "s1")])
-        self.assertFalse(found["paused"])
+        self.assertIsNone(found["lost"])
 
     def test_a_session_the_owner_is_not_holding_is_restored_first(self) -> None:
         host = Host([admission("a", "unknown")])
@@ -212,6 +230,19 @@ class DiscardTest(unittest.TestCase):
         with self.assertRaises(pending.PendingError) as raised:
             self.discard(host)
         self.assertEqual(raised.exception.status, 501)
+
+    def test_a_ledger_that_cannot_be_read_is_not_a_turn_that_moved_on(self) -> None:
+        # A locked store or a schema that drifted says so as a failure (502), never as "give up, the
+        # turn is gone" (409): the app's card would still show the lost turn.
+        host = Host([admission("a", "unknown")])
+
+        def broken(db, *, admission_id):
+            raise RuntimeError("database is locked")
+
+        host.get = broken
+        with self.assertRaises(pending.PendingError) as raised:
+            self.discard(host)
+        self.assertEqual(raised.exception.status, 502)
 
     def test_a_generation_that_moved_under_the_app_is_refused(self) -> None:
         host = Host([admission("a", "unknown")])

@@ -3801,9 +3801,8 @@ function pendingOf(sessionId) {
 }
 const pendingView = (held) => ({
   object: "memento.pending",
-  items: held.items.map(({ id, text, status }) => ({ id, text, status })),
+  items: held.items.map(({ id, text }) => ({ id, text })),
   lost: held.lost,
-  paused: Boolean(held.lost),
 })
 
 function startRun(req, body, options = {}) {
@@ -6145,8 +6144,8 @@ http
         pendingQueues.set(session, {
           lost: "lost_1",
           items: [
-            { id: "lost_1", text, status: "unknown" },
-            ...queued.map((one, place) => ({ id: `held_${place + 1}`, text: one, status: "queued" })),
+            { id: "lost_1", text },
+            ...queued.map((one, place) => ({ id: `held_${place + 1}`, text: one })),
           ],
         })
       noteEvent("runs", session)

@@ -1674,6 +1674,15 @@ function queueItem(raw: Record<string, unknown>): QueueItem {
   }
 }
 
+/** The objects of a host's array, each read by `row`: a body that isn't a list at all is no rows. */
+function objects<T>(value: unknown, row: (raw: Record<string, unknown>) => T): T[] {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .map(row)
+    : []
+}
+
 function queueRoot(config: HermesConfig, sessionId: string) {
   return `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/queue`
 }
@@ -1682,11 +1691,11 @@ function queueRoot(config: HermesConfig, sessionId: string) {
 export async function getQueue(config: HermesConfig, sessionId: string) {
   const response = await request(queueRoot(config, sessionId), { headers: headers(config) })
   const body = await response.json()
-  const list = (value: unknown) =>
-    Array.isArray(value)
-      ? value.filter((item) => item && typeof item === "object").map(queueItem)
-      : []
-  return { items: list(body?.items), sent: list(body?.sent), paused: Boolean(body?.paused) }
+  return {
+    items: objects(body?.items, queueItem),
+    sent: objects(body?.sent, queueItem),
+    paused: Boolean(body?.paused),
+  }
 }
 
 /** Queues a turn on the plugin, which starts it with `run` once the session's run is over. */
@@ -1829,31 +1838,30 @@ function pendingRoot(config: HermesConfig, sessionId: string) {
 }
 
 function pendingInput(raw: Record<string, unknown>): PendingInput {
-  const status = raw.status === "unknown" ? "unknown" : "queued"
-  return { id: String(raw.id), text: typeof raw.text === "string" ? raw.text : "", status }
+  return { id: String(raw.id), text: typeof raw.text === "string" ? raw.text : "" }
 }
 
 /** What Hermes holds for a session: the inputs still in its FIFO, and the turn a restart lost. */
-function pendingQueue(body: any): PendingQueue {
-  const items = Array.isArray(body?.items)
-    ? body.items.filter((item: unknown) => item && typeof item === "object").map(pendingInput)
-    : []
+function pendingQueue(body: unknown): PendingQueue {
+  const held = (body ?? {}) as Record<string, unknown>
   return {
-    items,
-    lost: typeof body?.lost === "string" ? body.lost : null,
-    paused: Boolean(body?.paused),
+    items: objects(held.items, pendingInput),
+    lost: typeof held.lost === "string" ? held.lost : null,
   }
 }
 
+/** The bound every read on a chat's screen keeps: a host that never answers can't hold one open. */
+const pendingSignal = (signal?: AbortSignal) =>
+  signal ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]) : AbortSignal.timeout(READ_TIMEOUT_MS)
+
 /**
- * The queue Hermes itself keeps for a session (`plugin/pending.py`): what waits in it, and whether a
- * turn the host lost mid-restart is holding it still. A host without the route answers nothing, and
- * the chat draws no card.
+ * The queue Hermes itself keeps for a session (`plugin/pending.py`): what waits in it, and which row
+ * a restart left unfinishable. A host without the route answers nothing, and the chat draws no card.
  */
 export async function getPending(config: HermesConfig, sessionId: string, signal?: AbortSignal) {
   const response = await request(pendingRoot(config, sessionId), {
     headers: headers(config),
-    signal,
+    signal: pendingSignal(signal),
   })
   return pendingQueue(await response.json())
 }
@@ -1869,7 +1877,7 @@ export async function discardPending(
 ) {
   const response = await request(
     `${pendingRoot(config, sessionId)}/${encodeURIComponent(admissionId)}/discard`,
-    { method: "POST", headers: headers(config) },
+    { method: "POST", headers: headers(config), signal: AbortSignal.timeout(WRITE_TIMEOUT_MS) },
   )
   return pendingQueue(await response.json())
 }

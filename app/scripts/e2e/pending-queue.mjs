@@ -1,14 +1,11 @@
 // A chat whose queue Hermes itself holds behind a turn a restart lost (`plugin/pending.py`): the card
 // takes the composer's place, names the lost turn and the message waiting behind it, and Discard
 // acknowledges it so the queue runs again — the TUI's `/discard`, from the app.
-import { app, assert, flow, LOOKS, mock, pass, runId } from "./lib.mjs"
+import { app, assert, flow, LOOKS, mockPost, pass, runId } from "./lib.mjs"
 
 /** Puts the host's fence on a session: one lost turn, and one input waiting behind it. */
 const fence = (session, text, queued) =>
-  fetch(`${mock}/__mock/pending`, {
-    method: "POST",
-    body: JSON.stringify({ session, text, queued: [queued] }),
-  })
+  mockPost("/__mock/pending", { session, text, queued: [queued] })
 
 async function body({ page, seed, shot, until }) {
   const chat = `e2e-pending-${runId()}`
@@ -51,6 +48,6 @@ async function body({ page, seed, shot, until }) {
 }
 
 // The card on a laptop and on a phone, each in its own theme.
-for (const { look, options } of [LOOKS[0], LOOKS[1]]) await flow(`pending-queue-${look}`, body, options)
+for (const { look, options } of LOOKS) await flow(`pending-queue-${look}`, body, options)
 
 pass("a fenced chat names what its queue holds and clears the lost turn from the app")
