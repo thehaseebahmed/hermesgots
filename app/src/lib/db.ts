@@ -768,11 +768,8 @@ export interface SpeechCacheRow {
 export interface AppCacheRow {
   /** `<connectionKey>\napps` for the list, `<connectionKey>\n<appId>/<pageId>` for a page. */
   key: string
-  /** The `connectionKey` of the bot whose host answered. */
   connection: string
-  /** The list, as the host answered it. */
   apps?: HostApp[]
-  /** The page, as the host answered it. */
   page?: HostAppPage
 }
 

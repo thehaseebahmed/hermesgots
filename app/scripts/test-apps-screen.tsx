@@ -6,6 +6,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
+import { connectionKey } from "@/lib/connection"
 import { clearAllData, db } from "@/lib/db"
 import { AppPage, AppsPage } from "@/routes/apps"
 import {
@@ -225,4 +226,18 @@ test("clearing all data clears the cached apps", async () => {
   await db.appCache.put({ key: "k\napps", connection: "k", apps: [] })
   await clearAllData()
   assert.equal(await db.appCache.count(), 0)
+})
+
+test("a page the host no longer lists is dropped from the cache", async () => {
+  await seed({ home: { source: SALES } })
+  await db.appCache.clear()
+  await db.appCache.put({
+    key: "stale",
+    connection: (await db.profiles.toArray()).map(connectionKey)[0],
+    page: { id: "old", appId: "house", source: "", undoable: false },
+  })
+  await mount(screen("/apps"), async () => {
+    await until(async () => (await db.appCache.get("stale")) === undefined, "the stale page dropped")
+    assert.equal(await db.appCache.count(), 1)
+  })
 })

@@ -29,9 +29,36 @@ const listKey = (profile: Profile) => `${connectionKey(profile)}\napps`
 const pageKey = (profile: Profile, appId: string, pageId: string) =>
   `${connectionKey(profile)}\n${appId}/${pageId}`
 
-/** Keeps what the host answered; a device whose storage refuses it still draws what it just read. */
-const keep = (row: Parameters<typeof db.appCache.put>[0]) =>
-  void db.appCache.put(row).catch(() => {})
+const warn = (what: string) => (failure: unknown) =>
+  console.warn(`[memento] Couldn't ${what}:`, failure)
+
+/** Keeps a page the host answered; a device whose storage refuses it still draws what it just read. */
+const keepPage = (profile: Profile, appId: string, page: HostAppPage) =>
+  void db.appCache
+    .put({ key: pageKey(profile, appId, page.id), connection: connectionKey(profile), page })
+    .catch(warn("cache the page"))
+
+/**
+ * Keeps the list the host answered, and drops the cached pages it no longer names, so an app or
+ * page deleted on the host isn't drawn offline from this device's copy.
+ */
+const keepList = (profile: Profile, apps: HostApp[]) => {
+  const connection = connectionKey(profile)
+  const named = new Set([
+    listKey(profile),
+    ...apps.flatMap((app) => app.pages.map((page) => pageKey(profile, app.id, page))),
+  ])
+  void db
+    .transaction("rw", db.appCache, async () => {
+      await db.appCache.put({ key: listKey(profile), connection, apps })
+      await db.appCache
+        .where("connection")
+        .equals(connection)
+        .filter((row) => !named.has(row.key))
+        .delete()
+    })
+    .catch(warn("cache the apps"))
+}
 
 const listed = createStore<Listed | undefined>(undefined)
 const reading = new Map<string, Promise<void>>()
@@ -48,7 +75,7 @@ function refreshApps(profile: Profile) {
   if (joined) return joined
   const read = listApps(profile)
     .then((apps) => {
-      keep({ key: listKey(profile), connection: connectionKey(profile), apps })
+      keepList(profile, apps)
       listed.set({ profileId: profile.id, apps })
     })
     .catch(async (failure) => {
@@ -177,15 +204,15 @@ export function useAppPage(appId: string, pageId: string | undefined) {
       if (!profile || !pageId) return
       getAppPage(profile, appId, pageId, signal)
         .then((page) => {
-          keep({ key: pageKey(profile, appId, pageId), connection: connectionKey(profile), page })
+          keepPage(profile, appId, page)
           setRead({ key, page })
         })
         .catch(async (failure) => {
           if (signal.aborted) return
           const missing = failure instanceof HermesError && failure.status === 404
-          const page = missing
-            ? undefined
-            : (await db.appCache.get(pageKey(profile, appId, pageId)))?.page
+          const cached = pageKey(profile, appId, pageId)
+          if (missing) void db.appCache.delete(cached).catch(warn("forget the page"))
+          const page = missing ? undefined : (await db.appCache.get(cached))?.page
           if (signal.aborted) return
           setRead({ key, page, offline: Boolean(page), error: wordsOf(failure), missing })
         })
@@ -196,7 +223,9 @@ export function useAppPage(appId: string, pageId: string | undefined) {
   const current = read?.key === key ? read : undefined
   const undo = useCallback(async () => {
     if (!profile || !pageId) return
-    setRead({ key, page: await undoAppPage(profile, appId, pageId) })
+    const page = await undoAppPage(profile, appId, pageId)
+    keepPage(profile, appId, page)
+    setRead({ key, page })
   }, [profile, appId, pageId, key])
   const [draft, setDraft] = useState<string>()
   const change = useCallback(

@@ -44,6 +44,14 @@ export function AppsPage() {
   return <AppsHome />
 }
 
+function OfflineNote() {
+  return (
+    <p role="status" className="text-center text-sm text-muted-foreground">
+      Offline — showing what this device last saw.
+    </p>
+  )
+}
+
 /** The list kept on screen beside the open app. */
 export function AppsPane({ pane }: { pane: FeaturePane }) {
   return <AppsHome list={pane} />
@@ -83,11 +91,7 @@ function AppsHome({ list }: { list?: FeaturePane }) {
         </div>
       </header>
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {offline && (
-          <p role="status" className="text-center text-sm text-muted-foreground">
-            Offline — showing what this device last saw.
-          </p>
-        )}
+        {offline && <OfflineNote />}
         {error && !apps && <p className="py-8 text-center text-sm text-warning">{error}</p>}
         {!loaded && !error && (
           <div className="flex justify-center py-8">
@@ -128,7 +132,7 @@ function AppsHome({ list }: { list?: FeaturePane }) {
  */
 export function AppPage() {
   const { id = "" } = useParams()
-  const { apps, loaded } = useApps()
+  const { apps, error: listError, loaded } = useApps()
   const { up } = useNav()
   const beside = Boolean(useAppsPane())
   const back = useCallback(() => up("/apps"), [up])
@@ -166,7 +170,13 @@ export function AppPage() {
   if (!app)
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-muted-foreground">
-        {loaded ? "This app is gone." : <Spinner className="size-6" />}
+        {!loaded ? (
+          <Spinner className="size-6" />
+        ) : listError && !apps ? (
+          listError
+        ) : (
+          "This app is gone."
+        )}
       </div>
     )
 
@@ -198,11 +208,7 @@ export function AppPage() {
         data-slot="app-page"
         className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]"
       >
-        {offline && (
-          <p role="status" className="text-center text-sm text-muted-foreground">
-            Offline — showing what this device last saw.
-          </p>
-        )}
+        {offline && <OfflineNote />}
         {page ? (
           <Suspense fallback={null}>
             <OpenUIBlock
