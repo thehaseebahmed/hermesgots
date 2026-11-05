@@ -27,6 +27,7 @@ from . import (
     afk,
     alerts,
     approvals,
+    apps,
     attachments,
     chats,
     clarify,
@@ -637,6 +638,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "meetings",
                     "meetings_ask",
                     "community",
+                    # The apps a bot keeps and their pages (apps.py, ADR 0099): the list, with each
+                    # app's title, library version and page ids and never a source, and one page
+                    # read on its own. A client that predates it draws no Apps screen rather than
+                    # one asking for a route that isn't there.
+                    "apps",
                     # The component library, told to a new session as a system-prompt section
                     # (openui.py). Advertised only where this host took it: a host that can't add a
                     # section says nothing, rather than offering a vocabulary never told.
@@ -3225,6 +3231,28 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         answer = await asyncio.to_thread(dictations.clear, store_path(), _request_profile())
         return web.json_response({"object": "memento.dictations.cleared", "stats": answer})
 
+    async def list_apps(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        rows = await asyncio.to_thread(apps.listing, store_path())
+        return web.json_response({"object": "memento.apps", "apps": rows})
+
+    async def get_app_page(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                apps.page,
+                store_path(),
+                request.match_info["app_id"],
+                request.match_info["page_id"],
+            )
+        except apps.AppsError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.app.page", "page": found})
+
     app.router.add_get(f"{PREFIX}/dictations", list_dictations)
     app.router.add_get(f"{PREFIX}/dictations/stats", dictation_stats)
     app.router.add_post(f"{PREFIX}/dictations", write_dictation)
@@ -3250,6 +3278,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
+    app.router.add_get(f"{PREFIX}/apps", list_apps)
+    app.router.add_get(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", get_app_page)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
 

@@ -14,6 +14,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 
+import plugin
 from plugin import dictation_cleanup, pipeline, workflows
 from plugin.tasks import READY_LABEL
 
@@ -121,6 +122,45 @@ class Context:
 
     def register_platform_handler(self, name: str, handler: Any) -> None:
         self.platforms[name] = handler
+
+
+class RouteAdapter:
+    """The API server as far as a wired route reaches: its auth check, and nothing else."""
+
+    def __init__(self) -> None:
+        self.denied: Any = None
+
+    def _check_auth(self, request: Any) -> Any:
+        return self.denied
+
+
+def wire(case: unittest.TestCase, adapter: Any) -> Any:
+    """The plugin's routes on a fake app, wired the way the API server wires them.
+
+    The ``aiohttp`` stand-in and the module-level adapters the wiring leaves behind are registered
+    for cleanup with the case.
+    """
+    aiohttp = ModuleType("aiohttp")
+    aiohttp.web = FakeWeb()
+    wiring = patch.dict(sys.modules, {"aiohttp": aiohttp, "aiohttp.web": aiohttp.web})
+    wiring.start()
+    case.addCleanup(wiring.stop)
+    for module in (plugin.sessions, plugin.approvals):
+        held = getattr(module, "adapter", None)
+        case.addCleanup(setattr, module, "adapter", held)
+    app = App()
+    context = Context()
+    plugin.register(context)
+    context.platforms["api_server"](app, adapter)
+    return app
+
+
+def route(app: Any, path: str) -> Any:
+    """A handler the plugin registered on a wired app, or a failure naming the missing path."""
+    for _method, registered, handler in app.router.added:
+        if registered == path:
+            return handler
+    raise AssertionError(f"the plugin registered no {path}")
 
 
 def staged(

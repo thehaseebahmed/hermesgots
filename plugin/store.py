@@ -4,8 +4,8 @@ projects still cloning (``clones.py``), repos being added to or removed from a p
 pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch and
 the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
 push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
-missions with their evidence ledgers (``research.py``), and the dictations a bot has heard
-(``dictations.py``)."""
+missions with their evidence ledgers (``research.py``), the dictations a bot has heard
+(``dictations.py``) and the apps a bot keeps with their pages (``apps.py``)."""
 
 from __future__ import annotations
 
@@ -32,8 +32,11 @@ logger = logging.getLogger(__name__)
 # already written has to move. 51 adds the routine messages a chat holds and the one that is still
 # waiting for its chat to be free (`platform_gots.py`, ADR 0081): two indexes beside one new table.
 # 54 drops the composer draft an earlier build mirrored onto a chat that was never saved as one
-# (`chats.py`); it is a data pass over existing rows and adds nothing.
-SCHEMA_VERSION = 54
+# (`chats.py`); it is a data pass over existing rows and adds nothing. 55 adds the apps a bot keeps
+# and their pages (`apps.py`, ADR 0099): one row per app, one per page, and a page keeps the source
+# its last change replaced — the one step of undo. Both are new tables, so nothing already written
+# has to move.
+SCHEMA_VERSION = 55
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -856,5 +859,29 @@ def _migrate(conn: sqlite3.Connection) -> None:
                WHERE value LIKE '%"draftText"%'
                  AND json_valid(value)
                  AND json_extract(value, '$.draftAt') IS NULL"""
+        )
+        # v55: the apps a bot keeps and their pages (apps.py, ADR 0099). An app is its title and the
+        # library version its pages were written against; a page is its own `openui-lang` source
+        # with its own first-line id, kept in the order a build answered them in — one page per
+        # place, so the first is the root the app opens on — and `previous_source` is the source its
+        # last change replaced, which is the one step of undo.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS apps (
+                   id TEXT PRIMARY KEY,
+                   title TEXT NOT NULL,
+                   library_version TEXT NOT NULL,
+                   created_at INTEGER NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS app_pages (
+                   app_id TEXT NOT NULL,
+                   page_id TEXT NOT NULL,
+                   position INTEGER NOT NULL CHECK (position >= 0),
+                   source TEXT NOT NULL,
+                   previous_source TEXT,
+                   PRIMARY KEY (app_id, page_id),
+                   UNIQUE (app_id, position)
+               )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
