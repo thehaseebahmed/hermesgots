@@ -70,10 +70,18 @@ class BubbleRecorder(
         return true
     }
 
-    /** Joins the reading thread, which flushes the Piece the take was in the middle of. */
+    /**
+     * Joins the reading thread, which flushes the Piece the take was in the middle of: the tail is
+     * the reader's own ending, and this waits for it because the service queues the take's Confirm
+     * only after `stop()` returns. A tail still on its way when that Confirm went would be answered
+     * for by a count that never included it, which is a take missing its last words and no error
+     * anywhere to say so.
+     */
     fun stop() {
         running = false
-        thread?.join(1500)
+        // The stop runs on a thread of the service's own, never the main one, so this wait costs the
+        // phone nothing; the bound is only for a reader too wedged to hear its own ending.
+        thread?.join(FLUSH_MS)
         thread = null
         record?.let {
             if (it.recordingState == AudioRecord.RECORDSTATE_RECORDING) it.stop()
@@ -140,12 +148,31 @@ class BubbleRecorder(
         } catch (error: Exception) {
             onError("The microphone stopped: ${error.message ?: "unknown"}")
         } finally {
-            // Whatever is still in the buffer when the take ends is the last thing said. Waiting for
-            // the meter to call it speech is how a take loses its last words: a quiet tail is still
-            // the user's.
+            // The device captured everything up to the Stop, and the reader has only read the frames
+            // it asked for: what is left sits in the device's own buffer until the device is
+            // released, and releasing it throws the end of the take away. Read it out here, where
+            // the recorder is still the one that heard it.
+            drain(recorder, buffer)
             val tail = (SystemClock.elapsedRealtime() - pieceStart).toInt()
-            if (buffer.size() > 0 && tail >= TAIL_MS) onPiece(wav(buffer.toByteArray()), tail)
+            // Whatever is left is the last thing said, however quiet the meter found it: the end of
+            // a take is not the place to decide a word was too small to be the user's.
+            if (buffer.size() > 0) onPiece(wav(buffer.toByteArray()), tail)
         }
+    }
+
+    /**
+     * Everything the device already holds and the reader had not read, taken out in one go — without
+     * waiting for audio that has not been said yet, so a Stop costs the buffer's own length and no
+     * more.
+     */
+    private fun drain(recorder: AudioRecord, into: ByteArrayOutputStream) {
+        var read: Int
+        do {
+            read = runCatching {
+                recorder.read(samples, 0, samples.size, AudioRecord.READ_NON_BLOCKING)
+            }.getOrDefault(0)
+            if (read > 0) into.write(pcm(samples, read))
+        } while (read > 0)
     }
 
     private fun pcm(from: ShortArray, count: Int): ByteArray {
@@ -216,8 +243,8 @@ class BubbleRecorder(
         private const val PIECE_MS = 1_200
         private const val PAUSE_MS = 350
         private const val LONG_PIECE_MS = 25_000
-        /** The shortest tail worth sending: under it there is nothing to hear (the page's own floor). */
-        private const val TAIL_MS = 300
+        /** How long a Stop waits for the reader to flush the tail it is holding. */
+        private const val FLUSH_MS = 5_000L
         private const val QUIET_MIN = 0.012
         private const val QUIET_MAX = 0.05
         private const val TAKEN = "The microphone is in use by another app."
