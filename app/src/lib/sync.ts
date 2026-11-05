@@ -18,7 +18,7 @@ import {
   type Account,
 } from "@/lib/account"
 import { hasPluginFeature, mergeChatList } from "@/lib/hermes"
-import { adoptDraft, draftKey } from "@/lib/drafts"
+import { adoptDraft, carriesSavedDraft, draftKey } from "@/lib/drafts"
 import { adoptSessionMode } from "@/lib/workspace"
 import {
   APPEARANCE_FIELDS,
@@ -552,7 +552,8 @@ async function syncAppearance(key: CryptoKey) {
 }
 
 // A plugin older than the draft_text feature rejects a record over its 16 KB cap, failing the whole
-// merge, so drafts only go to a plugin that advertises the feature, and never in a record over 64 KB.
+// merge, so a saved draft's text only goes to a plugin that advertises the feature, and never in a
+// record over 64 KB.
 const DRAFT_RECORD_CAP = 64 * 1024
 const encoder = new TextEncoder()
 
@@ -560,10 +561,10 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
     const value = Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue
-    // Only a record that carries a draft is measured.
     if (
-      value.draftText !== undefined &&
-      (!drafts || encoder.encode(JSON.stringify(value)).length > DRAFT_RECORD_CAP)
+      !carriesSavedDraft(value) ||
+      !drafts ||
+      encoder.encode(JSON.stringify(value)).length > DRAFT_RECORD_CAP
     )
       delete value.draftText
     doc[c.id] = { at: c.changedAt, value }
@@ -591,6 +592,7 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
         // choice made here writes either a pick or the Default row's marker. Clearing it would lose
         // the pin, and the next merge would carry the loss back to the plugin as well.
         if (value.modelChoice === undefined) delete synced.modelChoice
+        if (!carriesSavedDraft(value)) delete synced.draftText
         await db.conversations.put({
           ...(await db.conversations.get(id)),
           ...synced,
@@ -600,8 +602,7 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
         } as Conversation)
         await db.tombstones.delete(`chat:${id}`)
       })
-      // A pulled draft fills an empty composer here; it never overwrites text typed on this device.
-      if (entry.value.draftText) await adoptDraft(draftKey(id), entry.value.draftText)
+      if (carriesSavedDraft(entry.value)) await adoptDraft(draftKey(id), entry.value.draftText)
       // A pick made on another device follows the session here, and out to the plugin.
       if (entry.value.mode && entry.value.mode !== existing?.mode)
         await adoptSessionMode(id, entry.value.mode)

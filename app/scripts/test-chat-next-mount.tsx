@@ -45,13 +45,13 @@ const replies = () =>
   )
 
 /** Waits on the screen as a person would: the real screen polls at its real pace, so up to 6s. */
-async function until(check: () => boolean, what: string) {
+async function until(check: () => boolean | Promise<boolean>, what: string) {
   const by = Date.now() + 6_000
-  while (!check() && Date.now() < by) {
+  while (!(await check()) && Date.now() < by) {
     await settle()
     await act(async () => new Promise((resolve) => setTimeout(resolve, 25)))
   }
-  assert.ok(check(), what)
+  assert.ok(await check(), what)
 }
 
 const writing = (words: string) => BUSY_WORDS.writing.some((word) => words.includes(`${word}…`))
@@ -297,6 +297,22 @@ test("an away page still reads the transcript while it follows a run that says n
       () => headerLine() !== "This host isn't answering",
       "the page to read the transcript while it follows a silent run",
     )
+  })
+})
+
+test("a turn sent from chat-next retires the chat's saved draft", async () => {
+  const { host } = await onChatNext("c-draft-retired")
+  await db.conversations.update("c-draft-retired", { draftAt: 4, draftText: "half a thought" })
+  await mount(chatScreen("c-draft-retired"), async () => {
+    await sendFromComposer("Send this instead")
+    await until(() => host.asked.runs === 1, "the turn started")
+    await until(
+      async () => (await db.conversations.get("c-draft-retired"))?.draftText === undefined,
+      "the saved draft to be retired",
+    )
+    const held = await db.conversations.get("c-draft-retired")
+    assert.equal(held?.draftAt, undefined, "the mark is gone")
+    assert.equal(held?.draftText, undefined, "and the text with it, on every send path")
   })
 })
 

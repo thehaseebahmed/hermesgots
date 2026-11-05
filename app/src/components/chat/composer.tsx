@@ -37,7 +37,8 @@ import { previewItem } from "@/lib/media-items"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
-import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
+import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
+import { quietly } from "@/lib/report"
 import type { HermesConfig } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
 import {
@@ -188,7 +189,7 @@ export function Composer({
     setValue("")
     setAttachments([])
   }
-  // A draft that syncs in after mount fills the field only while it is still empty and untouched.
+  // A draft that lands after mount fills the field only while it is still empty and untouched.
   const syncedDraft = useDraftText(draftKey)
   useEffect(() => {
     if (!draftKey || !syncedDraft || loaded !== draftKey) return
@@ -207,7 +208,15 @@ export function Composer({
     })
     return () => {
       live = false
+      // The composer is going, by whatever route: the text is written down here, and a chat already
+      // kept as a draft takes it — so leaving by the sidebar or an address saves it, while an empty
+      // field leaves that record alone (a send of its own is what retires it).
       void flushDrafts()
+        .then(async () => {
+          if (!draftKey?.startsWith("c:")) return
+          if ((await loadDraft(draftKey)).trim()) await saveDraftToChat(draftKey.slice(2))
+        })
+        .catch(quietly("Keeping a session's draft"))
     }
   }, [draftKey])
   useEffect(() => {

@@ -469,9 +469,10 @@ export const FLOWS = {
     script: "regression-drafts.mjs",
     about: "Composer drafts are kept per chat and cleared on send",
   },
-  "draft-mode-sync": {
-    script: "e2e/draft-mode-sync.mjs",
-    about: "A composer draft and a picked mode sync through the plugin's chat record",
+  "draft-save": {
+    script: "e2e/draft-save.mjs",
+    about:
+      "A live composer's text stays on the device; saving the draft on the way out carries it through the plugin's chat record, and a picked mode still syncs",
   },
   "bot-threads": {
     script: "e2e/bot-threads.mjs",

@@ -9,7 +9,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { db, type Settings } from "@/lib/db"
-import { saveDraft } from "@/lib/drafts"
+import { draftKey, saveDraft } from "@/lib/drafts"
 import { ChatPage } from "@/routes/chat"
 import { fakeHost } from "./chat-next-host.ts"
 import { botProfile, click, find, mount, Path, path, seedChats, settle } from "./component-kit.tsx"
@@ -97,7 +97,7 @@ for (const [which, next] of screens) {
     const id = await seedSession(`session-draft-${which}`, { next })
     await mount(screen(id), async () => {
       await until(() => Boolean(backToCode()), "the way back is drawn")
-      saveDraft(`c:${id}`, "Fix the build")
+      saveDraft(draftKey(id), "Fix the build")
       await click(backToCode())
       await until(() => /Save your draft\?/.test(document.body.textContent ?? ""), "it asks")
       assert.ok(await db.conversations.get(id), "and nothing is deleted while it does")
@@ -106,7 +106,22 @@ for (const [which, next] of screens) {
       )
       await click(save)
       await until(() => Boolean(find("[data-code]")), "back at Code")
-      assert.ok((await db.conversations.get(id))?.draftAt, "kept as a draft")
+      const kept = await db.conversations.get(id)
+      assert.ok(kept?.draftAt, "kept as a draft")
+      assert.equal(kept?.draftText, "Fix the build", "with the text written down beside the mark")
+    })
+  })
+
+  test(`a saved draft whose text was cleared keeps its session and drops the text on ${which}`, async () => {
+    const id = await seedSession(`session-cleared-${which}`, { next })
+    await db.conversations.update(id, { draftAt: 4, draftText: "Fix the build" })
+    await mount(screen(id), async () => {
+      await until(() => Boolean(backToCode()), "the way back is drawn")
+      await click(backToCode())
+      await until(() => Boolean(find("[data-code]")), "back at Code")
+      const kept = await db.conversations.get(id)
+      assert.ok(kept?.draftAt, "the session is still the user's draft")
+      assert.equal(kept?.draftText, undefined, "and no text is left for another device to adopt")
     })
   })
 

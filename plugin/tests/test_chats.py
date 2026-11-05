@@ -1,10 +1,11 @@
-"""The chat list's draft text and picked mode, and the size cap they fit under.
+"""The chat list's saved-draft text and picked mode, and the size cap they fit under.
 
 Run: python3 -m unittest plugin.tests.test_chats -v
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -21,27 +22,70 @@ class DraftsAndModes(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = db_path(Path(self.tmp.name))
 
-    def test_a_newer_record_carries_its_draft_and_mode(self):
-        chats.merge(self.path, {"a": {"at": 1, "value": {"draftText": "old", "mode": "accept_edits"}}})
-        merged = chats.merge(self.path, {"a": {"at": 2, "value": {"draftText": "new", "mode": "plan"}}})
-        self.assertEqual(merged["a"]["value"], {"draftText": "new", "mode": "plan"})
+    def test_a_newer_record_carries_its_saved_draft_and_mode(self):
+        chats.merge(
+            self.path, {"a": {"at": 1, "value": {"draftAt": 1, "draftText": "old", "mode": "accept_edits"}}}
+        )
+        merged = chats.merge(
+            self.path, {"a": {"at": 2, "value": {"draftAt": 2, "draftText": "new", "mode": "plan"}}}
+        )
+        self.assertEqual(merged["a"]["value"], {"draftAt": 2, "draftText": "new", "mode": "plan"})
 
-    def test_an_older_record_does_not_overwrite_the_draft(self):
-        chats.merge(self.path, {"a": {"at": 5, "value": {"draftText": "kept"}}})
-        merged = chats.merge(self.path, {"a": {"at": 2, "value": {"draftText": "stale"}}})
+    def test_an_older_record_does_not_overwrite_the_saved_draft(self):
+        chats.merge(self.path, {"a": {"at": 5, "value": {"draftAt": 5, "draftText": "kept"}}})
+        merged = chats.merge(self.path, {"a": {"at": 2, "value": {"draftAt": 2, "draftText": "stale"}}})
         self.assertEqual(merged["a"]["value"]["draftText"], "kept")
 
-    def test_a_twenty_kb_draft_is_accepted(self):
-        merged = chats.merge(self.path, {"a": {"at": 1, "value": {"draftText": "x" * (20 * 1024)}}})
+    def test_a_live_composers_text_is_not_stored(self):
+        merged = chats.merge(
+            self.path, {"a": {"at": 1, "value": {"draftText": "half a thought", "mode": "plan"}}}
+        )
+        self.assertEqual(merged["a"]["value"], {"mode": "plan"})
+        conn = sqlite3.connect(self.path)
+        stored = conn.execute("SELECT value FROM chats WHERE id = 'a'").fetchone()[0]
+        conn.close()
+        self.assertNotIn("half a thought", stored)
+
+    def test_a_twenty_kb_saved_draft_is_accepted(self):
+        merged = chats.merge(
+            self.path, {"a": {"at": 1, "value": {"draftAt": 1, "draftText": "x" * (20 * 1024)}}}
+        )
         self.assertEqual(len(merged["a"]["value"]["draftText"]), 20 * 1024)
 
     def test_a_record_over_64_kb_is_rejected_whole(self):
         with self.assertRaises(chats.InvalidChats):
             chats.merge(
                 self.path,
-                {"a": {"at": 1, "value": {"draftText": "x" * (64 * 1024)}}, "b": {"at": 1, "value": {}}},
+                {
+                    "a": {"at": 1, "value": {"draftAt": 1, "draftText": "x" * (64 * 1024)}},
+                    "b": {"at": 1, "value": {}},
+                },
             )
         self.assertEqual(chats.read(self.path), {})
+
+    def test_a_store_at_v53_keeps_a_saved_draft_and_loses_a_live_one(self):
+        chats.merge(self.path, {"saved": {"at": 5, "value": {"mode": "plan"}}})
+        chats.merge(self.path, {"typed": {"at": 5, "value": {"mode": "plan"}}})
+        conn = sqlite3.connect(self.path)
+        for chat_id, value in (
+            ("saved", {"draftAt": 5, "draftText": "keep me", "mode": "plan"}),
+            ("typed", {"draftText": "half a thought", "mode": "plan"}),
+        ):
+            conn.execute(
+                "UPDATE chats SET value = ? WHERE id = ?", (json.dumps(value), chat_id)
+            )
+        conn.execute("PRAGMA user_version = 53")
+        conn.commit()
+        conn.close()
+        merged = chats.read(self.path)
+        self.assertEqual(merged["saved"]["value"], {"draftAt": 5, "draftText": "keep me", "mode": "plan"})
+        self.assertEqual(merged["typed"]["value"], {"mode": "plan"})
+        conn = sqlite3.connect(self.path)
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        at = conn.execute("SELECT at FROM chats WHERE id = 'saved'").fetchone()[0]
+        conn.close()
+        self.assertEqual(version, SCHEMA_VERSION)
+        self.assertEqual(at, 5, "the chat's own clock is left where the last write put it")
 
 
 class SessionPins(unittest.TestCase):

@@ -47,6 +47,7 @@ import { progressReminderNote, progressRemindersShown } from "@/lib/progress-rem
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
 import { NOT_SENT } from "@/lib/words"
+import { retireDraft } from "@/lib/drafts"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
@@ -1267,8 +1268,12 @@ export async function sendMessage(
   }
   // A pin describes a turn that reached Hermes, so a turn that never did takes its own back.
   if (!reachedHost) await release?.()
-  // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
-  else if (ask) void pinFromHost(conversationId, profile).catch(quietly("Pinning a chat's model"))
+  else {
+    // The words are on the host now, so the saved draft is retired; a failed send keeps it.
+    void retireDraft(conversationId).catch(quietly("Retiring a chat's draft"))
+    // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
+    if (ask) void pinFromHost(conversationId, profile).catch(quietly("Pinning a chat's model"))
+  }
   if (status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
   const turnNumber = history.filter((m) => m.role === "user" && m.status === "done").length + 1

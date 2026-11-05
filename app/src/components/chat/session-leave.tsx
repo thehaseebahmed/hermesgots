@@ -9,8 +9,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { db, deleteConversation, updateConversation, type Conversation } from "@/lib/db"
-import { draftKey, loadDraft } from "@/lib/drafts"
+import { db, deleteConversation, type Conversation } from "@/lib/db"
+import { draftKey, loadDraft, saveDraftToChat } from "@/lib/drafts"
+import { quietly } from "@/lib/report"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 
@@ -43,6 +44,11 @@ export function useSessionLeave({
   const leave = useCallback(async () => {
     if (!session) return
     if (!(await unsent(session))) return up(CODE)
+    // A draft already kept is kept again, not asked about twice.
+    if (session.draftAt) {
+      await saveDraftToChat(session.id).catch(quietly("Keeping a session's draft"))
+      return up(CODE)
+    }
     if ((await loadDraft(draftKey(session.id))).trim()) return setAsking(true)
     void deleteConversation(session.id)
     up(CODE)
@@ -71,11 +77,11 @@ export function useSessionLeave({
     if (!left || left === id) return
     void (async () => {
       const row = await db.conversations.get(left)
-      if (!row?.projectId || row.draftAt || !(await unsentRef.current(row))) return
-      if ((await loadDraft(draftKey(left))).trim())
-        await updateConversation(left, { draftAt: Date.now() })
+      if (!row?.projectId || !(await unsentRef.current(row))) return
+      // Saved without asking: there was no chance to ask.
+      if (row.draftAt || (await loadDraft(draftKey(left))).trim()) await saveDraftToChat(row.id)
       else await deleteConversation(left)
-    })()
+    })().catch(quietly("Keeping a session's draft"))
   }, [id])
   const dialog = (
     <AlertDialog open={asking} onOpenChange={setAsking}>
@@ -100,7 +106,7 @@ export function useSessionLeave({
           <AlertDialogAction
             onClick={async () => {
               if (!session) return
-              await updateConversation(session.id, { draftAt: Date.now() })
+              await saveDraftToChat(session.id)
               up(CODE)
             }}
           >

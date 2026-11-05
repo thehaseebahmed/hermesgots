@@ -10,6 +10,7 @@ import { act } from "react"
 import { createRoot } from "react-dom/client"
 
 import { db, type Profile } from "@/lib/db"
+import { draftKey } from "@/lib/drafts"
 import {
   inboxPublic,
   signOut,
@@ -33,6 +34,8 @@ type Netlify = "fast" | "slow" | "down"
 const netlify = { mode: "fast" as Netlify, calls: [] as string[], hangLists: false }
 /** What each bot's host answers, and what it was asked. */
 const hosts = new Map<string, { chats: number; reachable: boolean }>()
+/** Records the fake plugin answers with beside this device's own, as another device's would look. */
+const incoming = new Map<string, unknown>()
 /** The bots the registry holds, as the sealed records a plugin checks in. */
 let registry: Record<string, unknown> = {}
 
@@ -113,7 +116,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["draft_text"] })
     if (url.pathname.endsWith("/plugins/memento/chats")) {
       fake.chats += 1
-      return json({ object: "memento.chats", chats: body?.chats ?? {} })
+      return json({
+        object: "memento.chats",
+        chats: { ...(body?.chats ?? {}), ...Object.fromEntries(incoming) },
+      })
     }
     return json({})
   }
@@ -343,6 +349,26 @@ test("a bot the registry adds is merged in the same pass", async () => {
     "plugin",
     "before the pass it landed in reported done",
   )
+})
+
+test("a record's text with no saved draft is kept out of this device's row and drafts", async () => {
+  await device()
+  await db.conversations.clear()
+  incoming.set("legacy-chat", {
+    at: Date.now(),
+    value: { title: "Legacy", hermesSessionId: "s-legacy", draftText: "half a thought" },
+  })
+  try {
+    await syncNow()
+    await settle()
+    const row = await db.conversations.get("legacy-chat")
+    assert.ok(row, "the record itself is taken")
+    assert.equal(row?.draftText, undefined, "a live composer's text is not")
+    assert.equal(await db.drafts.get(draftKey("legacy-chat")), undefined, "and is never adopted here")
+  } finally {
+    incoming.clear()
+    await db.conversations.delete("legacy-chat")
+  }
 })
 
 test("a document read that never answers doesn't leave the sync running", async () => {

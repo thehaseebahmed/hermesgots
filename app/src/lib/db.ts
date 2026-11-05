@@ -227,7 +227,11 @@ export interface Conversation {
   afk?: boolean
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
-  /** The unsent text in this chat's composer. Synced through the chat record, so another device and a reinstall see it. */
+  /**
+   * The unsent text of a chat the user saved as a draft (`draftAt`). Synced, so the draft is picked
+   * up on another device and after a reinstall; a composer nobody saved keeps its text on the
+   * device that typed it (`db.drafts`), never here.
+   */
   draftText?: string
   /**
    * The message this thread began with, and when it was sent, as the host recorded it when it made
@@ -1257,6 +1261,20 @@ db.version(31)
 
 // v32: this device's own requests to each bot's host, for the screen behind Developer's Network log.
 db.version(32).stores({ netLog: "id, at, *bots, ending" })
+
+// v33: a saved draft carries its text to another device; a composer nobody saved keeps its text on
+// the device that typed it. Rows a build before this one mirrored for a live composer still hold a
+// copy, so it goes; a saved draft's copy stays.
+db.version(33).upgrade((tx) =>
+  tx
+    .table<Conversation>("conversations")
+    .toCollection()
+    // Only a row the upgrade can change is rewritten; Dexie puts back every row it visits otherwise.
+    .filter((conversation) => conversation.draftText !== undefined && !conversation.draftAt)
+    .modify((conversation) => {
+      delete conversation.draftText
+    }),
+)
 
 db.on("populate", (tx) => seedProfile(tx))
 

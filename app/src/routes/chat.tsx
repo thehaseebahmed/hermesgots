@@ -1295,7 +1295,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         conversationId = (await createConversation(profile.id, { modelChoice: keptModel })).id
         navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
       }
-      if (session?.draftAt) void updateConversation(conversationId, { draftAt: undefined })
       // Main's messages are triaged by the host first; a thread and a new chat never are.
       if (conversation?.main)
         await announceMove(await sendFromMain(conversationId, text, attachments))

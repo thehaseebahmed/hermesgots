@@ -1,6 +1,7 @@
 import { wireContent } from "@/lib/attachments"
 import { serverConfig } from "@/lib/connection"
 import { db, updateConversation, type Attachment } from "@/lib/db"
+import { retireDraft } from "@/lib/drafts"
 import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
 import { modelOf, wantsPin } from "@/lib/model-pick"
 import { announceMove, askTriage, canTriage, triaging } from "@/lib/triage"
@@ -79,6 +80,7 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
           // holding the row (ADR 0090, ADR 0096).
           ...openerFor(chat, { first, text: words, at }),
         }).catch(quietly("Marking a chat as sent in"))
+        void retireDraft(chatId).catch(quietly("Retiring a chat's draft"))
         // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
         if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
       },

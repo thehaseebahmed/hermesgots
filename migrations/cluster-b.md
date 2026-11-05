@@ -82,7 +82,7 @@ the resolution — which model the window belongs to, and where it comes from be
 7. Mock: `app/scripts/mock-hermes.mjs` resolves the window the same way (its context route is at `:1721`,
    and the run's `context_length` is hard-coded to 200000 at `:992`), and its `features` list (`:1397`)
    gains the flag. Flows that read the Context ring or a model switch (`pnpm e2e model-switch`,
-   `draft-mode-sync`, `screens`) must still pass.
+   `draft-save`, `screens`) must still pass.
 8. Docs: the context paragraph in `AGENTS.md` ("A chat's context use needs the Gots plugin" — its "The
    window the bot holds for the model shows first, then Hermes's for the call that ran it, then
    models.dev's" sentence is the one that becomes untrue), the `src/lib/context.ts` layout row, and

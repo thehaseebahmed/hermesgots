@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 # a session's close and the report it ends with (`closes.py`, ADR 0080): one new table, so nothing
 # already written has to move. 51 adds the routine messages a chat holds and the one that is still
 # waiting for its chat to be free (`platform_gots.py`, ADR 0081): two indexes beside one new table.
-SCHEMA_VERSION = 53
+# 54 drops the composer draft an earlier build mirrored onto a chat that was never saved as one
+# (`chats.py`); it is a data pass over existing rows and adds nothing.
+SCHEMA_VERSION = 54
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -846,4 +848,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         move_columns = {row[1] for row in conn.execute("PRAGMA table_info(main_moves)")}
         if "recorded_at" not in move_columns:
             conn.execute("ALTER TABLE main_moves ADD COLUMN recorded_at INTEGER")
+        # v54: a composer's text belongs to a chat the user saved as a draft; the copies older
+        # builds mirrored for a live composer go. A row whose value isn't JSON is left alone rather
+        # than failing the whole migration, and no row's clock moves — only `value` is touched.
+        conn.execute(
+            """UPDATE chats SET value = json_remove(value, '$.draftText')
+               WHERE value LIKE '%"draftText"%'
+                 AND json_valid(value)
+                 AND json_extract(value, '$.draftAt') IS NULL"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

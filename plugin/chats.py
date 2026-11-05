@@ -2,9 +2,13 @@
 
 Each record is ``{at, deleted?, value?}`` keyed by chat id, the same shape the app merges with:
 ``at`` is the chat's change clock, and the newer record wins, deletions included. Hermes keeps the
-transcripts; this keeps what it has no place for (titles the user typed, unsent composer text as
-``draftText``, a session's picked permission ``mode``, ...). A value is opaque JSON here; the app
-reads those fields back.
+transcripts; this keeps what it has no place for (titles the user typed, a session's picked
+permission ``mode``, ...). A value is opaque JSON here; the app reads those fields back.
+
+One field has a rule of its own: ``draftText`` is the unsent text of a chat the user *saved* as a
+draft (the value also carries ``draftAt``), and only that is stored. A live composer's text stays
+on the device that typed it, so a record naming a draft without ``draftAt`` is stored without it,
+and v54 removed the copies earlier builds wrote that way.
 """
 
 from __future__ import annotations
@@ -54,6 +58,10 @@ def _validate(chats: Any) -> list[tuple[str, int, int, str | None]]:
         value = entry.get("value")
         if not isinstance(value, dict):
             raise InvalidChats(f"Chat {chat_id} needs a value")
+        # A client older than this rule still sends a live composer's text, and it is dropped here
+        # rather than stored.
+        if "draftText" in value and value.get("draftAt") is None:
+            value = {field: item for field, item in value.items() if field != "draftText"}
         text = json.dumps(value, separators=(",", ":"))
         if len(text.encode("utf-8")) > MAX_VALUE_BYTES:
             raise InvalidChats(f"Chat {chat_id} is too large")
