@@ -472,7 +472,8 @@ const sameRequest = (a: Turn, b: Turn) =>
 
 /**
  * The turns without a failed one the next turn asks again: the user sent the message once more, so
- * the failure is behind them and the thread reads as if only the second send happened. A failed turn
+ * the failure is behind them and the thread reads as if only the second send happened. Only the
+ * drawing drops it — the host keeps the failed turn and whatever work it did — and a failed turn
  * nothing repeats stays, with the host's words.
  */
 export function withoutRepeatedFailures(turns: Turn[]): Turn[] {

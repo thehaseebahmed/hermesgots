@@ -46,9 +46,8 @@ import { compactionMarks } from "@/lib/compactions"
 import { questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
-import { usePluginFeatureOn } from "@/lib/features"
 import { describeActivity } from "@/lib/format"
-import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
+import { COLUMN, COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import type { RepoRef } from "@/lib/workspace"
@@ -56,7 +55,6 @@ import { carriesCount, replyFacts, threadLineOf } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
-import { clearFailedTurn } from "./api"
 import { messagesOf, heldMessage, replyId } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 import type { Waiting } from "./state"
@@ -130,12 +128,10 @@ export function AppThreadView({
     latestSend.current = send
   })
   const ask = useCallback((text: string) => latestSend.current(text, []), [])
-  // A turn the host gave up on can be sent again from where it stands: the host drops the failure
-  // from its transcript where it can, and the thread hides it once the request is asked again.
-  const hostClears = usePluginFeatureOn(
-    { baseUrl: server.server, apiKey: server.key },
-    "failed_turn_clear",
-  )
+  // A turn the host gave up on can be sent again from where it stands. Retry only sends the request
+  // once more: the half that failed may hold work the next turn needs — calls that ran, files they
+  // wrote — so nothing of it is taken out of the transcript, and the thread hides it only while its
+  // request is asked again.
   const [retrying, setRetrying] = useState(false)
   // A turn whose request is in a page not read yet has nothing to send again.
   const failedTurn =
@@ -145,7 +141,6 @@ export function AppThreadView({
     if (!failedTurn?.failed || retrying) return
     setRetrying(true)
     try {
-      if (hostClears) await clearFailedTurn(server, session, failedTurn.failed.row)
       // The files are on the host already, so the message names their paths; a photo goes as a
       // file, since the transcript keeps no copy of the image part to send again.
       const files = (failedTurn.files ?? []).map((file) => ({
@@ -317,11 +312,16 @@ export function AppThreadView({
                             line={message.id === lastId && holds ? line : undefined}
                           />
                           {message.id === retryId && (
-                            <div className={cn(COLUMN_BOX, REPLY_INSET)}>
+                            // On the reply's own edge, under the failure: the button's icon stands
+                            // where the error's icon does (the column's inset, its own left padding
+                            // cancelled) at the same 16px, its words at the error's 15px and its
+                            // gap, so the two lines read as one column rather than as a stray row.
+                            <div className={cn(COLUMN, REPLY_INSET, "pt-2")}>
                               <Button
                                 data-retry
                                 variant="ghost"
                                 size="sm"
+                                className="-ml-2 gap-2 border-0 text-[15px] font-normal"
                                 disabled={retrying}
                                 onClick={() => void retry()}
                               >

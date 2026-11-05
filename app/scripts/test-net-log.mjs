@@ -52,11 +52,8 @@ test("a host's minted session id is an id, and a route's own name is not", () =>
     "GET sessions/:id/agents",
   )
   assert.equal(
-    routeOf(
-      "http://hermes.test/api/plugins/memento/sessions/memento-1a2b/failed-turn/clear",
-      "POST",
-    ),
-    "POST sessions/:id/failed-turn/clear",
+    routeOf("http://hermes.test/api/plugins/memento/sessions/memento-1a2b/triage", "POST"),
+    "POST sessions/:id/triage",
   )
 })
 

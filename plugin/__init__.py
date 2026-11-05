@@ -43,7 +43,6 @@ from . import (
     dictations,
     meetings,
     events,
-    failed_turns,
     findings,
     gate,
     general,
@@ -637,8 +636,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # A routine's answer delivered into a chat as the bot's own message, and the
                     # route that names the run behind it (platform_gots.py, ADR 0081).
                     *([platform_gots.FEATURE] if platform_gots.available() is None else []),
-                    # A failed turn taken out of the transcript before its message is sent again.
-                    "failed_turn_clear",
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -2783,20 +2780,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         events.note("session", thread_session, path, True)
         return web.json_response({"object": "memento.move.undone", "undone": True})
 
-    async def clear_failed_turn(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        session_id = request.match_info["session_id"]
-        try:
-            row = int((await request.json())["row"])
-        except (ValueError, TypeError, KeyError):
-            return _error(web, "Body needs a row: the id of the failed turn's last row.", 400)
-        removed = await asyncio.to_thread(failed_turns.clear, hermes_home(), session_id, row)
-        if removed:
-            events.note("session", session_id, store_path(), True)
-        return web.json_response({"object": "memento.failed_turn.cleared", "removed": removed})
-
     async def remove_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2842,7 +2825,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/triage", triage_message)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/moves", get_moves)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/moves/{{move_id}}/undo", undo_move)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/failed-turn/clear", clear_failed_turn)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)
