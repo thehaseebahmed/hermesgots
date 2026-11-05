@@ -1004,3 +1004,18 @@ test("a page answered with no question waiting is not raised again by a replay",
   // The run's own next question is still raised.
   assert.equal(reduce(replayed, ask("c3-1", "Which services?")).waiting?.promptId, "c3-1")
 })
+
+test("a chat's record of its compactions wakes the thread only when it says something new", () => {
+  // The page dispatches the record whenever the chat's record moves, and a rebuilt set is the same record:
+  // a new state here wakes the store's fold, and its write, for nothing.
+  const none = reduce(initial, { type: "summaries", summaries: undefined })
+  assert.equal(none, initial, "a chat with no compactions says nothing")
+  assert.equal(reduce(none, { type: "summaries", summaries: new Set() }), none, "nor does an empty one")
+  const one = reduce(none, { type: "summaries", summaries: new Set([4]) })
+  assert.deepEqual([...(one.summaries ?? [])], [4], "the record's rows are kept")
+  assert.equal(reduce(one, { type: "summaries", summaries: new Set([4]) }), one, "read again, unchanged")
+  const two = reduce(one, { type: "summaries", summaries: new Set([4, 9]) })
+  assert.deepEqual([...(two.summaries ?? [])], [4, 9], "a record that moved lands")
+  const emptied = reduce(two, { type: "summaries", summaries: undefined })
+  assert.equal(emptied.summaries, undefined, "a chat whose record is gone stops naming rows")
+})

@@ -33,11 +33,13 @@ export { MAX_TEXT_CHARS, patchStats } from "@/lib/tool-calls"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
 import { isWakePrompt } from "@/lib/wake-prompt.ts"
 import {
+  boundaryOf,
   isRestatement,
   isSeamScaffolding,
-  summaryOf,
+  summaryRowsOf,
   seamDrawnContent,
   seamText,
+  type SummaryRows,
 } from "@/lib/compaction-seam"
 import { mayHoldArchive, nextWindow, type WindowCursor } from "@/lib/history-window"
 
@@ -119,23 +121,8 @@ function afterNotice(fragment: string, next: string, notice: string) {
   return fragment + gap + part
 }
 
-/** The rows the host flagged as a compaction's summary, by id, where the plugin said which. */
-export type SummaryRows = ReadonlySet<number>
-
-export const summaryRowsOf = (compactions?: { row?: number }[]): SummaryRows | undefined => {
-  const rows = compactions?.flatMap((one) => (one.row === undefined ? [] : [one.row]))
-  return rows?.length ? new Set(rows) : undefined
-}
-
-function summaryOfRow(row: SessionMessage, summaries?: SummaryRows) {
-  if (row.role !== "user" && row.role !== "assistant") return undefined
-  const summary = summaryOf(row.content ?? "")
-  if (summary) return { kind: summary.alone ? "alone" : "merged", after: summary.after }
-  return summaries?.has(row.id) ? { kind: "alone" as const, after: "" } : undefined
-}
-
 const isSummaryRow = (row: SessionMessage, summaries?: SummaryRows) =>
-  summaryOfRow(row, summaries)?.kind === "alone"
+  boundaryOf(row, summaries)?.kind === "alone"
 
 const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
   isSubagentResult(row) || isSeamScaffolding(row) || isSummaryRow(row, summaries)
@@ -159,7 +146,7 @@ function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
     let at = s
     for (let r = s + 1; r < out.length; r++) {
       const row = out[r]
-      if (summaryOfRow(row, summaries)) break
+      if (boundaryOf(row, summaries)) break
       // Rows the thread draws nothing of, and steers, are part of the carried work, not a turn.
       if (row.role !== "user" || isNotice(row) || dropsFromThread(row, summaries) || isSteer(row))
         continue
@@ -177,7 +164,7 @@ function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
     let next = at + 1
     while (
       next < out.length &&
-      !summaryOfRow(out[next], summaries) &&
+      !boundaryOf(out[next], summaries) &&
       out[next].timestamp &&
       out[next].timestamp! <= time
     )
@@ -306,11 +293,13 @@ function foldRows(
     return message
   }
   for (let row of rows) {
-    if (row.display_kind === "hidden" || row.role === "system") continue
-    const summary = summaryOfRow(row, summaries)
+    const summary = boundaryOf(row, summaries)
+    // A row the record names draws its seam — alone, or with the words it kept. Any other hidden row
+    // is the host's bookkeeping and draws nothing at all.
+    if (!summary && (row.display_kind === "hidden" || row.role === "system")) continue
     // The row's own time, on this device's clock: a summary with none is the moment it was read.
     const createdAt = Math.round((row.timestamp ?? 0) * 1000) || Date.now()
-    if (summary?.kind === "alone") {
+    if (summary) {
       if (reply)
         reply.seams = [
           ...(reply.seams ?? []),
@@ -322,12 +311,11 @@ function foldRows(
             at: createdAt,
           },
         ]
-      // Its calls are the reply's own, made after the compaction: only the summary's words go.
-      if (!row.tool_calls?.length) continue
-      row = { ...row, content: "" }
-    }
-    if (summary?.kind === "merged" && row.role === "assistant")
+      // Its calls are the reply's own, made after the compaction: only the summary's words go, and a
+      // row that kept the words it carried keeps them.
+      if (summary.kind === "alone" && !row.tool_calls?.length) continue
       row = { ...row, content: summary.after }
+    }
     if (isNotice(row)) {
       if (reply) notice = row.content ?? ""
       continue
@@ -603,7 +591,10 @@ function mergeSeams(local: Message, reply: Message | undefined) {
  * The fold's steer counts, in place of a reply this device drew without its calls: every steer it
  * kept counted none of them.
  */
-function withFoldedSteers(local: Message, reply: Message | undefined): Partial<Message> | undefined {
+function withFoldedSteers(
+  local: Message,
+  reply: Message | undefined,
+): Partial<Message> | undefined {
   const found = reply?.steers
   const held = local.steers ?? []
   // A fold holding fewer steers than this device is behind it, and leaves them as they are.

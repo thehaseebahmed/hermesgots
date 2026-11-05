@@ -98,22 +98,16 @@ async function replies(rows: SessionMessage[], from: number) {
   return seen
 }
 
-for (const [name, opts, content] of [
+for (const [name, opts] of [
   [
     "a restated request, the summary an assistant row",
     { summaryRole: "assistant", restated: true },
-    REQUEST,
   ],
   [
     "a restated request, a long run before the boundary",
     { summaryRole: "assistant", restated: true, carried: 60 },
-    REQUEST,
   ],
-  [
-    "an archived request, the summary a user row",
-    { summaryRole: "user", restated: false },
-    "archived ask",
-  ],
+  ["an archived request, the summary a user row", { summaryRole: "user", restated: false }],
 ] as const) {
   test(`the running turn keeps growing across a compaction: ${name}`, async () => {
     const rows = run(opts)
@@ -305,16 +299,37 @@ test("a message that only quotes a summary mid-text stays the user's", () => {
 
 test("the host's own flag names a summary the text alone would not", () => {
   reset(100)
-  const rows = [row("user", "Ask"), row("assistant", "Before"), row("assistant", "Odd handoff")]
-  rows.push(...pair("terminal", "After"))
+  const rows = [row("user", "Ask"), row("assistant", "Before"), row("assistant", "")] as Row[]
+  rows.push(...(pair("terminal", "After") as Row[]))
   assert.equal(
-    shape(rows).join(" | ").includes("Odd handoff"),
+    shape(rows.slice(0, 3)).join(" | ").includes("Before"),
     true,
-    "no flag: it is the reply's words",
+    "no flag: words are drawn",
   )
+  // What the host serves for a summary: flagged, and empty, because the projection took its words away.
   const flagged = new Set([rows[2].id])
-  const drawn = toMessages("c", SESSION, rows, { summaries: flagged }).map((m) => m.content)
-  assert.ok(!drawn.join(" ").includes("Odd handoff"), `flagged: not drawn: ${drawn.join(" | ")}`)
+  const drawn = toMessages("c", SESSION, rows, { summaries: flagged }).filter(
+    (m) => m.role === "assistant",
+  )
+  assert.equal(
+    drawn.length,
+    1,
+    `one reply across the seam: ${drawn.map((m) => m.content).join(" | ")}`,
+  )
+  assert.deepEqual(
+    drawn[0].seams?.map((seam) => seam.row),
+    [rows[2].id],
+    "the flag alone names it",
+  )
+  const kept = rows.map((one) => (one.id === rows[2].id ? { ...one, content: "Odd handoff" } : one))
+  assert.equal(
+    toMessages("c", SESSION, kept, { summaries: flagged })
+      .map((m) => m.content)
+      .join(" ")
+      .includes("Odd handoff"),
+    true,
+    "carried words are the reader's",
+  )
 })
 
 test("a summary stamped after the carried copies sits where the compaction fell", () => {

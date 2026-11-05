@@ -44,6 +44,19 @@ the two screens that draw a thread and Main all obey one rule. Its `trailing` ma
 `mainTail` no longer takes a compaction: a divider at the foot of a flow has no message below it,
 which is the one shape the rules forbid.
 
+**A compaction written on the reply's own row is still the boundary.** In-place compaction usually
+leaves its summary where the context split, as a `user` row the host serves `hidden` and empty. One
+made while a reply is running leaves it on that reply's own row instead — an `assistant` row, served
+the same way — and both screens looked for the boundary in a hidden *user* row alone. That reply kept
+no seam, so the record's mark, which falls after the reply's own request, could only name the next
+turn: the divider closed the run it compacted in, at the foot of its last reply, which is the shape
+this ADR set out to remove. The plugin's record names the summary's row, so the fold takes that row as
+the boundary on whichever of the two sides it was written — the user's row or the reply's. A hidden
+*assistant* row the record does not name — the placeholder an interrupted turn leaves — is still no
+boundary at all, and a hidden user row still is one, which is all a host that keeps no record leaves
+to go on. A row the record names that kept the words it carried keeps them *and* its seam: the words
+are the reply's own, and the divider still stands where the compaction fell between them.
+
 ## Considered options
 
 - **Matching the record to its seam harder.** Teach `compactionOf` that a rotation's `at` is the
@@ -67,6 +80,13 @@ which is the one shape the rules forbid.
   neither would cover the seam.
 
 ## Consequences
+
+- **The record is what names the boundary.** `foldTurns` takes the summary rows the plugin listed,
+  because neither the row's role nor its text says what it is once the host has projected it: a
+  summary and an interrupted turn's placeholder are both hidden and empty. Where the divider comes to
+  rest is still the fold's own rule — the first row written after the compaction — so a summary the
+  host wrote ahead of the work it re-emitted draws its seam after those rows, not at the moment the
+  context was compressed.
 
 - **A Main whose turns were all triaged away draws no divider, even when the host compacted it.** It
   held the only record of where the context it no longer shows was compressed; that is the price of

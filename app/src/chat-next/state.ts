@@ -1,3 +1,4 @@
+import { sameSummaryRows, type SummaryRows } from "@/lib/compaction-seam"
 import { questionsAround } from "@/lib/clarify-questions"
 import { clarifyAnswered, questionAt, type ClarifyResponse } from "@/lib/clarify"
 import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
@@ -14,6 +15,7 @@ import {
   withCarried,
   withSteer,
   withoutRepeatedFailures,
+  type FoldOptions,
   type Part,
   type Row,
   type SentFile,
@@ -39,6 +41,14 @@ export interface ThreadState {
   partial?: boolean
   /** The rows a compaction archived, once the reader has asked for them; kept across every read. */
   archived?: Row[]
+  /** The record's summary rows, which is what says a hidden row is the boundary (`namesCompaction`). */
+  summaries?: SummaryRows
+  /**
+   * The row the last turn of the transcript this state holds was opened by: the turn's own end is
+   * what a measured cost is compared against, and re-folding the old transcript to read it again
+   * costs a whole fold on every streamed flush.
+   */
+  lastRow?: number
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
   /** What the plugin holds for the session, drawn after the thread; none before it has said. */
@@ -164,6 +174,8 @@ export type ThreadEvent =
   | { type: "queue"; items: Queued[]; paused: boolean }
   /** The page read this device's *Show progress reminders*: what a reply's refusals draw from now. */
   | { type: "reminders"; on: boolean }
+  /** The chat's record of where its context was compacted, as the rows it named (ADR 0107). */
+  | { type: "summaries"; summaries?: SummaryRows }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
   | { type: "run"; event: RunEvent; at?: number }
   | { type: "failed"; error: string }
@@ -288,12 +300,17 @@ const givenAnswer = (answer: Answer): ClarifyResponse => ({
 })
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */
-export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean, showReminders = false) =>
-  foldTurns(
-    archived ? withArchive(rows, archived) : rows,
-    Boolean(partial) && !archived,
+type FoldInput = Partial<Pick<ThreadState, "archived">> & FoldOptions
+
+export const foldedOf = (
+  rows: Row[],
+  { archived, partial, showReminders = false, summaries }: FoldInput = {},
+) =>
+  foldTurns(archived ? withArchive(rows, archived) : rows, {
+    partial: Boolean(partial) && !archived,
     showReminders,
-  )
+    summaries,
+  })
 
 /** How much of a reply a turn holds: its calls, and the characters of the words it wrote. */
 function reach(turn: Turn) {
@@ -380,11 +397,7 @@ function withAnswers(turns: Turn[], answers?: Record<string, string>): Turn[] {
  * answer is given.
  */
 function answeredOnScreen(state: ThreadState, answer: Answer): ToolCall | undefined {
-  const call = drawn(
-    foldedOf(state.rows, state.archived, state.partial, state.showReminders),
-    state.live,
-    state.waiting,
-  )
+  const call = drawn(foldedOf(state.rows, state), state.live, state.waiting)
     .flatMap((turn) => turn.parts)
     .flatMap((part) => (part.kind === "tools" ? part.calls : []))
     .filter((one) => one.name === "clarify" && !one.result)
@@ -585,8 +598,7 @@ function waitingAfter(state: ThreadState, event: RunEvent): Waiting | undefined 
     const asked =
       state.waiting?.kind === "question" ? questionAt(set ?? [], state.waiting.question) : -1
     const answered =
-      state.answeredPrompts?.includes(raised.promptId) ||
-      (page >= 0 && asked >= 0 && page < asked)
+      state.answeredPrompts?.includes(raised.promptId) || (page >= 0 && asked >= 0 && page < asked)
     const settled = sameSettled(state.settled, raised)
     return settled || answered ? waiting : raised
   }
@@ -610,7 +622,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const rows = event.joined ? overlay(state.rows, event.rows) : event.rows
       if (!rows) return state
       const partial = event.more ?? state.partial
-      const last = foldedOf(rows, state.archived, partial, state.showReminders).at(-1)
+      const last = foldedOf(rows, { ...state, partial }).at(-1)
       const done = last?.done
       // What the turn this device watched cost goes with the row that opened it, which the
       // transcript has now written.
@@ -621,14 +633,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         measured &&
         last?.row !== undefined &&
         last.user === state.live?.turn.user &&
-        last.row !==
-          foldedOf(state.rows, state.archived, state.partial, state.showReminders).at(-1)?.row
+        last.row !== state.lastRow
           ? { ...state.stats, [last.row]: measured }
           : state.stats
       return {
         ...state,
         status: "ready",
         rows,
+        lastRow: last?.row,
         partial: partial ? true : undefined,
         stats,
         running: false,
@@ -653,7 +665,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const rows = prepend(state.rows, event.rows)
       const partial = event.last ? undefined : true
       if (rows === state.rows && partial === state.partial) return state
-      return { ...state, rows, partial }
+      // A page above the held rows can move which turn is last: the cache the cost of a turn is read
+      // against is re-derived here rather than left saying the row it said before.
+      const lastRow = foldedOf(rows, state).at(-1)?.row
+      return { ...state, rows, partial, lastRow }
     }
     case "earlier":
       // Drawn by the next read of the transcript, which folds the archive in with the live rows.
@@ -716,11 +731,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing — but the wait this page read off the run's own status is the run's, and
       // a join of the same run keeps it.
-      const last = turnsOf(
-        foldedOf(state.rows, state.archived, state.partial, state.showReminders),
-        state.live,
-        state.waiting,
-      ).at(-1)
+      const last = turnsOf(foldedOf(state.rows, state), state.live, state.waiting).at(-1)
       const waiting = state.waiting?.run === event.run ? state.waiting : undefined
       return {
         ...state,
@@ -736,6 +747,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     }
     case "reminders":
       return event.on === state.showReminders ? state : { ...state, showReminders: event.on }
+    case "summaries":
+      // A record that says the same thing leaves the state alone: a new state wakes the store's fold.
+      return sameSummaryRows(state.summaries, event.summaries)
+        ? state
+        : { ...state, summaries: event.summaries }
     case "queue": {
       const next = { items: event.items, paused: event.paused }
       return sameQueue(state.queue, next) ? state : { ...state, queue: next }
@@ -844,9 +860,4 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws, with the answers the page wrote itself read back on their calls. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(
-    foldedOf(state.rows, state.archived, state.partial, state.showReminders),
-    state.live,
-    state.waiting,
-    state.answers,
-  )
+  turnsOf(foldedOf(state.rows, state), state.live, state.waiting, state.answers)

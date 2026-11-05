@@ -144,7 +144,7 @@ test("a reply whose request is in an older page is drawn alone, and whole once t
     row(71),
     row(72),
   ]
-  const alone = foldTurns(newest, true)
+  const alone = foldTurns(newest, { partial: true })
   assert.equal(alone.length, 2)
   assert.equal(alone[0].cut, true)
   assert.equal(alone[0].user, "")
@@ -160,7 +160,7 @@ test("a reply whose request is in an older page is drawn alone, and whole once t
 
   const whole = foldTurns(
     [{ id: 69, role: "user", content: "the question", timestamp: 690 }, ...newest],
-    true,
+    { partial: true },
   )
   assert.equal(whole.length, 2)
   assert.equal(whole[0].user, "the question")
@@ -175,7 +175,7 @@ test("a page of calls and results with no request in it draws no empty turn", ()
     { id: 1, role: "tool", tool_call_id: "x", content: "result" },
     { id: 2, role: "user", content: "next" },
   ]
-  const turns = foldTurns(calls, true)
+  const turns = foldTurns(calls, { partial: true })
   assert.equal(turns.length, 1)
   assert.equal(turns[0].user, "next")
 })

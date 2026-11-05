@@ -44,6 +44,14 @@ const replyRow = (content: string, id: number): SessionMessage => ({
   timestamp: AT,
 })
 
+const hiddenRow = (id: number, timestamp = AT, role = "assistant"): SessionMessage => ({
+  id,
+  role,
+  content: "",
+  display_kind: "hidden",
+  timestamp,
+})
+
 /** What these rows fold to, computed once per assertion. */
 const drawn = (rows: SessionMessage[]) =>
   toMessages("c-1", SESSION, rows).map((m) => `${m.role}: ${m.content}`)
@@ -101,6 +109,101 @@ test("a message that is not the seam keeps every word", () => {
     [`user: ${reported}`],
     "a header on its own line, with no items under it, is still the user's",
   )
+})
+
+test("a summary the host serves hidden, on the reply's own row, still splits the reply at its seam", () => {
+  // Hermes writes a compaction made while a reply runs on that reply's own row, hidden and empty: the
+  // record is the only word on which one that is, and without it the seam is never drawn.
+  const rows: SessionMessage[] = [
+    seamRow(REQUEST, 60),
+    replyRow("Working through the plan", 61),
+    hiddenRow(62, AT + 1),
+    { id: 63, role: "assistant", content: " — starting with the fold.", timestamp: AT + 2 },
+    { id: 64, role: "user", content: "And the next question.", timestamp: AT + 3 },
+  ]
+  const messages = toMessages("c-1", SESSION, rows, { summaries: new Set([62]) })
+  const replies = messages.filter((m) => m.role === "assistant")
+  assert.equal(replies.length, 1, `one reply across the boundary: ${drawn(rows)}`)
+  assert.equal(replies[0].content, "Working through the plan\n\n — starting with the fold.")
+  assert.deepEqual(
+    replies[0].seams?.map((seam) => [seam.row, seam.contentOffset, seam.toolsBefore]),
+    [[62, "Working through the plan".length, 0]],
+    "the seam stands where the reply had got to, at the host's own row",
+  )
+  assert.equal(
+    messages.filter((m) => m.role === "user").length,
+    2,
+    `the summary draws no bubble of its own: ${drawn(rows)}`,
+  )
+})
+
+test("a row the record names that kept the words it carried is drawn, not dropped", () => {
+  // A summary merged into a reply's own row survives the host's projection as that reply's text, and the
+  // record still names it. Read as a summary alone, the thread would delete words the reader wrote.
+  const rows: SessionMessage[] = [
+    seamRow(REQUEST, 80),
+    { id: 81, role: "assistant", content: "the work it carried", timestamp: AT + 1 },
+    { id: 82, role: "assistant", content: "and what followed", timestamp: AT + 2 },
+  ]
+  const messages = toMessages("c-1", SESSION, rows, { summaries: new Set([81]) })
+  const replies = messages.filter((m) => m.role === "assistant")
+  assert.equal(replies.length, 1, `one reply: ${drawn(rows)}`)
+  assert.equal(replies[0].content, "the work it carried\n\nand what followed")
+  assert.equal(replies[0].seams, undefined, "no seam: the words are the reply's own")
+})
+
+test("a hidden user row with no record still seams: a host older than the record writes its summary there", () => {
+  // The record is the only word on an assistant row, but a host that keeps none leaves its summary in a
+  // hidden user row whose words the projection took away.
+  const rows: SessionMessage[] = [
+    seamRow(REQUEST, 80),
+    replyRow("working", 81),
+    hiddenRow(82, AT + 1, "user"),
+    replyRow(" — done", 83),
+  ]
+  const replies = toMessages("c-1", SESSION, rows, { summaries: new Set([99]) })
+  assert.equal(replies.filter((m) => m.role === "assistant").length, 1, `one reply: ${drawn(rows)}`)
+  assert.deepEqual(
+    replies.filter((m) => m.role === "assistant")[0].seams?.map((seam) => seam.row),
+    [82],
+    "the record names another row, and the hidden user row is the boundary anyway",
+  )
+})
+
+test("a row the record names keeps the words it carried, and its seam, whether or not it is hidden", () => {
+  for (const display_kind of ["hidden", undefined]) {
+    const rows: SessionMessage[] = [
+      seamRow(REQUEST, 90),
+      replyRow("working", 91),
+      { id: 92, role: "assistant", content: " and what followed", timestamp: AT + 1, display_kind },
+      replyRow(" — done", 94),
+    ]
+    const replies = toMessages("c-1", SESSION, rows, { summaries: new Set([92]) })
+    const drawn = replies.filter((m) => m.role === "assistant")
+    assert.equal(
+      drawn.length,
+      1,
+      `one reply (${display_kind ?? "visible"}): ${JSON.stringify(drawn)}`,
+    )
+    assert.ok(drawn[0].content.includes("and what followed"), "the words it carried are drawn")
+    assert.deepEqual(
+      drawn[0].seams?.map((seam) => seam.row),
+      [92],
+      `the seam stands where the compaction fell (${display_kind ?? "visible"})`,
+    )
+  }
+})
+
+test("a hidden assistant row the record does not name is no boundary", () => {
+  const rows: SessionMessage[] = [
+    seamRow(REQUEST, 70),
+    replyRow("working", 71),
+    hiddenRow(72),
+    replyRow(" — done", 73),
+  ]
+  const messages = toMessages("c-1", SESSION, rows, { summaries: new Set([99]) })
+  assert.equal(messages.filter((m) => m.role === "assistant")[0].seams, undefined)
+  assert.equal(messages.filter((m) => m.role === "assistant")[0].content, "working\n\n — done")
 })
 
 test("a chat that drew the seam before the fold read it stops showing it", async () => {

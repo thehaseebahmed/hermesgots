@@ -13,7 +13,7 @@ const live = recorded("compaction.live.json").data
 const archive = recorded("compaction.archive.json").data
 
 const row = (id, role, content, extra = {}) => ({ id, role, content, ...extra })
-const hidden = (id) => row(id, "user", "", { display_kind: "hidden" })
+const hidden = (id, role = "user") => row(id, role, "", { display_kind: "hidden" })
 const kinds = (turn) => turn.parts.map((part) => part.kind)
 
 test("the host's read opens on the compaction's hidden row: a turn whose request was archived, with no bubble of its own", () => {
@@ -54,6 +54,73 @@ test("the work a compaction carried sits above its divider, and what the run did
     row(6, "assistant", "done", { finish_reason: "stop", timestamp: 700 }),
   ])
   assert.deepEqual(kinds(turn), ["tools", "compaction", "tools", "text"])
+})
+
+const asked = (id) => ({ id, function: { name: "terminal", arguments: "{}" } })
+
+test("a compaction the reply itself carries still closes the reply where it fell, not at the turn after it", () => {
+  // Hermes writes a compaction made while a reply runs on that reply's own row, and serves it hidden and
+  // empty. Read as a user row alone no seam is made, and the record's mark can only name the next turn.
+  const rows = [
+    row(1, "user", "go", { timestamp: 100 }),
+    row(2, "assistant", "", {
+      finish_reason: "tool_calls",
+      timestamp: 100.2,
+      tool_calls: [asked("c1")],
+    }),
+    row(3, "tool", "first", { tool_call_id: "c1", timestamp: 100.4 }),
+    { ...hidden(4, "assistant"), timestamp: 500 },
+    row(5, "assistant", "", {
+      finish_reason: "tool_calls",
+      timestamp: 500.000001,
+      tool_calls: [asked("c2")],
+    }),
+    row(6, "tool", "second", { tool_call_id: "c2", timestamp: 500.000004 }),
+    row(7, "assistant", "and done", { finish_reason: "stop", timestamp: 700 }),
+    row(8, "user", "next", { timestamp: 800 }),
+    row(9, "assistant", "next answer", { finish_reason: "stop", timestamp: 801 }),
+  ]
+  const turns = foldTurns(rows, { summaries: new Set([4]) })
+  assert.equal(turns.length, 2, "the boundary splits no turn off")
+  assert.deepEqual(
+    kinds(turns[0]),
+    ["tools", "compaction", "tools", "text"],
+    "the reply is split at its own row, the work above the divider and what followed below",
+  )
+  assert.deepEqual(kinds(turns[1]), ["text"], "and the next turn carries none")
+})
+
+test("a hidden row the record does not name is no boundary", () => {
+  const rows = [
+    row(1, "user", "go", { timestamp: 100 }),
+    row(2, "assistant", "working", { timestamp: 101 }),
+    { ...hidden(3, "assistant"), timestamp: 102 },
+    row(4, "assistant", "done", { finish_reason: "stop", timestamp: 103 }),
+  ]
+  assert.deepEqual(kinds(foldTurns(rows, { summaries: new Set([7]) })[0]), ["text", "text"])
+})
+
+test("a row the record names that kept the words it carried keeps them, and its seam", () => {
+  // A summary merged into a reply's own row survives the host's projection as that reply's text, and the
+  // record still names it: the words are the reader's, and the divider still stands where it fell.
+  const rows = [
+    row(1, "user", "go", { timestamp: 100 }),
+    row(2, "assistant", "the work it carried", { timestamp: 101 }),
+    row(3, "assistant", "and what followed", { timestamp: 102, finish_reason: "stop" }),
+  ]
+  const [turn] = foldTurns(rows, { summaries: new Set([2]) })
+  assert.deepEqual(
+    kinds(turn),
+    ["text", "compaction", "text"],
+    "the words on both sides, and the seam",
+  )
+  assert.equal(
+    turn.parts
+      .filter((part) => part.kind === "text")
+      .map((part) => part.text)
+      .join(" | "),
+    "the work it carried | and what followed",
+  )
 })
 
 const call = (id) => ({ id, name: "terminal" })

@@ -102,6 +102,7 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { compactionMarks } from "@/lib/compactions"
+import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type DelegatedAgent, type HermesProject } from "@/lib/hermes"
@@ -313,6 +314,10 @@ function NextChat({
   paneThread?: string
 }) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
+  // A live query hands back a fresh array on every run, so what the thread keeps is keyed on the ids
+  // the record names rather than on the array that carried them.
+  const summaryKey = summaryKeyOf(chat?.compactions)
+  const summaries = useMemo(() => summaryRowsOfKey(summaryKey), [summaryKey])
   const bot = useLiveQuery(
     async () => (chat ? db.profiles.get(chat.profileId) : undefined),
     [chat?.profileId],
@@ -492,6 +497,7 @@ function NextChat({
                 chatId={id}
                 code={Boolean(chat.projectId)}
                 compacted={mayHoldArchive(chat.compactions)}
+                summaries={summaries}
                 blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
                 main={
                   mainOn

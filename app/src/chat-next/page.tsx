@@ -17,6 +17,7 @@ import { UserBubble } from "@/components/chat/user-bubble"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
 import { readPace, sendTimeoutMs } from "@/lib/away"
+import type { SummaryRows } from "@/lib/compaction-seam"
 import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
@@ -643,6 +644,8 @@ interface ThreadOptions {
   database?: SessionDb
   /** The host says a compaction took rows out of this chat: the only word on the archive (ADR 0058). */
   compacted?: boolean
+  /** The record's summary rows: where the thread's dividers belong (`namesCompaction`). */
+  summaries?: SummaryRows
 }
 
 /** The dev route: a session opened by `?server=&key=&session=`. */
@@ -681,6 +684,7 @@ export function ChatNextThread({
   Composer,
   Prompt,
   View = PlainView,
+  summaries,
   start,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
@@ -711,9 +715,13 @@ export function ChatNextThread({
       here = false
     }
   }, [store])
+  // The store folds too; `apply` queues behind the load, so this outlives the state `loaded()` rebuilds.
+  useEffect(() => {
+    void store.apply({ type: "summaries", summaries }).catch(() => undefined)
+  }, [store, summaries])
   const folded = useMemo(
-    () => foldedOf(rows, archived, held?.partial, showReminders),
-    [rows, archived, held?.partial, showReminders],
+    () => foldedOf(rows, { archived, partial: held?.partial, showReminders, summaries }),
+    [rows, archived, held?.partial, showReminders, summaries],
   )
   const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
   const { turns, origin } = useMemo(() => {

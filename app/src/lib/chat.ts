@@ -49,12 +49,12 @@ import { wireContent } from "@/lib/attachments"
 import { NOT_SENT } from "@/lib/words"
 import { retireDraft } from "@/lib/drafts"
 import { refreshContext } from "@/lib/context"
+import { summaryRowsOf } from "@/lib/compaction-seam"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
   foldTranscriptDetails,
   liveTurn,
   RUN_START_SLACK_S,
-  summaryRowsOf,
   noteFollowUps,
   patchStats,
   reconcileHistory,

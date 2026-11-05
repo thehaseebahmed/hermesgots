@@ -1,0 +1,101 @@
+{
+  "object": "list",
+  "session_id": "fixture-compaction-seam",
+  "compactions": [
+    {
+      "at": 1793884596128,
+      "row": 303025
+    }
+  ],
+  "data": [
+    {
+      "id": 303021,
+      "role": "user",
+      "content": "/triage\n1. Settings > AI Diction > History doesn't update from the Android bubble\n2. Settings > AI Diction > Overview > Bots has the wrong model combo …",
+      "timestamp": 1793878250.925751
+    },
+    {
+      "id": 303022,
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "5f6457a1-1d10-4996-b069-94b94b9281ea",
+          "call_id": "5f6457a1-1d10-4996-b069-94b94b9281ea",
+          "response_item_id": "fc_5f6457a1-1d10-4996-b069-94b94b9281ea",
+          "type": "function",
+          "function": {
+            "name": "skill_view",
+            "arguments": "{\"name\": \"mattpocock/triage\"}"
+          }
+        },
+        {
+          "id": "11bff406-f957-4561-b156-14696904186b",
+          "call_id": "11bff406-f957-4561-b156-14696904186b",
+          "response_item_id": "fc_11bff406-f957-4561-b156-14696904186b",
+          "type": "function",
+          "function": {
+            "name": "skill_view",
+            "arguments": "{\"name\": \"memento\"}"
+          }
+        }
+      ],
+      "timestamp": 1793884596.1279528,
+      "finish_reason": "tool_calls"
+    },
+    {
+      "id": 303023,
+      "role": "tool",
+      "content": "[skill_view] name=mattpocock/triage (14,107 chars) [SKILL_PRUNED: content lost in compression; reload with skill_view(name='mattpocock/triage')]",
+      "tool_call_id": "5f6457a1-1d10-4996-b069-94b94b9281ea",
+      "timestamp": 1793884596.1279538
+    },
+    {
+      "id": 303024,
+      "role": "tool",
+      "content": "[skill_view] name=memento (2,154 chars) [SKILL_PRUNED: content lost in compression; reload with skill_view(name='memento')]",
+      "tool_call_id": "11bff406-f957-4561-b156-14696904186b",
+      "timestamp": 1793884596.1279547
+    },
+    {
+      "id": 303025,
+      "role": "assistant",
+      "content": "",
+      "timestamp": 1793884596.1279557,
+      "display_kind": "hidden"
+    },
+    {
+      "id": 303026,
+      "role": "tool",
+      "content": "[terminal] ran `cd /opt/data/projects/gots/hermesgots/.worktrees/cosmic-lantern-6722 && for s...` -> exit 0, 1 lines output",
+      "tool_call_id": "be402ac9-6d11-4374-a6f0-6a32a4332d97",
+      "timestamp": 1793884596.1279566
+    },
+    {
+      "id": 303027,
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "eeb7c235-e97a-4978-b767-c237d472535c",
+          "call_id": "eeb7c235-e97a-4978-b767-c237d472535c",
+          "response_item_id": "fc_eeb7c235-e97a-4978-b767-c237d472535c",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"curl -s -H \\\"Authorization: Bearer $GITHUB_TOKEN\\\" https://api.github.com/repos/thehaseebahmed/hermesgots/actions/jobs/127235220817 | jq -r '.steps[] | \\\"\\\\(.number) \\\\(.name): \\\\(.conclusion)\\\"'\", \"timeout\": 120}"
+          }
+        }
+      ],
+      "timestamp": 1793884596.1279576,
+      "finish_reason": "tool_calls"
+    },
+    {
+      "id": 303028,
+      "role": "tool",
+      "content": "[terminal] ran `curl -s -H \"Authorization: Bearer $GITHUB_TOKEN\" https://api.github.com/repos...` -> exit 0, 1 lines output",
+      "tool_call_id": "eeb7c235-e97a-4978-b767-c237d472535c",
+      "timestamp": 1793884596.1279585
+    }
+  ]
+}

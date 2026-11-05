@@ -6234,10 +6234,19 @@ http
     // Dev only: POST { session_id, rows, from } appends plain turns to a session's transcript, so a
     // flow can build a chat longer than one host page without running each of its turns.
     if (url.pathname === "/__mock/rows" && req.method === "POST") {
-      const { session_id: sessionId, rows = 600, from = 1 } = await readBody(req)
+      const { session_id: sessionId, rows = 600, from = 1, data, compactions: marks } = await readBody(req)
       // A session the app hasn't opened yet has no transcript to append to; it starts empty.
       const stored = transcripts.get(sessionId) ?? []
       transcripts.set(sessionId, stored)
+      // `data` is a transcript recorded from a real host, row for row: the shape a flow wants when the
+      // point is what that session held, not what this mock would have written. Its own row ids come
+      // with it — a record naming one of them is the only word on where a compaction's boundary is.
+      if (Array.isArray(data)) {
+        for (const row of data) stored.push({ ...row, session_id: sessionId })
+        lastRowId = Math.max(lastRowId, ...data.map((row) => row.id ?? 0))
+        if (Array.isArray(marks)) compactions.set(sessionId, marks)
+        return json(res, 200, { ok: true, total: stored.length })
+      }
       const base = stored.at(-1)?.timestamp ?? Date.now() / 1000
       for (let i = 0; i < rows; i++) {
         const n = from + i

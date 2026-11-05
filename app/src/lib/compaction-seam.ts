@@ -161,3 +161,61 @@ export const isSeamScaffolding = (row: SeamRow) =>
   typeof row.content === "string" &&
   row.content.trim() !== "" &&
   seamDrawnContent(row) === ""
+
+/** The rows the plugin recorded as a compaction's summary, by id, where it said which. */
+export type SummaryRows = ReadonlySet<number>
+
+/** A row either builder can ask about: a transcript row, or the host's row as a device stored it. */
+export type BoundaryRow = SeamRow & { id?: number }
+
+/** The ids the record names, as a key a live query's fresh array can be compared by. */
+export const summaryRowIds = (compactions?: { row?: number }[]): number[] =>
+  (compactions ?? []).flatMap((one) => (one.row === undefined ? [] : [one.row]))
+
+/** That key, which is what a memo can depend on where the record's own array changes every run. */
+export const summaryKeyOf = (compactions?: { row?: number }[]) =>
+  summaryRowIds(compactions).join(",")
+
+/** The set a key names, for the memo that keyed on it. */
+export const summaryRowsOfKey = (key: string): SummaryRows | undefined =>
+  key ? new Set(key.split(",").map(Number)) : undefined
+
+/** None for a chat the host never compacted, and none for a plugin older than the record. */
+export const summaryRowsOf = (compactions?: { row?: number }[]): SummaryRows | undefined =>
+  summaryRowsOfKey(summaryKeyOf(compactions))
+
+/**
+ * Whether the record names this row as where a compaction's summary was written. It is the word the
+ * thread cannot read for itself: Hermes serves a summary hidden and empty, and one made while a reply
+ * ran is written on that reply's own row — an assistant row, where a host that keeps no record leaves
+ * only the user row an in-place compaction writes.
+ */
+export const namesCompaction = (row: { id?: number }, summaries?: SummaryRows) =>
+  row.id !== undefined && summaries?.has(row.id) === true
+
+/** What a boundary row contributes: a seam alone, or a seam with the words that row still carries. */
+export type Boundary = { kind: "alone" | "merged"; after: string }
+
+/**
+ * Whether this row is where a compaction's summary was written, and what of it a thread draws.
+ *
+ * The one rule both builders obey. A row whose own text is a summary is one wherever it was written;
+ * the plugin's record names the row a host serves hidden and empty, which is the only word on an
+ * assistant row a compaction made mid-reply; and a hidden *user* row is one with no record at all,
+ * because a host older than the record projects the summary's words away and leaves nothing to read.
+ */
+export function boundaryOf(row: BoundaryRow, summaries?: SummaryRows): Boundary | undefined {
+  if (row.role !== "user" && row.role !== "assistant") return undefined
+  const summary = summaryOf(row.content ?? "")
+  if (summary) return { kind: summary.alone ? "alone" : "merged", after: summary.after }
+  const named = namesCompaction(row, summaries)
+  if (!named && !(row.display_kind === "hidden" && row.role === "user")) return undefined
+  const carried = (row.content ?? "").trim()
+  return { kind: carried ? "merged" : "alone", after: carried }
+}
+
+/** Whether two records say the same thing, whichever set each was read into and whether one is empty. */
+export const sameSummaryRows = (a?: SummaryRows, b?: SummaryRows) =>
+  a === b ||
+  ((a?.size ?? 0) === (b?.size ?? 0) &&
+    (a === undefined || [...a].every((row) => b?.has(row) === true)))

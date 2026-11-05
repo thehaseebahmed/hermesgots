@@ -1,5 +1,10 @@
 import { splitAttachments, steerWords } from "../lib/attachment-text.ts"
-import { isSeamScaffolding, seamDrawnContent } from "../lib/compaction-seam.ts"
+import {
+  boundaryOf,
+  isSeamScaffolding,
+  seamDrawnContent,
+  type SummaryRows,
+} from "../lib/compaction-seam.ts"
 import type { MessageStats } from "../lib/db.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
@@ -189,6 +194,15 @@ const PRUNED = /^\[(Old tool output cleared|Duplicate tool output|[a-z_]+\] )/
 const DELIVERY = /^\[(ASYNC DELEGATION|IMPORTANT: \d+ background process)/
 const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
 
+const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
+
+export interface FoldOptions {
+  partial?: boolean
+  showReminders?: boolean
+  /** The record's summary rows: what says a hidden row is the boundary (`namesCompaction`). */
+  summaries?: SummaryRows
+}
+
 /**
  * Cuts a transcript at each user row and folds the rows after it into that turn's ordered parts. A
  * delivery row is not the user's: it starts a wake turn, which the rows after it, up to the next
@@ -197,9 +211,10 @@ const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
  * transcript whose older rows are not read yet, so a reply before the first request is a turn whose
  * request is missing (`cut`) rather than a stray to drop.
  */
-const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
-
-export function foldTurns(rows: Row[], partial = false, showReminders = false): Turn[] {
+export function foldTurns(
+  rows: Row[],
+  { partial = false, showReminders = false, summaries }: FoldOptions = {},
+): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
   const refusals = progressReminderNotes(rows)
@@ -231,20 +246,24 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
     turns.push(turn)
     return turn
   }
-  for (const row of rows) {
+  for (let row of rows) {
     // What the host wrote after the compaction closes the reply above it.
     if (pending && !isScaffold(row) && writtenAfter(row)) openSeam()
+    const boundary = boundaryOf(row, summaries)
+    if (boundary) {
+      seamed = true
+      const at = msOf(row)
+      openSeam()
+      pending = { kind: "compaction", row: row.id, ...(at !== undefined ? { at } : {}) }
+      // Its calls are the reply's own, made after the compaction: only the summary's words go, and a
+      // row that kept the words it carried keeps them.
+      if (boundary.kind === "alone" && !row.tool_calls?.length) continue
+      row = { ...row, content: boundary.after }
+    }
     if (row.role === "user") {
       // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
       if (row.display_kind === "steer") {
         turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content ?? "") })
-        continue
-      }
-      if (row.display_kind === "hidden") {
-        seamed = true
-        const at = msOf(row)
-        openSeam()
-        pending = { kind: "compaction", row: row.id, ...(at !== undefined ? { at } : {}) }
         continue
       }
       // A model switch, a restatement, the task snapshot and the pruned-skills notice are the model's

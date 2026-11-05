@@ -72,7 +72,7 @@ test("the refused call's note is the note its result carries, whole", () => {
 })
 
 test("behind the switch the fold draws the note where the call was, outside the run", () => {
-  const [turn] = foldTurns(interrupted(), false, true)
+  const [turn] = foldTurns(interrupted(), { showReminders: true })
   assert.deepEqual(
     turn.parts.map((part) => part.kind),
     ["reminder", "text", "tools"],
