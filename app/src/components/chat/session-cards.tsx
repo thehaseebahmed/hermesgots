@@ -156,8 +156,6 @@ function NoticeHead({
 }
 
 /** The tap target every notice in this slot uses, so one restyle reaches all of them. */
-const PILL = "h-11 rounded-full px-4"
-
 /** In place of the composer when the session can't go on: a repo it worked in left the project. */
 export function BlockedCard({ reason }: { reason: string }) {
   return (
@@ -183,7 +181,7 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
           title="This session is resolved."
           body="Reopen it to send more messages."
           action={
-            <Button variant="outline" className={PILL} onClick={onReopen}>
+            <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
               Reopen
             </Button>
           }
@@ -228,7 +226,7 @@ export function QueuePausedCard({
         </ul>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{stale ? STALE_NOTE : PAUSED_NOTE}</p>
-          <Button className={PILL} onClick={onDiscard} disabled={discarding || stale} data-discard-lost>
+          <Button className="h-11 rounded-full px-4" onClick={onDiscard} disabled={discarding || stale} data-discard-lost>
             {DISCARD_LABEL}
           </Button>
         </div>

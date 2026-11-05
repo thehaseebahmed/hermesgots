@@ -1674,7 +1674,6 @@ function queueItem(raw: Record<string, unknown>): QueueItem {
   }
 }
 
-/** The objects of a host's array, each read by `row`: a body that isn't a list at all is no rows. */
 function objects<T>(value: unknown, row: (raw: Record<string, unknown>) => T): T[] {
   return Array.isArray(value)
     ? value

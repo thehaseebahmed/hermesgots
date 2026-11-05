@@ -39,7 +39,7 @@ WIRE_TEXT = 400
 # never looked at.
 BUILT_INS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("hermes_state_runtime", ("get_session_admission", "list_session_admissions")),
-    ("gateway.session_authorities", ("authority_for_home",)),
+    ("gateway.session_authorities", ("authority_for_home", "owner_scope")),
     ("gateway.session_contract", ("SessionRef",)),
     ("gateway.session_api", ("restore_api_session",)),
 )
@@ -155,17 +155,13 @@ def view(rows: Any) -> Dict[str, Any]:
         if not isinstance(row, dict):
             continue
         status = row.get("status")
+        admission_id = row.get("admission_id")
         if status == RUNNING:
             running = True
-            continue
-        if status not in SHOWN:
-            continue
-        admission_id = row.get("admission_id")
-        if not isinstance(admission_id, str) or not admission_id:
-            continue
-        items.append({"id": admission_id, "text": public_text(row.get("payload"))})
-        if status == LOST and lost is None:
-            lost = admission_id
+        elif status in SHOWN and isinstance(admission_id, str) and admission_id:
+            items.append({"id": admission_id, "text": public_text(row.get("payload"))})
+            if status == LOST and lost is None:
+                lost = admission_id
     return {"items": items, "lost": lost, "running": running}
 
 
