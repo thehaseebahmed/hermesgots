@@ -67,3 +67,11 @@ export const needsTranscriptWords = (tool: string) => PREVIEW[tool]?.none === tr
  */
 export const labelComparable = (tool: string) =>
   !needsTranscriptWords(tool) && !TODO_TOOLS.has(tool)
+
+/**
+ * A terminal call Hermes previews as its first command and a count of the rest ("sleep 8 + 1
+ * command"). The call's own words are in the transcript, so a row wearing the preview is read again
+ * for them: a sheet lists every command whole, and the count belongs to the grouped row alone.
+ */
+export const isCountedPreview = (tool: string, label: string) =>
+  tool === "terminal" && /\s\+ \d+ commands?$/.test(label)

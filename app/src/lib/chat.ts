@@ -74,7 +74,7 @@ import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { canSteer, midReply } from "@/lib/steer"
 import { forgetTail } from "@/lib/session-tail"
 import { actionOfPreview, callOutcome } from "@/lib/tools"
-import { needsTranscriptWords } from "@/lib/tool-preview"
+import { isCountedPreview, needsTranscriptWords } from "@/lib/tool-preview"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -413,7 +413,11 @@ export function streamHandlers(turn: Turn): StreamHandlers {
         // some such row still has none, so a finished round costs no read at all.
         if (
           event.status !== "running" &&
-          draft.tools.some((t) => needsTranscriptWords(t.tool) && t.action === undefined)
+          draft.tools.some(
+            (t) =>
+              (needsTranscriptWords(t.tool) && t.action === undefined) ||
+              isCountedPreview(t.tool, t.label),
+          )
         )
           void readTranscriptDetails(turn)
       } else {

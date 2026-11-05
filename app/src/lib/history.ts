@@ -23,7 +23,7 @@ import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { settleTool } from "@/lib/tools"
 import { actionOf, spawnStamp } from "@/lib/spawn"
-import { labelComparable } from "@/lib/tool-preview"
+import { isCountedPreview, labelComparable } from "@/lib/tool-preview"
 import { clip, describeCall, parseArgs, writeStats } from "@/lib/tool-calls"
 import { progressReminderNotes, progressRemindersShown } from "@/lib/progress-reminder"
 import { isRoutineRow } from "@/lib/routine-message"
@@ -532,10 +532,16 @@ export function foldTranscriptDetails(local: ToolEvent[], transcript: ToolEvent[
   // A call whose label can't agree with the transcript's is paired by its place in the run — a todo
   // call, whose preview is worded differently, and a call Hermes previews with nothing at all.
   for (const name of new Set(local.map((tool) => tool.tool))) {
-    if (labelComparable(name)) continue
     const mine = local.flatMap((tool, index) =>
       tool.tool === name && !matched.has(index) ? [index] : [],
     )
+    // A comparable call is paired by place only where its preview is a count of commands, which no
+    // transcript label can equal.
+    if (
+      labelComparable(name) &&
+      !mine.some((index) => isCountedPreview(name, local[index].label))
+    )
+      continue
     const theirs = transcript.flatMap((tool, index) =>
       tool.tool === name && !taken.has(index) ? [index] : [],
     )
@@ -556,7 +562,8 @@ export function foldTranscriptDetails(local: ToolEvent[], transcript: ToolEvent[
     const needsResult = isPreview(tool) && tool.tool !== "clarify"
     // The transcript read the arguments; a preview that read like a control call was a guess.
     const needsAction = tool.action !== found.action
-    if (!needsStats && !needsResult && !needsAction) return tool
+    const needsWords = isCountedPreview(tool.tool, tool.label) && found.label !== tool.label
+    if (!needsStats && !needsResult && !needsAction && !needsWords) return tool
     const next = { ...tool }
     if (needsStats && found.added !== undefined)
       Object.assign(next, { added: found.added, removed: found.removed, created: found.created })
@@ -564,11 +571,17 @@ export function foldTranscriptDetails(local: ToolEvent[], transcript: ToolEvent[
       next.result = found.result
       if (found.error) next.error = found.error
     }
+    if (needsWords) next.label = found.label
     if (needsAction) {
       if (found.action === undefined) delete next.action
       else next.action = found.action
     }
-    if (next.added === tool.added && next.result === tool.result && next.action === tool.action)
+    if (
+      next.added === tool.added &&
+      next.result === tool.result &&
+      next.action === tool.action &&
+      next.label === tool.label
+    )
       return tool
     changed = true
     return next
