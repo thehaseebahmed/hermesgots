@@ -101,7 +101,7 @@ export const FLOWS = {
     script: "e2e/question-card.mjs",
     mock: "live-clarify",
     about:
-      'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"; a question longer than the screen keeps its own Skip and Send on it, the card stopping at half the screen and scrolling the choices inside; and one call\'s five questions are one card — a page per question with arrows, the page showing the one the host asks, never the call\'s first again — every answer reaching the run with the chat left open',
+      "On the new chat screen a question is the composer's alone — one waiting line in the thread, no card of it there — and reads answered once given, never \"No answer\"; a question longer than the screen keeps its own Skip and Send on it, the card stopping at half the screen and scrolling the choices inside; and one call's five questions are one card — a page per question with arrows, the page showing the one the host asks, never the call's first again — every answer reaching the run with the chat left open",
   },
   "question-reload": {
     script: "e2e/question-reload.mjs",
@@ -489,6 +489,11 @@ export const FLOWS = {
     extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },
     about:
       "A bot opens Main, its threads are cards where they began, each under the message that opened it, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
+  },
+  "app-build": {
+    script: "e2e/app-build.mjs",
+    about:
+      "A bot with no apps gets one from the plus and the prompt sheet: a three-block build, the consent list, then the app saved and opened on its root page",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",
