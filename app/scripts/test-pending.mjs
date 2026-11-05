@@ -6,14 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import {
-  EMPTY_TEXT,
-  LOST_LABEL,
-  WAITING_LABEL,
-  pausedQueue,
-  rowLine,
-  sameQueue,
-} from "../src/lib/pending.ts"
+import { EMPTY_TEXT, ROW_LABEL, pausedQueue, rowLine } from "../src/lib/pending.ts"
 
 const held = {
   items: [
@@ -21,6 +14,7 @@ const held = {
     { id: "b", text: "the older message behind it" },
   ],
   lost: "a",
+  running: false,
 }
 
 test("the row the host names as lost reads as lost, and everything behind it waits", () => {
@@ -28,23 +22,23 @@ test("the row the host names as lost reads as lost, and everything behind it wai
   assert.ok(card)
   assert.equal(card.lost, "a")
   assert.deepEqual(
-    card.rows.map((row) => [row.id, row.state, row.label]),
+    card.rows.map((row) => [row.id, row.state, ROW_LABEL[row.state]]),
     [
-      ["a", "lost", LOST_LABEL],
-      ["b", "waiting", WAITING_LABEL],
+      ["a", "lost", ROW_LABEL.lost],
+      ["b", "waiting", ROW_LABEL.waiting],
     ],
   )
   assert.equal(card.rows[0].text, "a turn lost when the server went down")
 })
 
 test("a queue with nothing lost draws no card: its messages are in the thread", () => {
-  assert.equal(pausedQueue({ items: held.items, lost: null }), undefined)
-  assert.equal(pausedQueue({ items: [], lost: null }), undefined)
+  assert.equal(pausedQueue({ items: held.items, lost: null, running: false }), undefined)
+  assert.equal(pausedQueue({ items: [], lost: null, running: true }), undefined)
   assert.equal(pausedQueue(undefined), undefined)
 })
 
 test("a fence with nothing behind it still draws the card", () => {
-  const card = pausedQueue({ items: [held.items[0]], lost: "a" })
+  const card = pausedQueue({ items: [held.items[0]], lost: "a", running: false })
   assert.equal(card?.rows.length, 1)
 })
 
@@ -54,25 +48,11 @@ test("the card is drawn from the row that was lost, not from a later one that al
   const card = pausedQueue({
     items: [held.items[0], { id: "later", text: "another lost turn" }],
     lost: "a",
+    running: false,
   })
   assert.deepEqual(
     card?.rows.map((row) => row.state),
     ["lost", "waiting"],
-  )
-})
-
-test("a read that says the same thing as the last one changes nothing", () => {
-  const copy = { items: held.items.map((item) => ({ ...item })), lost: "a" }
-  assert.ok(sameQueue(held, copy), "the same words, in the same order, are the same answer")
-  assert.ok(sameQueue(undefined, undefined))
-  assert.ok(!sameQueue(undefined, held))
-  assert.ok(!sameQueue(held, { ...held, lost: null }))
-  assert.ok(!sameQueue(held, { ...held, items: held.items.slice(0, 2).reverse() }))
-  assert.ok(
-    !sameQueue(held, {
-      ...held,
-      items: [{ ...held.items[0], text: "reworded" }, held.items[1]],
-    }),
   )
 })
 

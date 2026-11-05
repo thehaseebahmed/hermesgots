@@ -40,6 +40,7 @@ const held = {
     { id: "b", text: "the older message behind it" },
   ],
   lost: "a",
+  running: false,
 }
 
 type Seen = { path: string; method: string }
@@ -58,7 +59,7 @@ function host(queue: unknown, { features = ["pending"] } = {}) {
     if (/\/sessions\/[^/]+\/pending$/.test(url.pathname))
       return json({ object: "memento.pending", ...(queue as object) })
     if (/\/sessions\/[^/]+\/pending\/[^/]+\/discard$/.test(url.pathname) && method === "POST")
-      return json({ object: "memento.pending.discarded", items: [], lost: null, paused: false })
+      return json({ object: "memento.pending.discarded", items: [], lost: null, running: false })
     return json({ error: { message: "no route" } }, 404)
   }) as typeof fetch
   return seen
@@ -85,7 +86,7 @@ test("a chat whose queue a lost turn holds names what waits instead of the compo
 })
 
 test("a queue still moving draws no card, and the composer stays", async () => {
-  host({ items: [{ id: "b", text: "waiting its turn" }], lost: null })
+  host({ items: [{ id: "b", text: "waiting its turn" }], lost: null, running: false })
   await seedChat({ id: "chat-moving", messages: turn, profile: bot })
   await mount(chatScreen("chat-moving"), async () => {
     await until(() => Boolean(composer()), "the composer")

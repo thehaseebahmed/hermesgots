@@ -14,8 +14,9 @@ out was a terminal on the host, which is exactly what the app exists to avoid.
 **The queue is read from the ledger, and the lost turn is discarded from the chat.** The plugin reads
 a session's pending rows through Hermes's own reader (`list_session_admissions`) and answers them as
 `GET sessions/{id}/pending`: the inputs still in line, in FIFO order, each carrying only the words its
-sender typed, and `lost` naming the one row the host cannot say finished — the row that holds the
-rest — rather than a per-row status the app would have to translate. `POST
+sender typed, `lost` naming the one row the host cannot say finished — the row that holds the rest —
+and `running` saying the host is executing a turn there, rather than a per-row status the app would
+have to translate. `POST
 sessions/{id}/pending/{admission}/discard` acknowledges that turn through the authority that owns it
 (`resolve_unknown_as_owner`), the same resolution the gateway makes when the last viewer leaves a
 session whose turn recovered `unknown`; the row's generation is the fence, so a card that goes stale
@@ -32,9 +33,9 @@ The read is gated on the plugin advertising `pending`, so a host from before thi
 card at all — and a host whose Hermes has no admission ledger advertises nothing either, rather than
 answering "nothing is waiting" about a session it never read. It is polled at the chat's idle pace:
 a fence is written to the ledger with no event of its own, so no stream would ever announce it. A
-read is bounded like every other on the screen, and two in a row that don't answer give the composer
-back: the card is a claim about the host right now, and one that can't be discarded must not be able
-to hold a chat shut.
+read is bounded like every other on the screen, and two in a row that don't answer leave the card
+standing with its control disabled and its own sentence: the queue may still be held, and handing the
+composer back would admit a message behind a fence nothing will drain.
 
 ## Considered options
 
@@ -65,9 +66,11 @@ runs, and the turn it frees is followed from `runs/live` like one the plugin sta
 cannot do is cancel a message waiting behind the fence: that message runs once the fence lifts, from
 the app's Stop or not at all.
 
-**An empty thread behind a held queue is a state, not a failed read.** The app reads a chat that has a
-past and holds no rows here as a read that failed, and says so — right for a chat synced from another
-device, wrong for one whose only turn was the turn a restart lost, which never wrote its row. So
+**An empty thread that something is filling is a state, not a failed read.** The app reads a chat that
+has a past and holds no rows here as a read that failed, and says so — right for a chat synced from
+another device, wrong for one whose only turn was the turn a restart lost, which never wrote its row.
+The test is the host's, not a stopwatch: the queue is held there, it is running a turn there
+(`running`), or this screen is following a turn a discard just freed. So
 while the host says the queue is held, a read that comes back with nothing records no failure and the
 thread draws neither the pane nor a spinner: the card says why it is empty, and clearing the queue is
 what makes a read worth making again.

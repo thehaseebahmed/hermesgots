@@ -26,6 +26,8 @@ import {
   PAUSED_BODY,
   PAUSED_NOTE,
   PAUSED_TITLE,
+  ROW_LABEL,
+  STALE_NOTE,
   rowLine,
   type PendingRow,
 } from "@/lib/pending"
@@ -126,9 +128,9 @@ export function PlanReadyCard({
 }
 
 /**
- * The head of a notice in the composer's slot: an icon, a line, its body, and the control beside them
- * — one place for the icon's size, the words' voice and the 44px pill, so the notices can't drift.
- * A card draws it at the top of its content and keeps its own layout under it.
+ * The head of a notice in the composer's slot. One place for the icon's size and the words' voice,
+ * so the cards in that slot can't drift; a card draws it at the top of its content and keeps its
+ * own layout under it.
  */
 function NoticeHead({
   icon,
@@ -138,20 +140,23 @@ function NoticeHead({
 }: {
   icon: ReactNode
   title: string
-  body: string
+  body?: string
   action?: ReactNode
 }) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex min-h-11 items-center gap-3">
       <span className="shrink-0 [&>svg]:size-6">{icon}</span>
       <div className="min-w-0 flex-1 text-sm">
         <p className="font-medium">{title}</p>
-        <p className="text-muted-foreground">{body}</p>
+        {body && <p className="text-muted-foreground">{body}</p>}
       </div>
       {action}
     </div>
   )
 }
+
+/** The tap target every notice in this slot uses, so one restyle reaches all of them. */
+const PILL = "h-11 rounded-full px-4"
 
 /** In place of the composer when the session can't go on: a repo it worked in left the project. */
 export function BlockedCard({ reason }: { reason: string }) {
@@ -178,7 +183,7 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
           title="This session is resolved."
           body="Reopen it to send more messages."
           action={
-            <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
+            <Button variant="outline" className={PILL} onClick={onReopen}>
               Reopen
             </Button>
           }
@@ -198,10 +203,13 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
 export function QueuePausedCard({
   rows,
   discarding,
+  stale = false,
   onDiscard,
 }: {
   rows: PendingRow[]
   discarding: boolean
+  /** The host stopped answering: the queue may still be held, so the card stays, saying why it can't act. */
+  stale?: boolean
   onDiscard: () => void
 }) {
   return (
@@ -214,18 +222,13 @@ export function QueuePausedCard({
               <p className={cn("break-words", row.state === "lost" && "text-muted-foreground")}>
                 {rowLine(row.text)}
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{row.label}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{ROW_LABEL[row.state]}</p>
             </li>
           ))}
         </ul>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">{PAUSED_NOTE}</p>
-          <Button
-            className="h-11 rounded-full px-4"
-            onClick={onDiscard}
-            disabled={discarding}
-            data-discard-lost
-          >
+          <p className="text-xs text-muted-foreground">{stale ? STALE_NOTE : PAUSED_NOTE}</p>
+          <Button className={PILL} onClick={onDiscard} disabled={discarding || stale} data-discard-lost>
             {DISCARD_LABEL}
           </Button>
         </div>
@@ -238,9 +241,11 @@ export function QueuePausedCard({
 export function DiscardedCard() {
   return (
     <Card size="sm" className={CARD}>
-      <CardContent className="flex min-h-11 items-center gap-3">
-        <ArchiveXIcon className="size-6 shrink-0 text-muted-foreground" />
-        <p className="min-w-0 flex-1 text-sm font-medium">This session is discarded.</p>
+      <CardContent>
+        <NoticeHead
+          icon={<ArchiveXIcon className="text-muted-foreground" />}
+          title="This session is discarded."
+        />
       </CardContent>
     </Card>
   )

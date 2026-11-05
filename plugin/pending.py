@@ -21,26 +21,32 @@ import importlib
 import logging
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # The rows a client is shown: one still in line, and one the host cannot say finished. A ``started``
-# row is the turn actually running, not something waiting behind anything.
+# row is the turn actually running, not something waiting behind anything — it crosses as `running`
+# instead, so the app can tell a thread that is being filled from one it never got.
 SHOWN = ("queued", "unknown")
+RUNNING = "started"
 LOST = "unknown"
-# How much of each held message crosses to the app. A row draws one line of `ROW_TEXT_CHARS` (200,
-# `app/src/lib/pending.ts`) and never reads past it, so the envelope is cut here: a session at the
-# ledger's own cap would otherwise ship a quarter of a megabyte on every poll.
+# How much of each held message crosses to the app: a row draws one line of `ROW_TEXT_CHARS` (200,
+# `app/src/lib/pending.ts`) and never reads past it, so the envelope is cut here.
 WIRE_TEXT = 400
-# What this route needs from Hermes, module by module. `available` reads the list, so a host missing
-# one advertises no feature rather than answering an empty queue it never looked at.
+# What this route needs from Hermes, module by module — the read AND the restore. `available` reads
+# the list, so a host missing one advertises no feature rather than answering an empty queue it
+# never looked at.
 BUILT_INS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("hermes_state_runtime", ("get_session_admission", "list_session_admissions")),
     ("gateway.session_authorities", ("authority_for_home",)),
     ("gateway.session_contract", ("SessionRef",)),
     ("gateway.session_api", ("restore_api_session",)),
 )
+# The write is a method on the authority, not a module symbol, so the gate asks the class that
+# defines it: a host that can read a queue but never clear one would hide the composer behind a card
+# whose only control can't work.
+OWNER_PATH = ("gateway.session_authority", "SessionAuthority", "resolve_unknown_as_owner")
 
 
 class PendingError(Exception):
@@ -54,9 +60,8 @@ class PendingError(Exception):
 def available() -> Optional[str]:
     """Why this Hermes can't be asked, or ``None`` where it can.
 
-    The read is Hermes's admission ledger and the discard is its owner path; a host missing either
-    would answer "nothing is waiting" about a session it never read, which is the claim the app
-    draws a card from.
+    A host missing any of these would either answer "nothing is waiting" about a session it never
+    read — the claim the app draws a card from — or draw a card whose only control can never work.
     """
     for module, names in BUILT_INS:
         try:
@@ -66,15 +71,25 @@ def available() -> Optional[str]:
         for name in names:
             if not hasattr(found, name):
                 return f"This Hermes's session ledger has moved ({module}.{name})."
+    module, holder, method = OWNER_PATH
+    try:
+        defined = getattr(importlib.import_module(module), holder, None)
+    except ImportError as error:
+        return f"This Hermes has no session admission ledger ({error})."
+    if not callable(getattr(defined, method, None)):
+        return f"This Hermes's session ledger has moved ({module}.{holder}.{method})."
     return None
 
 
-def profile_scope(owner: Any) -> Any:
+def _owner_scope(owner: Any) -> Any:
     """The owning profile's scope for work done for the home it serves.
 
     A gateway hosting several profiles reads config and credentials per profile, so owner-side work
-    belongs in the owning profile's scope. A single-profile gateway, and a Hermes too old to offer
-    the helper, read in the ambient one, which is the same thing there.
+    belongs in the owning profile's scope; a Hermes too old to offer the helper reads in the ambient
+    one, which is the same thing on a single-profile host. A helper that is there and fails is not
+    that case — running the resolution in the launch profile's scope would read another profile's
+    config, so it is refused rather than guessed. Kept private: `plugin/profile_scope.py` exports a
+    different `profile_scope`, which takes a home and installs a secret scope.
     """
     try:
         from gateway.session_authorities import owner_scope
@@ -82,16 +97,17 @@ def profile_scope(owner: Any) -> Any:
         return nullcontext()
     try:
         return owner_scope(owner)
-    except Exception:
-        logger.warning("memento: reading this session outside its own profile's scope", exc_info=True)
-        return nullcontext()
+    except Exception as error:
+        logger.warning("memento: couldn't scope this session to its own profile", exc_info=True)
+        raise PendingError("The host couldn't work in that session's profile.", 502) from error
 
 
 def authority(adapter: Any, home: Path) -> Any:
-    """The session authority serving ``home``, or ``None`` on a Hermes that has none.
+    """The session authority serving ``home``, or ``None`` on a Hermes or a home that has none.
 
-    A gateway without one keeps no FIFO, so a session there can never be fenced ``unknown`` and
-    nothing is waiting behind anything: the read answers empty rather than failing.
+    A gateway without one keeps no FIFO, so a session there can never be fenced ``unknown`` — but a
+    home no authority serves also can't be read, which is why ``read`` refuses rather than calling
+    that an empty queue.
     """
     runner = getattr(adapter, "gateway_runner", None)
     if runner is None:
@@ -129,25 +145,34 @@ def view(rows: Any) -> Dict[str, Any]:
 
     ``lost`` names the row the host cannot say finished — the FIFO's first ``unknown``, the one that
     holds everything behind it. The rest wait, queued or unknown alike, each let go in its turn.
+    ``running`` says the host is executing a turn for this session: the queue has drained into one,
+    and a thread that is still empty is being written rather than missing.
     """
     items: List[Dict[str, Any]] = []
     lost: Optional[str] = None
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict) or row.get("status") not in SHOWN:
+    running = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = row.get("status")
+        if status == RUNNING:
+            running = True
+            continue
+        if status not in SHOWN:
             continue
         admission_id = row.get("admission_id")
         if not isinstance(admission_id, str) or not admission_id:
             continue
         items.append({"id": admission_id, "text": public_text(row.get("payload"))})
-        if row.get("status") == LOST and lost is None:
+        if status == LOST and lost is None:
             lost = admission_id
-    return {"items": items, "lost": lost}
+    return {"items": items, "lost": lost, "running": running}
 
 
 def read(owner: Any, session_id: str) -> Dict[str, Any]:
     """A session's pending rows, read from the ledger beside the authority that owns them."""
     if owner is None:
-        return view([])
+        raise PendingError("This Hermes can't read a session's queue.", 501)
     from hermes_state_runtime import list_session_admissions
 
     try:
@@ -155,11 +180,15 @@ def read(owner: Any, session_id: str) -> Dict[str, Any]:
     except Exception:
         logger.warning("memento: couldn't read the pending rows for %s", session_id, exc_info=True)
         raise PendingError("The host couldn't read this session's queue.", 502)
+    # A reader that answered something other than rows (a schema that moved, a stub) is a read that
+    # failed, never an empty queue: "nothing is waiting" is the one answer this route must not guess.
+    if not isinstance(rows, (list, tuple)):
+        logger.warning("memento: %s answered %r, not rows", session_id, type(rows).__name__)
+        raise PendingError("The host couldn't read this session's queue.", 502)
     return view(rows)
 
 
 def read_for(adapter: Any, home: Path, session_id: str) -> Dict[str, Any]:
-    """``read`` for a request: resolves the profile's authority first, on whatever thread it runs."""
     return read(authority(adapter, home), session_id)
 
 
@@ -207,7 +236,7 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
     ):
         raise PendingError("That turn isn't waiting to be discarded any more.", 409)
     generation = row.get("generation")
-    with profile_scope(owner):
+    with _owner_scope(owner):
         # Restoring the session is the host putting its own house in order; a failure there is the
         # host's, never the card's (409 would tell the reader the turn moved on, which it hasn't).
         try:
@@ -227,5 +256,10 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
 
 
 async def discard_for(adapter: Any, home: Path, session_id: str, admission_id: str) -> Dict[str, Any]:
-    """``discard`` for a request; the read after it costs one indexed select."""
     return await discard(authority(adapter, home), session_id, admission_id)
+
+
+# The row `info` advertises, in the shape `mcp.FEATURES` and `skill_catalog.FEATURES` have: the gate
+# is the family's own availability, so a host that can't serve it advertises nothing rather than a
+# card drawn over a queue nothing read.
+FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (("pending", available),)

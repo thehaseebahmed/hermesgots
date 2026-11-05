@@ -1841,27 +1841,21 @@ function pendingInput(raw: Record<string, unknown>): PendingInput {
   return { id: String(raw.id), text: typeof raw.text === "string" ? raw.text : "" }
 }
 
-/** What Hermes holds for a session: the inputs still in its FIFO, and the turn a restart lost. */
 function pendingQueue(body: unknown): PendingQueue {
   const held = (body ?? {}) as Record<string, unknown>
   return {
     items: objects(held.items, pendingInput),
     lost: typeof held.lost === "string" ? held.lost : null,
+    running: held.running === true,
   }
 }
 
-/** The bound every read on a chat's screen keeps: a host that never answers can't hold one open. */
-const pendingSignal = (signal?: AbortSignal) =>
-  signal ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]) : AbortSignal.timeout(READ_TIMEOUT_MS)
-
-/**
- * The queue Hermes itself keeps for a session (`plugin/pending.py`): what waits in it, and which row
- * a restart left unfinishable. A host without the route answers nothing, and the chat draws no card.
- */
-export async function getPending(config: HermesConfig, sessionId: string, signal?: AbortSignal) {
+/** The queue Hermes itself keeps for a session (`plugin/pending.py`): what waits in it, and which row
+ * a restart left unfinishable. Bounded like every other read on the screen. */
+export async function getPending(config: HermesConfig, sessionId: string) {
   const response = await request(pendingRoot(config, sessionId), {
     headers: headers(config),
-    signal: pendingSignal(signal),
+    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
   })
   return pendingQueue(await response.json())
 }

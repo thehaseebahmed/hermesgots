@@ -24,7 +24,8 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
-import { pausedQueue, sameQueue, type PendingQueue } from "@/lib/pending"
+import { equal } from "@/lib/equal"
+import { pausedQueue, type PendingQueue } from "@/lib/pending"
 import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
@@ -79,6 +80,7 @@ import {
   queueMessage,
   readPending,
   discardLostTurn,
+  HOST_QUEUE_SETTLE_MS,
   refreshQueue,
   reattachRun,
   sendFromMain,
@@ -981,6 +983,17 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   // read that changed nothing leaves the state it was, so the screen doesn't redraw on every tick.
   const [pending, setPending] = useState<PendingQueue>()
   const [discarding, setDiscarding] = useState(false)
+  // A card whose host stopped answering: still drawn — the queue may still be held — but its one
+  // control can't be promised to work, so it says so rather than handing the composer back and
+  // letting a message be admitted behind a fence nothing will drain.
+  const [stale, setStale] = useState(false)
+  // Set when this device acknowledged a lost turn: the turn it freed starts a beat later and writes
+  // its first row then, so an empty thread while this holds is being filled, not missing. Cleared by
+  // the ladder that follows the turn, or by the screen moving to another chat.
+  const [freed, setFreed] = useState(false)
+  // The timer that closes that window, kept so another chat opening (or the screen closing) ends it
+  // for the chat it belongs to rather than bumping a read on whatever is on screen then.
+  const freedTimer = useRef(0)
   const missed = useRef(0)
   usePoll(
     () => {
@@ -988,13 +1001,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       void readPending(id)
         .then((next) => {
           missed.current = 0
-          setPending((held) => (sameQueue(held, next) ? held : next))
+          setStale(false)
+          setPending((held) => (equal(held, next) ? held : next))
         })
         .catch((error) => {
           noteFailure("Reading the host's queue", error)
-          // The card says what the host holds *now*, and a read that didn't answer can't say it. Two
-          // in a row let the composer back: a card that can't be discarded must not hold a chat shut.
-          if (++missed.current >= 2) setPending(undefined)
+          if (++missed.current >= 2) setStale(true)
         })
     },
     CHAT_IDLE_MS,
@@ -1002,26 +1014,49 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     // A running turn is not a fenced one: the FIFO that a fence holds still is the one a run drains.
     { active: Boolean(id) && !busy },
   )
+  // This component outlives the chat it shows, so the last chat's queue, misses and freed turn are
+  // dropped when another one opens: none of them is a fact about the chat on screen now.
+  useEffect(() => {
+    setPending(undefined)
+    setStale(false)
+    missed.current = 0
+    setFreed(false)
+    window.clearTimeout(freedTimer.current)
+  }, [id])
   const paused = pausedQueue(pending)
-  // The one fact the render, the history read and the poll all ask: whether the host holds the queue.
   const heldQueue = Boolean(paused)
-  // When this device last acknowledged a lost turn, which frees one that starts a beat later.
-  const freedAt = useRef(0)
-  // Bumped when that freed turn's moment has passed, so the thread is read once more and says what it
+  // What this screen knows about a thread that is being filled rather than missing.
+  const filling = heldQueue || Boolean(pending?.running) || busy || freed
+  // `readHistory` is rebuilt only when the chat changes, so it reads this rather than a captured
+  // value: the empty-thread verdict must be judged against what is true when the read answers.
+  const fillingNow = useRef(false)
+  useEffect(() => {
+    fillingNow.current = filling
+  }, [filling])
+  // Bumped when the freed turn's window closes, so the thread is read once more and says what it
   // finds rather than spinning on a read that already answered.
-  const [freedTick, setFreedTick] = useState(0)
+  const [freedCheck, setFreedCheck] = useState(0)
   const discardLost = async () => {
     // The row the card drew as lost is the row acknowledged: one answer, not two readings of it.
     if (!id || !paused) return
     setDiscarding(true)
-    // Read before the card goes: the thread read this lets through is checked against it.
-    freedAt.current = Date.now()
     try {
-      setPending(await discardLostTurn(id, paused.lost))
-      // The freed turn's first row lands within the window the thread read is held open for; past it
-      // the thread is read again, so a turn that never came draws the pane rather than a spinner.
-      setTimeout(() => setFreedTick((n) => n + 1), SEND_CAUGHT_UP_MS)
+      const next = await discardLostTurn(id, paused.lost)
+      setPending(next)
+      setStale(false)
+      // The turn this frees writes its first row within the ladder that follows it; the last rung is
+      // when the window closes and the thread is read again, so a turn that never came draws the
+      // pane rather than a spinner nobody is filling.
+      setFreed(true)
+      const chat = id
+      window.clearTimeout(freedTimer.current)
+      freedTimer.current = window.setTimeout(() => {
+        if (latest.current.chat?.id !== chat) return
+        setFreed(false)
+        setFreedCheck((n) => n + 1)
+      }, HOST_QUEUE_SETTLE_MS)
     } catch (error) {
+      setFreed(false)
       toast.error(error instanceof Error ? error.message : "Couldn't discard the lost turn.")
     } finally {
       setDiscarding(false)
@@ -1101,9 +1136,10 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const needsHistory =
     Boolean(conversation && conversation.updatedAt > conversation.createdAt) &&
     messages?.length === 0
-  // A chat whose queue the host holds and whose thread is empty is waiting, not unread: the lost
-  // turn never wrote its row, so neither a read that failed nor a spinner is the truth (ADR 0108).
-  const pausedEmpty = heldQueue && !flow.length
+  // A chat whose queue is held, or whose turn the host is running, and whose thread is empty is
+  // being filled rather than unread: the turn writes its first row a beat later, so neither a read
+  // that failed nor a spinner that never lands is the truth (ADR 0108).
+  const pausedEmpty = filling && !flow.length
   const threadUnread = needsHistory && readFailure?.chat.id === id && !pausedEmpty
   const loadingHistory = needsHistory && !threadUnread && !pausedEmpty
   // A read describes the chat as it is when it fails, which is no reason for the read to run again.
@@ -1129,16 +1165,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       setReadFailure(failure)
       reportUnreadThread(failure)
     }
-    // Why the thread came back with nothing — an answer that read no rows, or a read that threw. A
-    // chat whose queue the host holds is empty by design (the lost turn never wrote its row), which
-    // the card states, so neither outcome is recorded as a failed read (ADR 0108). Asked through
-    // `readPending`, which the card's poll shares: one question, one request.
+    // A chat whose queue the host holds is empty by design (the lost turn never wrote its row),
+    // which the card states, so neither outcome is recorded as a failed read (ADR 0108). Asked
+    // through `readPending`, which the card's poll shares: one question, one request.
     const held = async () => {
-      // A turn a discard freed starts a beat later and writes its first row then, so a thread still
-      // empty just after one is being filled rather than missing.
-      if (Date.now() - freedAt.current < SEND_CAUGHT_UP_MS) return true
-      const queue = await readPending(id).catch(() => undefined)
-      return Boolean(pausedQueue(queue))
+      if (fillingNow.current) return true
+      return Boolean(pausedQueue(await readPending(id).catch(() => undefined)))
     }
     reconcileHistory(id)
       .then(async (count) => {
@@ -1153,8 +1185,8 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   useEffect(() => {
     // The queue's answer belongs to the question: a fence lifted is what makes the read worth making
     // again, and a fence still in place is what leaves the thread empty without a word.
-    if (needsHistory && !heldQueue) readHistory()
-  }, [needsHistory, heldQueue, freedTick, readHistory])
+    if (needsHistory && !pausedEmpty) readHistory()
+  }, [needsHistory, pausedEmpty, freedCheck, readHistory])
   const retryHistory = useCallback(() => {
     setReadFailure(undefined)
     readHistory()
@@ -1654,7 +1686,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         ) : paused ? (
           // Hermes holds this chat's queue behind a turn a restart lost: nothing typed here would
           // run, so the card takes the composer's place and names what waits (ADR 0108).
-          <QueuePausedCard rows={paused.rows} discarding={discarding} onDiscard={discardLost} />
+          <QueuePausedCard
+            rows={paused.rows}
+            discarding={discarding}
+            stale={stale}
+            onDiscard={discardLost}
+          />
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <PlanReadyCard
             autoAvailable={tracked}

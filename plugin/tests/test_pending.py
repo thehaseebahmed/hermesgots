@@ -66,12 +66,21 @@ class Host:
         authorities = types.ModuleType("gateway.session_authorities")
         authorities.authority_for_home = lambda runner, home: self.authority
         authorities.owner_scope = lambda authority: mock.MagicMock()
+        # The write is a method on the authority, never a module symbol: the fake holds it on a class
+        # too, so a gate that asked the module would fail here as it would on a real host.
+        authority = types.ModuleType("gateway.session_authority")
+
+        class SessionAuthority:  # noqa: N801 - named as Hermes names it
+            resolve_unknown_as_owner = FakeAuthority.resolve_unknown_as_owner
+
+        authority.SessionAuthority = SessionAuthority
         return {
             "hermes_state_runtime": runtime,
             "gateway": types.ModuleType("gateway"),
             "gateway.session_contract": contract,
             "gateway.session_api": api,
             "gateway.session_authorities": authorities,
+            "gateway.session_authority": authority,
         }
 
     def list_session_admissions(self, db, *, session_id):
@@ -122,9 +131,12 @@ class ViewTest(unittest.TestCase):
         )
 
     def test_a_running_turn_is_not_something_waiting(self) -> None:
+        # The host is executing a turn: it is not in line, and it is the reason a thread may still be
+        # empty — the app reads that as `running`, never as a row to draw.
         found = pending.view([admission("a", "started", "at work"), admission("b", "queued", "next")])
         self.assertEqual([item["id"] for item in found["items"]], ["b"])
         self.assertIsNone(found["lost"])
+        self.assertTrue(found["running"])
 
     def test_a_native_rows_words_are_its_event_text(self) -> None:
         row = admission("a", "queued", payload={"native_text_v1": {"event": {"text": "from a bot"}}})
@@ -135,12 +147,12 @@ class ViewTest(unittest.TestCase):
         self.assertEqual(found["items"], [])
 
     def test_nothing_pending_is_not_a_pause(self) -> None:
-        self.assertEqual(pending.view([]), {"items": [], "lost": None})
-        self.assertEqual(pending.view(None), {"items": [], "lost": None})
+        self.assertEqual(
+            pending.view([]), {"items": [], "lost": None, "running": False}
+        )
 
     def test_a_long_message_crosses_only_as_far_as_a_row_draws_it(self) -> None:
-        # The card draws one line of 200 characters; the envelope is cut at `WIRE_TEXT`, well before
-        # the ledger's own cap, so a full queue doesn't ship megabytes on every poll.
+        # The card draws one line of 200 characters; the envelope is cut at `WIRE_TEXT`.
         row = admission("a", "queued", "x" * 20_000)
         text = pending.view([row])["items"][0]["text"]
         self.assertEqual(len(text), pending.WIRE_TEXT)
@@ -156,6 +168,16 @@ class AvailableTest(unittest.TestCase):
         host = Host([])
         modules = host.modules()
         modules["gateway.session_contract"] = types.ModuleType("gateway.session_contract")
+        with mock.patch.dict(sys.modules, modules):
+            self.assertIn("session ledger has moved", pending.available() or "")
+
+    def test_a_host_that_can_read_but_never_clear_advertises_nothing(self) -> None:
+        # A card whose one control could only refuse would hide the composer behind it.
+        host = Host([])
+        modules = host.modules()
+        authority = types.ModuleType("gateway.session_authority")
+        authority.SessionAuthority = object
+        modules["gateway.session_authority"] = authority
         with mock.patch.dict(sys.modules, modules):
             self.assertIn("session ledger has moved", pending.available() or "")
 
@@ -176,14 +198,43 @@ class ReadTest(unittest.TestCase):
         self.assertEqual(found["lost"], "a")
         self.assertEqual(len(found["items"]), 2)
 
-    def test_a_host_without_an_authority_has_nothing_waiting(self) -> None:
+    def test_a_host_without_an_authority_says_it_cannot_read_rather_than_nothing_waiting(self) -> None:
+        # A home no authority serves can't be read at all: "nothing is waiting" would be a claim about
+        # a session nothing looked at, and the card it suppresses may still be needed.
         host = Host([admission("a", "unknown")])
         modules = host.modules()
         modules["gateway.session_authorities"].authority_for_home = lambda runner, home: None
         with mock.patch.dict(sys.modules, modules):
-            found = pending.read_for(SimpleNamespace(gateway_runner=object()), Path("/home"), "s1")
-        self.assertEqual(found, {"items": [], "lost": None})
+            with self.assertRaises(pending.PendingError) as raised:
+                pending.read_for(SimpleNamespace(gateway_runner=object()), Path("/home"), "s1")
+        self.assertEqual(raised.exception.status, 501)
         self.assertEqual(host.reads, [])
+
+    def test_a_host_that_cannot_scope_the_profile_refuses_rather_than_guessing(self) -> None:
+        # Running the resolution in the launch profile's scope would read another profile's config:
+        # a scope that is there and fails is refused, not replaced with the ambient one.
+        host = Host([admission("a", "unknown")])
+        modules = host.modules()
+        modules["gateway.session_authorities"].owner_scope = mock.MagicMock(
+            side_effect=RuntimeError("no such profile")
+        )
+        with mock.patch.dict(sys.modules, modules):
+            with self.assertRaises(pending.PendingError) as raised:
+                asyncio.run(
+                    pending.discard_for(
+                        SimpleNamespace(gateway_runner=object()), Path("/home"), "s1", "a"
+                    )
+                )
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(host.resolved, [])
+
+    def test_a_reader_that_answers_something_but_rows_is_not_an_empty_queue(self) -> None:
+        host = Host([])
+        host.list_session_admissions = lambda db, *, session_id: {"rows": []}
+        with mock.patch.dict(sys.modules, host.modules()):
+            with self.assertRaises(pending.PendingError) as raised:
+                pending.read_for(SimpleNamespace(gateway_runner=object()), Path("/home"), "s1")
+        self.assertEqual(raised.exception.status, 502)
 
 
 class DiscardTest(unittest.TestCase):

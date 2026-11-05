@@ -16,7 +16,6 @@ async function body({ page, seed, shot, until }) {
   await fence(session, LOST, HELD)
   await page.goto(`${app}/c/${chat}`)
 
-  // The card, in the composer's place: what was lost, what waits behind it, and the one control.
   const title = page.getByText("This session's queue is paused.")
   await title.waitFor({ timeout: 20_000 })
   await page.getByText(LOST).waitFor({ timeout: 10_000 })
@@ -35,7 +34,6 @@ async function body({ page, seed, shot, until }) {
   assert.equal(await page.locator('[data-slot="spinner"]').count(), 0, "and no read is claimed to run")
   await shot("paused")
 
-  // Discard acknowledges it on the host, and the chat is a chat again.
   await page.getByRole("button", { name: "Discard lost turn" }).click()
   await until(() => title.count().then((n) => n === 0), 10_000, "the card gone")
   await page.locator("textarea").waitFor({ timeout: 10_000 })
@@ -45,9 +43,23 @@ async function body({ page, seed, shot, until }) {
     "and clearing the queue does not turn the empty thread into one",
   )
   await shot("cleared")
+
+  // The host now reports the turn it freed as running, and the thread is still empty: the app waits
+  // on it rather than naming a read that failed, which is the state the queue-cleared screen used to
+  // fall into a few seconds later.
+  await page.waitForTimeout(5_000)
+  assert.equal(
+    await page.getByText("The thread didn't load.").count(),
+    0,
+    "and it is still not a failed read once the freed turn's window has passed",
+  )
+  assert.equal(
+    await page.locator('[data-slot="spinner"]').count(),
+    0,
+    "nor a spinner nothing is filling",
+  )
 }
 
-// The card on a laptop and on a phone, each in its own theme.
 for (const { look, options } of LOOKS) await flow(`pending-queue-${look}`, body, options)
 
 pass("a fenced chat names what its queue holds and clears the lost turn from the app")

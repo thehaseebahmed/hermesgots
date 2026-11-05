@@ -70,6 +70,7 @@ import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { clarifyResult } from "@/lib/clarify"
 import { quietly } from "@/lib/report"
+import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { canSteer, midReply } from "@/lib/steer"
 import { forgetTail } from "@/lib/session-tail"
 import { actionOfPreview, callOutcome } from "@/lib/tools"
@@ -982,7 +983,7 @@ async function runTurn(
   reattachTries.delete(turn.conversationId)
   await finishTurn(turn, usage, sendFailed)
   // The plugin puts a leftover steer first in its own queue, and starts what waits there.
-  if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
+  if (await hostQueue(turn.config)) followHostQueue(() => void refreshQueue(turn.conversationId))
   else if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
   return { status: draft.status, sendFailed, reachedHost }
 }
@@ -1588,7 +1589,7 @@ export async function queueMessage(
         hostQueued: true,
       })
       // The run may have ended while it was being queued, and the plugin started it at once.
-      followHostQueue(conversationId)
+      followHostQueue(() => void refreshQueue(conversationId))
       return item.id
     } catch {
       // It waits here instead, and goes from this device.
@@ -1712,51 +1713,58 @@ async function syncQueue(conversationId: string) {
 
 const syncingQueue = new Map<string, Promise<void>>()
 
-export function refreshQueue(conversationId: string) {
-  let pending = syncingQueue.get(conversationId)
-  if (!pending) {
-    pending = syncQueue(conversationId)
-      .catch(() => undefined)
-      .finally(() => syncingQueue.delete(conversationId))
-    syncingQueue.set(conversationId, pending)
+function once<K, V>(map: Map<K, Promise<V>>, key: K, call: () => Promise<V>): Promise<V> {
+  let running = map.get(key)
+  if (!running) {
+    running = call().finally(() => map.delete(key))
+    map.set(key, running)
   }
-  return pending
+  return running
+}
+
+export function refreshQueue(conversationId: string) {
+  return once(syncingQueue, conversationId, () => syncQueue(conversationId).catch(() => undefined))
 }
 
 /** The plugin starts the next turn within a second or so of the last one ending. */
 const HOST_QUEUE_CHECKS_MS = [400, 1500, 4000]
+/** When the last of those checks has run: a turn a queue change starts has written its first row. */
+export const HOST_QUEUE_SETTLE_MS = HOST_QUEUE_CHECKS_MS[HOST_QUEUE_CHECKS_MS.length - 1]
 
-function followHostQueue(conversationId: string) {
-  for (const ms of HOST_QUEUE_CHECKS_MS) setTimeout(() => void refreshQueue(conversationId), ms)
-}
-
-/** The turn a discard freed starts a beat later, so it is looked for where a queued turn's is. */
-function followFreedTurn(conversationId: string) {
-  for (const ms of HOST_QUEUE_CHECKS_MS)
-    setTimeout(() => void reattachRun(conversationId).catch(quietly("Following a run")), ms)
+/** Looks for what a queue change starts — the next turn, or the one a discard freed — as it starts. */
+function followHostQueue(check: () => void) {
+  for (const ms of HOST_QUEUE_CHECKS_MS) setTimeout(check, ms)
 }
 
 const readingPending = new Map<string, Promise<PendingQueue | undefined>>()
+/** A host whose plugin has no `/pending` route at all, left alone for the usual while. */
+const noPendingRoute = cooldown()
 
 /**
- * The queue Hermes itself keeps for this chat (`plugin/pending.py`): what waits in it, and which row
- * a restart left unfinishable. One read at a time — the screen's poll and a history read that found
- * nothing ask the same question, and neither should make the other's request. `undefined` where the
- * bot's host has no such route, so an older plugin draws no card at all rather than an empty one.
+ * The queue Hermes itself keeps for this chat (`plugin/pending.py`): what waits in it, which row a
+ * restart left unfinishable, and whether a turn is running there. `undefined` where the bot's host
+ * has no such route, so an older plugin draws no card at all rather than an empty one.
+ *
+ * The shared read takes no caller's signal: whoever asks first would otherwise decide for everyone
+ * else whether the answer arrives, and the history read waiting on it would take a cancelled poll
+ * for a host that never answered. It is bounded by its own timeout instead.
  */
 export function readPending(conversationId: string): Promise<PendingQueue | undefined> {
-  let reading = readingPending.get(conversationId)
-  if (!reading) {
-    reading = loadPending(conversationId).finally(() => readingPending.delete(conversationId))
-    readingPending.set(conversationId, reading)
-  }
-  return reading
+  return once(readingPending, conversationId, () => loadPending(conversationId))
 }
 
 async function loadPending(conversationId: string): Promise<PendingQueue | undefined> {
+  if (noPendingRoute.cooling(conversationId)) return undefined
   const host = await hostOf(conversationId)
   if (!host || !(await hasPluginFeature(host.config, "pending"))) return undefined
-  return getPending(host.config, host.conversation.hermesSessionId)
+  try {
+    return await getPending(host.config, host.conversation.hermesSessionId)
+  } catch (error) {
+    // A plugin older than this route is not asked again every tick: it answers the same 404 for as
+    // long as it runs, and the card has nothing to draw either way.
+    if (await lacksRoute(host.config, error, "pending")) noPendingRoute.start(conversationId)
+    throw error
+  }
 }
 
 /**
@@ -1770,7 +1778,7 @@ export async function discardLostTurn(conversationId: string, admissionId: strin
   if (!host || !(await hasPluginFeature(host.config, "pending")))
     throw new HermesError("This chat isn't one the app can clear.")
   const next = await discardPending(host.config, host.conversation.hermesSessionId, admissionId)
-  followFreedTurn(conversationId)
+  followHostQueue(() => void reattachRun(conversationId).catch(quietly("Following a run")))
   return next
 }
 
@@ -1792,7 +1800,7 @@ export async function sendQueued(message: Message) {
     if (!host) return
     await queueAction(host.config, host.conversation.hermesSessionId, message.id, "send")
     await refreshQueue(message.conversationId)
-    followHostQueue(message.conversationId)
+    followHostQueue(() => void refreshQueue(message.conversationId))
     return
   }
   // A reply is still streaming, so no turn can start: the message waits its turn like any other

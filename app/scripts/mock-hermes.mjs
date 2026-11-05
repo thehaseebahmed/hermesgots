@@ -3803,6 +3803,9 @@ const pendingView = (held) => ({
   object: "memento.pending",
   items: held.items.map(({ id, text }) => ({ id, text })),
   lost: held.lost,
+  // A fence holds every row still; once it is cleared the host starts the turn it freed, and says so
+  // until that turn is over — the fact the app reads a filling thread from.
+  running: Boolean(held.running),
 })
 
 function startRun(req, body, options = {}) {
@@ -5989,6 +5992,7 @@ http
           })
         held.items = []
         held.lost = null
+        held.running = true
         noteEvent("runs", id)
         noteEvent("session", id)
         return json(res, 200, { object: "memento.pending.discarded", ...pendingView(held) })
