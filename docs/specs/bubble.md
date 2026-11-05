@@ -118,10 +118,16 @@ the microphone for as long as the Bubble is on, with its own low-importance noti
 *Turn off* action. `BubbleRecorder` reads `AudioRecord` at 16 kHz mono, cuts Pieces on the page's rule
 (a 1.2 s floor, a 350 ms confirmed pause under a learned floor, a 25 s cap) at the page's own 50 ms
 tick, and writes each Piece as a self-contained WAV, because the host probes each file's container and
-never remuxes. The rule lives in the page and is compiled into the phone, so the numbers are compared
-rather than shared: `bench/dictation/cut.py` reads `BubbleRecorder.kt` as well as `dictation.ts` and
-fails the bench when either moves alone. Four Pieces at most are ever on their way; a host slower than
-that fails the take instead of letting a queue of audio build up in memory.
+never remuxes. Two things the page gets from the browser, the phone does not: the page's capture asks
+for `autoGainControl`, so the recorder lifts each frame towards a target peak itself (a peak envelope,
+a gain that drops at once and climbs slowly, and a ceiling on the lift) — a raw phone microphone at
+arm's length is quiet enough that a voice filter trims real speech as silence — and its ring is asked
+for 400 ms rather than the device's minimum, so a reader stalled for a moment costs no audio. A Piece's
+span is the audio's own length rather than the clock's, so a take that dropped frames cannot claim
+them. The rule lives in the page and is compiled into the phone, so the numbers are compared rather
+than shared: `bench/dictation/cut.py` reads `BubbleRecorder.kt` as well as `dictation.ts` and fails the
+bench when either moves alone. Four Pieces at most are ever on their way; a host slower than that fails
+the take instead of letting a queue of audio build up in memory.
 
 **The wire is the app's, unchanged.** Each Piece is a `POST …/dictation/{take}/piece` with `index`,
 `ms` and the bot's `vocabulary` repeated, as raw bytes with a real `Content-Type`; the end is one

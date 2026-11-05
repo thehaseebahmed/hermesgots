@@ -8,6 +8,7 @@ import android.os.SystemClock
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -28,6 +29,7 @@ class BubbleRecorder(
     private val onError: (String) -> Unit,
 ) {
     private val samples = ShortArray(FRAME)
+    private val gain = Gain()
     private var record: AudioRecord? = null
     private var thread: Thread? = null
 
@@ -47,7 +49,10 @@ class BubbleRecorder(
                 RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                buffer * 2,
+                // The minimum is what the device needs to be *correct*, not what it needs to be safe:
+                // a ring this deep is what keeps a stalled reader from losing the room's audio, and a
+                // read that finds nothing has already lost it — silently, with no error to read.
+                maxOf(buffer * 8, RING_MS * RATE / 1000 * 2),
             )
         } catch (error: Exception) {
             // Not `TAKEN`: a phone that cannot build an `AudioRecord` at all is a different answer
@@ -112,6 +117,9 @@ class BubbleRecorder(
                 }
                 if (read == 0) continue
                 val squares = squares(samples, read)
+                // The meter and the cut read the phone's own signal; the Piece is written with the
+                // lift a decoder needs, so what the host is handed is a normalised take.
+                gain.lift(samples, read)
                 buffer.write(pcm(samples, read))
                 val loudness = sqrt(squares / read).toFloat()
                 val quiet = meter.quiet(loudness)
@@ -137,7 +145,7 @@ class BubbleRecorder(
                 val pause = if (quietSince < 0) 0 else now - quietSince
                 // A stretch that has heard nothing never becomes a Piece: a room's tone is free.
                 if (heard && (length >= LONG_PIECE_MS || (length >= PIECE_MS && pause >= PAUSE_MS))) {
-                    if (buffer.size() > 0) onPiece(wav(buffer.toByteArray()), length.toInt())
+                    if (buffer.size() > 0) cut(buffer)
                     buffer.reset()
                     pieceStart = now
                     heard = false
@@ -152,11 +160,22 @@ class BubbleRecorder(
             // released, and releasing it throws the end of the take away. Read it out here, where
             // the recorder is still the one that heard it.
             drain(recorder, buffer)
-            val tail = (SystemClock.elapsedRealtime() - pieceStart).toInt()
             // Whatever is left is the last thing said, however quiet the meter found it: the end of
             // a take is not the place to decide a word was too small to be the user's.
-            if (buffer.size() > 0) onPiece(wav(buffer.toByteArray()), tail)
+            if (buffer.size() > 0) cut(buffer)
         }
+    }
+
+    /**
+     * Hands one finished Piece over, with the span it really holds.
+     *
+     * The span is the audio's own length, not the clock's: a frame the device dropped is a frame this
+     * take never had, and a row reading "26 seconds spoken" over eight seconds of audio is a number
+     * that cannot be weighed against the words beside it.
+     */
+    private fun cut(buffer: ByteArrayOutputStream) {
+        val pcm = buffer.toByteArray()
+        onPiece(wav(pcm), pcm.size * 1000 / (RATE * 2))
     }
 
     /**
@@ -170,7 +189,10 @@ class BubbleRecorder(
             read = runCatching {
                 recorder.read(samples, 0, samples.size, AudioRecord.READ_NON_BLOCKING)
             }.getOrDefault(0)
-            if (read > 0) into.write(pcm(samples, read))
+            if (read > 0) {
+                gain.lift(samples, read)
+                into.write(pcm(samples, read))
+            }
         } while (read > 0)
     }
 
@@ -233,10 +255,67 @@ class BubbleRecorder(
         }
     }
 
+    /**
+     * The lift a phone's own microphone needs, which the page gets from the browser for free.
+     *
+     * The Composer asks for `autoGainControl` in its capture constraints and the browser lifts a
+     * quiet room to a level a decoder can use. `AudioRecord` hands over whatever the microphone
+     * made — at arm's length around a fiftieth of full scale — and a take that quiet is trimmed as
+     * silence by the host's voice filter, or heard as a fragment of itself. This is the same idea in
+     * a few lines: a peak envelope, a gain that walks towards a target with it, and a ceiling on the
+     * lift, so even the quietest room is raised no further than that.
+     */
+    private class Gain {
+        private var envelope = 0f
+        private var current = 1f
+
+        /** `samples` in place, `count` of them, before they are written to a Piece. */
+        fun lift(samples: ShortArray, count: Int) {
+            var peak = 0f
+            for (index in 0 until count) {
+                val level = abs(samples[index].toInt()) / 32768f
+                if (level > peak) peak = level
+            }
+            // The loudest thing said in about half a second: a peak envelope falls between words, a
+            // level does not, and a gain that followed the level would swell the gaps.
+            envelope = max(peak, envelope * DECAY)
+            val wanted =
+                if (envelope < FLOOR) CEILING
+                else (TARGET / envelope).coerceIn(1f, CEILING)
+            // Down at once, up slowly: a gain that lagged a loud word would clip it, and one that
+            // leapt between two quiet ones is heard as pumping.
+            current = if (wanted < current) wanted else current + (wanted - current) * UP
+            if (current <= 1.001f) return
+            for (index in 0 until count) {
+                val lifted = samples[index] * current
+                samples[index] = when {
+                    lifted > Short.MAX_VALUE -> Short.MAX_VALUE
+                    lifted < Short.MIN_VALUE -> Short.MIN_VALUE
+                    else -> lifted.toInt().toShort()
+                }
+            }
+        }
+
+        private companion object {
+            /** What a frame is lifted towards: about -6 dBFS, which is loud to a decoder. */
+            const val TARGET = 0.5f
+            /** The most a quiet take is lifted: about +21 dB. */
+            const val CEILING = 12f
+            /** Under this peak a frame is the room itself, lifted by the ceiling like a quiet word. */
+            const val FLOOR = 0.002f
+            /** How much of the envelope survives one 50 ms frame — about half a second of memory. */
+            const val DECAY = 0.9f
+            /** How far the gain climbs towards a new target per frame; it drops to one at once. */
+            const val UP = 0.25f
+        }
+    }
+
     companion object {
         private const val RATE = 16_000
         /** One tick of the meter, and the span a cut is confirmed on: the page reads every 50 ms. */
         private const val FRAME = 800
+        /** How deep the microphone's ring is asked to be: the cushion a stalled reader eats into. */
+        private const val RING_MS = 400
         /** How many frames one meter reading is made of: two 50 ms frames are the 100 ms a person sees. */
         private const val LEVEL_FRAMES = 2
         private const val PIECE_MS = 1_200
