@@ -310,7 +310,7 @@ test("a local bot's line says local, whatever the resolver names it", async () =
   })
 })
 
-test("picking a bot moves this device's selection and mirrors it to the phone", async () => {
+test("picking a bot moves the Bubble's bot, not the chat selection, and mirrors it to the phone", async () => {
   await seed()
   await mount(screen(), async () => {
     await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
@@ -323,6 +323,7 @@ test("picking a bot moves this device's selection and mirrors it to the phone", 
     await until(async () => said("bubble-bot").includes("B bot"), "the new selection")
   })
   const settings = await db.settings.get("settings")
-  assert.equal(settings?.activeProfileId, "bot-2", "the app's own selection moved with it")
+  assert.equal(settings?.bubbleProfileId, "bot-2", "the Bubble's own bot moved")
+  assert.equal(settings?.activeProfileId, "bot-1", "the chat selection did not")
   assert.ok(bridgeCalls.includes("Bubble.configure"), "and the phone was told who hears it")
 })

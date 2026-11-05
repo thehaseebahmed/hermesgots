@@ -11,7 +11,13 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useEffect } from "react"
 
 import { serverConfig } from "@/lib/connection"
-import { getActiveProfile, listEnabledProfiles, listProfiles, type Profile } from "@/lib/db"
+import {
+  getBubbleProfile,
+  listEnabledProfiles,
+  listProfiles,
+  pinBubbleProfile,
+  type Profile,
+} from "@/lib/db"
 import { writeDictation } from "@/lib/dictations"
 import {
   dictationLeavesHost,
@@ -98,7 +104,7 @@ export async function bubbleState(): Promise<BubbleState | undefined> {
  */
 export async function mirrorBubble(profile?: Profile) {
   if (!bubbleAvailable()) return
-  const bot = profile ?? (await getActiveProfile())
+  const bot = profile ?? (await getBubbleProfile())
   if (!bot) return
   const wait = dictationWaitMs(bot)
   const block = {
@@ -150,12 +156,15 @@ export async function disableBubble() {
 }
 
 /**
- * Keeps the phone's copy of the bot in step with this device's selection, wherever the selection
- * moves — a bot's Main moves it as surely as the card does, so this hangs off the shell rather than
- * off the one screen that names it.
+ * Keeps the phone's copy of the Bubble's own bot in step, wherever it or its connection moves. Chat
+ * navigation never moves it, so this hangs off the shell rather than off the one screen that names it.
  */
 export function useBubbleMirror() {
-  const active = useLiveQuery(getActiveProfile, [])
+  const active = useLiveQuery(getBubbleProfile, [])
+  // The first bot resolved is pinned, so later navigation cannot carry the Bubble away.
+  useEffect(() => {
+    if (active) void pinBubbleProfile(active.id)
+  }, [active?.id])
   const baseUrl = active?.baseUrl ?? ""
   const apiKey = active?.apiKey ?? ""
   const wait = useDictationWaitMs(active)

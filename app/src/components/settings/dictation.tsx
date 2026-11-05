@@ -40,10 +40,10 @@ import { connectionKey } from "@/lib/connection"
 import { copyText, useCopied } from "@/lib/copied"
 import {
   db,
-  getActiveProfile,
+  getBubbleProfile,
   listEnabledProfiles,
   listProfiles,
-  setActiveProfile,
+  setBubbleProfile,
   type DictationRecord,
   type Profile,
 } from "@/lib/db"
@@ -489,7 +489,7 @@ function heardLine(settings?: SpeechSettings) {
 function BubbleCards() {
   const bots = useLiveQuery(listEnabledProfiles, [])
   const heard = useHeardBy(bots ?? [])
-  const active = useLiveQuery(getActiveProfile, [])
+  const bubbleBot = useLiveQuery(getBubbleProfile, [])
   const [state, setState] = useState<BubbleState>()
   const [busy, setBusy] = useState(false)
   const [picking, setPicking] = useState(false)
@@ -599,7 +599,7 @@ function BubbleCards() {
         <ValueRow
           title="Bot"
           purpose="Who hears the Bubble's takes"
-          value={active?.name}
+          value={bubbleBot?.name}
           onClick={() => setPicking(true)}
           data-setting="bubble-bot"
         />
@@ -608,7 +608,7 @@ function BubbleCards() {
         <PickList
           label="Bots"
           searchable={false}
-          selected={active?.id}
+          selected={bubbleBot?.id}
           // Only the bots the selection can land on: a disabled bot is resolved away on the next
           // read, so offering it would move the row and the phone to a bot nobody picked.
           // The same order the Bots tab draws, and each row the bot's own picture with the model it
@@ -624,9 +624,9 @@ function BubbleCards() {
           onPick={(id) => {
             setPicking(false)
             const picked = (bots ?? []).find((profile) => profile.id === id)
-            if (!picked || picked.id === active?.id) return
+            if (!picked || picked.id === bubbleBot?.id) return
             void (async () => {
-              await setActiveProfile(picked.id)
+              await setBubbleProfile(picked.id)
               await mirrorBubble(picked)
               await refresh()
             })()

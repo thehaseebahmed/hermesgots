@@ -16,6 +16,9 @@ export const bubbleAnswer = {
   microphone: true,
 }
 
+/** What the page told the Bubble to dictate with, one entry per `configure`, in order. */
+export const bubbleConfigured: { profileId: string; root: string }[] = []
+
 /** The takes the phone is holding for the log: read until the page says it has written them. */
 export const bubbleKept: unknown[] = []
 
@@ -58,6 +61,10 @@ Object.defineProperty(globalThis, "Capacitor", {
       bridgeCalls.push(`${plugin}.${method}`)
       // The phone is the one that decides: enabling starts the service and clears its flag, and
       // enabling without the draw-over grant starts nothing.
+      if (method === "configure") {
+        bubbleConfigured.push(options as { profileId: string; root: string })
+        return Promise.resolve()
+      }
       if (method === "state") return Promise.resolve({ ...bubbleAnswer })
       if (method === "takeaways") return Promise.resolve({ kept: [...bubbleKept] })
       if (method === "took") {

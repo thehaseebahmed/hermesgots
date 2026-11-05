@@ -83,6 +83,8 @@ export interface Settings {
   codeSort?: CodeSort
   codeSortDir?: SortDir
   activeProfileId?: string
+  /** The bot the Bubble hears with; chat navigation never moves it. */
+  bubbleProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
   /** Finished the first-run setup. */
@@ -1359,6 +1361,25 @@ export async function getActiveProfile(): Promise<Profile | undefined> {
   if (active && !active.disabled) return active
   const profiles = await listProfiles()
   return profiles.find((profile) => !profile.disabled) ?? active ?? profiles[0]
+}
+
+/** The Bubble's own bot; the selected bot answers until one is pinned or when the pinned one is gone. */
+export async function getBubbleProfile(): Promise<Profile | undefined> {
+  const { bubbleProfileId } = await getSettings()
+  const own = bubbleProfileId ? await db.profiles.get(bubbleProfileId) : undefined
+  if (own && !own.disabled) return own
+  return getActiveProfile()
+}
+
+export async function setBubbleProfile(id: string) {
+  await saveSettings({ bubbleProfileId: id })
+}
+
+/** Pins `id` as the Bubble's bot unless one is pinned, so a fallback is never written over a pick. */
+export async function pinBubbleProfile(id: string) {
+  await db.transaction("rw", db.settings, async () => {
+    if (!(await getSettings()).bubbleProfileId) await setBubbleProfile(id)
+  })
 }
 
 export async function setActiveProfile(id: string) {
