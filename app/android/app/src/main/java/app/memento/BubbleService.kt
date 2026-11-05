@@ -210,14 +210,16 @@ class BubbleService : Service() {
 
     private fun add() {
         val layout = WindowManager.LayoutParams(
-            px(56),
-            px(56),
+            px(BubbleView.MARK_DP),
+            px(BubbleView.MARK_DP),
             overlayType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = metrics().widthPixels - px(72)
+            // Docked where a thumb reaches and where the app underneath still reads around it: the
+            // same gap the mark keeps when a drag snaps it back to this edge.
+            x = metrics().widthPixels - px(BubbleView.MARK_DP + BubbleView.EDGE_DP)
             y = metrics().heightPixels / 2
         }
         val view = BubbleView(this).apply {
@@ -347,7 +349,11 @@ class BubbleService : Service() {
 
     private fun snap(layout: WindowManager.LayoutParams) {
         val screen = metrics()
-        layout.x = if (layout.x + px(28) < screen.widthPixels / 2) px(8) else screen.widthPixels - px(64)
+        // The edge gap is the same one the mark is given when it first appears, on either side, so a
+        // drag never leaves it sitting closer to the glass than a restart would.
+        layout.x =
+            if (layout.x + px(BubbleView.MARK_DP / 2) < screen.widthPixels / 2) px(BubbleView.EDGE_DP)
+            else screen.widthPixels - px(BubbleView.MARK_DP + BubbleView.EDGE_DP)
         layout.y = layout.y.coerceIn(px(24), screen.heightPixels - px(96))
         push(layout)
     }
@@ -632,14 +638,14 @@ class BubbleService : Service() {
 
     private fun resize(width: Int) {
         val layout = params ?: return
-        if (layout.width == width && layout.height == px(56)) return
+        if (layout.width == width && layout.height == px(BubbleView.MARK_DP)) return
         val screen = metrics()
         // The mark keeps the edge it is docked to: a pill on the right grows leftwards, so what
         // collapses back is the mark's own corner rather than a piece of the middle of the screen.
         val fromRight = layout.x + layout.width / 2 > screen.widthPixels / 2
         val right = layout.x + layout.width
         layout.width = width
-        layout.height = px(56)
+        layout.height = px(BubbleView.MARK_DP)
         layout.x = if (fromRight) right - width else layout.x
         layout.x = layout.x.coerceIn(0, (screen.widthPixels - width).coerceAtLeast(0))
         push(layout)

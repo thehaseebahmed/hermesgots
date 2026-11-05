@@ -98,8 +98,7 @@ class BubbleRecorder(
         var quietSince = -1L
         // The meter is read out every other frame: one reading per 100 ms is what a person sees, and a
         // level per 50 ms frame scrolled the bars twice as fast and read quieter than the room was.
-        var energy = 0.0
-        var counted = 0
+        var peak = 0f
         var frames = 0
         try {
             while (running) {
@@ -123,15 +122,15 @@ class BubbleRecorder(
                 } else if (quietSince < 0) {
                     quietSince = now
                 }
-                energy += squares
-                counted += read
+                // The block's loudest frame, not its average: a meter drawn from means flattens
+                // every peak into the room around it, which is a wave that never looks like talking.
+                if (loudness > peak) peak = loudness
                 frames += 1
                 if (frames >= LEVEL_FRAMES) {
                     // Raw, because the meter owns the scale: a loudness the view has to undo is a
                     // scale in two places, and the two drifted apart the moment either moved.
-                    onLevel(sqrt(energy / counted).toFloat())
-                    energy = 0.0
-                    counted = 0
+                    onLevel(peak)
+                    peak = 0f
                     frames = 0
                 }
                 val length = now - pieceStart

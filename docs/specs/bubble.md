@@ -42,16 +42,20 @@ nothing starts on half of them. A phone that already has both starts the Bubble 
 A grant taken away later takes the Bubble with it: the mark drops itself and the switch goes back to
 *Off*, with no error to read and nothing left on screen.
 
-Idle, the mark is a 56 dp circle at the screen's right edge, draggable and snapping to the nearest
-edge, and it is only on screen while the phone's keyboard is up — that is the state a person dictates
-in. A take and the five seconds after it are the exception: the keyboard can be dismissed while the
-user is talking, and a mark that vanished mid-take would take the way to stop it with it. The pill
+Idle, the mark is a 48 dp circle inset 20 dp from the screen's right edge — the size and the gap the
+marks that do this job on Android are read at, so the line of text it floats over still reads under it
+— draggable and snapping to the nearest edge at the same gap, and it is only on screen while the
+phone's keyboard is up — that is the state a person dictates in. A take and the five seconds after it
+are the exception: the keyboard can be dismissed while the user is talking, and a mark that vanished
+mid-take would take the way to stop it with it. The pill
 grows away from the edge the mark is docked to and collapses back onto the same corner; its background
 is a 70% shade so the app underneath stays readable. A take turns it into a pill: close, a level meter,
 done — the meter is its full width from the first frame, drawing silence as dots and speech as bars so the
-two read apart at a glance. Every slot is a bar at the height its loudness earns — silence is a row
-of short bars, not a gap — and the room is scaled by the meter rather than by the recorder, because a
-reading the view has to undo is a scale in two places. The take's last words are sent whatever the
+two read apart at a glance. Every slot is a bar at the height its loudness earns — silence is a dot,
+not a gap — and the room is scaled by the meter rather than by the recorder, because a
+reading the view has to undo is a scale in two places: a level is read against the quietest the room
+has been heard and drawn as its distance above it, so a quiet speaker in a quiet room moves the meter
+as far as a loud one in a noisy room. The take's last words are sent whatever the
 meter made of them: a quiet tail is still the user's. While the host is hearing the take the pill is a spinner and nothing else,
 exactly as wide as the spinner: the wait is one thing to look at rather than a cross beside a loader.
 A tap still gives the take back — a wait is out of the app's hands, not out of the user's, and a host

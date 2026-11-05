@@ -13,6 +13,7 @@ import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import kotlin.math.ln
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -42,18 +43,18 @@ class BubbleView(context: Context) : FrameLayout(context) {
     init {
         background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = context.px(28).toFloat()
+            cornerRadius = context.px(MARK_DP / 2).toFloat()
             // A mark over someone else's app is read past, not looked at: three parts solid, two clear.
             setColor(0xB31C1C1E.toInt())
         }
 
         circle = FrameLayout(context).apply {
-            addView(WaveMark(context), LayoutParams(context.px(26), context.px(24), Gravity.CENTER))
+            addView(WaveMark(context), LayoutParams(context.px(22), context.px(21), Gravity.CENTER))
         }
-        addView(circle, LayoutParams(context.px(56), context.px(56)))
+        addView(circle, LayoutParams(context.px(MARK_DP), context.px(MARK_DP)))
 
-        cancel = context.glyph(R.drawable.ic_bubble_close, "Cancel", 11)
-        done = context.glyph(R.drawable.ic_bubble_check, "Done", 11)
+        cancel = context.glyph(R.drawable.ic_bubble_close, "Cancel", 10)
+        done = context.glyph(R.drawable.ic_bubble_check, "Done", 10)
         meter = LevelMeter(context)
         loading = Loading(context)
 
@@ -62,13 +63,13 @@ class BubbleView(context: Context) : FrameLayout(context) {
             // Centred as much as it is vertical: a face with one child would otherwise be laid out at
             // the start of a wider window, and the gap that leaves reads as a mistake.
             gravity = Gravity.CENTER
-            setPadding(context.px(8), 0, context.px(8), 0)
+            setPadding(context.px(6), 0, context.px(6), 0)
         }
-        pill.addView(cancel, LinearLayout.LayoutParams(context.px(48), context.px(48)))
-        pill.addView(meter, LinearLayout.LayoutParams(0, context.px(48), 1f))
-        pill.addView(done, LinearLayout.LayoutParams(context.px(48), context.px(48)))
-        pill.addView(loading, LinearLayout.LayoutParams(context.px(40), context.px(40)))
-        addView(pill, LayoutParams(LayoutParams.MATCH_PARENT, context.px(56)))
+        pill.addView(cancel, LinearLayout.LayoutParams(context.px(42), context.px(42)))
+        pill.addView(meter, LinearLayout.LayoutParams(0, context.px(MARK_DP), 1f))
+        pill.addView(done, LinearLayout.LayoutParams(context.px(42), context.px(42)))
+        pill.addView(loading, LinearLayout.LayoutParams(context.px(34), context.px(34)))
+        addView(pill, LayoutParams(LayoutParams.MATCH_PARENT, context.px(MARK_DP)))
 
         cancel.setOnClickListener { onCancel?.invoke() }
         done.setOnClickListener { onDone?.invoke() }
@@ -97,13 +98,27 @@ class BubbleView(context: Context) : FrameLayout(context) {
 
     companion object {
         /**
+         * The mark's diameter: a control that floats over another app's text is read past, so it is
+         * drawn at the size a person's thumb still finds and a line of text still reads under — the
+         * size the marks that do this job on Android use.
+         */
+        const val MARK_DP = 48
+
+        /**
+         * The gap between the mark and the screen's edge it is docked to. A mark flush against the
+         * side is one the app underneath cannot be read beside, and one the phone's own edge gesture
+         * fights for.
+         */
+        const val EDGE_DP = 20
+
+        /**
          * The window a face asks for, in the view's own arithmetic: the mark is a circle, and a pill
          * is its children and its padding, so a child that changes size moves its window with it.
          */
         fun widthOf(context: Context, face: Face) = when (face) {
-            Face.Idle -> context.px(56)
+            Face.Idle -> context.px(MARK_DP)
             Face.Recording -> context.px(196)
-            Face.Waiting -> context.px(56)
+            Face.Waiting -> context.px(MARK_DP)
         }
     }
 }
@@ -164,7 +179,7 @@ private class WaveMark(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         strokeCap = Paint.Cap.ROUND
-        strokeWidth = context.px(2.5f)
+        strokeWidth = context.px(2.2f)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -184,25 +199,35 @@ private class WaveMark(context: Context) : View(context) {
  *
  * It is its full width from the first frame — a fixed ring of bars every sample pushes through, so
  * the meter never begins as a stub at one end and fills up — and every slot is drawn as a bar, at the
- * height its loudness earns. The room is scaled here, not by the recorder: a hundredth of full scale
- * is ordinary speech at arm's length, so five times it fills most of the pill.
+ * height its loudness earns. A level is read against the room rather than against full scale: the
+ * floor follows the quietest thing heard and a bar is the distance above it, so a quiet speaker in a
+ * quiet room moves the meter as far as a loud one in a noisy room, and no microphone's gain has to be
+ * guessed at. Silence is the floor, and the floor draws as a dot.
  */
 private class LevelMeter(context: Context) : View(context) {
     private val bars = FloatArray(BARS) { 0f }
+    private val dot = context.px(STROKE_DP)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         strokeCap = Paint.Cap.ROUND
-        strokeWidth = context.px(3f)
+        strokeWidth = dot
     }
+
+    /** The quietest the room has been heard: what every later level is a distance above. */
+    private var floor = Float.MAX_VALUE
 
     /** Back to silence across the whole width, for a take about to start. */
     fun restart() {
         bars.fill(0f)
+        floor = Float.MAX_VALUE
         invalidate()
     }
 
     /** The room as it arrives, unscaled: the height it draws at is this view's to decide. */
     fun push(loudness: Float) {
+        // A quieter reading is the room; a louder one only creeps the floor up, so a cough cannot
+        // leave the meter deaf for the rest of the take.
+        floor = if (loudness < floor) loudness else floor + (loudness - floor) * CREEP
         System.arraycopy(bars, 1, bars, 0, BARS - 1)
         bars[BARS - 1] = loudness
         invalidate()
@@ -212,20 +237,38 @@ private class LevelMeter(context: Context) : View(context) {
         if (width <= 0 || height <= 0) return
         val step = width.toFloat() / BARS
         val middle = height / 2f
+        val tallest = height * TALLEST
         for (index in 0 until BARS) {
             val x = step * index + step / 2f
-            val share = (bars[index] * FILL).coerceIn(LEAST_BAR, 1f)
-            val bar = share * height * 0.72f
+            // Silence is a dot rather than a gap: the row of them is the meter at rest, which is what
+            // a take looks like between two words.
+            val bar = dot + share(bars[index]) * (tallest - dot)
             canvas.drawLine(x, middle - bar / 2f, x, middle + bar / 2f, paint)
         }
     }
 
+    /**
+     * How far a reading stands above the room, from nothing at the floor to one at the ratio speech
+     * is above it. A ratio, so the microphone's gain and the phone's own loudness cancel.
+     */
+    private fun share(loudness: Float): Float {
+        val base = (if (floor == Float.MAX_VALUE) loudness else floor).coerceAtLeast(QUIETEST)
+        if (loudness <= base) return 0f
+        return (ln(loudness / base) / ln(SPEECH_RATIO)).coerceIn(0f, 1f)
+    }
+
     private companion object {
-        const val BARS = 24
-        /** What a reading is multiplied by to be drawn: arm's-length speech is about 0.02. */
-        const val FILL = 5f
-        /** The shortest bar a slot draws, so silence is a row of short bars and not a gap. */
-        const val LEAST_BAR = 0.06f
+        const val BARS = 22
+        /** A bar's own width: thin enough that a row of them reads as a wave rather than a fence. */
+        const val STROKE_DP = 1.8f
+        /** The tallest a bar is drawn, as a share of the pill's height: a band, not the whole face. */
+        const val TALLEST = 0.30f
+        /** The distance above the room that earns a full bar: ordinary speech at arm's length. */
+        const val SPEECH_RATIO = 24f
+        /** No bar is read against a floor quieter than this, so a silent room still has one. */
+        const val QUIETEST = 0.0004f
+        /** How fast the floor follows a louder room, per reading: slowly, as the recorder's does. */
+        const val CREEP = 0.002f
     }
 }
 
