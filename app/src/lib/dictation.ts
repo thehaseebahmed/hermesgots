@@ -82,6 +82,43 @@ function leavesHost(key: string): boolean {
   return infos.get(key)?.info?.provider?.cloud === true
 }
 
+/**
+ * Whether that bot's takes leave its host. A local model is warmed before a take's first Piece so the
+ * first decode does not pay its load; a cloud one has nothing to warm, so the phone is told which.
+ */
+export function dictationLeavesHost(config: HermesConfig): boolean {
+  return leavesHost(infoKey(config))
+}
+
+/**
+ * The longest that bot's Confirm can take, from the last `info` read, and 0 while nothing has been
+ * read: a caller outside the bar (the phone's own Bubble) holds to the host's number where there is
+ * one and to its own fallback where there is not.
+ */
+export function dictationWaitMs(config: HermesConfig): number {
+  return waitOf(infoKey(config))
+}
+
+/** The same number for a connection key, which is all a session holds: 0 where nothing has been read. */
+function waitOf(key: string): number {
+  return infos.get(key)?.info?.wait_ms ?? 0
+}
+
+/**
+ * Asks the bot's host how a take is heard, unless the answer is already at hand. The phone's own
+ * mirror needs that number and is not the bar: without a read of its own it would keep the fallback
+ * for as long as the app was open.
+ */
+export function primeDictationInfo(config: HermesConfig) {
+  void readDictationInfo(config)
+}
+
+/** The host's Confirm bound for a bot, and a reason to read again when that answer lands. */
+export function useDictationWaitMs(config?: HermesConfig) {
+  const key = config && config.apiKey && config.baseUrl ? infoKey(config) : ""
+  return useSyncExternalStore(subscribe, () => (key && config ? dictationWaitMs(config) : 0))
+}
+
 /** Whether the bot's host can dictate, and a way to ask it again; null for a bot without a key. */
 export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
@@ -302,8 +339,8 @@ export async function readKept(key: string): Promise<SavedDictation | undefined>
 
 /** The bound the bar holds to, as the bot's own host states it; null on a plugin too old to say. */
 function boundOf(profile: string): number | null {
-  const wait = infos.get(profile)?.info?.wait_ms
-  return typeof wait === "number" && wait > 0 ? wait : null
+  const wait = waitOf(profile)
+  return wait > 0 ? wait : null
 }
 
 function stopInflight(current: Session) {

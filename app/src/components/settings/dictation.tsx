@@ -3,7 +3,7 @@
  * it adds up to. The screen draws from this device's mirror, so nothing here waits on a host; opening
  * it reconciles every bot in the background and caches the totals it reads (ADR 0060).
  */
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -15,6 +15,9 @@ import {
   ConfirmDestructive,
   Group,
   LinkRow,
+  PickList,
+  PickSurface,
+  SwitchRow,
   ValueRow,
   linkRowClass,
   useHeaderAction,
@@ -22,9 +25,28 @@ import {
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { botTabPath } from "@/lib/bot-tabs"
+import {
+  bubbleAvailable,
+  bubbleState,
+  disableBubble,
+  enableBubble,
+  mirrorBubble,
+  openBubbleAccessibility,
+  openBubbleOverlay,
+  requestBubbleMicrophone,
+  type BubbleState,
+} from "@/lib/bubble"
 import { connectionKey } from "@/lib/connection"
 import { copyText, useCopied } from "@/lib/copied"
-import { listProfiles, type DictationRecord, type Profile } from "@/lib/db"
+import {
+  db,
+  getActiveProfile,
+  listEnabledProfiles,
+  listProfiles,
+  setActiveProfile,
+  type DictationRecord,
+  type Profile,
+} from "@/lib/db"
 import { useDictationInfo } from "@/lib/dictation"
 import { byMonth, pooledRate, spelledCount, textsOf, wordsLabel } from "@/lib/dictation-log"
 import {
@@ -35,9 +57,10 @@ import {
   useDictationTotals,
 } from "@/lib/dictations"
 import { formatDuration } from "@/lib/format"
-import { levelName, namedLevel } from "@/lib/speech"
-import { READ_FAILED, useSpeech, type SpeechCheck } from "@/lib/host-speech"
+import { levelName, namedLevel, type SpeechSettings } from "@/lib/speech"
+import { READ_FAILED, getSpeech, useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
+import { onReturn } from "@/lib/wake"
 
 /** The rows the History tab draws before the reader reaches the end of them. */
 export const PAGE_ROWS = 20
@@ -98,20 +121,20 @@ export function DictationSettings() {
 
   return (
     <>
-      <Tabs defaultValue="history" className="flex flex-col gap-4">
+      <Tabs defaultValue="overview" className="flex flex-col gap-4">
         <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
           <TabsTrigger value="bots">Bots</TabsTrigger>
-          <TabsTrigger value="stats">Stats</TabsTrigger>
         </TabsList>
+        <TabsContent value="overview" className="flex flex-col gap-4" data-dictation-overview>
+          <OverviewTab />
+        </TabsContent>
         <TabsContent value="history" className="flex flex-col gap-4" data-dictation-history>
           <HistoryTab profiles={profiles ?? []} />
         </TabsContent>
         <TabsContent value="bots" className="flex flex-col gap-4" data-dictation-bots>
           <BotsTab profiles={profiles ?? []} />
-        </TabsContent>
-        <TabsContent value="stats" className="flex flex-col gap-4" data-dictation-stats>
-          <StatsTab />
         </TabsContent>
       </Tabs>
       <ConfirmDestructive
@@ -383,7 +406,7 @@ function BotRow({ profile }: { profile: Profile }) {
 const UNSET = "—"
 
 /** What every bot has added up to, as the hosts last reported it. */
-function StatsTab() {
+function StatsTotals() {
   const { totals, reported } = useDictationTotals()
   const rate = pooledRate(totals.words, totals.ms)
   return (
@@ -401,5 +424,213 @@ function StatsTab() {
         data-setting="words-per-minute"
       />
     </Group>
+  )
+}
+
+/**
+ * The screen's first tab: the Bubble this phone runs, the bot whose speech-to-text it uses, and the
+ * totals underneath. Both cards are about this device, which is why they sit here rather than on a
+ * bot's own page — the Bubble does not follow a bot's settings, it follows this phone's choice.
+ */
+function OverviewTab() {
+  return (
+    <>
+      <BubbleCards />
+      <Caption>Stats</Caption>
+      <StatsTotals />
+    </>
+  )
+}
+
+type Grant = keyof Pick<BubbleState, "overlay" | "accessibility">
+
+/** Why the phone's answer means no Bubble, in the words the toast says it in. */
+function refusal(grant: Grant) {
+  return grant === "overlay"
+    ? "Without drawing over other apps there is no Bubble to tap."
+    : "Without the accessibility service the Bubble cannot type, so there is no Bubble."
+}
+
+/** What the phone said when it would not start, in the words the toast says it in. */
+const REFUSED: Record<string, string> = {
+  overlay: refusal("overlay"),
+  accessibility: refusal("accessibility"),
+  microphone: "Allow the microphone first.",
+}
+
+/**
+ * What each bot's takes are heard by, from the answer its host gave this device — the same cache the
+ * Bots tab draws from. A bot this device has never read is asked once; its answer lands in the cache
+ * and this query runs again.
+ */
+function useHeardBy(bots: Profile[]) {
+  const ids = bots.map((one) => one.id).join(",")
+  return useLiveQuery(async () => {
+    const rows = await db.speechCache.toArray()
+    const known = new Map(rows.map((row) => [row.key, row.speech]))
+    await Promise.all(
+      bots.map((bot) =>
+        known.has(connectionKey(bot)) ? undefined : getSpeech(bot).catch(() => undefined),
+      ),
+    )
+    return known
+  }, [ids])
+}
+
+/** The provider and model a bot hears with, or the host's own word for hearing nothing. */
+function heardLine(settings?: SpeechSettings) {
+  if (!settings?.model) return "Speech-to-text off"
+  return settings.provider?.name ? `${settings.provider.name}/${settings.model}` : settings.model
+}
+
+/** The Bubble and the bot it hears with. The two grants are the phone's, so the app asks for them. */
+function BubbleCards() {
+  const bots = useLiveQuery(listEnabledProfiles, [])
+  const heard = useHeardBy(bots ?? [])
+  const active = useLiveQuery(getActiveProfile, [])
+  const [state, setState] = useState<BubbleState>()
+  const [busy, setBusy] = useState(false)
+  const [picking, setPicking] = useState(false)
+  /** The grant the phone is being asked for: the page is away while that screen is up. */
+  const [waiting, setWaiting] = useState<Grant>()
+
+  // The one reader of the phone's state: the mount, the walk-through's return and every tap go
+  // through it, so a new reason to read it has one place to land.
+  const refresh = useCallback(() => bubbleState().then(setState), [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const switchOn = useCallback(async () => {
+    // The microphone is the one grant the phone asks in place, so it is asked before the service: an
+    // APK that started one without it would be refused by the system, not by the app.
+    if (!(await requestBubbleMicrophone())) {
+      toast.error(REFUSED.microphone)
+      await refresh()
+      return
+    }
+    const started = await enableBubble()
+    if (!started.started) toast.error(REFUSED[started.reason ?? ""] ?? "The Bubble couldn't start.")
+    await refresh()
+  }, [refresh])
+
+  /**
+   * The next grant that is missing, and the phone's screen that gives it. Both are the phone's to
+   * grant, so the app can only ask for one, wait to be come back to, and ask for the next.
+   */
+  const ask = useCallback(
+    async (now: BubbleState | undefined) => {
+      const grant: Grant | null = !now?.overlay ? "overlay" : !now.accessibility ? "accessibility" : null
+      if (!grant) {
+        await switchOn()
+        return
+      }
+      setWaiting(grant)
+      const trouble =
+        grant === "overlay" ? await openBubbleOverlay() : await openBubbleAccessibility()
+      if (trouble) {
+        setWaiting(undefined)
+        toast.error(trouble)
+      }
+    },
+    [switchOn],
+  )
+
+  // Coming back is the only moment either grant can be read as changed: both are given on screens of
+  // the phone's, and neither tells the app anything. `onReturn` is the app's one answer to that —
+  // Android's `resume` and the page's `visibilitychange` both say it, and a return from the phone's
+  // own settings screen may be only the first of the two.
+  useEffect(() => {
+    return onReturn(() => {
+      void (async () => {
+        const now = await bubbleState()
+        setState(now)
+        if (!waiting) return
+        setWaiting(undefined)
+        if (!now?.[waiting]) {
+          toast.error(refusal(waiting))
+          return
+        }
+        await ask(now)
+      })()
+    })
+  }, [waiting, ask])
+
+  /** One switch, two ways to throw it: the walk through the grants, or turning the service off. */
+  const turnOn = useCallback(async () => {
+    setBusy(true)
+    try {
+      await ask(state)
+    } finally {
+      setBusy(false)
+    }
+  }, [ask, state])
+
+  const turnOff = useCallback(async () => {
+    setBusy(true)
+    try {
+      await disableBubble()
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }, [refresh])
+
+  // A browser has no service, no window over another app and no accessibility: the card is not drawn
+  // at all rather than drawn dead.
+  if (!bubbleAvailable()) return null
+
+  return (
+    <>
+      <Caption>Bubble</Caption>
+      <Group>
+        <SwitchRow
+          id="bubble-on"
+          title="Bubble"
+          subtitle="Speak into the field in front of you, in any app"
+          checked={state?.enabled === true}
+          disabled={busy || Boolean(waiting)}
+          onCheckedChange={(on) => void (on ? turnOn() : turnOff())}
+          data-setting="bubble"
+        />
+        <ValueRow
+          title="Bot"
+          purpose="Who hears the Bubble's takes"
+          value={active?.name}
+          onClick={() => setPicking(true)}
+          data-setting="bubble-bot"
+        />
+      </Group>
+      <PickSurface open={picking} onOpenChange={setPicking} title="Bot">
+        <PickList
+          label="Bots"
+          searchable={false}
+          selected={active?.id}
+          // Only the bots the selection can land on: a disabled bot is resolved away on the next
+          // read, so offering it would move the row and the phone to a bot nobody picked.
+          // The same order the Bots tab draws, and each row the bot's own picture with the model it
+          // answers with: a name alone said nothing about which bot a take would be heard by.
+          options={(bots ?? []).map((profile) => ({
+            id: profile.id,
+            label: profile.name,
+            // What hears the take, not what answers a chat: this list decides the bot the Bubble
+            // dictates with, and its speech model is the one that matters here.
+            detail: heardLine(heard?.get(connectionKey(profile))),
+            leading: <Bot id={profile.botId} className="size-8 shrink-0" />,
+          }))}
+          onPick={(id) => {
+            setPicking(false)
+            const picked = (bots ?? []).find((profile) => profile.id === id)
+            if (!picked || picked.id === active?.id) return
+            void (async () => {
+              await setActiveProfile(picked.id)
+              await mirrorBubble(picked)
+              await refresh()
+            })()
+          }}
+        />
+      </PickSurface>
+    </>
   )
 }

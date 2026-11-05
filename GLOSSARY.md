@@ -524,8 +524,12 @@ _Avoid_: thumbnail cache, offline cache, image store, prefetch
 ## Speech-to-text
 
 **Speech-to-text**:
-Speaking a message into Gots instead of typing it. Its voice bar holds the composer's place while it runs, and its words land in the composer when it ends.
+Speaking a message instead of typing it. In Gots its voice bar holds the composer's place while it runs, and its words land in the composer when it ends; in another app the **Bubble** starts the take and its words land in the field that app has focused.
 _Avoid_: voice input, transcription, STT, voice typing, speed-to-text
+
+**Bubble**:
+The one control Gots leaves on a phone's screen while the keyboard is up: a mark that starts one **Take** and puts its words in the field that keyboard belongs to. It stays for a take and for five seconds after it even when the keyboard goes, so a take can be stopped, and dragging it onto the bin at the bottom of the screen turns it off. It hears with the bot this phone has selected, and it runs with Gots closed. Two switches are the phone's and not the app's — drawing over other apps, which draws the mark, and the accessibility service, which types the words and says when the keyboard is up — so switching the Bubble on asks for each in turn, and the mark takes itself away when either is switched off.
+_Avoid_: overlay, floating widget, floating button, mic button, dictate anywhere
 
 **Voice bar**:
 The strip that holds the composer's place during speech-to-text: how long it has been going, how loud the room is, and Stop, Send and Cancel.

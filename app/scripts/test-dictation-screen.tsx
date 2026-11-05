@@ -1,6 +1,6 @@
 /**
  * Settings › AI Dictation over a seeded mirror and faked hosts, as ADR 0060 draws it: three tabs in
- * one screen, History first; its rows newest first, a card of them under each month's caption, each
+ * one screen, Overview first; its rows newest first, a card of them under each month's caption, each
  * row the words over the bot and the count; a page drawn at a time and more appended at its end; a
  * row opening its sheet with the whole dictation, a Copy that copies it and a Delete that takes it
  * off its host; every bot listed in the list's own order, the ones whose host can't dictate disabled
@@ -210,7 +210,7 @@ const clockOf = (value: number) =>
 
 const history = () => find("[data-dictation-history]")
 const botsTab = () => find("[data-dictation-bots]")
-const statsTab = () => find("[data-dictation-stats]")
+const overview = () => find("[data-dictation-overview]")
 
 const tab = (name: string) =>
   findAll('[role="tab"]').find((one) => one.textContent?.trim() === name) ?? null
@@ -285,18 +285,29 @@ test("the menu's row and the screen it opens are called AI Dictation", async () 
   })
 })
 
-test("the screen draws three tabs in one address, History first", async () => {
+/**
+ * The screen as a reader meets it, on History — where most of these cases live. A case about another
+ * tab mounts the screen directly and switches: opening History only to leave it runs the panel's own
+ * reads for nothing.
+ */
+const mountScreen = (body: () => Promise<void>) =>
+  mount(screen(), async () => {
+    await openTab("History")
+    await body()
+  })
+
+test("the screen draws three tabs in one address, Overview first", async () => {
   await seed([{ name: "a", features: ["dictations"] }])
   await mount(screen(), async () => {
     assert.deepEqual(
       findAll('[role="tab"]').map((one) => one.textContent?.trim()),
-      ["History", "Bots", "Stats"],
+      ["Overview", "History", "Bots"],
       "the three the ask names, in its order",
     )
-    assert.equal(tab("History")?.getAttribute("aria-selected"), "true", "History is what opens")
-    assert.ok(history(), "and its panel is the one drawn")
-    assert.equal(botsTab(), null, "with the others closed")
-    assert.equal(statsTab(), null, "both of them")
+    assert.equal(tab("Overview")?.getAttribute("aria-selected"), "true", "Overview is what opens")
+    assert.ok(overview(), "and its panel is the one drawn")
+    assert.equal(history(), null, "with the others closed")
+    assert.equal(botsTab(), null, "both of them")
   })
 })
 
@@ -313,7 +324,7 @@ test("History keeps the dictations newest first, a card of them under each month
       ],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 3, "the three dictations")
     assert.deepEqual(
       captions(),
@@ -347,7 +358,7 @@ test("a take is placed by when its host heard it, and shows when it was said", a
       ],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 2, "both dictations")
     assert.deepEqual(
       captions(),
@@ -374,7 +385,7 @@ test("a row opens its dictation whole, a Copy that copies it", async () => {
   await seed([
     { name: "a", label: "Aria", features: ["dictations"], rows: [{ id: "one", text: said, words: 12, ms: 6_000, at: at(2026, 10, 24) }] },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 1, "the dictation")
     await click(rows()[0] ?? null)
     await until(async () => Boolean(sheet()), "the dictation's sheet")
@@ -413,7 +424,7 @@ test("a dictation draws the words as transcribed over the tidied ones, and Copy 
       rows: [{ id: "one", text: tidied, heard, words: 9, ms: 6_000, at: at(2026, 10, 24) }],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 1, "the dictation")
     await click(rows()[0] ?? null)
     await until(async () => Boolean(sheet()), "the dictation's sheet")
@@ -472,7 +483,7 @@ test("the sheet says what tidied a take, and whether it changed anything", async
       ],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 2, "the dictations")
     const byId = (id: string) =>
       rows().find((row) => row.getAttribute("data-dictation") === id) ?? null
@@ -507,7 +518,7 @@ test("a row whose cleanup was never recorded says nothing about it", async () =>
       rows: [{ id: "old", text: "Said and heard.", heard: "Said and heard.", words: 3, ms: 900, at: at(2026, 10, 22) }],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 1, "the dictation")
     await click(rows()[0] ?? null)
     await until(async () => Boolean(heardBlock()), "the sheet")
@@ -526,7 +537,7 @@ test("a take the cleanup left alone reads as one block, named Transcribed", asyn
       rows: [{ id: "one", text: words, heard: words, words: 5, ms: 1_800, at: at(2026, 10, 24) }],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 1, "the dictation")
     await click(rows()[0] ?? null)
     await until(async () => Boolean(heardBlock()), "the dictation's sheet")
@@ -558,7 +569,7 @@ test("Delete in a dictation's sheet takes it off its host and out of the mirror"
       ],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 2, "both dictations")
     await click(findAll("[data-dictation-history] button[data-dictation]")[1] ?? null)
     await until(async () => Boolean(sheet()), "the sheet")
@@ -588,7 +599,7 @@ test("Clear history empties every bot's log, this device's and theirs", async ()
       rows: [{ id: "b1", text: "One from B", words: 3, ms: 1_000, at: at(2026, 10, 23) }],
     },
   ])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 2, "both bots' dictations")
     await click(find('[aria-label="Clear history"]'))
     await until(async () => Boolean(find('[role="alertdialog"]')), "the confirmation")
@@ -723,7 +734,7 @@ test("History draws a page at a time and appends the rest at its end", async () 
     at: at(2026, 10, 24) + index * 60_000,
   }))
   await seed([{ name: "a", label: "Aria", features: ["dictations"], rows: takes }])
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === PAGE_ROWS, "one page of them")
     await act(async () => {
       watched.pop()?.()
@@ -749,7 +760,7 @@ test("Stats pools every bot's totals into one rate over the sum of the minutes",
     },
   ])
   await mount(screen(), async () => {
-    await openTab("Stats")
+    await openTab("Overview")
     await until(async () => statValue("words-spoken") === spelledCount(600), "the pooled words")
     assert.equal(statTitle("words-spoken"), "Words spoken", "the first card row names the words")
     assert.equal(
@@ -774,7 +785,7 @@ test("Stats pools every bot's totals into one rate over the sum of the minutes",
 test("a card no host has answered for draws no number rather than a zero", async () => {
   await seed([{ name: "a" }])
   await mount(screen(), async () => {
-    await openTab("Stats")
+    await openTab("Overview")
     await until(async () => statValue("words-spoken") === "—", "no words reported")
     assert.equal(
       statValue("words-per-minute"),
@@ -787,10 +798,14 @@ test("a card no host has answered for draws no number rather than a zero", async
 test("a host that answered with an empty log reads as no words and no rate", async () => {
   await seed([{ name: "a", features: ["dictations"] }])
   await mount(screen(), async () => {
-    await openTab("Stats")
+    await openTab("Overview")
     await until(async () => statValue("words-spoken") === "0", "the empty total")
     assert.equal(statValue("words-per-minute"), "—", "a rate with nothing to divide is no rate")
-    assert.equal(statsTab()?.querySelectorAll("[data-setting]").length, 2, "the two rows, and no line under them")
+    assert.equal(
+      find('[data-setting="words-spoken"]')?.closest("[data-settings-group]")?.querySelectorAll("[data-setting]").length,
+      2,
+      "the two totals, and no line under them",
+    )
   })
 })
 
@@ -819,7 +834,7 @@ test("opening the screen fills a mirror that a host has more in", async () => {
     loggedAt: at(2026, 10, 24),
     posted: true,
   })
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 2, "the host's newer dictation")
     assert.ok(await db.dictationLog.get("fresh"), "it is in the mirror now")
     const cached = await db.dictationStats.get(connectionKey(profile))
@@ -842,7 +857,7 @@ test("a take its host never received is kept, and posted again at the next open"
     loggedAt: at(2026, 10, 24),
     posted: false,
   })
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 1, "the take the mirror keeps")
     await until(
       async () => calls.some((one) => one.method === "POST"),
@@ -875,7 +890,7 @@ test("a host without the routes leaves the mirror and its cached totals alone", 
     posted: true,
   })
   await db.dictationStats.put({ id: key, words: 5, ms: 2_000, count: 1, clearedAt: 0 })
-  await mount(screen(), async () => {
+  await mountScreen(async () => {
     await until(async () => rows().length === 1, "the row it already held")
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30))

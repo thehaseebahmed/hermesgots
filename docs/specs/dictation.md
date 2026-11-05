@@ -13,15 +13,18 @@ per-bot list away, with nothing that gathers them.
 
 ## Solution
 
-A new Settings section, Dictation, sits under Appearance. It has three tabs. History lists every
+A new Settings section, Dictation, sits under Appearance. It has three tabs, and it opens on the
+first. Overview carries the Bubble's two rows — **Bubble**, and the **Bot** it hears with — and then
+the totals under a **Stats** caption: words spoken and the pooled words per minute across every bot
+whose host reported, each row carrying the line that says what it counts (`docs/specs/bubble.md`).
+History lists every
 dictation newest first, grouped by month under a month heading, one card of rows per month, drawing
 the first twenty entries and appending more as the reader reaches the end; a row shows the words and
 a muted line of the bot and the word count, and opens a sheet headed by the time the words were said,
 over the whole text, the bot, the count and how long the words took, with Delete asking first and a
 Copy beside it. Bots
 draws the Settings menu's own row for each bot, saying what its host hears on — or the host's own
-reason it cannot — and opening that bot's Speech-to-text page. Stats is one card with the words spoken across every bot and the
-pooled words per minute behind them, each row carrying the line that says what it counts.
+reason it cannot — and opening that bot's Speech-to-text page.
 
 A dictation is written at the moment a take's words land, kept on the bot that heard it by the Gots
 plugin, and mirrored on the device. Every read the screen makes is against the mirror; the host
@@ -128,7 +131,9 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   a take's pieces, the count with its noun singular and plural, the month key and heading of a
   dictation, the fingerprint comparison (match, stale window, clear), and the pooled rate including a
   zero-words and a zero-milliseconds case.
-- Component (`app/scripts/test-dictation-screen.tsx`): the three tabs render over a seeded mirror; the
+- Component (`app/scripts/test-dictation-screen.tsx`): the three tabs render in their order over a
+  seeded mirror, the screen opening on Overview with the two Bubble rows and the totals under their
+  caption; the
   month headings and their card grouping; twenty rows drawn and the rest appended when the end comes
   into view; a row opening its sheet with the bot, the count and the spoken length over Delete and Copy
   in that order; the clear action behind its confirmation; the Bots tab's rows saying what each host
@@ -136,7 +141,7 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   read failed, and the model a refresh reports landing on the bot; a take the host never received
   surviving a reconcile and being posted again; a take whose device clock is a month behind drawn in
   the month it was heard and above one it was said after, its sheet still carrying the time it was
-  said; Stats showing the summed words and rate from the cached answers, each row over its own line.
+  said; Overview showing the summed words and rate from the cached answers, each row over its own line.
 - Component (`app/scripts/test-dictation-mirror.tsx`): the reconciliation over a real Dexie database
   and a scripted host — a log the previous build left settled in one write with no POST, a take a host
   lacked handed over once and kept, a take a host refused marked and never asked about again, a read

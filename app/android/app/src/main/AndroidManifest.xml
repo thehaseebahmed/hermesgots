@@ -53,6 +53,26 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- The Bubble: a window over other apps, and the microphone a take needs while it is one. -->
+        <service
+            android:name=".BubbleService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Where the words land: the field the app in front has focused, and nothing else. -->
+        <service
+            android:name=".MementoAccessibilityService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
     </application>
 
     <!-- Permissions -->
@@ -62,4 +82,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Capacitor's WebView asks for both before it lets a page record audio. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- The Bubble draws over the app in front, and holds the microphone while it does. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 </manifest>

@@ -29,7 +29,9 @@ from . import ROOT
 # QUIET_MAX and SAMPLE_MS, with the floor's creep towards a noisier room. A cap that takes no pause is
 # a zero here and no constant there, which is why `app_rule_problems` keeps no fourth name for it.
 # That function reads the app's file and holds these numbers to it, because a bench that slices by a
-# rule the app has stopped running measures the wrong thing and calls it a baseline.
+# rule the app has stopped running measures the wrong thing and calls it a baseline. The phone's own
+# recorder (`BubbleRecorder.kt`) cuts by the same rule with no page to ask, so it is read there too:
+# its numbers are compiled into the APK, and a copy nothing checks is a copy that drifts.
 QUIET_MIN = 0.012
 QUIET_MAX = 0.05
 WINDOW_MS = 50
@@ -79,6 +81,9 @@ class CutPolicy:
 
 
 APP_RULE = ROOT / "app" / "src" / "lib" / "dictation.ts"
+PHONE_RULE = (
+    ROOT / "app" / "android" / "app" / "src" / "main" / "java" / "app" / "memento" / "BubbleRecorder.kt"
+)
 
 POLICIES: Dict[str, CutPolicy] = {
     # The rule the app runs today, and the numbers `app_rule_problems` holds to its file (#771). A
@@ -140,45 +145,74 @@ def _read_elsewhere(path: Path) -> Tuple[array, int]:
 
 
 def app_rule_problems(policy: CutPolicy) -> List[str]:
-    """The ``device`` policy against the app's own file: a rule that drifts is a baseline that lies.
+    """The ``device`` policy against both recorders that run it: a rule that drifts is a baseline that lies.
 
-    The app's cut is TypeScript and the bench's is Python, so the numbers live twice by necessity, and
-    this is where the two copies are put side by side. It compares the numbers the app declares, not
-    the shape of its branch: what it can prove is that a number moved, never that the app consults each
-    one where the policy does.
+    The app's cut is TypeScript, the phone's is Kotlin and the bench's is Python, so the numbers live
+    three times by necessity, and this is where they are put side by side. It compares the numbers
+    each side declares, not the shape of its branch: what it can prove is that a number moved, never
+    that each side consults it where the policy does. The phone's window is compared as a span —
+    ``FRAME`` samples at ``RATE`` — because it counts samples where the page counts milliseconds.
     """
-    if not APP_RULE.exists():
-        return [f"{APP_RULE.relative_to(ROOT)} isn't here: the app's cut rule can't be compared"]
-    text = APP_RULE.read_text()
+    return (
+        _span(APP_RULE, policy, ("const", "let"), window="SAMPLE_MS")
+        + _span(PHONE_RULE, policy, ("private const val", "const val"))
+        + _window_problems(PHONE_RULE, policy)
+    )
+
+
+def _span(
+    path: Path, policy: CutPolicy, declares: Tuple[str, ...], window: str = ""
+) -> List[str]:
+    """One file's numbers, with its own word for a constant: the two languages do not spell it alike.
+
+    ``window`` names the constant that states the meter's tick where a file keeps it as milliseconds;
+    the phone keeps its tick as a sample count, so it is compared by `_window_problems` instead.
+    """
+    if not path.exists():
+        return [f"{path.relative_to(ROOT)} isn't here: the cut rule can't be compared"]
+    text = path.read_text()
     stated = policy.stated()
-    wanted = {
+    named = {
         "PIECE_MS": stated["floor_ms"],
         "PAUSE_MS": stated["pause_ms"],
         "LONG_PIECE_MS": stated["cap_ms"],
         "QUIET_MIN": stated["quiet_min"],
         "QUIET_MAX": stated["quiet_max"],
-        "SAMPLE_MS": stated["window_ms"],
     }
+    if window:
+        named[window] = stated["window_ms"]
+    words = "|".join(declares)
     problems = []
-    for name, mine in wanted.items():
-        found = re.search(rf"\b(?:const|let)\s+{name}\s*=\s*([0-9_.]+)", text)
+    for name, mine in named.items():
+        found = re.search(rf"\b(?:{words})\s+{name}\s*=\s*([0-9_.]+)", text)
         if found is None:
-            problems.append(f"{APP_RULE.name} declares no {name}: the policy can't be compared")
+            problems.append(f"{path.name} declares no {name}: the policy can't be compared")
             continue
         theirs = float(found.group(1).replace("_", ""))
         if float(mine) != theirs:
-            problems.append(
-                f"the {policy.name} policy cuts at {name}={mine}, the app at {theirs}"
-            )
+            problems.append(f"the {policy.name} policy cuts at {name}={mine}, {path.name} at {theirs}")
     if "0.002" not in text:
-        problems.append("the app's floor no longer creeps by 0.002, which the policy still does")
-    # The cap's pause is no longer a constant to compare against: an app that still waits for one is a
-    # rule this policy isn't measuring, and SHORT_PAUSE_MS is the name it had.
+        problems.append(f"the floor no longer creeps by 0.002 in {path.name}, which the policy still does")
     if policy.cap_pause_ms == 0 and re.search(r"\bSHORT_PAUSE_MS\b", text):
         problems.append(
-            f"the {policy.name} policy's cap needs no pause, and the app still keeps SHORT_PAUSE_MS"
+            f"the {policy.name} policy's cap needs no pause, and {path.name} still keeps SHORT_PAUSE_MS"
         )
     return problems
+
+
+def _window_problems(path: Path, policy: CutPolicy) -> List[str]:
+    """The tick a cut is confirmed on, where a recorder states samples rather than milliseconds."""
+    if not path.exists():
+        return []
+    found = re.search(r"\bFRAME\s*=\s*([0-9_]+)", path.read_text())
+    rate = re.search(r"\bRATE\s*=\s*([0-9_]+)", path.read_text())
+    if found is None or rate is None:
+        return [f"{path.name} declares no FRAME and RATE: its window can't be compared"]
+    span = float(found.group(1).replace("_", "")) / float(rate.group(1).replace("_", "")) * 1000
+    want = float(policy.stated()["window_ms"])
+    if span != want:
+        return [f"the {policy.name} policy reads every {want:g} ms, {path.name} every {span:g} ms"]
+    return []
 
 
 def _windows(samples: Sequence[float], rate: int, window_ms: int) -> Iterator[float]:

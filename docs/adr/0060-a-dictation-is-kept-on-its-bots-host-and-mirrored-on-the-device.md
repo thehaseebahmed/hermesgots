@@ -1,5 +1,9 @@
 # A dictation is kept on its bot's host and mirrored on the device
 
+**Amended 2026-11-05**: the screen has three tabs and opens on **Overview** — the Bubble's two rows and,
+under a **Stats** caption, the totals that used to be a third tab (**Bubble**, `docs/adr/0103`).
+History follows it, then Bots, so the pair that can disagree for one open is now tab 2 and tab 3.
+
 A take leaves nothing behind. Its words land in the composer and the row that held its audio is
 deleted, so the app has no answer to "what have I dictated" beyond what is still unsent: nothing to
 list, nothing to count, and no way to tell a fast talker from a slow one. The new screen needs the
@@ -113,7 +117,7 @@ act stays Speech-to-text, and so does each bot's own settings page.
 - **The mirror can lag the host until the screen opens.** A dictation sent from another device arrives
   on the next open, not before; the History tab draws what the mirror holds, which is never blank for a
   want of a host.
-- **Tab 1 and tab 3 can disagree for one open.** The list is the mirror (this device, reconciled), the
+- **Tab 2 and tab 3 can disagree for one open.** The list is the mirror (this device, reconciled), the
   totals are every host's counts; the reconciliation fills the list at the same time the stats read
   lands, so the two agree from the next paint on.
 - **One small read per bot per open.** The fingerprint is a single row's worth of numbers, and per-bot

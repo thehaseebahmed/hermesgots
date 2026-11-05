@@ -2958,7 +2958,7 @@ export async function cancelDictation(config: HermesConfig, take: string) {
 }
 
 /** A Confirm's answer as the app reads it: the words it can show, and what tidied them. */
-function confirmedTake(value: unknown): ConfirmedTake | null {
+export function confirmedTake(value: unknown): ConfirmedTake | null {
   const raw = value as Record<string, unknown> | null
   if (!raw || typeof raw.text !== "string") return null
   return {

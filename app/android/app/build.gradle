@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
     namespace = "app.memento"
@@ -38,6 +39,10 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+    // Same bytecode level the Java alongside it compiles to.
+    kotlinOptions {
+        jvmTarget = "21"
     }
 }
 

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The two things the Bubble needs: the field another app has focused, where the words land, and the
+  phone's own window list, which is how the keyboard being up is read. It reads nothing else, which is
+  why no other event type is asked for.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/bubble_accessibility_description"
+    android:notificationTimeout="100"
+    android:summary="@string/bubble_accessibility_summary" />

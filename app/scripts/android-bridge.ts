@@ -4,8 +4,20 @@
  * built before it, which `withoutPlugin` fakes before the app is imported.
  */
 
-/** The calls to the notification settings plugin a page made, in the order it made them. */
+/** The calls a page made to the native plugins, in the order it made them. */
 export const bridgeCalls: string[] = []
+
+/** What the phone answers about the Bubble, as a test sets it: the grants and the service's state. */
+export const bubbleAnswer = {
+  enabled: false,
+  overlay: false,
+  accessibility: false,
+  /** Whether the phone has granted the microphone: a runtime prompt, so it starts granted here. */
+  microphone: true,
+}
+
+/** The takes the phone is holding for the log: read until the page says it has written them. */
+export const bubbleKept: unknown[] = []
 
 const headers = [
   {
@@ -16,6 +28,20 @@ const headers = [
     ],
   },
   { name: "NotificationSettings", methods: [{ name: "open", rtype: "promise" }] },
+  {
+    name: "Bubble",
+    methods: [
+      { name: "configure", rtype: "promise" },
+      { name: "requestMicrophone", rtype: "promise" },
+      { name: "enable", rtype: "promise" },
+      { name: "disable", rtype: "promise" },
+      { name: "state", rtype: "promise" },
+      { name: "takeaways", rtype: "promise" },
+      { name: "took", rtype: "promise" },
+      { name: "openOverlay", rtype: "promise" },
+      { name: "openAccessibility", rtype: "promise" },
+    ],
+  },
 ]
 
 Object.defineProperty(globalThis, "androidBridge", {
@@ -26,8 +52,40 @@ Object.defineProperty(globalThis, "androidBridge", {
 Object.defineProperty(globalThis, "Capacitor", {
   value: {
     PluginHeaders: headers,
-    nativePromise: (plugin: string, method: string) => {
+    nativePromise: (plugin: string, method: string, options?: unknown) => {
       if (plugin === "NotificationSettings") bridgeCalls.push(`${plugin}.${method}`)
+      if (plugin !== "Bubble") return Promise.resolve()
+      bridgeCalls.push(`${plugin}.${method}`)
+      // The phone is the one that decides: enabling starts the service and clears its flag, and
+      // enabling without the draw-over grant starts nothing.
+      if (method === "state") return Promise.resolve({ ...bubbleAnswer })
+      if (method === "takeaways") return Promise.resolve({ kept: [...bubbleKept] })
+      if (method === "took") {
+        // The phone drops what the page wrote, and nothing else: the rest is handed over again.
+        const ids = (options as { ids?: string[] } | undefined)?.ids ?? []
+        for (const id of ids) {
+          const at = bubbleKept.findIndex((take) => (take as { id?: string }).id === id)
+          if (at >= 0) bubbleKept.splice(at, 1)
+        }
+        return Promise.resolve()
+      }
+      if (method === "requestMicrophone") {
+        return Promise.resolve({ granted: bubbleAnswer.microphone })
+      }
+      if (method === "enable") {
+        // Half a grant is no Bubble: the phone refuses the same three ways the plugin does.
+        if (!bubbleAnswer.overlay) return Promise.resolve({ started: false, reason: "overlay" })
+        if (!bubbleAnswer.accessibility) {
+          return Promise.resolve({ started: false, reason: "accessibility" })
+        }
+        if (!bubbleAnswer.microphone) return Promise.resolve({ started: false, reason: "microphone" })
+        bubbleAnswer.enabled = true
+        return Promise.resolve({ started: true })
+      }
+      if (method === "disable") {
+        bubbleAnswer.enabled = false
+        return Promise.resolve()
+      }
       return Promise.resolve()
     },
   },

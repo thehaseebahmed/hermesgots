@@ -11,6 +11,9 @@ on:
     paths:
       - "app/**"
       - ".github/workflows/android.yml"
+  # Run by hand on any branch: the branch it is pointed at is packaged and its APK kept as an
+  # artifact. A pull request's build is thrown away, so this is the only way one of them installs.
+  workflow_dispatch:
 
 concurrency:
   group: android-${{ github.ref }}
@@ -22,6 +25,7 @@ permissions:
 jobs:
   # Whether the native project itself moved. A pull request that only touches the app's TypeScript
   # gets the static checks; packaging an APK is what main pays for, since only a push distributes it.
+  # A run on demand asked for a branch rather than a diff, so it packages.
   changes:
     name: What changed
     runs-on: ubuntu-latest
@@ -39,6 +43,9 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.sha }}
         run: |
+          # `changed-areas.sh` prints every area when the base cannot be worked out at all — a run on
+          # demand has none, and a first push's base is forty zeros — so packaging what is here needs
+          # no case of its own, and this job carries no second opinion on what "no diff" means.
           areas=$(bash "$GITHUB_WORKSPACE/.github/scripts/changed-areas.sh" "$BASE" "$HEAD")
           native=false
           while IFS= read -r area; do
@@ -153,6 +160,17 @@ jobs:
           ./gradlew $tasks --no-daemon || status=$?
           rm -f "$RUNNER_TEMP/release.keystore"
           exit $status
+
+      # A run on demand is someone asking for an installable build of one branch. Nothing else
+      # publishes it — the tester channel belongs to main alone — so the APK is the run's output.
+      - name: Keep the APK for the branch that was asked for
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: gots-${{ github.run_number }}
+          path: app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
       # Only what lands on main reaches testers, and only with a stable key, or each build
       # would refuse to install over the last.

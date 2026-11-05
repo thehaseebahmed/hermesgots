@@ -16,6 +16,7 @@ import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { mainThreadId } from "@/lib/db"
+import { useBubbleMirror, useBubbleTakeaways } from "@/lib/bubble"
 import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "@/lib/pane"
@@ -191,6 +192,8 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const wide = useWide()
+  useBubbleMirror()
+  useBubbleTakeaways()
   const [open, setOpen] = useState(false)
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()

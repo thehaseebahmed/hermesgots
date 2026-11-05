@@ -16,11 +16,13 @@ on:
     - cron: "40 2 * * *"
   pull_request:
     paths:
-      # The plugin is what is measured; the bench is the instrument; the app's own cut rule is where
-      # the bench's `device` policy is copied from, so a change to it has to run the comparison.
+      # The plugin is what is measured; the bench is the instrument; the app's own cut rule and the
+      # phone's copy of it are where the bench's `device` policy is copied from, so a change to either
+      # has to run the comparison.
       - "plugin/**"
       - "bench/**"
       - "app/src/lib/dictation.ts"
+      - "app/android/app/src/main/java/app/memento/BubbleRecorder.kt"
       - ".github/workflows/dictation-bench.yml"
   workflow_dispatch:
 
