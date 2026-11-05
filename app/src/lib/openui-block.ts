@@ -129,3 +129,17 @@ export function openuiParts(content: string): OpenuiPart[] {
     parts.push({ kind: "text", at: textFrom, text: content.slice(textFrom) })
   return parts
 }
+
+// A paste is often the fenced block a reply showed; the Lang inside it is what the reader means.
+export function pastedBlock(content: string): string {
+  const block = openuiParts(content).find((part) => part.kind === "openui")
+  return block ? block.source : content.trim()
+}
+
+/** The source re-fenced as `openui-lang`: one backtick longer than its longest run, for Markdown. */
+export function asLangFence(source: string) {
+  let length = 3
+  for (const run of source.match(/`+/g) ?? []) length = Math.max(length, run.length + 1)
+  const fence = "`".repeat(length)
+  return `${fence}${INFO}\n${source}\n${fence}`
+}

@@ -43,9 +43,24 @@ export const PROSE_RULES: readonly ProseRule[] = [
   },
 ]
 
+// `null` selects the block's own rules, a name that component's, `undefined` all of them.
+function listedFor(component: string | null | undefined): string[] {
+  return PROSE_RULES.flatMap((rule) =>
+    rule.listed && (component === undefined || rule.component === component) ? [rule.listed] : [],
+  )
+}
+
 /** The rules the prompt lists, in its order — the artifact's last lines. */
 export function listedRules(): string[] {
-  return PROSE_RULES.flatMap((rule) => (rule.listed ? [rule.listed] : []))
+  return listedFor(undefined)
+}
+
+export function blockRules(): string[] {
+  return listedFor(null)
+}
+
+export function componentRules(component: string): string[] {
+  return listedFor(component)
 }
 
 /**

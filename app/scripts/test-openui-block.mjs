@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { mayCarryBlock, openuiParts } from "../src/lib/openui-block.ts"
+import { mayCarryBlock, openuiParts, pastedBlock } from "../src/lib/openui-block.ts"
 
 const asText = (reply) => [{ kind: "text", at: 0, text: reply }]
 
@@ -296,6 +296,22 @@ test("a malformed id is no id, and the block still comes back", () => {
     assert.equal("id" in part, false, `${line} carries no id at all`)
     assert.ok(part.source.startsWith(line), `${line} is still the body's first line`)
   }
+})
+
+test("a pasted block is the Lang inside its fence, else the text itself", () => {
+  const reply = ["Text around it.", "", "```openui-lang", "root = Stack([c])", 'c = Card("Hi")', "```"].join(
+    "\n",
+  )
+  assert.equal(
+    pastedBlock(reply),
+    'root = Stack([c])\nc = Card("Hi")',
+    "a copied block hands the playground its Lang, not its fence",
+  )
+  assert.equal(
+    pastedBlock("  root = Stack([c])\nc = Card(\"Hi\")  "),
+    'root = Stack([c])\nc = Card("Hi")',
+    "a bare source is the text, trimmed",
+  )
 })
 
 test("a text that cannot hold a block says so, and comes back whole", () => {

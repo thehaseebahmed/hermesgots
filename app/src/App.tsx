@@ -52,6 +52,9 @@ const ChatNextPage = lazy(() =>
 const MarkdownDemoPage = lazy(() =>
   import("@/routes/demos/markdown").then((m) => ({ default: m.MarkdownDemoPage })),
 )
+const OpenUIReferencePage = lazy(() =>
+  import("@/routes/docs/open-ui").then((m) => ({ default: m.OpenUIReferencePage })),
+)
 
 /** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
 function toHex(color: string) {
@@ -126,6 +129,7 @@ function AppRoutes() {
         <Route path="bots" element={<BotsPage />} />
         <Route path="share" element={<SharePage />} />
         <Route path="demos/markdown" element={<MarkdownDemoPage />} />
+        <Route path="docs/open-ui" element={<OpenUIReferencePage />} />
         {import.meta.env.DEV ? <Route path="next" element={<ChatNextPage />} /> : null}
         <Route path="*" element={<ChatPage slot="route" />} />
       </Route>

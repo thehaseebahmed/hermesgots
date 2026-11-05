@@ -373,6 +373,7 @@ function MenuScreen({
       </Group>
       <Group>
         <CommunityRow />
+        <ReferenceRow />
         <FeedbackRow />
       </Group>
       <Group>
@@ -831,6 +832,17 @@ function Row({
 
 function FeedbackRow() {
   return <SheetRow icon={MessageSquareTextIcon} title="Send feedback" sheet={FeedbackSheet} />
+}
+
+function ReferenceRow() {
+  return (
+    <LinkRow
+      to="/docs/open-ui"
+      leading={<BookOpenCheckIcon className="size-5 shrink-0 text-muted-foreground" />}
+      title="Component reference"
+      subtitle="The blocks a bot can draw"
+    />
+  )
 }
 
 /**

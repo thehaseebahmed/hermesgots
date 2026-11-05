@@ -135,7 +135,11 @@ dom.window.HTMLElement.prototype.animate = () => ({
 })
 
 const canvas2d = {
+  fillStyle: "",
   measureText: (text) => ({ width: Math.ceil(String(text).length * 8) }),
+  fillRect() {},
+  // What App.tsx's ThemeColor reads back to keep the browser chrome in step with the theme.
+  getImageData: () => ({ data: [0, 0, 0, 255] }),
 }
 const canvas = dom.window.HTMLCanvasElement.prototype
 // The stub is installed once per realm: a second pass would wrap the stub in itself, so the flag
