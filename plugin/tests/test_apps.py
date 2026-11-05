@@ -7,16 +7,45 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import sqlite3
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
-from typing import Any, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Sequence, Set, Tuple
+from unittest import mock
 
 import plugin
 from plugin import apps, openui
 from plugin.store import SCHEMA_VERSION, connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
+
+
+def bundle_of(test: unittest.TestCase, apps_: Dict[str, Dict[str, Any]]) -> Path:
+    """A bundle folder the test owns, standing in for the plugin's own: ``apps_`` maps a key to
+    ``{"version", "title", "pages": {file name: source}}``. ``apps.BUNDLE`` points at it until the
+    test ends."""
+    root = Path(tempfile.mkdtemp())
+    test.addCleanup(shutil.rmtree, root, True)
+    manifest: Dict[str, Any] = {"set_version": 1, "apps": {}}
+    for key, entry in apps_.items():
+        manifest["apps"][key] = {
+            "version": entry["version"],
+            "title": entry["title"],
+            "pages": list(entry["pages"]),
+        }
+        for name, source in entry["pages"].items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(source, encoding="utf-8")
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    patch = mock.patch.object(apps, "BUNDLE", root)
+    patch.start()
+    test.addCleanup(patch.stop)
+    return root
+
+
+GENERATED = {"builtin": None, "hidden": False, "update": False}
 
 
 class Page(NamedTuple):
@@ -60,6 +89,9 @@ def plant(
 
 class Migration(unittest.TestCase):
     """The acceptance criterion: a fresh home and an upgraded home both gain the tables."""
+
+    def setUp(self) -> None:
+        bundle_of(self, {})
 
     def tables(self, path: Path) -> Tuple[Set[str], int]:
         conn = sqlite3.connect(path)
@@ -109,6 +141,7 @@ class Schema(unittest.TestCase):
     chose."""
 
     def setUp(self) -> None:
+        bundle_of(self, {})
         self.path = db_path(temp_hermes_home(self))
 
     def test_a_second_page_cannot_take_a_position_another_page_holds(self) -> None:
@@ -131,6 +164,7 @@ class Schema(unittest.TestCase):
 
 class Reads(unittest.TestCase):
     def setUp(self) -> None:
+        bundle_of(self, {})
         self.path = db_path(temp_hermes_home(self))
 
     def test_the_list_names_an_apps_title_and_page_ids_and_never_a_source(self) -> None:
@@ -148,8 +182,8 @@ class Reads(unittest.TestCase):
         self.assertEqual(
             apps.listing(self.path),
             [
-                {"id": "trip", "title": "Lisbon", "library_version": "1.0.1", "pages": ["home", "days"]},
-                {"id": "house", "title": "House", "library_version": "1.0.1", "pages": ["home"]},
+                {"id": "trip", "title": "Lisbon", "library_version": "1.0.1", "pages": ["home", "days"], **GENERATED},
+                {"id": "house", "title": "House", "library_version": "1.0.1", "pages": ["home"], **GENERATED},
             ],
             "every app is its title, its library version and its page ids, newest app first — and no source",
         )
@@ -220,6 +254,7 @@ class Routes(unittest.TestCase):
     """The two reads as the app asks them: the registered paths and the answers on the wire."""
 
     def setUp(self) -> None:
+        bundle_of(self, {})
         self.home = temp_hermes_home(self)
         self.path = db_path(self.home)
         self.adapter = RouteAdapter()
@@ -227,7 +262,7 @@ class Routes(unittest.TestCase):
 
     def listing(self) -> Any:
         request = FakeWeb.Request()
-        request.match_info, request.headers = {}, {}
+        request.match_info, request.headers, request.query = {}, {}, {}
         return asyncio.run(route(self.app, plugin.PREFIX + "/apps", "GET")(request))
 
     def page(self, app_id: str, page_id: str) -> Any:
@@ -257,6 +292,9 @@ class Routes(unittest.TestCase):
                         "title": "House",
                         "library_version": "1.0.1",
                         "pages": ["home"],
+                        "builtin": None,
+                        "hidden": False,
+                        "update": False,
                     }
                 ],
             },
@@ -312,6 +350,7 @@ class Writes(unittest.TestCase):
     """Creating an app and writing, then undoing, one page's whole source over the API."""
 
     def setUp(self) -> None:
+        bundle_of(self, {})
         self.home = temp_hermes_home(self)
         self.path = db_path(self.home)
         self.adapter = RouteAdapter()
@@ -485,6 +524,269 @@ class Queries(unittest.TestCase):
     def test_the_query_needs_the_bots_key(self) -> None:
         self.adapter.denied = {"status": 401, "payload": {}}
         self.assertEqual(self.ask({"shape": "sessions"}), {"status": 401, "payload": {}})
+def built(version: int = 1, **pages: str) -> Dict[str, Any]:
+    return {
+        "version": version,
+        "title": "Home",
+        "pages": pages or {"home/root.txt": "# id: root\nroot = Stack([])", "home/room.txt": "# id: room"},
+    }
+
+
+class Decision(unittest.TestCase):
+    """What the bundle owes one built-in app, as the pure rule."""
+
+    def test_a_missing_app_is_created(self) -> None:
+        self.assertEqual(apps.decide(1, None, False), "create")
+
+    def test_an_untouched_app_behind_the_bundle_is_replaced(self) -> None:
+        self.assertEqual(apps.decide(2, 1, False), "replace")
+
+    def test_an_untouched_app_at_the_bundles_version_is_not_written(self) -> None:
+        self.assertEqual(apps.decide(1, 1, False), "none")
+
+    def test_an_edited_app_behind_the_bundle_reports_an_update(self) -> None:
+        self.assertEqual(apps.decide(2, 1, True), "update")
+
+    def test_an_edited_app_at_the_bundles_version_owes_nothing(self) -> None:
+        self.assertEqual(apps.decide(1, 1, True), "none")
+
+
+class BuiltIns(unittest.TestCase):
+    def setUp(self) -> None:
+        self.path = db_path(temp_hermes_home(self))
+
+    def bundle(self, **entries: Dict[str, Any]) -> None:
+        bundle_of(self, entries)
+
+    def rows(self, sql: str = "SELECT * FROM apps ORDER BY id") -> list:
+        conn = sqlite3.connect(self.path)
+        try:
+            return conn.execute(sql).fetchall()
+        finally:
+            conn.close()
+
+    def test_the_first_list_read_seeds_every_built_in_with_its_pages_in_order(self) -> None:
+        self.bundle(home=built(), gtd={**built(), "title": "Tasks"})
+        listed = apps.listing(self.path)
+        self.assertEqual({row["builtin"] for row in listed}, {"home", "gtd"})
+        home = next(row for row in listed if row["builtin"] == "home")
+        self.assertEqual(home["pages"], ["root", "room"], "the first page the bundle lists is the root")
+        self.assertEqual(apps.page(self.path, home["id"], "root")["source"], "# id: root\nroot = Stack([])")
+
+    def test_a_second_read_writes_nothing(self) -> None:
+        self.bundle(home=built())
+        apps.listing(self.path)
+        before = self.path.read_bytes()
+        mtime = self.path.stat().st_mtime_ns
+        apps.listing(self.path)
+        self.assertEqual(self.path.stat().st_mtime_ns, mtime)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_a_reinstall_creates_no_duplicate(self) -> None:
+        self.bundle(home=built())
+        apps.listing(self.path)
+        apps.seed(self.path)
+        bundle_of(self, {"home": built()})
+        apps.listing(self.path)
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_seeding_is_the_first_read_and_not_install(self) -> None:
+        self.bundle(home=built())
+        self.assertFalse(self.path.exists())
+        apps.listing(self.path)
+        self.assertTrue(self.path.exists())
+
+    def test_a_built_in_is_refused_a_delete_and_a_generated_app_is_not(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        with self.assertRaises(apps.AppsError) as refused:
+            apps.remove(self.path, builtin)
+        self.assertEqual(refused.exception.status, 409)
+        self.assertEqual(len(self.rows("SELECT 1 FROM app_pages")), 2, "nothing was deleted")
+        made = apps.create(self.path, "Mine", "# id: root\nroot = Stack([])")
+        apps.remove(self.path, made["id"])
+        self.assertEqual([row["id"] for row in apps.listing(self.path)], [builtin])
+        self.assertEqual(self.rows(f"SELECT 1 FROM app_pages WHERE app_id = '{made['id']}'"), [])
+        with self.assertRaises(apps.AppsError) as gone:
+            apps.remove(self.path, made["id"])
+        self.assertEqual(gone.exception.status, 404)
+
+    def test_hiding_is_a_mark_on_the_host_that_the_list_leaves_out_and_unhiding_brings_back(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        apps.set_hidden(self.path, builtin, True)
+        self.assertEqual(apps.listing(self.path), [])
+        shown = apps.listing(self.path, include_hidden=True)
+        self.assertEqual([(row["id"], row["hidden"]) for row in shown], [(builtin, True)])
+        apps.set_hidden(self.path, builtin, False)
+        self.assertEqual(len(apps.listing(self.path)), 1)
+        self.assertEqual(self.rows("SELECT hidden FROM apps"), [(0,)])
+
+    def test_a_hidden_built_in_stays_hidden_through_a_reinstall_and_is_not_recreated(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        apps.set_hidden(self.path, builtin, True)
+        bundle_of(self, {"home": built()})
+        self.assertEqual(apps.listing(self.path), [])
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_only_a_built_in_is_hidden(self) -> None:
+        self.bundle()
+        made = apps.create(self.path, "Mine", "# id: root\nroot = Stack([])")
+        with self.assertRaises(apps.AppsError) as refused:
+            apps.set_hidden(self.path, made["id"], True)
+        self.assertEqual(refused.exception.status, 409)
+        with self.assertRaises(apps.AppsError) as bad:
+            apps.set_hidden(self.path, made["id"], "yes")
+        self.assertEqual(bad.exception.status, 400)
+
+    def test_an_untouched_built_in_is_replaced_wholesale_when_the_bundles_version_moves(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        self.bundle(
+            home={"version": 2, "title": "House", "pages": {"home/new.txt": "# id: root\nroot = Card(\"New\")"}}
+        )
+        listed = apps.listing(self.path)
+        self.assertEqual(
+            [(row["id"], row["title"], row["pages"], row["update"]) for row in listed],
+            [(builtin, "House", ["root"], False)],
+        )
+        self.assertEqual(apps.page(self.path, builtin, "root")["source"], "# id: root\nroot = Card(\"New\")")
+        self.assertEqual(self.rows("SELECT builtin_version FROM apps"), [(2,)])
+
+    def test_a_hidden_untouched_built_in_still_updates(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        apps.set_hidden(self.path, builtin, True)
+        self.bundle(home=built(2, **{"home/n.txt": "# id: root\nroot = Card(\"New\")"}))
+        apps.listing(self.path)
+        self.assertEqual(apps.page(self.path, builtin, "root")["source"], "# id: root\nroot = Card(\"New\")")
+        self.assertEqual(self.rows("SELECT hidden FROM apps"), [(1,)])
+
+    def test_an_edited_built_in_reports_an_update_and_is_left_alone(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        apps.write(self.path, builtin, "root", "# id: root\nroot = Card(\"Mine\")")
+        self.bundle(home=built(2, **{"home/n.txt": "# id: root\nroot = Card(\"New\")"}))
+        listed = apps.listing(self.path)
+        self.assertTrue(listed[0]["update"])
+        self.assertEqual(listed[0]["pages"], ["root", "room"])
+        self.assertEqual(apps.page(self.path, builtin, "root")["source"], "# id: root\nroot = Card(\"Mine\")")
+
+    def test_an_undo_is_an_edit_too(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        apps.write(self.path, builtin, "root", "# id: root\nroot = Card(\"Mine\")")
+        self.assertEqual(self.rows("SELECT edited FROM apps"), [(1,)])
+
+    def test_taking_the_update_replaces_every_page_and_clears_the_mark(self) -> None:
+        self.bundle(home=built())
+        builtin = apps.listing(self.path)[0]["id"]
+        apps.write(self.path, builtin, "room", "# id: room\nroot = Card(\"Mine\")")
+        self.bundle(home=built(2, **{"home/n.txt": "# id: root\nroot = Card(\"New\")"}))
+        apps.take_update(self.path, builtin)
+        listed = apps.listing(self.path)
+        self.assertEqual((listed[0]["pages"], listed[0]["update"]), (["root"], False))
+        self.assertEqual(self.rows("SELECT edited, builtin_version FROM apps"), [(0, 2)])
+        self.assertFalse(apps.page(self.path, builtin, "root")["undoable"])
+        with self.assertRaises(apps.AppsError) as spent:
+            apps.take_update(self.path, builtin)
+        self.assertEqual(spent.exception.status, 409)
+
+    def test_an_update_cannot_be_taken_for_a_generated_app(self) -> None:
+        self.bundle()
+        made = apps.create(self.path, "Mine", "# id: root\nroot = Stack([])")
+        with self.assertRaises(apps.AppsError) as refused:
+            apps.take_update(self.path, made["id"])
+        self.assertEqual(refused.exception.status, 409)
+
+    def test_a_bundle_that_drops_an_app_deletes_nothing_and_resumes_where_it_was(self) -> None:
+        self.bundle(home=built(), gtd=built())
+        listed = apps.listing(self.path)
+        gtd = next(row["id"] for row in listed if row["builtin"] == "gtd")
+        apps.write(self.path, gtd, "root", "# id: root\nroot = Card(\"Mine\")")
+        self.bundle(home=built())
+        after = apps.listing(self.path)
+        self.assertEqual(len(after), 2)
+        self.assertEqual(apps.page(self.path, gtd, "root")["source"], "# id: root\nroot = Card(\"Mine\")")
+        self.assertFalse(next(row for row in after if row["id"] == gtd)["update"])
+        with self.assertRaises(apps.AppsError):
+            apps.take_update(self.path, gtd)
+        self.bundle(home=built(), gtd=built(2))
+        self.assertTrue(next(row for row in apps.listing(self.path) if row["id"] == gtd)["update"])
+
+    def test_a_broken_bundle_leaves_the_list_working(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / "manifest.json").write_text("{not json", encoding="utf-8")
+        with mock.patch.object(apps, "BUNDLE", root):
+            with self.assertLogs("plugin.apps", level="WARNING"):
+                self.assertEqual(apps.listing(self.path), [])
+
+    def test_the_bundle_the_plugin_ships_seeds_and_every_page_is_kept(self) -> None:
+        listed = apps.listing(self.path)
+        self.assertEqual({row["builtin"] for row in listed}, {"home", "gtd"})
+        for row in listed:
+            self.assertEqual(row["pages"][0], "root")
+            for page_id in row["pages"]:
+                self.assertTrue(apps.page(self.path, row["id"], page_id)["source"].strip())
+
+
+class BuiltInRoutes(unittest.TestCase):
+    def setUp(self) -> None:
+        self.path = db_path(temp_hermes_home(self))
+        self.adapter = RouteAdapter()
+        self.app = wire(self, self.adapter)
+        bundle_of(self, {"home": built()})
+
+    def call(self, verb: str, path: str, match: Any, body: Any = None, query: Any = None) -> Any:
+        request = FakeWeb.Request()
+        request.match_info, request.headers, request.query = match, {}, query or {}
+
+        async def read() -> Any:
+            return body
+
+        request.json = read
+        return asyncio.run(route(self.app, plugin.PREFIX + path, verb)(request))
+
+    def test_a_delete_of_a_built_in_is_refused_and_it_is_hidden_over_the_wire(self) -> None:
+        listed = self.call("GET", "/apps", {})["payload"]["apps"]
+        builtin = listed[0]["id"]
+        refused = self.call("DELETE", "/apps/{app_id}", {"app_id": builtin})
+        self.assertEqual(refused["status"], 409)
+        hid = self.call("POST", "/apps/{app_id}/hidden", {"app_id": builtin}, {"hidden": True})
+        self.assertEqual(hid["status"], 200)
+        self.assertEqual(self.call("GET", "/apps", {})["payload"]["apps"], [])
+        shown = self.call("GET", "/apps", {}, query={"hidden": "1"})["payload"]["apps"]
+        self.assertEqual([row["hidden"] for row in shown], [True])
+
+    def test_a_generated_app_is_deleted_over_the_wire(self) -> None:
+        made = apps.create(self.path, "Mine", "# id: root\nroot = Stack([])")
+        answer = self.call("DELETE", "/apps/{app_id}", {"app_id": made["id"]})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(self.call("DELETE", "/apps/{app_id}", {"app_id": made["id"]})["status"], 404)
+
+    def test_the_update_is_taken_over_the_wire(self) -> None:
+        builtin = self.call("GET", "/apps", {})["payload"]["apps"][0]["id"]
+        apps.write(self.path, builtin, "root", "# id: root\nroot = Card(\"Mine\")")
+        bundle_of(self, {"home": built(2)})
+        self.assertTrue(self.call("GET", "/apps", {})["payload"]["apps"][0]["update"])
+        taken = self.call("POST", "/apps/{app_id}/update", {"app_id": builtin})
+        self.assertEqual(taken["status"], 200)
+        self.assertFalse(self.call("GET", "/apps", {})["payload"]["apps"][0]["update"])
+
+    def test_the_new_routes_need_the_bots_key(self) -> None:
+        self.adapter.denied = {"status": 401, "payload": {}}
+        for verb, path in (
+            ("DELETE", "/apps/{app_id}"),
+            ("POST", "/apps/{app_id}/hidden"),
+            ("POST", "/apps/{app_id}/update"),
+        ):
+            self.assertEqual(
+                self.call(verb, path, {"app_id": "x"}, {"hidden": True}),
+                {"status": 401, "payload": {}},
+            )
+        self.assertFalse(self.path.exists())
 
 
 if __name__ == "__main__":

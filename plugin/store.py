@@ -35,8 +35,9 @@ logger = logging.getLogger(__name__)
 # (`chats.py`); it is a data pass over existing rows and adds nothing. 55 adds the apps a bot keeps
 # and their pages (`apps.py`, ADR 0099): one row per app, one per page, and a page keeps the source
 # its last change replaced — the one step of undo. Both are new tables, so nothing already written
-# has to move.
-SCHEMA_VERSION = 55
+# has to move. 56 gives an app the columns a built-in one lives by (`apps.py`, #865): its bundle key,
+# the bundle version it was seeded at, whether a person has edited it and whether it is hidden.
+SCHEMA_VERSION = 56
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -883,5 +884,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (app_id, page_id),
                    UNIQUE (app_id, position)
                )"""
+        )
+        # v56: a built-in app is an ordinary row with a bundle key, the bundle version it was seeded
+        # at, an edit mark and a hidden mark (apps.py). Guarded by the table's own columns, since a
+        # store may already carry some of them.
+        app_columns = {row[1] for row in conn.execute("PRAGMA table_info(apps)")}
+        for column, definition in (
+            ("builtin_key", "TEXT"),
+            ("builtin_version", "INTEGER"),
+            ("edited", "INTEGER NOT NULL DEFAULT 0"),
+            ("hidden", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in app_columns:
+                conn.execute(f"ALTER TABLE apps ADD COLUMN {column} {definition}")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS apps_builtin_key ON apps (builtin_key)"
+            " WHERE builtin_key IS NOT NULL"
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

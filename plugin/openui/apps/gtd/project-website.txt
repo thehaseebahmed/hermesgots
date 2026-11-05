@@ -1,0 +1,5 @@
+# id: project-website
+root = Stack([sample, tasks, back])
+sample = Callout("info", "Sample data: these tasks are an example, not your project.")
+tasks = List([{"label": "Review the draft", "detail": "Next action"}, {"label": "Pick the colours", "detail": "Open"}, {"label": "Publish the page", "detail": "Open"}], true)
+back = Link("Back to the list", "root")

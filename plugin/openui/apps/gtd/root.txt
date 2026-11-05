@@ -1,0 +1,9 @@
+# id: root
+root = Stack([sample, today, projects, overdue, waiting, website])
+sample = Callout("info", "Sample data: these tasks show the shape of the page, not your list.")
+today = Card("Today", "Three things to do before the day ends.", [todayList])
+todayList = List([{"label": "Send the invoice", "detail": "Finance"}, {"label": "Book the dentist", "detail": "Personal"}, {"label": "Review the draft", "detail": "Website"}])
+projects = Table(["Project", "Next action", "Open"], [["Website", "Review the draft", 4], ["Finance", "Send the invoice", 2], ["Personal", "Book the dentist", 3]], "Sample projects")
+overdue = Callout("warn", "Sample: 1 task is overdue, Renew the passport.")
+waiting = List([{"label": "Logo files", "detail": "Waiting on Sam"}, {"label": "Quote for the roof", "detail": "Waiting on the builder"}], false)
+website = Link("Open the Website project", "project-website")

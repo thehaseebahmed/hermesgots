@@ -1,0 +1,17 @@
+{
+  "set_version": 1,
+  "apps": {
+    "home": {
+      "version": 1,
+      "title": "Home",
+      "library_version": "1.0.1",
+      "pages": ["home/root.txt", "home/living-room.txt"]
+    },
+    "gtd": {
+      "version": 1,
+      "title": "Tasks",
+      "library_version": "1.0.1",
+      "pages": ["gtd/root.txt", "gtd/project-website.txt"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# id: root
+root = Stack([sample, house, rooms, energy, open, living])
+sample = Callout("info", "Sample data: these numbers show the shape of the page, not your house.")
+house = Card("The house at a glance", "2 people home, 3 lights on, thermostat at 21 °C.")
+rooms = Table(["Room", "Temperature", "Humidity"], [["Living room", "21.4 °C", "44%"], ["Kitchen", "22.1 °C", "51%"], ["Bedroom", "19.8 °C", "47%"]], "Sample readings")
+energy = Chart("area", [{"name": "Energy (kWh)", "points": [{"x": "00:00", "y": 0.4}, {"x": "06:00", "y": 0.9}, {"x": "12:00", "y": 1.6}, {"x": "18:00", "y": 2.8}, {"x": "23:00", "y": 1.1}]}], "Hour", "kWh", "Sample energy use across the day, peaking at 18:00.")
+open = Callout("warn", "Sample: the back door has been open for 20 minutes.")
+living = Link("Open the living room", "living-room")

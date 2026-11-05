@@ -3247,7 +3247,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        rows = await asyncio.to_thread(apps.listing, store_path())
+        rows = await asyncio.to_thread(
+            apps.listing, store_path(), request.query.get("hidden") == "1"
+        )
         return web.json_response({"object": "memento.apps", "apps": rows})
 
     async def query_usage(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -3409,8 +3411,41 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             body=False,
         )
 
+    async def remove_app(request: "web.Request") -> "web.Response":
+        info = request.match_info
+        return await apps_write(
+            request,
+            lambda path, _: apps.remove(path, info["app_id"]) or {"id": info["app_id"]},
+            "app",
+            200,
+            body=False,
+        )
+
+    async def hide_app(request: "web.Request") -> "web.Response":
+        info = request.match_info
+        return await apps_write(
+            request,
+            lambda path, sent: apps.set_hidden(path, info["app_id"], sent.get("hidden")),
+            "app",
+            200,
+            body=True,
+        )
+
+    async def update_app(request: "web.Request") -> "web.Response":
+        info = request.match_info
+        return await apps_write(
+            request,
+            lambda path, _: apps.take_update(path, info["app_id"]),
+            "app",
+            200,
+            body=False,
+        )
+
     app.router.add_get(f"{PREFIX}/apps", list_apps)
     app.router.add_post(f"{PREFIX}/apps/query", query_app)
+    app.router.add_delete(f"{PREFIX}/apps/{{app_id}}", remove_app)
+    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/hidden", hide_app)
+    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/update", update_app)
     app.router.add_post(f"{PREFIX}/apps", create_app)
     app.router.add_post(f"{PREFIX}/apps/builds", mark_app_build)
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", write_app_page)
