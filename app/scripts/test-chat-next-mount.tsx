@@ -1032,7 +1032,7 @@ test("a turn the host gave up on is drawn as failed, in the host's words, and no
   })
 })
 
-test("Retry sends a failed turn's request again and leaves the failed half in the transcript", async () => {
+test("Retry sends a failed turn's request again and leaves the failed half on the host", async () => {
   const { host } = await onChatNext("c-retry", {}, { plugin: true })
   host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
   await mount(chatScreen("c-retry"), async () => {
@@ -1040,7 +1040,7 @@ test("Retry sends a failed turn's request again and leaves the failed half in th
     await click(find("[data-retry]"))
     await until(() => host.asked.runs === 1, "the request is sent again")
     assert.match(String(JSON.stringify(host.latest.body)), /Look around/)
-    // Retry is one send: what the failed half holds (its calls, what they wrote) stays on the host.
+    assert.equal(host.asked.failedTurnClears, 0, "Retry asked the host to delete nothing")
     assert.ok(
       host.rows.some((row) => row.display_kind === "failed_turn"),
       "the host still holds the failed turn",
@@ -1053,18 +1053,21 @@ test("Retry sends a failed turn's request again and leaves the failed half in th
     assert.ok(!find("[data-retry]"), "with nothing left to retry")
     assert.ok(
       host.rows.some((row) => row.display_kind === "failed_turn"),
-      "and it is still in the transcript after the retry answered",
+      "and it is still there after the retry answered",
     )
   })
 })
 
-test("Retry needs nothing of the plugin: it sends again and the thread shows the resend only", async () => {
+test("Retry needs nothing of the plugin: no feature probe, just the send", async () => {
   const { host } = await onChatNext("c-retry-bare", {}, { plugin: false })
   host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
   await mount(chatScreen("c-retry-bare"), async () => {
     await until(() => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    const probes = host.asked.info
     await click(find("[data-retry]"))
     await until(() => host.asked.runs === 1, "the request is sent again")
+    assert.equal(host.asked.info, probes, "Retry asked the plugin nothing")
+    assert.equal(host.asked.failedTurnClears, 0, "and asked the host to delete nothing")
     host.latest.run!.finish("Looking.")
     await until(() => replies().includes("Looking."), "the second try answers")
     assert.deepEqual(requests(), ["Look around"], "the request shows once")

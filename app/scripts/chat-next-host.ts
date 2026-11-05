@@ -207,6 +207,7 @@ export function fakeHost(
     health: 0,
     stops: 0,
     agentStops: 0,
+    failedTurnClears: 0,
     info: 0,
   }
   /** The offset of each transcript page asked for, in the order the asks came. */
@@ -880,6 +881,9 @@ export function fakeHost(
         pending_controls: state.waiting ? [state.waiting] : [],
       })
     }
+    // A route that no longer exists still counts its calls: a screen that asks the host to delete a
+    // failed turn would 404 here and its read would find the rows untouched either way.
+    if (/\/failed-turn\//.test(path)) asked.failedTurnClears += 1
     return reply({ error: { message: `no route ${path}` } }, 404)
   }
 

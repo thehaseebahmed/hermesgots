@@ -214,10 +214,10 @@ test("a failed turn's row ends the turn and keeps the host's words, not as a rep
     row(4, "assistant", "Your request was not processed.", { display_kind: "failed_turn" }),
   ])
   assert.deepEqual(
-    turns.map((turn) => [turn.done, turn.failed?.text, turn.failed?.row, turn.parts.length]),
+    turns.map((turn) => [turn.done, turn.failed?.text, turn.parts.length]),
     [
-      [true, "Your request was not processed.", 2, 0],
-      [true, "Your request was not processed.", 4, 0],
+      [true, "Your request was not processed.", 0],
+      [true, "Your request was not processed.", 0],
     ],
   )
 })
