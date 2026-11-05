@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Sequence, Set, Tuple
 
 import plugin
-from plugin import apps
+from plugin import apps, openui
 from plugin.store import SCHEMA_VERSION, connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
@@ -352,6 +352,29 @@ class Writes(unittest.TestCase):
     def test_a_source_without_an_id_line_is_the_root_page(self) -> None:
         made = self.create(source="root = Stack([])")["payload"]["app"]
         self.assertEqual(made["pages"], ["root"])
+
+    def test_a_build_of_three_pages_keeps_all_three_with_the_first_as_the_root(self) -> None:
+        pages = [f"# id: {name}\nroot = Stack([])" for name in ("home", "room", "trend")]
+        answer = self.send("/apps", {}, {"title": "House", "pages": pages})
+        self.assertEqual(answer["status"], 201)
+        made = answer["payload"]["app"]
+        self.assertEqual(made["pages"], ["home", "room", "trend"])
+        self.assertEqual(apps.listing(self.path)[0]["pages"], ["home", "room", "trend"])
+        self.assertEqual(apps.page(self.path, made["id"], "trend")["source"], pages[2])
+
+    def test_a_build_with_one_page_refused_writes_none_of_them(self) -> None:
+        pages = ["# id: home\nroot = Stack([])", "x" * (apps.PAGE_MAX_CHARS + 1)]
+        self.assertEqual(self.send("/apps", {}, {"title": "House", "pages": pages})["status"], 413)
+        twins = ["# id: home\nroot = Stack([])"] * 2
+        self.assertEqual(self.send("/apps", {}, {"title": "House", "pages": twins})["status"], 400)
+        self.assertEqual(self.send("/apps", {}, {"title": "House", "pages": []})["status"], 400)
+        self.assertEqual(apps.listing(self.path), [])
+
+    def test_a_build_session_is_marked_as_an_app_run(self) -> None:
+        answer = self.send("/apps/builds", {}, {"session_id": "run-1"})
+        self.assertEqual(answer["status"], 201)
+        self.assertTrue(openui.is_app_run({"session_id": "run-1"}, self.path))
+        self.assertEqual(self.send("/apps/builds", {}, {})["status"], 400)
 
     def test_a_second_write_keeps_the_first_source_and_undo_answers_it(self) -> None:
         app_id = self.create()["payload"]["app"]["id"]

@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Navigate, useNavigate, useParams } from "react-router"
-import { LayoutGridIcon, MenuIcon, Undo2Icon } from "lucide-react"
+import { LayoutGridIcon, MenuIcon, PlusIcon, Undo2Icon } from "lucide-react"
 
 import { attempt } from "@/lib/attempt"
 import { BackButton } from "@/components/back-button"
+import { AppBuildSheet } from "@/components/app-build-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow } from "@/components/item-list"
 import { Button } from "@/components/ui/button"
@@ -44,8 +45,10 @@ function AppsHome({ list }: { list?: FeaturePane }) {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { apps, error, loaded } = useApps()
+  const [building, setBuilding] = useState(false)
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <AppBuildSheet open={building} onOpenChange={setBuilding} />
       <header className={HEADER}>
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <Button
@@ -60,6 +63,15 @@ function AppsHome({ list }: { list?: FeaturePane }) {
           <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
             Apps
           </h1>
+          <Button
+            variant="outline"
+            size="icon-lg"
+            className="size-11 rounded-full"
+            onClick={() => setBuilding(true)}
+            aria-label="New app"
+          >
+            <PlusIcon />
+          </Button>
         </div>
       </header>
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">

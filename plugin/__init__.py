@@ -3307,12 +3307,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return await apps_write(
             request,
             lambda path, sent: apps.create(
-                path, sent.get("title"), sent.get("source"), sent.get("library_version")
+                path,
+                sent.get("title"),
+                sent.get("source"),
+                sent.get("library_version"),
+                sent.get("pages"),
             ),
             "app",
             201,
             body=True,
         )
+
+    async def mark_app_build(request: "web.Request") -> "web.Response":
+        """Marks the session a build is about to run in, so it is told the app's rules (ADR 0101)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        sent = await json_body(request)
+        if sent is None:
+            return _error(web, "Body must be a JSON object", 400)
+        marked = await asyncio.to_thread(
+            openui.mark_app_run, sent.get("session_id"), _request_profile()
+        )
+        if not marked:
+            return _error(web, "A build needs a session id.", 400)
+        return web.json_response({"object": "memento.app.build", "marked": True}, status=201)
 
     async def write_app_page(request: "web.Request") -> "web.Response":
         info = request.match_info
@@ -3338,6 +3357,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_get(f"{PREFIX}/apps", list_apps)
     app.router.add_post(f"{PREFIX}/apps", create_app)
+    app.router.add_post(f"{PREFIX}/apps/builds", mark_app_build)
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", write_app_page)
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}/undo", undo_app_page)
     app.router.add_get(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", get_app_page)

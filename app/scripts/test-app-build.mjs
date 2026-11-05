@@ -30,3 +30,38 @@ test("the Interfaces switch off refuses a build in its own words", () => {
 test("a switch not read yet is not an off", () => {
   assert.equal(buildBlocked("yes", undefined), undefined)
 })
+
+const block = (id) => `\`\`\`openui-lang\n# id: ${id}\nroot = Stack([])\n\`\`\``
+
+test("a build answering three blocks makes three pages, the first the root", async () => {
+  const { pagesOf } = await import("../src/lib/app-build.ts")
+  const built = pagesOf(`Here:\n\n${block("home")}\n\n${block("room")}\n\n${block("trend")}\n`)
+  assert.equal(built.error, undefined)
+  assert.equal(built.pages.length, 3)
+  assert.match(built.pages[0], /^# id: home/)
+  assert.match(built.pages[2], /^# id: trend/)
+})
+
+test("an answer that broke off mid-block, or carries none, keeps nothing", async () => {
+  const { pagesOf } = await import("../src/lib/app-build.ts")
+  const broken = pagesOf(`${block("home")}\n\n\`\`\`openui-lang\n# id: room\nroot = Sta`)
+  assert.ok(broken.error && !broken.pages)
+  assert.ok(pagesOf("I could not.").error)
+})
+
+test("the consent is read off the pages' own queries and mutations", async () => {
+  const { consentOf } = await import("../src/lib/app-build.ts")
+  const consent = consentOf([
+    'a = Query("light.list", {}, {})\nb = Mutation("light.set", {})',
+    'c = Query("light.list", {}, {})\nd = Query("temp.read", {}, {})',
+  ])
+  assert.deepEqual(consent, { reads: ["light.list", "temp.read"], acts: ["light.set"] })
+  assert.deepEqual(consentOf(["root = Stack([])"]), { reads: [], acts: [] })
+})
+
+test("a title is the prompt's first line, cut at a word when long", async () => {
+  const { titleOf } = await import("../src/lib/app-build.ts")
+  assert.equal(titleOf("  A home dashboard\nwith rooms"), "A home dashboard")
+  const long = titleOf("a ".repeat(60))
+  assert.ok(long.length <= 61 && long.endsWith("…"))
+})

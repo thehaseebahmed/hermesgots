@@ -2,10 +2,15 @@ import { useCallback, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { getActiveProfile, type Profile } from "@/lib/db"
+import { pagesOf } from "@/lib/app-build"
 import {
+  createApp,
+  followRun,
   getAppPage,
   HermesError,
   listApps,
+  markAppBuild,
+  startRun,
   undoAppPage,
   type HostApp,
   type HostAppPage,
@@ -41,6 +46,42 @@ function refreshApps(profile: Profile) {
     .finally(() => reading.delete(profile.id))
   reading.set(profile.id, read)
   return read
+}
+
+/**
+ * Runs a build and answers the pages it came to, writing nothing. The session is marked an app's
+ * before the run starts, so the model is told the app's rules; a run that ended any way but
+ * finished, or whose answer isn't whole blocks, throws and leaves nothing behind.
+ */
+export async function buildPages(profile: Profile, prompt: string, signal?: AbortSignal) {
+  const sessionId = crypto.randomUUID()
+  await markAppBuild(profile, sessionId)
+  const runId = await startRun(profile, {
+    sessionId,
+    idempotencyKey: sessionId,
+    messages: [{ role: "user", content: `Build this app:\n\n${prompt.trim()}` }],
+  })
+  let streamed = ""
+  const outcome = await followRun(
+    profile,
+    runId,
+    { lastSeq: -1, signal },
+    { onContent: (delta) => (streamed += delta) },
+  )
+  if (outcome?.status !== "completed")
+    throw new Error(outcome?.error ?? "The build didn't finish, so nothing was saved.")
+  const built = pagesOf(outcome.output ?? streamed)
+  if ("error" in built) throw new Error(`${built.error} Nothing was saved.`)
+  return built.pages
+}
+
+/** Writes the built pages as a new app and lists it, so it opens on its root page at once. */
+export async function saveApp(profile: Profile, title: string, pages: string[]) {
+  const app = await createApp(profile, title, pages)
+  const kept = listed.get()
+  const apps = kept?.profileId === profile.id ? (kept.apps ?? []) : []
+  listed.set({ profileId: profile.id, apps: [app, ...apps.filter((one) => one.id !== app.id)] })
+  return app
 }
 
 /** The active bot's apps, newest first, read from its host and kept fresh while a screen holds them. */

@@ -4545,3 +4545,25 @@ export async function undoAppPage(config: HermesConfig, appId: string, pageId: s
   })
   return toHostAppPage((await response.json())?.page as Record<string, unknown>)
 }
+
+/**
+ * Saves a build's pages as a new app, the first the root, in one write: the host keeps all of them
+ * or none. Answers the app as the list does.
+ */
+export async function createApp(config: HermesConfig, title: string, pages: string[]) {
+  const response = await request(appsRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ title, pages }),
+  })
+  return toHostApp((await response.json())?.app as Record<string, unknown>)
+}
+
+/** Tells the host a session is an app's build, so the run is given the app's rules, not a chat's. */
+export async function markAppBuild(config: HermesConfig, sessionId: string) {
+  await request(`${appsRoot(config)}/builds`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+}

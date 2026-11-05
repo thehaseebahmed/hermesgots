@@ -155,12 +155,19 @@ def page_id_of(source: str) -> str:
 
 
 def create(
-    path: Path, title: Any, source: Any, library_version: Optional[str] = None
+    path: Path,
+    title: Any,
+    source: Any = None,
+    library_version: Optional[str] = None,
+    pages: Any = None,
 ) -> Dict[str, Any]:
-    """Saves a new app whose first page, the root, is ``source``; answers the app as the list does.
+    """Saves a new app whose pages are written together, the first the root; answers the app as the
+    list does.
 
-    The app and its page are written in one transaction, so no reader meets an app without its
-    root. Raises ``AppsError`` (400/413) for a title or source that can't be kept.
+    ``pages`` is a build's blocks in order; a lone ``source`` is a one-page app. The app and every
+    page are written in one transaction, so no reader meets an app without its root or one half
+    built. Raises ``AppsError`` (400/413) for a title or source that can't be kept, or two pages
+    sharing an id.
     """
     if not isinstance(title, str) or not title.strip():
         raise AppsError("An app needs a title.", 400)
@@ -171,22 +178,28 @@ def create(
             f" this one is {len(title)}.",
             413,
         )
-    source = _checked(source)
+    if pages is None:
+        pages = [source]
+    if not isinstance(pages, list) or not pages:
+        raise AppsError("An app needs a page.", 400)
+    sources = [_checked(one) for one in pages]
+    ids = [page_id_of(one) for one in sources]
+    if len(set(ids)) != len(ids):
+        raise AppsError("Two pages of an app can't share an id.", 400)
     version = (
         library_version if isinstance(library_version, str) and library_version else LIBRARY_VERSION
     )
     app_id = f"app-{uuid.uuid4().hex[:12]}"
-    root = page_id_of(source)
     with _writing(path, building=True) as conn:
         conn.execute(
             "INSERT INTO apps (id, title, library_version, created_at) VALUES (?, ?, ?, ?)",
             (app_id, title, version, now_ms()),
         )
-        conn.execute(
-            "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, 0, ?)",
-            (app_id, root, source),
+        conn.executemany(
+            "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, ?, ?)",
+            [(app_id, page_id, position, one) for position, (page_id, one) in enumerate(zip(ids, sources))],
         )
-    return {"id": app_id, "title": title, "library_version": version, "pages": [root]}
+    return {"id": app_id, "title": title, "library_version": version, "pages": ids}
 
 
 def write(path: Path, app_id: str, page_id: str, source: Any) -> Dict[str, Any]:
