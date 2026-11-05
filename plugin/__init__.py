@@ -57,6 +57,7 @@ from . import (
     moves,
     openui,
     outbox,
+    pending,
     pipeline,
     platform_gots,
     projects,
@@ -601,6 +602,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "fallbacks",
                     "delegation_model",
                     "queue",
+                    # The queue Hermes itself holds for a session, and the turn a restart lost
+                    # (pending.py): what waits there is drawn in the chat, and the lost turn is
+                    # discarded from it — the TUI's `/discard`, which the app otherwise needs the
+                    # terminal for.
+                    "pending",
                     "dictation",
                     # A bot's dictation log: the durable copy of the words a take landed, with the
                     # totals its Dictation screen counts (dictations.py, ADR 0060).
@@ -2828,6 +2834,45 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)
+
+    # The queue Hermes itself keeps for a session: what waits there, and the turn a restart lost
+    # (``plugin/pending.py``). The app reads it beside its own queue, and discards a lost one so the
+    # messages behind it run — the TUI's ``/discard``, from the phone.
+    async def get_pending(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                pending.read_for, adapter, home, request.match_info["session_id"]
+            )
+        except pending.PendingError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.pending", **found})
+
+    async def discard_pending(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        try:
+            found = await pending.discard_for(
+                adapter, profile_home(), session_id, request.match_info["admission_id"]
+            )
+        except pending.PendingError as error:
+            return _error(web, str(error), error.status)
+        path = store_path()
+        # The discarded row can let a queued turn start at once: screens read the run and the queue.
+        events.note("runs", session_id, path, True)
+        events.note("session", session_id, path, True)
+        return web.json_response({"object": "memento.pending.discarded", **found})
+
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/pending", get_pending)
+    app.router.add_post(
+        f"{PREFIX}/sessions/{{session_id}}/pending/{{admission_id}}/discard", discard_pending
+    )
+
     async def research_view(path: Path, mission_id: str) -> "web.Response":
         found = await asyncio.to_thread(research.mission, path, mission_id)
         if found is None:

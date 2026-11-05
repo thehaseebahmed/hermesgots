@@ -17,8 +17,8 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **89 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 89 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **90 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 90 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
@@ -30,7 +30,7 @@ takes them rather than by the registry's order, so the count is the thing to che
 | **total** | **90** |
 
 Of those 90, 84 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 83 distinct files) and 6 point at the older
+reuses `todos.mjs`, so 84 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -212,6 +212,7 @@ a turn that fails leaves behind.
 | `routine-message` | stay | A routine's answer arrives in the chat that asked for it as the bot's own message — apart from the reply above it, opening as an aside — and its chip opens the run's transcript with no composer in it, at 390 and 1024px in both themes. | The fold, the chip and the sheet are decided in the component tier, but the message arriving at all is the host's delivery landing in a real chat and the app reading it back after a reload, which no component mount performs. | A component test carries the chip, the sheet and the pruned run; the delivery and the reload are only here. |
 | `chat-message` | stay | A bare Enter in the composer inserts a line and starts no run, the chord then sends `hello there`, and the chat gets a reply with text and a row under Recents. | The send, the streamed reply and the Recents row are the app's own wiring over a faked boundary — but a browser's own default action on Enter is not something a DOM without layout performs, so that first step can only be shown here. | A component test still carries the send, the streamed reply and the Recents row; nothing replaces the browser's Enter. |
 | `plain-error` | component | A turn that fails before it says anything reads as a marked error line on the page with no bubble or picture — the way every reply is drawn now — while the reply above it is on the page too. | Which row a failure takes is a render over the host's own error. | A component test asserts a reply, a chat's and a session's alike, is on the page with no bubble and no picture (`test-thread-rendering.tsx`); the flow keeps the landed reply drawn on the page without one, and the failed turn's own mark. |
+| `pending-queue` | stay | A chat whose queue Hermes holds behind a turn a restart lost draws the lost turn and the message behind it in the composer's place, at 1440 and 390px, and Discard acknowledges it on the host, after which the composer is back. | Geometry: a card in the composer's slot, and a composer that is not drawn beside it, are what no DOM without layout measures — the phone's wrapped note and button included. | A component test carries the card's words, the two calls and the composer's return (`test-pending-card.tsx`); the drawing at both widths is the flow's. |
 | `failed-send` | component | A send nothing reached stays dimmed like a queued message, wears a mark, says only that it didn't go, can be sent again with what it held or taken back, outlives a reload, and sends are refused meanwhile. | The failed row's state and its two actions are device state; the reload is Dexie's persistence, which a remount reaches. | A component test asserts the row's state and its two actions, and that it shares the queued row's own class tokens rather than a computed colour. |
 | `submission` | component | Two sends racing in one chat start one run and get one reply. | A guard in the send path: the same call twice without awaiting is the whole condition. | A component test calls the send path twice without awaiting and asserts one request and one reply row. |
 | `approval` | component | A session's approval waits in the sidebar's Waiting for input and Code's Waiting for You, and both move it to Idle once it is allowed — with the three panes it also checked at 1440px. | Two renders from one plugin answer; only the three-pane layout it checked is beyond a DOM. | A component test renders the sidebar and Code over a seeded waiting session, asserts both waiting lines, and Code lists it under Idle after the answer; the three-pane layout is the snapshots'. |

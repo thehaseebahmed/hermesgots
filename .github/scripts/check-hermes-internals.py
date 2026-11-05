@@ -78,6 +78,15 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("hermes_cli/plugins_dispatch.py",), "DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS = 4_000"),
     (("hermes_cli/plugins_dispatch.py",), "MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS = 8_000"),
     (("agent/prompt_builder.py",), "CONTEXT_FILE_MAX_CHARS = 20_000"),
+    # The queue Hermes keeps for a session, as `plugin/pending.py` reads it: the ledger's own reader,
+    # the fence that holds a paused FIFO, the owner path that clears it, and the restore that puts an
+    # API chat back in front of its authority before one is cleared (ADR 0108).
+    (("hermes_state_runtime.py",), "def list_session_admissions"),
+    (("hermes_state_runtime.py",), "status IN ('queued','started','unknown')"),
+    (("hermes_state_runtime.py",), "def get_session_admission"),
+    (("gateway/session_authority.py",), "async def resolve_unknown_as_owner"),
+    (("gateway/session_api.py",), "def restore_api_session"),
+    (("gateway/session_authorities.py",), "def authority_for_home"),
 )
 
 # Hermes's own constants, read out of the checkout as they are: they are what the plugin's copies are

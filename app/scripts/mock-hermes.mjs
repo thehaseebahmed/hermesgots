@@ -3790,6 +3790,22 @@ const queueView = (sessionId) => {
   }
 }
 
+// The queue Hermes itself keeps for a session (plugin/pending.py): a turn a restart lost, fenced
+// `unknown`, and the inputs blocked behind it. Empty until a flow or a hand puts one there
+// (POST /__mock/pending); a discard drops the lost turn and what it held, as the real host hands
+// those to its FIFO to start.
+const pendingQueues = new Map()
+function pendingOf(sessionId) {
+  if (!pendingQueues.has(sessionId)) pendingQueues.set(sessionId, { items: [], lost: null })
+  return pendingQueues.get(sessionId)
+}
+const pendingView = (held) => ({
+  object: "memento.pending",
+  items: held.items.map(({ id, text, status }) => ({ id, text, status })),
+  lost: held.lost,
+  paused: Boolean(held.lost),
+})
+
 function startRun(req, body, options = {}) {
   const key = req.headers["idempotency-key"]
   const replay = key && [...runs.values()].find((run) => run.key === key)
@@ -4178,6 +4194,9 @@ http
           ...(TRIAGE !== "off" ? ["triage_model"] : []),
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
+          // The queue Hermes itself keeps for a session, and the turn a restart lost under it
+          // (plugin/pending.py): the card that names it and the one control that clears it.
+          "pending",
           // A routine's message, and the route that names the run behind it (ADR 0081).
           ...(PLUGIN ? ["routine_message"] : []),
           "progress_reminders",
@@ -5958,6 +5977,25 @@ http
         item: { ...item, body: undefined, run_id: null, sent_at: null, error: null },
       })
     }
+    const pendingRoute =
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/pending(?:\/([^/]+)\/discard)?$/.exec(url.pathname)
+    if (PLUGIN && !profile && pendingRoute) {
+      const id = decodeURIComponent(pendingRoute[1])
+      const held = pendingOf(id)
+      if (!pendingRoute[2] && req.method === "GET") return json(res, 200, pendingView(held))
+      if (pendingRoute[2] && req.method === "POST") {
+        if (pendingRoute[2] !== held.lost)
+          return json(res, 409, {
+            error: { message: "That turn isn't waiting to be discarded any more." },
+          })
+        held.items = []
+        held.lost = null
+        noteEvent("runs", id)
+        noteEvent("session", id)
+        return json(res, 200, { object: "memento.pending.discarded", ...pendingView(held) })
+      }
+      return json(res, 405, { error: { message: "Method not allowed" } })
+    }
     const queueRoute =
       /^\/api\/plugins\/memento\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/(remove|send|steer))?$/.exec(
         url.pathname,
@@ -6090,6 +6128,29 @@ http
       const { delay = 0 } = await readBody(req)
       wakeDelayMs = Number(delay) || 0
       return json(res, 200, { ok: true, delay: wakeDelayMs })
+    }
+    // Dev only: POST { session, text?, queued? } makes a session's queue look like one a restart
+    // lost — the lost turn and the inputs fenced behind it (`plugin/pending.py`) — or { session,
+    // reset: true } clears it again, since the mock keeps its state between flows.
+    if (url.pathname === "/__mock/pending" && req.method === "POST") {
+      const {
+        session,
+        text = "a turn the server lost",
+        queued = ["the older message behind it"],
+        reset = false,
+      } = await readBody(req)
+      if (!session) return json(res, 400, { error: { message: "session is required" } })
+      if (reset) pendingQueues.delete(session)
+      else
+        pendingQueues.set(session, {
+          lost: "lost_1",
+          items: [
+            { id: "lost_1", text, status: "unknown" },
+            ...queued.map((one, place) => ({ id: `held_${place + 1}`, text: one, status: "queued" })),
+          ],
+        })
+      noteEvent("runs", session)
+      return json(res, 200, pendingView(pendingOf(session)))
     }
     // Dev only: POST { project_id, reason } makes the project's claimed task stalled — its session
     // waiting with that reason, the way a failed run or a restart leaves it — { pipeline, pr } moves

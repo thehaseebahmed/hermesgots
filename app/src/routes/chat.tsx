@@ -17,12 +17,14 @@ import { toast } from "sonner"
 
 import {
   CATCH_UP_MS,
+  CHAT_IDLE_MS,
   HOST_QUEUE_MS,
   PR_PENDING_MS,
   RUNS_MS,
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
+import { pausedQueue, type PendingQueue } from "@/lib/pending"
 import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
@@ -58,6 +60,7 @@ import {
   BlockedCard,
   DiscardedCard,
   PlanReadyCard,
+  QueuePausedCard,
   ResolvedCard,
 } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
@@ -74,6 +77,8 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import {
   queueMessage,
+  readPending,
+  discardLostTurn,
   refreshQueue,
   reattachRun,
   sendFromMain,
@@ -970,6 +975,34 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_MS)
     return () => window.clearInterval(timer)
   }, [id, hostWaiting])
+  // The queue Hermes itself holds for this chat, and the turn a restart can lose under it
+  // (`plugin/pending.py`). Read as the chat opens and then at the idle pace: a fence is written to
+  // the ledger with no event of its own, so nothing else on this screen would ever say so.
+  const [pending, setPending] = useState<PendingQueue>()
+  const [discarding, setDiscarding] = useState(false)
+  usePoll(
+    (signal) => {
+      if (!id) return setPending(undefined)
+      void readPending(id, signal)
+        .then(setPending)
+        .catch(quietly("Reading the host's queue"))
+    },
+    CHAT_IDLE_MS,
+    [id],
+    { active: Boolean(id) },
+  )
+  const paused = pausedQueue(pending)
+  const discardLost = async () => {
+    if (!id || !pending?.lost) return
+    setDiscarding(true)
+    try {
+      setPending(await discardLostTurn(id, pending.lost))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't discard the lost turn.")
+    } finally {
+      setDiscarding(false)
+    }
+  }
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const awaitingClarify = messages?.find((m) => m.clarify && !m.clarify.resolved)
   const activity = streaming && describeActivity(streaming)
@@ -1569,6 +1602,10 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
           <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
         ) : session?.blocked && !busy ? (
           <BlockedCard reason={session.blocked} />
+        ) : paused ? (
+          // Hermes holds this chat's queue behind a turn a restart lost: nothing typed here would
+          // run, so the card takes the composer's place and names what waits (ADR 0108).
+          <QueuePausedCard rows={paused.rows} discarding={discarding} onDiscard={discardLost} />
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <PlanReadyCard
             autoAvailable={tracked}

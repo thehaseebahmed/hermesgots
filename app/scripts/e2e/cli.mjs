@@ -131,6 +131,11 @@ export const FLOWS = {
     about:
       "A turn that fails before it answers shows as plain text in the chat, with no bot beside it",
   },
+  "pending-queue": {
+    script: "e2e/pending-queue.mjs",
+    about:
+      "A chat whose queue Hermes holds behind a turn a restart lost names what waits, in the composer's place, and Discard clears the lost turn from the app",
+  },
   reattach: {
     script: "e2e/reattach.mjs",
     about: "A reply still streaming when the page reloads picks its run up again and finishes",

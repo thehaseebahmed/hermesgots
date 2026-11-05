@@ -20,6 +20,7 @@ import { MAX_TODO_DEPTH } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
+import type { PendingInput, PendingQueue } from "@/lib/pending"
 import { parsePipeline, parseStage, type AfkStage, type SessionPipeline } from "@/lib/pipeline"
 import {
   parseWorkflowEntry,
@@ -1821,6 +1822,56 @@ export async function queueAction(
     { method: "POST", headers: headers(config) },
   )
   return (await response.json()) as Record<string, unknown>
+}
+
+function pendingRoot(config: HermesConfig, sessionId: string) {
+  return `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/pending`
+}
+
+function pendingInput(raw: Record<string, unknown>): PendingInput {
+  const status = raw.status === "unknown" ? "unknown" : "queued"
+  return { id: String(raw.id), text: typeof raw.text === "string" ? raw.text : "", status }
+}
+
+/** What Hermes holds for a session: the inputs still in its FIFO, and the turn a restart lost. */
+function pendingQueue(body: any): PendingQueue {
+  const items = Array.isArray(body?.items)
+    ? body.items.filter((item: unknown) => item && typeof item === "object").map(pendingInput)
+    : []
+  return {
+    items,
+    lost: typeof body?.lost === "string" ? body.lost : null,
+    paused: Boolean(body?.paused),
+  }
+}
+
+/**
+ * The queue Hermes itself keeps for a session (`plugin/pending.py`): what waits in it, and whether a
+ * turn the host lost mid-restart is holding it still. A host without the route answers nothing, and
+ * the chat draws no card.
+ */
+export async function getPending(config: HermesConfig, sessionId: string, signal?: AbortSignal) {
+  const response = await request(pendingRoot(config, sessionId), {
+    headers: headers(config),
+    signal,
+  })
+  return pendingQueue(await response.json())
+}
+
+/**
+ * Acknowledges a lost turn so the messages queued behind it run, and answers what the host holds
+ * afterwards. The lost input is not replayed: it stays in the transcript, to be sent again.
+ */
+export async function discardPending(
+  config: HermesConfig,
+  sessionId: string,
+  admissionId: string,
+) {
+  const response = await request(
+    `${pendingRoot(config, sessionId)}/${encodeURIComponent(admissionId)}/discard`,
+    { method: "POST", headers: headers(config) },
+  )
+  return pendingQueue(await response.json())
 }
 
 function researchRoot(config: HermesConfig, id?: string) {

@@ -20,7 +20,9 @@ import {
 import {
   addToQueue,
   clarifyQuestions,
+  discardPending,
   followRun,
+  getPending,
   getRun,
   getQueue,
   hasPluginFeature,
@@ -47,6 +49,7 @@ import { progressReminderNote, progressRemindersShown } from "@/lib/progress-rem
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
 import { NOT_SENT } from "@/lib/words"
+import type { PendingQueue } from "@/lib/pending"
 import { retireDraft } from "@/lib/drafts"
 import { refreshContext } from "@/lib/context"
 import { summaryRowsOf } from "@/lib/compaction-seam"
@@ -1725,6 +1728,33 @@ const HOST_QUEUE_CHECKS_MS = [400, 1500, 4000]
 
 function followHostQueue(conversationId: string) {
   for (const ms of HOST_QUEUE_CHECKS_MS) setTimeout(() => void refreshQueue(conversationId), ms)
+}
+
+/**
+ * The queue Hermes itself keeps for this chat (`plugin/pending.py`): what waits in it, and whether a
+ * turn the host lost mid-restart is holding it still. `undefined` where the bot's host has no such
+ * route, so an older plugin draws no card at all rather than an empty one.
+ */
+export async function readPending(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<PendingQueue | undefined> {
+  const host = await hostOf(conversationId)
+  if (!host || !(await hasPluginFeature(host.config, "pending"))) return undefined
+  return getPending(host.config, host.conversation.hermesSessionId, signal)
+}
+
+/**
+ * Acknowledges the lost turn holding this chat's queue, so the messages behind it run, and answers
+ * what the host holds now. Its message is not replayed: it stays in the transcript, to send again.
+ * The turn the discard frees is followed at once, as a queue the plugin started is.
+ */
+export async function discardLostTurn(conversationId: string, admissionId: string) {
+  const host = await hostOf(conversationId)
+  if (!host) return undefined
+  const next = await discardPending(host.config, host.conversation.hermesSessionId, admissionId)
+  void reattachRun(conversationId).catch(quietly("Following a run"))
+  return next
 }
 
 /** The first message this device holds; the plugin sends its own. */

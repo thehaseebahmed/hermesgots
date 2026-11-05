@@ -7,6 +7,7 @@ import {
   MessageCircleQuestionIcon,
   PencilLineIcon,
   RotateCcwIcon,
+  TimerOffIcon,
   ZapIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -20,6 +21,14 @@ import { clarifyRead } from "@/lib/clarify"
 import type { ToolEvent } from "@/lib/db"
 import { WAITING_FOR_ANSWER } from "@/lib/format"
 import { COLUMN_BOX } from "@/lib/layout"
+import {
+  DISCARD_LABEL,
+  PAUSED_BODY,
+  PAUSED_NOTE,
+  PAUSED_TITLE,
+  rowLine,
+  type PendingRow,
+} from "@/lib/pending"
 import { cn } from "@/lib/utils"
 
 /**
@@ -144,6 +153,58 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
         <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
           Reopen
         </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * In place of the composer while Hermes holds this session's queue behind a turn a restart lost
+ * (`pending.ts`, `plugin/pending.py`): what is waiting is named, and one button acknowledges the lost
+ * turn so the messages behind it run — the TUI's `/discard`, which the app otherwise needs a
+ * terminal for. The composer is not drawn beside it, because everything typed there would queue
+ * behind the same lost turn and never start.
+ */
+export function QueuePausedCard({
+  rows,
+  discarding,
+  onDiscard,
+}: {
+  rows: PendingRow[]
+  discarding: boolean
+  onDiscard: () => void
+}) {
+  return (
+    <Card size="sm" className={CARD}>
+      <CardContent className="space-y-3">
+        <div className="flex items-start gap-3">
+          <TimerOffIcon className="mt-0.5 size-6 shrink-0 text-warning" />
+          <div className="min-w-0 flex-1 text-sm">
+            <p className="font-medium">{PAUSED_TITLE}</p>
+            <p className="text-muted-foreground">{PAUSED_BODY}</p>
+          </div>
+        </div>
+        <ul className="space-y-1.5">
+          {rows.map((row) => (
+            <li key={row.id} className="rounded-2xl bg-muted/50 px-3 py-2 text-sm">
+              <p className={cn("break-words", row.state === "lost" && "text-muted-foreground")}>
+                {rowLine(row.text)}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{row.label}</p>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">{PAUSED_NOTE}</p>
+          <Button
+            className="h-11 rounded-full px-4"
+            onClick={onDiscard}
+            disabled={discarding}
+            data-discard-lost
+          >
+            {DISCARD_LABEL}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
