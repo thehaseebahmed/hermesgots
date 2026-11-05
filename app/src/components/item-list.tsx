@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode, Ref } from "react"
-import { ChevronUpIcon, SearchIcon, XIcon } from "lucide-react"
+import { ChevronUpIcon, PinIcon, SearchIcon, XIcon } from "lucide-react"
 import { Link } from "react-router"
 
 import { Bot } from "@/components/bot"
@@ -10,7 +10,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import type { CodeGroupKey, ItemGroupKey } from "@/lib/item-groups"
+import type { ListGroup } from "@/lib/item-groups"
 import type { RowTone } from "@/lib/session-work"
 import { cn } from "@/lib/utils"
 
@@ -24,7 +24,7 @@ export function ItemGroup({
   sticky,
   children,
 }: {
-  group: { key: ItemGroupKey | CodeGroupKey; label: string; items: unknown[] }
+  group: ListGroup
   sticky?: boolean
   children: ReactNode
 }) {
@@ -74,6 +74,16 @@ export function ItemGroup({
       </h2>
       <CollapsibleContent>{list}</CollapsibleContent>
     </Collapsible>
+  )
+}
+
+export function pinnedLine(pinned: boolean, text: string | undefined) {
+  if (!pinned && !text) return undefined
+  return (
+    <>
+      {pinned && <PinIcon className="size-3.5 shrink-0" aria-label="Pinned" />}
+      {text && <span className="truncate">{text}</span>}
+    </>
   )
 }
 

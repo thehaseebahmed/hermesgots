@@ -5,7 +5,6 @@ import {
   FolderIcon,
   FolderKanbanIcon,
   MenuIcon,
-  PinIcon,
   PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -18,7 +17,7 @@ import { toast } from "sonner"
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
 import { useOpenDrawer } from "@/components/drawer-context"
-import { ItemGroup, ItemRow } from "@/components/item-list"
+import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
 import { NewProjectPopup } from "@/components/new-project"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -452,14 +451,7 @@ function ProjectItem({
       botId={profile.botId}
       title={project.name}
       when={at > 0 ? formatWhen(at, now) : undefined}
-      line={
-        (project.pinnedAt || repos.names) && (
-          <>
-            {project.pinnedAt && <PinIcon className="size-3.5 shrink-0" aria-label="Pinned" />}
-            <span className="truncate">{repos.names}</span>
-          </>
-        )
-      }
+      line={pinnedLine(Boolean(project.pinnedAt), repos.names)}
       selected={pane?.selected === key}
       link={{ to: `/projects/${key}`, replace: Boolean(pane?.open), state: { project } }}
     >

@@ -276,8 +276,12 @@ The model a bot's next turns run on, set in its Chat settings: the host's own ma
 _Avoid_: bot model, base model, default pick
 
 **Pin**:
-The model a chat keeps, fixed at its first send: the model in effect then — the bot's default, else the host's main model — written into the chat's own pick and read back by every turn after it, so a Default model changed later leaves that chat where it was. Once written it follows nothing: not the default, not the bot's fallback chain, and a synced record that names no model leaves it as it is. Main carries none, following the default for as long as it lives, and the plugin reads a pin back to run a session's own turns with the app closed — an AFK stage's, and a wake's.
+The model a chat keeps, fixed at its first send: the model in effect then — the bot's default, else the host's main model — written into the chat's own pick and read back by every turn after it, so a Default model changed later leaves that chat where it was. Once written it follows nothing: not the default, not the bot's fallback chain, and a synced record that names no model leaves it as it is. Main carries none, following the default for as long as it lives, and the plugin reads a pin back to run a session's own turns with the app closed — an AFK stage's, and a wake's. It is the model that is pinned, not the session's place: a session placed at the top of a list is **Pinned**, a different thing.
 _Avoid_: lock, freeze, sticky model
+
+**Pinned**:
+A session held above the Code list's status groups, in a band of its own: positional and personal, it changes nothing about the session — not its state, not the model it runs, not whether anything sweeps it — and it leaves the group its claim would put it in rather than being drawn twice. It outlives the session changing state, it is ordered by the list's own sort, and a search or a project chip drops the band with the other headers. A project carries the same word in the project list, where it means the same thing — a place above the list rather than a claim about the item — though that list orders its pins by when they were pinned and the Code list orders them by the sort the reader picked.
+_Avoid_: favourite, star, bookmark, sticky
 
 **Model change**:
 The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.

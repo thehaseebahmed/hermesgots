@@ -12,7 +12,7 @@ import { MemoryRouter } from "react-router"
 
 import { forgetRead, markRead } from "@/lib/read-marks"
 import type { Conversation } from "@/lib/db"
-import { db } from "@/lib/db"
+import { db, updateConversation } from "@/lib/db"
 import { SessionItem } from "@/routes/code"
 import { sessionGroup, type LiveTurn, type LocalTurn } from "@/lib/session-work"
 import type { WaitingReason } from "@/lib/waiting"
@@ -215,6 +215,41 @@ test("a closed session never opened here is not dotted, one read before it close
       assert.ok(dot(), "Resolved after the mark, so it is new")
     },
   })
+})
+
+test("a pinned row leads its line with the pin's mark, and an unpinned row carries none", async () => {
+  const pinMark = () => document.querySelector('svg[aria-label="Pinned"]')
+  await drawRow(
+    conversation("pinned", {
+      pinned: true,
+      worktree: { branch: "a-branch", repos: [], instructions: "" },
+    }),
+    {
+      body: async () => {
+        const mark = pinMark()
+        assert.ok(mark, "a pinned session's row says so")
+        assert.equal(mark.nextElementSibling?.tagName, "SPAN", "the mark comes before the text")
+        assert.match(mark.nextElementSibling?.textContent ?? "", /a-branch/, "which is the row's detail")
+      },
+    },
+  )
+  await drawRow(conversation("unpinned"), {
+    body: async () => {
+      assert.equal(pinMark(), null, "a session that is not pinned carries nothing")
+    },
+  })
+})
+
+test("a pin write moves the sync clock and leaves the row's time alone", async () => {
+  await seedSettings()
+  await db.conversations.clear()
+  await db.conversations.put(conversation("clocked", { updatedAt: 200 }))
+  await updateConversation("clocked", { pinned: true })
+  const pinnedRow = await db.conversations.get("clocked")
+  assert.equal(pinnedRow?.pinned, true, "the pin is written")
+  assert.equal(pinnedRow?.updatedAt, 200, "the row's own time does not move with it")
+  await updateConversation("clocked", { pinned: undefined })
+  assert.equal((await db.conversations.get("clocked"))?.pinned, undefined, "and unpinning clears it")
 })
 
 test("a mark never moves back, and the oldest drop once the store is full", () => {

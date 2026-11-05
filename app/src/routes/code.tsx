@@ -15,7 +15,7 @@ import { Navigate, useNavigate } from "react-router"
 
 import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
-import { ItemGroup, ItemRow, SearchField } from "@/components/item-list"
+import { ItemGroup, ItemRow, pinnedLine, SearchField } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
@@ -243,7 +243,18 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   }, [rows, chip, query, order])
   // What waits on the user first, then working, idle and closed — deterministic, not a live
   // timestamp chasing itself.
-  const grouped = filtering ? undefined : codeGroups(shown, (r) => codeGroupOf(r.state), order)
+  const grouped = useMemo(
+    () =>
+      filtering
+        ? undefined
+        : codeGroups(
+            shown,
+            (r) => codeGroupOf(r.state),
+            order,
+            (r) => Boolean(r.c.pinned),
+          ),
+    [shown, order, filtering],
+  )
   const flat = filtering ? shown : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
@@ -548,7 +559,7 @@ export function SessionItem({
         ) : undefined
       }
       when={formatWhen(activity, now)}
-      line={line && <span className="truncate">{line}</span>}
+      line={pinnedLine(Boolean(session.pinned), line)}
       selected={session.id === pane?.selected}
       link={{ to: `/c/${session.id}`, replace: Boolean(pane?.open), state: { code: true } }}
     />

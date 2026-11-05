@@ -98,6 +98,7 @@ const CHAT_FIELDS = [
   "mode",
   "modelChoice",
   "muted",
+  "pinned",
   "main",
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>

@@ -246,6 +246,11 @@ export interface Conversation {
   discardedAt?: number
   /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
   muted?: boolean
+  /**
+   * Held above the Code list's status groups (ADR 0103). Synced through the chat record; a session
+   * that is not pinned carries no field.
+   */
+  pinned?: boolean
   /** The bot's Main thread: its permanent chat, which can't be deleted or discarded. Synced. */
   main?: boolean
   /** Permission mode. The plugin holds it live; the user's saved pick also travels in the chat record. */

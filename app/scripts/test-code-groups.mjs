@@ -126,3 +126,72 @@ test("the chosen order runs inside every group, and flat across everything filte
     "flat across groups under the same choice",
   )
 })
+
+test("a pinned session is drawn in the band above the four and leaves its own group", () => {
+  const groups = codeGroups(
+    [
+      { id: "pinned", state: "waiting", at: 1 },
+      { id: "waits", state: "waiting", at: 2 },
+      { id: "rests", state: "idle", at: 3 },
+    ],
+    (r) => codeGroupOf(r.state),
+    (a, b) => b.at - a.at,
+    (r) => r.id === "pinned",
+  )
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.label, g.items.map((r) => r.id)]),
+    [
+      ["pinned", "Pinned", ["pinned"]],
+      ["waiting", "Waiting for You", ["waits"]],
+      ["idle", "Idle", ["rests"]],
+    ],
+    "the band comes first and the row is not drawn in its group as well",
+  )
+})
+
+test("the band runs the order the list is handed, so the dropdown means one thing", () => {
+  const groups = codeGroups(
+    [
+      { id: "c", state: "idle", at: 3 },
+      { id: "a", state: "idle", at: 1 },
+      { id: "b", state: "idle", at: 2 },
+    ],
+    (r) => codeGroupOf(r.state),
+    (x, y) => x.at - y.at,
+    () => true,
+  )
+  assert.deepEqual(
+    groups.map((g) => g.key),
+    ["pinned"],
+    "every row is pinned and the four are empty, so only the band stands",
+  )
+  assert.deepEqual(
+    groups[0].items.map((r) => r.id),
+    ["a", "b", "c"],
+    "oldest first, the comparator it was handed",
+  )
+})
+
+test("with nothing pinned, the list is the four groups exactly as before", () => {
+  const groups = codeGroups(
+    [
+      row("a", "idle", 1),
+      row("b", "waiting", 2),
+      row("c", "resolved", 3),
+      row("d", "working", 4),
+    ],
+    (r) => codeGroupOf(r.state),
+    (x, y) => y.createdAt - x.createdAt,
+    () => false,
+  )
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.label, g.items.map((r) => r.id)]),
+    [
+      ["waiting", "Waiting for You", ["b"]],
+      ["working", "Working", ["d"]],
+      ["idle", "Idle", ["a"]],
+      ["closed", "Closed", ["c"]],
+    ],
+    "the four keys, their labels, their order and their members, and no band above them",
+  )
+})

@@ -75,6 +75,14 @@ const CODE_LABELS = {
 
 export type CodeGroupKey = keyof typeof CODE_LABELS
 
+const PINNED_LABEL = "Pinned" as const
+
+export interface ListGroup<T = unknown> {
+  key: ItemGroupKey | CodeGroupKey | "pinned"
+  label: string
+  items: T[]
+}
+
 /**
  * Which of the four a session's state puts it in: Resolved and Discarded share Closed, told apart
  * by their icon rather than by headings of their own. Waiting, Working and Idle pass through as
@@ -88,13 +96,23 @@ export function codeGroupOf(state: SessionState): CodeGroupKey {
  * The Code list's groups: the four in their fixed order, empty ones left out, each run by `order`
  * (created, newest first, unless the sort-by dropdown says otherwise). Each group is sorted on its
  * own, so one group's sessions never reach into another's.
+ *
+ * `pinned` lifts the rows it names into the band above the four, dropped when nothing is pinned;
+ * those rows leave the group their claim would have put them in (ADR 0103).
  */
 export function codeGroups<T>(
   items: T[],
   group: (item: T) => CodeGroupKey,
   order: (a: T, b: T) => number,
-) {
-  return groupsOf(items, CODE_LABELS, group, order)
+  pinned?: (item: T) => boolean,
+): ListGroup<T>[] {
+  const held: T[] = []
+  const rest: T[] = []
+  for (const item of items) (pinned?.(item) ? held : rest).push(item)
+  return [
+    ...(held.length ? [{ key: "pinned" as const, label: PINNED_LABEL, items: held.sort(order) }] : []),
+    ...groupsOf(rest, CODE_LABELS, group, order),
+  ]
 }
 
 /**

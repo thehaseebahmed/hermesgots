@@ -12,15 +12,22 @@ import { app, assert, flow, pass } from "./lib.mjs"
 
 const PROJECT = "p_1a2b3c4d"
 const ORDER = ["Waiting for You", "Working", "Idle", "Closed"]
+const BAND = "Pinned"
 
 const group = (page, label) => page.getByRole("region", { name: label, exact: true })
 
-/** Every group heading on screen, in the order they draw, in the list's own vocabulary. */
+const list = (page) =>
+  page
+    .locator("div.overflow-y-auto")
+    .filter({ has: page.getByRole("heading", { name: "Code", exact: true }) })
+
+/** Every heading the list draws, unfiltered: a group this file does not name must fail the sweep. */
 const headings = (page) =>
-  page.locator("section[aria-label]").evaluateAll((sections, wanted) => {
-    const labels = sections.map((one) => one.getAttribute("aria-label") ?? "")
-    return labels.filter((label) => wanted.includes(label))
-  }, ORDER)
+  list(page)
+    .locator("section[aria-label]")
+    .evaluateAll((sections) => sections.map((one) => one.getAttribute("aria-label") ?? ""))
+
+const pinMark = (scope) => scope.locator('svg[aria-label="Pinned"]')
 
 const countIn = async (page, label) => {
   const span = group(page, label).locator("h2 span").first()
@@ -292,9 +299,7 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   }, PROJECT)
   await page.reload()
   await until(async () => (await page.getByText("Overflow 0").isVisible()), 20_000, "the taller list")
-  const scroller = page
-    .locator("div.overflow-y-auto")
-    .filter({ has: page.getByRole("heading", { name: "Code", exact: true }) })
+  const scroller = list(page)
   assert.equal(await scroller.count(), 1, "the list's own scroll container")
   assert.ok(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 50),
     "the seeded rows make the list taller than its pane")
@@ -307,6 +312,51 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.ok(headingBox.y < headerBox.y + headerBox.height + 60, "and tucks right under it")
   await shot("sticky")
   pass("a group heading sticks beneath the list's header once the list scrolls")
+
+  const pinSession = async (label) => {
+    await page.locator("li").filter({ hasText: "Overflow 0" }).locator("a").first().click()
+    await page.waitForURL("**/c/cl-overflow-0", { timeout: 10_000 })
+    await page.getByRole("button", { name: "Chat options" }).click()
+    await page.getByRole("menuitem", { name: label, exact: true }).click()
+    await page.goto(`${app}/code`)
+  }
+
+  await pinSession("Pin")
+  await until(async () => (await group(page, BAND).count()) > 0, 15_000, "the pinned band")
+  assert.equal((await headings(page))[0], BAND, "the band draws above the four")
+  assert.equal(await countIn(page, BAND), "1", "holding the one session pinned")
+  assert.equal(await group(page, BAND).getByText("Overflow 0").count(), 1,
+    "the session stands in the band")
+  assert.equal(await group(page, "Idle").getByText("Overflow 0").count(), 0,
+    "and is not drawn in its own group as well")
+  assert.equal(await pinMark(group(page, BAND)).count(), 1, "the row carries the pin's own mark")
+  await shot("pinned")
+
+  await page.locator("button[data-search-toggle]").click()
+  const again = page.getByLabel("Search sessions")
+  await again.waitFor()
+  await again.fill("Overflow")
+  await until(async () => (await group(page, BAND).count()) === 0, 5_000, "the band to drop while filtering")
+  const hit = page.locator('a[href="/c/cl-overflow-0"]')
+  assert.equal(await hit.count(), 1, "the pinned session is still among the flat results")
+  assert.equal(await pinMark(hit).count(), 1,
+    "and still says it is pinned where the band is not drawn")
+  await again.fill("")
+  await until(async () => (await group(page, BAND).count()) > 0, 5_000, "the band back with the headers")
+
+  await pinSession("Unpin")
+  // The end state is waited for, not the band's absence: an absence is also true of a page that has
+  // not drawn yet, and Idle already holds rows before the click lands.
+  await until(
+    async () =>
+      (await group(page, BAND).count()) === 0 &&
+      (await group(page, "Idle").getByText("Overflow 0").count()) === 1,
+    15_000,
+    "the band to go and the row back in Idle",
+  )
+  assert.equal(await group(page, "Idle").getByText("Overflow 0").count(), 1,
+    "the session is back in the group its state puts it in")
+  pass("a pinned session stands in a band above the four, marked, leaves its group, drops with the headers while filtering, and returns on unpin")
 })
 
 const VARIANTS = [
@@ -334,6 +384,8 @@ for (const [width, dark] of VARIANTS) {
         })),
         { id: "clv-closed", title: "Finished work", projectId: PROJECT, createdAt: now - 500,
           updatedAt: now - 6_000, resolvedAt: now },
+        { id: "clv-pinned", title: "Held at the top", projectId: PROJECT, createdAt: now - 7_000,
+          updatedAt: now - 7_000, pinned: true },
       ])
 
       await page.goto(`${app}/code`)
@@ -359,7 +411,13 @@ for (const [width, dark] of VARIANTS) {
       await until(async () => (await group(page, "Working").count()) > 0, 15_000,
         `the working group at ${look}`)
 
-      assert.deepEqual(await headings(page), ORDER, `the four groups in order at ${look}`)
+      // The seed carries one pinned session, so the band is drawn at this width and must stand first.
+      assert.deepEqual(await headings(page), [BAND, ...ORDER],
+        `the band above the four, in that order, at ${look}`)
+      assert.equal(await group(page, BAND).getByText("Held at the top").count(), 1,
+        `the pinned row stands in the band at ${look}`)
+      assert.equal(await group(page, "Idle").getByText("Held at the top").count(), 0,
+        `and is not left in Idle at ${look}`)
       // The flow's own setup leaves idle and closed sessions of its own, so only Waiting and
       // Working are exact; the other two hold those plus this seed's own.
       for (const label of ["Waiting for You", "Working"])
@@ -382,11 +440,12 @@ for (const [width, dark] of VARIANTS) {
 
       // The header row has to hold its published height at this width: scroll the list, and the
       // stuck heading still stops beneath the header instead of under it.
-      const scroller = page
-        .locator("div.overflow-y-auto")
-        .filter({ has: page.getByRole("heading", { name: "Code", exact: true }) })
+      const scroller = list(page)
       assert.ok(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 50),
         `the list is taller than its pane at ${look}`)
+      // The frame is taken before the scroll, so it shows the top of the list — the band and the
+      // headings as they arrive — rather than wherever the tuck test left the scroller.
+      await shot(`code-list-${width}${dark ? "-dark" : ""}`)
       await scroller.evaluate((el) => { el.scrollTop = 300 })
       const headerBox = await scroller.locator("header").first().boundingBox()
       const headingBox = await group(page, "Idle").locator("h2").boundingBox()
@@ -394,7 +453,6 @@ for (const [width, dark] of VARIANTS) {
       assert.ok(headingBox.y >= headerBox.y + headerBox.height - 2,
         `the stuck heading stops beneath the header at ${look}`)
 
-      await shot(`code-list-${width}${dark ? "-dark" : ""}`)
       pass(`at ${look}: the groups, the yellow wait, the dot and the heading's tuck`)
     },
     { viewport: { width, height: width < 768 ? 844 : 900 }, dark },

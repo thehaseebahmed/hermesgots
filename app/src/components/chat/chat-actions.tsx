@@ -6,6 +6,7 @@ import {
   CheckIcon,
   EllipsisIcon,
   PencilIcon,
+  PinIcon,
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
@@ -197,8 +198,8 @@ export function LimitNotice({
 
 /**
  * The chat's header controls and what they open: the context ring and its usage sheet, and the
- * options menu — rename, mute, resolve or reopen, discard and delete, or a bot's mute and settings
- * on its Main — with the dialogs they ask in. Both chat screens draw it.
+ * options menu — rename, pin, mute, resolve or reopen, discard and delete, or a bot's mute and
+ * settings on its Main — with the dialogs they ask in. Both chat screens draw it.
  */
 export function ChatActions({
   chat,
@@ -301,6 +302,18 @@ export function ChatActions({
               </>
             ) : (
               <>
+                {session && (
+                  <DropdownMenuItem
+                    onClick={() =>
+                      void updateConversation(session.id, {
+                        pinned: session.pinned ? undefined : true,
+                      }).catch(quietly("Pinning a session"))
+                    }
+                  >
+                    <PinIcon />
+                    {session.pinned ? "Unpin" : "Pin"}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => void setThreadMuted(chat.id, !chat.muted)}>
                   {chat.muted ? <BellIcon /> : <BellOffIcon />}
                   {chat.muted ? "Unmute notifications" : "Mute notifications"}
