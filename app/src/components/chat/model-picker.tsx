@@ -23,7 +23,6 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
-import { useDelegationModel } from "@/lib/delegation"
 import { useTriageModel } from "@/lib/triage-model"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
@@ -686,31 +685,6 @@ function HostModelField({
         </PopupContent>
       </Popup>
     </Field>
-  )
-}
-
-/**
- * A bot's subagent model, in its settings: the model every task it delegates runs on, which is its
- * host's own delegation model.
- */
-export function DelegationModelSetting({
-  profile,
-  subtitle,
-}: {
-  profile: Profile
-  /** What the setting is for, under its label. */
-  subtitle?: string
-}) {
-  const record = useDelegationModel(profile)
-  if (!record.supported) return null
-  return (
-    <HostModelField
-      profile={profile}
-      name="delegation-model"
-      label="Subagent model"
-      subtitle={subtitle}
-      record={record}
-    />
   )
 }
 

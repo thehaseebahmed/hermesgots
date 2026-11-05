@@ -14,6 +14,7 @@ const PACES = [
   ["general", "General"],
   ["models", "Models"],
   ["coding", "Coding"],
+  ["delegation", "Delegation"],
 ]
 
 /** A Settings row of the menu, which the bot's own list takes the place of. */

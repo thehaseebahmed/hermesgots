@@ -51,7 +51,7 @@ confirmation.
    captions; each page captions its cards *Gots* and *Hermes* where both kinds exist, and General's
    profile card carries its own caption, *Bot Profile*, above its rows (ADR 0055).
 3. **Membership is settled page by page.** General: Gots = Enabled, Mute notifications, Bot Profile
-   (Name, Image, Test connection); Hermes = Subagent model, API base URL, Server key. Chat: Gots =
+   (Name, Image, Test connection); Hermes = API base URL, Server key (the Subagent model moved to the Delegation page, ADR 0109). Chat: Gots =
    Triage model; Hermes = Model, Default model, Fallback providers. Coding: Gots = Away From
    Keyboard > Pick budget. Speech-to-text: Gots = Vocabulary, Cleanup model; Hermes = Speech model.
 4. **A Hermes setting is named as the Hermes Dashboard names it.** Two renames land: *API key* →

@@ -38,17 +38,29 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from . import config_keys
+from . import config_keys, host_model
 from .config_keys import coerce, is_scalar, is_scalar_list, walk
 
 logger = logging.getLogger(__name__)
 
 # The Dashboard tab this page mirrors.
 TAB = "general"
+DELEGATION = host_model.DELEGATION_SECTION
 # Settings this app already edits elsewhere — the model and the chain after it — through writers
 # that keep their keys consistent: the page draws those two rows itself and writes them on the routes
 # that own them, so the host never offers them here.
 OWNED = frozenset({"model", "fallback_providers"})
+# What the Delegation page leaves to other writers. The subagent model and its provider are written
+# together by ``host_model.set_delegation`` (the page draws that row itself). The endpoint keys pin a
+# route ahead of the model and one of them is a secret this app never holds (ADR 0063); the fallback
+# chain's null and empty list mean inherit and none, which a text row cannot say.
+OWNED_BY_TAB: Dict[str, frozenset] = {
+    TAB: OWNED,
+    DELEGATION: frozenset(
+        f"{DELEGATION}.{name}"
+        for name in (*host_model.DELEGATION_NAMES, *host_model.ENDPOINT_KEYS, "fallback_providers")
+    ),
+}
 # A key the Dashboard shows as its own field but Hermes keeps inside another: the context window
 # belongs to the model, and a zero there means the key is absent and Hermes detects the window.
 VIRTUAL = {"model_context_length": ("model", "context_length")}
@@ -71,6 +83,17 @@ def _schema() -> Dict[str, Dict[str, Any]]:
     return CONFIG_SCHEMA
 
 
+def _tab_available(tab: str, label: str) -> Optional[str]:
+    """``None`` where this Hermes's schema carries the tab, else why the page can't draw it."""
+    try:
+        if any(isinstance(e, dict) and e.get("category") == tab for e in _schema().values()):
+            return None
+    except Exception:
+        logger.debug("memento: this Hermes has no config schema", exc_info=True)
+        return f"This Hermes version can't show its own {label} settings."
+    return f"This Hermes version has no {label} settings."
+
+
 def available() -> Optional[str]:
     """``None`` where this page can read and write the host, else why it can't."""
     try:
@@ -81,7 +104,14 @@ def available() -> Optional[str]:
     return None
 
 
-FEATURES: Tuple[Tuple[str, Any], ...] = (("general_page", available),)
+def delegation_available() -> Optional[str]:
+    return _tab_available(DELEGATION, "Delegation")
+
+
+FEATURES: Tuple[Tuple[str, Any], ...] = (
+    ("general_page", available),
+    ("delegation_page", delegation_available),
+)
 
 
 def _defaults() -> Dict[str, Any]:
@@ -110,18 +140,22 @@ def _kind(key: str, entry: Dict[str, Any]) -> str:
     return str(entry.get("type") or "string")
 
 
-def _section(key: str) -> str:
-    """The card a key is filed under: its own first segment, or nothing at the top level."""
+def _section(key: str, tab: str = TAB) -> str:
+    # The Delegation tab is one card under its own page.
+    if tab == DELEGATION:
+        return ""
     return key.split(".")[0] if "." in key else ""
 
 
-def _fields(schema: Dict[str, Dict[str, Any]], defaults: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _fields(
+    schema: Dict[str, Dict[str, Any]], defaults: Dict[str, Any], tab: str = TAB
+) -> Dict[str, Dict[str, Any]]:
     """The keys this page draws, in the schema's order, each with what the row needs to be drawn."""
     fields: Dict[str, Dict[str, Any]] = {}
     for key, entry in schema.items():
-        if not isinstance(entry, dict) or entry.get("category") != TAB:
+        if not isinstance(entry, dict) or entry.get("category") != tab:
             continue
-        if key in OWNED:
+        if key in OWNED_BY_TAB[tab]:
             continue
         kind = _kind(key, entry)
         if kind not in WRITABLE:
@@ -131,7 +165,7 @@ def _fields(schema: Dict[str, Dict[str, Any]], defaults: Dict[str, Any]) -> Dict
         # no default to judge by, a list key is left out — a row that can't save is worse than none.
         if kind == "list" and not is_scalar_list(defaults.get(key)):
             continue
-        row: Dict[str, Any] = {"key": key, "kind": kind, "section": _section(key)}
+        row: Dict[str, Any] = {"key": key, "kind": kind, "section": _section(key, tab)}
         options = entry.get("options")
         if isinstance(options, list) and options:
             row["options"] = [str(one) for one in options]
@@ -166,7 +200,7 @@ def _held(config: Dict[str, Any], key: str) -> Tuple[bool, Any]:
     return True, node
 
 
-def read(config_path: Path) -> Dict[str, Any]:
+def read(config_path: Path, tab: str = TAB) -> Dict[str, Any]:
     """The page's one read: the fields it draws, the values the file holds, and the host's defaults.
 
     Only the keys the file really holds are in ``values`` — a key sitting at its default is legitimately
@@ -174,7 +208,7 @@ def read(config_path: Path) -> Dict[str, Any]:
     and shows it muted rather than claiming a value nobody set.
     """
     defaults = _defaults()
-    fields = _fields(_schema(), defaults)
+    fields = _fields(_schema(), defaults, tab)
     config = _config(config_path)
     values: Dict[str, Any] = {}
     shown: Dict[str, Any] = {}
@@ -199,7 +233,7 @@ def _scalar(value: Any) -> Any:
     return None
 
 
-def set_value(config_path: Path, key: Any, value: Any = None) -> None:
+def set_value(config_path: Path, key: Any, value: Any = None, tab: str = TAB) -> None:
     """Writes one key of the page; ``None`` clears it, which is the host's default taking over.
 
     The key must be one the read offered, and the value must be the shape that key takes — a refused
@@ -207,7 +241,7 @@ def set_value(config_path: Path, key: Any, value: Any = None) -> None:
     file's order and every key this page doesn't model survive.
     """
     schema = _schema()
-    fields = _fields(schema, _defaults())
+    fields = _fields(schema, _defaults(), tab)
     if not isinstance(key, str) or key not in fields:
         raise ValueError(f"{key} isn't a setting this page can write.")
     field = fields[key]

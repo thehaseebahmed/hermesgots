@@ -248,7 +248,7 @@ export const FLOWS = {
   "delegation-model": {
     script: "e2e/delegation-model.mjs",
     about:
-      "A bot's subagent model is recorded as its host's delegation model, cleared back to the bot's own",
+      "A bot's subagent model, on its Delegation page, is recorded as its host's delegation model, cleared back to the bot's own",
   },
   "question-during-delegation": {
     script: "e2e/question-during-delegation.mjs",

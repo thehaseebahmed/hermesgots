@@ -10,8 +10,8 @@ lead with the subject of its own menu entry.
 where the bot is linked, _Mute notifications_, and _Test connection_, whose whole row is the test and
 which sits under the mute because that is the setting it proves. Then the caption _Bot Profile_ over
 the name, the image and _Progress updates_; then _Hermes_ over where this bot's server is and the key
-it answers with, or the subagent model once it is linked and the address is no longer the reader's to
-see. These are the rows the old General page held, drawn exactly as they were drawn there — the same
+it answers with, drawn only while the bot is unlinked (the subagent model it once held moved to the
+Delegation page, ADR 0109). These are the rows the old General page held, drawn exactly as they were drawn there — the same
 switches acting in place, the same values opening their edits, the same edits at
 `/settings/bots/<id>/bot/<edit>` (ADR 0055).
 

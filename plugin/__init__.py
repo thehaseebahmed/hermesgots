@@ -20,6 +20,7 @@ import contextlib
 import json
 import logging
 import re
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -2513,44 +2514,68 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     )
     app.router.add_post(f"{PREFIX}/stt", set_stt)
 
-    async def get_general(request: "web.Request") -> "web.Response":
-        """The Dashboard's General tab, as this bot's own Hermes holds it.
+    def keyed_settings_read(
+        *,
+        read: Callable[[Path], Dict[str, Any]],
+        object_name: str,
+        field: str,
+        no_schema: str,
+        failed: str,
+    ):
 
-        The fields are the host's own schema — the keys, their types and their options are Hermes's,
-        so the page is the same form the Dashboard draws without a table here to drift from it.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        config_path = host_config_path()
-        scope = profile_scope()
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            config_path = host_config_path()
+            scope = profile_scope()
 
-        def run() -> Dict[str, Any]:
-            with scope():
-                return general.read(config_path)
+            def run() -> Dict[str, Any]:
+                with scope():
+                    return read(config_path)
 
-        try:
-            payload = await asyncio.to_thread(run)
-        except ImportError:
-            return _error(web, "This Hermes version can't show its own General settings.", 501)
-        except Exception as error:
-            logger.warning("memento: couldn't read the host's General settings", exc_info=True)
-            return _error(web, f"The host couldn't read its config: {error}", 502)
-        return web.json_response({"object": "memento.general", "general": payload})
+            try:
+                payload = await asyncio.to_thread(run)
+            except ImportError:
+                return _error(web, no_schema, 501)
+            except Exception as error:
+                logger.warning(failed, exc_info=True)
+                return _error(web, f"The host couldn't read its config: {error}", 502)
+            return web.json_response({"object": object_name, field: payload})
 
-    app.router.add_get(f"{PREFIX}/general", get_general)
+        return handler
 
-    # A null value clears the key, which is the host's default taking over; the key must be one the
-    # read offered and the value the shape it takes, so a refused write touches no file.
-    set_general = keyed_settings_route(
-        write=general.set_value,
-        read=general.read,
-        object_name="memento.general",
-        field="general",
-        no_schema="This Hermes version can't show its own General settings.",
-        failed="The host couldn't save that setting",
-    )
-    app.router.add_post(f"{PREFIX}/general", set_general)
+    # /delegation is the subagent model's route, so the tab is on /delegation-settings. Fields are
+    # the host's own schema, so there is no table here to drift from it. A null value clears the key.
+    for tab, route, label in (
+        (general.TAB, "general", "General"),
+        (general.DELEGATION, "delegation-settings", "Delegation"),
+    ):
+        read_tab = partial(general.read, tab=tab)
+        object_name = f"memento.{route.replace('-', '_')}"
+        field = route.split("-")[0]
+        no_schema = f"This Hermes version can't show its own {label} settings."
+        app.router.add_get(
+            f"{PREFIX}/{route}",
+            keyed_settings_read(
+                read=read_tab,
+                object_name=object_name,
+                field=field,
+                no_schema=no_schema,
+                failed=f"memento: couldn't read the host's {label} settings",
+            ),
+        )
+        app.router.add_post(
+            f"{PREFIX}/{route}",
+            keyed_settings_route(
+                write=partial(general.set_value, tab=tab),
+                read=read_tab,
+                object_name=object_name,
+                field=field,
+                no_schema=no_schema,
+                failed="The host couldn't save that setting",
+            ),
+        )
 
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)

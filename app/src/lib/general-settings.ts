@@ -19,6 +19,8 @@ import {
 /** The feature a host advertises when it carries the Dashboard's General tab. */
 export const GENERAL_PAGE = "general_page"
 
+export const DELEGATION_PAGE = "delegation_page"
+
 /** One of the host's keys, as the read offers it. */
 export interface GeneralField {
   /** The dotted path, exactly as Hermes spells it: `session.terminal_continue`, `timezone`. */

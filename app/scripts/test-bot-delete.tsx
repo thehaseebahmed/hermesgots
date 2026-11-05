@@ -29,7 +29,7 @@ import {
 } from "./component-kit.tsx"
 
 /** Every feature the four gated pages need, so a test starts from a host that has them all. */
-const ALL = ["dictation", "mcps", "afk_picks", "skills", "delegation_model"]
+const ALL = ["dictation", "mcps", "afk_picks", "skills", "delegation_model", "delegation_page"]
 
 const settings = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>

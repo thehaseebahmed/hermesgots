@@ -56,7 +56,7 @@ const ITEM_PAGES: BotTab[] = ["mcps", "skills"]
  * The pages whose edits are named by the host's own keys: General's rows come from the bot's Hermes,
  * so its edit ids are whatever that host spells, and the page titles the one it was asked for.
  */
-const KEYED_PAGES: BotTab[] = ["general"]
+const KEYED_PAGES: BotTab[] = ["general", "delegation"]
 
 /**
  * The sub-screen a URL's fourth and fifth segments name, or nothing where the page has none by that

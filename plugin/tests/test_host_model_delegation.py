@@ -184,6 +184,22 @@ class SetDelegationTest(unittest.TestCase):
             saved = host_model.set_delegation(self.path, {"provider": "anthropic", "model": "sonnet"})
         self.assertEqual(saved, {"provider": "anthropic", "model": "claude-sonnet-4.5"})
 
+    def test_the_pick_already_held_still_drops_a_hidden_endpoint(self) -> None:
+        # The Delegation page never draws ``base_url``; a pick that matches the stored one must
+        # still clear it, or the row would read "Default model" while the pin keeps routing.
+        patch, calls, config = hermes(
+            self.config(
+                delegation={
+                    "provider": "relay",
+                    "model": "gpt-5",
+                    "base_url": "https://relay.example/v1",
+                }
+            )
+        )
+        with patch:
+            host_model.set_delegation(self.path, {"provider": "relay", "model": "gpt-5"})
+        self.assertEqual(config["delegation"], {"provider": "relay", "model": "gpt-5"})
+
     def test_a_pick_already_held_is_not_checked_again(self) -> None:
         patch, calls, _ = hermes(
             self.config(delegation={"provider": "deepseek", "model": "c/d"})
@@ -193,6 +209,18 @@ class SetDelegationTest(unittest.TestCase):
         self.assertEqual(saved, {"provider": "deepseek", "model": "c/d"})
         self.assertEqual(calls["write"], [])
         self.assertEqual(calls["switch"], [])
+
+    def test_blank_endpoint_keys_pin_nothing(self) -> None:
+        # Hermes ships the section with empty endpoint keys; it reads them as absent, so must we.
+        patch, calls, _ = hermes(
+            self.config(
+                delegation={"provider": "deepseek", "model": "c/d", "base_url": "", "api_key": ""}
+            )
+        )
+        with patch:
+            saved = host_model.set_delegation(self.path, {"provider": "deepseek", "model": "c/d"})
+        self.assertEqual(saved, {"provider": "deepseek", "model": "c/d"})
+        self.assertEqual(calls["write"], [])
 
 
 class ReadDelegationTest(unittest.TestCase):

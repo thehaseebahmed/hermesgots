@@ -30,7 +30,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   })
   assert.equal(await hosted(), null)
 
-  await page.goto(`${app}/settings/bots/${profileId}/general`)
+  await page.goto(`${app}/settings/bots/${profileId}/delegation`)
   await field.waitFor({ timeout: 15_000 })
   await field.getByText("Default model").waitFor()
   await shot("inherited")
@@ -74,9 +74,13 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     })
   })
   await page.reload()
-  await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
+  await page.locator("[data-bot-delegation]").waitFor({ timeout: 15_000 })
   assert.equal(await field.count(), 0, "no picker without the feature")
   assert.equal(await field.count(), 0, "and no row around it")
+  assert.ok(
+    (await page.locator('[data-setting="delegation.max_iterations"]').count()) > 0,
+    "while the page's own keys stay",
+  )
   await shot("no-picker")
 
   pass("the host recorded the subagent model, cleared it, and offered no row without it")

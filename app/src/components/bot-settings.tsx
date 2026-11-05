@@ -5,6 +5,7 @@ import {
   BotIcon,
   CodeXmlIcon,
   MessagesSquareIcon,
+  NetworkIcon,
   PlusIcon,
   PlugZapIcon,
   SlidersHorizontalIcon,
@@ -64,6 +65,7 @@ import { usePluginFeatureAnswers } from "@/lib/features"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
 import {
+  DELEGATION_PAGE,
   GENERAL_PAGE,
   draftOf,
   draftValue,
@@ -76,11 +78,13 @@ import {
 } from "@/lib/general-settings"
 import {
   checkHealth,
+  GENERAL_ROUTES,
   getGeneralSettings,
   getPluginVersion,
   listModels,
   REMINDER_LEVELS,
   setGeneralSetting,
+  type GeneralTab,
   type ReminderLevel,
 } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
@@ -113,6 +117,7 @@ const PAGE_FEATURES = {
   mcps: MCP_FEATURES.list,
   coding: AFK_PICKS_FEATURE,
   skills: SKILL_FEATURES.list,
+  delegation: DELEGATION_PAGE,
 } as const
 
 type GatedPage = keyof typeof PAGE_FEATURES
@@ -121,17 +126,11 @@ function gated(page: BotTab): page is GatedPage {
   return page in PAGE_FEATURES
 }
 
-/**
- * Everything a page asks the plugin about: the pages it can withhold, and the rows it holds only
- * where the plugin advertises them — a linked bot's Hermes side is left with no row at all when the
- * delegation model is withheld.
- */
-const PAGE_ANSWERS = { ...PAGE_FEATURES, delegation: "delegation_model" } as const
+const PAGE_ANSWERS = PAGE_FEATURES
 
 /** What the Models page's row needs: the Gots triage pick. */
 const MODELS_ANSWERS = { triage: "triage_model" } as const
 
-/** What General's own two rows need: the chain Hermes tries after this bot's main model. */
 const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 
 /** The icon a page's row, and the screen it opens, wear. */
@@ -143,6 +142,7 @@ const PAGE_ICONS: Record<BotTab, LucideIcon> = {
   "speech-to-text": AudioLinesIcon,
   mcps: PlugZapIcon,
   skills: WrenchIcon,
+  delegation: NetworkIcon,
 }
 
 /** The registry's Enabled flag, with when the bot's host last checked in. */
@@ -342,7 +342,7 @@ export function BotSettingsList({
   canDelete?: boolean
   onDeleted?: () => void
 }) {
-  const answers = usePluginFeatureAnswers(profile, PAGE_ANSWERS)
+  const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
   const [confirming, setConfirming] = useState(false)
   const linked = Boolean(profile.hostId)
   const navigate = useNavigate()
@@ -379,11 +379,7 @@ export function BotSettingsList({
         </Banner>
       )}
       <Caption>Bot</Caption>
-      <BotCard
-        profile={profile}
-        delegation={answers.delegation === "yes"}
-        onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))}
-      />
+      <BotCard profile={profile} onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))} />
       <Caption>Settings</Caption>
       <Group>{rows}</Group>
       <DeleteBotDialog
@@ -410,7 +406,7 @@ export function BotSettingsPage({
   tab?: BotTab
   sub?: BotSub
 }) {
-  const answers = usePluginFeatureAnswers(profile, PAGE_ANSWERS)
+  const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
   const gate = gated(tab) ? answers[tab] : undefined
   // Where a withheld page lands: the bot's own page, which is always there — a page gated on its own
   // availability cannot land on itself, and General is now one of those.
@@ -463,9 +459,11 @@ export function BotSettingsPage({
   // General is the host's own page: its rows come from the bot's Hermes, so it draws its own edit —
   // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
   // detail like any other and takes the generic path below.
-  if (shown === "general" && own?.kind === "edit")
-    return <GeneralPage profile={profile} sub={own} close={close} />
-  if (shown === "general" && !own) return <GeneralPage profile={profile} close={close} />
+  // Keyed by tab, so moving between the two never draws one tab's block under the other's route.
+  if ((shown in GENERAL_ROUTES) && own?.kind === "edit")
+    return <GeneralPage key={shown} profile={profile} tab={shown} sub={own} close={close} />
+  if ((shown in GENERAL_ROUTES) && !own)
+    return <GeneralPage key={shown} profile={profile} tab={shown} close={close} />
 
   // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
   // page's own edit is the screen the route pushed.
@@ -576,19 +574,23 @@ const RESTART_NOTE = "Applies when this bot's Hermes restarts."
  */
 function GeneralPage({
   profile,
+  tab = "general",
   sub,
   close,
 }: {
   profile: Profile
+  tab?: GeneralTab
   sub?: BotSub
   close: () => void
 }) {
   const large = useLarge()
   const navigate = useNavigate()
   const answers = usePluginFeatureAnswers(profile, GENERAL_ANSWERS)
+  const delegation = tab === "delegation"
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
-  const chain = useFallbackModels(profile)
+  const chain = useFallbackModels(delegation ? null : profile)
+  const subagent = useDelegationModel(delegation ? profile : null)
   const connection = connectionKey(profile)
   const [block, setBlock] = useState<GeneralSettings>()
   const [problem, setProblem] = useState<string>()
@@ -598,11 +600,13 @@ function GeneralPage({
 
   useEffect(() => {
     let cancelled = false
-    void getGeneralSettings(profile, AbortSignal.timeout(READ_TIMEOUT_MS))
+    void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {
         if (cancelled) return
         setRead(connection)
-        setProblem(next ? undefined : "This host doesn't carry its General settings.")
+        setProblem(
+          next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
+        )
         if (next) setBlock(next)
       })
       .catch((error: unknown) => {
@@ -610,7 +614,9 @@ function GeneralPage({
         // A read that failed is still an answer: the page stops loading and says what the host said.
         setRead(connection)
         setProblem(
-          error instanceof Error ? error.message : "Couldn't read this bot's General settings.",
+          error instanceof Error
+            ? error.message
+            : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
         )
       })
     return () => {
@@ -619,7 +625,7 @@ function GeneralPage({
     // The connection is what the answer belongs to: another bot's read is not this page's, and no
     // other field of the profile moves what the host holds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.id, connection])
+  }, [profile.id, connection, tab])
 
   // Every write answers the host's fresh block, so the row a person just changed is the row the
   // host now holds — and a refused write leaves the page as it was, with the host's sentence.
@@ -629,6 +635,7 @@ function GeneralPage({
       try {
         const next = await setGeneralSetting(
           profile,
+          tab,
           key,
           value,
           AbortSignal.timeout(WRITE_TIMEOUT_MS),
@@ -645,7 +652,7 @@ function GeneralPage({
         setSaving(undefined)
       }
     },
-    [profile],
+    [profile, tab],
   )
 
   const seeded = read === connection
@@ -704,17 +711,22 @@ function GeneralPage({
     const lead = first?.section === "" ? first.rows : []
     const others = first?.section === "" ? rest : groups
     return (
-      <div className="flex flex-col gap-4" data-bot-general>
+      <div className="flex flex-col gap-4" {...{ [`data-bot-${tab}`]: true }}>
         {problem && <Banner tone="warning">{problem}</Banner>}
         <Group>
-          <ValueRow
-            title="Model"
-            purpose="The host's main model, on every surface"
-            value={own ? fullModel(own) : ""}
-            onClick={() => setPick("model")}
-            data-setting="model"
-          />
-          {answers.fallbacks === "yes" && chain.supported && (
+          {delegation && subagent.supported && (
+            <SubagentModelRow profile={profile} record={subagent} own={own} />
+          )}
+          {!delegation && (
+            <ValueRow
+              title="Model"
+              purpose="The host's main model, on every surface"
+              value={own ? fullModel(own) : ""}
+              onClick={() => setPick("model")}
+              data-setting="model"
+            />
+          )}
+          {!delegation && answers.fallbacks === "yes" && chain.supported && (
             <ValueRow
               title="Fallback providers"
               purpose="The chain Hermes tries after the main model"
@@ -759,7 +771,7 @@ function GeneralPage({
         saving={saving === field.key}
         onWrite={write}
         onPick={() => setPick(field.key)}
-        onOpen={() => navigate(botSubPath(profile.id, "general", field.key))}
+        onOpen={() => navigate(botSubPath(profile.id, tab, field.key))}
       />
     )
   }
@@ -794,6 +806,42 @@ function GeneralPage({
       </PickSurface>
     )
   }
+}
+
+// Written on the model's own route, which checks the pick and sets provider and model together,
+// so the raw `delegation.*` keys are never rows.
+function SubagentModelRow({
+  profile,
+  record,
+  own,
+}: {
+  profile: Profile
+  record: ReturnType<typeof useDelegationModel>
+  own: ReturnType<typeof botModel>
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <ValueRow
+        title="Subagent model"
+        purpose="The model every subagent runs on"
+        value={record.pick ? fullModel(record.pick) : "Default model"}
+        disabled={record.saving}
+        busy={record.saving}
+        onClick={() => setOpen(true)}
+        data-setting="subagent-model"
+      />
+      <ModelPick
+        open={open}
+        title="Subagent model"
+        profile={profile}
+        choice={record.pick}
+        fallback={{ label: "Default model", model: own?.model }}
+        onPick={(next) => record.save(next)}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  )
 }
 
 /** One of the host's rows, drawn by what it holds: a switch writes on its own, everything else opens. */
@@ -893,21 +941,9 @@ function FieldForm({
  * what sits on its Hermes. Every setting is a value that opens its edit or its pick — no card holds
  * a field (ADR 0055).
  */
-function BotCard({
-  profile,
-  delegation,
-  onOpen,
-}: {
-  profile: Profile
-  /** Whether the bot's Hermes advertises the delegation model row. */
-  delegation: boolean
-  onOpen: (id: string) => void
-}) {
+function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) => void }) {
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
-  const info = useModelInfo(profile)
-  const own = botModel(profile, info)
-  const record = useDelegationModel(profile)
   const character = BOTS.find((bot) => bot.id === profile.botId)
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
   // The answer belongs to the connection it tested: an edited address or key is a connection nothing
@@ -990,41 +1026,26 @@ function BotCard({
         <RemindersSetting profile={profile} />
       </Group>
 
-      {/* The caption and its rows read one gate: a bot whose host withholds the row, or hasn't
-          answered, draws no card at all rather than one with a caption over nothing. */}
-      {((delegation && record.supported) || !linked) && (
+      {/* A linked bot's server is not the reader's to see, so the card is the unlinked bot's only: the
+          subagent model lives on the Delegation page. */}
+      {!linked && (
         <>
           <Caption>Hermes</Caption>
           <Group>
-            {record.supported && (
-              <ValueRow
-                title="Subagent model"
-                purpose="The model every subagent runs on"
-                value={record.pick ? fullModel(record.pick) : "Default model"}
-                disabled={record.saving}
-                busy={record.saving}
-                onClick={() => setPick("subagent")}
-                data-setting="subagent-model"
-              />
-            )}
-            {!linked && (
-              <>
-                <ValueRow
-                  title="API base URL"
-                  purpose="Where this bot's Hermes server is"
-                  value={profile.baseUrl}
-                  onClick={() => onOpen("base-url")}
-                  data-setting="base-url"
-                />
-                <ValueRow
-                  title="Server key"
-                  purpose="The key this app sends to that server"
-                  value={profile.apiKey ? "••••••••" : ""}
-                  onClick={() => onOpen("server-key")}
-                  data-setting="server-key"
-                />
-              </>
-            )}
+            <ValueRow
+              title="API base URL"
+              purpose="Where this bot's Hermes server is"
+              value={profile.baseUrl}
+              onClick={() => onOpen("base-url")}
+              data-setting="base-url"
+            />
+            <ValueRow
+              title="Server key"
+              purpose="The key this app sends to that server"
+              value={profile.apiKey ? "••••••••" : ""}
+              onClick={() => onOpen("server-key")}
+              data-setting="server-key"
+            />
           </Group>
         </>
       )}
@@ -1049,16 +1070,6 @@ function BotCard({
           }}
         />
       </PickSurface>
-
-      <ModelPick
-        open={pick === "subagent"}
-        title="Subagent model"
-        profile={profile}
-        choice={record.pick}
-        fallback={{ label: "Default model", model: own?.model }}
-        onPick={(next) => record.save(next)}
-        onClose={() => setPick(undefined)}
-      />
     </div>
   )
 }

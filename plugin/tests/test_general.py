@@ -287,7 +287,76 @@ class GateTest(unittest.TestCase):
     def test_a_host_with_a_schema_offers_the_page(self) -> None:
         with GeneralHost():
             self.assertIsNone(general.available())
-            self.assertEqual(general.FEATURES, (("general_page", general.available),))
+            self.assertEqual(
+                general.FEATURES,
+                (("general_page", general.available), ("delegation_page", general.delegation_available)),
+            )
+
+
+DELEGATION_SCHEMA = {
+    "delegation.model": {"type": "string", "category": "delegation"},
+    "delegation.provider": {"type": "string", "category": "delegation"},
+    "delegation.base_url": {"type": "string", "category": "delegation"},
+    "delegation.api_key": {"type": "string", "category": "delegation"},
+    "delegation.api_mode": {"type": "string", "category": "delegation"},
+    "delegation.fallback_providers": {"type": "string", "category": "delegation"},
+    "delegation.max_iterations": {"type": "number", "category": "delegation"},
+    "delegation.child_timeout_seconds": {"type": "number", "category": "delegation"},
+    "delegation.orchestrator_enabled": {"type": "boolean", "category": "delegation"},
+    "delegation.reasoning_effort": {
+        "type": "select",
+        "category": "delegation",
+        "options": ["", "low", "high"],
+    },
+    "timezone": {"type": "string", "category": "general"},
+}
+DELEGATION_DEFAULTS = {
+    "delegation": {
+        "max_iterations": 250,
+        "child_timeout_seconds": 0,
+        "orchestrator_enabled": True,
+        "reasoning_effort": "",
+    }
+}
+
+
+class DelegationTabTests(unittest.TestCase):
+    def test_the_tab_draws_its_own_keys_and_leaves_the_owned_and_hidden_ones(self) -> None:
+        with GeneralHost(schema=DELEGATION_SCHEMA, defaults=DELEGATION_DEFAULTS):
+            block = general.read(Path("config.yaml"), general.DELEGATION)
+        self.assertEqual(
+            [f["key"] for f in block["fields"]],
+            [
+                "delegation.max_iterations",
+                "delegation.child_timeout_seconds",
+                "delegation.orchestrator_enabled",
+                "delegation.reasoning_effort",
+            ],
+        )
+        self.assertEqual({f["section"] for f in block["fields"]}, {""})
+
+    def test_general_never_draws_a_delegation_key(self) -> None:
+        with GeneralHost(schema=DELEGATION_SCHEMA, defaults=DELEGATION_DEFAULTS):
+            block = general.read(Path("config.yaml"))
+        self.assertEqual([f["key"] for f in block["fields"]], ["timezone"])
+
+    def test_a_write_is_one_dotted_key_and_zero_is_a_value(self) -> None:
+        with GeneralHost(schema=DELEGATION_SCHEMA, defaults=DELEGATION_DEFAULTS) as host:
+            general.set_value(Path("config.yaml"), "delegation.child_timeout_seconds", 0, general.DELEGATION)
+        self.assertEqual(host.writes, [("delegation.child_timeout_seconds", 0)])
+
+    def test_the_owned_and_hidden_keys_are_refused(self) -> None:
+        for key in ("delegation.model", "delegation.api_key", "delegation.fallback_providers"):
+            with GeneralHost(schema=DELEGATION_SCHEMA, defaults=DELEGATION_DEFAULTS) as host:
+                with self.assertRaises(ValueError):
+                    general.set_value(Path("config.yaml"), key, "x", general.DELEGATION)
+            self.assertEqual(host.writes, [])
+
+    def test_a_host_with_no_delegation_tab_withholds_the_page(self) -> None:
+        with GeneralHost():
+            self.assertIsNotNone(general.delegation_available())
+        with GeneralHost(schema=DELEGATION_SCHEMA, defaults=DELEGATION_DEFAULTS):
+            self.assertIsNone(general.delegation_available())
 
 
 if __name__ == "__main__":

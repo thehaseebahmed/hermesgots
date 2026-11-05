@@ -332,7 +332,7 @@ The thread a subagent's own work draws — its thinking, what it ran and what it
 _Avoid_: child thread, worker view, agent detail
 
 **Subagent model**:
-The model a bot's delegated tasks run on, set in its settings and held on its host as Hermes's own delegation model. Nothing set means a delegated task inherits the bot's own model.
+The model a bot's delegated tasks run on, set on the _Delegation_ page and held on its host as Hermes's own delegation model. Nothing set means a delegated task inherits the bot's own model.
 _Avoid_: second opinion, delegation model, child model
 
 **Session stop**:
@@ -626,8 +626,11 @@ The value a Hermes setting runs at when the bot's host holds none of its own —
 _Avoid_: empty, blank, unset value, fallback
 
 **Bot page**:
-The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications, Test connection), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, or the subagent model once it is linked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and the one screen that asks the bot's host for nothing.
+The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications, Test connection), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, drawn only where the bot is unlinked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and the one screen that asks the bot's host for nothing.
 _Avoid_: bot settings list, general old, bot overview
+
+**Delegation**:
+A setting page of the bot's Hermes itself, the Dashboard's Config > Delegation tab mirrored through the same body as General. It leads with the subagent model, then the host's own scalar keys in one card with no caption. The endpoint keys (`base_url`, `api_key`, `api_mode`) and `fallback_providers` are never drawn.
 
 **General old**:
 The address `/settings/bots/<id>/general-old` and nothing more: the page Settings > Bot > General held before the host's own General tab took its place, kept whole there so a reader who wants it back can still reach it while the rows it held lead the bot page.

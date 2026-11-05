@@ -3571,6 +3571,16 @@ const GENERAL_DEFAULTS = {
   "updates.check": true,
   "updates.pre_update_backup": "quick",
 }
+const DELEGATION_FIELDS = [
+  { key: "delegation.max_iterations", kind: "number", section: "" },
+  { key: "delegation.orchestrator_enabled", kind: "boolean", section: "" },
+]
+const DELEGATION_DEFAULTS = {
+  "delegation.max_iterations": 250,
+  "delegation.orchestrator_enabled": true,
+}
+const delegationValues = new Map()
+
 const GENERAL_FIELDS = [
   {
     key: "model_context_length",
@@ -4193,6 +4203,7 @@ http
           "host_model",
           "fallbacks",
           "delegation_model",
+          "delegation_page",
           ...(TRIAGE !== "off" ? ["triage_model"] : []),
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
@@ -4835,6 +4846,28 @@ http
             model_context_length: 200000,
           },
           defaults: GENERAL_DEFAULTS,
+        },
+      })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/delegation-settings") {
+      const key = pluginProfile ?? ""
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        if (!body || !DELEGATION_FIELDS.some((field) => field.key === body.key))
+          return json(res, 400, {
+            error: { message: `${body?.key} isn't a setting this page can write.` },
+          })
+        const held = { ...(delegationValues.get(key) ?? {}) }
+        if (body.value === null) delete held[body.key]
+        else held[body.key] = body.value
+        delegationValues.set(key, held)
+      }
+      return json(res, 200, {
+        object: "memento.delegation_settings",
+        delegation: {
+          fields: DELEGATION_FIELDS,
+          values: delegationValues.get(key) ?? {},
+          defaults: DELEGATION_DEFAULTS,
         },
       })
     }
