@@ -3285,58 +3285,56 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
-    async def create_app(request: "web.Request") -> "web.Response":
+    async def apps_write(request: "web.Request", work, key: str, status: int, *, body: bool):
+        """One apps write: the key checked, a JSON body read where it takes one, and the host's
+        refusal answered with its own status."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
+        sent = None
+        if body:
+            sent = await json_body(request)
+            if sent is None:
+                return _error(web, "Body must be a JSON object", 400)
         try:
-            made = await asyncio.to_thread(
-                apps.create,
-                store_path(),
-                body.get("title"),
-                body.get("source"),
-                body.get("library_version"),
-            )
+            made = await asyncio.to_thread(work, store_path(), sent)
         except apps.AppsError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.app", "app": made}, status=201)
+        label = "memento.app" if key == "app" else "memento.app.page"
+        return web.json_response({"object": label, key: made}, status=status)
+
+    async def create_app(request: "web.Request") -> "web.Response":
+        return await apps_write(
+            request,
+            lambda path, sent: apps.create(
+                path, sent.get("title"), sent.get("source"), sent.get("library_version")
+            ),
+            "app",
+            201,
+            body=True,
+        )
 
     async def write_app_page(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        try:
-            found = await asyncio.to_thread(
-                apps.write,
-                store_path(),
-                request.match_info["app_id"],
-                request.match_info["page_id"],
-                body.get("source"),
-            )
-        except apps.AppsError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.app.page", "page": found})
+        info = request.match_info
+        return await apps_write(
+            request,
+            lambda path, sent: apps.write(
+                path, info["app_id"], info["page_id"], sent.get("source")
+            ),
+            "page",
+            200,
+            body=True,
+        )
 
     async def undo_app_page(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            found = await asyncio.to_thread(
-                apps.undo,
-                store_path(),
-                request.match_info["app_id"],
-                request.match_info["page_id"],
-            )
-        except apps.AppsError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.app.page", "page": found})
+        info = request.match_info
+        return await apps_write(
+            request,
+            lambda path, _: apps.undo(path, info["app_id"], info["page_id"]),
+            "page",
+            200,
+            body=False,
+        )
 
     app.router.add_get(f"{PREFIX}/apps", list_apps)
     app.router.add_post(f"{PREFIX}/apps", create_app)

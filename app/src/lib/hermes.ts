@@ -4493,7 +4493,6 @@ export interface HostApp {
   pages: string[]
 }
 
-/** One page's whole source and whether its last change can be undone. */
 export interface HostAppPage {
   id: string
   appId: string
@@ -4519,11 +4518,9 @@ function toHostAppPage(raw: Record<string, unknown>): HostAppPage {
   }
 }
 
-/** Every app the bot keeps, newest first. */
 export async function listApps(config: HermesConfig, signal?: AbortSignal) {
   const response = await request(appsRoot(config), { headers: headers(config), signal })
-  const body = await response.json()
-  return (Array.isArray(body?.apps) ? (body.apps as Record<string, unknown>[]) : []).map(toHostApp)
+  return objects((await response.json())?.apps, toHostApp)
 }
 
 /** One page of an app. A page or app that isn't there is a 404 `HermesError`. */
@@ -4540,32 +4537,6 @@ export async function getAppPage(
   return toHostAppPage((await response.json())?.page as Record<string, unknown>)
 }
 
-/** Saves a new app whose root page is `source`. */
-export async function createApp(config: HermesConfig, title: string, source: string) {
-  const response = await request(appsRoot(config), {
-    method: "POST",
-    headers: headers(config),
-    body: JSON.stringify({ title, source }),
-  })
-  return toHostApp((await response.json())?.app as Record<string, unknown>)
-}
-
-/** Replaces one page's whole source; the one it replaced is kept for an undo. */
-export async function writeAppPage(
-  config: HermesConfig,
-  appId: string,
-  pageId: string,
-  source: string,
-) {
-  const response = await request(appPageRoot(config, appId, pageId), {
-    method: "POST",
-    headers: headers(config),
-    body: JSON.stringify({ source }),
-  })
-  return toHostAppPage((await response.json())?.page as Record<string, unknown>)
-}
-
-/** Puts back the source a page's last write replaced. */
 export async function undoAppPage(config: HermesConfig, appId: string, pageId: string) {
   const response = await request(`${appPageRoot(config, appId, pageId)}/undo`, {
     method: "POST",

@@ -14,9 +14,11 @@ the same truth (ADR 0100).
 from __future__ import annotations
 
 import re
+import sqlite3
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from .store import now_ms, open_rows
 
@@ -70,30 +72,24 @@ def listing(path: Path) -> List[Dict[str, Any]]:
     ]
 
 
-def page(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
-    """One page's source and whether an undo is available — the source its last change replaced.
+def _found(conn: sqlite3.Connection, app_id: str, page_id: str) -> sqlite3.Row:
+    """One page's row, or the not-found that names what is missing: the app first, then the page.
 
-    The answer names the page the way the record does, by its app and its own id. A page of an app
-    that isn't there is not-found, in its own words: an app that is gone stays gone, and a read
-    never draws one back out of a page row left behind.
-
-    Raises ``AppsError`` (404) where the app or the page isn't there.
+    An app that is gone stays gone, so a page row left behind is never read back out of it.
     """
-    if not path.exists():
+    if conn.execute("SELECT 1 FROM apps WHERE id = ?", (app_id,)).fetchone() is None:
         raise AppsError("No such app.", 404)
-    conn = open_rows(path)
-    try:
-        if conn.execute("SELECT 1 FROM apps WHERE id = ?", (app_id,)).fetchone() is None:
-            raise AppsError("No such app.", 404)
-        found = conn.execute(
-            "SELECT source, previous_source IS NOT NULL AS undoable"
-            " FROM app_pages WHERE app_id = ? AND page_id = ?",
-            (app_id, page_id),
-        ).fetchone()
-    finally:
-        conn.close()
+    found = conn.execute(
+        "SELECT source, previous_source IS NOT NULL AS undoable"
+        " FROM app_pages WHERE app_id = ? AND page_id = ?",
+        (app_id, page_id),
+    ).fetchone()
     if found is None:
         raise AppsError("No such page.", 404)
+    return found
+
+
+def _answer(app_id: str, page_id: str, found: sqlite3.Row) -> Dict[str, Any]:
     return {
         "id": page_id,
         "app_id": app_id,
@@ -102,8 +98,46 @@ def page(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
     }
 
 
+def page(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
+    """One page's source and whether an undo is available — the source its last change replaced.
+
+    The answer names the page the way the record does, by its app and its own id.
+
+    Raises ``AppsError`` (404) where the app or the page isn't there.
+    """
+    if not path.exists():
+        raise AppsError("No such app.", 404)
+    conn = open_rows(path)
+    try:
+        return _answer(app_id, page_id, _found(conn, app_id, page_id))
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _writing(path: Path, building: bool = False) -> Iterator[sqlite3.Connection]:
+    """A connection holding the store's write lock, committed when the block ends and rolled back
+    when it raises, so a write is whole or not at all and its checks and its change see one state.
+
+    Only a ``building`` write may bring the store into being; any other finds no app in a store
+    that isn't there, and creates nothing.
+    """
+    if not building and not path.exists():
+        raise AppsError("No such app.", 404)
+    conn = open_rows(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
 def _checked(source: Any) -> str:
-    """A page's source as written, or a refusal: not text, empty, or past ``PAGE_MAX_CHARS``."""
     if not isinstance(source, str) or not source.strip():
         raise AppsError("A page needs a source.", 400)
     if len(source) > PAGE_MAX_CHARS:
@@ -116,12 +150,13 @@ def _checked(source: Any) -> str:
 
 
 def page_id_of(source: str) -> str:
-    """The id a source names on its first line (``# id: home``), else the root's own name."""
     found = _ID_LINE.match(source)
     return found.group(1) if found else ROOT_PAGE
 
 
-def create(path: Path, title: Any, source: Any, library_version: Optional[str] = None) -> Dict[str, Any]:
+def create(
+    path: Path, title: Any, source: Any, library_version: Optional[str] = None
+) -> Dict[str, Any]:
     """Saves a new app whose first page, the root, is ``source``; answers the app as the list does.
 
     The app and its page are written in one transaction, so no reader meets an app without its
@@ -137,12 +172,12 @@ def create(path: Path, title: Any, source: Any, library_version: Optional[str] =
             413,
         )
     source = _checked(source)
-    version = library_version if isinstance(library_version, str) and library_version else LIBRARY_VERSION
+    version = (
+        library_version if isinstance(library_version, str) and library_version else LIBRARY_VERSION
+    )
     app_id = f"app-{uuid.uuid4().hex[:12]}"
     root = page_id_of(source)
-    conn = open_rows(path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
+    with _writing(path, building=True) as conn:
         conn.execute(
             "INSERT INTO apps (id, title, library_version, created_at) VALUES (?, ?, ?, ?)",
             (app_id, title, version, now_ms()),
@@ -151,13 +186,6 @@ def create(path: Path, title: Any, source: Any, library_version: Optional[str] =
             "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, 0, ?)",
             (app_id, root, source),
         )
-        conn.execute("COMMIT")
-    except BaseException:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
     return {"id": app_id, "title": title, "library_version": version, "pages": [root]}
 
 
@@ -167,28 +195,15 @@ def write(path: Path, app_id: str, page_id: str, source: Any) -> Dict[str, Any]:
     A write names a page that is there: an app or page that isn't answers not-found and creates
     nothing, so a deleted app stays deleted. Raises ``AppsError`` (404, 400 or 413).
     """
-    # The app and page come first: naming nothing is not-found whatever the source is.
-    page(path, app_id, page_id)
-    source = _checked(source)
-    conn = open_rows(path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        changed = conn.execute(
+    with _writing(path) as conn:
+        _found(conn, app_id, page_id)
+        source = _checked(source)
+        conn.execute(
             "UPDATE app_pages SET previous_source = source, source = ?"
-            " WHERE app_id = ? AND page_id = ?"
-            " AND EXISTS (SELECT 1 FROM apps WHERE id = ?)",
-            (source, app_id, page_id, app_id),
-        ).rowcount
-        conn.execute("COMMIT")
-    except BaseException:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
-    if not changed:
-        raise AppsError("No such page.", 404)
-    return page(path, app_id, page_id)
+            " WHERE app_id = ? AND page_id = ?",
+            (source, app_id, page_id),
+        )
+        return _answer(app_id, page_id, _found(conn, app_id, page_id))
 
 
 def undo(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
@@ -197,22 +212,12 @@ def undo(path: Path, app_id: str, page_id: str) -> Dict[str, Any]:
 
     Raises ``AppsError`` (404 for a missing app or page, 409 for a page with nothing to undo).
     """
-    page(path, app_id, page_id)
-    conn = open_rows(path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        changed = conn.execute(
+    with _writing(path) as conn:
+        if not _found(conn, app_id, page_id)["undoable"]:
+            raise AppsError("Nothing to undo.", 409)
+        conn.execute(
             "UPDATE app_pages SET source = previous_source, previous_source = NULL"
-            " WHERE app_id = ? AND page_id = ? AND previous_source IS NOT NULL",
+            " WHERE app_id = ? AND page_id = ?",
             (app_id, page_id),
-        ).rowcount
-        conn.execute("COMMIT")
-    except BaseException:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
-    if not changed:
-        raise AppsError("Nothing to undo.", 409)
-    return page(path, app_id, page_id)
+        )
+        return _answer(app_id, page_id, _found(conn, app_id, page_id))

@@ -699,6 +699,10 @@ _Avoid_: widget, dashboard, mini-app, generated UI
 One document of an app: its own interface source, its own id, and one of the pages the app can show.
 _Avoid_: screen, view, tab, sheet
 
+**Page cap**:
+The most characters one page's source may hold. A write past it is refused whole, never cut to fit, and the refusal names the cap.
+_Avoid_: page limit, size limit, truncation
+
 **Root page**:
 The page an app opens on.
 _Avoid_: home page, first page, index

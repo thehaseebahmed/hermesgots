@@ -375,6 +375,11 @@ class Writes(unittest.TestCase):
         self.assertEqual(apps.listing(self.path), before)
         self.assertEqual(apps.listing(self.path)[0]["pages"], ["home"])
 
+    def test_a_write_to_a_store_that_is_not_there_does_not_bring_it_into_being(self) -> None:
+        self.assertEqual(self.write("ghost", "home", "root = Stack([])")["status"], 404)
+        self.assertEqual(self.undo("ghost", "home")["status"], 404)
+        self.assertFalse(self.path.exists())
+
     def test_a_source_past_the_page_cap_is_refused_and_names_the_cap(self) -> None:
         app_id = self.create()["payload"]["app"]["id"]
         big = "x" * (apps.PAGE_MAX_CHARS + 1)

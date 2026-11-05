@@ -13,6 +13,9 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useAppsPane, useRememberOpened, type FeaturePane } from "@/lib/pane"
 
+const HEADER =
+  "sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur"
+
 const OpenUIBlock = lazy(() => import("@/components/openui/openui-block"))
 
 /**
@@ -24,7 +27,10 @@ export function AppsPage() {
   const { apps, loaded } = useApps()
   if (!pane) return <AppsHome />
   if (!loaded) return null
-  const first = itemToOpen("apps", (apps ?? []).map((app) => app.id))
+  const first = itemToOpen(
+    "apps",
+    (apps ?? []).map((app) => app.id),
+  )
   if (first) return <Navigate to={`/apps/${first}`} replace />
   return <AppsHome />
 }
@@ -40,7 +46,7 @@ function AppsHome({ list }: { list?: FeaturePane }) {
   const { apps, error, loaded } = useApps()
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
+      <header className={HEADER}>
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <Button
             variant="outline"
@@ -117,7 +123,7 @@ export function AppPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
+      <header className={HEADER}>
         <div className="flex items-center gap-3">
           {!beside && <BackButton label="Back to Apps" onClick={back} />}
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight">

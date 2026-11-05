@@ -1,11 +1,7 @@
-/**
- * The apps screen: a sixth entry in the nav, a list of what the bot keeps, and the open app at an
- * address of its own, drawing its root page through the block a reply's interface goes through. A
- * page that cannot draw shows its source as code, as a reply does, and an undo answers a second
- * write. The host is faked at the fetch boundary with the plugin's own routes and answers.
- */
+/** The apps screen, with the host faked at the fetch boundary using the plugin's own routes and answers. */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 
 import { MemoryRouter, Route, Routes } from "react-router"
 
@@ -91,15 +87,21 @@ const screen = (entry: string) => (
 )
 
 for (const width of [390, 768]) {
-  test(`a page written over the API draws in the open app at ${width}px`, atWidth(width, async () => {
-    await seed({ home: { source: SALES } })
-    await mount(screen("/apps/house"), async () => {
-      await drawn(() => Boolean(cardOf(find("[data-slot=app-page]") ?? undefined)), "the root page")
-      assert.match(wordsOf(find("[data-slot=app-page]")), /Quarterly sales/)
-      assert.match(wordsOf(find("h1")), /House/)
-      assert.equal(codeOf(find("[data-slot=app-page]") ?? undefined), null, "no code beside it")
-    })
-  }))
+  test(
+    `a page written over the API draws in the open app at ${width}px`,
+    atWidth(width, async () => {
+      await seed({ home: { source: SALES } })
+      await mount(screen("/apps/house"), async () => {
+        await drawn(
+          () => Boolean(cardOf(find("[data-slot=app-page]") ?? undefined)),
+          "the root page",
+        )
+        assert.match(wordsOf(find("[data-slot=app-page]")), /Quarterly sales/)
+        assert.match(wordsOf(find("h1")), /House/)
+        assert.equal(codeOf(find("[data-slot=app-page]") ?? undefined), null, "no code beside it")
+      })
+    }),
+  )
 }
 
 test("the apps entry lists what the bot keeps and opens an app at its own address", async () => {
@@ -116,13 +118,16 @@ test("the apps entry lists what the bot keeps and opens an app at its own addres
   })
 })
 
-test("with room for it the list stays beside the open app", laptop(async () => {
-  await seed({ home: { source: SALES } })
-  await mount(screen("/apps/house"), async () => {
-    await drawn(() => text().includes("Quarterly sales"), "the root page")
-    assert.ok(find('ul[aria-label="Apps"]'), "the list is drawn beside it")
-  })
-}))
+test(
+  "with room for it the list stays beside the open app",
+  laptop(async () => {
+    await seed({ home: { source: SALES } })
+    await mount(screen("/apps/house"), async () => {
+      await drawn(() => text().includes("Quarterly sales"), "the root page")
+      assert.ok(find('ul[aria-label="Apps"]'), "the list is drawn beside it")
+    })
+  }),
+)
 
 test("a page that cannot draw shows its source as code, as a reply does", async () => {
   await seed({ home: { source: "# id: home\nroot = Nothing(" } })
@@ -149,6 +154,17 @@ test("undo puts back the source the last write replaced", async () => {
       false,
       "one step, so no second",
     )
+  })
+})
+
+test("a page written while the app is open draws when the screen comes back to it", async () => {
+  const pages = { home: { source: SALES } as Page }
+  await seed(pages)
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => text().includes("Quarterly sales"), "the root page")
+    pages.home = { source: 'root = Stack([c])\nc = Card("Rewritten", "New.")', previous: SALES }
+    await act(async () => void window.dispatchEvent(new Event("online")))
+    await drawn(() => text().includes("Rewritten"), "the page as written")
   })
 })
 
