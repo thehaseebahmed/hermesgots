@@ -1077,8 +1077,11 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const needsHistory =
     Boolean(conversation && conversation.updatedAt > conversation.createdAt) &&
     messages?.length === 0
-  const threadUnread = needsHistory && readFailure?.chat.id === id
-  const loadingHistory = needsHistory && !threadUnread
+  // A chat whose queue the host holds and whose thread is empty is waiting, not unread: the lost
+  // turn never wrote its row, so neither a read that failed nor a spinner is the truth (ADR 0108).
+  const pausedEmpty = Boolean(paused) && !flow.length
+  const threadUnread = needsHistory && readFailure?.chat.id === id && !pausedEmpty
+  const loadingHistory = needsHistory && !threadUnread && !pausedEmpty
   // A read describes the chat as it is when it fails, which is no reason for the read to run again.
   const latest = useRef({ chat: conversation, profile, stored: messages?.length ?? 0 })
   useEffect(() => {
@@ -1103,8 +1106,14 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       reportUnreadThread(failure)
     }
     reconcileHistory(id)
-      .then((count) => {
-        if (!count) failed()
+      .then(async (count) => {
+        if (count) return
+        // Nothing came back. A chat whose queue the host holds is empty for a reason the card in the
+        // composer's slot states: the turn a restart lost never wrote its row, so an empty transcript
+        // is the state, not a read that failed (ADR 0108). Every other chat with a past and no rows
+        // is still a read this device couldn't make.
+        if (pausedQueue(await readPending(id).catch(() => undefined))) return
+        failed()
       })
       .catch(failed)
   }, [id])
@@ -1541,6 +1550,11 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         </div>
       ) : threadUnread ? (
         <MissingThread onRetry={retryHistory} details={readDetails} />
+      ) : pausedEmpty ? (
+        // Nothing has been written in this thread yet and nothing can be until the lost turn is
+        // discarded: the card below says both, and a new session's face would say neither. The pane
+        // still takes its room, so the card keeps the composer's own place at the foot.
+        <div className="flex flex-1" data-empty-thread />
       ) : conversation?.main && botThreads && configured ? (
         <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
       ) : (

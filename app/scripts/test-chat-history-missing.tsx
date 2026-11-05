@@ -88,6 +88,18 @@ test("a session nothing was sent in still draws as a new one", async () => {
   })
 })
 
+test("a session with a past whose transcript answers empty is still a read that failed", async () => {
+  // The rule the fenced chat is the one exception to: a chat something was sent in, holding no rows
+  // here, that the host answers with nothing is not drawn as a chat nobody started.
+  await seedPastSession()
+  transcriptHost([], () => false)
+  await mount(chatScreen("s-past"), async () => {
+    await settle()
+    assert.ok(body().includes(THREAD_MISSING), "the pane says the thread didn't load")
+    assert.equal(botFace(), null, "and no new session is drawn")
+  })
+})
+
 test("Copy details hands support the failed read, without the bot's address", async () => {
   await seedPastSession()
   transcriptHost([], () => true)

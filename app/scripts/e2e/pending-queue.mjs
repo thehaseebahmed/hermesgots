@@ -31,12 +31,22 @@ async function body({ page, seed, shot, until }) {
     0,
     "nothing can be typed behind a turn that will never run",
   )
+  // The thread a lost turn never wrote a row in is empty, and that is the state, not a read that
+  // failed: no pane over it, and no spinner, since nothing can run behind the fence to write one.
+  const missing = page.getByText("The thread didn't load.")
+  assert.equal(await missing.count(), 0, "the empty thread is not called a failed read")
+  assert.equal(await page.locator('[data-slot="spinner"]').count(), 0, "and no read is claimed to run")
   await shot("paused")
 
   // Discard acknowledges it on the host, and the chat is a chat again.
   await page.getByRole("button", { name: "Discard lost turn" }).click()
   await until(() => title.count().then((n) => n === 0), 10_000, "the card gone")
   await page.locator("textarea").waitFor({ timeout: 10_000 })
+  assert.equal(
+    await page.getByText("The thread didn't load.").count(),
+    0,
+    "and clearing the queue does not turn the empty thread into one",
+  )
   await shot("cleared")
 }
 

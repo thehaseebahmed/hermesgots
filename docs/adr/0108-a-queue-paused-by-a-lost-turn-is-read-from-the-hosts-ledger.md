@@ -59,3 +59,10 @@ A session that a restart fenced is unstuck from the phone: the lost turn is ackn
 runs, and the turn it frees is followed from `runs/live` like one the plugin started. What a discard
 cannot do is cancel a message waiting behind the fence: that message runs once the fence lifts, from
 the app's Stop or not at all.
+
+**An empty thread behind a held queue is a state, not a failed read.** The app reads a chat that has a
+past and holds no rows here as a read that failed, and says so — right for a chat synced from another
+device, wrong for one whose only turn was the turn a restart lost, which never wrote its row. So
+while the host says the queue is held, a read that comes back with nothing records no failure and the
+thread draws neither the pane nor a spinner: the card says why it is empty, and clearing the queue is
+what makes a read worth making again.
