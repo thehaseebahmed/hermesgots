@@ -8,7 +8,7 @@
  * pin them without a host.
  */
 
-import { readStt, type SttSettings } from "./stt-settings.ts"
+import { providerModelKey, readStt, rowValue, type SttSettings } from "./stt-settings.ts"
 
 /** The feature a host advertises when it has the host speech settings at all. */
 export const SPEECH_MODEL = "speech_model"
@@ -276,6 +276,28 @@ export function heardLine(provider: HeardBy | undefined): string | null {
   if (provider.backend === "local_command")
     return "This host's whisper CLI drops the Hearing prompt and Vocabulary."
   return null
+}
+
+/**
+ * Who hears a bot's takes, as `provider/model` — the two fields named after the thing that really
+ * decides them, which is not the pair the host reports side by side.
+ *
+ * `model` is always the local model: a cloud provider keeps its own pick under `stt.<provider>.model`,
+ * so pairing it with the host's `model` names a local file beside a vendor (`groq/base`). And `none`
+ * is the resolver saying it could name no provider, not a provider a model can stand beside — the
+ * local model is what hears a take then, so the line says local. Null where this bot's takes are
+ * heard by nothing at all.
+ */
+export function botModelLine(settings?: SpeechSettings): string | null {
+  if (!settings?.model) return null
+  const provider = settings.provider
+  if (provider?.cloud && provider.name) {
+    // A host too old to carry the `stt` block names no provider model: the provider alone is what
+    // can honestly be said about it.
+    const model = settings.stt ? rowValue(settings.stt, providerModelKey(provider.name)) : ""
+    return model ? `${provider.name}/${model}` : provider.name
+  }
+  return `local/${settings.model}`
 }
 
 /** The model list with the size a pick is weighed on, in the units a download is read in. */

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  botModelLine,
   CLEANUP_LEVEL_ROWS,
   heardLine,
   marked,
@@ -271,4 +272,72 @@ test("a whisper CLI says what it drops; a host's own model says nothing", () => 
   assert.equal(heardLine({ name: "local", backend: "local", cloud: false }), null)
   assert.equal(heardLine({ name: "none", backend: null, cloud: false }), null)
   assert.equal(heardLine(undefined), null)
+})
+
+/** A host's answer with the `stt` block the Speech-to-text page draws, cut to what this line reads. */
+const stt = (model) =>
+  readSpeech({
+    ...settings,
+    model: "small",
+    stt: {
+      values: { "stt.groq.model": model },
+      defaults: { "stt.local.model": "small", "stt.groq.model": "whisper-large-v3-turbo" },
+      provider: { name: "groq", explicit: null, reason: null },
+      providers: [{ name: "groq", key_set: true }],
+      choices: [{ name: "local", key_set: null }, { name: "groq", key_set: true }],
+      models: { groq: ["whisper-large-v3", "whisper-large-v3-turbo"] },
+    },
+  })
+
+test("a cloud provider's line names that provider's own model, not the local one", () => {
+  const speech = { ...stt("whisper-large-v3"), provider: { name: "groq", backend: null, cloud: true } }
+  assert.equal(
+    botModelLine(speech),
+    "groq/whisper-large-v3",
+    "the model the vendor hears with, never the host's local model beside a vendor's name",
+  )
+})
+
+test("a provider holding no model of its own falls back to the host's default for it", () => {
+  const speech = readSpeech({
+    ...settings,
+    model: "small",
+    provider: { name: "groq", backend: null, cloud: true },
+    stt: {
+      values: {},
+      defaults: { "stt.local.model": "small", "stt.groq.model": "whisper-large-v3-turbo" },
+      provider: { name: "groq", explicit: null, reason: null },
+      providers: [{ name: "groq", key_set: true }],
+      choices: [{ name: "groq", key_set: true }],
+      models: {},
+    },
+  })
+  assert.equal(botModelLine(speech), "groq/whisper-large-v3-turbo")
+})
+
+test("a host too old to carry its speech settings names the provider alone", () => {
+  const speech = { ...settings, provider: { name: "groq", backend: null, cloud: true } }
+  assert.equal(botModelLine(speech), "groq", "never a local model under a vendor's name")
+})
+
+test("a local line names the local model, and none reads as local rather than as a provider", () => {
+  assert.equal(
+    botModelLine({ ...settings, model: "small", provider: { name: "local", backend: "local", cloud: false } }),
+    "local/small",
+  )
+  assert.equal(
+    botModelLine({ ...settings, model: "small", provider: { name: "none", backend: null, cloud: false } }),
+    "local/small",
+    "\"none\" is the resolver naming no provider: the local model is what hears the take",
+  )
+  assert.equal(
+    botModelLine({ ...settings, model: "small" }),
+    "local/small",
+    "a host that names no provider at all",
+  )
+})
+
+test("a host hearing nothing at all has no line to draw", () => {
+  assert.equal(botModelLine({ ...settings, model: "" }), null)
+  assert.equal(botModelLine(undefined), null)
 })

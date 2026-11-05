@@ -244,6 +244,72 @@ test("the bot list draws each bot's picture and speech model, in the order the B
   })
 })
 
+test("the bot list names the model the provider hears with, not the host's local one", async () => {
+  await seed()
+  const first = await db.profiles.get("bot-1")
+  assert.ok(first)
+  // A bot whose host sends every take to a vendor: the host's `model` is still the local model it
+  // would fall back to, and the vendor's own pick lives under its own key.
+  await db.speechCache.put({
+    key: connectionKey(first),
+    speech: readSpeech(
+      speech({
+        model: "small",
+        provider: { name: "groq", backend: null, cloud: true },
+        stt: {
+          values: { "stt.groq.model": "whisper-large-v3" },
+          defaults: { "stt.local.model": "small", "stt.groq.model": "whisper-large-v3-turbo" },
+          provider: { name: "groq", explicit: null, reason: null },
+          providers: [{ name: "groq", key_set: true }],
+          choices: [
+            { name: "local", key_set: null },
+            { name: "groq", key_set: true },
+          ],
+          models: { groq: ["whisper-large-v3", "whisper-large-v3-turbo"] },
+        },
+      }),
+    ),
+  })
+  await mount(screen(), async () => {
+    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
+    await click(row("bubble-bot"))
+    await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
+    const drawn = () => Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
+    await until(
+      async () => drawn()[0]?.textContent?.includes("groq/whisper-large-v3") === true,
+      "the provider's own model beside its name",
+    )
+    assert.ok(
+      !drawn()[0]?.textContent?.includes("small"),
+      "and never the local model a cloud provider would not hear with",
+    )
+  })
+})
+
+test("a local bot's line says local, whatever the resolver names it", async () => {
+  await seed()
+  const first = await db.profiles.get("bot-1")
+  assert.ok(first)
+  // Hermes answers `none` when it can name no provider; the local model is what hears the take.
+  await db.speechCache.put({
+    key: connectionKey(first),
+    speech: readSpeech(
+      speech({ model: "base", provider: { name: "none", backend: null, cloud: false } }),
+    ),
+  })
+  await mount(screen(), async () => {
+    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
+    await click(row("bubble-bot"))
+    await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
+    const drawn = () => Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
+    await until(
+      async () => drawn()[0]?.textContent?.includes("local/base") === true,
+      "local, with the model that hears it",
+    )
+    assert.ok(!drawn()[0]?.textContent?.includes("none/"), "never the resolver's own word")
+  })
+})
+
 test("picking a bot moves this device's selection and mirrors it to the phone", async () => {
   await seed()
   await mount(screen(), async () => {

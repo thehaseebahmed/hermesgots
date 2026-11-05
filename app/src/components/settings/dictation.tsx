@@ -57,7 +57,7 @@ import {
   useDictationTotals,
 } from "@/lib/dictations"
 import { formatDuration } from "@/lib/format"
-import { levelName, namedLevel, type SpeechSettings } from "@/lib/speech"
+import { botModelLine, levelName, namedLevel, type SpeechSettings } from "@/lib/speech"
 import { READ_FAILED, getSpeech, useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
 import { onReturn } from "@/lib/wake"
@@ -477,10 +477,12 @@ function useHeardBy(bots: Profile[]) {
   }, [ids])
 }
 
-/** The provider and model a bot hears with, or the host's own word for hearing nothing. */
+/**
+ * The provider and model a bot hears with, or the host's own word for hearing nothing: the line is
+ * `botModelLine`'s, since a bot's host reports its local model whatever provider resolves.
+ */
 function heardLine(settings?: SpeechSettings) {
-  if (!settings?.model) return "Speech-to-text off"
-  return settings.provider?.name ? `${settings.provider.name}/${settings.model}` : settings.model
+  return botModelLine(settings) ?? "Speech-to-text off"
 }
 
 /** The Bubble and the bot it hears with. The two grants are the phone's, so the app asks for them. */
