@@ -13,23 +13,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 import { Chart } from "./chart.tsx"
+import { Link } from "./link.tsx"
 import { Map } from "./map.tsx"
 import { signatureRule } from "./prose.ts"
 import { OPENUI_ROOT } from "./root.ts"
 
-/** The leaves a parent may nest, in the order the library registers them. */
-const leaves = () => [Card, Table, List, Callout, Chart, Map]
-
-const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
-  z.union(leaves().map((leaf) => leaf.ref)),
-)
-
-const stackProps = z.object({ children: z.array(child) })
-const cardProps = z.object({
-  title: z.string(),
-  body: z.string().optional(),
-  children: z.array(child).optional(),
-})
 const tableProps = z.object({
   columns: z.array(z.string()),
   rows: z.array(z.array(z.union([z.string(), z.number()]))),
@@ -46,40 +34,6 @@ const TONES = {
   warn: { Icon: TriangleAlertIcon, className: "bg-warning/10 *:[svg]:text-warning" },
   good: { Icon: CheckCircle2Icon, className: "bg-success/10 *:[svg]:text-success" },
 }
-
-const Stack = defineComponent({
-  name: OPENUI_ROOT,
-  props: stackProps,
-  description: "A column of blocks.",
-  component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof stackProps>>) => (
-    <div className="w-full min-w-0 space-y-3">
-      {props.children.map((node, i) => (
-        <Fragment key={i}>{renderNode(node)}</Fragment>
-      ))}
-    </div>
-  ),
-})
-
-const Card = defineComponent({
-  name: "Card",
-  props: cardProps,
-  description: "Title, text, then children.",
-  component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof cardProps>>) => (
-    <CardSurface size="sm">
-      <CardHeader>
-        <CardTitle>{props.title}</CardTitle>
-      </CardHeader>
-      {props.body || props.children?.length ? (
-        <CardContent className="space-y-3">
-          {props.body ? <p>{props.body}</p> : null}
-          {props.children?.map((node, i) => (
-            <Fragment key={i}>{renderNode(node)}</Fragment>
-          ))}
-        </CardContent>
-      ) : null}
-    </CardSurface>
-  ),
-})
 
 const Table = defineComponent({
   name: "Table",
@@ -152,8 +106,72 @@ const Callout = defineComponent({
   },
 })
 
+/**
+ * The two containers, built per library: what a parent may nest is part of the component's own
+ * schema, so a chat's Stack and Card name no `Link` (ADR 0101) — a reply has nowhere to move to, and
+ * the reference built from the chat's schema must not show it. `kids` is read lazily because a Card
+ * nests itself.
+ */
+function containers(kids: () => { ref: z.core.$ZodType }[]) {
+  const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
+    z.union(kids().map((kid) => kid.ref) as [z.ZodType, z.ZodType, ...z.ZodType[]]),
+  ) as z.ZodType<SubComponentOf<unknown>>
+  const stackProps = z.object({ children: z.array(child) })
+  const cardProps = z.object({
+    title: z.string(),
+    body: z.string().optional(),
+    children: z.array(child).optional(),
+  })
+  const Stack = defineComponent({
+    name: "Stack",
+    props: stackProps,
+    description: "A column of blocks.",
+    component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof stackProps>>) => (
+      <div className="w-full min-w-0 space-y-3">
+        {props.children.map((node, i) => (
+          <Fragment key={i}>{renderNode(node)}</Fragment>
+        ))}
+      </div>
+    ),
+  })
+  const Card = defineComponent({
+    name: "Card",
+    props: cardProps,
+    description: "Title, text, then children.",
+    component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof cardProps>>) => (
+      <CardSurface size="sm">
+        <CardHeader>
+          <CardTitle>{props.title}</CardTitle>
+        </CardHeader>
+        {props.body || props.children?.length ? (
+          <CardContent className="space-y-3">
+            {props.body ? <p>{props.body}</p> : null}
+            {props.children?.map((node, i) => (
+              <Fragment key={i}>{renderNode(node)}</Fragment>
+            ))}
+          </CardContent>
+        ) : null}
+      </CardSurface>
+    ),
+  })
+  return { Stack, Card }
+}
+
+/**
+ * The two libraries, built from one module and differing by the components they pass in (ADR 0101):
+ * a reply draws the chat's, an app's page the wider one. `extend()` is not the move — it throws on
+ * this root's lazy union — so each library gets its own containers.
+ */
+const chat = containers(() => [chat.Card, Table, List, Callout, Chart, Map])
 export const library = createLibrary({
-  components: [Stack, ...leaves()],
+  components: [chat.Stack, chat.Card, Table, List, Callout, Chart, Map],
   root: OPENUI_ROOT,
 })
 export const parser = createParser(library.toJSONSchema(), OPENUI_ROOT)
+
+const app = containers(() => [app.Card, Table, List, Callout, Chart, Map, Link])
+export const appLibrary = createLibrary({
+  components: [app.Stack, app.Card, Table, List, Callout, Chart, Map, Link],
+  root: OPENUI_ROOT,
+})
+export const appParser = createParser(appLibrary.toJSONSchema(), OPENUI_ROOT)

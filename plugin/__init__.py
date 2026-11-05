@@ -510,6 +510,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         # Whether the model is told the component library, which is what the openui feature means.
         openui_info = openui.advertised()
+        # And whether an app's own rules are told — the `apps` feature a build is gated on.
+        app_info = openui.app_advertised()
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
         # Hermes is too old gets no row rather than an error; the switch, the removal, the Catalogue
         # and adding from it are advertised apart from it and from each other, because each needs a
@@ -647,6 +649,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # (openui.py). Advertised only where this host took it: a host that can't add a
                     # section says nothing, rather than offering a vocabulary never told.
                     *([openui.FEATURE] if openui_info else []),
+                    # The app's own library and rules (openui.py, ADR 0101): `apps` is what the
+                    # Apps screen gates a build on, so a host whose plugin predates it answers
+                    # nothing and the screen refuses with the reason rather than starting a run.
+                    *([openui.APP_FEATURE] if app_info else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # A routine's answer delivered into a chat as the bot's own message, and the
@@ -668,6 +674,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 },
                 # `features` is matched with `includes`: the version rides in the sibling object.
                 **({"openui": openui_info} if openui_info else {}),
+                **({"apps": app_info} if app_info else {}),
             }
         )
 
@@ -3331,6 +3338,13 @@ def register(ctx) -> None:
         # again rather than waiting out its tick.
         register_hook("subagent_start", delegation.started)
         register_hook("on_session_end", lambda **_kwargs: delegation.wake())
+        # An app run's mark dies with its session: the prompt it steered is already frozen (ADR 0101).
+        register_hook(
+            "on_session_end",
+            lambda **kwargs: openui.unmark_app_run(
+                kwargs.get("session_id"), kwargs.get("profile_name")
+            ),
+        )
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(
@@ -3347,6 +3361,7 @@ def register(ctx) -> None:
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
     openui.register(ctx)
+    openui.app_register(ctx)
     # Gots is a delivery platform, so a routine can speak in a chat (platform_gots.py, ADR 0081).
     platform_gots.register(ctx)
     platform_gots.register_section(ctx)

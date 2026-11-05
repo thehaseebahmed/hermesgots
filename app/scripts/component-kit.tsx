@@ -511,6 +511,21 @@ export function flowRows() {
 }
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+/** The console's verbose notes of one kind, watched while a body runs (`report.ts`'s channel). */
+export function watchNotes(match: string) {
+  const notes: string[] = []
+  const original = console.debug
+  console.debug = (...args: unknown[]) => {
+    notes.push(args.map(String).join(" "))
+    original(...args)
+  }
+  return {
+    count: () => notes.filter((line) => line.includes(match)).length,
+    stop: () => {
+      console.debug = original
+    },
+  }
+}
 /** The one element a selector reaches whose `aria-label` is exactly this: a Gallery cell, a row. */
 export const labelled = (selector: string, label: string) =>
   findAll(selector).find((one) => one.getAttribute("aria-label") === label) ?? null

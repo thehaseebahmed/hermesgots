@@ -20,6 +20,7 @@ import {
   seedChat,
   settle,
   text,
+  watchNotes,
 } from "./component-kit.tsx"
 import {
   SALES,
@@ -45,18 +46,8 @@ function host(transcript: unknown[] = []) {
 }
 
 function watch() {
-  const notes: string[] = []
-  const original = console.debug
-  console.debug = (...args: unknown[]) => {
-    notes.push(args.map(String).join(" "))
-    original(...args)
-  }
-  return {
-    fallbacks: () => notes.filter((line) => line.includes("openui block")).length,
-    stop: () => {
-      console.debug = original
-    },
-  }
+  const seen = watchNotes("openui block")
+  return { fallbacks: seen.count, stop: seen.stop }
 }
 
 async function screen(messages: Message[], body: () => Promise<void>) {
