@@ -675,6 +675,26 @@ _Avoid_: fence, code block, snippet
 A block that names an earlier interface's id and redraws that interface in its place; it draws nothing of its own.
 _Avoid_: update, diff, override
 
+**App**:
+A saved surface of its own, made of pages, that a bot generated and its host keeps. It opens on its root page and is changed on its own surface, never from a chat.
+_Avoid_: widget, dashboard, mini-app, generated UI
+
+**Page**:
+One document of an app: its own interface source, its own id, and one of the pages the app can show.
+_Avoid_: screen, view, tab, sheet
+
+**Root page**:
+The page an app opens on.
+_Avoid_: home page, first page, index
+
+**Built-in app**:
+An app Gots ships and the plugin seeds rather than one the user generated. It can be hidden but not deleted, and it is replaced only while nobody has edited it.
+_Avoid_: default app, sample app, template
+
+**Component reference**:
+The page that shows every component the library offers — a live drawing, its source and its props. A reader's document, not the model's.
+_Avoid_: gallery, component gallery, library page, showcase
+
 ## Notifications
 
 **Push**:
