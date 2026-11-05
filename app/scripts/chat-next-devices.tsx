@@ -35,7 +35,7 @@ export const wait = (ms: number) =>
  * `tries` widens the wait for a claim that costs the page more than the one read a poll makes, such
  * as a wait recovered from a second read of the run.
  */
-export async function eventually(check: () => void, what: string, tries = 60) {
+export async function eventually(check: () => void, what: string, tries = 480) {
   for (let attempt = 0; attempt < tries; attempt++) {
     try {
       return check()

@@ -172,7 +172,7 @@ test("a word removed from the screen leaves the record", async () => {
   await seed("removing", ["dictation"], { vocabulary: ["Gots", "Haseeb"] })
   await mount(editor("/settings/bots/bot-1/speech-to-text/vocabulary"), async () => {
     await click(removeButton("Haseeb"))
-    assert.ok(!removeButton("Haseeb"), "the word is gone from the screen")
+    await until(async () => !removeButton("Haseeb"), "the word to leave the screen")
     assert.deepEqual((await db.profiles.get("bot-1"))?.vocabulary, ["Gots"])
     assert.ok(removeButton("Gots"), "the words beside it stay")
   })

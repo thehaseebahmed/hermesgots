@@ -354,6 +354,10 @@ test(
     await seed(["t-a"])
     await mount(screen("/c/t-a"), async () => {
       await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
+      await until(
+        async () => Boolean(findAll('[data-slot="header-row"]')[0]?.querySelector('[role="img"]')),
+        "Main's picture beside its name",
+      )
       const [main, thread] = findAll('[data-slot="header-row"]')
       assert.ok(main?.querySelector('[role="img"]'), "Main keeps the bot's picture beside its name")
       assert.equal(thread?.querySelector('[role="img"]'), null, "the thread beside it carries none")
