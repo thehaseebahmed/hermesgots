@@ -45,7 +45,12 @@ A grant taken away later takes the Bubble with it: the mark drops itself and the
 Idle, the mark is a 48 dp circle inset 20 dp from the screen's right edge — the size and the gap the
 marks that do this job on Android are read at, so the line of text it floats over still reads under it
 — draggable and snapping to the nearest edge at the same gap, and it is only on screen while the
-phone's keyboard is up — that is the state a person dictates in. A take and the five seconds after it
+phone's keyboard is up — that is the state a person dictates in. A phone that changes shape under it
+keeps it on that edge: unfolded to a bigger screen, or turned, the mark is put back at the gap it
+keeps, on the side it was docked to and at the share of the height it was left at, rather than left
+standing where those pixels used to be. It grows out of that edge as the keyboard brings it and
+shrinks back into it as the keyboard goes, so the mark that comes with the keyboard reads as the same
+control each time. A take and the five seconds after it
 are the exception: the keyboard can be dismissed while the user is talking, and a mark that vanished
 mid-take would take the way to stop it with it. The pill
 grows away from the edge the mark is docked to and collapses back onto the same corner; its background
@@ -104,6 +109,19 @@ they fail separately, and the activation asks for each in turn rather than offer
 the mark is up, and the accessibility service stands the Bubble down the moment the phone unbinds it.
 Either way the mark is removed, the switch is written off, and the service stops: no pill message,
 because there is no mark left to put one in.
+
+**The mark is docked to an edge, not to a pixel.** The window is placed with `TOP or START` gravity at
+an absolute offset, and a window keeps that offset whatever the screen does — so a phone unfolded to a
+wider screen would leave the mark standing away from the glass, in the middle of the room it now has.
+The service therefore keeps the two choices beside the window: the side the mark is docked to (the one
+it was dropped on, or the right by default) and the share of the height it was left at, and
+`onConfigurationChanged` re-places the window from them — the same 20 dp gap, the same share of the
+band the mark may be dropped in (`snap` writes those two when a drag lands, so a drag and a fold use
+one rule). A screen that changed its own density gets a new face drawn rather than a window it has
+outgrown, since every part of it is measured in dp when it is built. The mark grows out of its edge on
+the way in and shrinks back into it on the way out (170 ms, then 120 ms, pivoted on that edge): a change
+of whether the mark is drawn, not of what it shows, so it plays once per appearance and a phone set to
+no animations plays it as a jump.
 
 **The mark is shown for the keyboard, not for an app.** Only the accessibility service can see another
 app's windows, so it reads the phone's own interactive-window list and the service shows or hides the

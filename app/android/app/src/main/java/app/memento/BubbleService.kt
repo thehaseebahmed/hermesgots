@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
@@ -17,11 +18,14 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -31,6 +35,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * The Bubble itself: a mark that stays on the screen while another app is in front, a take's
@@ -71,6 +76,20 @@ class BubbleService : Service() {
     /** Whether the phone's keyboard is on screen, as the accessibility service last reported it. */
     private var keyboardUp = false
 
+    /** Whether the mark is drawn: what a change of it starts the grow in or the shrink out. */
+    private var shown = false
+
+    /**
+     * The edge the mark is docked to, and how far down the room it may stand, as the choices they are
+     * rather than as the window's pixels: a screen that changes shape moves no pixel the window holds,
+     * so what the mark is docked to has to be kept beside them (see [reflow]).
+     */
+    private var dockedRight = true
+    private var downShare = 0.5f
+
+    /** The density the mark's face was measured at, so a screen that rescaled itself gets a new face. */
+    private var builtDensity = 0f
+
     /**
      * When the mark may go with the keyboard down: the grace after a take ends, or the longer stay
      * after something went wrong. One deadline, because both answer the same question.
@@ -94,6 +113,16 @@ class BubbleService : Service() {
         running = this
         windows = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         channel()
+    }
+
+    /**
+     * A phone that changes shape under the mark — a foldable opened, or a rotation — gives the window
+     * the same pixel offset it had, so the mark is put back on the edge it was docked to rather than
+     * left standing in the middle of the room it now has.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        ui.post { reflow() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -162,9 +191,56 @@ class BubbleService : Service() {
         ui.removeCallbacks(revise)
         val now = System.currentTimeMillis()
         val holding = phase != BubbleView.Face.Idle || now < holdUntil
-        bubble?.visibility = if (keyboardUp || holding) View.VISIBLE else View.GONE
+        bubble?.let { arrive(it, keyboardUp || holding) }
         if (keyboardUp || phase != BubbleView.Face.Idle) return
         if (holdUntil > now) ui.postDelayed(revise, holdUntil - now + 50)
+    }
+
+    /**
+     * The mark arriving and leaving: it grows out of the edge it is docked to and shrinks back into it,
+     * so a mark that comes with the keyboard reads as the same control each time rather than a new one
+     * appearing — and a mark that goes says so on its way out. The phone's own animation scale still
+     * applies: a phone set to no animations plays this as a jump, as it does everything else.
+     */
+    private fun arrive(view: View, wanted: Boolean) {
+        // One arrival per change: `apply` is called on every keyboard report and every take's step, and
+        // a mark that restarted its grow on each would never finish one.
+        if (wanted == shown) return
+        shown = wanted
+        // A hide still running when the mark is wanted again is a frame of a mark that is leaving.
+        view.animate().cancel()
+        pivot(view)
+        if (wanted) {
+            view.alpha = 0f
+            view.scaleX = SHRUNK
+            view.scaleY = SHRUNK
+            view.visibility = View.VISIBLE
+            view.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(ENTER_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+            return
+        }
+        view.animate()
+            .alpha(0f)
+            .scaleX(SHRUNK)
+            .scaleY(SHRUNK)
+            .setDuration(EXIT_MS)
+            .setInterpolator(AccelerateInterpolator())
+            // Only where nothing has brought it back since: a second `apply` cancels this one.
+            .withEndAction { if (!shown) view.visibility = View.GONE }
+            .start()
+    }
+
+    /** Scaling from the edge the mark is docked to, so it grows out of the glass rather than in place. */
+    private fun pivot(view: View) {
+        // Unmeasured on the first frame, where the view's own centre is the pivot anyway.
+        if (view.width <= 0) return
+        view.pivotX = if (dockedRight) view.width.toFloat() else 0f
+        view.pivotY = view.height / 2f
     }
 
     private fun onKeyboard(up: Boolean) {
@@ -209,8 +285,9 @@ class BubbleService : Service() {
     }
 
     private fun add() {
+        val screen = metrics()
         val layout = WindowManager.LayoutParams(
-            px(BubbleView.MARK_DP),
+            BubbleView.widthOf(this, phase),
             px(BubbleView.MARK_DP),
             overlayType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
@@ -219,17 +296,20 @@ class BubbleService : Service() {
             gravity = Gravity.TOP or Gravity.START
             // Docked where a thumb reaches and where the app underneath still reads around it: the
             // same gap the mark keeps when a drag snaps it back to this edge.
-            x = metrics().widthPixels - px(BubbleView.MARK_DP + BubbleView.EDGE_DP)
-            y = metrics().heightPixels / 2
+            dock(this, screen)
         }
         val view = BubbleView(this).apply {
             onCancel = { cancel() }
             onDone = { stopTake() }
             setOnTouchListener(drag(layout))
+            // `apply` brings the mark in, so one that is not wanted never shows for a frame first.
+            visibility = View.GONE
         }
         runCatching { windows.addView(view, layout) }.onFailure { return }
         bubble = view
         params = layout
+        shown = false
+        builtDensity = screen.density
     }
 
     /** The overlay type this phone understands: the API 26 one where it exists, the old one below. */
@@ -293,6 +373,7 @@ class BubbleService : Service() {
             MotionEvent.ACTION_CANCEL -> {
                 dragging = false
                 hideBin()
+                reflow()
                 true
             }
 
@@ -303,9 +384,9 @@ class BubbleService : Service() {
     /** Where a dragged mark is dropped to switch the Bubble off: bottom centre, clear of the keys. */
     private fun binRect(): Rect {
         val screen = metrics()
-        val size = px(56)
+        val size = px(BIN_DP)
         val left = (screen.widthPixels - size) / 2
-        val top = screen.heightPixels - px(48) - size
+        val top = screen.heightPixels - px(BIN_FOOT_DP) - size
         return Rect(left, top, left + size, top + size)
     }
 
@@ -350,11 +431,12 @@ class BubbleService : Service() {
     private fun snap(layout: WindowManager.LayoutParams) {
         val screen = metrics()
         // The edge gap is the same one the mark is given when it first appears, on either side, so a
-        // drag never leaves it sitting closer to the glass than a restart would.
-        layout.x =
-            if (layout.x + px(BubbleView.MARK_DP / 2) < screen.widthPixels / 2) px(BubbleView.EDGE_DP)
-            else screen.widthPixels - px(BubbleView.MARK_DP + BubbleView.EDGE_DP)
-        layout.y = layout.y.coerceIn(px(24), screen.heightPixels - px(96))
+        // drag never leaves it sitting closer to the glass than a restart would. Which side it was
+        // dropped on and how far down the screen are kept, because the room it was dropped in can
+        // change shape under it ([reflow]).
+        dockedRight = layout.x + layout.width / 2 >= screen.widthPixels / 2
+        downShare = ((layout.y - px(SNAP_TOP_DP)).toFloat() / roomY(screen)).coerceIn(0f, 1f)
+        dock(layout, screen)
         push(layout)
     }
 
@@ -634,20 +716,68 @@ class BubbleService : Service() {
         bubble?.let { runCatching { windows.removeView(it) } }
         bubble = null
         params = null
+        shown = false
     }
+
+    /**
+     * Puts the mark back where the screen now says it belongs: the side it was docked to, the share of
+     * the height it was left at, and the same gap from the glass. A window keeps the pixel offset it
+     * was given, so without this a folded phone opened to a bigger screen leaves the mark standing in
+     * the middle of the room it has instead of on its edge.
+     */
+    private fun reflow() {
+        if (bubble == null) return
+        // A drag in hand owns the window until it lands, and its drop or cancellation reflows the mark:
+        // moving it under the finger would jump it by however much the screen changed.
+        if (dragging) return
+        val screen = metrics()
+        if (screen.density != builtDensity) {
+            // Every part of the face is measured in dp when it is built, so a screen that changed its
+            // own scale is drawn again rather than stretched by a window that outgrew it.
+            removeMark()
+            add()
+            render()
+            apply()
+            return
+        }
+        val layout = params ?: return
+        layout.width = BubbleView.widthOf(this, phase)
+        layout.height = px(BubbleView.MARK_DP)
+        dock(layout, screen)
+        push(layout)
+    }
+
+    /** Puts the window on the side it is docked to and at its place down the band. */
+    private fun dock(layout: WindowManager.LayoutParams, screen: DisplayMetrics) {
+        layout.x = dockX(screen, layout.width)
+        layout.y = dockY(screen)
+    }
+
+    /** The mark's left edge on the side it is docked to, at the gap it keeps from the glass. */
+    private fun dockX(screen: DisplayMetrics, width: Int): Int {
+        val edge = px(BubbleView.EDGE_DP)
+        val left = if (dockedRight) screen.widthPixels - width - edge else edge
+        // A window wider than the room has no edge to stand on: it starts at the glass.
+        return left.coerceIn(0, (screen.widthPixels - width).coerceAtLeast(0))
+    }
+
+    /** The room the mark may move through vertically: below the top edge, and above the bin at the foot. */
+    private fun roomY(screen: DisplayMetrics) =
+        (screen.heightPixels - px(SNAP_TOP_DP + BIN_FOOT_DP + BIN_DP + BubbleView.MARK_DP))
+            .coerceAtLeast(1)
+
+    /** Where the mark stands down the screen: its share of that room, from the top of the band. */
+    private fun dockY(screen: DisplayMetrics) =
+        px(SNAP_TOP_DP) + (downShare * roomY(screen)).roundToInt()
 
     private fun resize(width: Int) {
         val layout = params ?: return
         if (layout.width == width && layout.height == px(BubbleView.MARK_DP)) return
-        val screen = metrics()
         // The mark keeps the edge it is docked to: a pill on the right grows leftwards, so what
         // collapses back is the mark's own corner rather than a piece of the middle of the screen.
-        val fromRight = layout.x + layout.width / 2 > screen.widthPixels / 2
-        val right = layout.x + layout.width
         layout.width = width
         layout.height = px(BubbleView.MARK_DP)
-        layout.x = if (fromRight) right - width else layout.x
-        layout.x = layout.x.coerceIn(0, (screen.widthPixels - width).coerceAtLeast(0))
+        layout.x = dockX(metrics(), width)
         push(layout)
     }
 
@@ -719,6 +849,16 @@ class BubbleService : Service() {
         /** The page's own cap on one recording, so a take cannot grow without end. */
         private const val MAX_TAKE_MS = 10 * 60 * 1000L
         private const val PIECES_IN_FLIGHT = 4
+        /** How small the mark is as it arrives and leaves: a grow out of its edge, not a whole screen's. */
+        private const val SHRUNK = 0.6f
+        /** How long the mark takes to grow in, and to shrink back out, in ms. */
+        private const val ENTER_MS = 170L
+        private const val EXIT_MS = 120L
+        /** The band the mark may be dropped in: clear of the top edge and of the bin at the foot. */
+        private const val SNAP_TOP_DP = 24
+        /** The bin the mark is dropped on: its size, and its gap from the bottom of the screen. */
+        private const val BIN_DP = 56
+        private const val BIN_FOOT_DP = 48
 
         @Volatile
         private var running: BubbleService? = null
