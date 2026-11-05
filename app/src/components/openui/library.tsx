@@ -14,6 +14,7 @@ import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/compo
 
 import { Chart } from "./chart.tsx"
 import { Map } from "./map.tsx"
+import { signatureRule } from "./prose.ts"
 import { OPENUI_ROOT } from "./root.ts"
 
 /** The leaves a parent may nest, in the order the library registers them. */
@@ -83,7 +84,7 @@ const Card = defineComponent({
 const Table = defineComponent({
   name: "Table",
   props: tableProps,
-  description: "Plain-text cells.",
+  description: signatureRule("Table") ?? "",
   component: ({ props }: ComponentRenderProps<z.infer<typeof tableProps>>) => (
     <div className="w-full overflow-x-auto">
       <table className="w-full text-sm">

@@ -7,6 +7,7 @@ import { dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 import { library } from "../src/components/openui/library.tsx"
+import { listedRules } from "../src/components/openui/prose.ts"
 
 /** `plugin/openui.py` wins the import over its sibling `plugin/openui/` folder. */
 export const ARTIFACT = fileURLToPath(new URL("../../plugin/openui/prompt.txt", import.meta.url))
@@ -19,13 +20,6 @@ const LIBRARY = "@openuidev/react-lang"
 
 /** The library's preamble says the whole reply must be openui-lang: the wrong mode here. */
 const PREAMBLE = "You draw interfaces in openui-lang."
-
-const RULES = [
-  "Fence every block with ```openui-lang.",
-  "A new interface's first line is a fresh `# id: <slug>`.",
-  "A change to it is a second block with the same `# id:`.",
-  "A table's cells are plain text: no markdown, no links.",
-]
 
 /** The artifact is the product's: data draws, conversation speaks (spec #487). */
 const DRAWS_DATA =
@@ -131,7 +125,7 @@ export function generated() {
     bindings: false,
     builtinFunctions: false,
     preamble: PREAMBLE,
-    additionalRules: RULES,
+    additionalRules: listedRules(),
   })
   return `# ${LIBRARY} ${version()}\n\n${body}\n`
 }

@@ -1,6 +1,7 @@
 import { defineComponent, type ComponentRenderProps } from "@openuidev/react-lang"
 import { z } from "zod/v4"
 
+import { signatureRule } from "./prose.ts"
 import { lazySurface, SURFACE_FRAME } from "./surface.tsx"
 
 const pointSchema = z.object({
@@ -27,6 +28,6 @@ const MapSurface = lazySurface(
 export const Map = defineComponent({
   name: "Map",
   props: mapProps,
-  description: "Labeled places on a map at coordinates you supply, never looked up; summary in words.",
+  description: signatureRule("Map") ?? "",
   component: ({ props }: ComponentRenderProps<MapProps>) => <MapSurface props={props} />,
 })

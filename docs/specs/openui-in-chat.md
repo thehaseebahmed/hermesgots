@@ -83,7 +83,8 @@ interface in it, nothing about the thread changes.
 | `app/src/components/openui/library.tsx` | The component library: the single source of truth for what a model may draw |
 | `app/src/components/openui/chart.tsx` | The one heavy component (Recharts), lazily imported |
 | `app/src/components/settings/appearance.tsx` | The switch, where Appearance already lives |
-| `app/scripts/build-openui-prompt.mjs` | Writes the prompt artifact from `library.tsx`, refusing past 4,000 characters |
+| `app/src/components/openui/prose.ts` | The rules a component's schema cannot state — a chart's required summary, a table's plain-text cells, the fence and the fresh id — written once: the prompt build lists them, and the three that gloss a signature line are read by `library.tsx`, `chart.tsx` and `map.tsx`, so the words a model is told have one home |
+| `app/scripts/build-openui-prompt.mjs` | Writes the prompt artifact from `library.tsx` and `prose.ts`, refusing past 4,000 characters |
 | `app/scripts/test-openui.tsx` | Component tests: an interface, a fallback, a patch in place, an orphan patch |
 | `app/scripts/e2e/openui.mjs` | The flow: an interface at 390px and 768px, a fallback, a patch that doesn't move the reader's place |
 | `plugin/openui.py` | The system-prompt section, the stored switch and its route |
@@ -165,9 +166,12 @@ No explanatory captions: the components say what their data says.
 
 - `build-openui-prompt.mjs` writes `plugin/openui/prompt.txt` from
   `library.prompt({ inlineMode: true, toolCalls: false, bindings: false, builtinFunctions: false })`,
-  plus the rules this app adds through `additionalRules`: the fence is `openui-lang`, a new interface
-  carries a fresh `# id:`, a change reuses that id in a patch block, and a table's cells are plain
-  text. The script fails when the artifact passes 4,000 characters.
+  plus `listedRules()` from `prose.ts` — the rules this app adds through `additionalRules`: the fence
+  is `openui-lang`, a new interface carries a fresh `# id:`, a change reuses that id in a patch block,
+  and a table's cells are plain text. The chart's and the map's required summaries are that module's
+  too, and so is the table's plain-text gloss: each is stated on its component's signature line. A
+  rule's listed sentence added to the module reaches a regenerated prompt with no other edit. The
+  script fails when the artifact passes 4,000 characters.
 - `plugin/openui.py` registers the section with
   `ctx.register_system_prompt_section("openui", content, position="after_memory")`, reading the
   artifact at import, and advertises `openui` in `info`'s `features` with the artifact's version.

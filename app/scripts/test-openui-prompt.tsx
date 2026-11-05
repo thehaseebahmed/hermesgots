@@ -7,6 +7,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
+import { PROSE_RULES, listedRules } from "../src/components/openui/prose.ts"
 import { ARTIFACT, MAX_CHARS, generated, render, rewrite, version } from "./build-openui-prompt.mjs"
 
 const checkedIn = readFileSync(ARTIFACT, "utf8")
@@ -76,13 +77,61 @@ test("the header names the pinned renderer the words were generated for", () => 
   assert.equal(named[2], version(), "the pinned @openuidev/react-lang in package.json")
 })
 
-test("the rules this app adds are in it", () => {
-  // A regenerated artifact can't drift, but a rule deleted from one side can: these four are what
-  // the extractor and the fold need the model to say, so they are asserted, not just regenerated.
-  assert.match(checkedIn, /Fence every block with ```openui-lang\./)
-  assert.match(checkedIn, /A new interface's first line is a fresh `# id: <slug>`\./)
-  assert.match(checkedIn, /A change to it is a second block with the same `# id:`\./)
-  assert.match(checkedIn, /A table's cells are plain text: no markdown, no links\./)
+/**
+ * Every sentence the model is told, held as literals rather than read from the module: a rule deleted
+ * there must fail here too, and a list that read itself could not tell. The tail's order is checked
+ * against `listedRules()` below, which is the one thing a literal list cannot pin.
+ */
+const ARTIFACT_SAYS = [
+  "Fence every block with ```openui-lang.",
+  "A new interface's first line is a fresh `# id: <slug>`.",
+  "A change to it is a second block with the same `# id:`.",
+  "A table's cells are plain text: no markdown, no links.",
+  "Plain-text cells.",
+  "A bar, line, area or pie chart; summary in words.",
+  "Labeled places on a map at coordinates you supply, never looked up; summary in words.",
+]
+
+test("every rule the module holds is in the artifact, and the listed ones end it in order", () => {
+  for (const rule of ARTIFACT_SAYS) {
+    assert.ok(checkedIn.includes(rule), `the artifact no longer says: ${rule}`)
+  }
+  assert.ok(
+    checkedIn.trimEnd().endsWith(
+      listedRules()
+        .map((rule) => `- ${rule}`)
+        .join("\n"),
+    ),
+    "the artifact does not end with the prose module's rules, in its order: run `pnpm build:openui-prompt`",
+  )
+})
+
+test("a rule added to the module reaches the prompt with no other edit", () => {
+  // The build's own default path, not a list handed to it: a copy of the rules inside the script would
+  // pass every other test here, and only an addition to the module tells the two homes apart.
+  const rules = PROSE_RULES as { component: string | null; listed?: string }[]
+  const added = { component: null, listed: "A block that draws nothing is not a block." }
+  rules.push(added)
+  try {
+    assert.ok(
+      render().endsWith(`- ${added.listed}\n`),
+      "the build reads its own copy of the rules, not the prose module's",
+    )
+  } finally {
+    rules.pop()
+  }
+})
+
+test("a rule a component's props cannot state is on its signature line", () => {
+  const signatures = section(checkedIn, "## Component Signatures").split("\n")
+  for (const { component, gloss } of PROSE_RULES) {
+    if (!component || !gloss) continue
+    const line = signatures.find((text) => text.startsWith(`${component}(`))
+    assert.ok(
+      line?.includes(`— ${gloss}`),
+      `${component}'s signature line does not carry the module's rule: ${String(line)}`,
+    )
+  }
 })
 
 test("a data answer draws and a question asks through clarify", () => {

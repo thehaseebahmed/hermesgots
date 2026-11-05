@@ -2,6 +2,7 @@ import { defineComponent, type ComponentRenderProps } from "@openuidev/react-lan
 import { z } from "zod/v4"
 
 import { lazySurface, SURFACE_FRAME } from "./surface.tsx"
+import { signatureRule } from "./prose.ts"
 
 const seriesSchema = z.object({
   name: z.string(),
@@ -30,6 +31,6 @@ const ChartSurface = lazySurface(
 export const Chart = defineComponent({
   name: "Chart",
   props: chartProps,
-  description: "A bar, line, area or pie chart; summary in words.",
+  description: signatureRule("Chart") ?? "",
   component: ({ props }: ComponentRenderProps<ChartProps>) => <ChartSurface props={props} />,
 })
