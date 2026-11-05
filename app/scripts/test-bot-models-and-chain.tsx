@@ -176,6 +176,18 @@ const chainValue = (place: number) =>
 const remove = (place: number) => find(`[aria-label="Remove fallback ${place}"]`)
 /** Adding is the screen's header action, at a phone width as much as a wide one. */
 const addFallback = () => find('[aria-label="Add fallback"]')
+/**
+ * The header's add, once the host has answered with the providers a pick needs: it is disabled
+ * until then, and a click on a disabled button is nothing, so a test that clicked as soon as the
+ * screen drew passed or failed on whether an earlier test had warmed the model info cache.
+ */
+async function addReady() {
+  await until(async () => {
+    const button = addFallback()
+    return Boolean(button && !(button as HTMLButtonElement).disabled)
+  }, "the add button, once the host's providers are in")
+  return addFallback()
+}
 
 test("the Models page is the Gots triage row and the model a chat runs", async () => {
   await seed("chat-groups")
@@ -381,7 +393,7 @@ test("picking a model for a new fallback writes the chain", async () => {
   const calls = await seed("chat-chain-pick")
   await mount(page("/settings/bots/bot-1/general/fallback_providers"), async () => {
     await drawn()
-    await click(addFallback())
+    await click(await addReady())
     await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
     assert.ok(modelOption("cheap-model"), "the host's models, in a sheet")
     await click(modelOption("cheap-model"))
