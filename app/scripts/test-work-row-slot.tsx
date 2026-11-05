@@ -11,6 +11,7 @@ import test from "node:test"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { StatusLine } from "@/components/chat/status-line"
 import { THINKING_ACTIVITY } from "@/lib/format"
+import { REPLY_EDGE } from "@/lib/layout"
 import { THINKING_WORD } from "@/lib/thinking"
 
 import { mount } from "./component-kit.tsx"
@@ -44,6 +45,19 @@ test("the status line keeps the sign a work row gave up", async () => {
     const sign = line.firstElementChild
     assert.equal(sign?.getAttribute("data-slot"), "work-sign", "the line leads with its spinner")
     assert.equal(sign?.getAttribute("aria-hidden"), "true", "which is hidden from assistive tech")
+  })
+})
+
+test("the status line stands in the reply's column, on the edge its other rows share", async () => {
+  await mount(<StatusLine text="Waiting for your answer" />, async () => {
+    const line = document.querySelector('[data-slot="status-line"]')!
+    // The box every part of a reply stands in (ADR 0058). A line drawn on the pane's edge alone
+    // starts a reading column's width to the left of the reply whenever the pane is wider than the
+    // measure — the row read as belonging to nothing on the screen.
+    assert.ok(
+      REPLY_EDGE.split(" ").every((one) => line.classList.contains(one)),
+      `the line stands on the reply's edge, not the pane's: "${line.className}"`,
+    )
   })
 })
 

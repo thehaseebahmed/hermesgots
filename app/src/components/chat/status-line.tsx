@@ -6,7 +6,7 @@ import { WORK_ROW_CLASS, WorkSign } from "@/components/chat/work-row"
 import { THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
 import type { BusyKind } from "@/lib/busy-words"
 import type { FootLine } from "@/lib/thinking"
-import { REPLY_INSET } from "@/lib/layout"
+import { REPLY_EDGE } from "@/lib/layout"
 import { useBusyWord } from "@/lib/use-busy-word"
 import { cn } from "@/lib/utils"
 
@@ -30,6 +30,10 @@ const PLAIN_STATE: Record<BusyKind, string> = { thinking: "Thinking", writing: "
  * it, since a waiting turn is still a live line; only its words rotate, so a rotating word means
  * "this is the live line" and nothing else. What it says, and whether it stands at all, is
  * `statusLineOf`'s to decide.
+ *
+ * The row stands in the reply's reading column on the reply's edge, like its words and the rows
+ * that account for its work (ADR 0058): a line drawn on the pane's own edge instead starts a
+ * column's width to the left of the reply wherever the pane is wider than the measure.
  */
 export function StatusLine({
   text,
@@ -48,7 +52,7 @@ export function StatusLine({
   const face = useCodeFace()
   return (
     <div
-      className={cn(REPLY_INSET, WORK_ROW_CLASS, "w-auto", face, className)}
+      className={cn(REPLY_EDGE, WORK_ROW_CLASS, face, className)}
       aria-live="polite"
       data-slot="status-line"
     >
