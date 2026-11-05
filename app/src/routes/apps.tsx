@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Navigate, useNavigate, useParams } from "react-router"
 import {
   ArrowUpIcon,
@@ -17,7 +17,7 @@ import { ItemRow } from "@/components/item-list"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { useAppPage, useApps } from "@/lib/apps"
+import { appTools, useActiveProfile, useAppPage, useApps } from "@/lib/apps"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useAppsPane, useRememberOpened, type FeaturePane } from "@/lib/pane"
@@ -142,6 +142,8 @@ export function AppPage() {
   const root = app?.pages[0]
   const { page, error, missing, offline, undo, change, draft } = useAppPage(id, root)
   const [undoing, setUndoing] = useState(false)
+  const profile = useActiveProfile()
+  const tools = useMemo(() => (profile ? appTools(profile) : undefined), [profile])
   const [asked, setAsked] = useState("")
   const [failure, setFailure] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -216,6 +218,7 @@ export function AppPage() {
               open={draft !== undefined}
               streaming={draft !== undefined}
               draw="interface"
+              tools={tools}
             />
           </Suspense>
         ) : error ? (

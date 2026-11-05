@@ -29,6 +29,8 @@ TITLE_MAX_CHARS = 120
 # The library a page is written against until a build says otherwise.
 LIBRARY_VERSION = "1.0.1"
 ROOT_PAGE = "root"
+# What a page's `Query` may name: the host's own reads, and nothing else (ADR 0102).
+HOST_SHAPES = ("usage", "routines", "projects", "sessions")
 _ID_LINE = re.compile(r"\A\s*#\s*id:\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})\s*(?:\n|\Z)")
 
 

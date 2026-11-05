@@ -30,13 +30,15 @@ import { SALES, cardOf, codeOf, drawn, warm } from "./openui-kit.tsx"
 type Page = { source: string; previous?: string }
 
 /** A host keeping one app, answering the apps routes the way `apps.py` does. */
-function host(pages: Record<string, Page>) {
+function host(pages: Record<string, Page>, query?: (body: Record<string, unknown>) => Response) {
   const calls: string[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
     calls.push(`${method} ${url.pathname}`)
     const tail = url.pathname.split("/plugins/memento/")[1] ?? ""
+    if (tail === "apps/query" && method === "POST" && query)
+      return query(JSON.parse(String(init?.body)))
     if (tail === "apps")
       return json({
         object: "memento.apps",
@@ -65,11 +67,14 @@ function host(pages: Record<string, Page>) {
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch }
 }
 
-async function seed(pages: Record<string, Page>) {
+async function seed(
+  pages: Record<string, Page>,
+  query?: (body: Record<string, unknown>) => Response,
+) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile("apps-screen"))
-  const server = host(pages)
+  const server = host(pages, query)
   globalThis.fetch = server.fetch
   await warm()
   return server
@@ -237,7 +242,53 @@ test("a page the host no longer lists is dropped from the cache", async () => {
     page: { id: "old", appId: "house", source: "", undoable: false },
   })
   await mount(screen("/apps"), async () => {
-    await until(async () => (await db.appCache.get("stale")) === undefined, "the stale page dropped")
+    await until(
+      async () => (await db.appCache.get("stale")) === undefined,
+      "the stale page dropped",
+    )
     assert.equal(await db.appCache.count(), 1)
+  })
+})
+
+const READ = [
+  "root = Stack([c])",
+  'data = Query("projects", {}, {title: "Declared default"})',
+  'c = Card(data.title, "Read from the bot.")',
+].join("\n")
+
+const title = () => wordsOf(find("[data-slot=app-page] [data-slot=card-title]"))
+
+test("a page whose query names a host shape draws that shape's live value", async () => {
+  const asked: Record<string, unknown>[] = []
+  await seed({ home: { source: READ } }, (body) => {
+    asked.push(body)
+    return json({ object: "memento.app.query", shape: body.shape, value: { title: "Live value" } })
+  })
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => title() === "Live value", "the live value")
+    assert.equal(asked[0]?.shape, "projects")
+  })
+})
+
+test("with the host away the page draws the query's declared defaults", async () => {
+  await seed({ home: { source: READ } }, () => {
+    throw new TypeError("Failed to fetch")
+  })
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => text().includes("Read from the bot."), "the page")
+    assert.equal(title(), "Declared default")
+  })
+})
+
+test("a refused read draws a value the page renders", async () => {
+  const refused = READ.replace(
+    '{title: "Declared default"}',
+    '{error: "", title: "Declared default"}',
+  ).replace("data.title", "data.error")
+  await seed({ home: { source: refused } }, () =>
+    json({ error: { message: "'skills' is not something the bot can read." } }, 400),
+  )
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => title().includes("not something the bot can read"), "the refusal")
   })
 })

@@ -12,6 +12,7 @@ import {
   listApps,
   markAppBuild,
   startRun,
+  queryApp,
   undoAppPage,
   writeAppPage,
   type HostApp,
@@ -64,7 +65,8 @@ const listed = createStore<Listed | undefined>(undefined)
 const reading = new Map<string, Promise<void>>()
 
 /** The active bot: undefined until it is read, null where there is none. */
-const useActiveProfile = () => useLiveQuery(async () => (await getActiveProfile()) ?? null, [])
+export const useActiveProfile = () =>
+  useLiveQuery(async () => (await getActiveProfile()) ?? null, [])
 
 const wordsOf = (error: unknown) =>
   error instanceof Error ? error.message : "Couldn't reach the bot."
@@ -189,6 +191,31 @@ export function useApps() {
   usePoll(() => profile && void refreshApps(profile), LIST_MS, [profile?.id])
   const mine = state && state.profileId === profile?.id ? state : undefined
   return { apps: mine?.apps, error: mine?.error, offline: mine?.offline, loaded: Boolean(mine) }
+}
+
+/**
+ * The tools a page's `Query` calls, answered by the host's query route. A read the host refused or
+ * failed answers `{ error }`, which the page draws; a host that cannot be reached throws, so the
+ * page keeps the defaults it declared.
+ */
+export function appTools(profile: Profile, read: typeof queryApp = queryApp) {
+  return {
+    async callTool({
+      name,
+      arguments: args,
+    }: {
+      name: string
+      arguments?: Record<string, unknown>
+    }) {
+      try {
+        return { content: [], structuredContent: (await read(profile, name, args ?? {})) ?? null }
+      } catch (failure) {
+        if (failure instanceof HermesError && failure.status !== undefined)
+          return { content: [], structuredContent: { error: failure.message } }
+        throw failure
+      }
+    },
+  }
 }
 
 export function useAppPage(appId: string, pageId: string | undefined) {

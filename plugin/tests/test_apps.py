@@ -9,6 +9,7 @@ import asyncio
 import json
 import sqlite3
 import unittest
+from unittest import mock
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Sequence, Set, Tuple
 
@@ -429,6 +430,64 @@ class Writes(unittest.TestCase):
         self.assertEqual(self.create(), {"status": 401, "payload": {}})
         self.assertEqual(self.write("a", "b", "x"), {"status": 401, "payload": {}})
         self.assertEqual(apps.listing(self.path), [])
+
+
+class Queries(unittest.TestCase):
+    """A page's `Query` as the host answers it: only a host shape, and a refusal that says why."""
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.adapter = RouteAdapter()
+        self.app = wire(self, self.adapter)
+
+    def ask(self, body: Any) -> Any:
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {}, {}
+
+        async def read() -> Any:
+            if body is None:
+                raise ValueError("not json")
+            return body
+
+        request.json = read
+        return asyncio.run(route(self.app, plugin.PREFIX + "/apps/query", "POST")(request))
+
+    def test_the_host_shapes_are_the_four_reads_the_plugin_already_serves(self) -> None:
+        self.assertEqual(apps.HOST_SHAPES, ("usage", "routines", "projects", "sessions"))
+
+    def test_sessions_answers_the_hosts_chats(self) -> None:
+        answer = self.ask({"shape": "sessions"})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "memento.app.query")
+        self.assertEqual(answer["payload"]["shape"], "sessions")
+        self.assertEqual(answer["payload"]["value"], {"sessions": {}})
+
+    def test_usage_answers_what_the_usage_route_does(self) -> None:
+        fetched = {"provider": "codex", "plan": "pro", "windows": []}
+        with mock.patch.object(plugin.usage, "fetch", return_value=fetched) as fetch:
+            answer = self.ask({"shape": "usage", "args": {"provider": " Codex "}})
+        fetch.assert_called_once_with("codex")
+        self.assertEqual(answer["payload"]["value"], fetched)
+
+    def test_usage_without_a_provider_is_refused(self) -> None:
+        answer = self.ask({"shape": "usage"})
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("provider", answer["payload"]["error"]["message"])
+
+    def test_anything_but_a_host_shape_is_refused_naming_the_shapes(self) -> None:
+        for shape in ("mcp_call", "skills", None, 3, ""):
+            answer = self.ask({"shape": shape})
+            self.assertEqual(answer["status"], 400, shape)
+            for name in apps.HOST_SHAPES:
+                self.assertIn(name, answer["payload"]["error"]["message"])
+
+    def test_a_body_that_is_not_an_object_is_refused(self) -> None:
+        self.assertEqual(self.ask(None)["status"], 400)
+        self.assertEqual(self.ask([1])["status"], 400)
+
+    def test_the_query_needs_the_bots_key(self) -> None:
+        self.adapter.denied = {"status": 401, "payload": {}}
+        self.assertEqual(self.ask({"shape": "sessions"}), {"status": 401, "payload": {}})
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef } from "react"
-import { Renderer } from "@openuidev/react-lang"
+import { Renderer, type McpClientLike } from "@openuidev/react-lang"
 
 import { Markdown } from "@/components/chat/markdown"
 import { REPLY_TEXT } from "@/lib/layout"
@@ -11,7 +11,7 @@ import { gate, type Props } from "./gate.ts"
 export { blockProblem } from "./gate.ts"
 import { library } from "./library.tsx"
 
-function OpenUIBlock(props: Props) {
+function OpenUIBlock(props: Props & { tools?: McpClientLike }) {
   const { answer, failure } = gate(props)
   const noted = useRef(false)
   useEffect(() => {
@@ -23,7 +23,12 @@ function OpenUIBlock(props: Props) {
   if (answer === "code")
     return <Markdown className={REPLY_TEXT}>{asLangFence(props.source)}</Markdown>
   return (
-    <Renderer.Root response={props.source} library={library} isStreaming={props.streaming}>
+    <Renderer.Root
+      response={props.source}
+      library={library}
+      isStreaming={props.streaming}
+      toolProvider={props.tools}
+    >
       <Renderer.Content className="w-full min-w-0 space-y-3" />
     </Renderer.Root>
   )
@@ -32,5 +37,9 @@ function OpenUIBlock(props: Props) {
 export default memo(
   OpenUIBlock,
   (a, b) =>
-    a.source === b.source && a.open === b.open && a.streaming === b.streaming && a.draw === b.draw,
+    a.source === b.source &&
+    a.open === b.open &&
+    a.streaming === b.streaming &&
+    a.draw === b.draw &&
+    a.tools === b.tools,
 )
