@@ -614,15 +614,23 @@ A setting that is Gots's own — the app, the device or the Gots plugin's own ho
 _Avoid_: app setting, local setting, device setting
 
 **Hermes setting**:
-A setting of the bot's Hermes itself: the same knob the Hermes Dashboard shows, named as Hermes names it.
+A setting of the bot's Hermes itself: the same knob the Hermes Dashboard shows, named as Hermes names it. The General page is the Dashboard's own Config > General tab mirrored, so its rows are whatever that host's schema holds and its cards are the sections the host files them under — a key Hermes adds later is a row without an app release.
 _Avoid_: bot setting, server setting, config
 
 **Host default**:
 The value a Hermes setting runs at when the bot's host holds none of its own — the default Hermes itself was built with. A row shows it muted, and a reset returns the setting to it.
 _Avoid_: empty, blank, unset value, fallback
 
+**Bot page**:
+The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications, Test connection), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, or the subagent model once it is linked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and the one screen that asks the bot's host for nothing.
+_Avoid_: bot settings list, general old, bot overview
+
+**General old**:
+The address `/settings/bots/<id>/general-old` and nothing more: the page Settings > Bot > General held before the host's own General tab took its place, kept whole there so a reader who wants it back can still reach it while the rows it held lead the bot page.
+_Avoid_: legacy settings, old general tab, deprecated page
+
 **Progress reminder**:
-A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, then to carry on with the work rather than end there: a reply of words and no tool call ends the run. Where the list has fallen behind it also asks for it, naming `todo_list`. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
+A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, then to carry on with the work rather than end there: a reply of words and no tool call ends the run. Where the list has fallen behind it also asks for it, naming `todo_list`. A bot's reminders are set per bot, on its **Bot page** under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
 _Avoid_: nudge, check-in, status ping, verbosity, quiet mode
 
 ## Diagnostics

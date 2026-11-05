@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
+  BotIcon,
   CodeXmlIcon,
   MessagesSquareIcon,
   PlusIcon,
@@ -40,8 +41,9 @@ import {
   useHeaderAction,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
-import { botTabPath, BOT_PAGES, type BotPage, type BotTab } from "@/lib/bot-tabs"
+import { botPath, botTabPath, SETTING_PAGES, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { connectionKey } from "@/lib/connection"
 import {
@@ -59,17 +61,31 @@ import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { usePluginFeatureAnswers } from "@/lib/features"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
 import {
+  GENERAL_PAGE,
+  draftOf,
+  draftValue,
+  fieldLabel,
+  generalGroups,
+  generalRowValue,
+  optionLabel,
+  type GeneralField,
+  type GeneralSettings,
+} from "@/lib/general-settings"
+import {
   checkHealth,
+  getGeneralSettings,
   getPluginVersion,
   listModels,
   REMINDER_LEVELS,
+  setGeneralSetting,
   type ReminderLevel,
 } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { MCP_FEATURES } from "@/lib/mcps"
+import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
@@ -77,6 +93,7 @@ import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { useNow } from "@/lib/threads"
+import { plural } from "@/lib/tools"
 import { useTriageModel } from "@/lib/triage-model"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
@@ -89,6 +106,9 @@ type Connection =
 
 /** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
 const PAGE_FEATURES = {
+  // General mirrors the bot's own Hermes, so it needs a plugin that can read the host's schema. A
+  // host without it draws no General row, and a general address lands on the bot's own page.
+  general: GENERAL_PAGE,
   "speech-to-text": DICTATION,
   mcps: MCP_FEATURES.list,
   coding: AFK_PICKS_FEATURE,
@@ -108,11 +128,15 @@ function gated(page: BotTab): page is GatedPage {
  */
 const PAGE_ANSWERS = { ...PAGE_FEATURES, delegation: "delegation_model" } as const
 
-/** What the Models page's two rows need: the Gots triage pick, and the chain after the main model. */
-const MODELS_ANSWERS = { triage: "triage_model", fallbacks: "fallbacks" } as const
+/** What the Models page's row needs: the Gots triage pick. */
+const MODELS_ANSWERS = { triage: "triage_model" } as const
+
+/** What General's own two rows need: the chain Hermes tries after this bot's main model. */
+const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 
 /** The icon a page's row, and the screen it opens, wear. */
 const PAGE_ICONS: Record<BotTab, LucideIcon> = {
+  bot: BotIcon,
   general: SlidersHorizontalIcon,
   models: MessagesSquareIcon,
   coding: CodeXmlIcon,
@@ -293,16 +317,17 @@ function PageRow({
       className={linkRowClass}
     >
       <Icon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title={page.title} subtitle={page.subtitle} />
+      <RowText title={page.title} subtitle={page.subtitle ?? ""} />
     </Link>
   )
 }
 
 /**
- * A bot's settings as a list of pages: the plugin banner when it is out of date, then the pages in
- * two cards — General on its own, then every other page under it — separated by gaps and carrying no
- * captions (ADR 0055). A page the plugin withholds draws no row. The header's trash deletes the bot,
- * asking first; an unlinked bot is left alone where this device holds no other bot to fall back on.
+ * A bot's own page: the plugin banner when it is out of date, then what the bot is — its switches,
+ * its profile and how it connects — under the caption *Bot*, and the settings behind it in one card
+ * under *Settings* (ADR 0106). A page the plugin withholds draws no row. The header's trash deletes
+ * the bot, asking first; an unlinked bot is left alone where this device holds no other bot to fall
+ * back on.
  */
 export function BotSettingsList({
   profile,
@@ -317,15 +342,17 @@ export function BotSettingsList({
   canDelete?: boolean
   onDeleted?: () => void
 }) {
-  const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
+  const answers = usePluginFeatureAnswers(profile, PAGE_ANSWERS)
   const [confirming, setConfirming] = useState(false)
   const linked = Boolean(profile.hostId)
-  const rows = (pages: readonly BotPage[]) =>
-    pages.map((page) => {
-      const segment = page.segment
-      if (gated(segment) && answers[segment] !== "yes") return null
-      return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
-    })
+  const navigate = useNavigate()
+  // A row the host says it hasn't got is not drawn; a row whose answer hasn't come back yet is, so
+  // the card fills in rather than appearing a row at a time.
+  const rows = SETTING_PAGES.map((page) => {
+    const segment = page.segment
+    if (gated(segment) && answers[segment] === "no") return null
+    return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
+  })
 
   // The trash is the screen's own action, and its handler is the setter: the header reads the node
   // it was published with, and never re-renders for a change in the list below it.
@@ -351,8 +378,14 @@ export function BotSettingsList({
           {`This bot's plugin is out of date! Update it to ${MIN_PLUGIN_VERSION} or newer.`}
         </Banner>
       )}
-      <Group>{rows(BOT_PAGES.slice(0, 1))}</Group>
-      <Group>{rows(BOT_PAGES.slice(1))}</Group>
+      <Caption>Bot</Caption>
+      <BotCard
+        profile={profile}
+        delegation={answers.delegation === "yes"}
+        onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))}
+      />
+      <Caption>Settings</Caption>
+      <Group>{rows}</Group>
       <DeleteBotDialog
         profile={profile}
         open={confirming}
@@ -379,46 +412,67 @@ export function BotSettingsPage({
 }) {
   const answers = usePluginFeatureAnswers(profile, PAGE_ANSWERS)
   const gate = gated(tab) ? answers[tab] : undefined
-  const shown: BotTab = gate !== undefined && gate !== "yes" ? "general" : tab
+  // Where a withheld page lands: the bot's own page, which is always there — a page gated on its own
+  // availability cannot land on itself, and General is now one of those.
+  const shown: BotTab = gate !== undefined && gate !== "yes" ? "bot" : tab
   const large = useLarge()
   const navigate = useNavigate()
   // Only the page on screen owns its sub: an address into a page this bot doesn't have draws the
   // page it fell back to, never the other page's edit — and never a write to a field it doesn't hold.
   const own = tab === shown ? sub : undefined
 
-  // A URL into a page this bot doesn't have: General takes its place, in the history entry it was
-  // asked for, rather than the address reading MCP over a screen that isn't. Only an answer of "no"
-  // sends anyone anywhere — a Host still reading keeps the address and draws General meanwhile.
+  // A URL into a page this bot doesn't have: the bot's own page takes its place, in the history
+  // entry it was asked for, rather than the address reading MCP over a screen that isn't. Only an
+  // answer of "no" sends anyone anywhere — a Host still reading keeps the address and draws the
+  // bot's page meanwhile.
   useEffect(() => {
-    if (gate === "no") void navigate(botTabPath(profile.id, "general"), { replace: true })
+    if (gate === "no") void navigate(botPath(profile.id), { replace: true })
   }, [gate, navigate, profile.id])
 
+  // A sub of the bot's own page closes back onto that page's address, not onto a segment of its own.
   const close = useCallback(
-    () => navigate(botTabPath(profile.id, shown), { replace: true }),
+    () =>
+      navigate(shown === "bot" ? botPath(profile.id) : botTabPath(profile.id, shown), {
+        replace: true,
+      }),
     [navigate, profile.id, shown],
   )
 
-  // The pages with sub-screens of their own draw them; General and Models draw theirs here.
+  // The bot's own page draws its edits itself, as the entry screen does: the form is the screen the
+  // route pushed, or the card over the bot's page where there is a pane beside it.
+  if (shown === "bot") {
+    // The page asked for is withheld, or its host hasn't answered: what is left to draw is the bot's
+    // own page. Where a pane sits beside this one, that page is already in it — drawing it again
+    // would put two cards, two trash buttons and two feature reads on one screen.
+    if (!own) return large ? null : <BotSettingsList profile={profile} />
+    if (!large) return <PageSub profile={profile} tab="bot" sub={own} close={close} />
+    // From 1024px the bot's page is the pane beside this one, so the pane holds its edit alone.
+    return (
+      <EditCard title={own.title} onClose={close}>
+        <PageSub profile={profile} tab="bot" sub={own} close={close} />
+      </EditCard>
+    )
+  }
+
+  // The pages with sub-screens of their own draw them; General draws its own here.
   if (shown === "speech-to-text") return <DictationTab profile={profile} sub={own} />
   if (shown === "mcps") return <McpsTab profile={profile} sub={own} />
   if (shown === "coding") return <CodingTab profile={profile} />
   if (shown === "skills") return <SkillsTab profile={profile} sub={own} />
+
+  // General is the host's own page: its rows come from the bot's Hermes, so it draws its own edit —
+  // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
+  // detail like any other and takes the generic path below.
+  if (shown === "general" && own?.kind === "edit")
+    return <GeneralPage profile={profile} sub={own} close={close} />
+  if (shown === "general" && !own) return <GeneralPage profile={profile} close={close} />
 
   // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
   // page's own edit is the screen the route pushed.
   if (own && (own.kind === "detail" || !large))
     return <PageSub profile={profile} tab={shown} sub={own} close={close} />
 
-  const page =
-    shown === "models" ? (
-      <ModelsPage profile={profile} />
-    ) : (
-      <GeneralPage
-        profile={profile}
-        delegation={answers.delegation === "yes"}
-        onOpen={(id) => navigate(botSubPath(profile.id, "general", id))}
-      />
-    )
+  const page = <ModelsPage profile={profile} />
 
   if (!own) return page
   return (
@@ -443,17 +497,22 @@ function PageSub({
   sub: BotSub
   close: () => void
 }) {
-  if (tab === "models") return <FallbacksPage profile={profile} />
-  const edit = generalEdit(sub.id)
+  const large = useLarge()
+  // A detail is a screen of its own, and the one this page holds is the chain after its model.
+  if (tab === "general" && sub.kind === "detail") return <FallbacksPage profile={profile} />
+  const edit = botEdit(sub.id)
   // A segment the router refused never reaches here; one the table doesn't name holds no field, so
   // no id can fall through to a write the page doesn't mean.
   if (!edit) return null
   return (
     <EditForm
-      label={sub.title}
+      label={sub.label ?? sub.title}
       value={edit.read(profile)}
       placeholder={edit.placeholder}
       kind={edit.kind}
+      // A page's own edit is the screen the route pushes; where a pane sits beside it, the card is
+      // the surface and its close is the cancel.
+      surface={large ? "card" : "screen"}
       onSave={async (value) => {
         try {
           await updateProfile(profile.id, edit.patch(value))
@@ -467,15 +526,15 @@ function PageSub({
   )
 }
 
-/** A General edit: the field it holds on the bot, and the one write it makes. */
-type GeneralEdit = {
+/** One of the bot's own edits: the field it holds, and the one write it makes. */
+type BotEdit = {
   read: (profile: Profile) => string
   placeholder: string
   kind: "text" | "url" | "secret"
   patch: (value: string) => Partial<Omit<Profile, "id">>
 }
 
-const GENERAL_EDITS = {
+const BOT_EDITS = {
   name: {
     read: (profile) => profile.name,
     placeholder: "Hermes profile name",
@@ -494,20 +553,347 @@ const GENERAL_EDITS = {
     kind: "secret",
     patch: (value) => ({ apiKey: value.trim() }),
   },
-} satisfies Record<string, GeneralEdit>
+} satisfies Record<string, BotEdit>
 
-function generalEdit(id: string): GeneralEdit | undefined {
-  return id in GENERAL_EDITS ? GENERAL_EDITS[id as keyof typeof GENERAL_EDITS] : undefined
+function botEdit(id: string): BotEdit | undefined {
+  return id in BOT_EDITS ? BOT_EDITS[id as keyof typeof BOT_EDITS] : undefined
 }
 
 const TRIAGE_PURPOSE = "Whether a message from Main starts a new thread or continues one"
 
+/** What the page says of a key its host only opens when its process starts. */
+const RESTART_NOTE = "Applies when this bot's Hermes restarts."
+
 /**
- * General, by ownership: the bot's own switches, then what it looks like and how it connects, then
+ * General: the settings on this bot's own Hermes, as its Dashboard's Config > General tab holds
+ * them. The rows are the host's own — keys, kinds and choices all arrive with the read, so a key
+ * Hermes adds later is a row without an app release — and each is drawn as this app draws a setting:
+ * a switch acts in place, a value opens its edit, a pick opens its sheet (ADR 0055). Nothing is
+ * written until Save, and a reset hands the key back to the host's default.
+ *
+ * The page is its own sub-screen surface: below 1024px an edit is the screen the route pushed, and
+ * from 1024px it rides over the page as a centred card. A pick is neither — it opens where it is.
+ */
+function GeneralPage({
+  profile,
+  sub,
+  close,
+}: {
+  profile: Profile
+  sub?: BotSub
+  close: () => void
+}) {
+  const large = useLarge()
+  const navigate = useNavigate()
+  const answers = usePluginFeatureAnswers(profile, GENERAL_ANSWERS)
+  const info = useModelInfo(profile)
+  const own = botModel(profile, info)
+  const chain = useFallbackModels(profile)
+  const connection = connectionKey(profile)
+  const [block, setBlock] = useState<GeneralSettings>()
+  const [problem, setProblem] = useState<string>()
+  const [read, setRead] = useState("")
+  const [saving, setSaving] = useState<string>()
+  const [pick, setPick] = useState<string>()
+
+  useEffect(() => {
+    let cancelled = false
+    void getGeneralSettings(profile, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((next) => {
+        if (cancelled) return
+        setRead(connection)
+        setProblem(next ? undefined : "This host doesn't carry its General settings.")
+        if (next) setBlock(next)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        // A read that failed is still an answer: the page stops loading and says what the host said.
+        setRead(connection)
+        setProblem(
+          error instanceof Error ? error.message : "Couldn't read this bot's General settings.",
+        )
+      })
+    return () => {
+      cancelled = true
+    }
+    // The connection is what the answer belongs to: another bot's read is not this page's, and no
+    // other field of the profile moves what the host holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id, connection])
+
+  // Every write answers the host's fresh block, so the row a person just changed is the row the
+  // host now holds — and a refused write leaves the page as it was, with the host's sentence.
+  const write = useCallback(
+    async (key: string, value: unknown) => {
+      setSaving(key)
+      try {
+        const next = await setGeneralSetting(
+          profile,
+          key,
+          value,
+          AbortSignal.timeout(WRITE_TIMEOUT_MS),
+        )
+        // A host that answered without its block hasn't saved anything this page can draw: say so
+        // rather than closing the form over the value it held before.
+        if (!next) throw new Error("The host answered without its settings.")
+        setBlock(next)
+        return true
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+        return false
+      } finally {
+        setSaving(undefined)
+      }
+    },
+    [profile],
+  )
+
+  const seeded = read === connection
+  const groups = block ? generalGroups(block.fields) : []
+  // An address into a key this host doesn't hold: the page goes back to itself rather than standing
+  // on a screen that would draw nothing and write to a field it has no row for.
+  const field = block && sub ? block.fields.find((one) => one.key === sub.id) : undefined
+  const stray = Boolean(sub) && seeded && Boolean(block) && !field
+  useEffect(() => {
+    if (stray) close()
+  }, [close, stray])
+
+  if (sub) {
+    const form =
+      block && field ? (
+        <FieldForm
+          block={block}
+          field={field}
+          saving={saving === field.key}
+          onWrite={write}
+          onClose={close}
+        />
+      ) : problem ? (
+        <Banner tone="warning">{problem}</Banner>
+      ) : (
+        <div className="flex items-center justify-center py-16" data-general-loading>
+          <Spinner />
+        </div>
+      )
+    if (!large) return form
+    return (
+      <>
+        {cards()}
+        <EditCard title={sub.title} onClose={close}>
+          {form}
+        </EditCard>
+      </>
+    )
+  }
+
+  return cards()
+
+  /**
+   * The page's cards: the bot's model and the chain it falls back on lead, then a caption per section
+   * the host files its keys under with the rows it put there. The model and its chain are one
+   * decision, so they sit together ahead of the host's own order (ADR 0104).
+   */
+  function cards() {
+    if (!seeded)
+      return (
+        <div className="flex items-center justify-center py-16" data-general-loading>
+          <Spinner />
+        </div>
+      )
+    const [first, ...rest] = groups
+    const lead = first?.section === "" ? first.rows : []
+    const others = first?.section === "" ? rest : groups
+    return (
+      <div className="flex flex-col gap-4" data-bot-general>
+        {problem && <Banner tone="warning">{problem}</Banner>}
+        <Group>
+          <ValueRow
+            title="Model"
+            purpose="The host's main model, on every surface"
+            value={own ? fullModel(own) : ""}
+            onClick={() => setPick("model")}
+            data-setting="model"
+          />
+          {answers.fallbacks === "yes" && chain.supported && (
+            <ValueRow
+              title="Fallback providers"
+              purpose="The chain Hermes tries after the main model"
+              value={
+                chain.list.length ? plural(chain.list.length, "provider", "providers") : "None"
+              }
+              onClick={() => navigate(botSubPath(profile.id, "general", "fallback_providers"))}
+              data-setting="fallback_providers"
+            />
+          )}
+          {block && lead.map(row)}
+        </Group>
+        {others.map((group) => (
+          <Fragment key={group.section || "page"}>
+            {group.title && <Caption>{group.title}</Caption>}
+            <Group>{group.rows.map(row)}</Group>
+          </Fragment>
+        ))}
+        {picked()}
+        <ModelPick
+          open={pick === "model"}
+          title="Model"
+          profile={profile}
+          choice={own}
+          fallback={{ label: "Default", model: info?.model }}
+          onPick={(next) => void setDefaultModel(profile, next)}
+          onClose={() => setPick(undefined)}
+        />
+      </div>
+    )
+  }
+
+  /** One of the host's rows, wherever the card it belongs to is drawn. */
+  function row(field: GeneralField) {
+    if (!block) return null
+    return (
+      <GeneralRow
+        key={field.key}
+        block={block}
+        field={field}
+        disabled={Boolean(problem)}
+        saving={saving === field.key}
+        onWrite={write}
+        onPick={() => setPick(field.key)}
+        onOpen={() => navigate(botSubPath(profile.id, "general", field.key))}
+      />
+    )
+  }
+
+  /** The pick a row opened: its choices in the host's order, Automatic where the key can be cleared. */
+  function picked() {
+    const field = pick ? block?.fields.find((one) => one.key === pick) : undefined
+    if (!block || !field) return null
+    const held = String(effective(block, field.key) ?? "")
+    return (
+      <PickSurface
+        open
+        onOpenChange={(open) => !open && setPick(undefined)}
+        title={fieldLabel(field.key)}
+      >
+        <PickList
+          label={fieldLabel(field.key)}
+          searchable={field.searchable}
+          selected={held}
+          options={(field.options ?? []).map((option) => ({
+            id: option,
+            label: option ? optionLabel(option) : "Host default",
+          }))}
+          onPick={(id) => {
+            setPick(undefined)
+            void write(field.key, id || null)
+          }}
+        />
+        {field.restart && (
+          <p className="mt-3 px-1 text-center text-sm text-muted-foreground">{RESTART_NOTE}</p>
+        )}
+      </PickSurface>
+    )
+  }
+}
+
+/** One of the host's rows, drawn by what it holds: a switch writes on its own, everything else opens. */
+function GeneralRow({
+  block,
+  field,
+  saving,
+  disabled,
+  onWrite,
+  onPick,
+  onOpen,
+}: {
+  block: GeneralSettings
+  field: GeneralField
+  saving: boolean
+  disabled: boolean
+  onWrite: (key: string, value: unknown) => Promise<boolean>
+  onPick: () => void
+  onOpen: () => void
+}) {
+  if (field.kind === "switch")
+    return (
+      <SwitchRow
+        id={`general-${field.key}`}
+        title={fieldLabel(field.key)}
+        checked={rowOn(block, field.key)}
+        disabled={disabled || saving}
+        onCheckedChange={(next) => void onWrite(field.key, next)}
+        data-setting={field.key}
+      />
+    )
+  return (
+    <ValueRow
+      title={fieldLabel(field.key)}
+      // A key whose value reads wrong on its own carries the host's sentence about it.
+      purpose={field.note}
+      value={generalRowValue(block, field)}
+      muted={!explicitly(block, field.key)}
+      busy={saving}
+      disabled={disabled}
+      onClick={() => (field.kind === "pick" ? onPick() : onOpen())}
+      data-setting={field.key}
+    />
+  )
+}
+
+/**
+ * One of the host's settings, typed in: its value, the host's default behind it as the placeholder,
+ * and a reset where the file holds a value — which writes null, so the key leaves the file and the
+ * host's default takes over. A number that isn't one, or a list's entry left empty, is refused here
+ * before anything is written.
+ */
+function FieldForm({
+  block,
+  field,
+  saving,
+  onWrite,
+  onClose,
+}: {
+  block: GeneralSettings
+  field: GeneralField
+  saving: boolean
+  onWrite: (key: string, value: unknown) => Promise<boolean>
+  onClose: () => void
+}) {
+  const large = useLarge()
+  const fallback = block.defaults[field.key]
+  return (
+    <EditForm
+      label={fieldLabel(field.key)}
+      busy={saving}
+      surface={large ? "card" : "screen"}
+      value={draftOf(block, field)}
+      kind={field.kind === "number" ? "number" : "text"}
+      placeholder={field.kind === "list" ? "comma, separated" : String(fallback ?? "")}
+      note={field.restart ? RESTART_NOTE : undefined}
+      onSave={(text) => {
+        const parsed = draftValue(field, text)
+        if (!parsed.ok) {
+          toast.error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
+          return
+        }
+        void onWrite(field.key, parsed.value).then((ok) => ok && onClose())
+      }}
+      onReset={
+        explicitly(block, field.key)
+          ? () => void onWrite(field.key, null).then((ok) => ok && onClose())
+          : undefined
+      }
+      onCancel={onClose}
+    />
+  )
+}
+
+/**
+ * What a bot is, on its own page: its switches, then what it looks like and how it connects, then
  * what sits on its Hermes. Every setting is a value that opens its edit or its pick — no card holds
  * a field (ADR 0055).
  */
-function GeneralPage({
+function BotCard({
   profile,
   delegation,
   onOpen,
@@ -554,43 +940,18 @@ function GeneralPage({
   }
 
   return (
-    <>
+    <div className="flex flex-col gap-4" data-bot-card>
+      {/* The bot's own three switches, and the tap that asks its server how it is: the row is the
+          action, so nothing sits beside it that a thumb has to find. */}
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
-        <RemindersSetting profile={profile} />
-      </Group>
-
-      <Caption>Bot Profile</Caption>
-      <Group>
-        <ValueRow
-          title="Name"
-          value={profile.name}
-          onClick={() => onOpen("name")}
-          data-setting="name"
-        />
-        <ValueRow
-          title="Image"
-          value={character?.name ?? ""}
-          onClick={() => setPick("image")}
-          trailing={<Bot id={profile.botId} className="size-10" />}
-          data-setting="image"
-        />
         <ValueRow
           title="Test connection"
           purpose="Ask this bot's server how it is"
-          // The answer takes the value's place under the purpose: the accent where it connected, the
-          // host's own sentence in red where it didn't.
-          trailing={
-            <Button
-              onClick={test}
-              disabled={connection.state === "testing" || profile.disabled}
-              aria-label="Test connection"
-            >
-              <PlugZapIcon data-icon="inline-start" />
-              {connection.state === "testing" ? "Testing…" : "Test"}
-            </Button>
-          }
+          onClick={test}
+          disabled={profile.disabled}
+          busy={connection.state === "testing"}
           data-setting="test"
         >
           {answer && (
@@ -609,6 +970,24 @@ function GeneralPage({
             </span>
           )}
         </ValueRow>
+      </Group>
+
+      <Caption>Bot Profile</Caption>
+      <Group>
+        <ValueRow
+          title="Name"
+          value={profile.name}
+          onClick={() => onOpen("name")}
+          data-setting="name"
+        />
+        <ValueRow
+          title="Image"
+          value={character?.name ?? ""}
+          onClick={() => setPick("image")}
+          trailing={<Bot id={profile.botId} className="size-10" />}
+          data-setting="image"
+        />
+        <RemindersSetting profile={profile} />
       </Group>
 
       {/* The caption and its rows read one gate: a bot whose host withholds the row, or hasn't
@@ -680,7 +1059,7 @@ function GeneralPage({
         onPick={(next) => record.save(next)}
         onClose={() => setPick(undefined)}
       />
-    </>
+    </div>
   )
 }
 
@@ -688,14 +1067,10 @@ function GeneralPage({
 function ModelsPage({ profile }: { profile: Profile }) {
   const answers = usePluginFeatureAnswers(profile, MODELS_ANSWERS)
   const triage = answers.triage === "yes"
-  const fallbacks = answers.fallbacks === "yes"
   const [pick, setPick] = useState<string>()
-  const navigate = useNavigate()
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
   const triageRecord = useTriageModel(profile)
-  const chain = useFallbackModels(profile)
-  const chains = chain.list.length
 
   return (
     <div className="flex flex-col gap-4" data-bot-models>
@@ -731,22 +1106,6 @@ function ModelsPage({ profile }: { profile: Profile }) {
           onClick={() => setPick("model")}
           data-setting="model"
         />
-        <ValueRow
-          title="Default model"
-          purpose="The host's main model, on every surface"
-          value={own ? fullModel(own) : ""}
-          onClick={() => setPick("default-model")}
-          data-setting="default-model"
-        />
-        {fallbacks && chain.supported && (
-          <ValueRow
-            title="Fallback providers"
-            purpose="The chain Hermes tries after the main model"
-            value={chains ? `${chains} ${chains === 1 ? "provider" : "providers"}` : "None"}
-            onClick={() => navigate(botSubPath(profile.id, "models", "fallbacks"))}
-            data-setting="fallbacks"
-          />
-        )}
       </Group>
 
       <ModelPick
@@ -756,16 +1115,6 @@ function ModelsPage({ profile }: { profile: Profile }) {
         choice={own}
         fallback={{ label: "Default model", model: own?.model }}
         onPick={(next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined)}
-        onClose={() => setPick(undefined)}
-      />
-
-      <ModelPick
-        open={pick === "default-model"}
-        title="Default model"
-        profile={profile}
-        choice={profile.modelChoice}
-        fallback={{ label: "Default", model: info?.model }}
-        onPick={(next) => setDefaultModel(profile, next)}
         onClose={() => setPick(undefined)}
       />
 
@@ -795,45 +1144,59 @@ function FallbacksPage({ profile }: { profile: Profile }) {
       toast.error(error instanceof Error ? error.message : String(error))
     })
 
+  // Adding is the screen's own action, in its header: a row that added was a setting among settings,
+  // and this screen holds a chain of picks, not a row to write.
+  useHeaderAction(
+    "add",
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label="Add fallback"
+      // Hermes holds a chain of two: at the cap the header has nothing left to add.
+      disabled={cannotEdit || list.length >= MAX_FALLBACKS}
+      onClick={() => setPick(list.length)}
+    >
+      <PlusIcon />
+    </Button>,
+  )
+
   return (
     <div className="flex flex-col gap-4" data-fallbacks>
-      <Group>
-        {list.map((fallback, index) => (
-          <ValueRow
-            key={index}
-            title={`Fallback ${index + 1}`}
-            value={fullModel(fallback)}
-            onClick={() => setPick(index)}
-            disabled={cannotEdit}
-            busy={saving}
-            data-fallback={index + 1}
-            trailing={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-lg"
-                className="mr-3 size-11 shrink-0"
-                aria-label={`Remove fallback ${index + 1}`}
-                disabled={saving}
-                onClick={() => write(list.filter((_, at) => at !== index))}
-              >
-                <XIcon />
-              </Button>
-            }
-          />
-        ))}
-        {list.length < MAX_FALLBACKS && (
-          <button
-            type="button"
-            className={cn(linkRowClass, "gap-2 text-primary")}
-            disabled={cannotEdit}
-            onClick={() => setPick(list.length)}
-          >
-            <PlusIcon className="size-5 shrink-0" />
-            <span className="text-base">Add fallback</span>
-          </button>
-        )}
-      </Group>
+      {list.length ? (
+        <Group>
+          {list.map((fallback, index) => (
+            <ValueRow
+              key={index}
+              title={`Fallback ${index + 1}`}
+              value={fullModel(fallback)}
+              onClick={() => setPick(index)}
+              disabled={cannotEdit}
+              busy={saving}
+              data-fallback={index + 1}
+              trailing={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-lg"
+                  className="size-11 shrink-0"
+                  aria-label={`Remove fallback ${index + 1}`}
+                  disabled={saving}
+                  onClick={() => write(list.filter((_, at) => at !== index))}
+                >
+                  <XIcon />
+                </Button>
+              }
+            />
+          ))}
+        </Group>
+      ) : (
+        <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+          {cannotEdit && !providers.length
+            ? "No fallbacks. This bot's Hermes hasn't reported the providers to pick one from."
+            : "No fallbacks. Hermes tries the main model alone."}
+        </p>
+      )}
 
       <ModelPick
         open={pick !== undefined}

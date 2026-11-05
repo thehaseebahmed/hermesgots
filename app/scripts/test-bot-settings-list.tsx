@@ -18,6 +18,7 @@ import { SettingsPage } from "@/routes/settings"
 import {
   Path,
   absent,
+  GENERAL,
   botProfile,
   click,
   find,
@@ -27,11 +28,15 @@ import {
   mount,
   path,
   seedSettings,
+  shutSheet,
   text,
+  type,
+  until,
+  wordsOf,
 } from "./component-kit.tsx"
 
-/** Every feature the four gated pages need, so a test starts from a host that has them all. */
-const ALL = ["dictation", "mcps", "afk_picks", "skills"]
+/** Every feature the gated pages need, so a test starts from a host that has them all. */
+const ALL = ["general_page", "dictation", "mcps", "afk_picks", "skills"]
 
 const settings = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -50,7 +55,7 @@ async function seed(name: string, features: string[] | "away", patch = {}) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name, patch))
-  mediaHost({ features })
+  mediaHost({ features, general: GENERAL })
 }
 
 const rows = () => findAll("[data-bot-page]").map((row) => row.getAttribute("data-bot-page"))
@@ -60,38 +65,43 @@ const headings = () =>
   findAll(
     "[data-bot-settings-list] h1, [data-bot-settings-list] h2, [data-bot-settings-list] h3",
   ).map((heading) => heading.textContent)
-/** The cards the list draws, each with the pages it holds: General's alone, then every other page's. */
+/** The cards the list draws, each with the pages it holds. */
 const cards = () =>
-  findAll("[data-bot-settings-list] [data-settings-group]").map((card) =>
-    [...card.querySelectorAll("[data-bot-page]")].map((one) => one.getAttribute("data-bot-page")),
-  )
+  findAll("[data-bot-settings-list] [data-settings-group]")
+    .map((card) =>
+      [...card.querySelectorAll("[data-bot-page]")].map((one) => one.getAttribute("data-bot-page")),
+    )
+    .filter((pages) => pages.length)
 /** The icons a row wears: its page's own, and no chevron beside it. */
 const iconsPerRow = () =>
   findAll("[data-bot-page]").map((one) => one.querySelectorAll("svg").length)
 /** What a user reads on an element, with its spacing flattened. */
-const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
 const back = () => find('button[aria-label="Back"]')
 const titles = () => findAll("h1").map((heading) => heading.textContent)
 
-test("the list draws General alone, then every other page in the one card under it", async () => {
+test("the bot's page is what the bot is under Bot, then every setting in one card under Settings", async () => {
   await seed("list-order", ALL)
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(
       rows(),
       ["general", "models", "coding", "speech-to-text", "mcps", "skills"],
-      "the pages in list order",
+      "the settings in list order",
     )
     assert.deepEqual(
       cards(),
-      [["general"], ["models", "coding", "speech-to-text", "mcps", "skills"]],
-      "two cards separated by a gap: General on its own, then every other page together",
+      [["general", "models", "coding", "speech-to-text", "mcps", "skills"]],
+      "one card of every setting, under the bot's own rows",
     )
-    assert.deepEqual(headings(), [], "and no headings: a card is separated by the gap, not named")
+    assert.deepEqual(
+      headings(),
+      [],
+      "and no headings: a caption names a card, and none is a heading",
+    )
     assert.deepEqual(
       findAll("[data-bot-page]").map((one) => one.textContent),
       [
-        "GeneralEnabled, notifications, profile and your Hermes's address",
-        "ModelsModel, default model, triage model and fallback providers",
+        "GeneralModel, limits, session timeouts and update settings",
+        "ModelsThe model this bot's chats run and its triage model",
         "CodingAway From Keyboard and this bot's pick budget",
         "Speech-to-textVocabulary, cleanup model and speech model",
         "MCPThe servers this bot works with",
@@ -101,11 +111,19 @@ test("the list draws General alone, then every other page in the one card under 
     )
     assert.deepEqual(iconsPerRow(), [1, 1, 1, 1, 1, 1], "one icon a row, and no chevron beside it")
     assert.deepEqual(
-      words(find("[data-bot-settings-list]")),
-      findAll("[data-bot-page]")
-        .map((one) => words(one))
-        .join(""),
-      "and nothing else is written on the list: no captions over these cards",
+      findAll("[data-bot-settings-list] > p").map((one) => wordsOf(one)),
+      ["Bot", "Settings"],
+      "two captions: the bot's own rows, then the settings behind them",
+    )
+    assert.deepEqual(
+      findAll("[data-bot-card] > p").map((one) => wordsOf(one)),
+      ["Bot Profile", "Hermes"],
+      "and the bot's card keeps the names its own cards had",
+    )
+    assert.match(
+      wordsOf(find("[data-bot-card]")),
+      /^Mute notifications/,
+      "the bot's switches lead its card",
     )
     assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
     assert.ok(
@@ -124,24 +142,24 @@ const GATED = [
 ] as const
 
 for (const { feature, segment, name } of GATED) {
-  test(`a host that withholds ${feature} draws no ${name} row, and its address lands on General`, async () => {
+  test(`a host that withholds ${feature} draws no ${name} row, and its address lands on the bot's page`, async () => {
     await seed(
       `gate-${feature}`,
       ALL.filter((one) => one !== feature),
     )
     await mount(settings(`/settings/bots/bot-1/${segment}`), async () => {
-      assert.equal(row(segment), null, `no ${name} row on the list`)
-      assert.equal(path(), "/settings/bots/bot-1/general", "the address is General's, in place")
-      assert.match(text(), /Test connection/, "and General is what is drawn")
+      assert.equal(row(segment), null, `no ${name} row on the settings card`)
+      assert.equal(path(), "/settings/bots/bot-1", "the bot's own address, in place")
+      assert.ok(find("[data-bot-card]"), "and the bot's page is what is drawn")
     })
   })
 }
 
-test("a host that hasn't answered yet keeps the address, and draws General meanwhile", async () => {
+test("a host that hasn't answered yet keeps the address, and draws the bot's page meanwhile", async () => {
   await seed("gate-unknown", "away")
   await mount(settings("/settings/bots/bot-1/mcps"), async () => {
     assert.equal(path(), "/settings/bots/bot-1/mcps", "the address it was asked for stands")
-    assert.match(text(), /Test connection/, "General is what is drawn while there is no answer")
+    assert.ok(find("[data-bot-card]"), "and the bot's own page is what is drawn")
   })
 })
 
@@ -238,8 +256,16 @@ test(
       assert.equal(path(), "/settings/bots/bot-1/models", "the address carries the segment")
       assert.ok(find("[data-bot-settings-list]"), "the list stays where it was")
       assert.deepEqual(titles(), ["A bot", "Models"], "and the pane beside it swapped")
-      assert.match(text(), /Default model/, "to the Models page")
-      assert.doesNotMatch(text(), /Test connection/, "and nothing of General is left")
+      assert.match(
+        text(),
+        /The model a chat runs when it has no pick of its own/,
+        "to the Models page",
+      )
+      assert.doesNotMatch(
+        text(),
+        /Fallback providers/,
+        "and the chain is General's now, not theirs",
+      )
     })
   }),
 )
@@ -247,34 +273,103 @@ test(
 test("a page still holds what its page held, each setting over its value", async () => {
   const CHAT = [...ALL, "delegation_model", "triage_model", "fallbacks"]
   await seed("pages", ALL, { hostId: "host-1" })
-  await mount(settings("/settings/bots/bot-1/general"), async () => {
-    assert.deepEqual(titles(), ["General"], "the General page")
+  await mount(settings("/settings/bots/bot-1"), async () => {
+    assert.deepEqual(titles(), ["A bot"], "the bot's own page")
     for (const label of ["Enabled", "Name", "Image", "Test connection"])
-      assert.ok(text().includes(label), `General still has ${label}`)
+      assert.ok(text().includes(label), `it still has ${label}`)
     assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
     assert.doesNotMatch(text(), /Subagent model/, "and nothing of the Hermes side is forced on it")
   })
   await seed("pages-models", CHAT, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1/models"), async () => {
     assert.deepEqual(titles(), ["Models"], "the Models page")
-    for (const label of ["Default model", "Triage model", "Fallback providers"])
-      assert.ok(text().includes(label), `Models still has ${label}`)
-    assert.ok(find('[data-setting="fallbacks"]'), "its chain is a value that opens its own screen")
+    assert.ok(
+      text().includes("The model a chat runs when it has no pick of its own"),
+      "its model pick",
+    )
+    assert.ok(find('[data-setting="model"]'), "which is a value that opens its pick")
   })
 })
 
 test("a page's own edit is a screen the list's page pushes, with the list under it", async () => {
   await seed("pages-edit", ALL)
-  await mount(settings("/settings/bots/bot-1/general/name"), async () => {
-    assert.deepEqual(titles(), ["Name"], "the edit is a screen named for what it edits")
+  await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
+    assert.deepEqual(
+      titles(),
+      ["Edit Name"],
+      "the screen says what it does, not what the field says",
+    )
     assert.ok(find("#edit-name"), "holding the bot's name in a field")
-    assert.equal(path(), "/settings/bots/bot-1/general/name", "at an address of its own")
+    assert.equal(path(), "/settings/bots/bot-1/bot/name", "at an address of its own")
+    await click(back())
+    assert.equal(path(), "/settings/bots/bot-1", "and Back returns to the page it came from")
+    assert.deepEqual(titles(), ["A bot"], "which is named for the bot")
+  })
+
+  // Every drill-in form says what it does, the host's own keys included.
+  await seed("pages-edit-keyed", ALL)
+  await mount(settings("/settings/bots/bot-1/general/timezone"), async () => {
+    await until(async () => Boolean(find("#edit-timezone")), "the field")
+    assert.deepEqual(titles(), ["Edit Timezone"], "a key's form is named the same way")
+  })
+})
+
+test("a back that would throw away typing asks first", async () => {
+  await seed("pages-discard", ALL)
+  await mount(settings("/settings/bots/bot-1/general/timezone"), async () => {
+    await until(async () => Boolean(find("#edit-timezone")), "the field")
+    await type(find("#edit-timezone"), "UTC")
+    await click(back())
+    assert.equal(path(), "/settings/bots/bot-1/general/timezone", "the back holds the screen")
+    assert.ok(find("[role='alertdialog']"), "and asks before it throws the typing away")
+
+    await click(
+      findAll("[role='alertdialog'] button").find((one) => wordsOf(one) === "Keep editing") ?? null,
+    )
+    assert.equal(path(), "/settings/bots/bot-1/general/timezone", "keeping the edit stays in it")
+
+    await click(back())
+    await click(
+      findAll("[role='alertdialog'] button").find((one) => wordsOf(one) === "Discard") ?? null,
+    )
+    assert.equal(path(), "/settings/bots/bot-1/general", "and discarding leaves")
+  })
+})
+
+test(
+  "an edit drawn as a card is a pop-up: closing it asks nothing",
+  laptop(async () => {
+    await seed("wide-edit", ALL)
+    await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
+      await until(async () => Boolean(find("#edit-name")), "the card's field")
+      await type(find("#edit-name"), "Renamed")
+      // Clicking out of the card — Escape here — is the whole of saying no.
+      await shutSheet(() => find('[role="dialog"]'))
+      assert.equal(
+        path(),
+        "/settings/bots/bot-1",
+        "the card closes onto the page it was opened over",
+      )
+      assert.equal(
+        find('[role="alertdialog"]'),
+        null,
+        "with nothing asked: closing a pop-up is the whole of saying no",
+      )
+      assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "and nothing was written")
+    })
+  }),
+)
+
+test("an untouched edit leaves without a word", async () => {
+  await seed("pages-untouched", ALL)
+  await mount(settings("/settings/bots/bot-1/general/timezone"), async () => {
+    await until(async () => Boolean(find("#edit-timezone")), "the field")
     await click(back())
     assert.equal(
       path(),
       "/settings/bots/bot-1/general",
-      "and Back returns to the page it came from",
+      "a form nobody typed in is a back, not a question",
     )
-    assert.deepEqual(titles(), ["General"], "which is named for the page")
+    assert.equal(find('[role="alertdialog"]'), null, "with nothing to ask")
   })
 })

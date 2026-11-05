@@ -65,18 +65,19 @@ const run = async ({ page, profileId, shot }) => {
       response.url().includes("/api/plugins/memento/info") && response.request().method() === "GET",
   )
   await page.goto(`${app}${editor}`)
-  await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
+  await page.locator("[data-bot-general]").waitFor({ timeout: 15_000 })
   await answered
   await settled(page)
   assert.equal(await mcpRow().count(), 0, "the bot's list of pages has no MCP page")
   await shot("no-page")
 
-  // Reached by URL, the page lands back on the Bot's General page: no server list, and nowhere left
-  // to be stuck.
+  // Reached by URL, the page lands on the Bot's own page: no server list, and nowhere left to be
+  // stuck.
   await page.goto(`${app}${screen}`)
-  await page.waitForURL(`**${editor}/general`, { timeout: 15_000 })
+  await page.waitForURL(`**${editor}`, { timeout: 15_000 })
   assert.equal(await page.locator("[data-mcp]").count(), 0, "no server is listed")
-  await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
+  // The page it lands on is the Bot's: its own Hermes settings, in the host's own rows.
+  await page.locator("[data-bot-general]").waitFor({ timeout: 15_000 })
   await shot("back-on-general")
 
   // A Hermes that can list a Bot's servers but not switch one: the page lists them and offers no

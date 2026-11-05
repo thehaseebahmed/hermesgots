@@ -7,6 +7,16 @@
  * rule without a host.
  */
 
+import {
+  effective,
+  explicitly,
+  parseNumber,
+  scalarsOf,
+  rowOn,
+  rowValue,
+  type ParsedNumber,
+} from "./settings-values.ts"
+
 /** The feature a host advertises when it carries the speech settings beyond the model. */
 export const STT_SETTINGS = "stt_settings"
 
@@ -207,8 +217,8 @@ const CATALOGUE_ONLY = new Set(["deepinfra"])
 export function readStt(raw: unknown): SttSettings | undefined {
   const block = (raw ?? {}) as Record<string, unknown>
   if (typeof block !== "object" || Array.isArray(block)) return undefined
-  const values = scalars(block.values)
-  const defaults = scalars(block.defaults)
+  const values = scalarsOf(block.values) as Record<string, SttValue>
+  const defaults = scalarsOf(block.defaults) as Record<string, SttValue>
   if (!Object.keys(defaults).length) return undefined
   const provider = (block.provider ?? {}) as Record<string, unknown>
   const models: Record<string, string[]> = {}
@@ -243,45 +253,8 @@ function providerEntries(raw: unknown): { name: string; keySet: boolean | null }
   })
 }
 
-function scalars(raw: unknown): Record<string, SttValue> {
-  const out: Record<string, SttValue> = {}
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (value === null || ["string", "number", "boolean"].includes(typeof value))
-      out[key] = value as SttValue
-  }
-  return out
-}
-
-/** Whether the file really holds this key, rather than the host falling back to its default. */
-export function explicitly(block: SttSettings, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(block.values, key)
-}
-
-/** What will happen: the value written, else Hermes's own default for the key. */
-export function effective(block: SttSettings, key: string): SttValue {
-  if (explicitly(block, key)) return block.values[key] ?? null
-  const fallback = block.defaults[key]
-  return fallback === undefined ? null : fallback
-}
-
-/** A row's value as a user reads it: empty where nothing is held, so the row says Not set. */
-export function rowValue(block: SttSettings, key: string): string {
-  const value = effective(block, key)
-  if (value === null || value === "") return ""
-  if (typeof value === "boolean") return value ? "On" : "Off"
-  return String(value)
-}
-
-/** A switch's state: on unless the host says off, as Hermes reads its own truthiness. */
-export function rowOn(block: SttSettings, key: string): boolean {
-  const value = effective(block, key)
-  if (typeof value === "boolean") return value
-  if (typeof value === "number") return value !== 0
-  if (typeof value === "string")
-    return !["", "false", "no", "off", "0"].includes(value.trim().toLowerCase())
-  return false
-}
+/** The readings this page shares with General's: one table, so a row reads the same on both. */
+export { effective, explicitly, parseNumber, rowOn, rowValue, type ParsedNumber }
 
 /** The Provider row: what Hermes will use, and why when that is nothing. */
 export interface ProviderLine {
@@ -376,8 +349,7 @@ export function providerOptions(block: SttSettings): ProviderChoice[] {
     ...block.choices.map(({ name, keySet }) => ({
       id: name,
       label: providerLabel(name),
-      detail:
-        providerNote({ inUse: name === block.provider.name, keySet }) ?? undefined,
+      detail: providerNote({ inUse: name === block.provider.name, keySet }) ?? undefined,
     })),
   ]
 }
@@ -438,19 +410,4 @@ export function tableKeys(block?: SttSettings): string[] {
     ...STT_ROWS.map((row) => row.key),
     ...providers.flatMap((name) => providerPage(name).map((row) => row.key)),
   ]
-}
-
-/** A typed number, or `null` for a field left blank — which means the host's own default. */
-export type ParsedNumber = { ok: true; value: number | null } | { ok: false }
-
-/**
- * `null` is a field cleared back to the host's default; anything that isn't a number is refused
- * before it is written, since Hermes declares no bound on any of these and this page adds none.
- */
-export function parseNumber(text: string): ParsedNumber {
-  const trimmed = text.trim()
-  if (!trimmed) return { ok: true, value: null }
-  if (!/^-?(\d+(\.\d+)?|\.\d+)$/.test(trimmed)) return { ok: false }
-  const value = Number(trimmed)
-  return Number.isFinite(value) ? { ok: true, value } : { ok: false }
 }

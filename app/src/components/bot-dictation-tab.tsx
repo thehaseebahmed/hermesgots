@@ -6,6 +6,10 @@ import { useNavigate } from "react-router"
 import { Banner } from "@/components/banner"
 import {
   Caption,
+  FormActions,
+  fieldAreaClass,
+  fieldInputClass,
+  fieldLabelClass,
   Group,
   ModelPick,
   PickList,
@@ -617,7 +621,7 @@ function ValueForm({
   const id = `stt-${row.key}`
 
   return (
-    <PickSurface open onOpenChange={(next) => !next && onClose()} title={row.label}>
+    <PickSurface open onOpenChange={(next) => !next && onClose()} title={`Edit ${row.label}`}>
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
@@ -629,11 +633,14 @@ function ValueForm({
         }}
       >
         <div className="flex flex-col gap-2">
-          <Label htmlFor={id}>{row.label}</Label>
+          <Label htmlFor={id} className={fieldLabelClass}>
+            {row.label}
+          </Label>
           {row.control === "multiline" ? (
             <Textarea
               id={id}
               rows={3}
+              className={fieldAreaClass}
               autoCapitalize="off"
               spellCheck={false}
               placeholder={String(block.defaults[row.key] ?? "")}
@@ -643,7 +650,7 @@ function ValueForm({
           ) : (
             <Input
               id={id}
-              className="h-11"
+              className={fieldInputClass}
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
@@ -654,25 +661,14 @@ function ValueForm({
             />
           )}
         </div>
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-          {written && (
-            <Button
-              type="button"
-              variant="ghost"
-              className="text-muted-foreground sm:mr-auto"
-              disabled={saving}
-              onClick={() => void onWrite(row.key, null).then((ok) => ok && onClose())}
-            >
-              Host default
-            </Button>
-          )}
-          <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!ready}>
-            Save
-          </Button>
-        </div>
+        <FormActions
+          onCancel={onClose}
+          onReset={
+            written ? () => void onWrite(row.key, null).then((ok) => ok && onClose()) : undefined
+          }
+          disabled={!ready}
+          busy={saving}
+        />
       </form>
     </PickSurface>
   )
@@ -997,5 +993,7 @@ function ProbeNote({
 /** A model's one muted line: what it weighs, how it hears here, and whether it is already at work. */
 function modelNotes(row: SpeechModel): string {
   const download = row.downloaded || row.inUse ? "" : "Not on this host"
-  return [modelSize(row.sizeMb), measuredLine(row), marked(row), download].filter(Boolean).join(" · ")
+  return [modelSize(row.sizeMb), measuredLine(row), marked(row), download]
+    .filter(Boolean)
+    .join(" · ")
 }

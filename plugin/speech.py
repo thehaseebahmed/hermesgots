@@ -42,7 +42,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import dictation, dictation_cleanup, speech_probe
+from . import config_keys, dictation, dictation_cleanup, speech_probe
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -111,16 +111,8 @@ def clean_model(value: Any) -> str:
 
 def _stt(config_path: Path, strict: bool = False) -> Dict[str, Any]:
     """The ``stt`` section of the profile's ``config.yaml``, as Hermes reads it."""
-    try:
-        from gateway.run import _load_gateway_config
-
-        cfg = _load_gateway_config(config_path=config_path) or {}
-    except Exception:
-        if strict:
-            raise
-        logger.debug("memento: couldn't read the host's speech settings", exc_info=True)
-        return {}
-    section = cfg.get(STT_KEY) if isinstance(cfg, dict) else None
+    cfg = config_keys.load(config_path, strict=strict)
+    section = cfg.get(STT_KEY) if cfg else None
     return section if isinstance(section, dict) else {}
 
 
@@ -325,18 +317,13 @@ def _defaults() -> Dict[str, Any]:
     return section
 
 
-def _flatten(section: Dict[str, Any], prefix: str = f"{STT_KEY}.") -> Dict[str, Any]:
+def _flatten(section: Dict[str, Any], prefix: str = STT_KEY) -> Dict[str, Any]:
     """A section as the dotted paths Hermes spells it by, minus the ones this page never carries."""
-    out: Dict[str, Any] = {}
-    for key, value in section.items():
-        if key in HIDDEN:
-            continue
-        path = f"{prefix}{key}"
-        if isinstance(value, dict):
-            out.update(_flatten(value, f"{path}."))
-        else:
-            out[path] = value
-    return out
+    return {
+        path: value
+        for path, value in config_keys.walk(section, prefix)
+        if path.rsplit(".", 1)[-1] not in HIDDEN
+    }
 
 
 # The two spellings Hermes gives a provider's model: ElevenLabs' is ``model_id``; every other
@@ -518,19 +505,10 @@ def _checked(key: Any, value: Any) -> Any:
         if not isinstance(value, str) or not value.strip():
             raise ValueError("A provider pick needs a provider's name, or nothing for Automatic.")
         return value.strip()
-    if isinstance(sample, bool):
-        if not isinstance(value, bool):
-            raise ValueError(f"{key} is a switch, so its value is true or false.")
-        return value
-    if isinstance(sample, (int, float)):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{key} takes a number.")
-        return value
-    if isinstance(sample, str):
-        if not isinstance(value, str):
-            raise ValueError(f"{key} takes text.")
-        return value
-    raise ValueError(f"{key} isn't a speech setting this page can write.")
+    kind = config_keys.kind_of(sample)
+    if kind is None:
+        raise ValueError(f"{key} isn't a speech setting this page can write.")
+    return config_keys.coerce(key, kind, value)
 
 
 def set_stt_value(config_path: Path, key: Any, value: Any = None) -> None:
@@ -541,10 +519,7 @@ def set_stt_value(config_path: Path, key: Any, value: Any = None) -> None:
     removes that key alone. ValueError names a key the page may not write, or a value the key it
     names can't hold, before the file is touched.
     """
-    wanted = _checked(key, value)
-    from utils import atomic_roundtrip_yaml_update
-
-    atomic_roundtrip_yaml_update(config_path, str(key), wanted)
+    config_keys.write(config_path, str(key), _checked(key, value))
 
 
 def read_cleanup(path: Path) -> Optional[Dict[str, str]]:

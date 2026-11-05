@@ -35,7 +35,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   InputGroup,
@@ -43,9 +42,11 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
 import { useModelInfo } from "@/lib/model-info"
+import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
 
 /**
@@ -323,6 +324,50 @@ export function EditCard({
   )
 }
 
+/**
+ * A back that leaves an *edit screen* holding changes asks first: the dialog is the screen's to draw,
+ * and the handler it hands out is the one a back button calls. An edit drawn as a card registers no
+ * changes at all, so a back over one leaves without a word — a pop-up is closed, not committed.
+ */
+export function useLeaveGuard(leave: () => void) {
+  const [asking, setAsking] = useState(false)
+  // The handler is stable, so a screen can publish the same one to the system's own back without
+  // publishing it again on every render.
+  const latest = useRef(leave)
+  latest.current = leave
+  const go = useCallback(() => latest.current(), [])
+  const back = useCallback(() => {
+    if (holdsUnsavedChanges()) setAsking(true)
+    else go()
+  }, [go])
+  return {
+    back,
+    dialog: (
+      <ConfirmDestructive
+        open={asking}
+        title="Discard changes?"
+        description="What you typed in this edit isn't saved. Going back leaves it as it was."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onOpenChange={setAsking}
+        onConfirm={() => {
+          setAsking(false)
+          go()
+        }}
+      />
+    ),
+  }
+}
+
+/** A form field's label: the muted line above the input, the same everywhere one is typed into. */
+export const fieldLabelClass = "px-1 text-sm text-muted-foreground"
+/** A form field's input: a filled pill a thumb can find, at the height every edit screen uses. */
+export const fieldInputClass = "h-12 rounded-full bg-muted px-4 text-base"
+/** The same field inside a group that already draws the pill: only the room and the type are left. */
+export const fieldInnerClass = "h-12 px-4 text-base"
+/** A field holding several lines: the same filled room, with the room a sentence needs. */
+export const fieldAreaClass = "bg-muted px-4 text-base"
+
 export const NOT_SET = "Not set"
 
 /**
@@ -405,7 +450,7 @@ export function ValueRow({
         >
           {body}
         </button>
-        {trailing}
+        <span className="flex shrink-0 items-center pr-5">{trailing}</span>
       </div>
     )
   if (!onClick)
@@ -437,50 +482,138 @@ export function ValueRow({
 }
 
 /**
+ * The bar an edit form's actions sit in: one pill, the cancel and the save divided by a hairline,
+ * centred under the fields. Every edit wears it — pushed as a screen on a phone, drawn as a card
+ * above 1024px — so the two ways of editing are one form, and a reset, where the form has one,
+ * leads the bar. Save is the form's submit, so a caller keeps its own `onSubmit`.
+ */
+export function FormActions({
+  onCancel,
+  onReset,
+  resetLabel = "Reset",
+  saveLabel = "Save",
+  disabled,
+  busy,
+  className,
+}: {
+  /** The form's way out. Left off by a form whose Reset leads instead: back is its cancel. */
+  onCancel?: () => void
+  /**
+   * The form's nothing value: for a host setting, the key leaving the file. A form that has one leads
+   * with it in place of Cancel — back is what cancels, and the bar asks only what the screen can do.
+   */
+  onReset?: () => void
+  resetLabel?: string
+  saveLabel?: string
+  /** Cancels and saves both wait while the form holds nothing worth writing. */
+  disabled?: boolean
+  busy?: boolean
+  className?: string
+}) {
+  return (
+    <div
+      data-form-actions
+      className={cn(
+        "mx-auto flex w-fit max-w-full items-center rounded-full bg-muted p-1",
+        className,
+      )}
+    >
+      {onReset ? (
+        <>
+          <button type="button" disabled={busy} onClick={onReset} className={actionClass}>
+            {resetLabel}
+          </button>
+          <Divider />
+        </>
+      ) : onCancel ? (
+        <>
+          <button type="button" onClick={onCancel} className={actionClass}>
+            Cancel
+          </button>
+          <Divider />
+        </>
+      ) : null}
+      <button type="submit" disabled={disabled || busy} className={cn(actionClass, "font-medium")}>
+        {busy && <Spinner />}
+        {saveLabel}
+      </button>
+    </div>
+  )
+}
+
+const actionClass =
+  "flex min-h-11 items-center justify-center gap-2 rounded-full px-5 text-base text-foreground transition-colors hover:bg-background/40 disabled:opacity-50"
+
+/** The hairline between two of the bar's actions: drawn, never read out. */
+function Divider() {
+  return <span aria-hidden className="h-6 w-px shrink-0 bg-border" />
+}
+
+/**
  * The form a text value is edited in, whether it is pushed as a screen or shown as a centred card:
- * a labelled input holding the value, and Cancel and Save beneath it. Nothing is written until Save,
- * and Cancel writes nothing at all — the one write is what the row then shows.
+ * a labelled field holding the value, and the actions bar beneath it. Nothing is written until Save,
+ * and Cancel writes nothing at all — the one write is what the row then shows. On a phone the form
+ * fills the screen so the bar stands at its foot; in a card it stops under its field.
  */
 export function EditForm({
   label,
   value,
   placeholder,
   kind = "text",
+  note,
+  busy,
+  surface,
   onSave,
+  onReset,
   onCancel,
 }: {
   label: string
   value: string
   placeholder?: string
   /** `url` asks for a keyboard's URL key; `secret` masks the value behind a show toggle. */
-  kind?: "text" | "url" | "secret"
+  kind?: "text" | "url" | "secret" | "number"
+  /** A line under the field about the write itself: when the host reads the key, say. */
+  note?: string
   onSave: (value: string) => void
-  onCancel: () => void
+  /** The form's nothing value, where the host holds one: the key leaving the file. */
+  onReset?: () => void
+  onCancel?: () => void
+  /** A write already on its way: the bar waits, and says so. */
+  busy?: boolean
+  /**
+   * Where this form is drawn: the screen the route pushed, or a card over a page. It is the caller's
+   * fact — the container chose it — and it decides both how the form fills and whether a back asks.
+   */
+  surface?: "screen" | "card"
 }) {
   const [draft, setDraft] = useState(value)
   const [shown, setShown] = useState(false)
   const id = `edit-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   const next = kind === "text" ? draft.trim() : draft
+  // What a back would throw away — only where the form is the screen. A card is a pop-up, and closing
+  // a pop-up is the whole of saying no: nothing is asked.
+  useUnsavedChanges(surface === "screen" && next !== value)
   return (
     <form
-      className="flex flex-col gap-4"
+      className={cn("flex flex-col gap-6", surface === "screen" && "min-h-[calc(100dvh-7rem)]")}
       onSubmit={(event) => {
         event.preventDefault()
         onSave(next)
       }}
     >
       <div className="flex flex-col gap-2">
-        <label htmlFor={id} className="text-sm font-medium">
+        <label htmlFor={id} className={fieldLabelClass}>
           {label}
         </label>
-        <InputGroup className="h-11">
+        <InputGroup className="h-12 rounded-full bg-muted">
           <InputGroupInput
             id={id}
+            className={fieldInnerClass}
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            inputMode={kind === "url" ? "url" : undefined}
+            inputMode={kind === "url" ? "url" : kind === "number" ? "decimal" : undefined}
             type={kind === "secret" && !shown ? "password" : "text"}
             placeholder={placeholder}
             value={draft}
@@ -490,7 +623,7 @@ export function EditForm({
             <InputGroupAddon align="inline-end">
               <InputGroupButton
                 size="icon-sm"
-                className="size-11"
+                className="mr-1 size-10 rounded-full"
                 aria-label={shown ? "Hide key" : "Show key"}
                 onClick={() => setShown((open) => !open)}
               >
@@ -499,15 +632,15 @@ export function EditForm({
             </InputGroupAddon>
           )}
         </InputGroup>
+        {note && <p className="mt-3 px-1 text-center text-sm text-muted-foreground">{note}</p>}
       </div>
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={next === value}>
-          Save
-        </Button>
-      </div>
+      <FormActions
+        className="mt-auto"
+        onCancel={onCancel}
+        onReset={onReset}
+        disabled={next === value}
+        busy={busy}
+      />
     </form>
   )
 }
@@ -569,6 +702,7 @@ export function ConfirmDestructive({
   title,
   description,
   confirmLabel,
+  cancelLabel = "Cancel",
   busy,
   onOpenChange,
   onConfirm,
@@ -577,6 +711,8 @@ export function ConfirmDestructive({
   title: string
   description: ReactNode
   confirmLabel: string
+  /** The way out of the question, where Cancel isn't the word the dialog wants. */
+  cancelLabel?: string
   busy?: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
@@ -594,7 +730,7 @@ export function ConfirmDestructive({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" disabled={busy} onClick={onConfirm}>
             {confirmLabel}
           </AlertDialogAction>

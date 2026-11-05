@@ -489,6 +489,9 @@ export async function type(element: Element | null, value: string) {
 }
 
 export const text = () => document.body.textContent ?? ""
+/** An element's words as a row reads them: its text, whitespace collapsed to single spaces. */
+export const wordsOf = (element: Element | null) =>
+  (element?.textContent ?? "").replace(/\s+/g, " ").trim()
 export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 /**
@@ -616,6 +619,59 @@ const SERVED: Record<string, string> = {
   ".md": "text/markdown",
 }
 
+/** One of the host's own keys, in the shape a bot's General page reads (the schema's own kinds). */
+export type GeneralFieldFixture = {
+  key: string
+  kind: "boolean" | "select" | "number" | "list" | "string"
+  section?: string
+  options?: string[]
+  searchable?: boolean
+  restart?: boolean
+}
+
+/** What a bot's General page reads: the keys its file holds, the host's defaults, and the fields. */
+export type GeneralFixture = {
+  values?: Record<string, unknown>
+  defaults?: Record<string, unknown>
+  fields: GeneralFieldFixture[]
+}
+
+/**
+ * A host's General page as most tests draw it: a key of each kind, one filed under a section of its
+ * own, and the two keys the app draws outside the host's rows left out, as the host leaves them out.
+ */
+export const GENERAL: GeneralFixture = {
+  fields: [
+    { key: "toolsets", kind: "list" },
+    { key: "max_concurrent_sessions", kind: "number", restart: true },
+    { key: "session.terminal_continue", kind: "boolean", section: "session" },
+    {
+      key: "timezone",
+      kind: "select",
+      section: "session",
+      options: ["", "UTC", "Europe/London"],
+      searchable: true,
+      restart: true,
+    },
+    { key: "updates.check", kind: "boolean", section: "updates" },
+    {
+      key: "updates.pre_update_backup",
+      kind: "select",
+      section: "updates",
+      options: ["quick", "full", "off"],
+    },
+  ],
+  values: { timezone: "Europe/London", "updates.check": false },
+  defaults: {
+    toolsets: ["hermes-cli"],
+    max_concurrent_sessions: null,
+    "session.terminal_continue": true,
+    timezone: "",
+    "updates.check": true,
+    "updates.pre_update_backup": "quick",
+  },
+}
+
 /**
  * A host's plugin as every media test reads it: `info` advertising `features` ("away" is a host that
  * never answered), and the media route answering a path's bytes as the type its suffix names, or
@@ -632,6 +688,7 @@ export function mediaHost({
   life = 600,
   namesLife = true,
   asked = [],
+  general,
 }: {
   /** The host whose URLs this answers; every host when it is left empty. */
   host?: string
@@ -651,6 +708,8 @@ export function mediaHost({
   namesLife?: boolean
   /** Requests recorded so far, so a second host keeps one count going. */
   asked?: HostAsk[]
+  /** What a bot's General page reads, where a test draws the host's own settings. */
+  general?: GeneralFixture
 } = {}) {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : null
@@ -664,6 +723,8 @@ export function mediaHost({
       body: typeof init?.body === "string" ? init.body : undefined,
       authorization: sent.get("authorization") ?? request?.headers.get("authorization") ?? null,
     })
+    if (url.pathname.endsWith("/plugins/memento/general"))
+      return json({ object: "memento.general", general: general ?? null })
     if (url.pathname.endsWith("/plugins/memento/info"))
       return features === "away" ? json({}, 503) : json({ name: "memento", features })
     if (url.pathname.endsWith("/plugins/memento/media/url")) {

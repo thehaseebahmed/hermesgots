@@ -152,7 +152,7 @@ test("a value typed in is written as itself, and a reset writes null", async () 
       "en",
       "and the host's default is what it falls back to",
     )
-    await click(sheetButton("Host default"))
+    await click(sheetButton("Reset"))
     assert.deepEqual(
       calls.filter((call) => call.path.endsWith("/stt"))[0]?.body,
       { key: "stt.language", value: null },

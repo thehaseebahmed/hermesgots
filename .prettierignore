@@ -1,0 +1,5 @@
+# The repo map and the glossary wrap by hand at the column a sentence ends, and their tables are
+# single lines tens of kilobytes long. Prettier pads every cell to the widest in its column, which
+# turns the map into 1.6 MB of spaces — a rewrite no reader asked for and every session pays for.
+AGENTS.md
+GLOSSARY.md

@@ -3558,6 +3558,45 @@ const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
 const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
+// The bot's own General settings: what its `config.yaml` holds, per profile, and the keys this mock's
+// Hermes keeps — one of each kind the page draws, and one filed under a section of its own.
+const generalValues = new Map()
+const GENERAL_DEFAULTS = {
+  // The window a bot's model runs with: a number whose 0 is Hermes's own "detect it".
+  model_context_length: 0,
+  toolsets: ["hermes-cli"],
+  max_concurrent_sessions: null,
+  "session.terminal_continue": true,
+  timezone: "",
+  "updates.check": true,
+  "updates.pre_update_backup": "quick",
+}
+const GENERAL_FIELDS = [
+  {
+    key: "model_context_length",
+    kind: "number",
+    section: "",
+    note: "Context window override (0 = auto-detect from model metadata)",
+  },
+  { key: "toolsets", kind: "list", section: "" },
+  { key: "max_concurrent_sessions", kind: "number", section: "", restart: true },
+  { key: "session.terminal_continue", kind: "boolean", section: "session" },
+  {
+    key: "timezone",
+    kind: "select",
+    section: "session",
+    options: ["", "UTC", "Europe/London", "America/New_York"],
+    searchable: true,
+    restart: true,
+  },
+  { key: "updates.check", kind: "boolean", section: "updates" },
+  {
+    key: "updates.pre_update_backup",
+    kind: "select",
+    section: "updates",
+    options: ["quick", "full", "off"],
+  },
+]
 const delegationsOf = new Map()
 const triageModelsOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
@@ -4143,6 +4182,8 @@ http
           // A routine's message, and the route that names the run behind it (ADR 0081).
           ...(PLUGIN ? ["routine_message"] : []),
           "progress_reminders",
+          // The Dashboard's General tab, as a plugin that carries it advertises it (general.py).
+          "general_page",
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
@@ -4744,6 +4785,37 @@ http
       return json(res, 200, {
         object: "memento.progress_reminders",
         level: reminderLevels.get(key) ?? "normal",
+      })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/general") {
+      // The bot's own General page: the keys this mock's Hermes holds, the defaults behind them, and
+      // the kinds the app draws — the shape general.py answers with. A write lands on the one key.
+      const key = pluginProfile ?? ""
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        if (!body || typeof body.key !== "string")
+          return json(res, 400, { error: { message: "Body needs a key and a value." } })
+        const fields = GENERAL_FIELDS.map((field) => field.key)
+        if (!fields.includes(body.key))
+          return json(res, 400, {
+            error: { message: `${body.key} isn't a setting this page can write.` },
+          })
+        const held = { ...(generalValues.get(key) ?? {}) }
+        if (body.value === null) delete held[body.key]
+        else held[body.key] = body.value
+        generalValues.set(key, held)
+      }
+      return json(res, 200, {
+        object: "memento.general",
+        general: {
+          fields: GENERAL_FIELDS,
+          values: generalValues.get(key) ?? {
+            timezone: "Europe/London",
+            "updates.check": true,
+            model_context_length: 200000,
+          },
+          defaults: GENERAL_DEFAULTS,
+        },
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/fallbacks") {

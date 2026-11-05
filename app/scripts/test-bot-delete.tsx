@@ -60,7 +60,8 @@ async function seed(name: string, bots: Parameters<typeof botProfile>[1][]) {
 }
 
 /** A button's name as the screen reads it: its `aria-label`, else the words it shows. */
-const nameOf = (button: Element) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim()
+const nameOf = (button: Element) =>
+  (button.getAttribute("aria-label") ?? button.textContent ?? "").trim()
 const buttonNamed = (name: string) =>
   findAll("button").find((button) => nameOf(button) === name) ?? null
 
@@ -126,7 +127,11 @@ test("an unlinked bot's trash asks with the copy that says its chats go too, and
   await mount(settings("/settings/bots/bot-1"), async () => {
     const control = trash()
     assert.ok(control, "the header carries a trash named for the bot")
-    assert.equal((control as HTMLButtonElement).disabled, false, "a device with another bot to keep it")
+    assert.equal(
+      (control as HTMLButtonElement).disabled,
+      false,
+      "a device with another bot to keep it",
+    )
 
     await click(control)
     assert.equal(title(), "Delete A bot?", "named for the bot it deletes")
@@ -148,23 +153,23 @@ test("an unlinked bot's trash asks with the copy that says its chats go too, and
   })
 })
 
-test("General holds no remove or delete control of its own", async () => {
+test("the bot's own page holds no remove or delete control but the header's trash", async () => {
   await seed("delete-general", [
     { id: "bot-1", name: "A bot", hostId: "host-1" },
     { id: "bot-2", name: "Second bot", hostId: "host-2" },
   ])
-  await mount(settings("/settings/bots/bot-1/general"), async () => {
+  await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(
       findAll("h1").map((heading) => heading.textContent),
-      ["General"],
-      "the General page",
+      ["A bot"],
+      "the bot's own page",
     )
     for (const name of ["Remove A bot", "Delete bot"])
       assert.equal(buttonNamed(name), null, `no button named ${name} on the page`)
     absent("button", "Remove")
     assert.equal(find('[data-slot="alert-dialog-trigger"]'), null, "and nothing there asks first")
     for (const label of ["Enabled", "Mute notifications", "Bot Profile", "Test connection"])
-      assert.ok(text().includes(label), `General still has ${label}`)
+      assert.ok(text().includes(label), `it still has ${label}`)
   })
 })
 

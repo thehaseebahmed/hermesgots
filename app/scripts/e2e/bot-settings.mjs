@@ -74,7 +74,7 @@ const assertList = async (page, viewport) => {
   )
   const cards = list.locator("[data-settings-group]")
   const count = await cards.count()
-  assert.equal(count, 2, `General alone, then every other page, are two cards (${count})`)
+  assert.equal(count, 1, `every settings page is one card (${count})`)
   let previous = null
   for (let i = 0; i < count; i++) {
     const box = await cards.nth(i).boundingBox()
@@ -223,5 +223,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages with no headings anywhere: two caption-free cards separated by gaps under the out-of-date plugin's banner, General alone in the first and the other five pages in the second; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
 )

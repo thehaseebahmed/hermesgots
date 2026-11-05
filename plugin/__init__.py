@@ -46,6 +46,7 @@ from . import (
     failed_turns,
     findings,
     gate,
+    general,
     github,
     host_model,
     library,
@@ -518,6 +519,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # Off the loop: the checks import them.
         mcp_features = await asyncio.to_thread(_advertised, mcp.FEATURES)
         skills_features = await asyncio.to_thread(_advertised, skill_catalog.FEATURES)
+        # The General page mirrors this Hermes's own Dashboard form; a host that has no schema to
+        # copy advertises nothing, and the app keeps the page it has (general.py's gate).
+        general_features = await asyncio.to_thread(_advertised, general.FEATURES)
         return web.json_response(
             {
                 "name": "memento",
@@ -525,6 +529,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "features": [
                     "cron_runs",
                     "chats",
+                    *general_features,
                     "draft_text",
                     "context",
                     "todos",
@@ -2427,34 +2432,100 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_post(f"{PREFIX}/speech/probe", probe_speech)
 
-    async def set_stt(request: "web.Request") -> "web.Response":
-        """Writes one speech setting in the bot's own ``config.yaml``, and answers the fresh block."""
+    def keyed_settings_route(
+        *,
+        write: Callable[..., Any],
+        read: Callable[[Path], Dict[str, Any]],
+        object_name: str,
+        field: str,
+        no_schema: str,
+        failed: str,
+    ):
+        """A POST that writes one key of the bot's own ``config.yaml`` and answers the fresh block.
+
+        Speech-to-text, the General page and the provider picks on that page all write one dotted key
+        and answer what the host now holds, so they share one ladder: the body's own refusal, the
+        profile's scope, the thread the write runs on, and the three answers a refused write can have.
+        """
+
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            body = await json_body(request)
+            if not body or "key" not in body:
+                return _error(web, "Body needs a key and a value.", 400)
+            config_path = host_config_path()
+            scope = profile_scope()
+
+            def run() -> Dict[str, Any]:
+                with scope():
+                    write(config_path, body.get("key"), body.get("value"))
+                    # The page answers as it now stands: one read, so the row shows what the file
+                    # holds rather than what the app hoped it wrote.
+                    return read(config_path)
+
+            try:
+                payload = await asyncio.to_thread(run)
+            except ValueError as error:
+                return _error(web, str(error), 400)
+            except ImportError:
+                return _error(web, no_schema, 501)
+            except Exception as error:
+                logger.warning(failed, exc_info=True)
+                return _error(web, f"{failed}: {error}", 502)
+            return web.json_response({"object": object_name, field: payload})
+
+        return handler
+
+    set_stt = keyed_settings_route(
+        write=speech.set_stt_value,
+        read=speech.stt_settings,
+        object_name="memento.stt",
+        field="stt",
+        no_schema="This Hermes version can't read speech settings from here.",
+        failed="The host couldn't save the speech setting",
+    )
+    app.router.add_post(f"{PREFIX}/stt", set_stt)
+
+    async def get_general(request: "web.Request") -> "web.Response":
+        """The Dashboard's General tab, as this bot's own Hermes holds it.
+
+        The fields are the host's own schema — the keys, their types and their options are Hermes's,
+        so the page is the same form the Dashboard draws without a table here to drift from it.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        body = await json_body(request)
-        if not body or "key" not in body:
-            return _error(web, "Body needs a key and a value.", 400)
         config_path = host_config_path()
         scope = profile_scope()
 
         def run() -> Dict[str, Any]:
             with scope():
-                speech.set_stt_value(config_path, body.get("key"), body.get("value"))
-                return speech.stt_settings(config_path)
+                return general.read(config_path)
 
         try:
             payload = await asyncio.to_thread(run)
-        except ValueError as error:
-            return _error(web, str(error), 400)
         except ImportError:
-            return _error(web, "This Hermes version can't read speech settings from here.", 501)
+            return _error(web, "This Hermes version can't show its own General settings.", 501)
         except Exception as error:
-            logger.warning("memento: couldn't save the speech setting", exc_info=True)
-            return _error(web, f"The host couldn't save the speech setting: {error}", 502)
-        return web.json_response({"object": "memento.stt", "stt": payload})
+            logger.warning("memento: couldn't read the host's General settings", exc_info=True)
+            return _error(web, f"The host couldn't read its config: {error}", 502)
+        return web.json_response({"object": "memento.general", "general": payload})
 
-    app.router.add_post(f"{PREFIX}/stt", set_stt)
+    app.router.add_get(f"{PREFIX}/general", get_general)
+
+    # A null value clears the key, which is the host's default taking over; the key must be one the
+    # read offered and the value the shape it takes, so a refused write touches no file.
+    set_general = keyed_settings_route(
+        write=general.set_value,
+        read=general.read,
+        object_name="memento.general",
+        field="general",
+        no_schema="This Hermes version can't show its own General settings.",
+        failed="The host couldn't save that setting",
+    )
+    app.router.add_post(f"{PREFIX}/general", set_general)
 
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)

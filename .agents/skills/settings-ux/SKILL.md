@@ -27,9 +27,13 @@ Read this before drawing a settings screen, and again before calling one done.
 4. **No chevrons.** The value and the press state mark a row tappable; the reference screens carry
    no disclosure indicators and the app follows them.
 5. **Captions are short and muted, and only where they disambiguate.** The bot-settings pages caption
-   their ownership cards *Gots* and *Hermes*, and General's profile card *Bot Profile*; the list
+   their ownership cards *Gots* and *Hermes*, and the bot's own page its *Bot Profile*; the list
    itself carries none, and a page whose cards need no disambiguation carries none either. Cards are
-   separated by gaps — grouping is spacing first, a caption second.
+   separated by gaps — grouping is spacing first, a caption second. Two pages caption by subject
+   instead, because every row on them is a Hermes setting and an owner would disambiguate nothing:
+   Speech-to-text, whose cards are the three kinds of speech setting, and General, whose cards are the
+   sections the host's own Dashboard files its keys under — where the card over the page's own keys
+   carries no caption, since it would name the page twice (ADR 0063, ADR 0104).
 6. **One breakpoint: 1024px.** It is where panes split, pop-ups turn into drawers and these screens
    change shape. Material's expansion point is 840dp; the gap is recorded in ADR 0055 as a later,
    app-wide change, never a per-screen one.
@@ -38,7 +42,7 @@ Read this before drawing a settings screen, and again before calling one done.
 
 | Control | Below 1024px | From 1024px |
 | --- | --- | --- |
-| A text value (name, address, key) | pushed screen: labelled input, Cancel and Save | centred dialog card: the same form |
+| A text value (name, address, key, a number, a comma list) | pushed screen: labelled field, the bar with Cancel and Save (or Reset and Save) | centred dialog card: the same form, which closes without asking |
 | A list that is picked from (models, avatars) | bottom sheet: search, radio rows | centred dialog card: search, radio rows |
 | A list that is only read (vocabulary, fallbacks, a server's detail) | pushed screen | the page pane swaps to it, the list stays |
 | A switch, a stepper, a button | in place | in place |
@@ -46,6 +50,15 @@ Read this before drawing a settings screen, and again before calling one done.
 
 Save is explicit: the edit holds its value, Cancel discards it and Save writes it once. Switches and
 steppers are not part of that form — they are instant and stay out of anything with a Save button.
+
+The edit's actions are **one bar** (ADR 0105) holding the two things the screen can do: *Cancel* and
+*Save*, or *Reset* and *Save* where the form can clear its key back to the host's default — going
+back is the cancel, so the reset does not ride beside it as a third segment. The field above is a
+filled pill with its label in the muted tone the value rows use. On a phone the form fills the screen
+so the bar stands at its foot, where a thumb is; drawn as a centred card, the bar stops under its
+field. Both actions weigh the same — the pill is the emphasis — because the choice is between
+writing and not writing, not between two buttons. Only the pushed screen asks before it discards: a
+back over a card is a pop-up closing, and nothing is asked.
 
 ## Why (the evidence)
 

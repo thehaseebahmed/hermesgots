@@ -1,9 +1,10 @@
 /**
- * A bot's General page, over a seeded device database and a faked host (ADR 0055): no headings at
- * all, the muted captions "Bot Profile" and "Hermes" over the cards that follow them, every setting a
- * title over the line saying what it is for and the value it holds in the accent colour — "Not set"
- * where it holds nothing — a value's tap opening its edit as a pushed screen and its pick as a bottom
- * sheet, and the write each lands at the fetch boundary.
+ * A bot's own page, over a seeded device database and a faked host (ADR 0055, ADR 0104): what the
+ * bot is under the caption *Bot* — its switches, its profile, and how it connects — with no heading
+ * at all, every setting a title over the line saying what it is for and the value it holds in the
+ * accent colour, "Not set" where it holds nothing, a value's tap opening its edit as a pushed screen
+ * and its pick as a bottom sheet, and the write each lands at the fetch boundary. The settings behind
+ * it — every other page's row — sit in one card under *Settings*, which the list's own test holds.
  */
 import { toast } from "sonner"
 import assert from "node:assert/strict"
@@ -11,7 +12,7 @@ import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
-import { BotSettingsPage } from "@/components/bot-settings"
+import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
@@ -29,6 +30,7 @@ import {
   seedSettings,
   type,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 /** General draws the host's Subagent model only where its plugin advertises the override. */
@@ -38,7 +40,14 @@ function LivePage() {
   const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  const shown = botTabOf(tab) ?? "general"
+  // The bot's page is the entry itself; its edits are addressed under its own segment.
+  if (!tab)
+    return (
+      <div data-general-page>
+        <BotSettingsList key={profile.id} profile={profile} />
+      </div>
+    )
+  const shown = botTabOf(tab) ?? "bot"
   return (
     <div data-general-page>
       <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={botSubOf(shown, sub)} />
@@ -46,7 +55,7 @@ function LivePage() {
   )
 }
 
-const general = (entry = "/settings/bots/bot-1/general") => (
+const general = (entry = "/settings/bots/bot-1") => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
     <Routes>
@@ -142,9 +151,8 @@ async function seed(
 
 /** What a user reads on an element, with its spacing flattened. */
 const page = () => find("[data-general-page]")
-const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
 /** Where a string sits on the page, for asking what comes before what. */
-const at = (needle: string) => words(page()).indexOf(needle)
+const at = (needle: string) => wordsOf(page()).indexOf(needle)
 /** Any heading the page still draws: the captions replaced them. */
 const headings = () =>
   findAll("[data-general-page] h1, [data-general-page] h2, [data-general-page] h3").map((one) =>
@@ -162,22 +170,23 @@ const rowsIn = (title: string) =>
   )
 /** A setting's row, and what a user reads on it. */
 const row = (id: string) => find(`[data-setting="${id}"]`)
-const rowText = (id: string) => words(row(id))
+const rowText = (id: string) => wordsOf(row(id))
 /** The value a row holds, in the accent colour. */
 const accent = (id: string) => row(id)?.querySelector(".text-primary")?.textContent ?? null
 /** A button the page draws, by the words on it. */
 const button = (label: string) =>
-  findAll("[data-general-page] button").find((one) => words(one) === label) ?? null
-const testButton = () => find('[aria-label="Test connection"]')
+  findAll("[data-general-page] button").find((one) => wordsOf(one) === label) ?? null
+/** The row that asks the bot's server how it is: the row itself is the control, with no button. */
+const testRow = () => find('[data-setting="test"]')
 
 /** The bottom sheet a pick opens on a phone: its list of buttons, and the choices it offers. */
 const sheet = (label: string) => find(`[data-pick-list="${label}"]`)
 const choices = (label: string) => findAll(`[data-pick-list="${label}"] > button`)
 const choice = (label: string, name: string) =>
-  choices(label).find((one) => words(one) === name) ?? null
+  choices(label).find((one) => wordsOf(one) === name) ?? null
 /** A model a model pick offers, in the sheet it opened. */
 const modelOption = (name: string) =>
-  findAll("[aria-pressed]").find((one) => words(one) === name) ?? null
+  findAll("[aria-pressed]").find((one) => wordsOf(one) === name) ?? null
 /** Opens a setting's pick, and waits for the sheet it opens. */
 async function openPick(id: string) {
   await click(row(id))
@@ -188,13 +197,23 @@ async function openPick(id: string) {
 }
 
 test("General is the bot's own switches, then Bot Profile over its card, then its Hermes", async () => {
-  await seed("general-groups", { hostId: "host-1" })
+  await seed("general-old-groups", { hostId: "host-1" }, [...FEATURES, "progress_reminders"])
   await mount(general(), async () => {
     assert.deepEqual(headings(), [], "no headings: the captions name the cards")
 
-    const switches = words(page()?.children[0] ?? null)
+    assert.equal(
+      wordsOf(findAll("[data-general-page] > div > p")[0] ?? null),
+      "Bot",
+      "the bot's own rows lead, under the caption Bot",
+    )
+    const switches = wordsOf(findAll("[data-bot-card] [data-settings-group]")[0] ?? null)
     assert.match(switches, /Enabled/, "the bot's own switch sits on top, in a card of its own")
     assert.match(switches, /Mute notifications/)
+    assert.match(
+      switches,
+      /Test connection/,
+      "and the tap that asks its server how it is, under them",
+    )
     assert.doesNotMatch(switches, /Name|Image/, "and nothing of the profile block")
 
     assert.equal(
@@ -204,8 +223,8 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
     )
     assert.deepEqual(
       rowsIn("Bot Profile"),
-      ["name", "image", "test"],
-      "what the bot is called, how it looks, and how it connects",
+      ["name", "image", "reminders"],
+      "what the bot is called, how it looks, and how often it says what it is doing",
     )
     assert.equal(caption("Hermes")?.textContent?.trim(), "Hermes", "then its Hermes's caption")
     assert.deepEqual(
@@ -221,10 +240,10 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
     const order = [
       "Enabled",
       "Mute notifications",
+      "Test connection",
       "Bot Profile",
       "Name",
       "Image",
-      "Test connection",
       "Hermes",
       "Subagent model",
     ]
@@ -251,15 +270,15 @@ test("every setting is a title over the line saying what it is for, and the valu
 
     const mute =
       findAll("[data-general-page] label").find((one) =>
-        words(one).includes("Mute notifications"),
+        wordsOf(one).includes("Mute notifications"),
       ) ?? null
     assert.equal(
-      words(mute),
+      wordsOf(mute),
       "Mute notificationsEvery push from this bot, on every device",
       "Mute says what it mutes",
     )
     const enabled = findAll("[data-general-page] label").find((one) =>
-      words(one).includes("Enabled"),
+      wordsOf(one).includes("Enabled"),
     )
     assert.ok(!enabled, "an unlinked bot has no registry switch to draw")
 
@@ -337,10 +356,10 @@ test("a disabled bot still reads as hidden in Gots", async () => {
   await seed("general-disabled", { hostId: "host-1", disabled: true })
   await mount(general(), async () => {
     const enabled = findAll("[data-general-page] label").find((one) =>
-      words(one).includes("Enabled"),
+      wordsOf(one).includes("Enabled"),
     )
     assert.match(
-      words(enabled ?? null),
+      wordsOf(enabled ?? null),
       /^EnabledHidden in Gots/,
       "Enabled says the bot is hidden rather than when it was seen",
     )
@@ -351,13 +370,17 @@ test("the Name row opens the Name edit, and Save writes the bot's name", async (
   await seed("general-name-edit")
   await mount(general(), async () => {
     await click(row("name"))
-    assert.equal(path(), "/settings/bots/bot-1/general/name", "the edit has an address of its own")
-    assert.doesNotMatch(words(page()), /Mute notifications/, "and the page under it is not drawn")
+    assert.equal(path(), "/settings/bots/bot-1/bot/name", "the edit has an address of its own")
+    assert.doesNotMatch(wordsOf(page()), /Mute notifications/, "and the page under it is not drawn")
 
     const field = find("#edit-name") as HTMLInputElement | null
     assert.ok(field, "a labelled field holding the current value")
     assert.equal(field?.value, "A bot", "which is the bot's name")
-    assert.equal(words(find("[data-general-page] label")), "Name", "the label names what is edited")
+    assert.equal(
+      wordsOf(find("[data-general-page] label")),
+      "Name",
+      "and the field names what is edited",
+    )
     assert.equal(
       (button("Save") as HTMLButtonElement | null)?.disabled,
       true,
@@ -371,7 +394,7 @@ test("the Name row opens the Name edit, and Save writes the bot's name", async (
       "Renamed",
       "the write lands on the profile",
     )
-    assert.equal(path(), "/settings/bots/bot-1/general", "and the page comes back")
+    assert.equal(path(), "/settings/bots/bot-1", "and the page comes back")
     assert.equal(accent("name"), "Renamed", "showing the name the bot now holds")
   })
 })
@@ -383,13 +406,13 @@ test("Cancel writes nothing at all, and returns to the page", async () => {
     await type(find("#edit-name"), "Typed and abandoned")
     await click(button("Cancel"))
     assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "the profile is untouched")
-    assert.equal(path(), "/settings/bots/bot-1/general", "and the page is back")
+    assert.equal(path(), "/settings/bots/bot-1", "and the page is back")
   })
 })
 
 test("the Server key's edit masks the key, and Save waits for a change", async () => {
   await seed("general-key-edit")
-  await mount(general("/settings/bots/bot-1/general/server-key"), async () => {
+  await mount(general("/settings/bots/bot-1/bot/server-key"), async () => {
     const field = find("#edit-server-key") as HTMLInputElement | null
     assert.ok(field, "the key's own field")
     assert.equal(field?.getAttribute("type"), "password", "the key is masked while it is typed")
@@ -412,7 +435,7 @@ test("the Server key's edit masks the key, and Save waits for a change", async (
     )
     await click(button("Save"))
     assert.equal((await db.profiles.get("bot-1"))?.apiKey, "new-key", "and the write lands")
-    assert.equal(path(), "/settings/bots/bot-1/general", "back on the page")
+    assert.equal(path(), "/settings/bots/bot-1", "back on the page")
   })
 })
 
@@ -459,11 +482,11 @@ test("the Subagent model row opens the host's models, and a pick is written to t
 test("Test connection answers Connected, with the plugin version the host runs", async () => {
   await seed("general-test-ok")
   await mount(general(), async () => {
-    await click(testButton())
-    await until(async () => words(page()).includes("Connected"), "the test's answer")
+    await click(testRow())
+    await until(async () => wordsOf(page()).includes("Connected"), "the test's answer")
     const answer = find('[data-setting="test"] [role="status"]')
     assert.equal(
-      words(answer),
+      wordsOf(answer),
       "Connected · Plugin 0.81.0",
       "the row's answer line says it connected and names the plugin the host runs",
     )
@@ -473,10 +496,10 @@ test("Test connection answers Connected, with the plugin version the host runs",
 
   await seed("general-test-bare", {}, FEATURES, { version: null })
   await mount(general(), async () => {
-    await click(testButton())
-    await until(async () => words(page()).includes("Connected"), "the test's answer")
+    await click(testRow())
+    await until(async () => wordsOf(page()).includes("Connected"), "the test's answer")
     assert.equal(
-      words(find('[data-setting="test"] [role="status"]')),
+      wordsOf(find('[data-setting="test"] [role="status"]')),
       "Connected · No plugin",
       "a host without the plugin says so in the same place",
     )
@@ -486,17 +509,17 @@ test("Test connection answers Connected, with the plugin version the host runs",
 test("a test the host refuses shows its own sentence in the row's alert", async () => {
   await seed("general-test-fail", {}, FEATURES, { health: "Hermes is restarting." })
   await mount(general(), async () => {
-    await click(testButton())
+    await click(testRow())
     await until(async () => Boolean(find('[role="alert"]')), "the host's refusal")
     const alert = find('[role="alert"]')
-    assert.equal(words(alert), "Hermes is restarting.", "in the host's own words")
+    assert.equal(wordsOf(alert), "Hermes is restarting.", "in the host's own words")
     assert.match(alert?.className ?? "", /text-destructive/, "in red, as a refusal is")
     assert.equal(
-      words(row("test")).match(/Hermes is restarting\./g)?.length ?? 0,
+      wordsOf(row("test")).match(/Hermes is restarting\./g)?.length ?? 0,
       1,
       "the row's value carries the sentence, once",
     )
-    assert.doesNotMatch(words(row("test")), /Connected/, "and nothing claims it connected")
+    assert.doesNotMatch(wordsOf(row("test")), /Connected/, "and nothing claims it connected")
   })
 })
 
@@ -505,8 +528,8 @@ test(
   laptop(async () => {
     await seed("general-test-stale")
     await mount(general(), async () => {
-      await click(testButton())
-      await until(async () => words(page()).includes("Connected"), "the test's answer")
+      await click(testRow())
+      await until(async () => wordsOf(page()).includes("Connected"), "the test's answer")
       // The answer's own writes land after it: the page is read again, and its rows come back.
       await until(async () => Boolean(row("base-url")), "the page's rows")
 
@@ -516,14 +539,14 @@ test(
       assert.ok(field, "the address's edit")
       await type(field, "http://elsewhere.test/v1")
       // The card is a dialog, drawn in a portal: its Save is not inside the page's own subtree.
-      await click(findAll("button").find((one) => words(one) === "Save") ?? null)
+      await click(findAll("button").find((one) => wordsOf(one) === "Save") ?? null)
       await until(
         async () => (await db.profiles.get("bot-1"))?.baseUrl === "http://elsewhere.test/v1",
         "the new address to land",
       )
 
       assert.doesNotMatch(
-        words(row("test")),
+        wordsOf(row("test")),
         /Connected/,
         "the row claims nothing about a server it never reached",
       )
@@ -541,7 +564,7 @@ test("an address into a page this bot doesn't have draws no edit of it, and writ
       "/settings/bots/bot-1/speech-to-text/vocabulary",
       "the address it was asked for stands",
     )
-    assert.match(words(page()), /Test connection/, "General is what is drawn")
+    assert.match(wordsOf(page()), /Bot Profile/, "the bot's own page is what is drawn")
     absent("#edit-vocabulary", "and the page it names is not, so its edit has no field")
     absent(
       '[data-general-page] input:not([type="checkbox"])',
@@ -575,17 +598,17 @@ test("the reminders row is chosen where it sits, and shows no count", async () =
     )
     const pills = findAll('[data-setting="reminders"] [role="radio"]')
     assert.deepEqual(
-      pills.map((one) => words(one)),
+      pills.map((one) => wordsOf(one)),
       ["Off", "Quiet", "Normal", "Chatty"],
       "four words, and no numbers",
     )
     assert.doesNotMatch(rowText("reminders"), /\d/, "the counts behind them stay on the host")
 
     const chosen = () =>
-      findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => words(one))
+      findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => wordsOf(one))
     assert.deepEqual(chosen(), ["Normal"], "the level the host answered is the one that reads on")
 
-    const chatty = pills.find((one) => words(one) === "Chatty")
+    const chatty = pills.find((one) => wordsOf(one) === "Chatty")
     assert.ok(chatty, "Chatty is a pill the row draws")
     await click(chatty)
     await until(
@@ -597,21 +620,23 @@ test("the reminders row is chosen where it sits, and shows no count", async () =
       { level: "chatty" },
       "choosing a pill writes that level, and the counts stay the host's",
     )
-    await until(
-      () => chosen()[0] === "Chatty",
-      "the level the host answered back",
-    )
+    await until(() => chosen()[0] === "Chatty", "the level the host answered back")
   })
 })
 
 test("an older host's stored level reads as the level this app draws for it", async () => {
-  await seed("general-legacy-reminders", { hostId: "host-1" }, [...FEATURES, "progress_reminders"], {
-    level: "frequent",
-  })
+  await seed(
+    "general-legacy-reminders",
+    { hostId: "host-1" },
+    [...FEATURES, "progress_reminders"],
+    {
+      level: "frequent",
+    },
+  )
   await mount(general(), async () => {
     await until(() => Boolean(row("reminders")), "the reminders row")
     const chosen = () =>
-      findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => words(one))
+      findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => wordsOf(one))
     assert.deepEqual(chosen(), ["Chatty"], "the old name draws as the level it behaves as")
   })
 })
@@ -633,7 +658,7 @@ test("a level the host refuses says so, and the row keeps what the host holds", 
     await mount(general(), async () => {
       await until(() => Boolean(row("reminders")), "the reminders row")
       const quiet = findAll('[data-setting="reminders"] [role="radio"]').find(
-        (one) => words(one) === "Quiet",
+        (one) => wordsOf(one) === "Quiet",
       )
       assert.ok(quiet, "the four names are offered whatever the host holds")
       await click(quiet)
@@ -644,7 +669,7 @@ test("a level the host refuses says so, and the row keeps what the host holds", 
       await until(() => said.length > 0, "the host's refusal")
       assert.match(String(said[0]), /level must be one of/, "the host's words reach the user")
       const chosen = () =>
-        findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => words(one))
+        findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => wordsOf(one))
       assert.deepEqual(chosen(), ["Normal"], "and the row still draws the level the host holds")
     })
   } finally {
@@ -656,6 +681,6 @@ test("a plugin that doesn't advertise reminders draws no row", async () => {
   await seed("general-no-reminders", { hostId: "host-1" })
   await mount(general(), async () => {
     assert.equal(row("reminders"), null, "no row to set a setting this host doesn't have")
-    assert.doesNotMatch(words(page()), /Progress updates/)
+    assert.doesNotMatch(wordsOf(page()), /Progress updates/)
   })
 })

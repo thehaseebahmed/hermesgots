@@ -26,7 +26,6 @@ import {
   findAll,
   mount,
   seedSettings,
-  text,
   type Call,
 } from "./component-kit.tsx"
 
@@ -36,8 +35,8 @@ function LiveEditor() {
   if (!profile) return null
   return (
     <>
-      <BotSettingsList profile={profile} />
-      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+      {botTabOf(tab) !== undefined && <BotSettingsList profile={profile} replace />}
+      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "bot"} />
     </>
   )
 }
@@ -98,7 +97,9 @@ async function seed(name: string, features: string[], options: Parameters<typeof
 }
 
 test("a host that advertises afk_picks has a Coding tab, holding the bot's pick budget", async () => {
-  const calls = await seed("coding-tab", ["afk", "afk_switch", "afk_picks"], { pickBudget: 3 })
+  const calls = await seed("coding-tab", ["general_page", "afk", "afk_switch", "afk_picks"], {
+    pickBudget: 3,
+  })
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.ok(codingTab(), "the Coding page is on the list")
     assert.deepEqual(
@@ -142,12 +143,12 @@ test("the Coding page shows Pick budget as one value row, saying what a pick cou
   })
 })
 
-test("a host without afk_picks has no Coding tab, and its address lands on General", async () => {
-  await seed("no-coding-tab", ["afk", "afk_switch"])
+test("a host without afk_picks has no Coding tab, and its address lands on the bot's page", async () => {
+  await seed("no-coding-tab", ["general_page", "afk", "afk_switch"])
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.equal(codingTab(), null, "no Coding page")
-    assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
-    assert.match(text(), /Test connection/, "General is what is drawn")
+    assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
+    assert.ok(find("[data-bot-card]"), "and the bot's own page is what is drawn")
     assert.equal(budget(), null, "and no budget to set")
   })
 })

@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
-import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { BotSettingsPage } from "@/components/bot-settings"
 import { botSubOf } from "@/lib/bot-subs"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
@@ -17,7 +17,6 @@ import {
   mount,
   seedSettings,
   settle,
-  text,
   until,
 } from "./component-kit.tsx"
 
@@ -153,10 +152,9 @@ function LiveEditor() {
   const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  const page = botTabOf(tab) ?? "general"
+  const page = botTabOf(tab) ?? "bot"
   return (
     <>
-      <BotSettingsList profile={profile} />
       <BotSettingsPage key={profile.id} profile={profile} tab={page} sub={botSubOf(page, sub)} />
     </>
   )
@@ -215,7 +213,6 @@ const drawn = () => until(async () => find("[data-skills-tab]") !== null, "the s
 test("the editor's Skills tab is the tab's own address", async () => {
   await seed("skills-list", ["skills"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
-    assert.ok(tabNamed("Skills"), "the Skills tab is on the editor")
     assert.equal(here(), "/settings/bots/bot-1/skills", "the address is the tab's own")
     await drawn()
   })
@@ -224,9 +221,10 @@ test("the editor's Skills tab is the tab's own address", async () => {
 test("the Skills tab opens from the editor, and the address follows it", async () => {
   await seed("skills-nav", ["skills"])
   await mount(editor("/settings/bots/bot-1"), async () => {
-    assert.equal(here(), "/settings/bots/bot-1", "General is the bot's own address")
+    assert.equal(here(), "/settings/bots/bot-1", "the bot's own page, at its own address")
+    assert.ok(tabNamed("Skills"), "with the Skills row on it")
     await click(tabNamed("Skills"))
-    assert.equal(here(), "/settings/bots/bot-1/skills")
+    assert.equal(here(), "/settings/bots/bot-1/skills", "and the address follows the row")
     await drawn()
   })
 })
@@ -315,13 +313,13 @@ test("a row is its name over its description, with no icon and no category badge
   })
 })
 
-test("a host that can't list skills has no Skills tab, and its address lands on General", async () => {
+test("a host that can't list skills has no Skills tab, and its address lands on the bot's page", async () => {
   await seed("skills-absent", ["mcps"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     assert.equal(tabNamed("Skills"), null, "no Skills page")
     assert.equal(find("[data-skills-tab]"), null, "and nothing of the tab is drawn")
-    assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
-    assert.match(text(), /Test connection/, "General is what is drawn")
+    assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
+    assert.ok(find("[data-bot-card]"), "and the bot's own page is what is drawn")
   })
 })
 

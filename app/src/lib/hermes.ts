@@ -34,6 +34,7 @@ import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
+import { readGeneral } from "@/lib/general-settings"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -1333,6 +1334,39 @@ export async function setSttSetting(
     signal,
   })
   return readStt(((await response.json())?.stt ?? null) as unknown)
+}
+
+/**
+ * The settings on this bot's own Hermes that its Dashboard's Config > General tab shows
+ * (`general.py`): the keys, the kinds, the values the file holds and the host's default for each.
+ * The app draws the rows it is given; `general-settings.ts` is the shape.
+ */
+export async function getGeneralSettings(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/general`, {
+    headers: headers(config),
+    signal,
+  })
+  return readGeneral(((await response.json())?.general ?? null) as unknown)
+}
+
+/**
+ * Writes one of those settings in the bot's own `config.yaml` — a dotted path and the value its kind
+ * takes, or `null` to clear it back to the host's default — and answers the host's fresh block. The
+ * host refuses a key the page may not write, and its own sentence is what the page shows.
+ */
+export async function setGeneralSetting(
+  config: HermesConfig,
+  key: string,
+  value: unknown,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/general`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ key, value }),
+    signal,
+  })
+  return readGeneral(((await response.json())?.general ?? null) as unknown)
 }
 
 /**

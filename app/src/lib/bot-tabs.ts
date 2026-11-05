@@ -1,27 +1,30 @@
 /**
- * A bot's settings pages, in list order: the URL's third segment is one of these, and every page —
- * General's included — carries its own. General leads and stands alone in the first card; every
- * other page follows in one card after it, since only the grouping is structural, not a heading.
+ * A bot's settings pages: the URL's third segment is one of these, and every page carries its own.
+ * The bot's own page is the entry — its switches, its profile and how it connects, then one card of
+ * every page under them — so it carries a segment of its own for its edits, and it is not a row in
+ * its own card: the pages that card lists are the settings behind it.
  */
 
 /** One page: the segment naming it, and what its row and its screen are called. */
 export type BotPage = {
   segment: BotTab
   title: string
-  subtitle: string
+  /** What the page holds, for the row that opens it — the bot's own page is not a row, so it has none. */
+  subtitle?: string
 }
 
-/** The pages in list order with the copy the list draws — the list's structure as data. */
+/** The pages in order with the copy the list draws — the list's structure as data. */
 export const BOT_PAGES = [
+  { segment: "bot", title: "Bot" },
   {
     segment: "general",
     title: "General",
-    subtitle: "Enabled, notifications, profile and your Hermes's address",
+    subtitle: "Model, limits, session timeouts and update settings",
   },
   {
     segment: "models",
     title: "Models",
-    subtitle: "Model, default model, triage model and fallback providers",
+    subtitle: "The model this bot's chats run and its triage model",
   },
   {
     segment: "coding",
@@ -52,7 +55,12 @@ export type BotTab = (typeof BOT_PAGES)[number]["segment"]
 const OLD_TABS: Record<string, BotTab> = {
   chat: "models",
   dictation: "speech-to-text",
+  // The page General held before its rows moved onto the bot's own page.
+  "general-old": "bot",
 }
+
+/** The settings a bot's own page lists: every page but itself, in list order. */
+export const SETTING_PAGES: readonly BotPage[] = BOT_PAGES.filter((page) => page.segment !== "bot")
 
 /** The page a URL's third segment names, old segments included, or nothing where it names none. */
 export function botTabOf(segment: string | undefined): BotTab | undefined {
@@ -65,7 +73,7 @@ export function botPageOf(tab: BotTab): BotPage {
   return BOT_PAGES.find((page) => page.segment === tab) ?? BOT_PAGES[0]
 }
 
-/** A bot's own address: the list of its pages. */
+/** A bot's own address: its page, and the settings under it. */
 export function botPath(botId: string): string {
   return `/settings/bots/${botId}`
 }

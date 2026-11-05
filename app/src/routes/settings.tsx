@@ -42,7 +42,7 @@ import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import type { BotSub } from "@/lib/bot-subs"
-import { botPageOf, botPath, botTabOf, botTabPath, type BotPage } from "@/lib/bot-tabs"
+import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
 import { NetworkLogScreen } from "@/components/network-log"
@@ -61,6 +61,7 @@ import {
   SwitchRow,
   rowClass,
   Screen,
+  useLeaveGuard,
 } from "@/components/settings-chrome"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { DeviceStateSheet } from "@/components/device-state"
@@ -158,7 +159,9 @@ export function SettingsPage() {
   const botSub = botTab && sub ? botSubOf(botTab, sub, leaf) : undefined
   // On its own screen, a page sits under its bot's list and the list under the Settings menu.
   useEffect(() => {
-    if (!separate) return
+    // A bot's own screen publishes the guard itself — it is the screen that can ask — so this one
+    // would only compete with it.
+    if (!separate || (section === "bots" && botId)) return
     const back = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
@@ -168,7 +171,7 @@ export function SettingsPage() {
       up(back)
       return true
     })
-  }, [separate, up, botId, botTab, botSub])
+  }, [separate, up, section, botId, botTab, botSub])
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
@@ -178,6 +181,8 @@ export function SettingsPage() {
   if (tab && (section !== "bots" || !botId)) return <Navigate to="/settings" replace />
   // A segment that named a page before the list: the page that took its place, in its entry.
   if (botId && botTab && tab !== botTab) return <Navigate to={botTabPath(botId, botTab)} replace />
+  // The bot's own page is the entry itself: a bare `/bot` is the page it already is.
+  if (botId && botTab === "bot" && !botSub) return <Navigate to={botPath(botId)} replace />
   // A fourth segment that names nothing on this page is the page itself, in its own entry.
   if (sub && botTab && !botSub) return <Navigate to={botTabPath(botId!, botTab)} replace />
   // A fifth segment on a page that lists no items addresses the page itself.
@@ -223,7 +228,7 @@ export function SettingsPage() {
           />
         </Screen>
         <Screen
-          key={botTab ?? "general"}
+          key={botTab ?? "bot"}
           // The pane is titled by the sub only where the sub is the pane: an edit rides over the page
           // as a card and names itself there, so the page's own title still heads the pane.
           title={
@@ -231,11 +236,7 @@ export function SettingsPage() {
             page?.title ??
             botPageOf("general").title
           }
-          leading={
-            botSub && botTab ? (
-              <BackButton label="Back" onClick={() => up(botTabPath(bot.id, botTab))} />
-            ) : undefined
-          }
+          leading={botSub && botTab ? <PaneBack bot={bot} tab={botTab} /> : undefined}
           className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
         >
           <BotSettingsPage profile={bot} tab={botTab} sub={botSub} />
@@ -288,13 +289,36 @@ function BotListScreen({
 function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage; sub?: BotSub }) {
   const { up } = useNav()
   const back = sub ? botTabPath(profile.id, page.segment) : botPath(profile.id)
+  // An edit holding changes asks before its back throws them away — the header's back and the
+  // system's own (Android's gesture) alike, since both leave the same screen.
+  const guard = useLeaveGuard(() => up(back))
+  // The screen's own guard answers the system's back: it either leaves or asks, and either way the
+  // press is handled here.
+  useEffect(
+    () =>
+      setBackGuard(() => {
+        guard.back()
+        return true
+      }),
+    [guard.back],
+  )
   return (
-    <Screen
-      title={sub?.title ?? page.title}
-      leading={<BackButton label="Back" onClick={() => up(back)} />}
-    >
+    <Screen title={sub?.title ?? page.title} leading={<BackButton label="Back" onClick={guard.back} />}>
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />
+      {guard.dialog}
     </Screen>
+  )
+}
+
+/** The pane's own back: it leaves the sub-screen, and asks first where an edit holds changes. */
+function PaneBack({ bot, tab }: { bot: Profile; tab: BotTab }) {
+  const { up } = useNav()
+  const guard = useLeaveGuard(() => up(botTabPath(bot.id, tab)))
+  return (
+    <>
+      <BackButton label="Back" onClick={guard.back} />
+      {guard.dialog}
+    </>
   )
 }
 

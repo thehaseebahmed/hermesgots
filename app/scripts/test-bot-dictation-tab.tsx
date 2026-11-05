@@ -35,7 +35,7 @@ import {
   STT,
   switchIn,
 } from "./dictation-page-kit.tsx"
-import { click, find, findAll, mount, text, type, until } from "./component-kit.tsx"
+import { click, find, findAll, mount, type, until } from "./component-kit.tsx"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
 
@@ -50,14 +50,14 @@ test("a host that can hear speech has a Speech-to-text page, its Vocabulary row 
   })
 })
 
-test("a host that can't hear speech has no Speech-to-text page, and its address lands on General", async () => {
-  await seed("no-dictation", ["speech_model"])
+test("a host that can't hear speech has no Speech-to-text page, and its address lands on the bot's page", async () => {
+  await seed("no-dictation", ["general_page", "speech_model"])
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     assert.ok(!speechRow(), "no Speech-to-text row")
     assert.ok(!speechPage(), "no Speech-to-text page")
     assert.ok(!row("vocabulary"), "and no setting to read")
-    assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
-    assert.match(text(), /Test connection/, "General is what is drawn")
+    assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
+    assert.ok(find("[data-bot-card]"), "and the bot's own page is what is drawn")
   })
 })
 
@@ -230,11 +230,7 @@ test("the Speech model row names the model in play, and opens the host's models 
       /Recommended/,
       "and not again in its line",
     )
-    assert.equal(
-      findAll("[data-pick-badge]").length,
-      1,
-      "and only one row is",
-    )
+    assert.equal(findAll("[data-pick-badge]").length, 1, "and only one row is")
     assert.match(
       speechOption("large-v3")?.textContent ?? "",
       /Not measured/,
@@ -289,7 +285,12 @@ test("a measurement taken on another machine is named, and never drawn as this h
       at: null,
     },
   })
-  await seed("speech-probe-foreign", ["dictation", "speech_model", "speech_probe"], {}, { speech: foreign })
+  await seed(
+    "speech-probe-foreign",
+    ["dictation", "speech_model", "speech_probe"],
+    {},
+    { speech: foreign },
+  )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await openSpeech()
     await until(
@@ -307,10 +308,15 @@ test("a measurement taken on another machine is named, and never drawn as this h
 })
 
 test("a probe that never reached the host leaves the rows alone and puts no words under them", async () => {
-  const calls = await seed("speech-probe-offline", ["dictation", "speech_model", "speech_probe"], {}, {
-    speech: unmeasured(),
-    failProbe: true,
-  })
+  const calls = await seed(
+    "speech-probe-offline",
+    ["dictation", "speech_model", "speech_probe"],
+    {},
+    {
+      speech: unmeasured(),
+      failProbe: true,
+    },
+  )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await openSpeech()
     await until(
@@ -328,10 +334,16 @@ test("a probe that never reached the host leaves the rows alone and puts no word
 })
 
 test("a probe the host refuses says why under the rows, and the pick still stands", async () => {
-  await seed("speech-probe-refused", ["dictation", "speech_model", "speech_probe"], {}, {
-    speech: unmeasured(),
-    refuseProbe: "This host is hearing a take right now, so it can't time a model without getting in its way.",
-  })
+  await seed(
+    "speech-probe-refused",
+    ["dictation", "speech_model", "speech_probe"],
+    {},
+    {
+      speech: unmeasured(),
+      refuseProbe:
+        "This host is hearing a take right now, so it can't time a model without getting in its way.",
+    },
+  )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await openSpeech()
     await until(
@@ -615,7 +627,10 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
     )
     await click(find('[data-cleanup-level="high"]'))
     assert.deepEqual(calls[0]?.body, { cleanup_level: "high" }, "one level, written to the host")
-    await until(async () => lines(row("cleanup-level"))[3] === "High", "the row naming the level the host now runs")
+    await until(
+      async () => lines(row("cleanup-level"))[3] === "High",
+      "the row naming the level the host now runs",
+    )
     assert.deepEqual(levelCards(), [], "and the sheet closed behind the pick")
   })
 })
@@ -634,7 +649,12 @@ test("the Hearing prompt row is not offered until Developer is on", async () => 
 })
 
 test("a host that takes a level but not a Hearing prompt draws the level alone", async () => {
-  await seed("hearing-absent", ["dictation", "speech_model", "cleanup_level"], {}, { speech: speech() })
+  await seed(
+    "hearing-absent",
+    ["dictation", "speech_model", "cleanup_level"],
+    {},
+    { speech: speech() },
+  )
   await db.settings.update("settings", { developer: true })
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     assert.ok(row("cleanup-level"), "the level the host does take is offered")
@@ -730,7 +750,11 @@ test("a host that hears takes elsewhere says where, in the provider's own name",
     await until(async () => Boolean(row("heard-by")), "the row naming who hears a take")
     const drawn = lines(row("heard-by"))
     assert.equal(drawn[0], "Heard by", "the row names what it is about")
-    assert.match(drawn.join(" "), /uploaded to this provider/, "and that the take goes off the host")
+    assert.match(
+      drawn.join(" "),
+      /uploaded to this provider/,
+      "and that the take goes off the host",
+    )
     assert.equal(drawn.at(-1), "Groq", "with the provider the host resolves as its value")
   })
 })
@@ -760,7 +784,11 @@ test("the page opens on the last answer this device read, every row muted until 
     await until(async () => Boolean(row("speech-model")), "the rows the cached copy holds")
     assert.equal(loading(), null, "rows rather than a loader")
     assert.equal(valueOf(row("speech-model")), "base", "the model this device last read")
-    assert.equal(valueColour(row("speech-model")), "muted", "drawn muted: no fresh read confirms it")
+    assert.equal(
+      valueColour(row("speech-model")),
+      "muted",
+      "drawn muted: no fresh read confirms it",
+    )
     for (const name of ["speech-model", "cleanup-level", "cleanup-model"])
       assert.equal(off(row(name)), true, `${name} takes no taps until the host answers`)
     await click(row("cleanup-level"))

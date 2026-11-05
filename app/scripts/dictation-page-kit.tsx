@@ -243,7 +243,7 @@ export function LiveEditor() {
   const { tab, sub, leaf } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  const botTab = botTabOf(tab) ?? "general"
+  const botTab = botTabOf(tab) ?? "bot"
   // The fourth segment names a page's own sub-screen, as the settings route resolves it — and a
   // fifth, where that sub-screen is a list, the item behind it.
   const botSub = tab && sub ? botSubOf(botTab, sub, leaf) : undefined

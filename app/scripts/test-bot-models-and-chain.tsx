@@ -1,9 +1,9 @@
 /**
- * A bot's Models page, over a seeded device database and a faked host (ADR 0055): the muted captions
- * "Gots" and "Hermes" over the cards that follow them, every setting a title over the line saying
- * what it is for and the value it holds in the accent colour, each value opening its pick as a bottom
- * sheet, and Fallback providers drilling into the chain's own screen — the rows it holds, the chain a
- * pick writes and the chain a removal writes.
+ * A bot's models, over a seeded device database and a faked host (ADR 0055, ADR 0104): the Models
+ * page's Gots triage row and its own model pick, and — on General, where Hermes's Dashboard keeps
+ * them — the host's main model and the chain it falls back on, the chain drilling into a screen of
+ * its own. Every setting is a title over the line saying what it is for and the value it holds in
+ * the accent colour, each value opening its pick as a bottom sheet.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -11,6 +11,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsPage } from "@/components/bot-settings"
+import { Screen } from "@/components/settings-chrome"
+import { botPageOf } from "@/lib/bot-tabs"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
@@ -26,6 +28,7 @@ import {
   path,
   seedSettings,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 /** The triage row's purpose line, as the page words it. */
@@ -39,8 +42,13 @@ function LivePage() {
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
   const shown = botTabOf(tab) ?? "general"
+  const own = botSubOf(shown, sub)
+  // The screen a page wears, so a page's own header action — the chain's add — is drawn where it is
+  // in the app: at the header's right edge, over the page.
   return (
-    <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={botSubOf(shown, sub)} />
+    <Screen title={own?.title ?? botPageOf(shown).title}>
+      <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={own} />
+    </Screen>
   )
 }
 
@@ -60,7 +68,7 @@ const page = (entry: string) => (
  * one — and recording every request, so a test can read what a pick wrote.
  */
 function host({
-  features = ["triage_model", "fallbacks", "host_model"],
+  features = ["general_page", "triage_model", "fallbacks", "host_model"],
   writers = true,
   models = ["own-model", "cheap-model"],
   triage = null as Choice | null,
@@ -127,26 +135,32 @@ async function seed(name: string, options: Parameters<typeof host>[0] = {}, patc
 }
 
 /** What a user reads on an element, with its spacing flattened. */
-const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
-const chat = () => find("[data-bot-models]")
+/** The page this test mounted: Models' block, or General's. */
+const root = () => find("[data-bot-models]") ?? find("[data-bot-general]")
+/** Waits for what this screen draws: a General read lands after the screen does, and the chain is a
+ * screen of its own. */
+const drawn = () => until(async () => Boolean(root() ?? chain()), "the page")
 /** Any heading the page still draws: the captions replaced them. */
 const headings = () =>
-  findAll("[data-bot-models] h1, [data-bot-models] h2, [data-bot-models] h3").map((one) =>
-    one.textContent?.trim(),
-  )
+  [...(root()?.querySelectorAll("h1, h2, h3") ?? [])].map((one) => one.textContent?.trim())
 /** A caption: the muted line standing over a card of its own. */
 const caption = (title: string) =>
-  findAll("[data-bot-models] p").find((one) => words(one) === title) ?? null
+  [...(root()?.querySelectorAll("p") ?? [])].find((one) => wordsOf(one) === title) ?? null
 /** The settings the page draws, in the order it draws them. */
 const rows = () =>
-  findAll("[data-bot-models] [data-setting]").map((one) => one.getAttribute("data-setting"))
+  [...(root()?.querySelectorAll("[data-setting]") ?? [])].map((one) =>
+    one.getAttribute("data-setting"),
+  )
 /** A setting's row, what a user reads on it, and the value it holds in the accent colour. */
-const row = (id: string) => find(`[data-bot-models] [data-setting="${id}"]`)
-const rowText = (id: string) => words(row(id))
+const row = (id: string) =>
+  [...(root()?.querySelectorAll("[data-setting]") ?? [])].find(
+    (one) => one.getAttribute("data-setting") === id,
+  ) ?? null
+const rowText = (id: string) => wordsOf(row(id))
 const accent = (id: string) => row(id)?.querySelector(".text-primary")?.textContent ?? null
 /** A model a model pick offers, in the sheet it opened. */
 const modelOption = (name: string) =>
-  findAll("[aria-pressed]").find((one) => words(one) === name) ?? null
+  findAll("[aria-pressed]").find((one) => wordsOf(one) === name) ?? null
 /** Opens a setting's pick, and waits for the sheet it opens. */
 async function openPick(id: string) {
   await click(row(id))
@@ -160,10 +174,10 @@ const chainRow = (place: number) => find(`[data-fallbacks] [data-fallback="${pla
 const chainValue = (place: number) =>
   chainRow(place)?.querySelector(".text-primary")?.textContent ?? null
 const remove = (place: number) => find(`[aria-label="Remove fallback ${place}"]`)
-const addFallback = () =>
-  findAll("[data-fallbacks] button").find((one) => words(one) === "Add fallback") ?? null
+/** Adding is the screen's header action, at a phone width as much as a wide one. */
+const addFallback = () => find('[aria-label="Add fallback"]')
 
-test("the Models page is the Gots triage row, then the model, the default and the fallback chain", async () => {
+test("the Models page is the Gots triage row and the model a chat runs", async () => {
   await seed("chat-groups")
   await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.deepEqual(headings(), [], "no headings: the captions name the cards")
@@ -179,15 +193,15 @@ test("the Models page is the Gots triage row, then the model, the default and th
     )
     assert.deepEqual(
       rows(),
-      ["triage-model", "model", "default-model", "fallbacks"],
+      ["triage-model", "model"],
       "every setting, in the order the page draws them, under the owner it belongs to",
     )
     assert.ok(
-      words(chat()).indexOf("Gots") < words(chat()).indexOf("Hermes"),
+      wordsOf(root()).indexOf("Gots") < wordsOf(root()).indexOf("Hermes"),
       "Gots's caption comes before the Hermes card it does not name",
     )
     assert.doesNotMatch(
-      words(chat()),
+      wordsOf(root()),
       /Subagent model/,
       "Subagent model is General's, not this page's",
     )
@@ -207,22 +221,24 @@ test("the triage row says what the model decides, and no pop-up explains it", as
   })
 })
 
-test("the fallback row is Fallback providers, saying what the chain is for", async () => {
+test("General's fallback row is Fallback providers, saying what the chain is for", async () => {
   await seed("chat-fallbacks", { fallbacks: [{ provider: "openrouter", model: "cheap-model" }] })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
     assert.equal(
-      rowText("fallbacks"),
+      rowText("fallback_providers"),
       "Fallback providersThe chain Hermes tries after the main model1 provider",
       "the name a user reads, the line under it, and the chain's length",
     )
-    assert.doesNotMatch(words(chat()), /Fallback models/, "the old name is nowhere on the page")
+    assert.doesNotMatch(wordsOf(root()), /Fallback models/, "the old name is nowhere on the page")
   })
 })
 
 test("the chain's length is what the row says, and None when it holds nothing", async () => {
   await seed("chat-chain-none")
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.equal(accent("fallbacks"), "None", "an empty chain says None")
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
+    assert.equal(accent("fallback_providers"), "None", "an empty chain says None")
   })
 
   await seed("chat-chain-two", {
@@ -231,12 +247,13 @@ test("the chain's length is what the row says, and None when it holds nothing", 
       { provider: "openrouter", model: "own-model" },
     ],
   })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.equal(accent("fallbacks"), "2 providers", "and two of them say 2 providers")
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
+    assert.equal(accent("fallback_providers"), "2 providers", "and two of them say 2 providers")
   })
 })
 
-test("the model and default model rows say what each is for, and the value it holds", async () => {
+test("the Models page's model row says what it is for, and the value it holds", async () => {
   await seed("chat-subtitles")
   await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(
@@ -244,19 +261,27 @@ test("the model and default model rows say what each is for, and the value it ho
       "ModelThe model a chat runs when it has no pick of its owntest/model",
       "the model a chat runs, and the model it holds",
     )
+  })
+})
+
+test("General's model row is the host's main model, named as Hermes names it", async () => {
+  await seed("general-model-row")
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
     assert.equal(
-      rowText("default-model"),
-      "Default modelThe host's main model, on every surfaceopenrouter/own-model",
-      "and the default the host runs",
+      rowText("model"),
+      "ModelThe host's main model, on every surfaceopenrouter/own-model",
+      "the same knob the Dashboard shows, with the model the host runs",
     )
   })
 })
 
 test("the model pick marks the model the page already shows as the value", async () => {
   await seed("chat-model-marked")
-  await mount(page("/settings/bots/bot-1/models"), async () => {
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
     assert.equal(
-      accent("default-model"),
+      accent("model"),
       "openrouter/own-model",
       "the model in force, as the page shows it",
     )
@@ -290,15 +315,15 @@ test("a host without the triage route draws no Gots caption, and its Hermes card
     assert.ok(!caption("Gots"), "no caption over a card with no row in it")
     assert.ok(caption("Hermes"), "the Hermes card is the page's own")
     absent('[data-setting="triage-model"]', "and no triage row")
-    assert.deepEqual(rows(), ["model", "default-model", "fallbacks"], "the rest are as they were")
+    assert.deepEqual(rows(), ["model"], "and the model a chat runs is still there")
   })
 })
 
-test("a host without the fallback route leaves the chain's row off the page", async () => {
-  await seed("chat-no-fallbacks", { features: ["triage_model", "host_model"] })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    absent('[data-setting="fallbacks"]', "no fallback row from a host that records no chain")
-    assert.deepEqual(rows(), ["triage-model", "model", "default-model"], "and the rest stay")
+test("a host without the fallback route leaves the chain's row off General", async () => {
+  await seed("chat-no-fallbacks", { features: ["general_page", "triage_model", "host_model"] })
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
+    assert.deepEqual(rows(), ["model"], "and the model stays")
   })
 })
 
@@ -306,15 +331,16 @@ test("tapping Fallback providers opens the chain's own screen", async () => {
   await seed("chat-fallbacks-drill", {
     fallbacks: [{ provider: "openrouter", model: "cheap-model" }],
   })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    await click(row("fallbacks"))
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
+    await click(row("fallback_providers"))
     assert.equal(
       path(),
-      "/settings/bots/bot-1/models/fallbacks",
+      "/settings/bots/bot-1/general/fallback_providers",
       "the chain has an address of its own",
     )
     assert.ok(chain(), "and a screen of its own")
-    assert.ok(!chat(), "the page under it is not drawn")
+    assert.ok(!root(), "the page under it is not drawn")
   })
 })
 
@@ -325,28 +351,36 @@ test("the chain's screen lists what the host holds, each with a way to remove it
       { provider: "openrouter", model: "own-model" },
     ],
   })
-  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/general/fallback_providers"), async () => {
+    await drawn()
     assert.deepEqual(chainRows(), ["1", "2"], "one row per fallback, in the order it is tried")
-    assert.equal(words(chainRow(1)), "Fallback 1openrouter/cheap-model", "the first by its place")
+    assert.equal(wordsOf(chainRow(1)), "Fallback 1openrouter/cheap-model", "the first by its place")
     assert.equal(chainValue(1), "openrouter/cheap-model", "with its model in the accent colour")
     assert.equal(chainValue(2), "openrouter/own-model", "and the second's own")
     assert.ok(remove(1), "each row can be removed")
     assert.ok(remove(2))
-    assert.ok(!addFallback(), "and a full chain offers no way to add a third")
+    assert.equal(
+      (addFallback() as HTMLButtonElement | null)?.disabled,
+      true,
+      "and a full chain's add is off, Hermes holding two",
+    )
   })
 })
 
-test("an empty chain offers the row that adds one", async () => {
+test("an empty chain says so, and the header holds the way to add one", async () => {
   await seed("chat-chain-add")
-  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/general/fallback_providers"), async () => {
+    await drawn()
     assert.deepEqual(chainRows(), [], "no fallbacks yet")
-    assert.ok(addFallback(), "with the way to add the first")
+    assert.match(wordsOf(find("[data-fallbacks]")), /No fallbacks/, "and the screen says so")
+    assert.ok(addFallback(), "with the header holding the way to add the first")
   })
 })
 
 test("picking a model for a new fallback writes the chain", async () => {
   const calls = await seed("chat-chain-pick")
-  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/general/fallback_providers"), async () => {
+    await drawn()
     await click(addFallback())
     await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
     assert.ok(modelOption("cheap-model"), "the host's models, in a sheet")
@@ -369,7 +403,8 @@ test("removing a fallback writes the chain without it", async () => {
       { provider: "openrouter", model: "own-model" },
     ],
   })
-  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/general/fallback_providers"), async () => {
+    await drawn()
     await click(remove(1))
     const write = calls.find((one) => one.method === "POST" && one.path.endsWith("/fallbacks"))
     assert.deepEqual(
@@ -378,7 +413,7 @@ test("removing a fallback writes the chain without it", async () => {
       "the chain keeps the fallback that was under it",
     )
     assert.equal(
-      words(chainRow(1)),
+      wordsOf(chainRow(1)),
       "Fallback 1openrouter/own-model",
       "and the row behind it moves up",
     )
@@ -422,10 +457,11 @@ test("picking a triage model writes it to the host", async () => {
   })
 })
 
-test("picking a Default model makes it the host's main model", async () => {
+test("picking General's Model makes it the host's main model", async () => {
   const calls = await seed("chat-default-pick")
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    await openPick("default-model")
+  await mount(page("/settings/bots/bot-1/general"), async () => {
+    await drawn()
+    await openPick("model")
     await click(modelOption("cheap-model"))
 
     const write = calls.find(
