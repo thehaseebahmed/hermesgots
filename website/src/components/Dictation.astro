@@ -1,0 +1,29 @@
+---
+// A take being dictated: the level bar the composer shows, then what the host heard and what it
+// tidied that to. A picture of the app, so it's hidden from assistive tech.
+const bars = Array.from({ length: 28 }, (_, i) => ({
+  h: 22 + ((i * 37) % 70),
+  d: -((i * 90) % 1100),
+}))
+---
+
+<figure class="dictate" aria-hidden="true">
+  <div class="dictate-bar">
+    <span class="rec"></span>
+    <span class="wave">
+      {bars.map((b) => <i style={`--h:${b.h}%;--d:${b.d}ms`} />)}
+    </span>
+    <span class="time">0:07</span>
+    <span class="stop">Stop</span>
+  </div>
+  <div class="dictate-rows">
+    <p>
+      <span class="tag">Heard</span>
+      um so can you like ask the research bot about uh what hermes costs per month
+    </p>
+    <p class="tidy">
+      <span class="tag">Tidied</span>
+      Can you ask the research bot what Hermes costs per month?
+    </p>
+  </div>
+</figure>

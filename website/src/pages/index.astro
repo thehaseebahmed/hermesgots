@@ -1,288 +1,161 @@
 ---
+import "../styles/home.css"
+import Chat from "../components/Chat.astro"
+import Dictation from "../components/Dictation.astro"
 import Phone from "../components/Phone.astro"
 import Base from "../layouts/Base.astro"
 
-const slides = [
+const stages = [
   {
-    tag: "Chat",
-    title: "Replies that are interfaces.",
-    body: "An agent's answer doesn't have to be a wall of text. Gots can draw it as a real interface, with tables, forms and buttons you use in place, so a decision is a tap and a result is something you can work with. Run as many bots as you like, each keeping its threads in order.",
-    chips: ["Multiple Bots", "Smart Threads", "Interactive Replies"],
-    shot: "approve",
-    bot: "gem",
-    glow: "var(--usage-input)",
-  },
-  {
+    id: "code",
+    word: "Code",
     tag: "Code",
-    title: "Work that ends in a pull request.",
-    body: "Every session gets a worktree of its own and opens a draft pull request. Leave AFK on and your host works through the issues you've labelled while you're away: it builds, runs your tests itself, and never merges.",
-    chips: ["AFK Mode", "Output Library", "Skill Management"],
+    title: "Sessions that end in a pull request.",
+    body: "Every session gets a worktree of its own and opens a draft pull request. Use plan mode to read the plan before anything is written. Leave AFK on and your host works through the issues you've labelled, runs your tests itself and never merges.",
+    chips: ["Plan mode", "Worktrees", "AFK", "Skills"],
     shot: "code",
-    bot: "hex",
-    glow: "var(--usage-cache-read)",
   },
   {
-    tag: "Research",
+    id: "research",
+    word: "Research",
+    tag: "Research missions",
     title: "Answers with receipts.",
-    body: "A mission reads the web and writes a guide where each sentence points to its source. The host re-checks every quote and flags anything unsourced, and you can have another model write it again to compare.",
-    chips: ["Structured", "Multi Model Analysis"],
+    body: "A mission reads the web, then writes a guide where every sentence points at its source. The host re-checks each quote and flags anything unsourced. Compare and decide scores your options against the criteria you set.",
+    chips: ["Learn & understand", "Compare & decide", "Cited"],
     shot: "research",
-    bot: "stella",
-    glow: "var(--usage-cache-write)",
   },
   {
-    tag: "Meetings",
-    title: "The meeting, without the minutes.",
-    body: "Hand over a recording or a transcript and the bot returns what was decided and what's yours to do, with a timeline to check it against.",
-    chips: ["Smart Summary", "Transcription", "Action Items", "Smart Hand-offs"],
-    bot: "penny",
-    glow: "var(--primary)",
+    id: "dictate",
+    word: "Dictate",
+    tag: "Dictation",
+    title: "Dictation that runs on your own bot.",
+    body: "Talk into any chat. Your Hermes host transcribes it with the speech model you pick, tidies it to the level you want and drops the words where your cursor was. Teach it your names and jargon once.",
+    chips: ["Your vocabulary", "Cleanup levels", "Your host"],
+    dictate: true,
   },
   {
-    tag: "Routines",
-    title: "Scheduled work that shows its work.",
-    body: "Every routine across your bots, with its recent runs as little bars. When one starts failing it rises to the top, and your phone hears about it before you go looking.",
-    chips: ["Run History", "Failure Alerts"],
-    shot: "routines",
-    bot: "tri",
-    glow: "var(--usage-output)",
+    id: "generate",
+    word: "Generate",
+    tag: "Generative UI",
+    title: "Replies that are interfaces.",
+    body: "Built on OpenUI. An answer can come back as a table, a chart, a form or buttons you use in place, so a decision is a tap instead of a paragraph.",
+    chips: ["OpenUI", "Approvals in place", "Tables & charts"],
+    shot: "approve",
   },
-  {
-    tag: "Community",
-    title: "See how you stack up.",
-    body: "Find out which providers and models people are really using this week or this month, and where your own tokens put you. It's opt-in, and you can leave whenever you like.",
-    chips: [],
-    shot: "community",
-    cta: { href: "/community", label: "See the leaderboard" },
-    bot: "bloom",
-    glow: "var(--merged)",
-  },
-  {
-    tag: "Yours",
-    title: "Your host. Your keys.",
-    body: "Gots is a window onto a Hermes agent you run yourself. Your chats and keys stay with you, and settings sync end-to-end encrypted, so the server only ever holds ciphertext.",
-    chips: [],
-    shot: "bots",
-    bot: "cubby",
-    glow: "var(--usage-input)",
-  },
-]
-
-const extras = [
-  "Photos and files",
-  "Share sheet",
-  "Dictation on your host",
-  "Per-chat model picker",
-  "MCP servers",
-  "Notifications by type",
-  "Light and dark",
-  "Eight bots",
-  "Todo pills",
 ]
 
 const coming = [
   {
-    bot: "penny",
-    status: "Next up",
-    title: "Voice Call",
-    body: "Ring a bot and talk it through, or let it ring you when something is waiting on you.",
+    bot: "orbi",
+    title: "Bot chatrooms",
+    body: "Put several bots in one room and let them work a problem together.",
   },
   {
-    bot: "gem",
-    status: "Wishlist",
-    title: "Raycast Integration",
-    body: "Ask your bots from the launcher, without opening an app.",
+    bot: "penny",
+    title: "Meeting transcription",
+    body: "Hand over a recording. Get back what was decided, what's yours to do and a timeline to check it against.",
   },
   {
     bot: "bloom",
-    status: "Wishlist",
-    title: "Speech-to-Text anywhere",
-    body: "Dictate into any app on your computer, transcribed by your own Hermes host.",
+    title: "Apps from replies",
+    body: "Ask for a small app. It lives beside your chats, drawn from the same OpenUI parts.",
   },
   {
-    bot: "cubby",
-    status: "Wishlist",
-    title: "Phone Integration",
-    body: "Let your bots see your calendar, contacts and more, only when you allow it.",
+    bot: "gem",
+    title: "Calling",
+    body: "Ring a bot and talk it through, or let it ring you when something is waiting on you.",
   },
-  {
-    bot: "orbi",
-    status: "Wishlist",
-    title: "Bot-to-Bot Communication",
-    body: "Your bots hand work to each other, even when they live on different hosts.",
-  },
-  {
-    bot: "stella",
-    status: "Next up",
-    title: "More research missions",
-    body: "Learn and understand is ready. Six more mission types are lining up behind it.",
-  },
-  {
-    bot: "hex",
-    status: "After the beta",
-    title: "Google Play",
-    body: "The Android app, straight from the store.",
-  },
-  {
-    bot: "tri",
-    status: "Wishlist",
-    title: "An iOS app",
-    body: "Share into Gots from the iPhone share sheet, like Android does.",
-  },
-]
-
-const floaters = [
-  { bot: "gem", style: "--x:-6%;--y:18%;--s:5.5rem;--r:-8deg;--k:60;--t:0s" },
-  { bot: "bloom", style: "--x:92%;--y:8%;--s:6.5rem;--r:10deg;--k:-40;--t:-2s" },
-  { bot: "orbi", style: "--x:8%;--y:62%;--s:4.5rem;--r:6deg;--k:-70;--t:-4s" },
-  { bot: "stella", style: "--x:88%;--y:56%;--s:5rem;--r:-12deg;--k:50;--t:-1s" },
-  { bot: "hex", style: "--x:22%;--y:-6%;--s:3.75rem;--r:14deg;--k:80;--t:-3s" },
 ]
 ---
 
 <Base
   title="Gots: Hermes Bots that got your back"
-  description="Gots gives you Hermes Bots that got your back. Code, research and more with your Hermes Agent from your phone, and come back to find it done."
+  description="Gots is the app for your Hermes Agent, on your phone and your laptop. Code, research, dictation and generative UI, running on your own host."
 >
   <main>
-    <section class="lp-hero" data-hero>
+    <section class="home-hero">
       <div class="wrap hero-copy">
-        <h1 class="mega" data-reveal="pop" style="--d:80ms">
-          Hermes Bots that<br />got your <em>back!</em>
-        </h1>
-        <p class="lede-xl" data-reveal="rise" style="--d:180ms">
-          Ask for something, close Gots, and come back to find it done. Your Hermes agent keeps working on your own host, and your phone gets a push when it needs you.
+        <p class="tag" data-reveal>Hermes Bots that got your back</p>
+        <h1 data-reveal style="--d:60ms">Ask. Close the app. Come back to it <em>done.</em></h1>
+        <p class="lede" data-reveal style="--d:120ms">
+          Gots is the app for your Hermes agent. It works on your own host, so the job keeps going when your phone sleeps, and you pick it up on whichever screen is closer.
         </p>
-        <div class="cta" data-reveal="rise" style="--d:280ms">
-          <a class="btn" href="#features">See what it does</a>
-          <a class="btn btn-ghost" href="#coming">What's cooking</a>
+        <div class="cta" data-reveal style="--d:180ms">
+          <a class="btn" href="#waitlist">Join the waiting list</a>
+          <a class="btn btn-ghost" href="#features">See what it does</a>
         </div>
+        <p class="where" data-reveal style="--d:240ms">Phone · Tablet · Laptop</p>
       </div>
 
-      <div class="hero-stage">
-        {
-          floaters.map((f) => (
-            <img class="floater" src={`/bots/${f.bot}.png`} alt="" width="96" height="96" style={f.style} />
-          ))
-        }
+      <figure class="hero-art" aria-label="The same coding session open on a laptop and on a phone">
+        <div class="laptop">
+          <div class="laptop-lid"><div class="laptop-screen"><Chat variant="laptop" /></div></div>
+          <div class="laptop-base"></div>
+        </div>
         <div class="hero-phone">
-          <div class="phone"><Phone shot="bots" eager alt="The list of Hermes Bots in Gots" /></div>
+          <div class="phone"><div class="phone-screen"><Chat variant="phone" /></div></div>
         </div>
-      </div>
+        <p class="hero-bubble"><img src="/bots/hex.png" alt="" width="48" height="48" />On it.</p>
+      </figure>
     </section>
 
-    <section id="features" class="story" data-story data-count={slides.length} data-active="0" style={`--n:${slides.length}`}>
-      <div class="story-sticky">
-        <div class="wrap story-head">
-          <span class="eyebrow">New</span>
-        </div>
-        <div class="wrap story-grid">
-          <div class="story-copy">
-            {
-              slides.map((s, i) => (
-                <article class="copy" data-i={i}>
+    <div id="features">
+      {
+        stages.map((s, i) => (
+          <>
+            <div class="wedge" aria-hidden="true"><span>{s.word}</span></div>
+            <section class:list={["stage", { flip: i % 2 === 1 }]} aria-labelledby={`${s.id}-title`}>
+              <div class="wrap stage-grid">
+                <div class="stage-copy" data-reveal>
                   <span class="tag">{s.tag}</span>
-                  <h2>{s.title}</h2>
+                  <h2 id={`${s.id}-title`}>{s.title}</h2>
                   <p>{s.body}</p>
-                  {s.chips.length > 0 && (
-                    <ul class="chips">
-                      {s.chips.map((chip) => <li>{chip}</li>)}
-                    </ul>
+                  <ul class="chips">
+                    {s.chips.map((chip) => <li>{chip}</li>)}
+                  </ul>
+                </div>
+                <div class="stage-art" data-reveal style="--d:100ms">
+                  {s.dictate ? (
+                    <Dictation />
+                  ) : (
+                    <div class="phone art-phone">
+                      <Phone shot={s.shot!} alt={s.title} />
+                    </div>
                   )}
-                  {s.cta && <a class="btn btn-ghost" href={s.cta.href}>{s.cta.label}</a>}
-                </article>
-              ))
-            }
-          </div>
+                </div>
+              </div>
+            </section>
+          </>
+        ))
+      }
+    </div>
 
-          <div class="story-device">
-            {
-              slides.map((s, i) => (
-                <span class="glow" data-i={i} style={`--glow:${s.glow}`} />
-              ))
-            }
-            <div class="phone">
-              {
-                slides.map((s, i) => (
-                  <div class="slide" data-i={i}>
-                    {s.shot ? (
-                      <Phone shot={s.shot} alt={s.title} />
-                    ) : (
-                      <div class="phone-fill soon-screen">
-                        <img src={`/bots/${s.bot}.png`} alt="" width="96" height="96" />
-                      </div>
-                    )}
-                  </div>
-                ))
-              }
-            </div>
-            {
-              slides.map((s, i) => (
-                <img
-                  class="mascot"
-                  data-i={i}
-                  src={`/bots/${s.bot}.png`}
-                  alt=""
-                  width="96"
-                  height="96"
-                />
-              ))
-            }
-          </div>
-        </div>
-        <ol class="dots" aria-label="Features">
-          {
-            slides.map((s, i) => (
-              <li>
-                <button type="button" data-dot={i} aria-label={s.tag} aria-current={i === 0}>
-                  <span></span>
-                </button>
-              </li>
-            ))
-          }
-        </ol>
-      </div>
-    </section>
-
-    <section class="extras">
+    <section id="coming" class="coming">
       <div class="wrap">
-        <h2 class="section-title" data-reveal="rise">And a pocketful more.</h2>
-        <ul class="pills">
+        <span class="tag" data-reveal>Coming soon</span>
+        <h2 class="section-title" data-reveal>Next in the room.</h2>
+        <ul class="coming-grid">
           {
-            extras.map((name, i) => (
-              <li data-reveal="pop" style={`--d:${i * 60}ms`}>{name}</li>
+            coming.map((c, i) => (
+              <li data-reveal style={`--d:${i * 70}ms`}>
+                <img src={`/bots/${c.bot}.png`} alt="" width="96" height="96" loading="lazy" />
+                <span class="soon">Coming soon</span>
+                <h3>{c.title}</h3>
+                <p>{c.body}</p>
+              </li>
             ))
           }
         </ul>
       </div>
     </section>
 
-    <section id="coming" class="coming">
-      <div class="wrap">
-        <span class="eyebrow" data-reveal="pop">Coming soon</span>
-        <h2 class="section-title" data-reveal="rise">What's cooking.</h2>
-      </div>
-      <ul class="deck" tabindex="0" aria-label="Coming soon">
-        {
-          coming.map((card, i) => (
-            <li class="card" data-reveal="pop" style={`--d:${i * 80}ms;--tilt:${i % 2 ? 1.5 : -1.5}deg`}>
-              <span class="sticker">{card.status}</span>
-              <h3>{card.title}</h3>
-              <p>{card.body}</p>
-              <img src={`/bots/${card.bot}.png`} alt="" width="96" height="96" loading="lazy" />
-            </li>
-          ))
-        }
-      </ul>
-    </section>
-
     <section id="pricing" class="pricing">
       <div class="wrap">
-        <span class="eyebrow" data-reveal="pop">Pricing</span>
-        <h2 class="section-title" data-reveal="rise">Two ways in. Both simple.</h2>
+        <span class="tag" data-reveal>Pricing</span>
+        <h2 class="section-title" data-reveal>Two ways in. Both simple.</h2>
 
         <div class="plans">
-          <article id="waitlist" class="plan plan-featured" data-reveal="rise">
+          <article id="waitlist" class="plan plan-featured" data-reveal>
             <span class="tag">Hosted</span>
             <p class="price">Waiting list</p>
             <p class="plan-lede">
@@ -303,7 +176,7 @@ const floaters = [
             </ul>
           </article>
 
-          <article class="plan" data-reveal="rise" style="--d:120ms">
+          <article class="plan" data-reveal style="--d:100ms">
             <span class="tag">Self-host</span>
             <p class="price">Free</p>
             <p class="plan-lede">Run it on your own Hermes host. Your chats, runs and keys stay with you.</p>
@@ -317,4 +190,9 @@ const floaters = [
       </div>
     </section>
   </main>
+
+  <div class="dock" data-dock>
+    <span class="wordmark">Gots</span>
+    <a class="btn btn-sm" href="#waitlist">Join the waiting list</a>
+  </div>
 </Base>

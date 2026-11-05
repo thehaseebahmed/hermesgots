@@ -1,0 +1,740 @@
+/* The landing page's own sections. The page sits on warm paper in light mode, with the app's
+   green as its one accent; the bots are the only other colour. */
+:root {
+  --background: oklch(0.975 0.007 95);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.145 0 0);
+  }
+}
+
+/* Hero */
+.home-hero {
+  position: relative;
+  overflow: clip;
+  padding-top: clamp(3rem, 7vw, 5.5rem);
+  text-align: center;
+}
+
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.home-hero h1 {
+  margin: 0;
+  font-size: clamp(2.4rem, 7vw, 5rem);
+  text-wrap: balance;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  font-weight: 800;
+}
+
+.home-hero h1 em {
+  font-style: normal;
+  color: var(--primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .home-hero h1 em {
+    color: oklch(0.8 0.15 150);
+  }
+}
+
+.lede {
+  max-width: 38rem;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: clamp(1.05rem, 2.2vw, 1.3rem);
+  line-height: 1.45;
+}
+
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.where {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero-art {
+  position: relative;
+  width: min(100% - 2rem, 62rem);
+  margin: clamp(2.5rem, 6vw, 4rem) auto 0;
+  padding-bottom: 3rem;
+}
+
+.laptop {
+  width: 80%;
+  margin-right: auto;
+}
+
+.laptop-lid {
+  padding: 1.6% 1.6% 2%;
+  border-radius: 0.9rem 0.9rem 0.3rem 0.3rem;
+  background: oklch(0.2 0 0);
+  box-shadow:
+    0 0 0 1px oklch(1 0 0 / 14%) inset,
+    0 2.5rem 5rem -2rem oklch(0 0 0 / 35%);
+}
+
+.laptop-screen {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 0.35rem;
+  overflow: hidden;
+  background: var(--background);
+  container-type: inline-size;
+}
+
+.laptop-base {
+  height: 0.8rem;
+  margin-inline: -3%;
+  border-radius: 0 0 1.2rem 1.2rem;
+  background: linear-gradient(oklch(0.84 0 0), oklch(0.7 0 0));
+}
+
+.hero-phone {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: min(24%, 14rem);
+}
+
+.phone-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 10.5% / 4.9%;
+  overflow: hidden;
+  background: var(--background);
+  container-type: inline-size;
+}
+
+.hero-bubble {
+  position: absolute;
+  left: 2%;
+  top: -2.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.3rem 0.9rem 0.3rem 0.35rem;
+  border: 2px solid var(--foreground);
+  border-radius: 999px;
+  background: var(--card);
+  font-weight: 700;
+  font-size: 0.95rem;
+  rotate: -4deg;
+}
+
+.hero-bubble img {
+  width: 2rem;
+  height: 2rem;
+}
+
+@media (max-width: 640px) {
+  .laptop {
+    width: 100%;
+  }
+  .hero-phone {
+    width: 36%;
+    bottom: 0;
+  }
+  .hero-art {
+    padding-bottom: 5rem;
+  }
+}
+
+/* The app, drawn in HTML. Sizes are in em off the container so one drawing fits both frames. */
+.app {
+  position: relative;
+  display: flex;
+  height: 100%;
+  font-size: var(--fs);
+  line-height: 1.35;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.app-phone {
+  --fs: max(4.3cqw, 6px);
+}
+
+.app-laptop {
+  --fs: max(1.55cqw, 6px);
+}
+
+.app b {
+  font-weight: 600;
+}
+
+.app small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.82em;
+}
+
+.app img {
+  display: block;
+  width: 2.4em;
+  height: 2.4em;
+  flex: none;
+}
+
+.app-side {
+  flex: 0 0 27%;
+  padding: 1.2em 0.8em;
+  border-right: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.app-side-title {
+  margin: 0 0 0.8em 0.4em;
+  font-weight: 700;
+}
+
+.app-side ul {
+  display: grid;
+  gap: 0.2em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-side li {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.55em 0.5em;
+  border-radius: 0.8em;
+}
+
+.app-side li.on {
+  background: var(--card);
+}
+
+.app-side li span {
+  min-width: 0;
+}
+
+.app-side li b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.9em 1em;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-phone .app-head {
+  padding-top: 2.6em;
+}
+
+.app-thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.9em;
+  padding: 1.1em;
+}
+
+.app-thread p,
+.app-thread ul {
+  margin: 0;
+}
+
+.msg-user {
+  align-self: flex-end;
+  max-width: 82%;
+  padding: 0.6em 0.9em;
+  border-radius: 1.1em 1.1em 0.3em 1.1em;
+  background: var(--muted);
+}
+
+.calls {
+  display: grid;
+  gap: 0.3em;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-foreground);
+  font-size: 0.88em;
+}
+
+.calls li {
+  padding: 0.35em 0.8em;
+  border-radius: 0.6em;
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+}
+
+.calls code {
+  font-family: var(--mono);
+  font-size: 0.95em;
+  color: var(--foreground);
+}
+
+.calls em {
+  font-style: normal;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.pr {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.5em;
+  padding: 0.4em 0.9em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 0.88em;
+  font-weight: 600;
+}
+
+.pr i {
+  width: 0.65em;
+  height: 0.65em;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.status {
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+
+.app-composer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 1em 1em;
+  padding: 0.7em 0.7em 0.7em 1.1em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+
+.app-composer i {
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.scan {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app {
+    animation: scan-in 1.1s var(--ease) 0.3s both;
+  }
+  .app-thread > * {
+    animation: line-in 0.5s var(--ease) var(--d, 0s) both;
+  }
+  .scan {
+    position: absolute;
+    inset: 0 0 auto;
+    display: block;
+    height: 2px;
+    background: var(--primary);
+    box-shadow: 0 0 1em var(--primary);
+    animation: scan-line 1.1s var(--ease) 0.3s both;
+    pointer-events: none;
+  }
+}
+
+@keyframes scan-in {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+
+@keyframes scan-line {
+  from {
+    top: 0;
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  to {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes line-in {
+  from {
+    opacity: 0;
+    translate: 0 0.6em;
+  }
+}
+
+/* Chapter wipes: a green wedge between stages, with the stage's word on it. */
+.wedge {
+  display: grid;
+  place-items: center;
+  height: clamp(10rem, 30vw, 20rem);
+  margin-block: -1px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  clip-path: polygon(0 14%, 100% 0, 100% 86%, 0 100%);
+  overflow: hidden;
+}
+
+.wedge span {
+  font-size: clamp(4rem, 17vw, 13rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .wedge {
+      animation: wedge-tilt linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 55%;
+    }
+    .wedge span {
+      animation: wedge-word linear both;
+      animation-timeline: view();
+      animation-range: entry 0% exit 100%;
+    }
+  }
+}
+
+@keyframes wedge-tilt {
+  from {
+    clip-path: polygon(0 50%, 100% 50%, 100% 50%, 0 50%);
+  }
+}
+
+@keyframes wedge-word {
+  from {
+    translate: -18% 0;
+  }
+  to {
+    translate: 18% 0;
+  }
+}
+
+/* Stages */
+.stage {
+  padding-block: clamp(3rem, 8vw, 6rem);
+}
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: clamp(2rem, 6vw, 5rem);
+}
+
+.stage.flip .stage-copy {
+  order: 2;
+}
+
+.stage-copy {
+  max-width: 30rem;
+}
+
+.stage-copy h2 {
+  margin: 0.75rem 0;
+  font-size: clamp(2rem, 4.4vw, 3.2rem);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.stage-copy p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 1.1rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chips li {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.stage-art {
+  display: grid;
+  place-items: center;
+}
+
+.art-phone {
+  width: clamp(15rem, 26vw, 19rem);
+}
+
+@media (max-width: 860px) {
+  .stage-grid {
+    grid-template-columns: 1fr;
+  }
+  .stage.flip .stage-copy {
+    order: 0;
+  }
+  .stage-copy {
+    max-width: none;
+  }
+  .art-phone {
+    width: min(70vw, 18rem);
+  }
+}
+
+/* Dictation */
+.dictate {
+  display: grid;
+  gap: 1rem;
+  width: min(100%, 26rem);
+  margin: 0;
+}
+
+.dictate-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.7rem 0.8rem 0.7rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 1.25rem 2.5rem -1.25rem oklch(0 0 0 / 25%);
+}
+
+.rec {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--usage-output);
+}
+
+.wave {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  height: 2rem;
+}
+
+.wave i {
+  flex: 1;
+  height: var(--h);
+  border-radius: 99px;
+  background: var(--foreground);
+}
+
+.time {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+
+.stop {
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.dictate-rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dictate-rows p {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 1rem 1.2rem;
+  border-radius: 1.2rem;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.dictate-rows .tidy {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wave i {
+    animation: level 1.1s ease-in-out var(--d) infinite alternate;
+  }
+  .rec {
+    animation: blink 1.4s steps(2, jump-none) infinite;
+  }
+}
+
+@keyframes level {
+  to {
+    height: calc(var(--h) * 0.35);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Coming soon */
+.coming {
+  padding-block: clamp(4rem, 10vw, 8rem) clamp(2rem, 5vw, 4rem);
+}
+
+.coming-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin: 2.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coming-grid li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-height: 17rem;
+  padding: 1.5rem;
+  border: 1.5px dashed color-mix(in oklab, var(--foreground) 28%, transparent);
+  border-radius: 1.5rem;
+}
+
+.coming-grid img {
+  width: 4.25rem;
+  height: auto;
+  margin-bottom: auto;
+}
+
+.soon {
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.4rem;
+  background: var(--foreground);
+  color: var(--background);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coming-grid h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.coming-grid p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 960px) {
+  .coming-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .coming-grid {
+    grid-template-columns: 1fr;
+  }
+  .coming-grid li {
+    min-height: 0;
+  }
+}
+
+/* The dock: the one call to action that stays in reach. */
+.dock {
+  position: fixed;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: 50%;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.4rem 0.4rem 0.4rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--card) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 0.75rem 2rem -0.75rem oklch(0 0 0 / 30%);
+  translate: -50% 0;
+  white-space: nowrap;
+  transition:
+    translate 0.4s var(--ease),
+    opacity 0.3s;
+}
+
+.dock.is-away {
+  translate: -50% 150%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+html:not(.js) .dock {
+  display: none;
+}
+
+@media (max-width: 420px) {
+  .dock .wordmark {
+    display: none;
+  }
+  .dock {
+    padding-left: 0.4rem;
+  }
+}

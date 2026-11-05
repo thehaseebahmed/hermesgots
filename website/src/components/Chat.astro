@@ -1,0 +1,63 @@
+---
+// One coding session drawn in HTML, so the hero's phone and laptop can show the same thread at
+// their own sizes. It's a picture of the app, not the app: nothing in it is interactive.
+interface Props {
+  variant: "phone" | "laptop"
+}
+
+const { variant } = Astro.props
+
+const sessions = [
+  { bot: "hex", title: "Fix flaky retry test", state: "Done", on: true },
+  { bot: "stella", title: "Cloud pricing brief", state: "Reading" },
+  { bot: "gem", title: "Release notes", state: "Idle" },
+]
+---
+
+<div class={`app app-${variant}`} aria-hidden="true">
+  {
+    variant === "laptop" && (
+      <aside class="app-side">
+        <p class="app-side-title">Code</p>
+        <ul>
+          {sessions.map((s) => (
+            <li class:list={[{ on: s.on }]}>
+              <img src={`/bots/${s.bot}.png`} alt="" width="48" height="48" />
+              <span>
+                <b>{s.title}</b>
+                <small>{s.state}</small>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </aside>
+    )
+  }
+  <div class="app-main">
+    <header class="app-head">
+      <img src="/bots/hex.png" alt="" width="48" height="48" />
+      <span>
+        <b>Fix flaky retry test</b>
+        <small>Hex · hermesgots</small>
+      </span>
+    </header>
+    <div class="app-thread">
+      <p class="msg-user" style="--d: 0.5s">Fix the flaky retry test and open a PR.</p>
+      <ul class="calls" style="--d: 1s">
+        <li>Ran 3 commands</li>
+        <li>Edited <code>retry.test.ts</code> <em>+14 −2</em></li>
+      </ul>
+      <p class="msg-bot" style="--d: 1.5s">
+        Fixed. The test raced the backoff timer, so it now waits on the clock instead of a sleep.
+        The draft pull request is up.
+      </p>
+      <p class="pr" style="--d: 2s"><i></i>Draft · checks passing</p>
+      <p class="status" style="--d: 2.4s">Done in 2m 14s</p>
+    </div>
+    <div class="app-composer">
+      <span>Message Hex</span>
+      <i></i>
+    </div>
+  </div>
+  <span class="scan"></span>
+</div>
