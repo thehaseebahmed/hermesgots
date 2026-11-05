@@ -451,6 +451,64 @@ def _dispatcher(tt: Any) -> Any:
     return (lambda path: call(path, source="dictation")) if named else call
 
 
+def _wav_frames(part: bytes) -> Optional[Tuple[bytes, bytes]]:
+    """One WAV Piece's format description and the frames it carries, or None for anything else."""
+    if len(part) < 12 or part[0:4] != b"RIFF" or part[8:12] != b"WAVE":
+        return None
+    at = 12
+    fmt: Optional[bytes] = None
+    while at + 8 <= len(part):
+        name = part[at : at + 4]
+        size = int.from_bytes(part[at + 4 : at + 8], "little")
+        if name == b"data":
+            return (fmt, part[at + 8 : at + 8 + size]) if fmt is not None else None
+        if name == b"fmt ":
+            fmt = part[at : at + 8 + size]
+        at += 8 + size + (size & 1)
+    return None
+
+
+def _joined_wav(parts: Sequence[bytes]) -> Optional[List[bytes]]:
+    """Several WAV Pieces handed over as the one recording they are, or None if they aren't that.
+
+    A Piece is a file in its own right (`BubbleRecorder.wav`), so writing the Pieces one after
+    another leaves every Piece but the first behind a header a reader has already finished with: the
+    take is heard up to its first pause and no further. One RIFF header, then every Piece's frames in
+    order, is the take whole. The chunks stay separate so a nine-megabyte take is still never joined
+    into a second buffer.
+    """
+    if not parts or any(len(part) < 44 for part in parts):
+        return None
+    frames: List[bytes] = []
+    fmt: Optional[bytes] = None
+    for part in parts:
+        split = _wav_frames(part)
+        if split is None:
+            return None
+        head, body = split
+        if fmt is None:
+            fmt = head
+        elif head != fmt:
+            return None
+        frames.append(body)
+    if fmt is None:
+        return None
+    if any(len(body) & 1 for body in frames[:-1]):
+        return None
+    body = frames[-1]
+    pad = b"\x00" if len(body) & 1 else b""
+    size = 4 + len(fmt) + 8 + sum(len(chunk) for chunk in frames) + len(pad)
+    header = (
+        b"RIFF"
+        + size.to_bytes(4, "little")
+        + b"WAVE"
+        + fmt
+        + b"data"
+        + sum(len(chunk) for chunk in frames).to_bytes(4, "little")
+    )
+    return [header, *frames, pad] if pad else [header, *frames]
+
+
 def _temp(data: Any, content_type: Optional[str], decode: Any) -> Any:
     """Hands ``data`` to ``decode`` as a file it can read, and deletes the file however that ends.
 
@@ -724,12 +782,16 @@ def _upload_whole(take: Take) -> str:
             raise DictationError("The recording is too long.", 413)
         if not any(parts):
             return ""
+        whole = _joined_wav(parts)
+        handed, handed_type = (
+            (whole, "audio/wav") if whole is not None else (parts, content_type)
+        )
         try:
             return _landed(
                 run_bounded(
                     "memento-dictation-upload",
                     CLOUD_SECONDS,
-                    lambda: _temp(parts, content_type, _dispatcher(_tools())),
+                    lambda: _temp(handed, handed_type, _dispatcher(_tools())),
                 )
             )
         except BoundedTimeout:

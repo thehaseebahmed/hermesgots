@@ -7,10 +7,12 @@ ready, what reaches faster-whisper, and how its answers come back.
 
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import types
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 
@@ -743,6 +745,68 @@ class CleanVocabularyTest(unittest.TestCase):
     def test_a_word_carries_no_more_than_the_cap(self) -> None:
         self.assertEqual(
             len(dictation.clean_vocabulary(["x" * 200])[0]), dictation.MAX_WORD
+        )
+
+
+class PiecesAreOneRecordingTest(TakeCase):
+    """A take cut at a pause is heard whole: its Pieces are joined, not stacked behind one header."""
+
+    def wav(self, seconds: float, hz: int = 16_000) -> bytes:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as file:
+            file.setnchannels(1)
+            file.setsampwidth(2)
+            file.setframerate(hz)
+            file.writeframes(b"\x01\x00" * int(hz * seconds))
+        return buffer.getvalue()
+
+    def heard_by_the_vendor(self, pieces, types=None):
+        """Uploads each Piece and answers with the bytes the vendor was handed."""
+        taken = {}
+
+        def transcribe_audio(path, source=None):
+            with open(path, "rb") as file:
+                taken["data"] = file.read()
+            taken["path"] = path
+            return {"success": True, "transcript": " One thought, whole. "}
+
+        _, patch = hermes(_get_provider=lambda cfg: "groq", transcribe_audio=transcribe_audio)
+        with patch:
+            for index, data in enumerate(pieces):
+                dictation.upload(
+                    "p",
+                    "take-1",
+                    index,
+                    data,
+                    "audio/wav" if types is None else types[index],
+                    hearing=True,
+                    ms=1000,
+                )
+            answer = dictation.confirm("p", "take-1", len(pieces), level="none")
+        return taken, answer
+
+    def test_two_wav_pieces_are_heard_as_the_three_seconds_they_are(self) -> None:
+        taken, answer = self.heard_by_the_vendor([self.wav(1.0), self.wav(2.0)])
+        self.assertEqual(answer["text"], "One thought, whole.")
+        self.assertTrue(taken["path"].endswith(".wav"), "a joined take is a WAV")
+        with wave.open(io.BytesIO(taken["data"]), "rb") as file:
+            self.assertEqual(
+                (file.getnframes() / file.getframerate(), file.getnchannels(), file.getframerate()),
+                (3.0, 1, 16_000),
+                "the second Piece is part of the take, not bytes behind a finished header",
+            )
+
+    def test_a_piece_that_is_not_wav_is_still_handed_over_as_it_arrived(self) -> None:
+        taken, _ = self.heard_by_the_vendor(
+            [b"webm-one", b"webm-two"], ["audio/webm;codecs=opus", "audio/webm;codecs=opus"]
+        )
+        self.assertEqual(taken["data"], b"webm-onewebm-two")
+
+    def test_wav_pieces_of_different_formats_are_not_forced_together(self) -> None:
+        first, second = self.wav(1.0), self.wav(1.0, hz=8_000)
+        taken, _ = self.heard_by_the_vendor([first, second])
+        self.assertEqual(
+            taken["data"], first + second, "a format it cannot merge is handed over as it arrived"
         )
 
 

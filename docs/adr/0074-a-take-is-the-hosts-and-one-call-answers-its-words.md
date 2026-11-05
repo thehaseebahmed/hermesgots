@@ -31,7 +31,11 @@ delete rather than a wait for that window to pass, so a cancelled take's audio l
 the order it arrived and keeps the words; a local host drops the audio as soon as it has them. A host
 resolving a cloud provider keeps the take's audio and uploads the whole of it at the Confirm, and still
 sends no Hearing prompt — a vendor decode reads the audio alone and the Cleanup carries the bot's names
-(ADR 0069's provider rule stands unchanged).
+(ADR 0069's provider rule stands unchanged). The several Pieces reach the vendor as one recording: each
+Piece is a file in its own right with its own RIFF header, so writing them one after another made a
+reader stop at the end the first header declared — a take cut at a pause was heard up to that pause and
+no further, and read as a short answer rather than a lost half. WAV Pieces are joined under one header
+(the format checked against the first Piece, bytes for anything else left exactly as they arrived).
 
 **One call answers the take, and it is the only call that carries words.** The Confirm names how many
 Pieces the take has. A host holding fewer answers 409 naming the indexes it is missing, the app sends
