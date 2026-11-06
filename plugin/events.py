@@ -207,14 +207,28 @@ def on_turn_end(**kwargs: Any) -> None:
 def on_approval(**kwargs: Any) -> None:
     """``pre_approval_request`` / ``post_approval_response``: a run began or stopped waiting for the
     user. The hook names no platform, so a session known to be another surface's is skipped."""
+    if not _is_guardian_pass(kwargs):
+        _record_wait(kwargs)
+
+
+def on_approval_request(**kwargs: Any) -> None:
+    """``pre_approval_request``: as ``on_approval``, and the user's other devices hear of it."""
+    if _is_guardian_pass(kwargs):
+        return
+    _record_wait(kwargs)
+    session_id = _text(kwargs.get("session_id"))
+    if _is_api_session(session_id):
+        push.notify("approval", session_id)
+
+
+def _record_wait(kwargs: Dict[str, Any]) -> None:
     session_id = _text(kwargs.get("session_id"))
     if session_id is None or _is_api_session(session_id):
         note("runs", session_id, force=True)
 
 
-def on_approval_request(**kwargs: Any) -> None:
-    """``pre_approval_request``: as ``on_approval``, and the user's other devices hear of it."""
-    on_approval(**kwargs)
-    session_id = _text(kwargs.get("session_id"))
-    if _is_api_session(session_id):
-        push.notify("approval", session_id)
+def _is_guardian_pass(kwargs: Dict[str, Any]) -> bool:
+    """The guardian LLM's own pass over a request (``surface="smart"``, answered as
+    ``choice="smart_approve"``/``"smart_deny"``), not a prompt: one it hands to the user fires the
+    hook again."""
+    return kwargs.get("surface") == "smart" or str(kwargs.get("choice") or "").startswith("smart_")
