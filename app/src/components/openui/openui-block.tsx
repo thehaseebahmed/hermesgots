@@ -7,6 +7,8 @@ import { asLangFence } from "@/lib/openui-block.ts"
 import { noteFailure } from "@/lib/report"
 
 import { gate, type Props } from "./gate.ts"
+
+export { blockProblem } from "./gate.ts"
 import { library } from "./library.tsx"
 
 function OpenUIBlock(props: Props) {

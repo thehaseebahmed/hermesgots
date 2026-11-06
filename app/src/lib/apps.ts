@@ -125,7 +125,7 @@ export async function changePage(
   )
   const changed = changeOf(output)
   if ("error" in changed) throw new Error(`${changed.error} Nothing was saved.`)
-  const { blockProblem } = await import("@/components/openui/gate")
+  const { blockProblem } = await import("@/components/openui/openui-block")
   const problem = blockProblem(changed.source)
   if (problem) throw new Error(`The change doesn't draw: ${problem} Nothing was saved.`)
   return writeAppPage(profile, appId, pageId, changed.source)
