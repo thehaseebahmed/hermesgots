@@ -62,7 +62,7 @@ function host(
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = init?.method ?? "GET"
-    calls.push(`${method} ${url.pathname.split("/memento/")[1] ?? url.pathname}`)
+    calls.push(`${method} ${url.pathname.split("/gots/")[1] ?? url.pathname}`)
     if (script.down) throw new TypeError("Failed to fetch")
     if (url.pathname.endsWith("/dictations/stats")) {
       // The totals the app itself reconciles against, with the one number a test may contradict.

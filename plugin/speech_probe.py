@@ -48,7 +48,7 @@ from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
 
-OBJECT = "memento.speech.probe"
+OBJECT = "gots.speech.probe"
 KEY = "speech_probe"
 FIXTURE = Path(__file__).parent / "speech" / "probe.wav"
 KEEP_UP = 2.0
@@ -297,7 +297,7 @@ def measure(
                 load_ms = _timed(decode, FIXTURE, name)
                 decode_ms = _timed(decode, FIXTURE, name)
             except Exception as unanswered:
-                logger.warning("memento: couldn't time %s on this host: %s", name, unanswered)
+                logger.warning("gots: couldn't time %s on this host: %s", name, unanswered)
                 continue
             measured[name] = {
                 "realtime": round(spoken / max(1, decode_ms), 2),

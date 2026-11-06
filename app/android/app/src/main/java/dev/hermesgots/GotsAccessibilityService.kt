@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
@@ -22,7 +22,7 @@ import android.view.accessibility.AccessibilityWindowInfo
  * never a retry. A blind second attempt on a field that had silently accepted the first is exactly
  * how one sentence becomes two.
  */
-class MementoAccessibilityService : AccessibilityService() {
+class GotsAccessibilityService : AccessibilityService() {
 
     private val ui = Handler(Looper.getMainLooper())
 
@@ -158,7 +158,7 @@ class MementoAccessibilityService : AccessibilityService() {
         private const val SETTLE_MS = 120L
 
         @Volatile
-        var live: MementoAccessibilityService? = null
+        var live: GotsAccessibilityService? = null
             private set
 
         /** Whether the phone has switched this service on: without it nothing can insert anything. */

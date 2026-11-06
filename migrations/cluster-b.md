@@ -33,7 +33,7 @@ the resolution — which model the window belongs to, and where it comes from be
 ## The contract
 
 - **New module `plugin/models_dev.py`.** Fetches `https://models.dev/api.json` and caches it in
-  `memento.db`. Verified shape (checked 2026-10-17): `{ "<provider>": { "models": { "<id>": { "limit":
+  `gots.db`. Verified shape (checked 2026-10-17): `{ "<provider>": { "models": { "<id>": { "limit":
   {"context", "output"}, "cost": {"input","output","cache_read","cache_write"}, "modalities": {...},
   "id", "name" } } } }`, 232 providers, ~3.5 MB. Model ids are the provider list's own; the app's matcher
   (`src/lib/model-match.ts::normalise` / `sameModel`, re-exported by `models.ts`) is the reference for how

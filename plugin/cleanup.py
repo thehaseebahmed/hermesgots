@@ -105,7 +105,7 @@ def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[
             try:
                 dropped = sessions.remove(path, sid)["removed"]
             except Exception:
-                logger.debug("memento: couldn't remove the worktrees of %s", sid, exc_info=True)
+                logger.debug("gots: couldn't remove the worktrees of %s", sid, exc_info=True)
                 dropped = False
             if not dropped:
                 result["kept"] += 1
@@ -114,7 +114,7 @@ def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[
             try:
                 db.delete_session(sid)
             except Exception:
-                logger.debug("memento: couldn't delete Hermes session %s", sid, exc_info=True)
+                logger.debug("gots: couldn't delete Hermes session %s", sid, exc_info=True)
         attachments.remove(hermes_home, sid)
         gone.add(sid)
         if chat_id:
@@ -141,6 +141,6 @@ async def run_daily(adapter: Any, hermes_home: Path) -> None:
         try:
             db = getattr(adapter, "_session_db", None)
             done = await asyncio.to_thread(sweep, hermes_home, db)
-            logger.info("memento: daily cleanup %s", done)
+            logger.info("gots: daily cleanup %s", done)
         except Exception:
-            logger.warning("memento: daily cleanup failed", exc_info=True)
+            logger.warning("gots: daily cleanup failed", exc_info=True)

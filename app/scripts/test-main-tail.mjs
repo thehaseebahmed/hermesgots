@@ -8,7 +8,7 @@ const thread = (id, createdAt, extra = {}) => ({
     id,
     profileId: "bot-1",
     title: `Thread ${id}`,
-    hermesSessionId: `memento-${id}`,
+    hermesSessionId: `gots-${id}`,
     createdAt,
     updatedAt: createdAt,
     changedAt: 0,
@@ -41,9 +41,9 @@ const drawn = (tail) =>
 test("a move older than every card leads the tail, so no card outranks it", () => {
   const tail = mainTail({
     cards: [thread("t-litellm", 40), thread("t-clef", 30)],
-    moves: [move("m-memento", 10)],
+    moves: [move("m-gots", 10)],
   })
-  assert.deepEqual(drawn(tail), ["move:m-memento@10", "card:t-clef@30", "card:t-litellm@40"])
+  assert.deepEqual(drawn(tail), ["move:m-gots@10", "card:t-clef@30", "card:t-litellm@40"])
 })
 
 test("a move made after a card follows it", () => {

@@ -15,7 +15,7 @@ import {
 } from "../src/lib/attachment-text.ts"
 import { formatBytes } from "../src/lib/attachment-caps.ts"
 
-const HOST = "/home/h/.hermes/memento/attachments/session-1"
+const HOST = "/home/h/.hermes/plugin-data/gots/attachments/session-1"
 
 const file = (patch = {}) => ({
   id: "f1",

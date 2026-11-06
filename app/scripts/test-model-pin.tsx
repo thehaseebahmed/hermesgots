@@ -199,7 +199,7 @@ function refusesQueue(name: string) {
     if (!url.host.startsWith(name)) return json({})
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["queue"] })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["queue"] })
     if (url.pathname.endsWith("/api/model/options")) return json({})
     if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
     if (url.pathname.endsWith("/queue")) return json({ error: { message: "No queue here." } }, 500)
@@ -219,7 +219,7 @@ async function seed(name: string, bot: Partial<Profile> = {}): Promise<Profile> 
       id: MAIN,
       profileId: profile.id,
       title: "Main",
-      hermesSessionId: `memento-${MAIN}`,
+      hermesSessionId: `gots-${MAIN}`,
       createdAt: 1,
       updatedAt: 1,
       changedAt: 0,

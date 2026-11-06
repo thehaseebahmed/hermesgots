@@ -20,7 +20,7 @@ from plugin import commands, gate, pipeline, sessions
 from plugin.store import db_path
 from plugin.tests._helpers import staged as staged_record
 
-SESSION = "memento-afk-commands"
+SESSION = "gots-afk-commands"
 
 
 class CommandTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class CommandTests(unittest.TestCase):
             "p1",
             [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": str(self.home / "checkout"),
                     "path": str(self.tree),
                     "branch": "hermes/afk-337",
@@ -119,7 +119,7 @@ class CommandTests(unittest.TestCase):
 
     def test_an_unknown_session_records_nothing(self) -> None:
         self.staged()
-        self.run_command("pnpm test", session_id="memento-not-a-session")
+        self.run_command("pnpm test", session_id="gots-not-a-session")
         self.assertEqual(pipeline.stage_commands(self.read()), [])
 
     def test_a_finished_task_records_nothing_on_its_last_stage(self) -> None:

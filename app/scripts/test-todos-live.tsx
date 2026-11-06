@@ -57,7 +57,7 @@ const turn: Message[] = [
 function host(live: Record<string, unknown> = {}) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/runs/live"))
+    if (url.pathname.endsWith("/plugins/gots/runs/live"))
       return json({ sessions: {}, run_ids: {}, waiting: {}, subagents: {}, ...live })
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: [] })
     return json({ error: { message: "no route" } }, 404)

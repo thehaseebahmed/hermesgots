@@ -42,7 +42,7 @@ DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024
 URL_LIFETIME_S = 10 * 60
 # The query a signature travels in, in place of the Bearer header an element can't send.
 URL_PARAM = "token"
-# Where this profile's signing secret is kept in `memento.db`'s `host_settings`.
+# Where this profile's signing secret is kept in `gots.db`'s `host_settings`.
 KEY_SETTING = "media_key"
 
 VIDEO_TYPES: Dict[str, str] = {

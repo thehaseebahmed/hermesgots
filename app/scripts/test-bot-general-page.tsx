@@ -81,11 +81,11 @@ function host({
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return away
         ? json({ error: { message: "Not home." } }, 503)
-        : json({ name: "memento", features })
-    if (url.pathname.endsWith("/plugins/memento/general")) {
+        : json({ name: "gots", features })
+    if (url.pathname.endsWith("/plugins/gots/general")) {
       if (method === "POST" && body) {
         if (refuse && body.key === refuse.key)
           return json({ error: { message: refuse.message } }, 400)
@@ -97,7 +97,7 @@ function host({
         if (body.value === null) delete (held.values as Record<string, unknown>)[key]
         else (held.values as Record<string, unknown>)[key] = body.value
       }
-      return json({ object: "memento.general", general: held })
+      return json({ object: "gots.general", general: held })
     }
     return json({}, 404)
   }

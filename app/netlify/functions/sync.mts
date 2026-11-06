@@ -6,5 +6,5 @@ import { requireUser } from "../lib/identity.ts"
 export default async (req: Request) => {
   const user = await requireUser(req)
   if (user instanceof Response) return user
-  return handleDocs(req, user.id, getStore({ name: "memento-sync", consistency: "strong" }))
+  return handleDocs(req, user.id, getStore({ name: "gots-sync", consistency: "strong" }))
 }

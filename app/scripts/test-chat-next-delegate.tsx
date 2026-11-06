@@ -23,7 +23,7 @@ const slow = (host: ReturnType<typeof fakeHost>) => openDevice(host, { idleMs: 6
 
 const GOAL = "Check the weather in Lisbon"
 const setUp = (name: string, options = {}) => {
-  const host = fakeHost(`memento-delegate-${name}`, { plugin: true, ...options })
+  const host = fakeHost(`gots-delegate-${name}`, { plugin: true, ...options })
   return host
 }
 

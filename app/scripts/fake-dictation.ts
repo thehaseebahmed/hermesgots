@@ -128,14 +128,14 @@ export function dictationHost(options: DictationHostOptions = {}) {
       body,
       vocabulary: url.searchParams.getAll("vocabulary"),
     })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return json({
-        name: "memento",
+        name: "gots",
         features: ["dictation"],
         dictation: { ready: true, model: "base", wait_ms: waitMs },
       })
     if (url.pathname.endsWith("/dictation/warm"))
-      return json({ object: "memento.dictation_warm", warmed: true, ms: 0 })
+      return json({ object: "gots.dictation_warm", warmed: true, ms: 0 })
     if (piece?.length && method === "POST") {
       uploads += 1
       if (upload === "hang") return new Promise<Response>(() => {})
@@ -146,7 +146,7 @@ export function dictationHost(options: DictationHostOptions = {}) {
       const held = takes.get(id) ?? new Set<number>()
       held.add(index)
       takes.set(id, held)
-      return json({ object: "memento.dictation_piece", take: id, index }, 202)
+      return json({ object: "gots.dictation_piece", take: id, index }, 202)
     }
     if (confirming?.length && method === "POST") {
       const id = decodeURIComponent(confirming[1])
@@ -166,7 +166,7 @@ export function dictationHost(options: DictationHostOptions = {}) {
       if (confirm === "slow") await new Promise((done) => setTimeout(done, confirmAfter))
       takes.delete(id)
       return json({
-        object: "memento.dictation",
+        object: "gots.dictation",
         text: cleaned && tidied ? tidied : heard,
         heard,
         ms: count * 1000,
@@ -178,7 +178,7 @@ export function dictationHost(options: DictationHostOptions = {}) {
     }
     if (cancelling?.length && method === "DELETE") {
       const removed = takes.delete(decodeURIComponent(cancelling[1]))
-      return json({ object: "memento.dictation_cancelled", removed })
+      return json({ object: "gots.dictation_cancelled", removed })
     }
     return json({}, 404)
   }

@@ -124,7 +124,7 @@ function onlyReadyFrames(
 
 const greetingKeys = () =>
   Array.from({ length: localStorage.length }, (_, at) => localStorage.key(at) ?? "")
-    .filter((key) => key === "memento:last-greeted" || key.startsWith("memento:line-turn:"))
+    .filter((key) => key === "gots:last-greeted" || key.startsWith("gots:line-turn:"))
     .sort()
     .map((key) => `${key}=${localStorage.getItem(key)}`)
 

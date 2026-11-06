@@ -1,4 +1,4 @@
-package app.memento;
+package dev.hermesgots;
 
 import android.content.ActivityNotFoundException;
 import android.content.Intent;

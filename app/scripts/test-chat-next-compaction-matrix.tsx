@@ -19,7 +19,7 @@ import { fakeHost } from "./chat-next-host.ts"
 import { openDevice, sendFrom, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
 
 const setUp = (name: string) => {
-  const host = fakeHost(`memento-compaction-${name}`)
+  const host = fakeHost(`gots-compaction-${name}`)
   return host
 }
 

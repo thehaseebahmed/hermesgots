@@ -13,7 +13,7 @@ class HandleErrorPropagationTests(unittest.TestCase):
     def _handle_with_results(self, results):
         """Call handle() with ship() mocked to return the given results."""
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "memento.db"
+            db_path = Path(tmp) / "gots.db"
             db_path.touch()
             record = {"session_id": "test-session", "repos": []}
             with (

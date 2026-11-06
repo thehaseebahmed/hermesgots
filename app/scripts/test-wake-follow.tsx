@@ -84,7 +84,7 @@ function host() {
   over = false
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/runs/live"))
+    if (url.pathname.endsWith("/plugins/gots/runs/live"))
       return json(over ? {} : { sessions: { [SESSION]: "running" }, run_ids: { [SESSION]: RUN } })
     if (url.pathname.endsWith(`/v1/runs/${RUN}/events`)) return json({ error: {} }, 404)
     if (url.pathname.endsWith(`/v1/runs/${RUN}`))

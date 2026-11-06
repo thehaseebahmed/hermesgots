@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import android.annotation.SuppressLint
 import android.media.AudioFormat
@@ -63,7 +63,7 @@ class BubbleRecorder(
         record = recorder
         running = true
         recorder.startRecording()
-        thread = Thread({ listen(recorder) }, "memento-bubble-recorder").apply {
+        thread = Thread({ listen(recorder) }, "gots-bubble-recorder").apply {
             isDaemon = true
             start()
         }

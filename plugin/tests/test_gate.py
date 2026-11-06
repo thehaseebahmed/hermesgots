@@ -20,7 +20,7 @@ from plugin import gate, pipeline, sessions
 from plugin.store import db_path
 from plugin.tests._helpers import staged as staged_record
 
-SESSION = "memento-afk-gate"
+SESSION = "gots-afk-gate"
 
 
 class GateTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class GateTests(unittest.TestCase):
             "p1",
             [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": str(self.home / "checkout"),
                     "path": str(self.tree),
                     "branch": "hermes/afk-265",
@@ -67,13 +67,13 @@ class GateTests(unittest.TestCase):
             "p1",
             [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": str(self.home / "checkout"),
                     "path": str(self.tree),
                     "branch": "hermes/afk-265",
                 },
                 {
-                    "name": "mock-user/memento-api",
+                    "name": "mock-user/gots-api",
                     "repo_root": str(self.home / "checkout-api"),
                     "path": str(other),
                     "branch": "hermes/afk-265",
@@ -110,7 +110,7 @@ class GateTests(unittest.TestCase):
 
     def test_a_command_that_is_not_installed_exits_non_zero(self) -> None:
         self.staged()
-        answer = self.call({"commands": ["memento-no-such-command"]})
+        answer = self.call({"commands": ["gots-no-such-command"]})
         self.assertNotEqual(answer["results"][0]["code"], 0)
 
     def test_the_answer_is_kept_on_the_stage_the_build_is_in(self) -> None:
@@ -165,7 +165,7 @@ class GateTests(unittest.TestCase):
     def test_a_command_that_names_a_repo_runs_in_that_repos_worktree(self) -> None:
         other = self.two_repos()
         self.staged()
-        self.call({"commands": [{"repo": "mock-user/memento-api", "command": "pwd > where-i-ran"}]})
+        self.call({"commands": [{"repo": "mock-user/gots-api", "command": "pwd > where-i-ran"}]})
         self.assertEqual(
             (other / "where-i-ran").read_text().strip(),
             str(other),
@@ -173,7 +173,7 @@ class GateTests(unittest.TestCase):
         )
         self.assertEqual(
             pipeline.gate_of(pipeline.read(self.read()["pipeline"]))["commands"],
-            [{"command": "pwd > where-i-ran", "repo": "mock-user/memento-api", "code": 0}],
+            [{"command": "pwd > where-i-ran", "repo": "mock-user/gots-api", "code": 0}],
         )
 
     def test_a_repo_this_session_has_not_got_is_refused_before_anything_runs(self) -> None:
@@ -193,7 +193,7 @@ class GateTests(unittest.TestCase):
 
     def test_a_session_with_no_worktree_is_refused(self) -> None:
         self.staged()
-        answer = self.call({"commands": ["true"]}, session_id="memento-not-a-session")
+        answer = self.call({"commands": ["true"]}, session_id="gots-not-a-session")
         self.assertIn("no worktree", answer["error"])
 
     def test_a_command_that_hangs_is_a_failure_not_a_wait(self) -> None:

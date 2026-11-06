@@ -23,7 +23,7 @@ Point Gots Settings at `http://localhost:8642/v1` to use it.
 |----------|---------|---------|
 | `PORT` | `8642` | Port to listen on |
 | `MOCK_NO_GITHUB` | unset | Set to `1` to simulate no GitHub account on host (signed out) |
-| `MOCK_NO_PLUGIN` | unset | Set to `1` to disable Gots plugin endpoints (`/api/plugins/memento/*`) |
+| `MOCK_NO_PLUGIN` | unset | Set to `1` to disable Gots plugin endpoints (`/api/plugins/gots/*`) |
 | `MOCK_NO_RUNS` | unset | Set to `1` to disable `/v1/runs` endpoints (like older Hermes) |
 | `MOCK_RUN_BACKLOG` | `1000` | Event buffer size per run; shrink to exercise `replay.truncated` |
 | `MOCK_DROP_EVENTS_MS` | `0` | Cut every event stream after N ms (simulates phone screen off) |
@@ -103,7 +103,7 @@ http://localhost:8642/p/bob/v1        # profile "bob"
 - **`/v1/models`**: Returns profile name as model id (`mock-model-alice`, `mock-model-bob`, or `hermes-agent` for default)
 - **`/api/model/options`**: Named profiles report `mock-model-<profile>` with provider `openrouter` (exercises manual model entry in app)
 - **Cron jobs** (`/api/jobs`): Seeded per-profile with deterministic but different run histories
-- **Plugin endpoints** (`/api/plugins/memento/*`): **Only served on default profile** (no `/p/<profile>/` prefix), matching real Hermes
+- **Plugin endpoints** (`/api/plugins/gots/*`): **Only served on default profile** (no `/p/<profile>/` prefix), matching real Hermes
 
 ### Testing Multiple Profiles
 
@@ -157,34 +157,34 @@ pnpm mock
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/plugins/memento/info` | Plugin manifest with features list |
-| GET | `/api/plugins/memento/skills` | The profile's skills for the composer's `/` menu (3 fixtures) |
-| GET | `/api/plugins/memento/openui` | The interface switch on: `{ object: "memento.openui", enabled: true }`, the shape `plugin/openui.py` serves so a reply's block draws |
-| GET | `/api/plugins/memento/cron/runs?per_job=24` | Ledger-style run history per job |
-| GET | `/api/plugins/memento/github` | `{ connected: true, login: "mock-user" }` or `connected: false` |
-| GET | `/api/plugins/memento/github/repos` | 5 mock repos (memento, maze, dotfiles, zigbee-bridge, ha-automations) |
-| POST | `/api/plugins/memento/projects` | Create project with repos (simulates clone delay) |
-| POST | `/api/plugins/memento/projects/{id}` | Rename/describe project |
-| POST | `/api/plugins/memento/projects/{id}/remove` | Delete project |
-| GET | `/api/plugins/memento/projects` | List all projects with activity |
-| GET | `/api/plugins/memento/projects/{id}/tasks` | The project's tasks as AFK reads them: a project left to work has claimed its oldest (265) so it is claimed and only 266 is ready; otherwise two ready (265, 266), one claimed (267, `mock-user`), one blocked by 267; empty groups while the project clones, 409 without a GitHub account |
-| GET/POST | `/api/plugins/memento/projects/{id}/afk` | AFK's switch for the project: `{ on, reason, task, refusal }`, kept per project in the mock so a reload reads it back, with the task AFK holds while on (`task`, its oldest ready one, on the read after the switch rather than in the POST's own answer) and no refusal; that same read publishes the session the sweep starts for it — a chat record marked `afk` and its transcript's first row, `Title: …`, `Description:`, the body and `[Issue #265](<url>)` — so Code shows the AFK session and opening it shows the issue itself; `POST { on }` writes it, 409 with the reason where the project can't be worked — no repository, no GitHub account, or archived — and archiving or deleting the project turns it off |
-| GET/POST | `/api/plugins/memento/chats` | Chat list sync (newer record wins) |
-| POST | `/api/plugins/memento/sessions/{id}/label` | Answer a chat's own source; an older app still asks, nothing is relabelled |
-| GET | `/api/plugins/memento/sessions/{id}/context` | Latest model call prompt/output tokens |
-| GET | `/api/plugins/memento/sessions/{id}/todos` | Todo list from transcript |
-| POST | `/api/plugins/memento/runs/{id}/clarify` | Answer clarify questions |
-| GET | `/api/plugins/memento/runs/live` | Sessions with active runs |
-| POST/GET | `/api/plugins/memento/sessions/{id}/workspace` | Create/read project workspace (worktrees) |
-| POST | `/api/plugins/memento/sessions/{id}/mode` | Change permission mode (accept_edits/auto/plan) |
-| POST | `/api/plugins/memento/sessions/{id}/workspace/remove` | Remove worktrees (keeps if "commit" said) |
-| GET | `/api/plugins/memento/sessions/{id}/prs` | PRs per repo after 2 turns |
+| GET | `/api/plugins/gots/info` | Plugin manifest with features list |
+| GET | `/api/plugins/gots/skills` | The profile's skills for the composer's `/` menu (3 fixtures) |
+| GET | `/api/plugins/gots/openui` | The interface switch on: `{ object: "gots.openui", enabled: true }`, the shape `plugin/openui.py` serves so a reply's block draws |
+| GET | `/api/plugins/gots/cron/runs?per_job=24` | Ledger-style run history per job |
+| GET | `/api/plugins/gots/github` | `{ connected: true, login: "mock-user" }` or `connected: false` |
+| GET | `/api/plugins/gots/github/repos` | 5 mock repos (gots, maze, dotfiles, zigbee-bridge, ha-automations) |
+| POST | `/api/plugins/gots/projects` | Create project with repos (simulates clone delay) |
+| POST | `/api/plugins/gots/projects/{id}` | Rename/describe project |
+| POST | `/api/plugins/gots/projects/{id}/remove` | Delete project |
+| GET | `/api/plugins/gots/projects` | List all projects with activity |
+| GET | `/api/plugins/gots/projects/{id}/tasks` | The project's tasks as AFK reads them: a project left to work has claimed its oldest (265) so it is claimed and only 266 is ready; otherwise two ready (265, 266), one claimed (267, `mock-user`), one blocked by 267; empty groups while the project clones, 409 without a GitHub account |
+| GET/POST | `/api/plugins/gots/projects/{id}/afk` | AFK's switch for the project: `{ on, reason, task, refusal }`, kept per project in the mock so a reload reads it back, with the task AFK holds while on (`task`, its oldest ready one, on the read after the switch rather than in the POST's own answer) and no refusal; that same read publishes the session the sweep starts for it — a chat record marked `afk` and its transcript's first row, `Title: …`, `Description:`, the body and `[Issue #265](<url>)` — so Code shows the AFK session and opening it shows the issue itself; `POST { on }` writes it, 409 with the reason where the project can't be worked — no repository, no GitHub account, or archived — and archiving or deleting the project turns it off |
+| GET/POST | `/api/plugins/gots/chats` | Chat list sync (newer record wins) |
+| POST | `/api/plugins/gots/sessions/{id}/label` | Answer a chat's own source; an older app still asks, nothing is relabelled |
+| GET | `/api/plugins/gots/sessions/{id}/context` | Latest model call prompt/output tokens |
+| GET | `/api/plugins/gots/sessions/{id}/todos` | Todo list from transcript |
+| POST | `/api/plugins/gots/runs/{id}/clarify` | Answer clarify questions |
+| GET | `/api/plugins/gots/runs/live` | Sessions with active runs |
+| POST/GET | `/api/plugins/gots/sessions/{id}/workspace` | Create/read project workspace (worktrees) |
+| POST | `/api/plugins/gots/sessions/{id}/mode` | Change permission mode (accept_edits/auto/plan) |
+| POST | `/api/plugins/gots/sessions/{id}/workspace/remove` | Remove worktrees (keeps if "commit" said) |
+| GET | `/api/plugins/gots/sessions/{id}/prs` | PRs per repo after 2 turns |
 
 ### Session Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/sessions/{id}` | Session title + source (memento/api_server) |
+| GET | `/api/sessions/{id}` | Session title + source (gots/api_server) |
 | GET | `/api/sessions/{id}/messages?order=latest&limit&offset` | Paged transcript (newest first, each page oldest first) |
 
 ---
@@ -200,7 +200,7 @@ pnpm mock
 
 # Auto mode: plugin bypasses approval
 # In project session, switch mode to "auto" via UI or:
-# POST /api/plugins/memento/sessions/{id}/mode { "mode": "auto" }
+# POST /api/plugins/gots/sessions/{id}/mode { "mode": "auto" }
 # Then "clean up" → runs without asking
 ```
 
@@ -241,7 +241,7 @@ MOCK_NO_RUNS=1 pnpm mock
 
 ```bash
 MOCK_NO_PLUGIN=1 pnpm mock
-# /api/plugins/memento/* returns 404 (no CORS)
+# /api/plugins/gots/* returns 404 (no CORS)
 # App should fall back to Netlify chats document
 # Routines screen shows install commands
 ```
@@ -250,8 +250,8 @@ MOCK_NO_PLUGIN=1 pnpm mock
 
 ```bash
 MOCK_NO_GITHUB=1 pnpm mock
-# /api/plugins/memento/github → { connected: false }
-# /api/plugins/memento/github/repos → 409 error
+# /api/plugins/gots/github → { connected: false }
+# /api/plugins/gots/github/repos → 409 error
 # Project creation still works for public repos
 ```
 
@@ -269,13 +269,13 @@ pnpm mock
 
 ```bash
 pnpm mock
-# 1. Create project via POST /api/plugins/memento/projects
-#    { "name": "Test", "repos": ["mock-user/memento"] }
+# 1. Create project via POST /api/plugins/gots/projects
+#    { "name": "Test", "repos": ["mock-user/gots"] }
 # 2. Start chat with project session
-# 3. POST /api/plugins/memento/sessions/{id}/workspace { "project_id": "..." }
+# 3. POST /api/plugins/gots/sessions/{id}/workspace { "project_id": "..." }
 #    → returns worktree info + instructions for agent
 # 4. Send "plan" → plan mode with workspace context
-# 5. After 2 turns → GET /api/plugins/memento/sessions/{id}/prs shows PRs
+# 5. After 2 turns → GET /api/plugins/gots/sessions/{id}/prs shows PRs
 # 6. Say "merge" → PRs become merged
 ```
 
@@ -283,7 +283,7 @@ pnpm mock
 
 ```bash
 pnpm mock
-# "ask" → single question, waits for POST /api/plugins/memento/runs/{id}/clarify
+# "ask" → single question, waits for POST /api/plugins/gots/runs/{id}/clarify
 # "ask five" → 5 questions (multi-select on some)
 # Plan mode always asks before writing plan
 ```
@@ -293,7 +293,7 @@ pnpm mock
 ```bash
 pnpm mock
 # "plan" → creates todo list via todo_list tool
-# GET /api/plugins/memento/sessions/{id}/todos → returns list with revision
+# GET /api/plugins/gots/sessions/{id}/todos → returns list with revision
 # Next turn → revision increments, list updates
 ```
 
@@ -302,7 +302,7 @@ pnpm mock
 ```bash
 pnpm mock
 # Run a few turns
-# GET /api/plugins/memento/sessions/{id}/context
+# GET /api/plugins/gots/sessions/{id}/context
 # → { prompt_tokens, output_tokens, context_length, model, provider, at }
 ```
 
@@ -336,7 +336,7 @@ pnpm mock
 # receipt under them still streams, and the patch that lands a few seconds later changes the card
 # and adds the table's fourth row without moving where you are reading
 # Below it, the block naming Sparkline draws as the code the model sent, and the reply still ends
-# GET /api/plugins/memento/openui answers { enabled: true } — the switch a drawing gate reads
+# GET /api/plugins/gots/openui answers { enabled: true } — the switch a drawing gate reads
 ```
 
 ---

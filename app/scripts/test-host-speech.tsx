@@ -46,7 +46,7 @@ function host(body: unknown, status = 200) {
 test("the read is the host's speech route, and answers the shape the tab draws", async () => {
   const calls = host({ speech: answer })
   const speech = await getSpeech(config)
-  assert.match(calls[0].path, /\/api\/plugins\/memento\/speech$/)
+  assert.match(calls[0].path, /\/api\/plugins\/gots\/speech$/)
   assert.equal(calls[0].method, "GET")
   assert.equal(speech.model, "small")
   assert.equal(speech.models[0].inUse, true)
@@ -77,7 +77,7 @@ test("a write the host refuses rejects in the host's own words", async () => {
 test("a probe is the host's own route, and answers the record its rows are drawn from", async () => {
   const calls = host({ speech: answer })
   const probed = await probeSpeech(config)
-  assert.match(calls[0].path, /\/api\/plugins\/memento\/speech\/probe$/)
+  assert.match(calls[0].path, /\/api\/plugins\/gots\/speech\/probe$/)
   assert.equal(calls[0].method, "POST")
   assert.equal(calls[0].sent, undefined, "a probe carries nothing: the host decides what it hears")
   assert.equal(probed.models[0].measured?.realtime, 3.2)

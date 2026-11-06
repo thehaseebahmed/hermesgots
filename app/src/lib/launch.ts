@@ -4,7 +4,7 @@ import { matchPath, useLocation, useNavigate } from "react-router"
 import { db } from "@/lib/db"
 
 /** The chat or session open when the app was last left, and when; a per-device convenience. */
-const LAST_KEY = "memento:last-chat"
+const LAST_KEY = "gots:last-chat"
 /** Past this, a launch starts a new chat rather than picking up an old thread. */
 const REOPEN_WITHIN_MS = 60 * 60 * 1000
 

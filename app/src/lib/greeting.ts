@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 
 import { BOTS, DEFAULT_BOT_ID } from "@/components/bots"
 
-const SEEN = "memento:last-greeted"
-const TURN = "memento:line-turn:"
+const SEEN = "gots:last-greeted"
+const TURN = "gots:line-turn:"
 const ABSENCE_MS = 60 * 60 * 1000
 
 export const GREETINGS = ["Good morning.", "Good afternoon.", "Good evening."]

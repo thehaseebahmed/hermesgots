@@ -963,7 +963,7 @@ export interface NetRequest {
   words?: number
 }
 
-export const db = new Dexie("memento") as Dexie & {
+export const db = new Dexie("gots") as Dexie & {
   settings: EntityTable<Settings, "id">
   profiles: EntityTable<Profile, "id">
   conversations: EntityTable<Conversation, "id">
@@ -1511,7 +1511,7 @@ export async function createConversation(
     id: randomId(),
     profileId,
     title: "New chat",
-    hermesSessionId: `memento-${randomId()}`,
+    hermesSessionId: `gots-${randomId()}`,
     createdAt: now,
     updatedAt: now,
     changedAt: now,
@@ -1549,7 +1549,7 @@ export async function ensureMainThread(profileId: string): Promise<Conversation>
       profileId,
       title: "Main",
       titleEdited: true,
-      hermesSessionId: `memento-${id}`,
+      hermesSessionId: `gots-${id}`,
       createdAt: now,
       updatedAt: now,
       changedAt: 0,

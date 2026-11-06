@@ -61,7 +61,7 @@ test("with the switch on, a plain chat opens on chat-next, read from its bot and
     bots: [bot],
     settings: { chatNext: true },
   })
-  const host = fakeHost("memento-c-next")
+  const host = fakeHost("gots-c-next")
   host.seed([{ user: "Why is the sky blue?", reply: "Rayleigh scattering.", tools: 1 }])
   await mount(chatScreen("c-next"), async () => {
     await until(() => requests().length > 0, "chat-next drew the turn")
@@ -101,8 +101,8 @@ test("a bot served at /p/<profile> reaches its plugin inside the plugin's own pr
   await readLiveRun(connection, "s1")
   await readAgents(connection, "s1")
   assert.deepEqual(asked, [
-    "http://hermes.test/api/plugins/memento/p/work/runs/live",
-    "http://hermes.test/api/plugins/memento/p/work/sessions/s1/agents",
+    "http://hermes.test/api/plugins/gots/p/work/runs/live",
+    "http://hermes.test/api/plugins/gots/p/work/sessions/s1/agents",
   ])
 })
 
@@ -127,7 +127,7 @@ async function onChatNext(
     bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: defaultPick, ...patch }],
     settings: { chatNext: true, ...settings },
   })
-  return { host: fakeHost(`memento-${id}`, { ...hostOptions, plugin }), defaultPick }
+  return { host: fakeHost(`gots-${id}`, { ...hostOptions, plugin }), defaultPick }
 }
 
 async function sendFromComposer(text: string) {
@@ -142,7 +142,7 @@ test("the app's composer sends a turn the way every send goes, and pins the chat
     await sendFromComposer("Why is the sky blue?")
     await until(() => host.asked.runs === 1, "the host was asked to run the message")
     const body = host.latest.body!
-    assert.equal(body.session_id, "memento-c-send", "the chat's own session")
+    assert.equal(body.session_id, "gots-c-send", "the chat's own session")
     assert.deepEqual(
       { provider: body.provider, model: body.model },
       defaultPick,
@@ -847,7 +847,7 @@ test("the composer carries the chat's model pill, which names the model the chat
 
 test("the header's options rename a chat and delete it, as the current screen's do", async () => {
   await onChatNext("c-options")
-  await db.sentFiles.put({ session: "memento-c-options", path: "/h/a.png", blob: new Blob(["x"]) })
+  await db.sentFiles.put({ session: "gots-c-options", path: "/h/a.png", blob: new Blob(["x"]) })
   await mount(chatScreen("c-options"), async () => {
     await until(() => Boolean(find('button[aria-label="Chat options"]')), "the options button")
     await click(find('button[aria-label="Chat options"]'))
@@ -928,7 +928,7 @@ test("an archive the host cannot give retires the offer rather than saying it lo
     await until(() => Boolean(find("[data-earlier]")), "the offer over the window")
     await click(find("[data-earlier]")!)
     await until(() => !find("[data-earlier]"), "the offer to go when the host gave nothing")
-    const record = await db.sessionStates.get("memento-c-lost-session")
+    const record = await db.sessionStates.get("gots-c-lost-session")
     assert.ok(!record?.archived, "no archive is recorded that the host never gave")
   })
 })
@@ -1106,7 +1106,7 @@ test("a reply this device watched keeps what it cost, under the reply, once the 
     await until(() => !find('button[aria-label="Stop"]'), "the turn is over")
     await settle()
     assert.match(text(), /\b1 tokens\b/)
-    const kept = (await db.sessionStates.get("memento-c-stats"))?.stats
+    const kept = (await db.sessionStates.get("gots-c-stats"))?.stats
     assert.equal(Object.keys(kept ?? {}).length, 1, "and the device keeps them across a reload")
   })
 })

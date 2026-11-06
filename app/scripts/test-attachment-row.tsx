@@ -26,7 +26,7 @@ import {
 } from "./component-kit.tsx"
 
 const NAME = "field notes.pdf"
-const HOST_PATH = "/home/h/.hermes/memento/attachments/session-1/field notes.pdf"
+const HOST_PATH = "/home/h/.hermes/plugin-data/gots/attachments/session-1/field notes.pdf"
 
 const attachment: Attachment = {
   id: "a1",

@@ -6,7 +6,7 @@ import { handleRegistry, type Caller, type Inbox } from "../lib/registry.ts"
 
 /** The inbox lives in the account's vault document, which the app keeps; it's public by design. */
 async function inbox(userId: string): Promise<Inbox | undefined> {
-  const sync = getStore({ name: "memento-sync", consistency: "strong" })
+  const sync = getStore({ name: "gots-sync", consistency: "strong" })
   const vault = (await sync.get(`${userId}/vault`, { type: "json" })) as {
     inbox?: Inbox
   } | null
@@ -29,7 +29,7 @@ export default async (req: Request) => {
   }
   const site = process.env.URL ?? new URL(req.url).origin
   return handleRegistry(req, {
-    store: getStore({ name: "memento-registry", consistency: "strong" }),
+    store: getStore({ name: "gots-registry", consistency: "strong" }),
     caller,
     inbox,
     fcm: createFcm(process.env.FIREBASE_SERVICE_ACCOUNT),

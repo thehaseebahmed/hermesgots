@@ -1,10 +1,10 @@
 {
   "object": "list",
-  "session_id": "memento-fixture-events-1",
+  "session_id": "gots-fixture-events-1",
   "data": [
     {
       "id": 76401,
-      "session_id": "memento-fixture-events-1",
+      "session_id": "gots-fixture-events-1",
       "role": "user",
       "content": "Run the terminal command `echo hi` and then reply with one short sentence.",
       "tool_call_id": null,
@@ -19,7 +19,7 @@
     },
     {
       "id": 76402,
-      "session_id": "memento-fixture-events-1",
+      "session_id": "gots-fixture-events-1",
       "role": "assistant",
       "content": "",
       "tool_call_id": null,
@@ -42,7 +42,7 @@
     },
     {
       "id": 76403,
-      "session_id": "memento-fixture-events-1",
+      "session_id": "gots-fixture-events-1",
       "role": "tool",
       "content": "{\"output\": \"hi\", \"exit_code\": 0, \"error\": null}",
       "tool_call_id": "call_function_thh0uoj7ho32_1",
@@ -57,7 +57,7 @@
     },
     {
       "id": 76404,
-      "session_id": "memento-fixture-events-1",
+      "session_id": "gots-fixture-events-1",
       "role": "assistant",
       "content": "The command printed \"hi\" as expected.",
       "tool_call_id": null,

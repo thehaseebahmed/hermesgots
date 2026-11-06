@@ -44,13 +44,13 @@ class PlanModeTest(unittest.TestCase):
                 "branch": "hermes/jazzy-quokka-7bfe",
             }
         ]
-        sessions._upsert(self.db, "memento-1", "p1", repos, mode, None)
+        sessions._upsert(self.db, "gots-1", "p1", repos, mode, None)
         return sessions._before_tool(
             {
                 "tool_name": tool,
                 "args": {"path": "shot.png"},
-                "task_id": "memento-1",
-                "session_id": "memento-1",
+                "task_id": "gots-1",
+                "session_id": "gots-1",
             }
         )
 
@@ -116,14 +116,14 @@ class PlanOwnershipTest(unittest.TestCase):
             conn.executemany("INSERT INTO sessions (id, parent_session_id) VALUES (?, ?)", pairs)
 
     def test_a_plan_lands_on_its_own_session_only(self) -> None:
-        self._session("memento-a")
-        self._session("memento-b", mode="accept_edits")
+        self._session("gots-a")
+        self._session("gots-b", mode="accept_edits")
         sessions.after_llm(
-            session_id="memento-a", task_id="memento-a", assistant_response=PLAN_REPLY
+            session_id="gots-a", task_id="gots-a", assistant_response=PLAN_REPLY
         )
-        sessions.after_run(session_id="memento-a", completed=True, interrupted=False)
-        first = sessions.read(self.db, "memento-a")
-        other = sessions.read(self.db, "memento-b")
+        sessions.after_run(session_id="gots-a", completed=True, interrupted=False)
+        first = sessions.read(self.db, "gots-a")
+        other = sessions.read(self.db, "gots-b")
         assert first is not None and other is not None
         self.assertTrue(first["plan_pending"])
         self.assertTrue(str(first["plan_file"]).startswith("plans/"))
@@ -134,22 +134,22 @@ class PlanOwnershipTest(unittest.TestCase):
 
     def test_an_ancestors_record_is_never_this_sessions_workspace(self) -> None:
         # A chat Hermes moved to a child session: the child has no record, its lineage reaches A's.
-        self._session("memento-a")
-        mine = sessions.read(self.db, "memento-a")
+        self._session("gots-a")
+        mine = sessions.read(self.db, "gots-a")
         assert mine is not None
         self.assertTrue(sessions.save_plan(self.db, self.home, mine, PLAN_REPLY))
-        sessions.set_plan_pending(self.db, "memento-a", True)
-        self._lineage([("memento-a", None), ("memento-child", "memento-a")])
+        sessions.set_plan_pending(self.db, "gots-a", True)
+        self._lineage([("gots-a", None), ("gots-child", "gots-a")])
         # The walk is what the hooks need: a child's tool call finds the worktree its chat runs in.
         # It finds A's pending plan and file with it, which is why the route the app reads — the one
         # whose plan card approves that file — must not use it.
-        ancestor = sessions.record_for(self.db, self.home, "memento-child")
+        ancestor = sessions.record_for(self.db, self.home, "gots-child")
         assert ancestor is not None
-        self.assertEqual(ancestor["session_id"], "memento-a")
+        self.assertEqual(ancestor["session_id"], "gots-a")
         self.assertTrue(ancestor["plan_pending"])
         self.assertTrue(str(ancestor["plan_file"]).startswith("plans/"))
         # What the app reads is the session's own: none of that is the child's workspace.
-        self.assertIsNone(sessions.record_of(self.db, "memento-child"))
-        own = sessions.record_of(self.db, "memento-a")
+        self.assertIsNone(sessions.record_of(self.db, "gots-child"))
+        own = sessions.record_of(self.db, "gots-a")
         assert own is not None
-        self.assertEqual(own["session_id"], "memento-a")
+        self.assertEqual(own["session_id"], "gots-a")

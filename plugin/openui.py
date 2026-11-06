@@ -22,7 +22,7 @@ POSITION = "after_memory"
 # The key the switch is kept under in the profile's `host_settings` (store.py). Absent means on, so
 # only an off ever writes a row.
 SETTING = "openui"
-OBJECT = "memento.openui"
+OBJECT = "gots.openui"
 
 # The app's own section and the feature its registration advertises: a host whose plugin predates
 # it answers no `apps`, and the app reads that as "this bot cannot make apps" (ADR 0101).
@@ -56,7 +56,7 @@ def _read(artifact: Path) -> str:
     try:
         return artifact.read_text(encoding="utf-8")
     except OSError:
-        logger.warning("memento: couldn't read the %s artifact", artifact.name, exc_info=True)
+        logger.warning("gots: couldn't read the %s artifact", artifact.name, exc_info=True)
         return ""
 
 
@@ -108,7 +108,7 @@ def path_for(profile_name: Optional[str] = None) -> Optional[Path]:
         # its relative imports need isn't there, and a missing store must not break the import.
         from .store import db_path
     except Exception:
-        logger.debug("memento: couldn't resolve the openui switch's profile", exc_info=True)
+        logger.debug("gots: couldn't resolve the openui switch's profile", exc_info=True)
         return None
     return db_path(home)
 
@@ -126,7 +126,7 @@ def enabled(path: Optional[Path]) -> bool:
 
         value = get_setting(path, SETTING)
     except Exception:
-        logger.debug("memento: couldn't read the openui switch", exc_info=True)
+        logger.debug("gots: couldn't read the openui switch", exc_info=True)
         return True
     return True if value is None else bool(value)
 
@@ -166,7 +166,7 @@ def mark_app_run(session_id: str, profile_name: Optional[str] = None) -> bool:
 
         put_setting(path, f"{APP_RUN}:{session_id}", True)
     except Exception:
-        logger.debug("memento: couldn't mark an app run", exc_info=True)
+        logger.debug("gots: couldn't mark an app run", exc_info=True)
         return False
     return True
 
@@ -188,7 +188,7 @@ def unmark_app_run(session_id: Any, profile_name: Optional[str] = None) -> None:
 
         put_setting(path, f"{APP_RUN}:{session_id}", None)
     except Exception:
-        logger.debug("memento: couldn't clear an app run's mark", exc_info=True)
+        logger.debug("gots: couldn't clear an app run's mark", exc_info=True)
 
 
 def is_app_run(session: Optional[Mapping[str, Any]], path: Optional[Path]) -> bool:
@@ -205,7 +205,7 @@ def is_app_run(session: Optional[Mapping[str, Any]], path: Optional[Path]) -> bo
 
         return get_setting(path, f"{APP_RUN}:{session_id}") is True
     except Exception:
-        logger.debug("memento: couldn't read an app run's mark", exc_info=True)
+        logger.debug("gots: couldn't read an app run's mark", exc_info=True)
         return False
 
 
@@ -264,7 +264,7 @@ def _register(
     try:
         register_section(section_id, content_fn, position=POSITION)
     except Exception:
-        logger.warning("memento: couldn't register the %s section", what, exc_info=True)
+        logger.warning("gots: couldn't register the %s section", what, exc_info=True)
         return f"This Hermes refused the {what} section."
     return None
 
@@ -274,7 +274,7 @@ def register(ctx: Any) -> bool:
     global _refusal_reason
     _refusal_reason = _register(ctx, SECTION, TEXT, VERSION, content, "openui")
     if _refusal_reason is None:
-        logger.info("memento: telling the model the component library (%s)", VERSION)
+        logger.info("gots: telling the model the component library (%s)", VERSION)
     return _refusal_reason is None
 
 
@@ -283,7 +283,7 @@ def app_register(ctx: Any) -> bool:
     global _app_refusal_reason
     _app_refusal_reason = _register(ctx, APP_SECTION, APP_TEXT, APP_VERSION, app_content, "app")
     if _app_refusal_reason is None:
-        logger.info("memento: telling an app run its own rules (%s)", APP_VERSION)
+        logger.info("gots: telling an app run its own rules (%s)", APP_VERSION)
     return _app_refusal_reason is None
 
 

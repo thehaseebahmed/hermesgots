@@ -82,9 +82,9 @@ const budgetPurpose = () =>
 const step = (name: "Decrease pick budget" | "Increase pick budget") =>
   findAll("button").find((button) => button.getAttribute("aria-label") === name) ?? null
 const botWrites = (calls: Call[]) =>
-  calls.filter((call) => call.method === "POST" && call.path.endsWith("/plugins/memento/afk"))
+  calls.filter((call) => call.method === "POST" && call.path.endsWith("/plugins/gots/afk"))
 const botReads = (calls: Call[]) =>
-  calls.filter((call) => call.method === "GET" && call.path.endsWith("/plugins/memento/afk"))
+  calls.filter((call) => call.method === "GET" && call.path.endsWith("/plugins/gots/afk"))
 
 /** A bot of this test's own — its connection names a host, so no other test's feature list is read. */
 async function seed(name: string, features: string[], options: Parameters<typeof afkHost>[0] = {}) {
@@ -165,7 +165,7 @@ test("the stepper writes one number at a time through the bot's own route", asyn
       [{ pick_budget: 6 }],
       "one write, naming the budget alone",
     )
-    assert.equal(botWrites(calls)[0].path, "/api/plugins/memento/afk", "on the bot-level route")
+    assert.equal(botWrites(calls)[0].path, "/api/plugins/gots/afk", "on the bot-level route")
     assert.equal(shown(), "6 tasks", "the tab reads the budget the host answered")
 
     await click(step("Decrease pick budget"))
@@ -255,7 +255,7 @@ test("a tap on a segment writes the threshold, and the row draws the host's answ
       [{ usage_threshold: 80 }],
       "one write, naming the threshold alone",
     )
-    assert.equal(botWrites(calls)[0].path, "/api/plugins/memento/afk", "on the bot-level route")
+    assert.equal(botWrites(calls)[0].path, "/api/plugins/gots/afk", "on the bot-level route")
     assert.equal(thresholdShown(), "70% used", "the value the host answered, not the one asked for")
     assert.equal(
       chosenSegment()?.textContent,
@@ -349,7 +349,7 @@ test("a host that answers no deciding window leaves the row silent", async () =>
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.equal(accountFigure(), null, "a host with nothing to say draws no figure")
     assert.equal(
-      calls.filter((call) => call.path.endsWith("/plugins/memento/usage")).length,
+      calls.filter((call) => call.path.endsWith("/plugins/gots/usage")).length,
       1,
       "and the tab did ask it, once",
     )
@@ -361,7 +361,7 @@ test("a host older than the threshold draws no figure, since there is no number 
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.equal(accountFigure(), null)
     assert.equal(
-      calls.filter((call) => call.path.endsWith("/plugins/memento/usage")).length,
+      calls.filter((call) => call.path.endsWith("/plugins/gots/usage")).length,
       0,
       "Off reads no account at all",
     )

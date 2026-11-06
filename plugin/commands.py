@@ -33,7 +33,7 @@ def before_tool(**kwargs: Any) -> None:
     try:
         _before_tool(kwargs)
     except Exception:
-        logger.debug("memento: couldn't record a shell command", exc_info=True)
+        logger.debug("gots: couldn't record a shell command", exc_info=True)
 
 
 def _before_tool(kwargs: dict) -> None:

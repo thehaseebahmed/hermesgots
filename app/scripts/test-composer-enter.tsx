@@ -114,8 +114,8 @@ test("the field's keyboard hint says what the key does", async () => {
 function host() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["skills"] })
-    if (url.pathname.endsWith("/plugins/memento/skills"))
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["skills"] })
+    if (url.pathname.endsWith("/plugins/gots/skills"))
       return json({
         object: "list",
         data: [

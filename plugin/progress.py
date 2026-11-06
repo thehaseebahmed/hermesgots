@@ -22,7 +22,7 @@ CALLS_BETWEEN: Dict[str, Optional[int]] = {"off": None, "quiet": 50, "normal": 2
 LEVELS = tuple(CALLS_BETWEEN)
 DEFAULT_LEVEL = "normal"
 LEVEL_KEY = "progress_reminders"
-OBJECT = "memento.progress_reminders"
+OBJECT = "gots.progress_reminders"
 
 # Levels a store written before the four names holds: the same ten calls as `chatty`, so a bot that
 # had already chosen does not move, and an older app's write still lands.
@@ -60,7 +60,7 @@ def _session(kwargs: Dict[str, Any]) -> Optional[str]:
     session of its own whose reply reaches its parent rather than the user.
     """
     session_id = kwargs.get("session_id") or ""
-    if not isinstance(session_id, str) or not session_id.startswith(sessions.MEMENTO_ID_PREFIX):
+    if not isinstance(session_id, str) or not session_id.startswith(sessions.ID_PREFIXES):
         return None
     return session_id
 
@@ -126,7 +126,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
     try:
         return _before_tool(kwargs)
     except Exception:
-        logger.debug("memento: progress reminder failed", exc_info=True)
+        logger.debug("gots: progress reminder failed", exc_info=True)
         return None
 
 
@@ -155,7 +155,7 @@ def _threshold() -> Optional[int]:
     try:
         return CALLS_BETWEEN[level(path)]
     except Exception:
-        logger.debug("memento: couldn't read the reminders level; asking nothing", exc_info=True)
+        logger.debug("gots: couldn't read the reminders level; asking nothing", exc_info=True)
         return None
 
 
@@ -177,7 +177,7 @@ def after_tool(**kwargs: Any) -> None:
             turns[turn] = turns.get(turn, 0) + 1
             _drop_oldest_session()
     except Exception:
-        logger.debug("memento: progress reminder count failed", exc_info=True)
+        logger.debug("gots: progress reminder count failed", exc_info=True)
 
 
 def after_model_call(**kwargs: Any) -> None:
@@ -196,7 +196,7 @@ def after_model_call(**kwargs: Any) -> None:
             if turns is not None:
                 turns.pop(turn, None)
     except Exception:
-        logger.debug("memento: progress reminder reset failed", exc_info=True)
+        logger.debug("gots: progress reminder reset failed", exc_info=True)
 
 
 def _spoke(kwargs: Dict[str, Any]) -> bool:
@@ -222,4 +222,4 @@ def turn_started(**kwargs: Any) -> None:
                 return
             _restart_stretch(session_id)
     except Exception:
-        logger.debug("memento: progress reminder turn reset failed", exc_info=True)
+        logger.debug("gots: progress reminder turn reset failed", exc_info=True)

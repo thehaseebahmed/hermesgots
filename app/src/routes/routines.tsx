@@ -107,7 +107,7 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : "Couldn't load routines."
 }
 
-const COLLAPSED_KEY = "memento:routines:collapsed"
+const COLLAPSED_KEY = "gots:routines:collapsed"
 
 /** Bots whose routines are folded away; a per-device convenience, so localStorage is enough. */
 function useCollapsedBots() {

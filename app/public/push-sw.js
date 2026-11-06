@@ -61,7 +61,7 @@ async function show(data) {
   // A newer push about the same thing replaces one still showing; what waits on the user is one
   // thing, whichever way.
   const group = ["approval", "question", "plan"].includes(data.kind) ? "session" : data.kind
-  const tag = sessionId ? `${group || "session"}:${sessionId}` : "memento"
+  const tag = sessionId ? `${group || "session"}:${sessionId}` : "gots"
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
   const looking = windows.some((client) => client.visibilityState === "visible")
   const title =

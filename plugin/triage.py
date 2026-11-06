@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import chats, host_model, outbox, research
 from .store import get_setting, put_setting
-from .sessions import MEMENTO_ID_PREFIX
+from .sessions import GOTS_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ def set_model(
         return read_model(path)
     if not (gate.get("model") and gate.get("provider")):
         raise Withheld(
-            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`."
         )
     from gateway.run import _load_gateway_config
 
@@ -230,7 +230,7 @@ def decide(
         system_prompt=SYSTEM,
         max_tokens=200,
         temperature=0,
-        purpose="memento.triage",
+        purpose="gots.triage",
     )
     try:
         try:
@@ -240,12 +240,12 @@ def decide(
                 raise
             # The picked model failed (retired, no credentials, or the host took the override
             # permission back): the bot's own model decides, if there is time left for it.
-            logger.debug("memento: the triage model failed, using the bot's own", exc_info=True)
+            logger.debug("gots: the triage model failed, using the bot's own", exc_info=True)
             if deadline is not None and time.monotonic() > deadline:
                 return None
             result = llm.complete_structured(**ask)
     except Exception:
-        logger.debug("memento: triage's model call failed", exc_info=True)
+        logger.debug("gots: triage's model call failed", exc_info=True)
         return None
     parsed = getattr(result, "parsed", None)
     if not isinstance(parsed, dict):
@@ -268,14 +268,14 @@ def open_thread(
 ) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
-    The id is the app's own kind (a UUID) and the session is ``memento-<id>``, so every device and
+    The id is the app's own kind (a UUID) and the session is ``gots-<id>``, so every device and
     the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs.
     ``opener`` is the message that began the thread and ``opener_at`` when the reader sent it: with
     them on the record, a device that never opens the thread still draws its card's bubble and
     stands the card at that message's time (ADR 0090).
     """
     chat_id = str(uuid.uuid4())
-    session_id = f"{MEMENTO_ID_PREFIX}{chat_id}"
+    session_id = f"{GOTS_ID_PREFIX}{chat_id}"
     now = int(time.time() * 1000)
     value = {
         "id": chat_id,
@@ -379,7 +379,7 @@ async def deliver(
         try:
             await asyncio.to_thread(chats.set_choice, path, found["thread"], new_pick)
         except Exception:
-            logger.debug("memento: triage couldn't pin %s", found["thread"], exc_info=True)
+            logger.debug("gots: triage couldn't pin %s", found["thread"], exc_info=True)
     item = await asyncio.to_thread(outbox.add, path, thread, profile, text, files, run)
     steered = None
     if steer:
@@ -393,7 +393,7 @@ def discard(path: Path, chat_id: str) -> None:
     try:
         chats.merge(path, {chat_id: {"at": int(time.time() * 1000) + 1, "deleted": True}})
     except Exception:
-        logger.debug("memento: triage couldn't take back a thread", exc_info=True)
+        logger.debug("gots: triage couldn't take back a thread", exc_info=True)
 
 
 # Answers already given, by the id the app sent with the message: a request the app repeats after a
@@ -476,5 +476,5 @@ def triage(
             "model_choice": value.get("modelChoice"),
         }
     except Exception:
-        logger.debug("memento: triage failed", exc_info=True)
+        logger.debug("gots: triage failed", exc_info=True)
         return {"decision": MAIN}

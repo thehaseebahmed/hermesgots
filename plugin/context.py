@@ -36,7 +36,7 @@ def record(**kwargs: Any) -> None:
     try:
         _record(kwargs)
     except Exception:
-        logger.debug("memento: couldn't record context use", exc_info=True)
+        logger.debug("gots: couldn't record context use", exc_info=True)
 
 
 def _record(kwargs: Dict[str, Any]) -> None:

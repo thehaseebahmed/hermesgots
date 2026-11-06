@@ -22,7 +22,7 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
 
   await until(
     async () => {
-      const answer = await (await fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`)).json()
+      const answer = await (await fetch(`${mock}/api/plugins/gots/projects/${projectId}/afk`)).json()
       return answer.task ? answer : null
     },
     20_000,

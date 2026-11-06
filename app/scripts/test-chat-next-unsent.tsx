@@ -51,7 +51,7 @@ function refuseSends(why: "away" | string) {
 }
 
 test("a message that didn't go is drawn at the end of the flow, not inside a turn", async () => {
-  const host = fakeHost("memento-unsent-end")
+  const host = fakeHost("gots-unsent-end")
   const device = await openDevice(host)
   try {
     await turn(device, host, "the first ask", "The first answer.")
@@ -85,7 +85,7 @@ test("a message that didn't go is drawn at the end of the flow, not inside a tur
 })
 
 test("two messages that didn't go keep the order they were sent in", async () => {
-  const host = fakeHost("memento-unsent-order")
+  const host = fakeHost("gots-unsent-order")
   const device = await openDevice(host)
   try {
     await turn(device, host, "an ask", "An answer.")
@@ -121,7 +121,7 @@ test("two messages that didn't go keep the order they were sent in", async () =>
 })
 
 test("taking a message back removes it, and its words don't come back to the field", async () => {
-  const host = fakeHost("memento-unsent-cancel")
+  const host = fakeHost("gots-unsent-cancel")
   const device = await openDevice(host)
   try {
     const answer = refuseSends("away")
@@ -143,7 +143,7 @@ test("taking a message back removes it, and its words don't come back to the fie
 })
 
 test("a message that didn't go outlives a reopen", async () => {
-  const host = fakeHost("memento-unsent-reload")
+  const host = fakeHost("gots-unsent-reload")
   const first = await openDevice(host)
   await turn(first, host, "an ask", "An answer.")
   await showsEverything(first, host, "the turn")
@@ -180,7 +180,7 @@ test("a message that didn't go outlives a reopen", async () => {
 })
 
 test("a message sent again stays in its row until the host takes it", async () => {
-  const host = fakeHost("memento-unsent-until-taken")
+  const host = fakeHost("gots-unsent-until-taken")
   const device = await openDevice(host)
   try {
     await turn(device, host, "an ask", "An answer.")
@@ -214,7 +214,7 @@ test("a message sent again stays in its row until the host takes it", async () =
 })
 
 test("a message that didn't go keeps the files it was sent with", async () => {
-  const host = fakeHost("memento-unsent-files")
+  const host = fakeHost("gots-unsent-files")
   const row: Unsent = {
     id: "unsent-1",
     text: "look at this",
@@ -237,7 +237,7 @@ test("a message that didn't go keeps the files it was sent with", async () => {
 })
 
 test("a retry that fails again leaves the row exactly where it was", async () => {
-  const host = fakeHost("memento-unsent-retry-fails")
+  const host = fakeHost("gots-unsent-retry-fails")
   const device = await openDevice(host)
   try {
     await turn(device, host, "an ask", "An answer.")
@@ -265,7 +265,7 @@ test("a retry that fails again leaves the row exactly where it was", async () =>
 
 test("a host that turns a send down keeps the message, and says why where the reader is", async () => {
   const REFUSAL = "Rate limit exceeded. Try again in a few seconds."
-  const host = fakeHost("memento-unsent-refused")
+  const host = fakeHost("gots-unsent-refused")
   const device = await openDevice(host)
   const said: string[] = []
   const original = toast.error
@@ -306,7 +306,7 @@ test("a host that turns a send down keeps the message, and says why where the re
 })
 
 test("a send the host never answers says what is known, not what a failed read says", async () => {
-  const host = fakeHost("memento-unsent-unanswered")
+  const host = fakeHost("gots-unsent-unanswered")
   const device = await openDevice(host)
   const said: string[] = []
   const original = toast.error

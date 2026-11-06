@@ -669,10 +669,10 @@ export function fakeHost(
       latest.key = new Headers(init.headers).get("idempotency-key") ?? undefined
       return reply({ run_id: id, status: "started", replayed: false }, 202)
     }
-    if (plugin && path === "/api/plugins/memento/info") {
+    if (plugin && path === "/api/plugins/gots/info") {
       asked.info++
       return reply({
-        object: "memento.info",
+        object: "gots.info",
         version: "0.91.0",
         features: [
           "queue",
@@ -684,22 +684,22 @@ export function fakeHost(
         ],
       })
     }
-    if (plugin && path === `/api/plugins/memento/sessions/${session}/triage`) {
+    if (plugin && path === `/api/plugins/gots/sessions/${session}/triage`) {
       const { text, steer } = JSON.parse(String(init?.body))
       triage.asked.push({ text, steer: Boolean(steer) })
       return triage.decision === "main"
         ? reply({ decision: "main" })
         : reply({ decision: triage.decision, thread: triage.thread, item: { id: "q_triage" } })
     }
-    if (plugin && path === `/api/plugins/memento/sessions/${session}/moves`)
+    if (plugin && path === `/api/plugins/gots/sessions/${session}/moves`)
       return reply({ moves: triage.moves })
     // The plugin's media route: a URL minted for one path, which the route serves as the image or
     // file its suffix names.
-    if (plugin && path === "/api/plugins/memento/media/url") {
+    if (plugin && path === "/api/plugins/gots/media/url") {
       const file = String(JSON.parse(String(init?.body ?? "{}")).path ?? "")
       const type = file.endsWith(".png") ? "image/png" : "application/octet-stream"
       return reply({
-        object: "memento.media_url",
+        object: "gots.media_url",
         path: file,
         url: `${url.origin}${path.replace(/\/url$/, "")}?path=${encodeURIComponent(file)}&token=mock-token`,
         type,
@@ -707,18 +707,18 @@ export function fakeHost(
         expires: Math.floor(Date.now() / 1000) + MEDIA_LIFE_S,
       })
     }
-    if (plugin && path === "/api/plugins/memento/media") {
+    if (plugin && path === "/api/plugins/gots/media") {
       const file = url.searchParams.get("path") ?? ""
       const type = file.endsWith(".png") ? "image/png" : "application/octet-stream"
       return new Response(new Blob(["bytes"], { type }), { headers: { "content-type": type } })
     }
-    const moding = plugin && path === `/api/plugins/memento/sessions/${session}/mode`
+    const moding = plugin && path === `/api/plugins/gots/sessions/${session}/mode`
     if (moding) {
       // A mode post settles any plan waiting, the way the plugin's does.
       workspace.mode = JSON.parse(String(init?.body)).mode
       workspace.planPending = false
     }
-    if (moding || (plugin && path === `/api/plugins/memento/sessions/${session}/workspace`)) {
+    if (moding || (plugin && path === `/api/plugins/gots/sessions/${session}/workspace`)) {
       const posting = !moding && init?.method === "POST"
       if (posting) {
         workspace.posts++
@@ -739,7 +739,7 @@ export function fakeHost(
         blocked: workspace.blocked,
       })
     }
-    const queueRoute = `/api/plugins/memento/sessions/${session}/queue`
+    const queueRoute = `/api/plugins/gots/sessions/${session}/queue`
     if (plugin && path === queueRoute && init?.method === "POST") {
       const body = JSON.parse(String(init.body))
       const item = {
@@ -786,13 +786,13 @@ export function fakeHost(
     }
     // The Gots plugin's one read a device needs to find a run it did not start. Recorded against
     // 0.22.5, it calls a run held up on a prompt `running` and lists nothing under `waiting`.
-    if (plugin && path === "/api/plugins/memento/runs/live") {
+    if (plugin && path === "/api/plugins/gots/runs/live") {
       dispatch()
       const live = [...runs].filter(([, state]) => !state.done).at(-1)
       // A run the gateway dropped is still listed: the plugin's own sweep is what forgets it.
       const named = live?.[0] ?? droppedRun
       return reply({
-        object: "memento.runs",
+        object: "gots.runs",
         sessions: named ? { [session]: "running" } : {},
         run_ids: named ? { [session]: named } : {},
         waiting: {},
@@ -802,7 +802,7 @@ export function fakeHost(
       })
     }
     // The plugin's list of the children a session delegated to.
-    if (plugin && path === `/api/plugins/memento/sessions/${session}/todos`) {
+    if (plugin && path === `/api/plugins/gots/sessions/${session}/todos`) {
       todos.reads++
       const list = todos.list
       return reply(
@@ -821,7 +821,7 @@ export function fakeHost(
     // The session's Stop for every child still at work, in the plugin's one call.
     if (
       plugin &&
-      path === `/api/plugins/memento/sessions/${session}/agents/stop` &&
+      path === `/api/plugins/gots/sessions/${session}/agents/stop` &&
       init?.method === "POST"
     ) {
       asked.agentStops++
@@ -831,13 +831,13 @@ export function fakeHost(
       if (cooperative) askedIds.push(...running.map((agent) => agent.id))
       else running.forEach((agent) => (agent.status = "done"))
       return reply({
-        object: "memento.agents_stop",
+        object: "gots.agents_stop",
         stopped: running.length,
         agents: running.map((agent) => ({ id: agent.id, stopped: true })),
       })
     }
-    if (plugin && path === `/api/plugins/memento/sessions/${session}/agents`)
-      return reply({ object: "memento.agents", session_id: session, agents })
+    if (plugin && path === `/api/plugins/gots/sessions/${session}/agents`)
+      return reply({ object: "gots.agents", session_id: session, agents })
     // A child is a session of its own, read like any other.
     const child = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path)
     if (child && children.has(child[1]))

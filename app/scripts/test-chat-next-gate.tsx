@@ -11,7 +11,7 @@ import { fakeHost } from "./chat-next-host.ts"
 import { eventually, openDevice, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
 
 test("a host that can't be reached is away, not unsupported: the device draws what it holds", async () => {
-  const host = fakeHost("memento-gate-away", { plugin: true })
+  const host = fakeHost("gots-gate-away", { plugin: true })
   const first = await openDevice(host)
   await turn(first, host, "one", "First.")
   await first.close()

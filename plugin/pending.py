@@ -98,7 +98,7 @@ def _owner_scope(owner: Any) -> Any:
     try:
         return owner_scope(owner)
     except Exception as error:
-        logger.warning("memento: couldn't scope this session to its own profile", exc_info=True)
+        logger.warning("gots: couldn't scope this session to its own profile", exc_info=True)
         raise PendingError("The host couldn't work in that session's profile.", 502) from error
 
 
@@ -119,7 +119,7 @@ def authority(adapter: Any, home: Path) -> Any:
     try:
         return authority_for_home(runner, home)
     except Exception:
-        logger.debug("memento: couldn't resolve the session authority for %s", home, exc_info=True)
+        logger.debug("gots: couldn't resolve the session authority for %s", home, exc_info=True)
         return None
 
 
@@ -174,12 +174,12 @@ def read(owner: Any, session_id: str) -> Dict[str, Any]:
     try:
         rows = list_session_admissions(owner.db, session_id=session_id)
     except Exception:
-        logger.warning("memento: couldn't read the pending rows for %s", session_id, exc_info=True)
+        logger.warning("gots: couldn't read the pending rows for %s", session_id, exc_info=True)
         raise PendingError("The host couldn't read this session's queue.", 502)
     # A reader that answered something other than rows (a schema that moved, a stub) is a read that
     # failed, never an empty queue: "nothing is waiting" is the one answer this route must not guess.
     if not isinstance(rows, (list, tuple)):
-        logger.warning("memento: %s answered %r, not rows", session_id, type(rows).__name__)
+        logger.warning("gots: %s answered %r, not rows", session_id, type(rows).__name__)
         raise PendingError("The host couldn't read this session's queue.", 502)
     return view(rows)
 
@@ -221,7 +221,7 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
     try:
         row = await asyncio.to_thread(get_session_admission, owner.db, admission_id=admission_id)
     except Exception:
-        logger.warning("memento: couldn't read a lost turn on %s", session_id, exc_info=True)
+        logger.warning("gots: couldn't read a lost turn on %s", session_id, exc_info=True)
         raise PendingError("The host couldn't read this session's queue.", 502)
     # A row of another session, or one that already settled, is the app's card gone stale: refused in
     # the same words, since the screen's only move either way is to read the queue again.
@@ -238,7 +238,7 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
         try:
             await asyncio.to_thread(ensure_live, owner, session_id)
         except Exception:
-            logger.warning("memento: couldn't restore %s to discard", session_id, exc_info=True)
+            logger.warning("gots: couldn't restore %s to discard", session_id, exc_info=True)
             raise PendingError("The host couldn't restore that session to discard the turn.", 502)
         try:
             await resolve(SessionRef(owner.profile_id, session_id), admission_id, generation)
@@ -246,7 +246,7 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
             reason = getattr(error, "reason", "")
             if reason in ("stale_generation", "not_found"):
                 raise PendingError("That turn isn't waiting to be discarded any more.", 409)
-            logger.warning("memento: couldn't discard a lost turn on %s", session_id, exc_info=True)
+            logger.warning("gots: couldn't discard a lost turn on %s", session_id, exc_info=True)
             raise PendingError("The host couldn't discard that turn.", 502)
     return await asyncio.to_thread(read, owner, session_id)
 

@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import org.json.JSONObject
 import java.io.IOException

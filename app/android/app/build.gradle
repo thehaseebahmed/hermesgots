@@ -2,10 +2,12 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
 android {
-    namespace = "app.memento"
+    namespace = "dev.hermesgots"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "app.memento"
+        // The id is the installed app's identity and the name Firebase registers, so it moves with a
+        // registered app of its own and not with the package rename alone.
+        applicationId "dev.hermesgots"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode((System.getenv("ANDROID_VERSION_CODE") ?: "1") as int)

@@ -106,7 +106,7 @@ class PassageTest(unittest.TestCase):
 class MissionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
-        self.path = Path(self.dir.name) / "memento.db"
+        self.path = Path(self.dir.name) / "gots.db"
         self.llm = FakeLlm()
         research.ctx = SimpleNamespace(llm=self.llm)
         notify = mock.patch.object(research.push, "notify")
@@ -146,8 +146,8 @@ class MissionTest(unittest.TestCase):
         self.assertEqual(found["stage"], "reading")
 
     def test_the_model_the_researcher_ran_on_is_kept(self) -> None:
-        # The store sits in the profile's memento folder, beside Hermes's own state.db.
-        self.path = Path(self.dir.name) / "memento" / "memento.db"
+        # The store sits in the profile's gots folder, beside Hermes's own state.db.
+        self.path = Path(self.dir.name) / "plugin-data" / "gots" / "gots.db"
         state = sqlite3.connect(Path(self.dir.name) / "state.db")
         state.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, model TEXT, billing_provider TEXT)")
         self.reach_reading()
@@ -389,7 +389,7 @@ class MissionTest(unittest.TestCase):
             research.before_tool(tool_name="terminal", task_id="research-r_1")["action"], "block"
         )
         self.assertIsNone(research.before_tool(tool_name="web_extract", task_id="research-r_1"))
-        self.assertIsNone(research.before_tool(tool_name="terminal", task_id="memento-chat"))
+        self.assertIsNone(research.before_tool(tool_name="terminal", task_id="gots-chat"))
 
 
 class FakeCompareLlm(FakeLlm):
@@ -435,7 +435,7 @@ class FakeCompareLlm(FakeLlm):
 class CompareTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
-        self.path = Path(self.dir.name) / "memento.db"
+        self.path = Path(self.dir.name) / "gots.db"
         self.llm = FakeCompareLlm()
         research.ctx = SimpleNamespace(llm=self.llm)
         notify = mock.patch.object(research.push, "notify")

@@ -35,7 +35,7 @@ class Agent:
     """An agent the API server builds, delegating through Hermes's own dispatch: the tool's
     ``background`` default is what it gets, so the model is handed a handle."""
 
-    session_id = "memento-1"
+    session_id = "gots-1"
 
     def __init__(self, delegate: Any) -> None:
         self._delegate = delegate
@@ -103,7 +103,7 @@ class DelegationTest(unittest.TestCase):
         raise AssertionError(f"the plugin registered no {path}")
 
     def test_a_delegation_runs_beside_the_turn(self) -> None:
-        agent = self.adapter._create_agent(session_id="memento-1")
+        agent = self.adapter._create_agent(session_id="gots-1")
         answer = agent._dispatch_delegate_task({"goal": "plan the auth refactor"})
         self.assertEqual(answer, HANDLE, "the model was parked until the child finished")
         self.assertEqual(self.calls, [{"goal": "plan the auth refactor", "background": True}])

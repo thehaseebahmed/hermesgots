@@ -10,7 +10,7 @@ const TYPED = "half-written thought"
 
 /** The chat record the plugin holds for this chat, as the app pushed it. */
 async function record() {
-  const body = await fetch(`${mock}/api/plugins/memento/chats`).then((res) => res.json())
+  const body = await fetch(`${mock}/api/plugins/gots/chats`).then((res) => res.json())
   return body.chats?.[chat]?.value ?? null
 }
 

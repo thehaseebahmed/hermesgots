@@ -286,7 +286,7 @@ class Routes(unittest.TestCase):
         self.assertEqual(
             answer["payload"],
             {
-                "object": "memento.apps",
+                "object": "gots.apps",
                 "apps": [
                     {
                         "id": "house",
@@ -318,7 +318,7 @@ class Routes(unittest.TestCase):
         self.assertEqual(
             changed["payload"],
             {
-                "object": "memento.app.page",
+                "object": "gots.app.page",
                 "page": {
                     "id": "home",
                     "app_id": "house",
@@ -624,7 +624,7 @@ class Queries(unittest.TestCase):
     def test_sessions_answers_the_hosts_chats(self) -> None:
         answer = self.ask({"shape": "sessions"})
         self.assertEqual(answer["status"], 200)
-        self.assertEqual(answer["payload"]["object"], "memento.app.query")
+        self.assertEqual(answer["payload"]["object"], "gots.app.query")
         self.assertEqual(answer["payload"]["shape"], "sessions")
         self.assertEqual(answer["payload"]["value"], {"sessions": {}})
 

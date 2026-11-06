@@ -85,7 +85,7 @@ async def _title_of(db: Any, session_id: str) -> Optional[str]:
     try:
         return await asyncio.to_thread(get, session_id)
     except Exception:
-        logger.debug("memento: couldn't read a session's title", exc_info=True)
+        logger.debug("gots: couldn't read a session's title", exc_info=True)
         return None
 
 
@@ -137,7 +137,7 @@ async def _read_titles(path: Path, db: Any, home: Path, since: int) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.debug("memento: a title watch failed a pass", exc_info=True)
+            logger.debug("gots: a title watch failed a pass", exc_info=True)
         await asyncio.sleep(TITLE_TICK_SECONDS)
 
 
@@ -182,7 +182,7 @@ async def serve(
                     chat_session, home, session_id
                 )
             except Exception:
-                logger.debug("memento: couldn't follow session %s", session_id, exc_info=True)
+                logger.debug("gots: couldn't follow session %s", session_id, exc_info=True)
                 return session_id
         return chat_sessions[session_id]
 

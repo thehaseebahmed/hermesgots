@@ -42,7 +42,7 @@ class PrCacheTests(unittest.TestCase):
         self.clock = FakeClock()
         self._patches = [
             patch.object(github, "time", self.clock),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
             patch.object(github, "token", return_value=(None, None)),
         ]
         for one in self._patches:

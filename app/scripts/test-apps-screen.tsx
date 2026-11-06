@@ -46,17 +46,17 @@ function host(
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
     calls.push(`${method} ${url.pathname}`)
-    const tail = url.pathname.split("/plugins/memento/")[1] ?? ""
+    const tail = url.pathname.split("/plugins/gots/")[1] ?? ""
     if (tail === "apps/query" && method === "POST" && query)
       return query(JSON.parse(String(init?.body)))
     if (tail === "apps/house/consent" && method === "POST") {
       owed.agreed.push(JSON.parse(String(init?.body)))
       owed.pending = NONE
-      return json({ object: "memento.app", app: { id: "house", tools: owed.agreed.at(-1) } })
+      return json({ object: "gots.app", app: { id: "house", tools: owed.agreed.at(-1) } })
     }
     if (tail === "apps")
       return json({
-        object: "memento.apps",
+        object: "gots.apps",
         apps: [
           {
             id: "house",
@@ -77,7 +77,7 @@ function host(
       page.previous = undefined
     }
     return json({
-      object: "memento.app.page",
+      object: "gots.app.page",
       page: {
         id: found[1],
         app_id: "house",
@@ -285,7 +285,7 @@ test("a page whose query names a host shape draws that shape's live value", asyn
   const asked: Record<string, unknown>[] = []
   await seed({ home: { source: READ } }, (body) => {
     asked.push(body)
-    return json({ object: "memento.app.query", shape: body.shape, value: { title: "Live value" } })
+    return json({ object: "gots.app.query", shape: body.shape, value: { title: "Live value" } })
   })
   await mount(screen("/apps/house"), async () => {
     await drawn(() => title() === "Live value", "the live value")

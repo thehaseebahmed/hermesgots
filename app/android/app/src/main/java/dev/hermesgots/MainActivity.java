@@ -1,4 +1,4 @@
-package app.memento;
+package dev.hermesgots;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

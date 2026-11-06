@@ -44,8 +44,8 @@ function host() {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["skills"] })
-    if (url.pathname.endsWith("/plugins/memento/skills"))
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["skills"] })
+    if (url.pathname.endsWith("/plugins/gots/skills"))
       return json({ object: "list", data: SKILLS })
     return json({})
   }) as typeof fetch

@@ -79,7 +79,7 @@ test("before the compaction: the first child's wake turn is whole, the batch's i
   assert.equal(owed.wake, true)
   assert.equal(owed.done, false, "the host has not written its reply")
   assert.equal(
-    recorded("runs-live.json").sessions["memento-fixture-delegate-compaction-before"],
+    recorded("runs-live.json").sessions["gots-fixture-delegate-compaction-before"],
     "running",
   )
 })

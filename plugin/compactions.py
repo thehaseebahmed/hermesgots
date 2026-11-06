@@ -75,7 +75,7 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
                 walked.append(current)
             in_place = _in_place(conn, walked, continued)
     except sqlite3.Error:
-        logger.debug("memento: couldn't read a chat's compactions", exc_info=True)
+        logger.debug("gots: couldn't read a chat's compactions", exc_info=True)
         return None
     sizes = _sizes(home, [item["session"] for item in rotated])
     marks = [{"at": item["at"], **sizes.get(item["session"], {})} for item in rotated] + in_place
@@ -132,7 +132,7 @@ def _in_place(
             walked,
         ).fetchall()
     except sqlite3.Error:
-        logger.warning("memento: couldn't read a chat's in-place compactions", exc_info=True)
+        logger.warning("gots: couldn't read a chat's in-place compactions", exc_info=True)
         return []
     return [
         {"at": _ms(row["timestamp"]), "row": row["id"]}
@@ -158,7 +158,7 @@ def _sizes(home: Path, sessions: List[str]) -> Dict[str, Dict[str, int]]:
             sessions,
         ).fetchall()
     except sqlite3.Error:
-        logger.debug("memento: couldn't read context sizes", exc_info=True)
+        logger.debug("gots: couldn't read context sizes", exc_info=True)
         return {}
     finally:
         if conn is not None:

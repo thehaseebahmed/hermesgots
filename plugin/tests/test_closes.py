@@ -15,7 +15,7 @@ RECORD = {
             "name": "acme/app",
             "repo_root": "/repos/app",
             "path": "/repos/app/wt",
-            "branch": "memento/s-1",
+            "branch": "gots/s-1",
         }
     ],
 }

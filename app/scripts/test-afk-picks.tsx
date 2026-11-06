@@ -177,12 +177,12 @@ test("a write the host refuses leaves the count it had", async () => {
 test("a plugin without afk_picks draws the sheet it always drew", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["afk", "afk_switch", "afk_prompt"] })
-    if (url.pathname.endsWith("/plugins/memento/skills")) return json({ object: "list", data: [] })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["afk", "afk_switch", "afk_prompt"] })
+    if (url.pathname.endsWith("/plugins/gots/skills")) return json({ object: "list", data: [] })
     if (url.pathname.endsWith("/afk"))
       return json({
-        object: "memento.afk",
+        object: "gots.afk",
         on: true,
         reason: null,
         task: { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" },

@@ -198,14 +198,14 @@ jobs:
       - name: Name the APK
         id: apk
         run: |
-          out="$RUNNER_TEMP/memento-${{ steps.version.outputs.name }}.apk"
+          out="$RUNNER_TEMP/gots-${{ steps.version.outputs.name }}.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
       # Kept for releases: a build can be pulled from the run without the Release page.
       - uses: actions/upload-artifact@v7
         with:
-          name: memento-${{ steps.version.outputs.name }}
+          name: gots-${{ steps.version.outputs.name }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 

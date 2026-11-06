@@ -25,7 +25,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const HOST = "/home/h/.hermes/memento/attachments/session-1"
+const HOST = "/home/h/.hermes/plugin-data/gots/attachments/session-1"
 
 const photo: Attachment = {
   id: "photo",

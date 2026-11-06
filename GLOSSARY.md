@@ -755,3 +755,7 @@ _Avoid_: job run, execution, log, cron session
 **Notification settings**:
 The screen that decides what a device is told about: the app's own list of categories on the web, and the phone's own list of channels in the Android app.
 _Avoid_: notification types, notification preferences, alert settings
+
+**Gots plugin**:
+The plugin Gots installs into a bot's Hermes host, enabled under the name `gots`. It was called `memento`; the old name survives only where older sessions still carry it.
+_Avoid_: Memento, memento plugin, the Hermes plugin

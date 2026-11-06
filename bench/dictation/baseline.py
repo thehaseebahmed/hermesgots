@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Sequence
 
 from .words import words_of
 
-OBJECT = "memento.bench.dictation.baseline"
+OBJECT = "gots.bench.dictation.baseline"
 
 # What must agree before two records can be read against each other, and what a run names. Every one
 # of them decides what words the decoder is given or how its audio is cut, so two runs that disagree

@@ -108,7 +108,7 @@ class UndoTests(unittest.TestCase):
     def _move(self, **extra):
         moves.record(
             self.path, "m1", "main-s", "more on Lisbon", "t1",
-            thread_session="memento-t1", item="q_1", body=self.body, **extra
+            thread_session="gots-t1", item="q_1", body=self.body, **extra
         )
         return moves.get(self.path, "main-s", "m1")
 
@@ -116,7 +116,7 @@ class UndoTests(unittest.TestCase):
         move = self._move(new=True, files=[{"name": "a.txt"}])
         self.assertEqual(
             (move["thread_session"], move["item"], move["new"], move["body"], move["files"]),
-            ("memento-t1", "q_1", True, self.body, [{"name": "a.txt"}]),
+            ("gots-t1", "q_1", True, self.body, [{"name": "a.txt"}]),
         )
 
     def test_phase_follows_the_threads_reply(self):
@@ -164,36 +164,36 @@ class UndoTests(unittest.TestCase):
     def test_the_message_leaves_the_threads_transcript(self):
         state = self._transcript(
             [
-                ("memento-t1", "user", "earlier", 90),
-                ("memento-t1", "assistant", "ok", 91),
-                ("memento-t1", "user", '<attachment name="a" />\nmore on Lisbon', 100),
-                ("memento-t1", "assistant", "partial", 101),
+                ("gots-t1", "user", "earlier", 90),
+                ("gots-t1", "assistant", "ok", 91),
+                ("gots-t1", "user", '<attachment name="a" />\nmore on Lisbon', 100),
+                ("gots-t1", "assistant", "partial", 101),
                 ("other", "user", "more on Lisbon", 100),
             ]
         )
-        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "more on Lisbon", 99_000), 2)
+        self.assertEqual(moves.take_from_transcript(self.home, "gots-t1", "more on Lisbon", 99_000), 2)
         self.assertEqual(
             self._left(state),
-            [("memento-t1", "earlier"), ("memento-t1", "ok"), ("other", "more on Lisbon")],
+            [("gots-t1", "earlier"), ("gots-t1", "ok"), ("other", "more on Lisbon")],
         )
-        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "absent"), 0)
+        self.assertEqual(moves.take_from_transcript(self.home, "gots-t1", "absent"), 0)
         self.assertEqual(moves.take_from_transcript(Path(tempfile.mkdtemp()), "x", "y"), 0)
 
     def test_the_transcript_is_left_alone_unless_the_message_is_certain(self):
         state = self._transcript(
             [
-                ("memento-t1", "user", "ok", 10),
-                ("memento-t1", "assistant", "fine", 11),
-                ("memento-t1", "user", "okay, and also this", 200),
-                ("memento-t1", "assistant", "reply", 201),
+                ("gots-t1", "user", "ok", 10),
+                ("gots-t1", "assistant", "fine", 11),
+                ("gots-t1", "user", "okay, and also this", 200),
+                ("gots-t1", "assistant", "reply", 201),
             ]
         )
         # A substring of a later message, and an older exact match, are not the moved message.
-        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "ok", 150_000), 0)
-        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "okay", 150_000), 0)
+        self.assertEqual(moves.take_from_transcript(self.home, "gots-t1", "ok", 150_000), 0)
+        self.assertEqual(moves.take_from_transcript(self.home, "gots-t1", "okay", 150_000), 0)
         self.assertEqual(len(self._left(state)), 4)
         # Neither is the thread's newest user row when it was written before the item was sent.
-        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "okay, and also this", 500_000), 0)
+        self.assertEqual(moves.take_from_transcript(self.home, "gots-t1", "okay, and also this", 500_000), 0)
         self.assertEqual(len(self._left(state)), 4)
 
     def test_a_list_read_does_not_load_bodies_and_old_ones_are_dropped(self):
@@ -241,7 +241,7 @@ class ServedMoveTests(unittest.TestCase):
     def test_a_served_move_is_the_move_and_nothing_of_the_hosts(self):
         moves.record(
             self.path, "m1", "main-s", "plan my move", "t1",
-            thread_session="memento-t1", item="q_1", new=True, body={"a": 1}
+            thread_session="gots-t1", item="q_1", new=True, body={"a": 1}
         )
         served = moves.public(moves.get(self.path, "main-s", "m1"), True)
         self.assertEqual(

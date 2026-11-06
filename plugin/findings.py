@@ -104,7 +104,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         ),
         0,
     )
-    logger.info("memento: %s reported %s findings from %s", record["session_id"], kept, skill)
+    logger.info("gots: %s reported %s findings from %s", record["session_id"], kept, skill)
     return json.dumps({"skill": skill.strip(), "reported": kept})
 
 
@@ -115,10 +115,10 @@ def register(ctx: Any) -> bool:
         return False
     try:
         return register_tool(
-            name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🔎"
+            name=TOOL, toolset="gots", schema=SCHEMA, handler=handle, emoji="🔎"
         ) is not False
     except Exception:
-        logger.warning("memento: couldn't register the afk_findings tool", exc_info=True)
+        logger.warning("gots: couldn't register the afk_findings tool", exc_info=True)
         return False
 
 

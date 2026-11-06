@@ -36,7 +36,7 @@ export default async (req: Request) => {
   }
   return handleCommunity(req, {
     store: getStore({ name: "gots-community", consistency: "strong" }),
-    registry: getStore({ name: "memento-registry", consistency: "strong" }),
+    registry: getStore({ name: "gots-registry", consistency: "strong" }),
     caller,
     github: githubLogin,
   })

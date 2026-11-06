@@ -1,9 +1,9 @@
 {
-  "object": "memento.runs",
+  "object": "gots.runs",
   "sessions": {},
   "run_ids": {},
   "waiting": {},
   "subagents": {
-    "memento-fixture-delegate-compaction": 4
+    "gots-fixture-delegate-compaction": 4
   }
 }

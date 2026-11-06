@@ -56,7 +56,7 @@ def load(config_path: Path, *, strict: bool = False) -> Dict[str, Any]:
     except Exception:
         if strict:
             raise
-        logger.debug("memento: couldn't read the host's config", exc_info=True)
+        logger.debug("gots: couldn't read the host's config", exc_info=True)
         return {}
     return cfg if isinstance(cfg, dict) else {}
 

@@ -109,7 +109,7 @@ class TempStore(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.path = Path(self.tmp.name) / "memento.db"
+        self.path = Path(self.tmp.name) / "gots.db"
         self.config = Path(self.tmp.name) / "config.yaml"
 
 
@@ -346,7 +346,7 @@ class CleanupTest(TempStore):
         self.assertIsNone(speech.read_cleanup(self.path), "a withheld pick stores nothing")
         state = speech.cleanup_state(self.path, self.denied)
         self.assertFalse(state["allowed"])
-        self.assertIn("hermes plugins enable memento", state["reason"])
+        self.assertIn("hermes plugins enable gots", state["reason"])
 
     def test_a_pick_needs_both_halves_of_the_permission(self) -> None:
         with self.assertRaises(speech.Withheld):

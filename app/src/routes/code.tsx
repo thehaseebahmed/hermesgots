@@ -70,7 +70,7 @@ import { useStoredSort } from "@/lib/use-sort"
 
 const DAY_MS = 86_400_000
 const SEARCH_FIELD_ID = "code-search"
-const LAST_PROJECT = "memento:last-session-project"
+const LAST_PROJECT = "gots:last-session-project"
 
 /** Asks the list to open the New session sheet, from the empty pane beside it. */
 const newSessionAsked = createSignal()

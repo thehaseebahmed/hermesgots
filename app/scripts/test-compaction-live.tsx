@@ -191,7 +191,7 @@ test("the thread draws one divider where the run compacted, and the words around
     }
     if (/\/context$/.test(url.pathname))
       return json({
-        object: "memento.context",
+        object: "gots.context",
         prompt_tokens: 4_200,
         compactions: [{ at: 5_000_000 }],
       })

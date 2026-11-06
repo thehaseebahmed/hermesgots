@@ -19,7 +19,7 @@ import { getSessionCloses } from "@/lib/hermes"
 import { quietly } from "@/lib/report"
 import { createStore } from "@/lib/store"
 
-const KEY = "memento:close-reports"
+const KEY = "gots:close-reports"
 /** The store only ever grows: the oldest marks drop past this many. */
 const KEEP = 200
 

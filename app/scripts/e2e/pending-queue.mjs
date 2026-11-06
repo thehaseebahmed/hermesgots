@@ -9,7 +9,7 @@ const fence = (session, text, queued) =>
 
 async function body({ page, seed, shot, until }) {
   const chat = `e2e-pending-${runId()}`
-  const session = `memento-${chat}`
+  const session = `gots-${chat}`
   const LOST = "a turn the server lost"
   const HELD = "the older message behind it"
   await seed([{ id: chat, title: "A fenced chat", hermesSessionId: session }])

@@ -32,8 +32,8 @@ async function host(compactions: unknown[] = []) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: [] })
-    if (/\/api\/plugins\/memento\/sessions\/[^/]+\/context$/.test(url.pathname))
-      return json({ object: "memento.context", prompt_tokens: 4_200, compactions })
+    if (/\/api\/plugins\/gots\/sessions\/[^/]+\/context$/.test(url.pathname))
+      return json({ object: "gots.context", prompt_tokens: 4_200, compactions })
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
 }

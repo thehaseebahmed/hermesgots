@@ -114,7 +114,7 @@ def _disabled() -> Optional[Set[str]]:
     try:
         return set(read_disabled(load_config()))
     except Exception:
-        logger.debug("memento: couldn't read this profile's disabled skills", exc_info=True)
+        logger.debug("gots: couldn't read this profile's disabled skills", exc_info=True)
         return None
 
 
@@ -126,7 +126,7 @@ def _origins() -> Optional[Callable[[str], str]]:
     try:
         bundled_names, hub_names = set(bundled()), set(hub())
     except Exception:
-        logger.debug("memento: couldn't read skill origins", exc_info=True)
+        logger.debug("gots: couldn't read skill origins", exc_info=True)
         return None
 
     def origin(name: str) -> str:
@@ -240,7 +240,7 @@ def _plugin_rows(seen: Set[str], disabled: Optional[Set[str]]) -> List[Dict[str,
 
         found = get_plugin_manager().list_plugin_skill_metadata()
     except Exception:
-        logger.debug("memento: couldn't list the host's plugin skills", exc_info=True)
+        logger.debug("gots: couldn't list the host's plugin skills", exc_info=True)
         return []
     rows = []
     for entry in found:
@@ -278,7 +278,7 @@ def _catalog_rows(
             project,
         )
     except Exception:
-        logger.debug("memento: couldn't read the host's skill catalog", exc_info=True)
+        logger.debug("gots: couldn't read the host's skill catalog", exc_info=True)
         return None
 
 
@@ -376,13 +376,13 @@ def _clear_caches() -> None:
         try:
             clear()
         except Exception:
-            logger.debug("memento: couldn't clear the skills cache", exc_info=True)
+            logger.debug("gots: couldn't clear the skills cache", exc_info=True)
     prompt = _helper("agent.prompt_builder", "clear_skills_system_prompt_cache")
     if prompt is not None:
         try:
             prompt(clear_snapshot=True)
         except Exception:
-            logger.debug("memento: couldn't clear the skills prompt cache", exc_info=True)
+            logger.debug("gots: couldn't clear the skills prompt cache", exc_info=True)
 
 
 def find_row(rows: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
@@ -458,7 +458,7 @@ def _skill_md(name: str, find: Callable[..., Any]) -> Optional[Path]:
             try:
                 root = manager().find_plugin_skill(name)
             except Exception:
-                logger.debug("memento: couldn't find that plugin skill", exc_info=True)
+                logger.debug("gots: couldn't find that plugin skill", exc_info=True)
                 root = None
     if root is None:
         return None
@@ -478,7 +478,7 @@ def _linked(skill_dir: Path) -> Optional[Dict[str, List[str]]]:
     try:
         return dict(linked(skill_dir))
     except Exception:
-        logger.debug("memento: couldn't list a skill's linked files", exc_info=True)
+        logger.debug("gots: couldn't list a skill's linked files", exc_info=True)
         return None
 
 
@@ -498,7 +498,7 @@ def _readiness(name: str, content: str) -> Dict[str, Any]:
         frontmatter = parse(content=content)
         fields, extras = readiness(frontmatter, str(frontmatter.get("name") or name))
     except Exception:
-        logger.debug("memento: couldn't read a skill's readiness", exc_info=True)
+        logger.debug("gots: couldn't read a skill's readiness", exc_info=True)
         return {}
     return {**fields, **extras}
 

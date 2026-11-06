@@ -65,7 +65,7 @@ SELECT = (
 def public(row: Dict[str, Any]) -> Dict[str, Any]:
     """A close as the routes and the app read it: the wire shape, with the repositories as names."""
     return {
-        "object": "memento.closing",
+        "object": "gots.closing",
         "session_id": row["session_id"],
         "state": row["state"],
         "started_at": row["started_at"],
@@ -181,7 +181,7 @@ def spawn(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> No
             with _lock:
                 _running.discard(key)
 
-    threading.Thread(target=thread, name=f"memento-close-{session_id[:8]}", daemon=True).start()
+    threading.Thread(target=thread, name=f"gots-close-{session_id[:8]}", daemon=True).start()
 
 
 def work(path: Path, home: Path, record: Dict[str, Any]) -> Dict[str, Any]:
@@ -198,7 +198,7 @@ def work(path: Path, home: Path, record: Dict[str, Any]) -> Dict[str, Any]:
             if afk.release_session(home, record):
                 afk.wake()
         except Exception:
-            logger.warning("memento: couldn't release a closed session's task", exc_info=True)
+            logger.warning("gots: couldn't release a closed session's task", exc_info=True)
         # Before the branches go: a tree whose commits are only on its remote branch can still go.
         try:
             gone = sessions.remove(path, record["session_id"])
@@ -211,7 +211,7 @@ def work(path: Path, home: Path, record: Dict[str, Any]) -> Dict[str, Any]:
             sessions._clear_cwd(record["session_id"])
         results = ship.close(home, record)
     except Exception as failure:
-        logger.warning("memento: a session's close failed", exc_info=True)
+        logger.warning("gots: a session's close failed", exc_info=True)
         error = error or str(failure) or "Couldn't finish closing the session."
     return {"removed": removed, "kept": kept, "results": results, "error": error}
 
@@ -247,7 +247,7 @@ def finish(path: Path, session_id: str, report: Dict[str, Any]) -> None:
         finally:
             conn.close()
     except Exception:
-        logger.warning("memento: couldn't write a session's close report", exc_info=True)
+        logger.warning("gots: couldn't write a session's close report", exc_info=True)
         return
     events.note("closes", session_id, path, True)
 
@@ -279,7 +279,7 @@ def resume(home: Path) -> None:
     try:
         rows = owed(path)
     except Exception:
-        logger.debug("memento: couldn't read the session closes to resume", exc_info=True)
+        logger.debug("gots: couldn't read the session closes to resume", exc_info=True)
         return
     for row in rows:
         spawn(path, home, row["session_id"], _snapshot(path, home, row))

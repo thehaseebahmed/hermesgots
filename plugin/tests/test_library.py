@@ -56,8 +56,8 @@ class FilesDirTest(unittest.TestCase):
                 "branch": "hermes/jazzy-quokka-7bfe",
             }
         ]
-        sessions._upsert(self.db, "memento-1", "p1", repos, "auto", folder)
-        record = sessions.read(self.db, "memento-1")
+        sessions._upsert(self.db, "gots-1", "p1", repos, "auto", folder)
+        record = sessions.read(self.db, "gots-1")
         assert record is not None
         self.assertEqual(record["files_dir"], folder)
         self.assertEqual(record["branch"], "hermes/jazzy-quokka-7bfe")
@@ -77,13 +77,13 @@ class FilesDirTest(unittest.TestCase):
                 "branch": "hermes/jazzy-quokka-7bfe",
             }
         ]
-        sessions._upsert(self.db, "memento-1", "p1", repos, "auto", None)
+        sessions._upsert(self.db, "gots-1", "p1", repos, "auto", None)
         with stub_projects_db([self.project]):
-            record = sessions.ensure(self.db, self.home, "memento-1", "p1", None, None)
+            record = sessions.ensure(self.db, self.home, "gots-1", "p1", None, None)
         self.assertEqual(
             record["files_dir"], str(self.home / "project" / "files" / "jazzy-quokka-7bfe")
         )
-        stored = sessions.read(self.db, "memento-1")
+        stored = sessions.read(self.db, "gots-1")
         assert stored is not None
         self.assertEqual(stored["files_dir"], record["files_dir"])
 
@@ -113,7 +113,7 @@ class LibraryAddTest(unittest.TestCase):
                 "branch": "hermes/jazzy-quokka-7bfe",
             }
         ]
-        sessions._upsert(self.db, "memento-1", "p1", repos, "auto", str(self.files_dir))
+        sessions._upsert(self.db, "gots-1", "p1", repos, "auto", str(self.files_dir))
         # The library folder resolves from the project, so projects.db is stubbed for every call.
         (self.home / "projects.db").write_bytes(b"")
         projects_patcher = stub_projects_db([fake_project(self.project)])
@@ -123,7 +123,7 @@ class LibraryAddTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def _call(self, path: str, folder: str = "screenshots", task_id: str = "memento-1") -> dict:
+    def _call(self, path: str, folder: str = "screenshots", task_id: str = "gots-1") -> dict:
         return json.loads(library.handle({"path": path, "folder": folder}, task_id=task_id))
 
     def test_a_relative_path_moves_out_of_the_worktree(self) -> None:
@@ -161,7 +161,7 @@ class LibraryAddTest(unittest.TestCase):
         self.assertTrue((self.worktree / "shot.png").is_file())
 
     def test_a_folder_is_required(self) -> None:
-        result = json.loads(library.handle({"path": "shot.png"}, task_id="memento-1"))
+        result = json.loads(library.handle({"path": "shot.png"}, task_id="gots-1"))
         self.assertEqual(result, {"error": "folder is required."})
 
     def test_a_folder_must_be_a_kebab_case_slug(self) -> None:
@@ -223,7 +223,7 @@ class LibraryAddTest(unittest.TestCase):
 
     def test_a_record_from_before_the_column_still_files_it(self) -> None:
         with sqlite3.connect(self.db) as conn:
-            conn.execute("UPDATE project_sessions SET files_dir = NULL WHERE session_id = 'memento-1'")
+            conn.execute("UPDATE project_sessions SET files_dir = NULL WHERE session_id = 'gots-1'")
         result = self._call("shot.png", "screenshots")
         self.assertEqual(result["path"], str(self.files_dir / "screenshots" / "shot.png"))
 
@@ -304,7 +304,7 @@ class InstructionsTest(unittest.TestCase):
         self.tree = self.home / "project" / ".worktrees" / "jazzy-quokka-7bfe"
         self.tree.mkdir(parents=True)
         self.record = {
-            "session_id": "memento-1",
+            "session_id": "gots-1",
             "path": str(self.tree),
             "branch": "hermes/jazzy-quokka-7bfe",
             "files_dir": str(self.home / "project" / "files" / "jazzy-quokka-7bfe"),

@@ -170,7 +170,7 @@ class PrsBatchTests(unittest.TestCase):
             self.read([f"s-{n}" for n in range(4)])
         self.assertTrue(names, "the batch read something")
         self.assertTrue(
-            all(name.startswith("memento-prs") for name in names),
+            all(name.startswith("gots-prs") for name in names),
             f"a batch's chains run on the batch's own workers, not the executor every other route "
             f"shares: {sorted(set(names))}",
         )

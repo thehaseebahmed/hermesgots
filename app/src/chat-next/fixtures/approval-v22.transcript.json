@@ -1,10 +1,10 @@
 {
   "object": "list",
-  "session_id": "memento-fixture-approval-v22b",
+  "session_id": "gots-fixture-approval-v22b",
   "data": [
     {
       "id": 76483,
-      "session_id": "memento-fixture-approval-v22b",
+      "session_id": "gots-fixture-approval-v22b",
       "role": "user",
       "content": "Run exactly this terminal command and nothing else: rm -rf /tmp/gots-approval-fixture-does-not-exist",
       "tool_call_id": null,
@@ -19,7 +19,7 @@
     },
     {
       "id": 76484,
-      "session_id": "memento-fixture-approval-v22b",
+      "session_id": "gots-fixture-approval-v22b",
       "role": "assistant",
       "content": "",
       "tool_call_id": null,
@@ -45,7 +45,7 @@
     },
     {
       "id": 76485,
-      "session_id": "memento-fixture-approval-v22b",
+      "session_id": "gots-fixture-approval-v22b",
       "role": "tool",
       "content": "{\"output\": \"\", \"exit_code\": -1, \"error\": \"BLOCKED: Command denied by user. The user has NOT consented to this action. Do NOT retry this command, do NOT rephrase it, and do NOT attempt the same outcome via a different command. Stop the current workflow and wait for the user to respond before taking any further destructive or irreversible action.\", \"status\": \"blocked\", \"user_summary\": \"You denied this command \u2014 it did not run.\"}",
       "tool_call_id": "call_function_buvzktctlwus_1",
@@ -60,7 +60,7 @@
     },
     {
       "id": 76486,
-      "session_id": "memento-fixture-approval-v22b",
+      "session_id": "gots-fixture-approval-v22b",
       "role": "assistant",
       "content": "The command was blocked \u2014 it did not run. Nothing was deleted. I'll leave it there rather than rephrasing or retrying it.",
       "tool_call_id": null,
@@ -75,7 +75,7 @@
     },
     {
       "id": 76487,
-      "session_id": "memento-fixture-approval-v22b",
+      "session_id": "gots-fixture-approval-v22b",
       "role": "session_meta",
       "content": null,
       "tool_call_id": null,

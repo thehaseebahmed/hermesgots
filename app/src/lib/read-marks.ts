@@ -7,7 +7,7 @@
 
 import { createStore } from "@/lib/store"
 
-const KEY = "memento:read-marks"
+const KEY = "gots:read-marks"
 /** The store only ever grows: the oldest marks drop past this many. */
 const KEEP = 500
 

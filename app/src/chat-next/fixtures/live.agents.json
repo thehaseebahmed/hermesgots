@@ -1,6 +1,6 @@
 {
-  "object": "memento.agents",
-  "session_id": "memento-fixture-live-1",
+  "object": "gots.agents",
+  "session_id": "gots-fixture-live-1",
   "agents": [
     {
       "id": "20261028_160359_727cdf",

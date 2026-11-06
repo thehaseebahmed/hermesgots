@@ -2,7 +2,7 @@
 // (the manifest's share_target) posts what was shared here; it's kept in a cache for the share
 // screen to read, which a redirect then opens.
 
-const SHARE_CACHE = "memento-share"
+const SHARE_CACHE = "gots-share"
 // What one message carries, so a share of more is said out loud by the share screen.
 const MAX_FILES = 10
 

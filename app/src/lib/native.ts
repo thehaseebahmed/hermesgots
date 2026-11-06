@@ -35,7 +35,7 @@ export async function openNotificationSettings(): Promise<string | undefined> {
   if (!isNative) return
   // An APK built before the plugin has no screen to open and no method to call: one would throw.
   if (!Capacitor.isPluginAvailable(NOTIFICATION_SETTINGS_PLUGIN)) {
-    console.debug("[memento] no notification settings plugin in this build")
+    console.debug("[gots] no notification settings plugin in this build")
     return
   }
   try {
@@ -110,7 +110,7 @@ export function openExternal(url: string) {
 /** The Netlify deploy the app signs in and syncs through, baked in by `pnpm build:android`. */
 export const SITE_URL = (import.meta.env.VITE_SITE_URL ?? "").replace(/\/+$/, "")
 
-const NATIVE_AUTH = "memento-native-auth"
+const NATIVE_AUTH = "gots-native-auth"
 
 /**
  * Identity returns to the page that started sign-in, `/auth/native.html`. If it lands on the site

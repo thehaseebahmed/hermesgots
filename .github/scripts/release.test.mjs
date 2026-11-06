@@ -32,7 +32,7 @@ function state(over = {}) {
     pluginVersion: "0.47.0",
     minPluginVersion: "0.42.0",
     previous: { tag: "v2026.09.10", appVersion: "0.1.0-beta", pluginVersion: "0.47.0" },
-    siteUrl: "https://memento.thehaseebahmed.com",
+    siteUrl: "https://hermesgots.dev",
     ...over,
   }
 }
@@ -161,7 +161,7 @@ describe("the release decision", () => {
     assert.match(decision.notes, /0\.42\.0/)
     assert.match(decision.notes, /--ref v2026\.09\.17/)
     assert.match(decision.notes, /gh workflow run deploy\.yml --ref v2026\.09\.17 -f promote=true/)
-    assert.match(decision.notes, /memento\.thehaseebahmed\.com/)
+    assert.match(decision.notes, /hermesgots\.dev/)
   })
 
   it("says the APK version code, so a release page shows what installs over what", () => {

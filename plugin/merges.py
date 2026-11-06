@@ -104,6 +104,6 @@ async def run(hermes_home: Path) -> None:
         try:
             done = await asyncio.to_thread(check, hermes_home)
             if done:
-                logger.info("memento: resolved %d merged session(s)", done)
+                logger.info("gots: resolved %d merged session(s)", done)
         except Exception:
-            logger.warning("memento: checking merged pull requests failed", exc_info=True)
+            logger.warning("gots: checking merged pull requests failed", exc_info=True)

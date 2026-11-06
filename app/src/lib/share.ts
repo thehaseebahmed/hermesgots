@@ -70,7 +70,7 @@ export const receiveShare = (share: IncomingShare) => setShare(share)
 
 export const useIncomingShare = current.use
 
-const SHARE_CACHE = "memento-share"
+const SHARE_CACHE = "gots-share"
 
 /**
  * Reads a share the service worker took (`public/share-sw.js`), then forgets it. False only where
@@ -170,7 +170,7 @@ async function fromNative(share: NativeShare) {
 
 /**
  * Opens the share screen when another app shares into the Android app, including the share that
- * launched it. In development, `window.mementoShare({ title, text, url, files })` does the same.
+ * launched it. In development, `window.gotsShare({ title, text, url, files })` does the same.
  */
 export function useShareReceiver() {
   const navigate = useNavigate()
@@ -181,8 +181,8 @@ export function useShareReceiver() {
       navigate("/share")
     }
     if (import.meta.env.DEV) {
-      const dev = window as unknown as { mementoShare?: (input: object) => void }
-      dev.mementoShare = (input) => open(toShare(input))
+      const dev = window as unknown as { gotsShare?: (input: object) => void }
+      dev.gotsShare = (input) => open(toShare(input))
     }
     if (!isNative) return
     let handle: PluginListenerHandle | undefined

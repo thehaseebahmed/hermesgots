@@ -177,7 +177,7 @@ Proof standards:
   workspace's `files/<session>/` and file that copy.
 
 Each drive ends with `PASS: …` lines per step; a failure saves `<flow>-failed.png` and the run ends
-`FAILED: <flows>`. Server logs are in `$TMPDIR/memento-e2e-logs/`. Keep, per run: the flow's PNGs,
+`FAILED: <flows>`. Server logs are in `$TMPDIR/gots-e2e-logs/`. Keep, per run: the flow's PNGs,
 the `PASS:` transcript, and any read-back values the journey asserted (reply length, request counts).
 Record the feature id and the entry point used with every artifact.
 

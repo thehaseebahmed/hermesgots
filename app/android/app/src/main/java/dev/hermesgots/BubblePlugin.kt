@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import android.Manifest
 import android.content.Intent
@@ -83,7 +83,7 @@ class BubblePlugin : Plugin() {
             return
         }
         // Half the grants is no Bubble: without the service the mark would draw and type nothing.
-        if (!MementoAccessibilityService.connected()) {
+        if (!GotsAccessibilityService.connected()) {
             call.resolve(JSObject().put("started", false).put("reason", "accessibility"))
             return
         }
@@ -112,7 +112,7 @@ class BubblePlugin : Plugin() {
         val answer = JSObject()
             .put("enabled", BubbleConfig.enabled(context))
             .put("overlay", Settings.canDrawOverlays(context))
-            .put("accessibility", MementoAccessibilityService.connected())
+            .put("accessibility", GotsAccessibilityService.connected())
         call.resolve(answer)
     }
 

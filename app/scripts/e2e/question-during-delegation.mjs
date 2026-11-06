@@ -28,14 +28,14 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   assert.ok(sessionId, "the chat has a Hermes session")
   const agents = async () => {
     const answered = await fetch(
-      `${mock}/api/plugins/memento/sessions/${encodeURIComponent(sessionId)}/agents`,
+      `${mock}/api/plugins/gots/sessions/${encodeURIComponent(sessionId)}/agents`,
     )
     return (await answered.json()).agents ?? []
   }
   // What the host says runs for this chat (`runs/live`), so a reply is known to have arrived while
   // its run was still going rather than after it ended.
   const live = async () => {
-    const answered = await fetch(`${mock}/api/plugins/memento/runs/live`)
+    const answered = await fetch(`${mock}/api/plugins/gots/runs/live`)
     const body = await answered.json()
     return { session: body.sessions?.[sessionId] ?? null }
   }

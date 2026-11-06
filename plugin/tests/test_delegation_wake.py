@@ -1056,7 +1056,7 @@ class StopRouteTest(unittest.TestCase):
         sessions.remember_agent(db_path(self.home), "c1", "sa-1")
         answer = self.stop("s", "c1")
         self.assertEqual(answer["status"], 200)
-        self.assertEqual(answer["payload"]["object"], "memento.agent_stop")
+        self.assertEqual(answer["payload"]["object"], "gots.agent_stop")
         self.assertEqual(answer["payload"]["session_id"], "s")
         self.assertEqual(answer["payload"]["agent_id"], "c1")
         self.assertTrue(answer["payload"]["stopped"])
@@ -1140,7 +1140,7 @@ class StopRouteTest(unittest.TestCase):
         self.plant_children([{"id": "c1", "open": True}, {"id": "c2", "open": True}], ["c1", "c2"])
         answer = self.stop_all("s")
         self.assertEqual(answer["status"], 200)
-        self.assertEqual(answer["payload"]["object"], "memento.agents_stop")
+        self.assertEqual(answer["payload"]["object"], "gots.agents_stop")
         self.assertEqual(answer["payload"]["session_id"], "s")
         self.assertEqual(answer["payload"]["stopped"], 2)
         self.assertEqual(

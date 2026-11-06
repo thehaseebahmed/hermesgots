@@ -41,13 +41,13 @@ class TriageTests(unittest.TestCase):
         self.home = Path(tempfile.mkdtemp())
         self.path = db_path(self.home)
         self.records = {
-            MAIN: chat(main=True, hermesSessionId="memento-main-bot", title="Main"),
+            MAIN: chat(main=True, hermesSessionId="gots-main-bot", title="Main"),
             "t1": chat(hermesSessionId="s1", title="Trip to Lisbon", updatedAt=5),
             "t2": chat(hermesSessionId="s2", title="Taxes", updatedAt=9),
         }
         chats.merge(self.path, self.records)
 
-    def run_triage(self, llm, text="more on Lisbon", session="memento-main-bot"):
+    def run_triage(self, llm, text="more on Lisbon", session="gots-main-bot"):
         with mock.patch.object(triage, "_llm", return_value=llm), mock.patch.object(
             triage, "_rows", return_value={}
         ):
@@ -96,7 +96,7 @@ class TriageTests(unittest.TestCase):
 
     def test_open_thread_writes_the_record_a_new_chat_has(self):
         chat_id, session = triage.open_thread(self.path, "bot")
-        self.assertEqual(session, f"memento-{chat_id}")
+        self.assertEqual(session, f"gots-{chat_id}")
         record = chats.read(self.path)[chat_id]
         self.assertEqual(record["at"], record["value"]["changedAt"])
         value = record["value"]
@@ -123,7 +123,7 @@ class TriageTests(unittest.TestCase):
             "model": "m",
             "provider": "p",
             "instructions": "i",
-            "session_id": "memento-main-bot",
+            "session_id": "gots-main-bot",
             "input": [{"role": "user", "content": "plan my trip"}],
             "conversation_history": [{"role": "user", "content": "old"}],
         }
@@ -131,7 +131,7 @@ class TriageTests(unittest.TestCase):
         started = triage.start_thread(
             self.path, "bot", "bot", "plan my trip", files, body
         )
-        self.assertEqual(started["session_id"], f"memento-{started['thread']}")
+        self.assertEqual(started["session_id"], f"gots-{started['thread']}")
         self.assertEqual(chats.read(self.path)[started["thread"]]["value"]["hermesSessionId"], started["session_id"])
         queued = outbox.read(self.path, started["session_id"])["items"]
         self.assertEqual([item["id"] for item in queued], [started["item"]["id"]])
@@ -141,7 +141,7 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(run["session_id"], started["session_id"])
         self.assertEqual(run["input"], body["input"])
         self.assertNotIn("conversation_history", run)
-        self.assertEqual(outbox.read(self.path, "memento-main-bot")["items"], [])
+        self.assertEqual(outbox.read(self.path, "gots-main-bot")["items"], [])
 
     def test_a_new_thread_says_which_model_its_first_turn_runs_on(self):
         body = {"model": "m", "provider": "p", "input": [{"role": "user", "content": "hi"}]}
@@ -265,7 +265,7 @@ class TriageModelTests(unittest.TestCase):
         chats.merge(
             self.path,
             {
-                MAIN: chat(main=True, hermesSessionId="memento-main-bot", title="Main"),
+                MAIN: chat(main=True, hermesSessionId="gots-main-bot", title="Main"),
                 "t1": chat(hermesSessionId="s1", title="Trip", updatedAt=5),
             },
         )
@@ -321,7 +321,7 @@ class TriageModelTests(unittest.TestCase):
         with mock.patch.object(triage, "_llm", return_value=llm), mock.patch.object(
             triage, "_rows", return_value={}
         ):
-            triage.triage(self.path, self.home, "memento-main-bot", "hi")
+            triage.triage(self.path, self.home, "gots-main-bot", "hi")
         self.assertEqual((llm.calls[0]["provider"], llm.calls[0]["model"]), ("a", "b"))
 
     def test_triage_without_a_pick_uses_the_bots_own_model(self):
@@ -329,7 +329,7 @@ class TriageModelTests(unittest.TestCase):
         with mock.patch.object(triage, "_llm", return_value=llm), mock.patch.object(
             triage, "_rows", return_value={}
         ):
-            triage.triage(self.path, self.home, "memento-main-bot", "hi")
+            triage.triage(self.path, self.home, "gots-main-bot", "hi")
         self.assertNotIn("model", llm.calls[0])
         self.assertNotIn("provider", llm.calls[0])
 

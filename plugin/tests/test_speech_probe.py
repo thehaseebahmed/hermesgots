@@ -79,7 +79,7 @@ class Base(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.path = Path(self.tmp.name) / "memento.db"
+        self.path = Path(self.tmp.name) / "gots.db"
         self.fixture = Path(self.tmp.name) / "probe.wav"
         self.real = speech_probe.FIXTURE
 

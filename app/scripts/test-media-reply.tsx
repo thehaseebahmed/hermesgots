@@ -26,7 +26,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const SENT = "/home/h/.hermes/memento/attachments/session-1"
+const SENT = "/home/h/.hermes/plugin-data/gots/attachments/session-1"
 const LIBRARY = "/home/h/.hermes/library"
 
 const photo: Attachment = {

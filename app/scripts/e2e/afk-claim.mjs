@@ -22,11 +22,11 @@ const REFUSAL = "Couldn't reach GitHub from the server."
 /** What a bot that never set one works within. */
 const BUDGET = 5
 
-const botAfk = () => fetch(`${mock}/api/plugins/memento/afk`).then((response) => response.json())
+const botAfk = () => fetch(`${mock}/api/plugins/gots/afk`).then((response) => response.json())
 
 const writeBudget = async (pick_budget) =>
   (
-    await fetch(`${mock}/api/plugins/memento/afk`, {
+    await fetch(`${mock}/api/plugins/gots/afk`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pick_budget }),
@@ -35,7 +35,7 @@ const writeBudget = async (pick_budget) =>
 
 const writeThreshold = async (usage_threshold) =>
   (
-    await fetch(`${mock}/api/plugins/memento/afk`, {
+    await fetch(`${mock}/api/plugins/gots/afk`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ usage_threshold }),
@@ -53,7 +53,7 @@ const run = async ({ page, profileId, shot, until }) => {
   // write of its budget is read back, and putting it back is the same write.
   await writeBudget(BUDGET)
   const bot = await botAfk()
-  assert.equal(bot.object, "memento.afk.bot", "the bot-level route answers its own object")
+  assert.equal(bot.object, "gots.afk.bot", "the bot-level route answers its own object")
   assert.equal(bot.pick_budget, BUDGET, "a bot that never set a budget works within five")
   const smaller = await writeBudget(4)
   assert.equal(smaller.pick_budget, 4, "the bot's budget is the number it was written")
@@ -296,13 +296,13 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("reloaded")
 
   // GitHub refusing leaves the switch on and its reason in the pop-up; nothing turns itself off.
-  await page.route("**/api/plugins/memento/projects/*/afk", (route) => {
+  await page.route("**/api/plugins/gots/projects/*/afk", (route) => {
     if (route.request().method() !== "GET") return route.continue()
     return route.fulfill({
       status: 200,
       headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
       body: JSON.stringify({
-        object: "memento.afk",
+        object: "gots.afk",
         on: true,
         reason: null,
         task: null,
@@ -321,7 +321,7 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   assert.equal(await page.locator("[data-working]").count(), 0, "and holds no task to name")
   await shot("refused")
-  await page.unroute("**/api/plugins/memento/projects/*/afk")
+  await page.unroute("**/api/plugins/gots/projects/*/afk")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }

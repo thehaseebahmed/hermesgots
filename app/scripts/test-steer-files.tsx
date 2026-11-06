@@ -14,7 +14,7 @@ import { db, mainThreadId, type Attachment } from "@/lib/db"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
 const MAIN = mainThreadId("bot-1")
-const MAIN_SESSION = `memento-${MAIN}`
+const MAIN_SESSION = `gots-${MAIN}`
 
 type Seen = { path: string; method?: string; body: any }
 
@@ -37,7 +37,7 @@ function host(name: string, { features = ["queue"], upload = true } = {}) {
     seen.push({ path: url.pathname, method: init?.method, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
     if (url.pathname.endsWith("/attachments") && init?.method === "POST") {
       const file = url.searchParams.get("name")
       if (!upload) return json({ error: { message: "The host is full." } }, 507)

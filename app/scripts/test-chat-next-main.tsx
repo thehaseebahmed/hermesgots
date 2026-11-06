@@ -73,7 +73,7 @@ async function seedMain(name: string) {
     status: "done",
     createdAt: 3,
   })
-  return { bot, main, thread: `${name}-t1`, host: fakeHost(`memento-${main}`, { plugin: true }) }
+  return { bot, main, thread: `${name}-t1`, host: fakeHost(`gots-${main}`, { plugin: true }) }
 }
 
 async function sendFromComposer(text: string) {
@@ -137,7 +137,7 @@ test("a message the host keeps in Main is posted to Main, as any send is", async
     await sendFromComposer("What's the weather?")
     await until(() => host.asked.runs === 1, "the turn was posted")
     assert.equal(host.triage.asked.length, 1, "after the host was asked")
-    assert.equal(host.latest.body?.session_id, `memento-${main}`, "on Main's own session")
+    assert.equal(host.latest.body?.session_id, `gots-${main}`, "on Main's own session")
     await until(() => requests().includes("What's the weather?"), "and drawn as Main's request")
   })
 })
@@ -170,7 +170,7 @@ test("/thread from Main starts a thread with the message as its first turn", asy
 
 test("a thread of Main leads back to it", async () => {
   const { main, thread } = await seedMain("main-back")
-  fakeHost(`memento-${thread}`, { plugin: true })
+  fakeHost(`gots-${thread}`, { plugin: true })
   await mount(screen(thread), async () => {
     await until(() => Boolean(find('[aria-label="Back to Tri"]')), "the thread leads back")
     await click(find('[aria-label="Back to Tri"]'))

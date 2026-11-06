@@ -93,9 +93,9 @@ function host(
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ path: url.pathname, method, body })
-    if (url.pathname.endsWith("/api/plugins/memento/info"))
-      return json({ name: "memento", features })
-    const write = /\/api\/plugins\/memento\/skills\/([^/]+)\/enabled$/.exec(url.pathname)
+    if (url.pathname.endsWith("/api/plugins/gots/info"))
+      return json({ name: "gots", features })
+    const write = /\/api\/plugins\/gots\/skills\/([^/]+)\/enabled$/.exec(url.pathname)
     if (write && method === "POST") {
       if (refuse) return json({ error: { message: refuse } }, 400)
       const name = decodeURIComponent(write[1])
@@ -104,7 +104,7 @@ function host(
       found.enabled = body?.enabled === true
       return json({ object: "skill", data: { ...found } })
     }
-    const removal = /\/api\/plugins\/memento\/skills\/([^/]+)$/.exec(url.pathname)
+    const removal = /\/api\/plugins\/gots\/skills\/([^/]+)$/.exec(url.pathname)
     if (removal && method === "DELETE") {
       if (refuse) return json({ error: { message: refuse } }, 400)
       const name = decodeURIComponent(removal[1])
@@ -113,7 +113,7 @@ function host(
       held.splice(index, 1)
       return json({ object: "list", data: held.map((row) => ({ ...row })) })
     }
-    const file = /\/api\/plugins\/memento\/skills\/([^/]+)\/file$/.exec(url.pathname)
+    const file = /\/api\/plugins\/gots\/skills\/([^/]+)\/file$/.exec(url.pathname)
     if (file && method === "GET") {
       const name = decodeURIComponent(file[1])
       const path = url.searchParams.get("path") ?? ""
@@ -122,7 +122,7 @@ function host(
         return json({ error: { message: `Skill '${name}' has no file '${path}'.` } }, 404)
       return json({ object: "skill.file", data: { name, path, content } })
     }
-    const view = /\/api\/plugins\/memento\/skills\/([^/]+)$/.exec(url.pathname)
+    const view = /\/api\/plugins\/gots\/skills\/([^/]+)$/.exec(url.pathname)
     if (view && method === "GET") {
       const name = decodeURIComponent(view[1])
       const row = held.find((one) => one.name === name)
@@ -141,7 +141,7 @@ function host(
         },
       })
     }
-    if (url.pathname.endsWith("/api/plugins/memento/skills"))
+    if (url.pathname.endsWith("/api/plugins/gots/skills"))
       return json({ object: "list", data: held.map((row) => ({ ...row })) })
     return json({}, 404)
   }
@@ -371,7 +371,7 @@ test("flipping a switch writes it to the Host, and the row shows what it answere
     await until(async () => calls.some((call) => call.method === "POST"), "the write")
     assert.deepEqual(
       calls.filter((call) => call.method === "POST").map((call) => [call.path, call.body]),
-      [["/api/plugins/memento/skills/pr-review/enabled", { enabled: false }]],
+      [["/api/plugins/gots/skills/pr-review/enabled", { enabled: false }]],
       "one write, of the one field the route takes",
     )
     await until(async () => /Off/.test(row("pr-review")?.textContent ?? ""), "the row to say Off")
@@ -663,7 +663,7 @@ test("confirming removes the skill, and the row leaves every list at once", asyn
     await until(async () => calls.some((call) => call.method === "DELETE"), "the removal")
     assert.deepEqual(
       calls.filter((call) => call.method === "DELETE").map((call) => call.path),
-      ["/api/plugins/memento/skills/pr-review"],
+      ["/api/plugins/gots/skills/pr-review"],
       "one removal, of the skill the note was opened on",
     )
     await until(async () => row("pr-review") === null, "the row to leave the tab")
@@ -797,7 +797,7 @@ test("a category that reads on is cleared whole by a tap, and nothing beside it"
     await until(async () => posts(calls).length === 1, "the category's one write")
     assert.deepEqual(
       posts(calls).map((call) => [call.path, call.body]),
-      [["/api/plugins/memento/skills/ops-one/enabled", { enabled: false }]],
+      [["/api/plugins/gots/skills/ops-one/enabled", { enabled: false }]],
       "the one row that was on, written off",
     )
     await until(
@@ -824,9 +824,9 @@ test("a category that reads off is filled whole by a tap, and one that reads on 
         .map((call) => call.path)
         .sort(),
       [
-        "/api/plugins/memento/skills/ops-one/enabled",
-        "/api/plugins/memento/skills/ops-three/enabled",
-        "/api/plugins/memento/skills/ops-two/enabled",
+        "/api/plugins/gots/skills/ops-one/enabled",
+        "/api/plugins/gots/skills/ops-three/enabled",
+        "/api/plugins/gots/skills/ops-two/enabled",
       ],
       "every row in it",
     )
@@ -875,7 +875,7 @@ test("a tap on a category never writes the skill the Host can't switch", async (
     await until(async () => posts(calls).length === 1, "clearing what it may")
     assert.deepEqual(
       posts(calls).map((call) => [call.path, call.body]),
-      [["/api/plugins/memento/skills/ops-one/enabled", { enabled: false }]],
+      [["/api/plugins/gots/skills/ops-one/enabled", { enabled: false }]],
       "the switchable row that was on, and the essential one left alone",
     )
     await settle()

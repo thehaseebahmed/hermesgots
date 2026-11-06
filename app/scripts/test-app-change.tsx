@@ -45,7 +45,7 @@ function host(kept: Kept, events: unknown[]) {
       return new Response(events.map(frame).join(""), {
         headers: { "content-type": "text/event-stream" },
       })
-    const tail = url.pathname.split("/plugins/memento/")[1] ?? ""
+    const tail = url.pathname.split("/plugins/gots/")[1] ?? ""
     if (tail === "apps/builds") return json({ marked: true }, 201)
     if (tail === "apps")
       return json({

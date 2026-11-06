@@ -1,13 +1,13 @@
 """Links a Hermes profile to a Gots account, so it shows up in the app as a bot by itself.
 
-``hermes memento link <code> --site <app URL>`` claims a link code the app minted, which gives this
+``hermes gots link <code> --site <app URL>`` claims a link code the app minted, which gives this
 profile a host token. The profile's bot record (name, URL, API key) is sealed to the account's inbox
 key before it leaves (ECIES on P-256, the same scheme as ``openFromInbox`` in the app's ``vault.ts``),
 so the registry passes it along without being able to read it. The gateway then re-publishes the
 record when it changes and checks in every 10 minutes (``run``). Everything is best effort: a
 registry that can't be reached only means the app's copy is a little stale.
 
-State lives in ``$HERMES_HOME/memento/link.json`` (0600), per profile.
+State lives in ``$HERMES_HOME/plugin-data/gots/link.json`` (0600), per profile.
 """
 
 from __future__ import annotations
@@ -25,13 +25,15 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from . import migrate, store
+
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_SECONDS = 600
 TIMEOUT_SECONDS = 15
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 CODE = re.compile(r"^MK_([0-9A-Z]{8})-([0-9A-Z]{16})-([0-9A-Z]{13})$")
-INFO = b"memento-inbox-v1"
+INFO = b"gots-inbox-v1"
 DEFAULT_PORT = 8642
 
 
@@ -116,7 +118,7 @@ def call(
         data=None if body is None else json.dumps(body).encode(),
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "memento-plugin",
+            "User-Agent": "gots-plugin",
             **({"Authorization": f"Bearer {token}"} if token else {}),
         },
     )
@@ -138,7 +140,7 @@ def call(
 
 
 def state_path(home: Path) -> Path:
-    return home / "memento" / "link.json"
+    return store.data_dir(home) / "link.json"
 
 
 def load_state(home: Path) -> Dict[str, Any]:
@@ -242,7 +244,7 @@ def publish(home: Path, state: Dict[str, Any], *, process_env: bool, force: bool
     if not force and state.get("published") == current:
         return False
     bot = bot_id(state, value["profile"])
-    sealed = seal(inbox["publicKey"], value, f"memento:{state['userId']}:bot:{bot}")
+    sealed = seal(inbox["publicKey"], value, f"gots:{state['userId']}:bot:{bot}")
     call(
         state["site"],
         "PUT",
@@ -299,7 +301,7 @@ def check_in(home: Path, *, process_env: bool) -> Optional[str]:
             state["revoked"] = True
             save_state(home, state)
             return "removed in Gots"
-        logger.debug("memento: check-in failed for %s: %s", home, error)
+        logger.debug("gots: check-in failed for %s: %s", home, error)
         return str(error)
 
 
@@ -314,7 +316,7 @@ def served_homes(adapter: Any) -> List[Path]:
 
             homes += [Path(home) for _, home in profiles_to_serve(multiplex=True)]
         except Exception:
-            logger.debug("memento: couldn't list served profiles", exc_info=True)
+            logger.debug("gots: couldn't list served profiles", exc_info=True)
     seen: set[Path] = set()
     return [home for home in homes if not (home.resolve() in seen or seen.add(home.resolve()))]
 
@@ -329,7 +331,7 @@ async def run(adapter: Any) -> None:
                 # Only the process's own profile may fall back to the process environment.
                 await asyncio.to_thread(check_in, home, process_env=home == first)
             except Exception:
-                logger.debug("memento: check-in crashed for %s", home, exc_info=True)
+                logger.debug("gots: check-in crashed for %s", home, exc_info=True)
         await asyncio.sleep(HEARTBEAT_SECONDS)
 
 
@@ -496,14 +498,14 @@ def enable_platform(home: Path) -> bool:
         section = (config.get("platforms") or {}).get("gots")
         held = section if isinstance(section, dict) else {}
     except Exception:
-        logger.debug("memento: couldn't read %s", path, exc_info=True)
+        logger.debug("gots: couldn't read %s", path, exc_info=True)
     if held.get("enabled") is True:
         return False
     try:
         atomic_roundtrip_yaml_update(path, PLATFORM_KEY, True)
         return True
     except Exception:
-        logger.warning("memento: couldn't turn the Gots platform on in %s", path, exc_info=True)
+        logger.warning("gots: couldn't turn the Gots platform on in %s", path, exc_info=True)
         return False
 
 
@@ -527,10 +529,10 @@ def cmd_link(args: Any) -> int:
     try:
         if is_linked(state):
             print("This profile is already linked. To link it to another account, run "
-                  "`hermes memento unlink` first.")
+                  "`hermes gots unlink` first.")
         else:
             if not args.code:
-                print("Paste the link code from Gots: hermes memento link <code> --site <url>")
+                print("Paste the link code from Gots: hermes gots link <code> --site <url>")
                 return 2
             state = claim(home, state, args.code, site)
 
@@ -622,7 +624,7 @@ def cmd_status(args: Any) -> int:
 
 
 def setup_cli(parser: Any) -> None:
-    commands = parser.add_subparsers(dest="memento_command")
+    commands = parser.add_subparsers(dest="gots_command")
     link = commands.add_parser("link", help="Link this profile to your Gots account")
     link.add_argument("code", nargs="?", help="The link code from the app")
     link.add_argument("--site", help="The address you open Gots at")
@@ -633,4 +635,5 @@ def setup_cli(parser: Any) -> None:
     unlink.set_defaults(func=cmd_unlink)
     status = commands.add_parser("status", help="Show whether this profile is linked")
     status.set_defaults(func=cmd_status)
+    migrate.setup_cli(commands)
     parser.set_defaults(func=lambda args: (parser.print_help(), 2)[1])

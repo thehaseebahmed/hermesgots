@@ -44,7 +44,7 @@ export default async (_req: Request) => {
   const key = process.env.BENCHLM_DATA_KEY
   if (!key) return Response.json({ error: "BENCHLM_DATA_KEY is not set" }, { status: 502 })
 
-  const store = getStore({ name: "memento-rankings", consistency: "strong" })
+  const store = getStore({ name: "gots-rankings", consistency: "strong" })
   const cached = (await store.get(CACHE_KEY, { type: "json" })) as CachedRankings | null
 
   // Serve fresh cache without hitting upstream.

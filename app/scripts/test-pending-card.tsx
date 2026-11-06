@@ -54,12 +54,12 @@ function host(queue: unknown, { features = ["pending"] } = {}) {
     seen.push({ path: url.pathname, method })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
     if (/\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: [] })
     if (/\/sessions\/[^/]+\/pending$/.test(url.pathname))
-      return json({ object: "memento.pending", ...(queue as object) })
+      return json({ object: "gots.pending", ...(queue as object) })
     if (/\/sessions\/[^/]+\/pending\/[^/]+\/discard$/.test(url.pathname) && method === "POST")
-      return json({ object: "memento.pending.discarded", items: [], lost: null, running: false })
+      return json({ object: "gots.pending.discarded", items: [], lost: null, running: false })
     return json({ error: { message: "no route" } }, 404)
   }) as typeof fetch
   return seen
@@ -117,7 +117,7 @@ test("Discard acknowledges the lost turn on its own route, and the composer come
     const posted = seen.filter((one) => one.method === "POST" && one.path.endsWith("/discard"))
     assert.deepEqual(
       posted.map((one) => one.path),
-      ["/api/plugins/memento/sessions/chat-discard-hermes/pending/a/discard"],
+      ["/api/plugins/gots/sessions/chat-discard-hermes/pending/a/discard"],
       "the row the card named, on the chat's own session",
     )
   })

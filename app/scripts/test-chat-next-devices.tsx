@@ -8,7 +8,7 @@ import { fakeHost } from "./chat-next-host.ts"
 import { openDevice, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
 
 test("1: a chat left open on the device that started it shows every turn it made", async () => {
-  const host = fakeHost("memento-one")
+  const host = fakeHost("gots-one")
   await withDevice(openDevice(host), async (phone) => {
     await turn(phone, host, "first question", "The first answer.")
     await turn(phone, host, "second question", "The second answer.", 3)
@@ -17,7 +17,7 @@ test("1: a chat left open on the device that started it shows every turn it made
 })
 
 test("2: a device that never held the chat shows all of it, however long it has grown", async () => {
-  const host = fakeHost("memento-two")
+  const host = fakeHost("gots-two")
   // Thirty turns of six rows each: far more than the one page of fifty the host answers with.
   host.seed(
     Array.from({ length: 30 }, (_, at) => ({
@@ -32,7 +32,7 @@ test("2: a device that never held the chat shows all of it, however long it has 
 })
 
 test("3: a chat continued on another device is whole again when the first device comes back", async () => {
-  const host = fakeHost("memento-three")
+  const host = fakeHost("gots-three")
   const phone = await openDevice(host)
   const laptop = await openDevice(host)
   try {

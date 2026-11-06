@@ -32,16 +32,16 @@ from plugin import afk, delegation, link, pipeline, sessions
 from plugin.store import db_path
 from plugin.tests._helpers import staged as staged_record
 
-SESSION = "memento-afk-s1"
+SESSION = "gots-afk-s1"
 CHILD = "c1"
 TASK = {
-    "repo": "mock-user/memento",
+    "repo": "mock-user/gots",
     "number": 265,
     "title": "The frontier is read from GitHub and listed",
-    "url": "https://github.com/mock-user/memento/issues/265",
+    "url": "https://github.com/mock-user/gots/issues/265",
 }
 # The worktree a gate reads once its stage has done what it said it would.
-CLEAN = [{"name": "mock-user/memento", "changed": 0, "ahead": 2}]
+CLEAN = [{"name": "mock-user/gots", "changed": 0, "ahead": 2}]
 
 
 class Adapter:
@@ -82,7 +82,7 @@ class StageCase(unittest.TestCase):
         self.posted: List[Dict[str, Any]] = []
         self.repos = [
             {
-                "name": "mock-user/memento",
+                "name": "mock-user/gots",
                 "repo_root": "/checkout",
                 "path": "/trees/afk-265",
                 "branch": "hermes/afk-265",

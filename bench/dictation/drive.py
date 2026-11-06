@@ -442,7 +442,7 @@ def run(
                 }
             )
     return {
-        "object": "memento.bench.dictation",
+        "object": "gots.bench.dictation",
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "host": machine(),
         "decoder": host_of.decoder.stated(),

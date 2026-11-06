@@ -165,7 +165,7 @@ def _ask(tt: Any, attr: str, *args: Any) -> Optional[str]:
     try:
         return str(probe(*args) or "").strip().lower() or None
     except Exception:
-        logger.debug("memento: Hermes couldn't answer %s", attr, exc_info=True)
+        logger.debug("gots: Hermes couldn't answer %s", attr, exc_info=True)
         return None
 
 
@@ -185,7 +185,7 @@ def provider_name(cfg: Dict[str, Any]) -> str:
     try:
         return _provider(_tools(), cfg) or ""
     except Exception:
-        logger.debug("memento: no speech provider to name", exc_info=True)
+        logger.debug("gots: no speech provider to name", exc_info=True)
         return ""
 
 
@@ -204,7 +204,7 @@ def heard_by_config(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, 
         tt = _tools()
         return heard_by(tt, cfg if cfg is not None else _local_config(tt))
     except Exception:
-        logger.debug("memento: no speech provider to name", exc_info=True)
+        logger.debug("gots: no speech provider to name", exc_info=True)
         return None
 
 
@@ -515,7 +515,7 @@ def _temp(data: Any, content_type: Optional[str], decode: Any) -> Any:
     ``data`` is one Piece's bytes or the several of a cloud take, written straight into the file: a
     nine-megabyte take is never joined into a second buffer to be handed over.
     """
-    fd, path = tempfile.mkstemp(prefix="memento-dictation-", suffix=suffix_for(content_type))
+    fd, path = tempfile.mkstemp(prefix="gots-dictation-", suffix=suffix_for(content_type))
     try:
         with os.fdopen(fd, "wb") as file:
             for part in (data,) if isinstance(data, (bytes, bytearray)) else data:
@@ -525,7 +525,7 @@ def _temp(data: Any, content_type: Optional[str], decode: Any) -> Any:
         try:
             os.unlink(path)
         except OSError:
-            logger.debug("memento: couldn't delete the clip it wrote", exc_info=True)
+            logger.debug("gots: couldn't delete the clip it wrote", exc_info=True)
 
 
 def _voice(take: Take) -> Tuple[str, str]:
@@ -577,7 +577,7 @@ def _expire(now: Optional[float] = None) -> None:
     for key in stale:
         _drop(key)
     if stale:
-        logger.debug("memento: dropped %d dictation take(s) left alone", len(stale))
+        logger.debug("gots: dropped %d dictation take(s) left alone", len(stale))
 
 
 def local_decoder() -> Optional[Callable[..., Any]]:
@@ -623,7 +623,7 @@ def _reap() -> None:
     """Starts the sweeper once, from the first take this process is handed."""
     global _sweeper
     if _sweeper is None or not _sweeper.is_alive():
-        _sweeper = threading.Thread(target=_sweep, name="memento-dictation-sweep", daemon=True)
+        _sweeper = threading.Thread(target=_sweep, name="gots-dictation-sweep", daemon=True)
         _sweeper.start()
 
 
@@ -645,7 +645,7 @@ def _worker(take: Take) -> None:
         except DictationError as failure:
             text, error = "", str(failure)
         except Exception:
-            logger.warning("memento: couldn't hear a dictation Piece", exc_info=True)
+            logger.warning("gots: couldn't hear a dictation Piece", exc_info=True)
             text, error = "", "Transcription failed."
         with _heard:
             piece["data"] = None
@@ -716,7 +716,7 @@ def upload(
                 take.queue.put(index)
                 if take.worker is None:
                     take.worker = threading.Thread(
-                        target=_worker, args=(take,), name="memento-dictation-take", daemon=True
+                        target=_worker, args=(take,), name="gots-dictation-take", daemon=True
                     )
                     take.worker.start()
     return {"take": key[1], "index": index}
@@ -789,7 +789,7 @@ def _upload_whole(take: Take) -> str:
         try:
             return _landed(
                 run_bounded(
-                    "memento-dictation-upload",
+                    "gots-dictation-upload",
                     CLOUD_SECONDS,
                     lambda: _temp(handed, handed_type, _dispatcher(_tools())),
                 )
@@ -824,7 +824,7 @@ def _heard_model(state: Dict[str, Any], take: Take) -> str:
         cfg = _local_config(_tools())
     except Exception:
         # The host itself can't be read: a fact about the host, not a model it declined to name.
-        logger.debug("memento: couldn't read the host's speech settings", exc_info=True)
+        logger.debug("gots: couldn't read the host's speech settings", exc_info=True)
         return ""
     return speech.provider_model(name, cfg)
 

@@ -36,7 +36,7 @@ def task(
     assignees: Iterable[str] = (),
     created: str = "2026-10-01T00:00:00Z",
     blockers: Iterable[Dict[str, Any]] = (),
-    repo: str = "mock-user/memento",
+    repo: str = "mock-user/gots",
 ) -> Dict[str, Any]:
     """A task row as the read builds one."""
     return {
@@ -52,7 +52,7 @@ def task(
     }
 
 
-def blocker(number: int, state: str = "open", repo: str = "mock-user/memento") -> Dict[str, Any]:
+def blocker(number: int, state: str = "open", repo: str = "mock-user/gots") -> Dict[str, Any]:
     return {
         "repo": repo,
         "number": number,
@@ -172,7 +172,7 @@ class ReadTests(unittest.TestCase):
         self.folders: List[Any] = [Folder(self.home.name)]
         self._patches = [
             patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
         ]
         for one in self._patches:
             one.start()
@@ -203,9 +203,9 @@ class ReadTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def test_a_repository_is_asked_once_for_its_ready_tasks(self) -> None:
-        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265)]})
+        self.serve({"/repos/mock-user/gots/issues?": [issue_row(265)]})
         found = read(Path(self.home.name), self.folders)
-        self.assertEqual(found["repos"], ["mock-user/memento"])
+        self.assertEqual(found["repos"], ["mock-user/gots"])
         self.assertEqual([row["number"] for row in found["ready"]], [265])
         self.assertEqual(len(self.paths), 1)
         self.assertIn(f"labels={READY_LABEL}", self.paths[0])
@@ -214,12 +214,12 @@ class ReadTests(unittest.TestCase):
     def test_the_frontier_read_carries_no_bodies(self) -> None:
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [
+                "/repos/mock-user/gots/issues?": [
                     issue_row(265, body="Describe it."),
                     issue_row(266, body="Claimed.", labels=(READY_LABEL, CLAIM_LABEL)),
                     issue_row(267, body="Blocked.", created="2026-10-03T00:00:00Z", summary=1),
                 ],
-                "/repos/mock-user/memento/issues/267/dependencies/blocked_by": [issue_row(265)],
+                "/repos/mock-user/gots/issues/267/dependencies/blocked_by": [issue_row(265)],
             }
         )
         found = read(Path(self.home.name), self.folders)
@@ -237,27 +237,27 @@ class ReadTests(unittest.TestCase):
     def test_the_sweeps_read_carries_the_body_of_the_one_it_claims(self) -> None:
         body = "## What to build\n\nThe first run opens with the issue.\n\n- verbatim\n"
         self.serve(
-            {"/repos/mock-user/memento/issues?": [issue_row(265, body=body), issue_row(266, body="x")]}
+            {"/repos/mock-user/gots/issues?": [issue_row(265, body=body), issue_row(266, body="x")]}
         )
         task = frontier(Path(self.home.name), self.folders)[0]
         self.assertEqual((task["number"], task["body"]), (265, body))
         self.assertEqual(len(self.paths), 1, "the body comes with the list, not from a second read")
 
     def test_the_sweeps_read_of_an_empty_frontier_is_empty(self) -> None:
-        self.serve({"/repos/mock-user/memento/issues?": []})
+        self.serve({"/repos/mock-user/gots/issues?": []})
         self.assertEqual(frontier(Path(self.home.name), self.folders), [])
 
     def test_an_issue_with_no_body_is_an_empty_one(self) -> None:
-        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body=None)]})
+        self.serve({"/repos/mock-user/gots/issues?": [issue_row(265, body=None)]})
         self.assertEqual(frontier(Path(self.home.name), self.folders)[0]["body"], "")
 
     def test_a_web_edited_body_reads_with_unix_line_endings(self) -> None:
-        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body="a\r\n\r\nb\rc")]})
+        self.serve({"/repos/mock-user/gots/issues?": [issue_row(265, body="a\r\n\r\nb\rc")]})
         self.assertEqual(frontier(Path(self.home.name), self.folders)[0]["body"], "a\n\nb\nc")
 
     def test_a_repository_pages_until_github_offers_no_more(self) -> None:
         first = (
-            f"/repos/mock-user/memento/issues?state=open&labels={READY_LABEL}"
+            f"/repos/mock-user/gots/issues?state=open&labels={READY_LABEL}"
             "&sort=created&direction=asc&per_page=100"
         )
         second = f"{first}&page=2"
@@ -272,7 +272,7 @@ class ReadTests(unittest.TestCase):
 
     def test_a_link_pointing_back_at_the_page_read_is_not_followed(self) -> None:
         first = (
-            f"/repos/mock-user/memento/issues?state=open&labels={READY_LABEL}"
+            f"/repos/mock-user/gots/issues?state=open&labels={READY_LABEL}"
             "&sort=created&direction=asc&per_page=100"
         )
         self.serve({first: [issue_row(265)]}, links={first: f'<{github.API}{first}>; rel="next"'})
@@ -281,15 +281,15 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(self.paths, [first])
 
     def test_a_pull_request_is_never_a_task(self) -> None:
-        self.serve({"/repos/mock-user/memento/issues?": [issue_row(9, pull_request=True)]})
+        self.serve({"/repos/mock-user/gots/issues?": [issue_row(9, pull_request=True)]})
         found = read(Path(self.home.name), self.folders)
         self.assertEqual(found["ready"], [])
 
     def test_a_native_edge_is_read_and_its_open_blocker_blocks(self) -> None:
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [issue_row(266, summary=1)],
-                "/repos/mock-user/memento/issues/266/dependencies/blocked_by": [
+                "/repos/mock-user/gots/issues?": [issue_row(266, summary=1)],
+                "/repos/mock-user/gots/issues/266/dependencies/blocked_by": [
                     issue_row(265)
                 ],
             }
@@ -302,8 +302,8 @@ class ReadTests(unittest.TestCase):
     def test_a_native_edge_that_is_closed_leaves_the_task_ready(self) -> None:
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [issue_row(266, summary=1)],
-                "/repos/mock-user/memento/issues/266/dependencies/blocked_by": [
+                "/repos/mock-user/gots/issues?": [issue_row(266, summary=1)],
+                "/repos/mock-user/gots/issues/266/dependencies/blocked_by": [
                     issue_row(265, state="closed")
                 ],
             }
@@ -315,8 +315,8 @@ class ReadTests(unittest.TestCase):
         """The line is the fallback, and GitHub's own "no edges" summary is what turns it on."""
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [issue_row(266, body="Blocked by: #265", summary=0)],
-                "/repos/mock-user/memento/issues/265": issue_row(265, state="closed"),
+                "/repos/mock-user/gots/issues?": [issue_row(266, body="Blocked by: #265", summary=0)],
+                "/repos/mock-user/gots/issues/265": issue_row(265, state="closed"),
             }
         )
         found = read(Path(self.home.name), self.folders)
@@ -327,11 +327,11 @@ class ReadTests(unittest.TestCase):
         """Without GitHub's own count, the edges are read to tell "no edges" from "all closed"."""
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [
+                "/repos/mock-user/gots/issues?": [
                     issue_row(266, body="Blocked by: #265", summary=None)
                 ],
-                "/repos/mock-user/memento/issues/266/dependencies/blocked_by": [],
-                "/repos/mock-user/memento/issues/265": issue_row(265),
+                "/repos/mock-user/gots/issues/266/dependencies/blocked_by": [],
+                "/repos/mock-user/gots/issues/265": issue_row(265),
             }
         )
         found = read(Path(self.home.name), self.folders)
@@ -340,8 +340,8 @@ class ReadTests(unittest.TestCase):
     def test_a_body_line_naming_an_open_issue_blocks(self) -> None:
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [issue_row(266, body="Blocked by: #265")],
-                "/repos/mock-user/memento/issues/265": issue_row(265),
+                "/repos/mock-user/gots/issues?": [issue_row(266, body="Blocked by: #265")],
+                "/repos/mock-user/gots/issues/265": issue_row(265),
             }
         )
         found = read(Path(self.home.name), self.folders)
@@ -350,8 +350,8 @@ class ReadTests(unittest.TestCase):
     def test_a_body_line_naming_no_such_issue_blocks_nothing(self) -> None:
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [issue_row(266, body="Blocked by: #999")],
-                "/repos/mock-user/memento/issues/999": github.GitHubError("Not Found"),
+                "/repos/mock-user/gots/issues?": [issue_row(266, body="Blocked by: #999")],
+                "/repos/mock-user/gots/issues/999": github.GitHubError("Not Found"),
             }
         )
         found = read(Path(self.home.name), self.folders)
@@ -361,8 +361,8 @@ class ReadTests(unittest.TestCase):
         """An unreadable blocker is not a closed one: working the task early is the worse mistake."""
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [issue_row(266, body="Blocked by: #265")],
-                "/repos/mock-user/memento/issues/265": github.GitHubError(
+                "/repos/mock-user/gots/issues?": [issue_row(266, body="Blocked by: #265")],
+                "/repos/mock-user/gots/issues/265": github.GitHubError(
                     "Couldn't reach GitHub from the server."
                 ),
             }
@@ -389,10 +389,10 @@ class ReadTests(unittest.TestCase):
         """It's out of the frontier, so what blocks it is neither read nor told to the app."""
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [
+                "/repos/mock-user/gots/issues?": [
                     issue_row(265, labels=(READY_LABEL, CLAIM_LABEL), summary=2)
                 ],
-                "/repos/mock-user/memento/issues/265/dependencies/blocked_by": [],
+                "/repos/mock-user/gots/issues/265/dependencies/blocked_by": [],
             }
         )
         found = read(Path(self.home.name), self.folders)
@@ -405,7 +405,7 @@ class ReadTests(unittest.TestCase):
         """``blocked_by`` counts the open ones, so a zero settles it without a second request."""
         self.serve(
             {
-                "/repos/mock-user/memento/issues?": [
+                "/repos/mock-user/gots/issues?": [
                     issue_row(266, summary=3, open_edges=0)
                 ],
             }

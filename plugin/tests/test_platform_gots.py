@@ -24,7 +24,7 @@ from plugin import chats, platform_gots
 from plugin.store import connect, db_path
 
 CHAT = "main-bot"
-SESSION = "memento-main-bot"
+SESSION = "gots-main-bot"
 WRAPPED = (
     "Cronjob Response: Morning watch\n"
     "(job_id: job-1)\n"
@@ -389,7 +389,7 @@ class RoutineMessage(unittest.TestCase):
         content = self._rows()[0][1]
         staged = platform_gots._media_paths(content)
         self.assertEqual(len(staged), 1)
-        self.assertTrue(staged[0].startswith(str(self.home / "memento" / "attachments")))
+        self.assertTrue(staged[0].startswith(str(self.home / "plugin-data" / "gots" / "attachments")))
         self.assertTrue(Path(staged[0]).is_file())
 
     def test_a_sixth_file_is_dropped_and_named(self):

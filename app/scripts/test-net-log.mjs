@@ -33,9 +33,9 @@ test("a request is named by its route, never by its URL", () => {
     ),
     "GET sessions/:id/messages",
   )
-  assert.equal(routeOf("http://hermes.test/api/plugins/memento/events?since=3"), "GET events")
+  assert.equal(routeOf("http://hermes.test/api/plugins/gots/events?since=3"), "GET events")
   assert.equal(
-    routeOf("http://hermes.test/api/plugins/memento/p/work/sessions/12/queue/7/stop", "POST"),
+    routeOf("http://hermes.test/api/plugins/gots/p/work/sessions/12/queue/7/stop", "POST"),
     "POST sessions/:id/queue/:id/stop",
   )
 })
@@ -52,7 +52,7 @@ test("a host's minted session id is an id, and a route's own name is not", () =>
     "GET sessions/:id/agents",
   )
   assert.equal(
-    routeOf("http://hermes.test/api/plugins/memento/sessions/memento-1a2b/triage", "POST"),
+    routeOf("http://hermes.test/api/plugins/gots/sessions/gots-1a2b/triage", "POST"),
     "POST sessions/:id/triage",
   )
 })

@@ -25,7 +25,7 @@ export interface Inbox {
   keyId: string
   /** P-256, SPKI DER, base64. */
   publicKey: string
-  /** PKCS #8, base64, sealed for `memento:<userId>:inbox`. */
+  /** PKCS #8, base64, sealed for `gots:<userId>:inbox`. */
   privateKey: Sealed
 }
 
@@ -211,7 +211,7 @@ async function prfKey(secret: BufferSource, prfSalt: string) {
       name: "HKDF",
       hash: "SHA-256",
       salt: fromBase64(prfSalt),
-      info: encoder.encode("memento-vault-v1"),
+      info: encoder.encode("gots-vault-v1"),
     },
     material,
     { name: "AES-GCM", length: 256 },
@@ -347,7 +347,7 @@ export async function openFromInbox<T>(
   )
   const material = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"])
   const key = await crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: epk, info: encoder.encode("memento-inbox-v1") },
+    { name: "HKDF", hash: "SHA-256", salt: epk, info: encoder.encode("gots-inbox-v1") },
     material,
     { name: "AES-GCM", length: 256 },
     false,

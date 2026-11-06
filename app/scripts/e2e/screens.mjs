@@ -54,7 +54,7 @@ for (const width of [390, 1024]) {
               branch: BRANCH,
               instructions: "",
               repos: [
-                { name: "mock-user/memento", branch: BRANCH },
+                { name: "mock-user/gots", branch: BRANCH },
                 { name: "mock-user/gots-app", branch: BRANCH },
                 { name: "mock-user/docs", branch: BRANCH },
                 { name: "mock-user/website", branch: BRANCH },
@@ -87,7 +87,7 @@ for (const width of [390, 1024]) {
           `no bot picture in the session's header at ${look}`,
         )
         // The owner the repositories share said once, the names the width has room for, the rest counted.
-        const line = width < 768 ? "Test bot · memento +3" : "Test bot · memento, gots-app +2"
+        const line = width < 768 ? "Test bot · gots +3" : "Test bot · gots, gots-app +2"
         const subtitle = header.getByText(/^Test bot · /)
         await subtitle.first().waitFor({ timeout: 5_000 })
         assert.equal(
@@ -129,8 +129,8 @@ for (const width of [390, 1024]) {
         // above — and the same centring gates hold in it.
         if (width === 1024) {
           for (const [at, expected] of [
-            [768, "Test bot · memento, gots-app +2"],
-            [1280, "Test bot · memento, gots-app, docs +1"],
+            [768, "Test bot · gots, gots-app +2"],
+            [1280, "Test bot · gots, gots-app, docs +1"],
           ]) {
             await page.setViewportSize({ width: at, height: at === 768 ? 768 : 900 })
             await page.goto(`${app}/c/${sessionId}`)

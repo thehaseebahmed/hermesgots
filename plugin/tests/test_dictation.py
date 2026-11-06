@@ -536,7 +536,7 @@ class ConfirmTest(TakeCase):
     def test_a_cloud_takes_answer_leaves_the_bots_stored_level_where_it_was(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        path = Path(tmp.name) / "memento.db"
+        path = Path(tmp.name) / "gots.db"
         speech.set_level(path, "high")
         _, patch = hermes(_get_provider=lambda cfg: "groq")
         with patch:

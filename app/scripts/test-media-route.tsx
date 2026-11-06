@@ -39,7 +39,7 @@ test("a file draws from a URL where the host advertises media", async () => {
   const asked = mediaHost({ host: "media-advertised" })
   const read = await loadHostMediaUrl(CHAT, "/host/cat.png")
   assert.ok(read, "the host signed a URL")
-  assert.match(read!.url, /^http:\/\/media-advertised\.test\/api\/plugins\/memento\/media\?/)
+  assert.match(read!.url, /^http:\/\/media-advertised\.test\/api\/plugins\/gots\/media\?/)
   assert.match(read!.url, /token=/, "carrying the signature the route checks")
   assert.equal(read!.type, "image/png", "and what the file is")
   assert.equal(askedFor(asked, "/media/url"), 1, "from the plugin's mint route")
@@ -85,11 +85,11 @@ test("a host that was away is asked again, not remembered as a no", async () => 
     null,
     "a host that didn't answer draws nothing",
   )
-  const askedWhileAway = askedFor(asked, "/plugins/memento/info")
+  const askedWhileAway = askedFor(asked, "/plugins/gots/info")
   assert.ok(askedWhileAway > 0, "it was asked")
   mediaHost({ host: "media-away", features: ["media", "media_url"], asked })
   assert.ok(await loadHostMediaUrl(CHAT, "/host/a.png"), "the real answer draws the file")
-  assert.ok(askedFor(asked, "/plugins/memento/info") > askedWhileAway, "which took a second ask")
+  assert.ok(askedFor(asked, "/plugins/gots/info") > askedWhileAway, "which took a second ask")
 })
 
 test("a plugin from before the signed URL keeps the fallback it had", async () => {
@@ -111,6 +111,6 @@ test("a plugin that answered without the media route is left alone", async () =>
   })
   assert.equal(await loadHostMediaUrl(CHAT, "/host/a.png"), null, "nothing draws")
   assert.equal(await loadHostMediaUrl(CHAT, "/host/b.png"), null, "still nothing draws")
-  assert.equal(askedFor(asked, "/plugins/memento/info"), 1, "the answer is remembered")
+  assert.equal(askedFor(asked, "/plugins/gots/info"), 1, "the answer is remembered")
   assert.equal(askedFor(asked, "/media/url"), 0, "and the route it lacks isn't asked")
 })

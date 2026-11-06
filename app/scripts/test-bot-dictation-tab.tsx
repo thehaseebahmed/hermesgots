@@ -615,7 +615,7 @@ test("the pick's Default row clears the cleanup model the bot had", async () => 
 
 test("a host that withholds the model-override permission says so instead of offering it", async () => {
   const reason =
-    "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+    "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`."
   await seed(
     "cleanup-denied",
     ["dictation", "speech_model"],

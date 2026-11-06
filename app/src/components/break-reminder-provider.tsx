@@ -18,7 +18,7 @@ import { DEFAULT_SETTINGS, getSettings } from "@/lib/db"
 import { ReminderClock, isEligibleReminderDevice } from "@/lib/break-reminders"
 import { isNative, minimizeAndroidApp } from "@/lib/native"
 
-const STORAGE_KEY = "memento:break-reminders"
+const STORAGE_KEY = "gots:break-reminders"
 
 const MESSAGES = [
   "Your agent's got this. Go live a little.",

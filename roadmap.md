@@ -10,7 +10,7 @@ from a remote PWA client.
 Gots is a thin client to one already-running Hermes server. It can only
 reach Hermes's deliberately narrow HTTP API server (`/v1/*`, a handful of
 `/api/*` routes) and whatever the Gots plugin adds to it
-(`/api/plugins/memento/...`, same pattern as the existing cron-runs route).
+(`/api/plugins/gots/...`, same pattern as the existing cron-runs route).
 
 Everything interesting on the Hermes side — git worktrees (`hermes -w`,
 `/worktree new`), Projects, the Kanban board, checkpoints/`/rollback`, and
@@ -37,7 +37,7 @@ No new Hermes-side work. Pure Gots frontend.
 New Gots plugin routes, read-only, mirroring the existing
 `cron/runs` route shape.
 
-- [x] `GET /api/plugins/memento/projects` — list the user's configured
+- [x] `GET /api/plugins/gots/projects` — list the user's configured
       Hermes Projects (name, description, folders and which are git repos,
       last session time), read from `projects.db`.
 - [x] Gots UI: a "Code" nav item listing every bot's Projects in one
@@ -48,9 +48,9 @@ New Gots plugin routes, read-only, mirroring the existing
 
 ## Phase 3 (optional) — Checkpoints/rollback viewer
 
-- [ ] `GET /api/plugins/memento/checkpoints?project=<slug>` — list
+- [ ] `GET /api/plugins/gots/checkpoints?project=<slug>` — list
       checkpoints with change stats, and a diff endpoint
-      (`GET /api/plugins/memento/checkpoints/:id/diff`).
+      (`GET /api/plugins/gots/checkpoints/:id/diff`).
 - [ ] New Gots frontend surface: a diff viewer (file list + unified
       diff), read-only to start.
 
@@ -60,7 +60,7 @@ The agent's own plan for a turn, shown read-only above the composer the way
 Claude Code shows its task list. This is Hermes's per-session `todo_list`
 tool, not Kanban: the agent writes and updates it, the user only watches.
 
-- [x] `GET /api/plugins/memento/sessions/{id}/todos` — the session's latest
+- [x] `GET /api/plugins/gots/sessions/{id}/todos` — the session's latest
       `todo_list` result, read from its transcript (following compression).
 - [x] Nudge the agent to plan: `todo_list` is a deferred tool by default, so
       each run sends a short `instructions` line asking for it on multi-step
@@ -72,7 +72,7 @@ tool, not Kanban: the agent writes and updates it, the user only watches.
 The first genuinely new capability, not just a read/write proxy: a chat
 that works in its own git worktree of a project's repo.
 
-- [x] `POST /api/plugins/memento/sessions/{id}/workspace` — makes the
+- [x] `POST /api/plugins/gots/sessions/{id}/workspace` — makes the
       session's worktree with `hermes_cli/worktree_ops.py`'s own function
       and points the session's tools into it (`/v1/runs` has no cwd, but
       Hermes's terminal tool has a per-task cwd override keyed by the

@@ -34,8 +34,8 @@ await flow(
     }
     // The page the flow starts on has already told its line; start the hour and the turns over.
     await open("/")
-    await page.evaluate(() => localStorage.removeItem("memento:last-greeted"))
-    await page.evaluate((id) => localStorage.removeItem(`memento:line-turn:${id}`), bot.id)
+    await page.evaluate(() => localStorage.removeItem("gots:last-greeted"))
+    await page.evaluate((id) => localStorage.removeItem(`gots:line-turn:${id}`), bot.id)
 
     // The first of the hour: a greeting, then the line, as two lines.
     const first = await open("/c/e2e-empty")
@@ -45,7 +45,7 @@ await flow(
     assert.equal(await page.getByText("Draft session").count(), 0, "no title before it starts")
     assert.equal(await page.getByText("Give me a tour").count(), 0, "no suggestions")
     assert.equal(await page.locator("header img").count(), 0, "no bot in the header")
-    const chip = page.locator("li").filter({ hasText: "mock-user/memento" })
+    const chip = page.locator("li").filter({ hasText: "mock-user/gots" })
     assert.equal(await chip.count(), 1, "the session names the repository it will work in")
     assert.equal(
       await chip.getByText("new branch from", { exact: true }).count(),

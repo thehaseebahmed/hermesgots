@@ -59,8 +59,8 @@ nothing on Netlify's side.
   gets re-run.
 - **Netlify Identity's `site_url` follows the deploy it serves** — not the host that was asked, and not
   a site-wide setting. Decoding the `state` JWT that `/.netlify/identity/authorize?provider=github`
-  mints: on the production deploy, which `memento.thehaseebahmed.com` and `hermesgots.netlify.app`
-  both serve, `site_url` is `https://memento.thehaseebahmed.com`; on the `staging--` branch deploy it
+  mints: on the production deploy, which `hermesgots.dev` and `hermesgots.netlify.app`
+  both serve, `site_url` is `https://hermesgots.dev`; on the `staging--` branch deploy it
   is `https://staging--hermesgots.netlify.app`, with the same site id answering both. Asking from the
   production host while it served a *promoted* branch deploy gave that branch host, which rules out the
   request host, and two answers under one site id rule out a site-wide setting. So a promoted branch

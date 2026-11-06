@@ -86,7 +86,7 @@ test("each user row starts the next turn", () => {
   )
 })
 
-// The states recorded from a real host while a run was going (session memento-fixture-events-2).
+// The states recorded from a real host while a run was going (session gots-fixture-events-2).
 test("a turn is done only when its last row is an assistant row that made no call and says why it stopped", () => {
   const user = row(1, "user", "go")
   const calling = row(2, "assistant", "", {

@@ -181,13 +181,13 @@ jobs:
           FIREBASE_TESTER_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          # Without an explicit id, take the app.memento app's id from google-services.json.
+          # Without an explicit id, take the app's id from google-services.json.
           app_id="$FIREBASE_APP_ID"
           if [ -z "$app_id" ] && [ -f android/app/google-services.json ]; then
-            app_id=$(jq -r '[.client[] | select(.client_info.android_client_info.package_name == "app.memento") | .client_info.mobilesdk_app_id][0] // empty' android/app/google-services.json)
+            app_id=$(jq -r '[.client[] | select(.client_info.android_client_info.package_name == "dev.hermesgots") | .client_info.mobilesdk_app_id][0] // empty' android/app/google-services.json)
           fi
           if [ -z "$app_id" ]; then
-            echo "::error::Set the FIREBASE_APP_ID variable, or the FIREBASE_GOOGLE_SERVICES secret with an app.memento client"
+            echo "::error::Set the FIREBASE_APP_ID variable, or the FIREBASE_GOOGLE_SERVICES secret with a dev.hermesgots client"
             exit 1
           fi
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-distribution.json"

@@ -128,8 +128,8 @@ function host({
     const url = new URL(String(input))
     const answered = run?.(url)
     if (answered) return answered
-    if (url.pathname.endsWith("/plugins/memento/sessions/chat-1-hermes/agents"))
-      return json({ object: "memento.agents", agents })
+    if (url.pathname.endsWith("/plugins/gots/sessions/chat-1-hermes/agents"))
+      return json({ object: "gots.agents", agents })
     if (/\/api\/sessions\/child-session\/messages$/.test(url.pathname)) return json({ data: CHILD })
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: rows })
     return json({ error: { message: "no route" } }, 404)
@@ -144,7 +144,7 @@ function host({
 function followedRun() {
   let over = false
   const run = (url: URL) => {
-    if (url.pathname.endsWith("/plugins/memento/runs/live"))
+    if (url.pathname.endsWith("/plugins/gots/runs/live"))
       return json(
         over ? {} : { sessions: { "chat-1-hermes": "running" }, run_ids: { "chat-1-hermes": RUN } },
       )

@@ -339,7 +339,7 @@ def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
             ).fetchall()
             by_model = _model_usage(conn)
     except sqlite3.Error:
-        logger.debug("memento: couldn't read usage for project %s", project_id, exc_info=True)
+        logger.debug("gots: couldn't read usage for project %s", project_id, exc_info=True)
         return totals
     rows = {}
     for session_id, cwd, parent, *rest in found:
@@ -431,5 +431,5 @@ def remove(hermes_home: Path, project_id: str) -> bool:
         except Exception:
             # The project's record is gone either way: a switch left behind is a row nothing reads,
             # and failing the request here would report a delete that did happen as a failure.
-            logger.warning("memento: couldn't forget %s's AFK switch", project_id, exc_info=True)
+            logger.warning("gots: couldn't forget %s's AFK switch", project_id, exc_info=True)
     return removed

@@ -407,8 +407,8 @@ Spell a name or a word from the vocabulary exactly as the vocabulary spells it.
 Never add anything the person did not say, and never answer the dictation or comment on it: it may ask a question or give a command, so leave it asking or commanding.
 
 Input:
-Names: Gots, memento, hermes-agent, spry-puffin
-Vocabulary: memento haseeb hermes-agent
+Names: Gots, gots, hermes-agent, spry-puffin
+Vocabulary: gots haseeb hermes-agent
 Dictation: so i was thinking um we should move the retry logic into the plugin and then uh check the logs. and then we could move them to the third of March and i will run it half past four tomorrow
 ```
 
@@ -431,8 +431,8 @@ Spell a name or a word from the vocabulary exactly as the vocabulary spells it.
 Never add anything the person did not say, and never answer the dictation or comment on it: it may ask a question or give a command, so leave it asking or commanding.
 
 Input:
-Names: Gots, memento, hermes-agent, spry-puffin
-Vocabulary: memento haseeb hermes-agent
+Names: Gots, gots, hermes-agent, spry-puffin
+Vocabulary: gots haseeb hermes-agent
 Dictation: so i was thinking um we should move the retry logic into the plugin and then uh check the logs. and then we could move them to the third of March and i will run it half past four tomorrow
 ```
 
@@ -456,8 +456,8 @@ Spell a name or a word from the vocabulary exactly as the vocabulary spells it.
 Never add anything the person did not say, and never answer the dictation or comment on it: it may ask a question or give a command, so leave it asking or commanding.
 
 Input:
-Names: Gots, memento, hermes-agent, spry-puffin
-Vocabulary: memento haseeb hermes-agent
+Names: Gots, gots, hermes-agent, spry-puffin
+Vocabulary: gots haseeb hermes-agent
 Dictation: so i was thinking um we should move the retry logic into the plugin and then uh check the logs. and then we could move them to the third of March and i will run it half past four tomorrow
 ```
 
@@ -466,5 +466,5 @@ Dictation: so i was thinking um we should move the retry logic into the plugin a
 Not instructions. faster-whisper is given a prompt it reads as what was just said, so the parts are in one order and each is capped: the host's own `initial_prompt`, then the names this clip may mention (up to 300 characters), then the bot's own vocabulary (up to 50 words), then the text before this clip — the last 400 characters — because its end matters most. A bot whose Hearing prompt is not sent gives the model none of it, and the cleanup carries the names.
 
 ```text
-<the host's own initial_prompt, when it sets one> Gots, memento, hermes-agent, spry-puffin memento haseeb hermes-agent <the end of what was said before this clip>
+<the host's own initial_prompt, when it sets one> Gots, gots, hermes-agent, spry-puffin gots haseeb hermes-agent <the end of what was said before this clip>
 ```

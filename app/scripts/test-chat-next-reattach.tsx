@@ -23,7 +23,7 @@ import {
 const lastTurn = (device: Device) => device.turns().at(-1)
 
 test("a device that opens mid-run draws the words already written and the ones still coming", async () => {
-  const host = fakeHost("memento-reattach-new", { plugin: true })
+  const host = fakeHost("gots-reattach-new", { plugin: true })
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 1 }])
   const run = host.startElsewhere("in flight")
   run.say("\n\nStarting now.")
@@ -53,7 +53,7 @@ test("a device that opens mid-run draws the words already written and the ones s
 })
 
 test("a device left open on an idle chat joins a run another device starts", async () => {
-  const host = fakeHost("memento-reattach-open", { plugin: true })
+  const host = fakeHost("gots-reattach-open", { plugin: true })
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 0 }])
   await withDevice(openDevice(host), async (phone) => {
     await showsEverything(phone, host, "the finished chat first")
@@ -69,7 +69,7 @@ test("a device left open on an idle chat joins a run another device starts", asy
 })
 
 test("two devices follow one run at once and each draws every word as it is written", async () => {
-  const host = fakeHost("memento-reattach-two", { plugin: true })
+  const host = fakeHost("gots-reattach-two", { plugin: true })
   const phone = await openDevice(host)
   const laptop = await openDevice(host)
   try {
@@ -97,7 +97,7 @@ test("two devices follow one run at once and each draws every word as it is writ
 })
 
 test("a stream that dies mid-run is joined again, and the words are not doubled", async () => {
-  const host = fakeHost("memento-reattach-drop", { plugin: true })
+  const host = fakeHost("gots-reattach-drop", { plugin: true })
   await withDevice(openDevice(host), async (phone) => {
     const run = await sendFrom(phone, host, "go")
     run.say("\n\nFirst part.")
@@ -120,7 +120,7 @@ test("a stream that dies mid-run is joined again, and the words are not doubled"
 // Found in a real browser: a device that returns just as its stream ends starts a second read while
 // the final one is in flight, and the final one was thrown away as stale.
 test("a stream that ends while another read is in flight does not leave the thread stuck", async () => {
-  const host = fakeHost("memento-reattach-race", { plugin: true, latency: 80 })
+  const host = fakeHost("gots-reattach-race", { plugin: true, latency: 80 })
   await withDevice(openDevice(host), async (phone) => {
     const run = await sendFrom(phone, host, "go")
     run.say("\n\nFirst part.")
@@ -143,7 +143,7 @@ test("a stream that ends while another read is in flight does not leave the thre
 })
 
 test("words written before and after a stream dies each appear once, with no call between them", async () => {
-  const host = fakeHost("memento-reattach-resume", { plugin: true })
+  const host = fakeHost("gots-reattach-resume", { plugin: true })
   await withDevice(openDevice(host), async (phone) => {
     const run = await sendFrom(phone, host, "go")
     run.say("\n\nBefore the drop.")
@@ -163,7 +163,7 @@ test("words written before and after a stream dies each appear once, with no cal
 })
 
 test("a run that takes over as the last one ends is joined without leaving the chat", async () => {
-  const host = fakeHost("memento-reattach-handover", { plugin: true })
+  const host = fakeHost("gots-reattach-handover", { plugin: true })
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 0 }])
   await withDevice(openDevice(host), async (phone) => {
     await showsEverything(phone, host, "the finished chat first")
@@ -191,7 +191,7 @@ test("a run that takes over as the last one ends is joined without leaving the c
  * no reply and the page keeps believing one is going.
  */
 test("a run the host has dropped is not drawn as a failure over the thread", async () => {
-  const host = fakeHost("memento-reattach-ghost", { plugin: true })
+  const host = fakeHost("gots-reattach-ghost", { plugin: true })
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 1 }])
   host.startElsewhere("in flight")
   host.retireLatest()

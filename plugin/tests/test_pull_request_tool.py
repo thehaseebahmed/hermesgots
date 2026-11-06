@@ -42,7 +42,7 @@ class _Base(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = self._tmp.name
-        self.db = Path(self.tmp) / "memento.db"
+        self.db = Path(self.tmp) / "gots.db"
         self.db.touch()
 
     def tearDown(self):

@@ -35,8 +35,8 @@ const conversation = (): Conversation =>
     title: "A session",
     hermesSessionId: SESSION,
     worktree: {
-      branch: "memento/close",
-      repos: [{ name: "acme/app", branch: "memento/close" }],
+      branch: "gots/close",
+      repos: [{ name: "acme/app", branch: "gots/close" }],
       instructions: "",
     },
     createdAt: 10,
@@ -81,7 +81,7 @@ function heldHost() {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith("/info"))
-      return json({ name: "memento", version: "0.97.0", features: ["closes"] })
+      return json({ name: "gots", version: "0.103.0", features: ["closes"] })
     if (url.endsWith(`/sessions/${SESSION}/closes`) && init?.method === "POST") {
       asked.push("asked")
       return held
@@ -92,7 +92,7 @@ function heldHost() {
 }
 
 const close = (facts: Record<string, unknown> = {}) => ({
-  object: "memento.closing",
+  object: "gots.closing",
   session_id: SESSION,
   state: "done",
   started_at: 5,

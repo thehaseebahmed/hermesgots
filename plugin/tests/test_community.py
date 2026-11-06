@@ -35,7 +35,7 @@ class CommunityTest(unittest.TestCase):
             **{
                 "platform": "api_server",
                 "model": "Anthropic/Claude-Opus-5-5",
-                "session_id": "memento-1",
+                "session_id": "gots-1",
                 "usage": usage,
                 **overrides,
             }

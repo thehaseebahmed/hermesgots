@@ -24,7 +24,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="memento" android:host="auth" />
+                <data android:scheme="gots" android:host="auth" />
             </intent-filter>
 
             <!-- Text, links and any file shared from other apps open the share screen. -->
@@ -62,7 +62,7 @@
 
         <!-- Where the words land: the field the app in front has focused, and nothing else. -->
         <service
-            android:name=".MementoAccessibilityService"
+            android:name=".GotsAccessibilityService"
             android:exported="true"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

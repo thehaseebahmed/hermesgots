@@ -21,7 +21,7 @@ from plugin.tasks import READY_LABEL
 # Stands in for the host's own profile scope: `HERMES_HOME_OVERRIDE` and the secret scope are context
 # variables a request sets and `copy_context()` carries. Read by a fake decode the way Hermes reads
 # its own, so a test can prove the work ran as the bot it was done for.
-BOT = contextvars.ContextVar("memento-test-bot", default="the launch profile")
+BOT = contextvars.ContextVar("gots-test-bot", default="the launch profile")
 
 
 @contextmanager
@@ -431,7 +431,7 @@ def issue_row(
     row: Dict[str, Any] = {
         "number": number,
         "title": title or f"Task {number}",
-        "html_url": f"https://github.com/mock-user/memento/issues/{number}",
+        "html_url": f"https://github.com/mock-user/gots/issues/{number}",
         "state": state,
         "created_at": created,
         "body": body,
@@ -444,5 +444,5 @@ def issue_row(
             "blocked_by": summary if open_edges is None else open_edges,
         }
     if pull_request:
-        row["pull_request"] = {"url": "https://api.github.com/repos/mock-user/memento/pulls/1"}
+        row["pull_request"] = {"url": "https://api.github.com/repos/mock-user/gots/pulls/1"}
     return row

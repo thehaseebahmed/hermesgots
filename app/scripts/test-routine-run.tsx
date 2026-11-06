@@ -101,9 +101,9 @@ function host({
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
     asked.push({ method, path: url.pathname })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
-    if (/\/plugins\/memento\/sessions\/[^/]+\/routines$/.test(url.pathname))
-      return json({ object: "memento.routines", routines })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ name: "gots", features })
+    if (/\/plugins\/gots\/sessions\/[^/]+\/routines$/.test(url.pathname))
+      return json({ object: "gots.routines", routines })
     if (url.pathname.endsWith(`/api/sessions/${RUN}/messages`))
       return run ? json({ data: run }) : json({ error: { message: "No such session." } }, 404)
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: [] })
@@ -220,7 +220,7 @@ test("a host that doesn't advertise the feature is asked for nothing and draws n
     { chat: "routine-legacy", bot: botProfile("routine-legacy"), features: ["attachments"] },
     async (asked) => {
       // What it advertises is read once per connection; only then is there nothing to ask.
-      await until(async () => askedFor(asked, "/plugins/memento/info") > 0, "the feature read")
+      await until(async () => askedFor(asked, "/plugins/gots/info") > 0, "the feature read")
       await settle()
       assert.equal(askedFor(asked, "/routines"), 0, "nothing was asked of the chat")
       assert.equal(findAll("[data-slot=routine-receipt]").length, 0, "and no line is drawn")
@@ -240,7 +240,7 @@ test("a chat with no routine message is asked nothing, and draws nothing extra",
       routines: [],
     },
     async (asked) => {
-      await until(async () => askedFor(asked, "/plugins/memento/info") > 0, "the feature read")
+      await until(async () => askedFor(asked, "/plugins/gots/info") > 0, "the feature read")
       await settle()
       assert.equal(askedFor(asked, "/routines"), 0, "nothing was asked of the chat")
       assert.equal(findAll("[data-slot=routine-receipt]").length, 0, "and nothing is drawn")

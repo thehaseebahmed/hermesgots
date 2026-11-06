@@ -34,7 +34,7 @@ pnpm e2e up / pnpm e2e down       # start every server and leave it up, or stop 
 
 Each flow prints `PASS: …` lines, and the run ends with `All N passed` or `FAILED: <flows>`. On
 failure, read the flow's output above that line, then look at its `<flow>-failed.png`. Server logs
-are in `$TMPDIR/memento-e2e-logs/`.
+are in `$TMPDIR/gots-e2e-logs/`.
 
 The CLI reuses any server that is already up, so after `pnpm e2e up` each run starts at once. With
 `--keep`, a run leaves its own servers running.
@@ -127,7 +127,7 @@ An agent sees the app through PNG files. It captures them in three ways:
    ```
 
 2. **Each step of a flow.** Inside a flow, `await shot("waiting")` saves `<flow>-waiting.png`, and a
-   failing flow saves `<flow>-failed.png`. They go to `$TMPDIR/memento-e2e/`, or to `--shots <dir>`.
+   failing flow saves `<flow>-failed.png`. They go to `$TMPDIR/gots-e2e/`, or to `--shots <dir>`.
    Take a shot at each state a reviewer would want to see.
 
 3. **In a script of your own.** Use `page.screenshot({ path, fullPage: true })` for a whole page,
@@ -191,14 +191,14 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 6. Prove the flow can fail by running it against main:
 
    ```bash
-   git worktree add /tmp/memento-main origin/main
-   ln -s "$PWD/app/node_modules" /tmp/memento-main/app/node_modules
-   (cd /tmp/memento-main/app && pnpm exec vite --port 15174 --strictPort &)
+   git worktree add /tmp/gots-main origin/main
+   ln -s "$PWD/app/node_modules" /tmp/gots-main/app/node_modules
+   (cd /tmp/gots-main/app && pnpm exec vite --port 15174 --strictPort &)
    pnpm e2e <flow> --app http://localhost:15174
    ```
 
    If it passes there too, it doesn't test your change. Afterwards, free the port with
-   `fuser -k 15174/tcp` and run `git worktree remove --force /tmp/memento-main`.
+   `fuser -k 15174/tcp` and run `git worktree remove --force /tmp/gots-main`.
 7. Look at the flow's screenshots for every width and mode you touched.
 
 ## Gotchas

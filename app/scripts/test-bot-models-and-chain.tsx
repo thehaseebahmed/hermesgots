@@ -89,18 +89,18 @@ function host({
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return json({
-        name: "memento",
+        name: "gots",
         version: "0.81.0",
         features,
         research: { writers: { model: writers, provider: writers } },
       })
-    if (url.pathname.endsWith("/plugins/memento/triage-model")) {
+    if (url.pathname.endsWith("/plugins/gots/triage-model")) {
       if (method === "POST") pick = body?.triage_model ?? null
       return json({ triage_model: pick })
     }
-    if (url.pathname.endsWith("/plugins/memento/fallbacks")) {
+    if (url.pathname.endsWith("/plugins/gots/fallbacks")) {
       if (method === "POST") chain = body?.fallbacks ?? []
       return json({ fallbacks: chain })
     }
@@ -458,7 +458,7 @@ test("picking a triage model writes it to the host", async () => {
     await click(modelOption("cheap-model"))
 
     const write = calls.find(
-      (one) => one.method === "POST" && one.path.endsWith("/plugins/memento/triage-model"),
+      (one) => one.method === "POST" && one.path.endsWith("/plugins/gots/triage-model"),
     )
     assert.deepEqual(
       write?.body,
@@ -477,7 +477,7 @@ test("picking General's Model makes it the host's main model", async () => {
     await click(modelOption("cheap-model"))
 
     const write = calls.find(
-      (one) => one.method === "POST" && one.path.endsWith("/plugins/memento/model"),
+      (one) => one.method === "POST" && one.path.endsWith("/plugins/gots/model"),
     )
     assert.deepEqual(
       write?.body,

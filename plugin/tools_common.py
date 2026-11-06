@@ -26,7 +26,7 @@ def wire_tool(adapter: Any, tool: str, schema: Dict[str, Any], label: str) -> bo
         try:
             equip_tool(agent, tool, schema)
         except Exception:
-            logger.debug("memento: couldn't add the %s tool to an agent", label, exc_info=True)
+            logger.debug("gots: couldn't add the %s tool to an agent", label, exc_info=True)
         return agent
 
     adapter._create_agent = create_agent

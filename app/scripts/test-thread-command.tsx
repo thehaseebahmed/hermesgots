@@ -43,7 +43,7 @@ async function seed(patch: { developer?: boolean; botThreads?: boolean } = {}) {
       id: MAIN,
       profileId: bot.id,
       title: "Main",
-      hermesSessionId: `memento-${MAIN}`,
+      hermesSessionId: `gots-${MAIN}`,
       createdAt: 1,
       updatedAt: 1,
       changedAt: 0,
@@ -71,7 +71,7 @@ function host(name: string) {
     seen.push({ path: url.pathname, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ features: ["attachments", "queue", "triage", "moves"] })
     if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
     if (url.pathname.endsWith("/triage"))

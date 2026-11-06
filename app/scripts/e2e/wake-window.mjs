@@ -36,7 +36,7 @@ await flow(
     }, chat)
     assert.ok(sessionId, "the chat has a Hermes session")
     const live = async () => {
-      const answered = await fetch(`${mock}/api/plugins/memento/runs/live`)
+      const answered = await fetch(`${mock}/api/plugins/gots/runs/live`)
       const body = await answered.json()
       return { session: body.sessions?.[sessionId] ?? null, waking: body.waking?.[sessionId] ?? 0 }
     }

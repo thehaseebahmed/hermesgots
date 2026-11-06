@@ -57,7 +57,7 @@ function speech() {
       wav.writeInt16LE(Math.round(Math.max(-1, Math.min(1, value)) * 32767), 44 + at * 2)
     }
   }
-  const path = join(mkdtempSync(join(tmpdir(), "memento-dictation-")), "speech.wav")
+  const path = join(mkdtempSync(join(tmpdir(), "gots-dictation-")), "speech.wav")
   writeFileSync(path, wav)
   return path
 }
@@ -399,7 +399,7 @@ try {
   // While the host is asked, the mic is greyed out and does nothing.
   {
     const page = await open(mock, { width: 390, height: 844 })
-    await page.route("**/api/plugins/memento/info", async (route) => {
+    await page.route("**/api/plugins/gots/info", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 3000))
       await route.continue().catch(() => {})
     })

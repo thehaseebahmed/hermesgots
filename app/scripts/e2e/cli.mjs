@@ -513,7 +513,7 @@ Commands:
 
 Options:
   --polling            Run flows on the mock without its change stream, so the app polls
-  --shots <dir>        Where screenshots go (default: ${join(tmpdir(), "memento-e2e")})
+  --shots <dir>        Where screenshots go (default: ${join(tmpdir(), "gots-e2e")})
   --app <url>          Use an app already running there (say main's, on another port)
   --headed             Show the browser (needs a display)
   --width <px>         shot: the window's width (default 1440; 390 is a phone, 1024 a tablet)
@@ -537,7 +537,7 @@ const flag = (name) => {
   if (at >= 0) args.splice(at, 1)
   return at >= 0
 }
-const shots = resolve(option("--shots") ?? join(tmpdir(), "memento-e2e"))
+const shots = resolve(option("--shots") ?? join(tmpdir(), "gots-e2e"))
 const appUrl = option("--app")
 const width = Number(option("--width") ?? 1440)
 const height = Number(option("--height") ?? (width < 768 ? 844 : 900))
@@ -549,7 +549,7 @@ const keep = flag("--keep")
 const headed = flag("--headed")
 const [command, ...rest] = args
 
-const logs = join(tmpdir(), "memento-e2e-logs")
+const logs = join(tmpdir(), "gots-e2e-logs")
 const started = []
 const up = async (url) => {
   // One server, both families: Vite without `--host` binds `::1` alone while a `localhost` that

@@ -14,9 +14,9 @@ from plugin import progress
 from plugin.store import db_path, put_setting
 from plugin.tests._helpers import Context, js_constant, temp_hermes_home
 
-SESSION = "memento-abc"
+SESSION = "gots-abc"
 TURN = "turn-1"
-AFK_SESSION = "memento-afk-1a2b3c4d5e6f"
+AFK_SESSION = "gots-afk-1a2b3c4d5e6f"
 FIXTURE = (
     Path(__file__).resolve().parents[2] / "app" / "scripts" / "progress-reminder-fixture.ts"
 )
@@ -221,7 +221,7 @@ class ProgressTest(unittest.TestCase):
 
     def test_two_sessions_are_counted_apart(self) -> None:
         self.calls(progress.CALLS_BETWEEN["normal"])
-        self.assertIsNone(self.call(session="memento-other"))
+        self.assertIsNone(self.call(session="gots-other"))
 
     def test_an_afk_run_follows_the_same_level(self) -> None:
         self.calls(progress.CALLS_BETWEEN["normal"], session=AFK_SESSION)
@@ -234,7 +234,7 @@ class ProgressTest(unittest.TestCase):
 
     def test_the_table_does_not_grow_without_bound(self) -> None:
         for index in range(progress.KEEP_SESSIONS + 10):
-            self.call(session=f"memento-{index}")
+            self.call(session=f"gots-{index}")
         self.assertLessEqual(len(progress._calls), progress.KEEP_SESSIONS)
 
     def test_the_reminder_is_registered_ahead_of_plan_modes_block(self) -> None:

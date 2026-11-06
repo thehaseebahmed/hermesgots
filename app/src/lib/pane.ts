@@ -81,7 +81,7 @@ export function useCodePane(): FeaturePane | undefined {
 /** The features whose item pane opens on the one opened last, per device. */
 type Feature = "meetings" | "research" | "code" | "projects" | "apps"
 
-const lastKey = (feature: Feature) => `memento:last-${feature}`
+const lastKey = (feature: Feature) => `gots:last-${feature}`
 
 /** Notes the item open in a feature, for its pane to open again. */
 export function useRememberOpened(feature: Feature, id: string | undefined) {

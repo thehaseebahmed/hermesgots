@@ -112,7 +112,7 @@ await flow("file-message", async ({ page, seed, until, shot, centreOf, drag }) =
   )
   assert.match(
     cells.sources[0],
-    /\/plugins\/memento\/media\?path=[^&]*&token=/,
+    /\/plugins\/gots\/media\?path=[^&]*&token=/,
     "the cell draws from a URL the host signed",
   )
   const rowText = await note.innerText()
@@ -146,7 +146,7 @@ await flow("file-message", async ({ page, seed, until, shot, centreOf, drag }) =
   const reads = []
   page.on("request", (request) => {
     const url = new URL(request.url())
-    if (url.pathname.endsWith("/plugins/memento/media/url")) reads.push(url.pathname)
+    if (url.pathname.endsWith("/plugins/gots/media/url")) reads.push(url.pathname)
   })
   await page.goto(`${app}/c/${elsewhere}`)
   await note.waitFor({ timeout: 20_000 })
@@ -237,7 +237,7 @@ await flow("file-message", async ({ page, seed, until, shot, centreOf, drag }) =
     note.click(),
   ])
   await tab.waitForLoadState("domcontentloaded").catch(() => {})
-  assert.match(tab.url(), /\/plugins\/memento\/media\?path=.*token=/, "at the file's signed URL")
+  assert.match(tab.url(), /\/plugins\/gots\/media\?path=.*token=/, "at the file's signed URL")
   const shown = await tab.evaluate(() => document.body.innerText)
   assert.match(shown, /Cleanup notes/, "where the browser shows the note in place")
   pass(`a tap on the note opened a tab at ${tab.url().split("?")[0]}`)

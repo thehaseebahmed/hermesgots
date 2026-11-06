@@ -68,7 +68,7 @@ def _working(home: Path, session_id: str) -> bool:
         root = sessions.chat_session(home, session_id)
         return delegation.live_sessions(home).get(root, 0) > 0
     except Exception:
-        logger.debug("memento: couldn't tell whether %s still works", session_id, exc_info=True)
+        logger.debug("gots: couldn't tell whether %s still works", session_id, exc_info=True)
         return False
 
 
@@ -115,7 +115,7 @@ def turn_finished(**kwargs: Any) -> None:
         path, home = sessions._paths()
         record = sessions.record_for(path, home, session_id) if path.exists() else None
         # Delegated children and other surfaces' sessions end turns too.
-        if not record and not session_id.startswith("memento-"):
+        if not record and not session_id.startswith(sessions.ID_PREFIXES):
             return
         # A turn's end is where an earlier held run can have finished: its subagents may be gone.
         tell_finished(path, home)
@@ -136,7 +136,7 @@ def turn_finished(**kwargs: Any) -> None:
             else:
                 push.notify("run_done", session_id, path)
     except Exception:
-        logger.debug("memento: couldn't tell a turn's end", exc_info=True)
+        logger.debug("gots: couldn't tell a turn's end", exc_info=True)
 
 
 def _finished_recently(row: Dict[str, Any], now: float) -> bool:
@@ -213,7 +213,7 @@ def check(hermes_home: Path, now: Optional[int] = None) -> None:
         try:
             look()
         except Exception:
-            logger.warning("memento: looking for news to push failed", exc_info=True)
+            logger.warning("gots: looking for news to push failed", exc_info=True)
 
 
 async def run(hermes_home: Path) -> None:

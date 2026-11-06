@@ -36,7 +36,7 @@
           "type": "function",
           "function": {
             "name": "skill_view",
-            "arguments": "{\"name\": \"memento\"}"
+            "arguments": "{\"name\": \"gots\"}"
           }
         }
       ],
@@ -53,7 +53,7 @@
     {
       "id": 303024,
       "role": "tool",
-      "content": "[skill_view] name=memento (2,154 chars) [SKILL_PRUNED: content lost in compression; reload with skill_view(name='memento')]",
+      "content": "[skill_view] name=gots (2,154 chars) [SKILL_PRUNED: content lost in compression; reload with skill_view(name='gots')]",
       "tool_call_id": "11bff406-f957-4561-b156-14696904186b",
       "timestamp": 1793884596.1279547
     },

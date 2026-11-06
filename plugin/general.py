@@ -89,7 +89,7 @@ def _tab_available(tab: str, label: str) -> Optional[str]:
         if any(isinstance(e, dict) and e.get("category") == tab for e in _schema().values()):
             return None
     except Exception:
-        logger.debug("memento: this Hermes has no config schema", exc_info=True)
+        logger.debug("gots: this Hermes has no config schema", exc_info=True)
         return f"This Hermes version can't show its own {label} settings."
     return f"This Hermes version has no {label} settings."
 
@@ -99,7 +99,7 @@ def available() -> Optional[str]:
     try:
         _schema()
     except Exception:
-        logger.debug("memento: this Hermes has no config schema", exc_info=True)
+        logger.debug("gots: this Hermes has no config schema", exc_info=True)
         return "This Hermes version can't show its own General settings."
     return None
 
@@ -124,7 +124,7 @@ def _defaults() -> Dict[str, Any]:
     try:
         defaults = dict(walk(config_keys.defaults()))
     except Exception:
-        logger.warning("memento: this Hermes's config defaults couldn't be read", exc_info=True)
+        logger.warning("gots: this Hermes's config defaults couldn't be read", exc_info=True)
         return {}
     # A virtual key is not in Hermes's own defaults — the Dashboard shows its 0 as "auto-detect" —
     # so the page gives it the nothing it means: unpinned.

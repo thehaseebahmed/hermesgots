@@ -34,7 +34,7 @@ const pageKey = (profile: Profile, appId: string, pageId: string) =>
   `${connectionKey(profile)}\n${appId}/${pageId}`
 
 const warn = (what: string) => (failure: unknown) =>
-  console.warn(`[memento] Couldn't ${what}:`, failure)
+  console.warn(`[gots] Couldn't ${what}:`, failure)
 
 /** Keeps a page the host answered; a device whose storage refuses it still draws what it just read. */
 const keepPage = (profile: Profile, appId: string, page: HostAppPage) =>

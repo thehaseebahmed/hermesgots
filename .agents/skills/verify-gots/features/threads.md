@@ -119,7 +119,7 @@ Preconditions:
 - The sidebar's bot row previews what Main last said. Where Main has said nothing that preview
   reads `No threads yet`, the third pane of a bot with no threads reads the same line, and the
   header's own subtitle at zero threads is `No threads`. Assert the one you mean, from its column.
-- The third pane's thread is this device's memory (`localStorage`, `memento:last-thread:<bot id>`),
+- The third pane's thread is this device's memory (`localStorage`, `gots:last-thread:<bot id>`),
   not the host's: a fresh browser profile shows Main alone until a thread of that bot has been
   opened in it, and a drive that only seeds threads through Dexie sees two columns. Opening one
   thread is what fills the third.

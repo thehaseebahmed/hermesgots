@@ -11,7 +11,7 @@ import test from "node:test"
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
 
-const phone = () => read("android/app/src/main/java/app/memento/BubbleNet.kt")
+const phone = () => read("android/app/src/main/java/dev/hermesgots/BubbleNet.kt")
 const page = () => read("src/lib/dictation.ts")
 const host = () => read("src/lib/hermes.ts")
 

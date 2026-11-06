@@ -84,7 +84,7 @@ user peeks over the screen; and a channel exists only if this device can reach w
 | `app/src/lib/push.ts` | Read the phone's channels, the registration list, which channels are created, the test push's channel, the legacy delete |
 | `app/src/routes/settings.tsx` | The row's name, where it opens, when it shows, the web list's title |
 | `app/src/lib/native.ts` | The bridge that opens the phone's notification settings |
-| `app/android/app/src/main/java/app/memento/` | The native plugin for that screen, registered beside the two already there |
+| `app/android/app/src/main/java/dev/hermesgots/` | The native plugin for that screen, registered beside the two already there |
 | `app/netlify/lib/fcm.ts` | The test push's channel |
 | `app/scripts/test-*.mjs` | Unit rules: the name and importance, the registration list |
 | `app/scripts/test-*.tsx` | The component test over the row |

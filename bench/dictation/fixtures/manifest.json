@@ -1,5 +1,5 @@
 {
-  "object": "memento.bench.dictation.fixtures",
+  "object": "gots.bench.dictation.fixtures",
   "note": "One voice, synthesised once and committed: the bytes are the fixture, so a regenerated voice cannot be mistaken for the one a baseline was taken on.",
   "takes": [
     {
@@ -37,7 +37,7 @@
       "reference": "names.txt",
       "vocabulary": [
         "Gots",
-        "Memento",
+        "Gots",
         "Haseeb",
         "Nous Research"
       ],

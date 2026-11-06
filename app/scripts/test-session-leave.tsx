@@ -54,7 +54,7 @@ async function seedSession(
     ...(sent ? { updatedAt: 9 } : {}),
   })
   await db.drafts.clear()
-  fakeHost(`memento-${id}`, { plugin: true })
+  fakeHost(`gots-${id}`, { plugin: true })
   return id
 }
 

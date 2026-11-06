@@ -32,7 +32,7 @@ const ENDING: Record<NetRequest["ending"], { label: string; timed: boolean; fail
 export const failed = (row: NetRequest) => ENDING[row.ending].failed
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-/** A name a host minted with a number in it — `memento-1a2b`, `e2e-netlog-dmk73b` — is an id too. */
+/** A name a host minted with a number in it — `gots-1a2b`, `e2e-netlog-dmk73b` — is an id too. */
 const MINTED = /^(?=.*\d)[A-Za-z0-9_-]{8,}$/
 
 const isId = (part: string) => UUID.test(part) || /^\d+$/.test(part) || MINTED.test(part)

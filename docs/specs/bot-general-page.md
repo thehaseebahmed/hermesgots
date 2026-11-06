@@ -29,7 +29,7 @@ under _Settings_ (ADR 0106). `/general-old` remains as an address that redirects
 
 ## Decisions
 
-1. **The host answers the page.** `GET /api/plugins/memento/general` answers `{ fields, values,
+1. **The host answers the page.** `GET /api/plugins/gots/general` answers `{ fields, values,
 defaults }`: each field as `{ key, kind, section, options?, searchable?, restart?, note? }`, with the
    dotted path exactly as Hermes spells it. The fields are the host's schema for the Dashboard's
    General category, minus the keys with a shape this page can't write back.

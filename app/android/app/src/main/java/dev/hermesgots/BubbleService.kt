@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import android.Manifest
 import android.app.Notification
@@ -150,7 +150,7 @@ class BubbleService : Service() {
         ui.postDelayed(watch, WATCH_MS)
         // The mark appears for the keyboard, so the phone's own answer is read before it is drawn.
         ui.post {
-            keyboardUp = MementoAccessibilityService.live?.keyboardUp() == true
+            keyboardUp = GotsAccessibilityService.live?.keyboardUp() == true
             apply()
         }
         return START_STICKY
@@ -182,7 +182,7 @@ class BubbleService : Service() {
         }
     }
 
-    private fun grants() = Settings.canDrawOverlays(this) && MementoAccessibilityService.connected()
+    private fun grants() = Settings.canDrawOverlays(this) && GotsAccessibilityService.connected()
 
     /**
      * The mark is only there while the keyboard is up, which is the state a person dictates in: a take
@@ -461,7 +461,7 @@ class BubbleService : Service() {
      */
     private fun start() {
         val chosen = BubbleConfig.bot(this) ?: return fail(NO_BOT)
-        if (!MementoAccessibilityService.connected()) return fail(NO_TYPING)
+        if (!GotsAccessibilityService.connected()) return fail(NO_TYPING)
         // Revoked between the switch and the tap: a foreground service of this type does not need it
         // to be running, and the recorder's own construction would throw.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
@@ -473,7 +473,7 @@ class BubbleService : Service() {
         val current = UUID.randomUUID().toString()
         // A local model, loaded before the first Piece: on its own thread, because a slow loader must
         // not hold the Piece that is already on its way.
-        if (!chosen.cloud) Thread({ client.warm() }, "memento-bubble-warm").start()
+        if (!chosen.cloud) Thread({ client.warm() }, "gots-bubble-warm").start()
         net = client
         take = current
         failure = null
@@ -543,7 +543,7 @@ class BubbleService : Service() {
                 runCatching { recorder.stop() }
                 enqueue { finish(current) }
             },
-            "memento-bubble-stop",
+            "gots-bubble-stop",
         ).start()
     }
 
@@ -588,14 +588,14 @@ class BubbleService : Service() {
     private fun land(answer: BubbleNet.Answer) {
         val client = net ?: return
         val id = UUID.randomUUID().toString()
-        val landed = MementoAccessibilityService.live?.land(answer.text)
+        val landed = GotsAccessibilityService.live?.land(answer.text)
         if (landed?.landed == true) {
             // Nothing is said: the words are in the field, and the row is written behind them. On a
             // thread of its own, because a host slow to take the row must not hold the first Piece of
             // the next take — the upload queue is the take's, not the log's.
             Thread(
                 { if (!client.record(id, answer)) keep(client.bot, id, answer) },
-                "memento-bubble-log",
+                "gots-bubble-log",
             ).start()
             return
         }
@@ -647,7 +647,7 @@ class BubbleService : Service() {
         if (dying == null && current == null) return
         if (queued) {
             current?.let { id -> client?.let { one -> enqueue { runCatching { one.cancel(id) } } } }
-            Thread({ dying?.stop() }, "memento-bubble-$label").start()
+            Thread({ dying?.stop() }, "gots-bubble-$label").start()
             return
         }
         Thread(
@@ -655,7 +655,7 @@ class BubbleService : Service() {
                 runCatching { dying?.stop() }
                 current?.let { id -> client?.cancel(id) }
             },
-            "memento-bubble-$label",
+            "gots-bubble-$label",
         ).start()
     }
 
@@ -835,9 +835,9 @@ class BubbleService : Service() {
     }
 
     companion object {
-        const val ACTION_START = "app.memento.bubble.START"
-        const val ACTION_STOP = "app.memento.bubble.STOP"
-        const val ACTION_REFRESH = "app.memento.bubble.REFRESH"
+        const val ACTION_START = "dev.hermesgots.bubble.START"
+        const val ACTION_STOP = "dev.hermesgots.bubble.STOP"
+        const val ACTION_REFRESH = "dev.hermesgots.bubble.REFRESH"
 
         private const val CHANNEL = "bubble"
         private const val NOTICE = 4211

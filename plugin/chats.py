@@ -198,7 +198,7 @@ def pin(path: Path, session_id: str) -> Optional[Dict[str, str]]:
     try:
         return choice(by_session(path, session_id))
     except Exception:
-        logger.debug("memento: couldn't read %s's pinned model", session_id, exc_info=True)
+        logger.debug("gots: couldn't read %s's pinned model", session_id, exc_info=True)
         return None
 
 

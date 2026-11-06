@@ -5,8 +5,9 @@ export const APP_VERSION = __APP_VERSION__
  * field or behaviour that only a newer plugin has. 0.97.0 is the first whose dictation is a take's
  * three verbs — a blind Piece, the one Confirm that answers a take's words, and a Cancel that
  * deletes it (ADR 0074) — and whose dictation mirror carries what tidied each take. There is no
- * second wire: a plugin from before it cannot hear a take at all. */
-export const MIN_PLUGIN_VERSION = "0.97.0"
+ * second wire: a plugin from before it cannot hear a take at all. 0.109.0 is the first that is the
+ * `gots` plugin, served under `/api/plugins/gots`; the `memento` plugin's routes are not read. */
+export const MIN_PLUGIN_VERSION = "0.109.0"
 
 function parts(version: string) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())

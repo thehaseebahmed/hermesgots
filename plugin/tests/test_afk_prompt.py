@@ -5,10 +5,10 @@ from plugin import pipeline, prompt_builder
 from plugin.tests._helpers import placed, preset, staged as staged_record
 
 TASK: Dict[str, Any] = {
-    "repo": "mock-user/memento",
+    "repo": "mock-user/gots",
     "number": 265,
     "title": "The frontier is read from GitHub and listed",
-    "url": "https://github.com/mock-user/memento/issues/265",
+    "url": "https://github.com/mock-user/gots/issues/265",
     "created_at": "2026-10-01T00:00:00Z",
     "body": (
         "## What to build\n"
@@ -21,7 +21,7 @@ TASK: Dict[str, Any] = {
 }
 
 RECORD: Dict[str, Any] = {
-    "session_id": "memento-afk-0123456789ab",
+    "session_id": "gots-afk-0123456789ab",
     "project_id": "p1",
     "mode": "auto",
     "path": "/trees/afk-265",
@@ -30,7 +30,7 @@ RECORD: Dict[str, Any] = {
     "files_dir": "/checkout/files/afk-265",
     "repos": [
         {
-            "name": "mock-user/memento",
+            "name": "mock-user/gots",
             "repo_root": "/checkout",
             "path": "/trees/afk-265",
             "branch": "hermes/afk-265",
@@ -45,7 +45,7 @@ class AfkPromptTests(unittest.TestCase):
 
     def test_it_names_the_issue_and_where_its_text_is(self) -> None:
         text = self.text()
-        self.assertIn("mock-user/memento#265", text)
+        self.assertIn("mock-user/gots#265", text)
         self.assertIn(TASK["url"], text)
         self.assertIn("gh issue view", text, "it reads the issue itself")
         self.assertNotIn(
@@ -158,7 +158,7 @@ class AfkPromptTests(unittest.TestCase):
 
     def test_it_keeps_the_sessions_own_prompt(self) -> None:
         text = self.text()
-        self.assertIn("You are working in a git worktree of mock-user/memento", text)
+        self.assertIn("You are working in a git worktree of mock-user/gots", text)
         self.assertIn("**pull_request**", text, "the session's shipping rules still hold")
         self.assertIn(
             '$HERMES_SAFE_ROOT/.scratch/hermes/afk-265',
@@ -176,7 +176,7 @@ class AfkPromptTests(unittest.TestCase):
 
     def test_the_url_falls_back_to_github_when_the_row_has_none(self) -> None:
         text = self.text(task={key: value for key, value in TASK.items() if key != "url"})
-        self.assertIn("https://github.com/mock-user/memento/issues/265", text)
+        self.assertIn("https://github.com/mock-user/gots/issues/265", text)
 
 
 class SectionTests(unittest.TestCase):
@@ -184,7 +184,7 @@ class SectionTests(unittest.TestCase):
 
     OTHER = {
         **RECORD,
-        "session_id": "memento-2",
+        "session_id": "gots-2",
         "files_dir": "/checkout/files/other-9",
         "repos": [
             {
@@ -237,7 +237,7 @@ class SectionTests(unittest.TestCase):
     def test_the_issue_is_named_under_the_last_section_only(self) -> None:
         before, after = prompt_builder.afk_prompt(RECORD, TASK).split("## Current Session")
         self.assertNotIn("265", before, "no issue number above the section that names this session")
-        self.assertIn("mock-user/memento#265", after)
+        self.assertIn("mock-user/gots#265", after)
 
 
 class FirstMessageTests(unittest.TestCase):
@@ -276,7 +276,7 @@ class FirstMessageTests(unittest.TestCase):
 
     def test_the_instructions_carry_no_issue_text(self) -> None:
         text = prompt_builder.afk_prompt({**RECORD, "pipeline": None}, TASK)
-        self.assertIn("mock-user/memento#265", text)
+        self.assertIn("mock-user/gots#265", text)
         self.assertNotIn(TASK["body"], text, "the body rides in the message, so the prompt is cached")
 
     def test_the_issue_text_is_framed_as_quoted_and_never_overriding(self) -> None:
@@ -329,7 +329,7 @@ class BuildStageTests(unittest.TestCase):
 
     def test_the_task_and_the_worktree_are_still_named(self) -> None:
         text = self.text()
-        self.assertIn("mock-user/memento#265", text)
+        self.assertIn("mock-user/gots#265", text)
         self.assertIn("/trees/afk-265", text)
 
     def test_the_staged_first_run_is_told_its_issue_is_in_the_message(self) -> None:
@@ -364,7 +364,7 @@ class StagePromptTests(unittest.TestCase):
     def test_it_reviews_what_the_build_did(self) -> None:
         text = self.text()
         self.assertIn("Review stage", text)
-        self.assertIn("reviewing the build of mock-user/memento#265", text)
+        self.assertIn("reviewing the build of mock-user/gots#265", text)
         self.assertIn(TASK["url"], text, "the issue is where the reviewer reads the spec")
         self.assertIn("/trees/afk-265", text)
 

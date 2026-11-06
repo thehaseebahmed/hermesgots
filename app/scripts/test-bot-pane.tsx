@@ -38,7 +38,7 @@ async function seed(threads: string[] = [], patch: { botThreads?: boolean } = {}
       profileId: bot.id,
       title: `Thread ${id}`,
       titleEdited: true,
-      hermesSessionId: `memento-${id}`,
+      hermesSessionId: `gots-${id}`,
       createdAt: 10 + index,
       updatedAt: 10 + index,
       changedAt: 10,
@@ -150,7 +150,7 @@ test(
       }
       if (url.pathname.endsWith("/capabilities"))
         return json({ features: { run_submission: true, run_events_sse: true } })
-      if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["queue", "moves"] })
+      if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["queue", "moves"] })
       if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
       return json({})
     }) as typeof fetch
@@ -163,7 +163,7 @@ test(
       await click(find("[data-to-thread]"))
       await until(async () => path() === "/c/t-a", "the thread's own address")
       await until(async () => runs.length === 1, "the thread's first turn, posted once")
-      assert.equal(runs[0], "memento-t-a", "on the thread's own session")
+      assert.equal(runs[0], "gots-t-a", "on the thread's own session")
       assert.equal(takeHandover("t-a"), undefined, "and taken, so a remount sends nothing again")
     })
   }),
@@ -238,7 +238,7 @@ test(
       id: "t-other",
       profileId: other.id,
       title: "Thread t-other",
-      hermesSessionId: "memento-t-other",
+      hermesSessionId: "gots-t-other",
       createdAt: 30,
       updatedAt: 30,
       changedAt: 30,
@@ -276,7 +276,7 @@ test(
       profileId: other.id,
       title: "Thread t-b",
       titleEdited: true,
-      hermesSessionId: "memento-t-b",
+      hermesSessionId: "gots-t-b",
       createdAt: 20,
       updatedAt: 20,
       changedAt: 20,

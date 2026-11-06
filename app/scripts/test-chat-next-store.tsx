@@ -191,7 +191,7 @@ test("an answer given here is on the device, so a thread reopened mid-call still
 })
 
 test("deleting a chat deletes what chat-next kept of its session", async () => {
-  const session = "memento-delete-me"
+  const session = "gots-delete-me"
   await db.conversations.put({
     id: "c-delete",
     profileId: "p",

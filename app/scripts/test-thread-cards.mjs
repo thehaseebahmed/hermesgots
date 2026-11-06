@@ -17,7 +17,7 @@ const chat = (id, createdAt, extra = {}) => ({
   id,
   profileId: "bot-1",
   title: `Thread ${id}`,
-  hermesSessionId: `memento-${id}`,
+  hermesSessionId: `gots-${id}`,
   createdAt,
   updatedAt: createdAt,
   changedAt: 0,

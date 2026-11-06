@@ -48,7 +48,7 @@ function host(name: string) {
     seen.push({ path: url.pathname, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ features: ["queue", "triage", "moves"] })
     if (url.pathname.endsWith("/triage")) return json({ decision: "main" })
     if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
@@ -173,7 +173,7 @@ async function seedThreads() {
       id,
       profileId: bot.id,
       title: `Thread ${id}`,
-      hermesSessionId: `memento-${id}`,
+      hermesSessionId: `gots-${id}`,
       createdAt: 10,
       updatedAt: 10,
       changedAt: 0,

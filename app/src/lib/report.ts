@@ -3,7 +3,7 @@
  * so it still shows in the console's verbose level instead of vanishing.
  */
 export function noteFailure(what: string, error: unknown) {
-  console.debug(`[memento] ${what} failed:`, error)
+  console.debug(`[gots] ${what} failed:`, error)
 }
 
 /** `noteFailure` as a promise's `.catch`, which then resolves to undefined. */

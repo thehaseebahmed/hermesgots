@@ -20,7 +20,7 @@ const LONG = Array.from({ length: 30 }, (_, at) => ({
 const PAGES = [0, PAGE, 2 * PAGE, 3 * PAGE]
 
 test("the newest page is drawn before an older one is served, with the loader while pages are read", async () => {
-  const host = fakeHost("memento-first")
+  const host = fakeHost("gots-first")
   host.seed(LONG)
   const second = host.hold(PAGE)
   await withDevice(openDevice(host), async (device) => {
@@ -53,7 +53,7 @@ test("the newest page is drawn before an older one is served, with the loader wh
 })
 
 test("older pages go above the turns drawn without replacing them", async () => {
-  const host = fakeHost("memento-above")
+  const host = fakeHost("gots-above")
   host.seed(LONG)
   const second = host.hold(PAGE)
   await withDevice(openDevice(host), async (device) => {
@@ -74,7 +74,7 @@ test("older pages go above the turns drawn without replacing them", async () => 
 })
 
 test("the loader is never shown while nothing is read: a chat of one page, or one that is whole", async () => {
-  const short = fakeHost("memento-short")
+  const short = fakeHost("gots-short")
   short.seed(LONG.slice(0, 5))
   await withDevice(openDevice(short), async (device) => {
     await showsEverything(device, short, "a chat that fits the first page")
@@ -88,7 +88,7 @@ test("the loader is never shown while nothing is read: a chat of one page, or on
     )
   })
 
-  const host = fakeHost("memento-whole")
+  const host = fakeHost("gots-whole")
   host.seed(LONG)
   const shown: (string | undefined)[] = []
   await withDevice(openDevice(host), async (device) => {
@@ -113,7 +113,7 @@ test("the loader is never shown while nothing is read: a chat of one page, or on
 })
 
 test("a thread the device holds, that has not moved, costs the one page", async () => {
-  const host = fakeHost("memento-held")
+  const host = fakeHost("gots-held")
   host.seed(LONG)
   const first = await openDevice(host)
   const database = first.database
@@ -136,7 +136,7 @@ test("a thread the device holds, that has not moved, costs the one page", async 
 })
 
 test("a thread left unfinished picks up where it stopped, from the rows the device holds", async () => {
-  const host = fakeHost("memento-resume")
+  const host = fakeHost("gots-resume")
   host.seed(LONG)
   const third = host.hold(2 * PAGE)
   const first = await openDevice(host)
@@ -169,7 +169,7 @@ test("a thread left unfinished picks up where it stopped, from the rows the devi
 })
 
 test("a page that fails leaves the thread as drawn, and is read again only when asked", async () => {
-  const host = fakeHost("memento-fail")
+  const host = fakeHost("gots-fail")
   host.seed(LONG)
   const broken = host.fail(2 * PAGE)
   await withDevice(openDevice(host), async (device) => {
@@ -199,7 +199,7 @@ test("a page that fails leaves the thread as drawn, and is read again only when 
 })
 
 test("a page that fails while the chat is held back does not stop the newest page being drawn", async () => {
-  const host = fakeHost("memento-fail-first-ok")
+  const host = fakeHost("gots-fail-first-ok")
   host.seed(LONG)
   host.fail(PAGE)
   await withDevice(openDevice(host), async (device) => {
@@ -216,7 +216,7 @@ test("the app's rows keep their ids while older turns are added above, which is 
     bots: [{ ...botProfile("hermes"), baseUrl: "http://c-older.test/v1" }],
     settings: { chatNext: true },
   })
-  const host = fakeHost("memento-c-older")
+  const host = fakeHost("gots-c-older")
   host.seed(LONG)
   const second = host.hold(PAGE)
   const ids = () =>
@@ -248,7 +248,7 @@ test("the app's rows keep their ids while older turns are added above, which is 
 })
 
 test("a thread this device holds nothing of says it is loading, and stops when rows land", async () => {
-  const host = fakeHost("memento-loading")
+  const host = fakeHost("gots-loading")
   host.seed(LONG)
   const first = host.hold(0)
   await withDevice(openDevice(host), async (device) => {

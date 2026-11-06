@@ -223,7 +223,7 @@ const hostAuth = { Authorization: "Bearer mock-key", "Content-Type": "applicatio
 /** What the plugin holds for a session's queue: the items waiting, and the runs it started. */
 export async function queueOf(sessionId) {
   const res = await fetch(
-    `${mock}/api/plugins/memento/sessions/${encodeURIComponent(sessionId)}/queue`,
+    `${mock}/api/plugins/gots/sessions/${encodeURIComponent(sessionId)}/queue`,
     { headers: hostAuth },
   )
   return res.json()
@@ -719,15 +719,15 @@ export const compress = (session, child) => mockPost("/__mock/compress", { sessi
  * projects are told apart in the mock's list.
  */
 export async function makeProject(until, name) {
-  const created = await fetch(`${mock}/api/plugins/memento/projects`, {
+  const created = await fetch(`${mock}/api/plugins/gots/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: `${name} ${runId()}`, repos: ["mock-user/memento"] }),
+    body: JSON.stringify({ name: `${name} ${runId()}`, repos: ["mock-user/gots"] }),
   })
   const pending = await created.json()
   const ready = await until(
     async () => {
-      const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
+      const listed = await (await fetch(`${mock}/api/plugins/gots/projects`)).json()
       const found = listed.projects.find((project) => project.slug === pending.slug)
       return found?.status === "ready" ? found : null
     },
@@ -756,7 +756,7 @@ export const say = (body) =>
 
 /** AFK's answer for a project, read straight from the mock rather than through the app's own sheet. */
 export const afkRead = async (projectId) =>
-  (await fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`)).json()
+  (await fetch(`${mock}/api/plugins/gots/projects/${projectId}/afk`)).json()
 
 /**
  * Seeds this device's vault the way a returning device's is: a data key minted here, and its locked

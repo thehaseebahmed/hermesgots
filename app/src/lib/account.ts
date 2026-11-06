@@ -87,7 +87,7 @@ async function browserAccount(): Promise<Account> {
     if (user) return { status: "signed-in", user }
   } catch (error) {
     // Identity couldn't be asked. The stored token still names its owner, so the app runs.
-    console.debug("[memento] identity unverified", error)
+    console.debug("[gots] identity unverified", error)
   }
   const user = storedUser(storedToken())
   return user ? { status: "signed-in", user } : { status: "signed-out" }

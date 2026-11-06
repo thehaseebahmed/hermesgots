@@ -29,10 +29,10 @@ function host(features: string[] | "away", name: string, asked: string[]) {
     const url = new URL(String(input instanceof Request ? input.url : input))
     if (!url.host.startsWith(name)) return json({})
     asked.push(url.pathname)
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return features === "away"
         ? json({ error: { message: "The host is away." } }, 503)
-        : json({ name: "memento", version: "0.79.0", features })
+        : json({ name: "gots", version: "0.79.0", features })
     return json({})
   }) as typeof fetch
   return asked

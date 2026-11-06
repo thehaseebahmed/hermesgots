@@ -171,15 +171,15 @@ async function run(m, note) {
 }
 
 export async function handleMeetings(req, res, path, { json, readBody, noteEvent }) {
-  if (!path.startsWith("/api/plugins/memento/meetings")) return false
+  if (!path.startsWith("/api/plugins/gots/meetings")) return false
   const note = (id) => noteEvent("meetings", id)
   const fail = (status, message) => json(res, status, { error: { message } })
-  const answer = (m) => json(res, 200, { object: "memento.meeting", meeting: view(m, true) })
-  if (path === "/api/plugins/memento/meetings") {
+  const answer = (m) => json(res, 200, { object: "gots.meeting", meeting: view(m, true) })
+  if (path === "/api/plugins/gots/meetings") {
     if (req.method === "GET") {
       const rows = [...meetings.values()].sort((a, b) => b.created_at - a.created_at)
       json(res, 200, {
-        object: "memento.meetings",
+        object: "gots.meetings",
         meetings: rows.map((m) => view(m, false)),
         unavailable: audioOff() ? "faster-whisper isn't installed on the host." : null,
       })
@@ -226,10 +226,10 @@ export async function handleMeetings(req, res, path, { json, readBody, noteEvent
     meetings.set(m.id, m)
     note(m.id)
     if (m.stage === "writing") void run(m, note)
-    json(res, 201, { object: "memento.meeting", meeting: view(m, true) })
+    json(res, 201, { object: "gots.meeting", meeting: view(m, true) })
     return true
   }
-  const match = /^\/api\/plugins\/memento\/meetings\/([^/]+)(?:\/(\w+))?$/.exec(path)
+  const match = /^\/api\/plugins\/gots\/meetings\/([^/]+)(?:\/(\w+))?$/.exec(path)
   const m = match && meetings.get(decodeURIComponent(match[1]))
   if (!m) return (fail(404, "No such meeting."), true)
   const action = match[2]
@@ -291,13 +291,13 @@ export async function handleMeetings(req, res, path, { json, readBody, noteEvent
       Object.assign(m, { updated_at: Date.now() })
       note(m.id)
     }, 700)
-    json(res, 202, { object: "memento.meeting", meeting: view(m, true) })
+    json(res, 202, { object: "gots.meeting", meeting: view(m, true) })
     return true
   }
   if (action === "remove") {
     meetings.delete(m.id)
     note(m.id)
-    json(res, 200, { object: "memento.meeting.removed", removed: true })
+    json(res, 200, { object: "gots.meeting.removed", removed: true })
     return true
   }
   return (fail(404, "No such action."), true)

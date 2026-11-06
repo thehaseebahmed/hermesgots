@@ -37,23 +37,23 @@ def read_sources(home: Path) -> dict:
 class HealSourcesTests(unittest.TestCase):
     def test_the_labels_this_plugin_wrote_go_back_to_the_api_source(self):
         home = temp_hermes_home(self)
-        write_store(home, [("memento-a", "Gots"), ("memento-b", "Gots Code"),
-                           ("memento-c", "memento"), ("memento-d", "Memento"),
-                           ("memento-e", "memento-code"), ("memento-f", "Memento Code")])
+        write_store(home, [("gots-a", "Gots"), ("gots-b", "Gots Code"),
+                           ("gots-c", "gots"), ("gots-d", "Gots"),
+                           ("gots-e", "gots-code"), ("gots-f", "Gots Code")])
         self.assertEqual(sessions.heal_sources(home), 6)
         self.assertEqual(set(read_sources(home).values()), {"api_server"})
 
     def test_another_surfaces_session_is_left_alone(self):
         home = temp_hermes_home(self)
         write_store(home, [("telegram-1", "telegram"), ("desktop-1", "desktop"),
-                           ("memento-a", "Gots")])
+                           ("gots-a", "Gots")])
         sessions.heal_sources(home)
         self.assertEqual(read_sources(home), {"telegram-1": "telegram", "desktop-1": "desktop",
-                                              "memento-a": "api_server"})
+                                              "gots-a": "api_server"})
 
     def test_a_second_pass_moves_nothing(self):
         home = temp_hermes_home(self)
-        write_store(home, [("memento-a", "Gots")])
+        write_store(home, [("gots-a", "Gots")])
         self.assertEqual(sessions.heal_sources(home), 1)
         self.assertEqual(sessions.heal_sources(home), 0)
 
@@ -64,7 +64,7 @@ class HealSourcesTests(unittest.TestCase):
 
     def test_a_healthy_store_is_only_read(self):
         home = temp_hermes_home(self)
-        write_store(home, [("memento-a", "api_server")])
+        write_store(home, [("gots-a", "api_server")])
         before = (home / "state.db").stat().st_mtime_ns
         self.assertEqual(sessions.heal_sources(home), 0)
         self.assertEqual((home / "state.db").stat().st_mtime_ns, before)
@@ -77,14 +77,14 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
         broken = temp_hermes_home(self)
         (broken / "state.db").mkdir()
         good = temp_hermes_home(self)
-        write_store(good, [("memento-a", "Gots")])
+        write_store(good, [("gots-a", "Gots")])
         failed = await plugin.repair_labelled_sources([broken, good])
         self.assertEqual(failed, [broken])
-        self.assertEqual(read_sources(good), {"memento-a": "api_server"})
+        self.assertEqual(read_sources(good), {"gots-a": "api_server"})
 
     async def test_a_home_with_nothing_to_repair_is_not_a_failure(self):
         home = temp_hermes_home(self)
-        write_store(home, [("memento-a", "api_server")])
+        write_store(home, [("gots-a", "api_server")])
         self.assertEqual(await plugin.repair_labelled_sources([home]), [])
 
 

@@ -156,7 +156,7 @@ async function localKey() {
 }
 
 function inboxAad() {
-  return `memento:${userId()}:inbox`
+  return `gots:${userId()}:inbox`
 }
 
 /** The account's inbox public key, which link codes carry the fingerprint of. */
@@ -364,12 +364,12 @@ export function forgetLocalKey() {
 async function readDoc<T>(key: CryptoKey, name: string) {
   const doc = await getDoc<Sealed>(name)
   if (!doc) return { entries: {} as Doc<T>, etag: undefined }
-  const entries = await unseal<Doc<T>>(key, doc.data, `memento:${userId()}:${name}`)
+  const entries = await unseal<Doc<T>>(key, doc.data, `gots:${userId()}:${name}`)
   return { entries, etag: doc.etag }
 }
 
 async function writeDoc<T>(key: CryptoKey, name: string, entries: Doc<T>, etag?: string) {
-  return putDoc(name, await seal(key, entries, `memento:${userId()}:${name}`), etag)
+  return putDoc(name, await seal(key, entries, `gots:${userId()}:${name}`), etag)
 }
 
 /**

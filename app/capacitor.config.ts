@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from "@capacitor/cli"
 
 const config: CapacitorConfig = {
-  appId: "app.memento",
+  appId: "dev.hermesgots",
   appName: "Gots",
   webDir: "dist",
   android: {

@@ -41,14 +41,14 @@ function host(run: Run) {
     calls.push(`${method} ${url.pathname}`)
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["apps"] })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["apps"] })
     if (url.pathname.endsWith("/v1/runs") && method === "POST") return json({ run_id: "run-1" })
     if (/\/v1\/runs\/[^/]+\/events$/.test(url.pathname))
       return new Response(run.events.map(frame).join(""), {
         headers: { "content-type": "text/event-stream" },
       })
-    const tail = url.pathname.split("/plugins/memento/")[1] ?? ""
+    const tail = url.pathname.split("/plugins/gots/")[1] ?? ""
     if (tail === "apps/builds") return json({ marked: true }, 201)
     if (tail === "apps" && method === "POST") {
       const sent = body.pages as string[]

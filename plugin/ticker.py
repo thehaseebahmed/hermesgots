@@ -43,7 +43,7 @@ class Ticker:
             try:
                 await before()
             except Exception:
-                logger.debug("memento: the %s watcher couldn't start up", self.name, exc_info=True)
+                logger.debug("gots: the %s watcher couldn't start up", self.name, exc_info=True)
         while True:
             try:
                 await asyncio.wait_for(self._event.wait(), every)
@@ -55,4 +55,4 @@ class Ticker:
                 if asyncio.iscoroutine(result):
                     await result
             except Exception:
-                logger.debug("memento: the %s watcher failed", self.name, exc_info=True)
+                logger.debug("gots: the %s watcher failed", self.name, exc_info=True)

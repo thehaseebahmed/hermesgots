@@ -25,7 +25,7 @@ const run = async ({ page, profileId, shot, until }) => {
   // Every read of the Bot's servers, so the page's own timer can be counted.
   const reads = []
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname.endsWith("/api/plugins/memento/mcp")) reads.push(1)
+    if (new URL(request.url()).pathname.endsWith("/api/plugins/gots/mcp")) reads.push(1)
   })
   const panel = () => page.locator("[data-mcp-tab]")
 
@@ -148,7 +148,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("back")
 
   // A Bot with no MCP servers shows the + and nothing else: no heading over an empty list.
-  await page.route("**/api/plugins/memento/mcp", (route) =>
+  await page.route("**/api/plugins/gots/mcp", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -174,7 +174,7 @@ const run = async ({ page, profileId, shot, until }) => {
   const opened = reads.length
   await page.waitForTimeout(7_000)
   assert.equal(reads.length, opened, "a page with nothing transient reads once on open")
-  await page.unroute("**/api/plugins/memento/mcp")
+  await page.unroute("**/api/plugins/gots/mcp")
 }
 
 for (const width of [390, 1024]) {

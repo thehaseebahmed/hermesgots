@@ -113,7 +113,7 @@ function host(rows = transcript) {
   over = false
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/runs/live"))
+    if (url.pathname.endsWith("/plugins/gots/runs/live"))
       return json(
         over
           ? {}

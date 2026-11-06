@@ -30,7 +30,7 @@ const TEA: Ask = {
 const asking = { text: "Which do you prefer?", choices: ["tea", "coffee"] }
 
 const setUp = (name: string) => {
-  const host = fakeHost(`memento-waiting-${name}`, { plugin: true })
+  const host = fakeHost(`gots-waiting-${name}`, { plugin: true })
   return host
 }
 
@@ -40,7 +40,7 @@ const setUp = (name: string) => {
  * a phone coming back to a waiting run meets.
  */
 const withholding = (name: string) =>
-  fakeHost(`memento-withheld-${name}`, { plugin: true, withhold: true })
+  fakeHost(`gots-withheld-${name}`, { plugin: true, withhold: true })
 
 /** Another device answering: a request straight to the host, with no screen of ours involved. */
 const answerElsewhere = (run: string, prompt_id: string, answer: string) =>

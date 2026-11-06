@@ -49,7 +49,7 @@ for (const [width, collapsed, panes] of CASES) {
         const last = page.url()
         await page.waitForFunction(
           ([key, id]) => localStorage.getItem(key) === id,
-          ["memento:last-meetings", last.split("/").at(-1)],
+          ["gots:last-meetings", last.split("/").at(-1)],
         )
         await page.goto(`${app}/meetings`)
         await page.waitForURL(last, { timeout: 5_000 })
@@ -73,7 +73,7 @@ for (const [width, collapsed, panes] of CASES) {
         const last = page.url()
         await page.waitForFunction(
           ([key, id]) => localStorage.getItem(key) === id,
-          ["memento:last-projects", `${profileId}/p_5e6f7a8b`],
+          ["gots:last-projects", `${profileId}/p_5e6f7a8b`],
         )
         await page.goto(`${app}/projects`)
         await page.waitForURL(last, { timeout: 5_000 })
@@ -102,7 +102,7 @@ for (const [width, collapsed, panes] of CASES) {
         const last = page.url()
         await page.waitForFunction(
           ([key, id]) => localStorage.getItem(key) === id,
-          ["memento:last-code", last.split("/").at(-1)],
+          ["gots:last-code", last.split("/").at(-1)],
         )
         await page.goto(`${app}/code`)
         await page.waitForURL(last, { timeout: 5_000 })
@@ -141,7 +141,7 @@ for (const [width, collapsed, panes] of CASES) {
         const last = page.url()
         await page.waitForFunction(
           ([key, id]) => localStorage.getItem(key) === id,
-          ["memento:last-research", last.split("/").at(-1)],
+          ["gots:last-research", last.split("/").at(-1)],
         )
         await page.goto(`${app}/research`)
         await page.waitForURL(last, { timeout: 5_000 })

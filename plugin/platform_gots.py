@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from . import attachments, chats, events, push, sessions, ticker
-from .store import connect, current_path
+from .store import connect, current_path, home_of
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ HOME_ENV_VAR = "GOTS_HOME_CHANNEL"
 # The display kind the row carries, and the feature `info` advertises for the route beside it.
 KIND = "routine_message"
 FEATURE = "routine_message"
-OBJECT = "memento.routines"
+OBJECT = "gots.routines"
 SECTION = "gots_routines"
 TARGET_MAIN = "main"
 MAIN_PREFIX = "main-"
@@ -222,7 +222,7 @@ def _store():
 
         return acquire()
     except Exception:
-        logger.debug("memento: couldn't reach Hermes's session store", exc_info=True)
+        logger.debug("gots: couldn't reach Hermes's session store", exc_info=True)
         return None
 
 
@@ -233,7 +233,7 @@ def _tip(db: Any, session_id: str) -> str:
         try:
             return str(resolve(session_id) or session_id)
         except Exception:
-            logger.debug("memento: couldn't resolve %s to its tip", session_id, exc_info=True)
+            logger.debug("gots: couldn't resolve %s to its tip", session_id, exc_info=True)
     return session_id
 
 
@@ -257,7 +257,7 @@ def _run(db: Any, job_id: Optional[str]) -> Run:
     try:
         rows = lister(job_id, limit=1) or []
     except Exception:
-        logger.debug("memento: couldn't read the runs of %s", job_id, exc_info=True)
+        logger.debug("gots: couldn't read the runs of %s", job_id, exc_info=True)
         return Run()
     first = rows[0] if rows else None
     if not isinstance(first, dict):
@@ -333,7 +333,7 @@ def _acquire(db: Any, session_id: str, holder: str) -> bool:
     try:
         return bool(take(session_id, holder, ttl_seconds=LEASE_TTL_SECONDS))
     except Exception:
-        logger.debug("memento: couldn't take %s's turn lease", session_id, exc_info=True)
+        logger.debug("gots: couldn't take %s's turn lease", session_id, exc_info=True)
         return False
 
 
@@ -344,7 +344,7 @@ def _release(db: Any, session_id: str, holder: str) -> None:
     try:
         let_go(session_id, holder)
     except Exception:
-        logger.debug("memento: couldn't release %s's turn lease", session_id, exc_info=True)
+        logger.debug("gots: couldn't release %s's turn lease", session_id, exc_info=True)
 
 
 def _write(db: Any, session_id: str, text: str, metadata: Dict[str, Any], holder: str) -> int:
@@ -383,7 +383,7 @@ def stage(home: Path, session_id: str, source: str) -> Optional[Path]:
             return None
         return attachments.save(home, session_id, origin.name, origin.read_bytes())
     except (OSError, ValueError):
-        logger.warning("memento: couldn't stage %s for a routine's message", origin, exc_info=True)
+        logger.warning("gots: couldn't stage %s for a routine's message", origin, exc_info=True)
         return None
 
 
@@ -509,7 +509,7 @@ def deliver(
     metadata = metadata or {}
     notify = metadata.get("notify") is not False
     path = current_path()
-    home = path.parent.parent
+    home = home_of(path)
     chat = resolve_chat(path, ref)
     if chat is None:
         return {
@@ -545,7 +545,7 @@ def deliver(
             return {"success": True, "message_id": str(already), "chat_id": chat["id"], "execution": execution}
         return _deliver_now(path, home, db, chat, tip, text, files, execution, job_id, title, run, notify)
     except Exception as error:
-        logger.warning("memento: a routine's message couldn't be delivered", exc_info=True)
+        logger.warning("gots: a routine's message couldn't be delivered", exc_info=True)
         return {"error": f"Couldn't write the routine's message: {error}"}
     finally:
         try:
@@ -553,7 +553,7 @@ def deliver(
 
             release_or_close(db)
         except Exception:
-            logger.debug("memento: couldn't let go of the session store", exc_info=True)
+            logger.debug("gots: couldn't let go of the session store", exc_info=True)
 
 
 def _deliver_now(
@@ -571,7 +571,7 @@ def _deliver_now(
     notify: bool,
 ) -> Dict[str, Any]:
     staged, dropped = _staged(home, chat["session"], files)
-    holder = f"memento-routine-{secrets.token_hex(6)}"
+    holder = f"gots-routine-{secrets.token_hex(6)}"
     taken = _acquire(db, tip, holder)
     # A chat in a turn, or one that said something moments ago, reads the message as an aside.
     aside = (not taken) or _recent(home, tip)
@@ -635,7 +635,7 @@ def _staged(
             continue
         staged.append(copy)
     if dropped:
-        logger.warning("memento: a routine's message dropped %d file(s): %s", len(dropped), "; ".join(dropped))
+        logger.warning("gots: a routine's message dropped %d file(s): %s", len(dropped), "; ".join(dropped))
     return staged, dropped
 
 
@@ -659,7 +659,7 @@ def write_queued(home: Path, path: Path) -> int:
             tip = _tip(db, item["session_id"])
             if not _exists(home, tip):
                 continue
-            holder = f"memento-routine-{secrets.token_hex(6)}"
+            holder = f"gots-routine-{secrets.token_hex(6)}"
             if not _acquire(db, tip, holder):
                 # Still in a turn: the message keeps its place in the queue.
                 continue
@@ -678,7 +678,7 @@ def write_queued(home: Path, path: Path) -> int:
                 push.notify(KIND, item["session_id"], path=path)
             landed += 1
         except Exception:
-            logger.debug("memento: a queued routine message couldn't be written", exc_info=True)
+            logger.debug("gots: a queued routine message couldn't be written", exc_info=True)
         finally:
             try:
                 from hermes_state_registry import release_or_close
@@ -766,7 +766,7 @@ def _current_rows(home: Path, session_id: str) -> Dict[str, int]:
                 (*ids, KIND),
             ).fetchall()
     except sqlite3.Error:
-        logger.debug("memento: couldn't resolve the routine messages of %s", session_id, exc_info=True)
+        logger.debug("gots: couldn't resolve the routine messages of %s", session_id, exc_info=True)
         return {}
     found: Dict[str, int] = {}
     for row_id, execution in rows:
@@ -804,7 +804,7 @@ def _lineage(home: Path, session_id: str) -> List[str]:
                 ids.append(str(row["id"]))
                 current = str(row["id"])
     except sqlite3.Error:
-        logger.debug("memento: couldn't walk the lineage of %s", session_id, exc_info=True)
+        logger.debug("gots: couldn't walk the lineage of %s", session_id, exc_info=True)
     return ids
 
 
@@ -844,7 +844,7 @@ class RoutineDelivery:
         mark = getattr(self, "_mark_connected", None)
         if callable(mark):
             mark()
-        logger.info("memento: the Gots platform is connected — routines deliver into this bot's chats")
+        logger.info("gots: the Gots platform is connected — routines deliver into this bot's chats")
         return True
 
     async def disconnect(self) -> None:
@@ -910,7 +910,7 @@ def attach(
     the chat's newest message is the only answer there is.
     """
     path = current_path()
-    home = path.parent.parent
+    home = home_of(path)
     chat = resolve_chat(path, ref)
     if chat is None:
         return {"error": f"No chat on this bot is '{ref}'."}
@@ -979,7 +979,7 @@ def _rewrite(home: Path, row: int, text: str) -> bool:
                 (text[:MAX_TEXT], row, KIND),
             ).rowcount > 0
     except sqlite3.Error:
-        logger.debug("memento: couldn't add a file to a routine's message", exc_info=True)
+        logger.debug("gots: couldn't add a file to a routine's message", exc_info=True)
         return False
 
 
@@ -1029,12 +1029,12 @@ def register(ctx: Any) -> bool:
     """Registers Gots as a delivery platform, or leaves the plugin running without one."""
     register_platform = getattr(ctx, "register_platform", None)
     if not callable(register_platform):
-        logger.warning("memento: this Hermes version can't add a delivery platform; routines stay local")
+        logger.warning("gots: this Hermes version can't add a delivery platform; routines stay local")
         return False
     try:
         from gateway.platforms.send_targets import parse_nonempty
     except Exception:
-        logger.warning("memento: this Hermes version can't add a delivery platform; routines stay local")
+        logger.warning("gots: this Hermes version can't add a delivery platform; routines stay local")
         return False
     try:
         register_platform(
@@ -1055,9 +1055,9 @@ def register(ctx: Any) -> bool:
             platform_hint="",
         )
     except Exception:
-        logger.warning("memento: this Hermes refused the Gots platform; routines stay local", exc_info=True)
+        logger.warning("gots: this Hermes refused the Gots platform; routines stay local", exc_info=True)
         return False
-    logger.info("memento: routines deliver into this bot's chats (%s:%s)", NAME, TARGET_MAIN)
+    logger.info("gots: routines deliver into this bot's chats (%s:%s)", NAME, TARGET_MAIN)
     return True
 
 
@@ -1083,7 +1083,7 @@ def register_section(ctx: Any) -> bool:
     try:
         register(SECTION, content, position="after_memory")
     except Exception:
-        logger.warning("memento: couldn't tell the model where routines deliver", exc_info=True)
+        logger.warning("gots: couldn't tell the model where routines deliver", exc_info=True)
         return False
     return True
 
@@ -1100,7 +1100,7 @@ def fill_deliver(**kwargs: Any) -> Optional[Dict[str, Any]]:
     try:
         return _fill_deliver(kwargs)
     except Exception:
-        logger.debug("memento: couldn't name where a routine delivers", exc_info=True)
+        logger.debug("gots: couldn't name where a routine delivers", exc_info=True)
         return None
 
 

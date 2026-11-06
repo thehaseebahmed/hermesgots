@@ -1,6 +1,6 @@
 {
-  "object": "memento.agents",
-  "session_id": "memento-fixture-delegate-compaction-before",
+  "object": "gots.agents",
+  "session_id": "gots-fixture-delegate-compaction-before",
   "agents": [
     {
       "id": "20261028_201403_9feee8",

@@ -148,15 +148,15 @@ function host({
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return away
         ? json({ error: { message: "Not home." } }, 503)
-        : json({ name: "memento", version, features })
-    if (url.pathname.endsWith("/plugins/memento/delegation-settings"))
+        : json({ name: "gots", version, features })
+    if (url.pathname.endsWith("/plugins/gots/delegation-settings"))
       return noDelegation
         ? json({ error: { message: "No delegation category." } }, 501)
-        : json({ object: "memento.delegation_settings", delegation: DELEGATION })
-    if (url.pathname.endsWith("/plugins/memento/delegation"))
+        : json({ object: "gots.delegation_settings", delegation: DELEGATION })
+    if (url.pathname.endsWith("/plugins/gots/delegation"))
       return json({
         delegation: body ? body.delegation : null,
         ...(customDelegation && !body ? { custom: true } : {}),
@@ -176,11 +176,11 @@ function host({
         ],
       })
     if (url.pathname.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
-    if (url.pathname.endsWith("/plugins/memento/reminders")) {
+    if (url.pathname.endsWith("/plugins/gots/reminders")) {
       // A host older than the four names refuses one it doesn't hold, in its own words (ADR 0068).
       if (refuse && body?.level === refuse)
         return json({ error: { message: `level must be one of off, normal, frequent` } }, 400)
-      return json({ object: "memento.progress_reminders", level: body?.level ?? level })
+      return json({ object: "gots.progress_reminders", level: body?.level ?? level })
     }
     if (url.pathname.endsWith("/health"))
       return health ? json({ error: { message: health } }, 500) : json({ ok: true })
@@ -546,7 +546,7 @@ test("the Delegation page's Subagent model row opens the host's models, and a pi
     await click(modelOption("cheap-model"))
 
     const write = calls.find(
-      (one) => one.method === "POST" && one.path.endsWith("/plugins/memento/delegation"),
+      (one) => one.method === "POST" && one.path.endsWith("/plugins/gots/delegation"),
     )
     assert.deepEqual(
       write?.body,

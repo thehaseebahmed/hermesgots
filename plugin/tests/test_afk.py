@@ -130,7 +130,7 @@ class SwitchTests(unittest.TestCase):
         (self.checkout / ".git").mkdir(parents=True)
         self._patches = [
             patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
         ]
         for one in self._patches:
             one.start()
@@ -279,10 +279,10 @@ class SwitchTests(unittest.TestCase):
             self.home,
             "p1",
             {
-                "repo": "mock-user/memento",
+                "repo": "mock-user/gots",
                 "number": 265,
                 "title": "Task 265",
-                "url": "https://github.com/mock-user/memento/issues/265",
+                "url": "https://github.com/mock-user/gots/issues/265",
                 "created_at": "2026-10-01T00:00:00Z",
             },
         )
@@ -319,10 +319,10 @@ class SwitchTests(unittest.TestCase):
                 self.home,
                 "p1",
                 {
-                    "repo": "mock-user/memento",
+                    "repo": "mock-user/gots",
                     "number": number,
                     "title": f"Task {number}",
-                    "url": f"https://github.com/mock-user/memento/issues/{number}",
+                    "url": f"https://github.com/mock-user/gots/issues/{number}",
                     "created_at": "2026-10-01T00:00:00Z",
                 },
             )
@@ -334,7 +334,7 @@ class SwitchTests(unittest.TestCase):
         released = sorted(call.args[:2] for call in release_claim.call_args_list)
         self.assertEqual(
             released,
-            [("mock-user/memento", 265), ("mock-user/memento", 266)],
+            [("mock-user/gots", 265), ("mock-user/gots", 266)],
             "a task left labelled and assigned would never be read as ready again (ADR 0012)",
         )
         self.assertEqual(afk._holds(self.home, "p1"), [])
@@ -436,7 +436,7 @@ class AfkHome(unittest.TestCase):
         (self.checkout / ".git").mkdir(parents=True)
         for one in (
             patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
         ):
             one.start()
             self.addCleanup(one.stop)
@@ -742,7 +742,7 @@ class PromptTests(AfkHome):
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
         body = afk.run_body(
             self.record(),
-            {"repo": "mock-user/memento", "number": 265},
+            {"repo": "mock-user/gots", "number": 265},
             "Squash every checkpoint into one commit.",
         )
         self.assertIn("Squash every checkpoint into one commit.", body["instructions"])
@@ -755,12 +755,12 @@ class PromptTests(AfkHome):
     def record(self) -> Dict[str, Any]:
         """A session's record as the run's request reads it."""
         return {
-            "session_id": "memento-afk-s1",
+            "session_id": "gots-afk-s1",
             "project_id": "p1",
             "mode": "auto",
             "repos": [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": str(self.checkout),
                     "path": "/trees/afk-265",
                     "branch": "hermes/afk-265",
@@ -770,10 +770,10 @@ class PromptTests(AfkHome):
 
     def test_a_staged_tasks_first_run_opens_with_the_issue_too(self) -> None:
         task = {
-            "repo": "mock-user/memento",
+            "repo": "mock-user/gots",
             "number": 265,
             "title": "It",
-            "url": "https://github.com/mock-user/memento/issues/265",
+            "url": "https://github.com/mock-user/gots/issues/265",
             "body": "Read the frontier first.\n",
         }
         body = afk.run_body({**self.record(), "pipeline": staged_record(pipeline.BUILD)}, task, None)
@@ -790,10 +790,10 @@ class PromptTests(AfkHome):
 
     def test_a_later_stage_run_keeps_its_one_line_input(self) -> None:
         task = {
-            "repo": "mock-user/memento",
+            "repo": "mock-user/gots",
             "number": 265,
             "title": "It",
-            "url": "https://github.com/mock-user/memento/issues/265",
+            "url": "https://github.com/mock-user/gots/issues/265",
             "body": "Read the frontier first.\n",
         }
         body = afk.stage_body({**self.record(), "pipeline": staged_record(pipeline.CRITIQUE)}, task)
@@ -862,7 +862,7 @@ class ClaimStubTests(unittest.TestCase):
         self.writes: List[tuple] = []
         self._patches = [
             patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
             patch.object(github, "_get", self.answer_get),
             patch.object(github, "_page", self.answer_page),
             patch.object(github, "_request", self.answer_request),
@@ -887,12 +887,12 @@ class ClaimStubTests(unittest.TestCase):
     def answer_get(self, path: str, auth: Any) -> Any:
         if path == "/user":
             return {"login": "mock-user"}
-        if path.startswith("/repos/mock-user/memento/labels/"):
+        if path.startswith("/repos/mock-user/gots/labels/"):
             if self.label_exists:
                 return {"name": CLAIM_LABEL}
             # GitHub words a missing label as it words any missing thing.
             raise github.GitHubError("Not Found")
-        if path.startswith("/repos/mock-user/memento/issues?"):
+        if path.startswith("/repos/mock-user/gots/issues?"):
             if self.read_error is not None:
                 raise self.read_error
             return self.issues
@@ -925,10 +925,10 @@ class ClaimTests(ClaimStubTests):
         self.assertEqual(
             self.writes,
             [
-                ("POST", "/repos/mock-user/memento/issues/265/labels", {"labels": [CLAIM_LABEL]}),
+                ("POST", "/repos/mock-user/gots/issues/265/labels", {"labels": [CLAIM_LABEL]}),
                 (
                     "POST",
-                    "/repos/mock-user/memento/issues/265/assignees",
+                    "/repos/mock-user/gots/issues/265/assignees",
                     {"assignees": ["mock-user"]},
                 ),
             ],
@@ -952,12 +952,12 @@ class ClaimTests(ClaimStubTests):
         self.issues = [issue_row(265)]
         self.sweep()
         method, path, data = self.writes[0]
-        self.assertEqual((method, path), ("POST", "/repos/mock-user/memento/labels"))
+        self.assertEqual((method, path), ("POST", "/repos/mock-user/gots/labels"))
         self.assertEqual(data["name"], CLAIM_LABEL)
         # And only then is the task claimed with it.
         self.assertEqual(
             self.writes[1],
-            ("POST", "/repos/mock-user/memento/issues/265/labels", {"labels": [CLAIM_LABEL]}),
+            ("POST", "/repos/mock-user/gots/issues/265/labels", {"labels": [CLAIM_LABEL]}),
         )
 
     def test_an_older_task_somebody_already_claimed_is_passed_over(self) -> None:
@@ -991,7 +991,7 @@ class ClaimTests(ClaimStubTests):
         )
         self.assertEqual(
             [path for method, path, _ in self.writes if path.endswith("/labels")],
-            [f"/repos/mock-user/memento/issues/{number}/labels" for number in (265, 266, 267)],
+            [f"/repos/mock-user/gots/issues/{number}/labels" for number in (265, 266, 267)],
             "each is claimed on GitHub, in the order they were taken",
         )
         self.assertEqual(self.shown()["task"]["number"], 265, "the read still answers the oldest")
@@ -1048,13 +1048,13 @@ class ClaimTests(ClaimStubTests):
         self.assertEqual(
             self.writes,
             [
-                ("POST", "/repos/mock-user/memento/issues/265/labels", {"labels": [CLAIM_LABEL]}),
+                ("POST", "/repos/mock-user/gots/issues/265/labels", {"labels": [CLAIM_LABEL]}),
                 (
                     "POST",
-                    "/repos/mock-user/memento/issues/265/assignees",
+                    "/repos/mock-user/gots/issues/265/assignees",
                     {"assignees": ["mock-user"]},
                 ),
-                ("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None),
+                ("DELETE", "/repos/mock-user/gots/issues/265/labels/gots-got-it", None),
             ],
             "the mark is taken back off, so the task is in the frontier again",
         )
@@ -1103,10 +1103,10 @@ class ClaimTests(ClaimStubTests):
         self.assertEqual(
             shown["task"],
             {
-                "repo": "mock-user/memento",
+                "repo": "mock-user/gots",
                 "number": 265,
                 "title": "Task 265",
-                "url": "https://github.com/mock-user/memento/issues/265",
+                "url": "https://github.com/mock-user/gots/issues/265",
                 "created_at": "2026-10-01T00:00:00Z",
             },
         )
@@ -1134,7 +1134,7 @@ class PickCountTests(ClaimStubTests):
         self.sweep()
         for number in numbers:
             mine = next(hold for hold in self.hold() if hold.task["number"] == number)
-            afk._adopt(self.home, "p1", f"memento-afk-{number}", mine.task)
+            afk._adopt(self.home, "p1", f"gots-afk-{number}", mine.task)
         self.writes.clear()
 
     def test_the_read_answers_every_hold_and_the_count(self) -> None:
@@ -1149,10 +1149,10 @@ class PickCountTests(ClaimStubTests):
         self.assertEqual(
             shown["holds"][0],
             {
-                "repo": "mock-user/memento",
+                "repo": "mock-user/gots",
                 "number": 265,
                 "title": "Task 265",
-                "url": "https://github.com/mock-user/memento/issues/265",
+                "url": "https://github.com/mock-user/gots/issues/265",
                 "created_at": "2026-10-01T00:00:00Z",
                 "stage": None,
                 "stage_name": None,
@@ -1210,7 +1210,7 @@ class PickCountTests(ClaimStubTests):
         self.fill(3, [265, 266, 267])
         repos = [
             {
-                "name": "mock-user/memento",
+                "name": "mock-user/gots",
                 "repo_root": str(self.checkout),
                 "path": f"/trees/afk-{number}",
                 "branch": f"hermes/afk-{number}",
@@ -1218,7 +1218,7 @@ class PickCountTests(ClaimStubTests):
             for number in (265, 266)
         ]
         for number, kind in ((265, pipeline.BUILD), (266, pipeline.GATE_CHECK)):
-            session_id = f"memento-afk-{number}"
+            session_id = f"gots-afk-{number}"
             sessions._upsert(db_path(self.home), session_id, "p1", repos, "auto", None)
             sessions.set_pipeline(db_path(self.home), session_id, staged_record(kind))
         with patch.object(
@@ -1230,7 +1230,7 @@ class PickCountTests(ClaimStubTests):
         )
         self.assertEqual(
             sorted(pipelines_of.call_args.args[1]),
-            ["memento-afk-265", "memento-afk-266", "memento-afk-267"],
+            ["gots-afk-265", "gots-afk-266", "gots-afk-267"],
             "one ask names every session holding a task",
         )
         self.assertEqual(
@@ -1250,7 +1250,7 @@ class PickCountTests(ClaimStubTests):
         hold_update(self.home, old, claimed_at=int(time.time()) - afk.STALL_SECONDS - 1)
         self.assertEqual(
             list(afk.stalled(self.home)),
-            ["memento-afk-265"],
+            ["gots-afk-265"],
             "the hold taken long ago is the one waiting; the one claimed after it is still starting",
         )
         self.sweep()
@@ -1272,7 +1272,7 @@ class PickCountTests(ClaimStubTests):
         )
         self.assertEqual(
             [path for method, path, _ in self.writes if path.endswith("/assignees")],
-            ["/repos/mock-user/memento/issues/266/assignees"],
+            ["/repos/mock-user/gots/issues/266/assignees"],
             "nothing is claimed twice",
         )
 
@@ -1298,7 +1298,7 @@ class PickCountTests(ClaimStubTests):
         self.assertTrue(
             afk.release_session(
                 self.home,
-                {"session_id": "memento-afk-266", "project_id": "p1", "task": middle},
+                {"session_id": "gots-afk-266", "project_id": "p1", "task": middle},
             )
         )
         self.assertEqual(
@@ -1309,8 +1309,8 @@ class PickCountTests(ClaimStubTests):
         self.assertEqual(
             [write[1] for write in self.writes],
             [
-                "/repos/mock-user/memento/issues/266/labels/gots-got-it",
-                "/repos/mock-user/memento/issues/266/assignees",
+                "/repos/mock-user/gots/issues/266/labels/gots-got-it",
+                "/repos/mock-user/gots/issues/266/assignees",
             ],
             "only that task's claim comes off GitHub",
         )
@@ -1393,10 +1393,10 @@ class PickBudgetSettingTests(unittest.TestCase):
 
     def test_every_projects_read_answers_the_budget_and_the_holds_against_it(self) -> None:
         held = {
-            "repo": "mock-user/memento",
+            "repo": "mock-user/gots",
             "number": 265,
             "title": "Task 265",
-            "url": "https://github.com/mock-user/memento/issues/265",
+            "url": "https://github.com/mock-user/gots/issues/265",
             "created_at": "2026-10-01T00:00:00Z",
         }
         afk._hold(self.home, "p1", held)
@@ -2053,7 +2053,7 @@ class AfkSessionTests(ClaimStubTests):
     arrives through the chat list.
     """
 
-    SESSION = "memento-afk-s1"
+    SESSION = "gots-afk-s1"
 
     def setUp(self) -> None:
         super().setUp()
@@ -2063,7 +2063,7 @@ class AfkSessionTests(ClaimStubTests):
         self.task = self.shown()["task"]
         repos = [
             {
-                "name": "mock-user/memento",
+                "name": "mock-user/gots",
                 "repo_root": str(self.checkout),
                 "path": "/trees/afk-265",
                 "branch": "hermes/afk-265",
@@ -2102,10 +2102,10 @@ class ReleaseTests(AfkSessionTests):
         self.assertEqual(
             self.released(),
             [
-                ("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None),
+                ("DELETE", "/repos/mock-user/gots/issues/265/labels/gots-got-it", None),
                 (
                     "DELETE",
-                    "/repos/mock-user/memento/issues/265/assignees",
+                    "/repos/mock-user/gots/issues/265/assignees",
                     {"assignees": ["mock-user"]},
                 ),
             ],
@@ -2147,8 +2147,8 @@ class ReleaseTests(AfkSessionTests):
         self.assertEqual(
             [write[1] for write in self.writes if write[0] == "POST"],
             [
-                "/repos/mock-user/memento/issues/266/labels",
-                "/repos/mock-user/memento/issues/266/assignees",
+                "/repos/mock-user/gots/issues/266/labels",
+                "/repos/mock-user/gots/issues/266/assignees",
             ],
             "and only the task that filled it is claimed on GitHub",
         )
@@ -2162,8 +2162,8 @@ class ReleaseTests(AfkSessionTests):
         self.assertEqual(
             [write[1] for write in self.released()],
             [
-                "/repos/mock-user/memento/issues/265/labels/gots-got-it",
-                "/repos/mock-user/memento/issues/265/assignees",
+                "/repos/mock-user/gots/issues/265/labels/gots-got-it",
+                "/repos/mock-user/gots/issues/265/assignees",
             ],
             "the task it named is the one given back, so it is in the frontier and not stuck forever",
         )
@@ -2212,26 +2212,26 @@ class ReleaseTests(AfkSessionTests):
         afk._free(self.home, "p1", self.task)
         later = {**self.task, "number": 266, "title": "Task 266"}
         afk._hold(self.home, "p1", later)
-        afk._adopt(self.home, "p1", "memento-afk-s2", later)
+        afk._adopt(self.home, "p1", "gots-afk-s2", later)
         self.writes.clear()
 
         self.assertTrue(afk.release_session(self.home, record))
         self.assertEqual(
             afk._row(self.home, "p1")["task"], later, "the hold the project has now is not that one"
         )
-        self.assertEqual(held_task(self.home).session_id, "memento-afk-s2")
+        self.assertEqual(held_task(self.home).session_id, "gots-afk-s2")
         self.assertEqual(
             [write[1] for write in self.released()],
             [
-                "/repos/mock-user/memento/issues/265/labels/gots-got-it",
-                "/repos/mock-user/memento/issues/265/assignees",
+                "/repos/mock-user/gots/issues/265/labels/gots-got-it",
+                "/repos/mock-user/gots/issues/265/assignees",
             ],
             "only the closed session's own task comes off GitHub",
         )
 
     def test_a_session_started_by_hand_releases_nothing(self) -> None:
         self.assertFalse(
-            afk.release_session(self.home, {"session_id": "memento-abc", "project_id": "p1"}),
+            afk.release_session(self.home, {"session_id": "gots-abc", "project_id": "p1"}),
             "a session with no task behind it has no claim to give back",
         )
         self.assertEqual(self.writes, [])
@@ -2308,15 +2308,15 @@ class RunEndTests(AfkSessionTests):
     def test_a_run_of_a_session_afk_does_not_hold_leaves_the_hold_alone(self) -> None:
         repos = [
             {
-                "name": "mock-user/memento",
+                "name": "mock-user/gots",
                 "repo_root": str(self.checkout),
                 "path": "/trees/hand-made",
                 "branch": "hermes/hand-made",
             }
         ]
-        sessions._upsert(db_path(self.home), "memento-hand-made", "p1", repos, "auto", None)
+        sessions._upsert(db_path(self.home), "gots-hand-made", "p1", repos, "auto", None)
         with patch.object(afk, "wake") as wake:
-            self.ended(session_id="memento-hand-made", completed=True)
+            self.ended(session_id="gots-hand-made", completed=True)
         self.assertEqual(self.shown()["task"], self.task)
         wake.assert_called_once()
 
@@ -2336,21 +2336,21 @@ class RunEndTests(AfkSessionTests):
         afk._hold(self.home, "p1", newer)
         repos = [
             {
-                "name": "mock-user/memento",
+                "name": "mock-user/gots",
                 "repo_root": str(self.checkout),
                 "path": "/trees/afk-266",
                 "branch": "hermes/afk-266",
             }
         ]
-        sessions._upsert(db_path(self.home), "memento-afk-s2", "p1", repos, "auto", "/files/afk-266")
-        afk._adopt(self.home, "p1", "memento-afk-s2", newer)
-        sessions.set_task(db_path(self.home), "memento-afk-s2", None)
+        sessions._upsert(db_path(self.home), "gots-afk-s2", "p1", repos, "auto", "/files/afk-266")
+        afk._adopt(self.home, "p1", "gots-afk-s2", newer)
+        sessions.set_task(db_path(self.home), "gots-afk-s2", None)
         self.assertIsNone(
-            sessions.read(db_path(self.home), "memento-afk-s2")["task"],
+            sessions.read(db_path(self.home), "gots-afk-s2")["task"],
             "the record names no task, which is what a run's end then has to go on",
         )
 
-        self.ended("memento-afk-s2", completed=True)
+        self.ended("gots-afk-s2", completed=True)
         self.assertEqual(
             [hold.task["number"] for hold in afk._holds(self.home, "p1")],
             [265],
@@ -2416,10 +2416,10 @@ class SessionTests(unittest.TestCase):
         self.home.joinpath("projects.db").write_text("")
         (self.home / "checkout" / ".git").mkdir(parents=True)
         self.task = {
-            "repo": "mock-user/memento",
+            "repo": "mock-user/gots",
             "number": 265,
             "title": "The frontier is read from GitHub and listed",
-            "url": "https://github.com/mock-user/memento/issues/265",
+            "url": "https://github.com/mock-user/gots/issues/265",
             "created_at": "2026-10-01T00:00:00Z",
             "body": "Read the frontier first.\n\n- oldest first",
         }
@@ -2437,7 +2437,7 @@ class SessionTests(unittest.TestCase):
             "plan_pending": False,
             "repos": [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": "/checkout",
                     "path": "/trees/quiet-marmot",
                     "branch": "hermes/quiet-marmot",
@@ -2446,7 +2446,7 @@ class SessionTests(unittest.TestCase):
         }
         for one in (
             patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
             patch.object(github, "login", return_value="gots-bot"),
             patch.object(github, "_request", self.request),
             patch("plugin.sessions.ensure", side_effect=self.ensure),
@@ -2489,7 +2489,7 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(project_id, "p1")
         self.assertEqual(task, self.task["title"], "the worktree is named after the task")
         self.assertEqual(mode, "auto", "an AFK session runs in Auto")
-        self.assertTrue(session_id.startswith("memento-"), "a session id Gots's own hooks label")
+        self.assertTrue(session_id.startswith("gots-"), "a session id Gots's own hooks label")
 
     def test_the_chat_record_it_publishes_is_what_makes_the_session_appear(self) -> None:
         self.start()
@@ -2524,7 +2524,7 @@ class SessionTests(unittest.TestCase):
         self.assertNotIn(
             "body", record["task"], "the issue's text is the run's, and no row of the host's keeps it"
         )
-        self.assertIsNone(sessions.read(db_path(self.home), "memento-afk-not-this-one"))
+        self.assertIsNone(sessions.read(db_path(self.home), "gots-afk-not-this-one"))
 
     def test_a_run_that_never_started_names_no_task(self) -> None:
         outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
@@ -2548,7 +2548,7 @@ class SessionTests(unittest.TestCase):
             "\n"
             "- oldest first\n"
             "\n"
-            "[Issue #265](https://github.com/mock-user/memento/issues/265)",
+            "[Issue #265](https://github.com/mock-user/gots/issues/265)",
             "the input is the issue itself, its body verbatim and its link",
         )
 
@@ -2571,7 +2571,7 @@ class SessionTests(unittest.TestCase):
         self.assertIn("its text is the spec", instructions, "the fixed points are AFK's own")
         self.assertIn("gh issue view", instructions, "it fetches the issue itself")
         self.assertIn(
-            "You are working in a git worktree of mock-user/memento",
+            "You are working in a git worktree of mock-user/gots",
             instructions,
             "the session's own prompt is kept, so its worktree and pull request lines still hold",
         )
@@ -2627,13 +2627,13 @@ class SessionTests(unittest.TestCase):
                 "left-behind": {
                     "at": 1,
                     "value": {
-                        "hermesSessionId": "memento-afk-fixed",
+                        "hermesSessionId": "gots-afk-fixed",
                         "modelChoice": {"provider": "deepseek", "model": "deepseek-v4-pro"},
                     },
                 }
             },
         )
-        with patch.object(afk, "new_session_id", return_value="memento-afk-fixed"), patch.object(
+        with patch.object(afk, "new_session_id", return_value="gots-afk-fixed"), patch.object(
             afk.host_model,
             "read_main",
             return_value={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
@@ -2645,7 +2645,7 @@ class SessionTests(unittest.TestCase):
             "a session that is starting runs the profile's model, whatever else names its id",
         )
         self.assertEqual(
-            self.chats()["memento-afk-fixed"]["value"]["modelChoice"],
+            self.chats()["gots-afk-fixed"]["value"]["modelChoice"],
             {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
             "and its record keeps the pick its run went out on",
         )
@@ -2661,7 +2661,7 @@ class SessionTests(unittest.TestCase):
             "read_main",
             return_value={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
         ):
-            began = afk._begin(self.home, db_path(self.home), "p1", "memento-afk-1")
+            began = afk._begin(self.home, db_path(self.home), "p1", "gots-afk-1")
         self.assertEqual(
             began.pinned, {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}
         )
@@ -2715,10 +2715,10 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(
             self.writes,
             [
-                ("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None),
+                ("DELETE", "/repos/mock-user/gots/issues/265/labels/gots-got-it", None),
                 (
                     "DELETE",
-                    "/repos/mock-user/memento/issues/265/assignees",
+                    "/repos/mock-user/gots/issues/265/assignees",
                     {"assignees": ["gots-bot"]},
                 ),
             ],
@@ -2750,7 +2750,7 @@ class SessionTests(unittest.TestCase):
             rows = [issue_row(265)]
             with (
                 patch.object(github, "token", return_value=("token", "env")),
-                patch.object(github, "origin_repo", return_value="mock-user/memento"),
+                patch.object(github, "origin_repo", return_value="mock-user/gots"),
                 patch.object(github, "_get", lambda path, auth: {"login": "mock-user"}),
                 patch.object(github, "_page", lambda path, auth: (rows, "")),
                 patch.object(github, "_request", lambda *args, **kwargs: {}),
@@ -2833,7 +2833,7 @@ class SweepAllTests(unittest.TestCase):
         (self.checkout / ".git").mkdir(parents=True)
         for one in (
             patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "origin_repo", return_value="mock-user/gots"),
         ):
             one.start()
             self.addCleanup(one.stop)
@@ -2876,8 +2876,8 @@ class SweepAllTests(unittest.TestCase):
     def test_a_sweep_answers_the_tasks_it_just_claimed(self) -> None:
         """The pass's answer is what the loop starts sessions for, in the order it took them."""
         set_on(self.home, "p1", [folder(str(self.checkout))], True)
-        task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
-        second = {"repo": "mock-user/memento", "number": 266, "title": "Task 266"}
+        task = {"repo": "mock-user/gots", "number": 265, "title": "Task 265"}
+        second = {"repo": "mock-user/gots", "number": 266, "title": "Task 266"}
         with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
             with (
                 patch.object(afk, "_plan", return_value=afk.Plan("p1", [task, second])),
@@ -2898,7 +2898,7 @@ class LoopTests(unittest.TestCase):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
-        self.task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
+        self.task = {"repo": "mock-user/gots", "number": 265, "title": "Task 265"}
         self.starts: List[tuple] = []
         self.patch = patch("plugin.link.served_homes", return_value=[self.home])
         self.patch.start()
@@ -2927,7 +2927,7 @@ class LoopTests(unittest.TestCase):
     def test_the_tasks_one_pass_claimed_are_started_one_after_another(self) -> None:
         """A start makes a worktree on the project's repository: two at once is a load nobody asked
         for, however many tasks the same pass claimed (ADR 0025)."""
-        second = {"repo": "mock-user/memento", "number": 266, "title": "Task 266"}
+        second = {"repo": "mock-user/gots", "number": 266, "title": "Task 266"}
         running: List[int] = []
         overlaps: List[int] = []
 
@@ -2945,7 +2945,7 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(overlaps, [1, 1], "the second start waits for the first to finish")
 
     def test_one_projects_failure_to_start_does_not_stop_anothers(self) -> None:
-        second = {"repo": "mock-user/memento", "number": 266, "title": "Task 266"}
+        second = {"repo": "mock-user/gots", "number": 266, "title": "Task 266"}
         with (
             patch.object(afk, "sweep_all", return_value=[("p1", self.task), ("p2", second)]),
             patch.object(afk, "start", side_effect=[RuntimeError("no worktree"), None]),
@@ -2998,7 +2998,7 @@ class WakeTests(unittest.TestCase):
 class StagedRunTests(AfkSessionTests):
     """A staged task's run end: the gate's verdict, the stage it starts, and where it stalls."""
 
-    CLEAN = [{"name": "mock-user/memento", "changed": 0, "ahead": 2}]
+    CLEAN = [{"name": "mock-user/gots", "changed": 0, "ahead": 2}]
 
     def stage(self, kind: str = pipeline.BUILD, critique=("code-review",)) -> dict:
         record = staged_record(kind, steps=tuple(critique))
@@ -3198,7 +3198,7 @@ class StagedFlowTests(AfkSessionTests):
     are fakes too, so what happens between the runs is the host's own record and nothing else.
     """
 
-    CLEAN = [{"name": "mock-user/memento", "changed": 0, "ahead": 2}]
+    CLEAN = [{"name": "mock-user/gots", "changed": 0, "ahead": 2}]
     LOOP = preset("preset:loop")
     BROKEN = [{"command": "pnpm test", "code": 1}]
     PASSING = [{"command": "pnpm test", "code": 0}]
@@ -3262,7 +3262,7 @@ class StagedFlowTests(AfkSessionTests):
         self.assertEqual(pipeline.stage_name(self.pipeline()), "Review")
         self.assertEqual(
             self.posted[1]["input"][0]["content"],
-            "Review #265 (https://github.com/mock-user/memento/issues/265)",
+            "Review #265 (https://github.com/mock-user/gots/issues/265)",
         )
         self.assertNotIn("The round before this one failed", self.posted[1]["instructions"])
         self.ended()
@@ -3283,7 +3283,7 @@ class StagedFlowTests(AfkSessionTests):
         self.assertEqual(pipeline.stage_name(self.pipeline()), "Summary")
         self.assertEqual(
             self.posted[1]["input"][0]["content"],
-            "Summary #265 (https://github.com/mock-user/memento/issues/265)",
+            "Summary #265 (https://github.com/mock-user/gots/issues/265)",
         )
         self.assertIn("wrap-up", self.posted[1]["instructions"])
         self.assertIn("weekly-review", self.posted[1]["instructions"], "the stage's own skill is named")
@@ -3327,7 +3327,7 @@ class StagedFlowTests(AfkSessionTests):
                 if steps:
                     self.assertEqual(
                         self.posted[0]["input"][0]["content"],
-                        "Summary #265 (https://github.com/mock-user/memento/issues/265)",
+                        "Summary #265 (https://github.com/mock-user/gots/issues/265)",
                     )
                     self.assertIn("wrap-up", self.posted[0]["instructions"])
 
@@ -3430,14 +3430,14 @@ class StageRunTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         self.task = {
-            "repo": "mock-user/memento",
+            "repo": "mock-user/gots",
             "number": 265,
             "title": "The frontier is read from GitHub and listed",
-            "url": "https://github.com/mock-user/memento/issues/265",
+            "url": "https://github.com/mock-user/gots/issues/265",
         }
         staged = staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage"))
         self.record = {
-            "session_id": "memento-afk-review",
+            "session_id": "gots-afk-review",
             "project_id": "p1",
             "mode": "auto",
             "path": "/trees/afk-265",
@@ -3448,7 +3448,7 @@ class StageRunTests(unittest.TestCase):
             "pipeline": staged,
             "repos": [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": "/checkout",
                     "path": "/trees/afk-265",
                     "branch": "hermes/afk-265",
@@ -3527,12 +3527,12 @@ class StageRunTests(unittest.TestCase):
         body = self.run_stage()
         self.assertEqual(
             body["input"],
-            [{"role": "user", "content": "Review #265 (https://github.com/mock-user/memento/issues/265)"}],
+            [{"role": "user", "content": "Review #265 (https://github.com/mock-user/gots/issues/265)"}],
         )
 
     def test_its_instructions_name_the_task_the_base_and_the_skills_in_order(self) -> None:
         text = self.run_stage()["instructions"]
-        self.assertIn("mock-user/memento#265", text)
+        self.assertIn("mock-user/gots#265", text)
         self.assertIn("base branch main", text, "the branch the pull request is against")
         self.assertIn('"code-review", "log-triage"', text, "the stage's steps, in the order it applies them")
         self.assertIn("Review stage", text)
@@ -3608,10 +3608,10 @@ class MigrationTests(unittest.TestCase):
     )"""
 
     HELD = {
-        "repo": "mock-user/memento",
+        "repo": "mock-user/gots",
         "number": 265,
         "title": "The frontier is read from GitHub and listed",
-        "url": "https://github.com/mock-user/memento/issues/265",
+        "url": "https://github.com/mock-user/gots/issues/265",
         "created_at": "2026-10-01T00:00:00Z",
     }
 
@@ -3628,7 +3628,7 @@ class MigrationTests(unittest.TestCase):
             "at": 1_700_000_000,
             "task": json.dumps(self.HELD),
             "claimed_at": 1_700_000_100,
-            "session_id": "memento-afk-265",
+            "session_id": "gots-afk-265",
             "stalled": None,
             "stalled_at": None,
             "prompt": "Work in checkpoints.",
@@ -3657,7 +3657,7 @@ class MigrationTests(unittest.TestCase):
         holds = afk._holds(self.home, "p1")
         self.assertEqual(len(holds), 1, "exactly one hold: a working claim is never lost or doubled")
         self.assertEqual(holds[0].task, self.HELD)
-        self.assertEqual(holds[0].session_id, "memento-afk-265", "the session working it comes along")
+        self.assertEqual(holds[0].session_id, "gots-afk-265", "the session working it comes along")
         self.assertEqual(holds[0].claimed_at, 1_700_000_100, "and the clock it was claimed on")
         self.assertEqual(holds[0].stalled, "The run failed.")
         self.assertEqual(holds[0].stalled_at, 1_700_000_200)
@@ -3695,7 +3695,7 @@ class MigrationTests(unittest.TestCase):
             conn.close()
         holds = afk._holds(self.home, "p1")
         self.assertEqual(len(holds), 1, "a hold is copied once, whatever the store's version says")
-        self.assertEqual(holds[0].session_id, "memento-afk-265")
+        self.assertEqual(holds[0].session_id, "gots-afk-265")
 
 
 class FeatureTests(unittest.TestCase):
@@ -3728,7 +3728,7 @@ class BotRouteTests(unittest.TestCase):
         )
 
     def test_its_answer_is_a_bots_own_object(self) -> None:
-        self.assertIn('"object": "memento.afk.bot"', self.source)
+        self.assertIn('"object": "gots.afk.bot"', self.source)
 
     def test_it_reads_and_writes_the_bots_own_store(self) -> None:
         for call in ("afk.bot_read", "afk.bot_writes", "afk.write_bot"):

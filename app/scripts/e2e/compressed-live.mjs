@@ -27,7 +27,7 @@ async function streaming(chatId, { send, lastReply, until }) {
 async function compressed(name, { reload }) {
   await flow(name, async ({ page, seed, send, lastReply, until, shot }) => {
     const chatId = `e2e-livecomp-${runId()}`
-    const sessionId = `memento-${chatId}`
+    const sessionId = `gots-${chatId}`
     await seed([{ id: chatId, title: "Live compression", hermesSessionId: sessionId }])
     await page.goto(`${app}/c/${chatId}`)
 
@@ -62,7 +62,7 @@ async function compressed(name, { reload }) {
 async function stopped() {
   await flow("compressed-live-stop", async ({ page, seed, send, lastReply, until }) => {
     const chatId = `e2e-livecomp-${runId()}`
-    const sessionId = `memento-${chatId}`
+    const sessionId = `gots-${chatId}`
     await seed([{ id: chatId, title: "Stop under compression", hermesSessionId: sessionId }])
     await page.goto(`${app}/c/${chatId}`)
 

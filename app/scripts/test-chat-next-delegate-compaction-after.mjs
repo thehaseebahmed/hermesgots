@@ -29,7 +29,7 @@ test("the recording caught the children running when the host compacted, and arc
   assert.equal(running.length, 4)
   assert.ok(running.every((agent) => agent.status === "running"))
   assert.ok(done.every((agent) => agent.status === "done"))
-  assert.equal(recorded("runs-live.json").subagents["memento-fixture-delegate-compaction"], 4)
+  assert.equal(recorded("runs-live.json").subagents["gots-fixture-delegate-compaction"], 4)
   assert.equal(live[0].display_kind, "hidden", "the live read opens on the compaction")
   const liveCalls = live.flatMap((row) => (row.tool_calls ?? []).map((call) => call.function.name))
   assert.ok(!liveCalls.includes("delegate_task"), "the call is only in the archive")

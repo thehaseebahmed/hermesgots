@@ -73,7 +73,7 @@ cannot be mistaken for the one a baseline was taken on.
 | `straddle` | a sentence that straddles a pause: one Piece under `long-floor`, two under `device` | local |
 | `long` | a long unbroken take: past the floor with no pause to open at | local |
 | `silence` | room tone: no words at all | local |
-| `names` | names said against a Vocabulary (`Gots`, `Memento`, `Haseeb`, `Nous Research`) | local |
+| `names` | names said against a Vocabulary (`Gots`, `Gots`, `Haseeb`, `Nous Research`) | local |
 | `floor` | speech over a floor above the app's quiet threshold: no pause is ever confirmed | local |
 | `cloud` | a take for the cloud path: held whole and uploaded once, at its Confirm | cloud |
 | `sixty` | a sixty-second take in several Pieces | local |
@@ -83,7 +83,7 @@ Every fixture is one Piece under some policy and several under another, except t
 cloud take, which are one Piece under all of them — a cloud host holds the take and uploads the whole
 of it at once, so a cut into several Pieces is refused rather than measured as if it weren't.
 
-The `names` case is its own acceptance test: with the Vocabulary it lands `Gots`, `Memento` and
+The `names` case is its own acceptance test: with the Vocabulary it lands `Gots`, `Gots` and
 `Haseeb`; without it the same audio lands "Goths" and "his sea b" and word error rate goes from 0.07
 to 0.50 (`--no-vocabulary`). The two-word entry `Nous Research` comes back as "News Research" on
 `base` either way, which is why the record reports a list of misses and not a yes.

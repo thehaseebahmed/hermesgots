@@ -60,9 +60,9 @@ class SwitchTest(unittest.TestCase):
     def test_the_answer_names_the_object_the_switch_and_the_version(self) -> None:
         self.assertEqual(
             openui.record(False),
-            {"object": "memento.openui", "enabled": False, "version": openui.VERSION},
+            {"object": "gots.openui", "enabled": False, "version": openui.VERSION},
         )
-        self.assertEqual(openui.OBJECT, "memento.openui")
+        self.assertEqual(openui.OBJECT, "gots.openui")
         self.assertEqual(openui.FEATURE, "openui")
 
 

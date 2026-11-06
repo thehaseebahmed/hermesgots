@@ -114,7 +114,7 @@ export async function syncPush() {
   }
   const json = sub?.toJSON()
   if (!json?.endpoint) return
-  const subject = location.origin.startsWith("https:") ? location.origin : "https://memento.invalid"
+  const subject = location.origin.startsWith("https:") ? location.origin : "https://gots.invalid"
   for (const bot of await listProfiles()) {
     if (!bot.apiKey || !bot.baseUrl.trim()) continue
     const id = `${connectionKey(bot)}\n${json.endpoint}`

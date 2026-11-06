@@ -86,7 +86,7 @@ class Categories(unittest.TestCase):
 
     def test_a_database_from_before_categories_gains_the_column(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "memento.db"
+            path = Path(tmp) / "gots.db"
             old = sqlite3.connect(path)
             old.execute(
                 """CREATE TABLE push_subscriptions (endpoint TEXT PRIMARY KEY, device TEXT NOT NULL,
@@ -103,7 +103,7 @@ class Categories(unittest.TestCase):
 
     def test_once_tells_a_thing_a_single_time_until_cleared(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "memento.db"
+            path = Path(tmp) / "gots.db"
             self.assertTrue(push.once(path, "a"))
             self.assertFalse(push.once(path, "a"))
             self.assertTrue(push.once(path, "b"))
@@ -128,8 +128,8 @@ class Mutes(unittest.TestCase):
         chats.merge(self.path, {chat_id: {"at": 1, "value": value}})
 
     def test_nothing_is_muted_by_default(self):
-        self.chat("a", "memento-a")
-        self.assertFalse(push.muted(self.path, "question", "memento-a"))
+        self.chat("a", "gots-a")
+        self.assertFalse(push.muted(self.path, "question", "gots-a"))
 
     def test_a_muted_bot_mutes_everything_it_would_say(self):
         push.set_bot_muted(self.path, True)
@@ -139,26 +139,26 @@ class Mutes(unittest.TestCase):
         self.assertFalse(push.muted(self.path, "routine_failed", "x"))
 
     def test_a_muted_thread_mutes_its_own_session_only(self):
-        self.chat("a", "memento-a", muted=True)
-        self.chat("b", "memento-b")
-        self.assertTrue(push.muted(self.path, "approval", "memento-a"))
-        self.assertTrue(push.muted(self.path, "run_done", "memento-a"))
-        self.assertFalse(push.muted(self.path, "approval", "memento-b"))
+        self.chat("a", "gots-a", muted=True)
+        self.chat("b", "gots-b")
+        self.assertTrue(push.muted(self.path, "approval", "gots-a"))
+        self.assertTrue(push.muted(self.path, "run_done", "gots-a"))
+        self.assertFalse(push.muted(self.path, "approval", "gots-b"))
         # Not about a session: a thread's mute has no say.
-        self.assertFalse(push.muted(self.path, "routine_failed", "memento-a"))
+        self.assertFalse(push.muted(self.path, "routine_failed", "gots-a"))
 
     def test_a_compressed_session_is_still_its_chats(self):
-        self.chat("a", "memento-a", muted=True)
-        self.parents["child"] = "memento-a"
+        self.chat("a", "gots-a", muted=True)
+        self.parents["child"] = "gots-a"
         self.assertTrue(push.muted(self.path, "question", "child"))
 
     def test_unmuting_a_thread_clears_it(self):
-        self.chat("a", "memento-a", muted=True)
+        self.chat("a", "gots-a", muted=True)
         chats.merge(
             self.path,
-            {"a": {"at": 2, "value": {"hermesSessionId": "memento-a", "title": "t", "createdAt": 1, "updatedAt": 1}}},
+            {"a": {"at": 2, "value": {"hermesSessionId": "gots-a", "title": "t", "createdAt": 1, "updatedAt": 1}}},
         )
-        self.assertFalse(push.muted(self.path, "question", "memento-a"))
+        self.assertFalse(push.muted(self.path, "question", "gots-a"))
 
 
 class Messages(unittest.TestCase):
@@ -185,23 +185,23 @@ class Messages(unittest.TestCase):
         conn.close()
 
     def test_a_session_push_carries_its_chats_title(self):
-        chats.merge(self.path, {"a": {"at": 1, "value": {"hermesSessionId": "memento-a", "title": "Trip to Lahore"}}})
-        push._run(self.path, "question", "memento-a")
+        chats.merge(self.path, {"a": {"at": 1, "value": {"hermesSessionId": "gots-a", "title": "Trip to Lahore"}}})
+        push._run(self.path, "question", "gots-a")
         self.assertEqual(self.sent, [{"title": "Trip to Lahore"}])
 
     def test_a_compressed_session_carries_its_chats_title(self):
-        chats.merge(self.path, {"a": {"at": 1, "value": {"hermesSessionId": "memento-a", "title": "Trip"}}})
-        self.parents["child"] = "memento-a"
+        chats.merge(self.path, {"a": {"at": 1, "value": {"hermesSessionId": "gots-a", "title": "Trip"}}})
+        self.parents["child"] = "gots-a"
         push._run(self.path, "run_done", "child")
         self.assertEqual(self.sent[0]["title"], "Trip")
 
     def test_a_chat_the_app_hasnt_synced_takes_hermess_title(self):
-        self.state([("memento-b", "Fix the login bug")])
-        push._run(self.path, "approval", "memento-b")
+        self.state([("gots-b", "Fix the login bug")])
+        push._run(self.path, "approval", "gots-b")
         self.assertEqual(self.sent, [{"title": "Fix the login bug"}])
 
     def test_without_any_title_none_is_sent(self):
-        push._run(self.path, "approval", "memento-c")
+        push._run(self.path, "approval", "gots-c")
         self.assertEqual(self.sent, [{}])
 
     def test_a_long_title_is_cut(self):
@@ -212,7 +212,7 @@ class Messages(unittest.TestCase):
 
     def test_the_bot_rides_along(self):
         push.set_bot(self.path, "penny")
-        push._run(self.path, "run_done", "memento-d")
+        push._run(self.path, "run_done", "gots-d")
         self.assertEqual(self.sent, [{"bot": "penny"}])
 
     def test_only_a_bot_id_is_kept(self):
@@ -237,58 +237,58 @@ class Turns(unittest.TestCase):
         for patch in self.patches:
             patch.stop()
 
-    def end(self, session="memento-1", **flags):
+    def end(self, session="gots-1", **flags):
         alerts.turn_finished(session_id=session, platform="api_server", **flags)
 
     def test_a_failed_turn_is_told_at_once(self):
-        alerts.turn_started(session_id="memento-1", platform="api_server")
+        alerts.turn_started(session_id="gots-1", platform="api_server")
         self.end(completed=False, failed=True, interrupted=False)
-        self.assertEqual(self.told, [("run_failed", "memento-1")])
+        self.assertEqual(self.told, [("run_failed", "gots-1")])
 
     def test_a_stopped_turn_is_not_a_failure(self):
-        alerts.turn_started(session_id="memento-1", platform="api_server")
+        alerts.turn_started(session_id="gots-1", platform="api_server")
         self.end(completed=False, failed=True, interrupted=True)
         self.assertEqual(self.told, [])
 
     def test_a_short_turn_that_finished_is_not_news(self):
-        alerts.turn_started(session_id="memento-1", platform="api_server")
+        alerts.turn_started(session_id="gots-1", platform="api_server")
         self.end(completed=True, failed=False, interrupted=False)
         self.assertEqual(self.told, [])
 
     def test_a_long_turn_that_finished_is(self):
-        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        alerts._started["gots-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
         self.end(completed=True, failed=False, interrupted=False)
-        self.assertEqual(self.told, [("run_done", "memento-1")])
+        self.assertEqual(self.told, [("run_done", "gots-1")])
 
     def test_a_turn_whose_subagents_still_work_is_not_finished_yet(self):
-        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
-        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+        alerts._started["gots-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"gots-1": 1}):
             self.end(completed=True, failed=False, interrupted=False)
         self.assertEqual(self.told, [])
 
     def test_that_turn_is_told_once_its_subagents_are_gone(self):
-        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
-        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+        alerts._started["gots-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"gots-1": 1}):
             self.end(completed=True, failed=False, interrupted=False)
             self.assertEqual(self.told, [], "the news waits while the run still has work")
         with mock.patch.object(delegation, "live_sessions", lambda home: {}):
             alerts.tell_finished(*alerts.sessions._paths())
-        self.assertEqual(self.told, [("run_done", "memento-1")])
+        self.assertEqual(self.told, [("run_done", "gots-1")])
 
     def test_a_turn_held_for_its_subagents_is_told_only_once(self):
-        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
-        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+        alerts._started["gots-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"gots-1": 1}):
             self.end(completed=True, failed=False, interrupted=False)
         with mock.patch.object(delegation, "live_sessions", lambda home: {}):
             alerts.tell_finished(*alerts.sessions._paths())
             alerts.tell_finished(*alerts.sessions._paths())
-        self.assertEqual(self.told, [("run_done", "memento-1")])
+        self.assertEqual(self.told, [("run_done", "gots-1")])
 
     def test_a_failure_is_told_at_once_whatever_its_subagents_do(self):
-        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
-        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+        alerts._started["gots-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"gots-1": 1}):
             self.end(completed=False, failed=True, interrupted=False)
-        self.assertEqual(self.told, [("run_failed", "memento-1")])
+        self.assertEqual(self.told, [("run_failed", "gots-1")])
 
     def test_a_session_of_another_surface_is_ignored(self):
         alerts._started["telegram-9"] = time.monotonic() - 1000

@@ -22,7 +22,7 @@ await flow("idle-requests", async ({ page, send, until }) => {
   page.on("request", (request) => {
     const url = new URL(request.url())
     if (url.port === new URL(process.env.MOCK_URL).port && request.method() !== "OPTIONS")
-      seen.push(url.pathname.replace(/memento-[\w-]+/, "<chat>"))
+      seen.push(url.pathname.replace(/gots-[\w-]+/, "<chat>"))
   })
   await page.waitForTimeout(65_000)
   const counts = Object.entries(Object.groupBy(seen, (path) => path))

@@ -145,7 +145,7 @@ def fetch(provider: str) -> Optional[Dict[str, Any]]:
         else:
             snapshot = fetch_account_usage(provider)
     except Exception:
-        logger.debug("memento: couldn't read %s's usage from Hermes", provider, exc_info=True)
+        logger.debug("gots: couldn't read %s's usage from Hermes", provider, exc_info=True)
         return None
     if snapshot is not None:
         return serialize(snapshot)
@@ -153,6 +153,6 @@ def fetch(provider: str) -> Optional[Dict[str, Any]]:
         try:
             return serialize(usage_ollama.fetch_windows())
         except Exception:
-            logger.debug("memento: couldn't read %s's balance", provider, exc_info=True)
+            logger.debug("gots: couldn't read %s's balance", provider, exc_info=True)
             return None
     return None

@@ -259,12 +259,12 @@ def _within(deadline_s: float, call: Callable[[], Optional[str]]) -> Optional[st
     at all leaves the words as the host heard them, which is what ``finish`` lands.
     """
     try:
-        return run_bounded("memento-dictation-cleanup", deadline_s, call)
+        return run_bounded("gots-dictation-cleanup", deadline_s, call)
     except BoundedTimeout:
-        logger.debug(f"memento: a cleanup missed its {deadline_s}s budget")
+        logger.debug(f"gots: a cleanup missed its {deadline_s}s budget")
         return None
     except BaseException:  # noqa: BLE001 - a cleanup never costs a take its words
-        logger.debug("memento: a cleanup raised", exc_info=True)
+        logger.debug("gots: a cleanup raised", exc_info=True)
         return None
 
 
@@ -292,19 +292,19 @@ def _ask_model(
         system_prompt=prompt.system,
         max_tokens=prompt.tokens(input_text),
         temperature=0,
-        purpose="memento.dictation.cleanup",
+        purpose="gots.dictation.cleanup",
     )
     try:
         result = llm.complete_structured(**call, **options)
     except Exception:
         if not options:
-            logger.debug("memento: a dictation's cleanup failed", exc_info=True)
+            logger.debug("gots: a dictation's cleanup failed", exc_info=True)
             return None
-        logger.debug("memento: the picked cleanup model failed, using the bot's own", exc_info=True)
+        logger.debug("gots: the picked cleanup model failed, using the bot's own", exc_info=True)
         try:
             result = llm.complete_structured(**call)
         except Exception:
-            logger.debug("memento: a dictation's cleanup failed", exc_info=True)
+            logger.debug("gots: a dictation's cleanup failed", exc_info=True)
             return None
     parsed = getattr(result, "parsed", None)
     if not isinstance(parsed, dict):

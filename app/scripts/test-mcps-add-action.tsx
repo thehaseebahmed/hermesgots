@@ -90,14 +90,14 @@ async function seed(name: string, features: string[], servers: unknown[] = SERVE
   const host = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/memento/mcp")) {
+    if (url.pathname.endsWith("/plugins/gots/mcp")) {
       // Recorded here rather than by the host behind it: this route is answered before the host
       // sees it, so its own record would never carry the read.
       asked.push({ host: url.host, path: url.pathname, search: url.search, authorization: null })
       return json({ object: { servers } })
     }
     // One server's own block, as its page reads it: what the Config tab is built from.
-    const detail = url.pathname.match(/\/plugins\/memento\/mcp\/([^/]+)$/)
+    const detail = url.pathname.match(/\/plugins\/gots\/mcp\/([^/]+)$/)
     if (detail)
       return json({
         object: {
@@ -161,7 +161,7 @@ test("a Host without mcps_add has no + anywhere, and still lists its servers", a
     assert.equal(addButton(), null, "no +")
     assert.equal(namedAdd().length, 0, "and nothing named Add a server")
     assert.equal(
-      asked.filter((one) => one.path.endsWith("/plugins/memento/mcp")).length,
+      asked.filter((one) => one.path.endsWith("/plugins/gots/mcp")).length,
       1,
       "the page still read the bot's servers",
     )

@@ -9,7 +9,7 @@ import { app, assert, flow, makeProject, mock, pass, say } from "./lib.mjs"
 const TASK = 265
 const PR = 27
 const TITLE = `#${TASK} The frontier is read from GitHub and listed`
-const OPENING = `Title: The frontier is read from GitHub and listed\nDescription:\nRead the project's tasks from GitHub and list them.\n\n[Issue #${TASK}](https://github.com/mock-user/memento/issues/${TASK})`
+const OPENING = `Title: The frontier is read from GitHub and listed\nDescription:\nRead the project's tasks from GitHub and list them.\n\n[Issue #${TASK}](https://github.com/mock-user/gots/issues/${TASK})`
 
 // The records `plugin/pipeline.py` writes, stage by stage, with the gate's answer each one carries.
 const GATE = {
@@ -31,7 +31,7 @@ const RECORDS = {
   },
 }
 
-const afkPath = (projectId) => `${mock}/api/plugins/memento/projects/${projectId}/afk`
+const afkPath = (projectId) => `${mock}/api/plugins/gots/projects/${projectId}/afk`
 
 const post = (path, body) =>
   fetch(path, {
@@ -174,7 +174,7 @@ function watch(page) {
 const run = async ({ page, until, shot }) => {
   const errors = watch(page)
   const projectId = await makeProject(until, "Pipeline pill")
-  const id = `memento-afk-${projectId}`
+  const id = `gots-afk-${projectId}`
   // A critique skill is what turns the pipeline on, written the way the sheet's pickers write it.
   assert.equal(
     (await write(projectId, { build_skill: "plan", critique_skills: ["code-review"] })).status,
@@ -298,7 +298,7 @@ const plain = async ({ page, until, shot }) => {
   const errors = watch(page)
   // A project with no critique skill is one run: its session is never staged, and has no pill.
   const projectId = await makeProject(until, "Pipeline pill plain")
-  const id = `memento-afk-${projectId}`
+  const id = `gots-afk-${projectId}`
   await workOn(until, projectId)
   await seed(page, { id, projectId })
   await page.goto(`${app}/c/${id}`)
@@ -317,14 +317,14 @@ const plain = async ({ page, until, shot }) => {
 const olderPlugin = async ({ page, until, shot }) => {
   const errors = watch(page)
   const projectId = await makeProject(until, "Pipeline pill old")
-  const id = `memento-afk-${projectId}`
+  const id = `gots-afk-${projectId}`
   assert.equal(
     (await write(projectId, { build_skill: "plan", critique_skills: ["code-review"] })).status,
     200,
     "the critique is chosen",
   )
   await workOn(until, projectId)
-  await page.route("**/api/plugins/memento/info", async (route) => {
+  await page.route("**/api/plugins/gots/info", async (route) => {
     if (route.request().method() !== "GET") return route.continue()
     const response = await route.fetch()
     const body = await response.json()
@@ -359,7 +359,7 @@ const olderPlugin = async ({ page, until, shot }) => {
     "a plugin that doesn't advertise the pipeline draws no pill",
   )
   await shot("without-feature")
-  await page.unroute("**/api/plugins/memento/info")
+  await page.unroute("**/api/plugins/gots/info")
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }
 

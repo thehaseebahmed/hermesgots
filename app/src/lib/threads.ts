@@ -320,7 +320,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
 }
 
 /** The thread a bot's third pane reopens: the last one this device opened for that bot. */
-export const lastThreadKey = (profileId: string) => `memento:last-thread:${profileId}`
+export const lastThreadKey = (profileId: string) => `gots:last-thread:${profileId}`
 
 /**
  * What a bot's third pane holds while the address is Main: the thread this device opened last for

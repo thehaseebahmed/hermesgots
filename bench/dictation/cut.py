@@ -82,7 +82,7 @@ class CutPolicy:
 
 APP_RULE = ROOT / "app" / "src" / "lib" / "dictation.ts"
 PHONE_RULE = (
-    ROOT / "app" / "android" / "app" / "src" / "main" / "java" / "app" / "memento" / "BubbleRecorder.kt"
+    ROOT / "app" / "android" / "app" / "src" / "main" / "java" / "dev" / "hermesgots" / "BubbleRecorder.kt"
 )
 
 POLICIES: Dict[str, CutPolicy] = {

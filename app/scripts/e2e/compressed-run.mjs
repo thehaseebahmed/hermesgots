@@ -32,7 +32,7 @@ async function compressed(name, { beforeRun }) {
   await flow(name, async ({ page, seed, lastReply, until, shot }) => {
     const suffix = runId()
     const chatId = `e2e-comp-${suffix}`
-    const sessionId = `memento-${chatId}`
+    const sessionId = `gots-${chatId}`
     const childId = `${sessionId}-c1`
     // A chat synced from another device: it has turns on Hermes and none on this one yet.
     await seed([{ id: chatId, title: "Compressed", hermesSessionId: sessionId }])

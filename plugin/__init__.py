@@ -87,7 +87,7 @@ from .store import current_path
 
 logger = logging.getLogger(__name__)
 
-PREFIX = "/api/plugins/memento"
+PREFIX = "/api/plugins/gots"
 # A batch read of sessions' pull requests waits this long before answering with the rest unread. A
 # screen asks after every session it lists, and each session's read is a chain of outbound calls
 # (see `github.py`); the calls themselves are bounded there, once, for every route.
@@ -120,7 +120,7 @@ def _chain_pool() -> concurrent.futures.ThreadPoolExecutor:
     with _chains_lock:
         if _chains is None:
             _chains = concurrent.futures.ThreadPoolExecutor(
-                max_workers=github.MAX_OUTBOUND, thread_name_prefix="memento-prs"
+                max_workers=github.MAX_OUTBOUND, thread_name_prefix="gots-prs"
             )
         return _chains
 # Gots shows 24 runs per job.
@@ -279,7 +279,7 @@ def _stored(read: Callable[[], Any], default: Any, what: str) -> Any:
     try:
         return read()
     except Exception:
-        logger.warning(f"memento: couldn't read {what}", exc_info=True)
+        logger.warning(f"gots: couldn't read {what}", exc_info=True)
         return default
 
 
@@ -321,7 +321,7 @@ def mirror_for_profiles(app: Any, web: Any) -> None:
     try:
         from gateway.platforms.api_server import _api_request_profile
     except ImportError:
-        logger.warning("memento: this Hermes can't scope routes by profile; /p/<profile> bots stay off")
+        logger.warning("gots: this Hermes can't scope routes by profile; /p/<profile> bots stay off")
         return
 
     def scoped(handler: Any):
@@ -354,13 +354,13 @@ async def repair_labelled_sources(homes: List[Path]) -> List[Path]:
         try:
             moved = await asyncio.to_thread(sessions.heal_sources, home)
         except Exception:
-            logger.warning("memento: couldn't repair session labels in %s", home, exc_info=True)
+            logger.warning("gots: couldn't repair session labels in %s", home, exc_info=True)
             failed.append(home)
             continue
         if moved is None:
             failed.append(home)
         elif moved:
-            logger.info("memento: put %d relabelled session(s) back on the API source in %s", moved, home)
+            logger.info("gots: put %d relabelled session(s) back on the API source in %s", moved, home)
     return failed
 
 
@@ -373,7 +373,7 @@ async def retry_labelled_sources(homes: List[Path]) -> None:
         if not homes:
             return
     logger.error(
-        "memento: couldn't repair relabelled sessions in %s; those chats keep answering "
+        "gots: couldn't repair relabelled sessions in %s; those chats keep answering "
         "permission_denied until a restart heals them",
         ", ".join(str(home) for home in homes),
     )
@@ -412,14 +412,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(clones.resume, home)
             await asyncio.to_thread(repos.resume, home)
         except Exception:
-            logger.debug("memento: couldn't resume project clones", exc_info=True)
+            logger.debug("gots: couldn't resume project clones", exc_info=True)
         # And a session the user closed with its close still owed (closes.py, ADR 0080), on every
         # home this process serves: a `/p/<profile>` bot's row is as owed as the launch profile's.
         try:
             for served in link.served_homes(adapter):
                 await asyncio.to_thread(closes.resume, served)
         except Exception:
-            logger.debug("memento: couldn't resume the session closes", exc_info=True)
+            logger.debug("gots: couldn't resume the session closes", exc_info=True)
         # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
         # sessions.heal_sources.
         failed = await repair_labelled_sources(link.served_homes(adapter))
@@ -465,7 +465,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     except RuntimeError:
         # Loaded into a server that is already taking turns: no startup pass, but the rows still
         # have to be back before the next one, so repair them from here.
-        logger.warning("memento: the API server already started; no daily cleanup until restart")
+        logger.warning("gots: the API server already started; no daily cleanup until restart")
         asyncio.ensure_future(repair_labelled_sources(link.served_homes(adapter)))
 
     def unauthorized(request: "web.Request"):
@@ -482,7 +482,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             from hermes_cli.plugins import get_plugin_manager
 
-            loaded = getattr(get_plugin_manager(), "_plugins", {}).get("memento")
+            loaded = getattr(get_plugin_manager(), "_plugins", {}).get("gots")
             return bool(loaded and loaded.enabled and not loaded.error)
         except Exception:
             return True
@@ -504,7 +504,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             return store_path()
         except Exception:
-            logger.debug("memento: no dictation store to read a level from", exc_info=True)
+            logger.debug("gots: no dictation store to read a level from", exc_info=True)
             return None
 
     async def info(request: "web.Request") -> "web.Response":
@@ -534,7 +534,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         pending_features = await asyncio.to_thread(_advertised, pending.FEATURES)
         return web.json_response(
             {
-                "name": "memento",
+                "name": "gots",
                 "version": VERSION,
                 "features": [
                     "cron_runs",
@@ -738,7 +738,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         except ImportError:
             return _error(web, "This Hermes version can't switch models from here.", 501)
-        return web.json_response({"object": "memento.host_model", **chosen})
+        return web.json_response({"object": "gots.host_model", **chosen})
 
     async def get_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -755,7 +755,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             fallbacks = await asyncio.to_thread(run)
         except ImportError:
             return _error(web, "This Hermes version can't read models from here.", 501)
-        return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
+        return web.json_response({"object": "gots.fallbacks", "fallbacks": fallbacks})
 
     async def json_body(request: "web.Request"):
         try:
@@ -935,7 +935,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         except ImportError:
             return _error(web, "This Hermes version can't switch models from here.", 501)
-        return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
+        return web.json_response({"object": "gots.fallbacks", "fallbacks": fallbacks})
 
     async def get_delegation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -956,7 +956,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response(
-            {"object": "memento.delegation", "delegation": pick, "custom": custom}
+            {"object": "gots.delegation", "delegation": pick, "custom": custom}
         )
 
     async def get_triage_model(request: "web.Request") -> "web.Response":
@@ -964,7 +964,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         pick = await asyncio.to_thread(triage.read_model, store_path())
-        return web.json_response({"object": "memento.triage_model", "triage_model": pick})
+        return web.json_response({"object": "gots.triage_model", "triage_model": pick})
 
     async def get_openui(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1032,7 +1032,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         except ImportError:
             return _error(web, "This Hermes version can't switch models from here.", 501)
-        return web.json_response({"object": "memento.triage_model", "triage_model": saved})
+        return web.json_response({"object": "gots.triage_model", "triage_model": saved})
 
     async def set_delegation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1058,7 +1058,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         except ImportError:
             return _error(web, "This Hermes version can't switch models from here.", 501)
-        return web.json_response({"object": "memento.delegation", "delegation": saved})
+        return web.json_response({"object": "gots.delegation", "delegation": saved})
 
     def profile_scope():
         # The API server's own per-profile scope (home and secrets) for the request being served, or
@@ -1091,7 +1091,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         records = await asyncio.to_thread(chats.read, store_path())
-        return web.json_response({"object": "memento.chats", "chats": records})
+        return web.json_response({"object": "gots.chats", "chats": records})
 
     async def merge_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1107,7 +1107,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
-        return web.json_response({"object": "memento.chats", "chats": records})
+        return web.json_response({"object": "gots.chats", "chats": records})
 
     async def session_context(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1124,12 +1124,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 session_id = await asyncio.to_thread(resolve, session_id) or session_id
             except Exception:
-                logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+                logger.debug("gots: couldn't resolve session %s", session_id, exc_info=True)
         found = await asyncio.to_thread(context.read, path, session_id) or {}
         changes = await asyncio.to_thread(model_changes.read, path, session_id, asked_id)
         compacted = await asyncio.to_thread(compactions.read, profile_home(), session_id)
         body = {
-            "object": "memento.context",
+            "object": "gots.context",
             "session_id": session_id,
             **{field: found.get(field) for field in context.FIELDS},
         }
@@ -1173,7 +1173,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not provider:
             return _error(web, "Missing provider", 400)
         result = await read_usage(provider)
-        return web.json_response({"object": "memento.usage", **result})
+        return web.json_response({"object": "gots.usage", **result})
 
     async def session_agents(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1185,7 +1185,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
         found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
-        return web.json_response({"object": "memento.agents", "session_id": session_id, "agents": found})
+        return web.json_response({"object": "gots.agents", "session_id": session_id, "agents": found})
 
     async def stop_agent(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1197,7 +1197,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         home = hermes_home()
         found = await asyncio.to_thread(delegation.stop, home, session_id, agent_id)
         return web.json_response(
-            {"object": "memento.agent_stop", "session_id": session_id, "agent_id": agent_id, **found}
+            {"object": "gots.agent_stop", "session_id": session_id, "agent_id": agent_id, **found}
         )
 
     async def stop_agents(request: "web.Request") -> "web.Response":
@@ -1210,7 +1210,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
         found = await asyncio.to_thread(delegation.stop_all, home, session_id, live)
         return web.json_response(
-            {"object": "memento.agents_stop", "session_id": session_id, **found}
+            {"object": "gots.agents_stop", "session_id": session_id, **found}
         )
 
     async def session_todos(request: "web.Request") -> "web.Response":
@@ -1227,12 +1227,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 try:
                     session_id = await asyncio.to_thread(resolve, session_id) or session_id
                 except Exception:
-                    logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+                    logger.debug("gots: couldn't resolve session %s", session_id, exc_info=True)
             found = await asyncio.to_thread(todos.read, db, session_id)
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(
             {
-                "object": "memento.todos",
+                "object": "gots.todos",
                 "session_id": session_id,
                 "revision": found["revision"] if found else None,
                 "todos": found["todos"] if found else None,
@@ -1266,7 +1266,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             rows = await read_projects()
         except ImportError:
             return _error(web, "This Hermes version has no Projects.", 501)
-        return web.json_response({"object": "memento.projects", "projects": rows})
+        return web.json_response({"object": "gots.projects", "projects": rows})
 
     def hermes_home() -> Path:
         return profile_home()
@@ -1276,7 +1276,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         result = await asyncio.to_thread(github.status, hermes_home())
-        return web.json_response({"object": "memento.github", **result})
+        return web.json_response({"object": "gots.github", **result})
 
     async def github_repos(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1286,7 +1286,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             rows = await asyncio.to_thread(github.repos, hermes_home())
         except github.GitHubError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.github.repos", "repos": rows})
+        return web.json_response({"object": "gots.github.repos", "repos": rows})
 
     async def create_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1306,7 +1306,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ValueError as error:
             return _error(web, str(error), 400)
         clones.spawn(home, created["slug"])
-        return web.json_response({"object": "memento.project", **created}, status=202)
+        return web.json_response({"object": "gots.project", **created}, status=202)
 
     async def edit_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1337,7 +1337,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not found:
             return _error(web, "No such project.", 404)
         events.note("projects", None, store_path(), True)
-        return web.json_response({"object": "memento.project", "id": request.match_info["project_id"]})
+        return web.json_response({"object": "gots.project", "id": request.match_info["project_id"]})
 
     async def delete_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1358,7 +1358,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not found:
             return _error(web, "No such project.", 404)
         events.note("projects", None, store_path(), True)
-        return web.json_response({"object": "memento.project", "removed": True})
+        return web.json_response({"object": "gots.project", "removed": True})
 
     async def retry_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1372,7 +1372,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
         if retried is None:
             return _error(web, "No failed project to retry.", 404)
-        return web.json_response({"object": "memento.project", **retried}, status=202)
+        return web.json_response({"object": "gots.project", **retried}, status=202)
 
     async def add_repo(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1394,7 +1394,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         if added is None:
             return _error(web, "No such project.", 404)
-        return web.json_response({"object": "memento.project.repo", **added}, status=202)
+        return web.json_response({"object": "gots.project.repo", **added}, status=202)
 
     async def remove_repo(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1414,7 +1414,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         if not found:
             return _error(web, "That repo isn't in this project.", 404)
-        return web.json_response({"object": "memento.project.repo", "removed": True}, status=202)
+        return web.json_response({"object": "gots.project.repo", "removed": True}, status=202)
 
     async def project_usage(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1431,7 +1431,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version has no Projects.", 501)
         if found is None:
             return _error(web, "No such project.", 404)
-        return web.json_response({"object": "memento.project.usage", **found})
+        return web.json_response({"object": "gots.project.usage", **found})
 
     async def resolve_project(project_id: str):
         """A project, or the response that says why it can't be read — its two routes' own answer."""
@@ -1455,7 +1455,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # A project still being cloned has no library to list yet.
         if clones.is_pending_id(project_id):
             return web.json_response(
-                {"object": "memento.library", "project_id": project_id, "folders": []}
+                {"object": "gots.library", "project_id": project_id, "folders": []}
             )
         project, refused = await resolve_project(project_id)
         if refused is not None:
@@ -1463,7 +1463,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         root = library.library_root(project)
         folders = await asyncio.to_thread(library.tree, root)
         return web.json_response(
-            {"object": "memento.library", "project_id": project_id, "folders": folders}
+            {"object": "gots.library", "project_id": project_id, "folders": folders}
         )
 
     async def project_tasks(request: "web.Request") -> "web.Response":
@@ -1474,7 +1474,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # A project still being cloned has no checkout to read a task from yet.
         if clones.is_pending_id(project_id):
             return web.json_response(
-                {"object": "memento.tasks", "project_id": project_id, **tasks.empty()}
+                {"object": "gots.tasks", "project_id": project_id, **tasks.empty()}
             )
         project, refused = await resolve_project(project_id)
         if refused is not None:
@@ -1485,7 +1485,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # GitHub's own reason is the answer: there's no account on this server, or its token
             # was refused, and the sheet says so instead of showing an empty frontier.
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.tasks", "project_id": project_id, **found})
+        return web.json_response({"object": "gots.tasks", "project_id": project_id, **found})
 
     async def project_afk(request: "web.Request") -> "web.Response":
         """Whether the project is left to work its own tasks, and why it can't be."""
@@ -1506,7 +1506,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             project.folders,
             bool(getattr(project, "archived", False)),
         )
-        return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
+        return web.json_response({"object": "gots.afk", "project_id": project_id, **found})
 
     async def post_project_afk(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1551,7 +1551,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 project.folders,
                 bool(getattr(project, "archived", False)),
             )
-        return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
+        return web.json_response({"object": "gots.afk", "project_id": project_id, **found})
 
     async def bot_afk(request: "web.Request") -> "web.Response":
         """The bot's own AFK numbers: the pick budget, how much of it is held, and the usage threshold.
@@ -1581,12 +1581,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def bot_afk_answer() -> "web.Response":
         """The one answer both of the bot's writes and its read carry."""
         found = await asyncio.to_thread(afk.bot_read, hermes_home())
-        return web.json_response({"object": "memento.afk.bot", **found})
+        return web.json_response({"object": "gots.afk.bot", **found})
 
     async def workflows_response() -> "web.Response":
         """The library as it stands: what every write to it answers."""
         found = await asyncio.to_thread(workflows.library, hermes_home())
-        return web.json_response({"object": "memento.workflows", "workflows": found})
+        return web.json_response({"object": "gots.workflows", "workflows": found})
 
     async def list_workflows(request: "web.Request") -> "web.Response":
         """A bot's workflows: presets first, read-only, each naming its stages."""
@@ -1604,7 +1604,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
         if found is None:
             return _error(web, "No such workflow.", 404)
-        return web.json_response({"object": "memento.workflow", **found})
+        return web.json_response({"object": "gots.workflow", **found})
 
     async def create_workflow(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1664,7 +1664,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             record = {**record, "pipeline": pipeline.for_app(record.get("pipeline"))}
         return web.json_response(
             {
-                "object": "memento.workspace",
+                "object": "gots.workspace",
                 "workspace": record,
                 "instructions": prompt_builder.session_prompt(record) if record else None,
                 "blocked": await asyncio.to_thread(sessions.blocked, hermes_home(), record),
@@ -1737,7 +1737,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 sessions.answer_waiting(request.match_info["session_id"])
             except Exception:
-                logger.debug("memento: answering waiting approvals failed", exc_info=True)
+                logger.debug("gots: answering waiting approvals failed", exc_info=True)
         return await workspace_response(record)
 
     async def remove_workspace(request: "web.Request") -> "web.Response":
@@ -1751,7 +1751,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         if result.get("removed"):
             sessions._clear_cwd(session_id)
-        return web.json_response({"object": "memento.workspace.removed", **result})
+        return web.json_response({"object": "gots.workspace.removed", **result})
 
     def prs_of(home: Path, record: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
         """Each repo's pull requests, newest first, from a session's own record."""
@@ -1775,7 +1775,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 await asyncio.to_thread(merges.check, home, {session_id})
             except Exception:
-                logger.debug("memento: resolving a merged session failed", exc_info=True)
+                logger.debug("gots: resolving a merged session failed", exc_info=True)
         return [pr for group in per_repo for pr in group]
 
     async def session_pr(request: "web.Request") -> "web.Response":
@@ -1789,7 +1789,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             prs = await settled_prs(home, session_id, record)
         except github.GitHubError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.prs", "prs": prs})
+        return web.json_response({"object": "gots.prs", "prs": prs})
 
     # A screen asks after every session it lists, and each read is a chain of outbound calls: the
     # batch answers them in one request, a few at a time and within a deadline, so a dependency
@@ -1840,7 +1840,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 _, found = task.result()
             except Exception:
-                logger.debug("memento: the batch read of %s failed", session_id, exc_info=True)
+                logger.debug("gots: the batch read of %s failed", session_id, exc_info=True)
                 unread.append(session_id)
                 continue
             if found is None:
@@ -1853,7 +1853,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             pass_ = asyncio.get_running_loop().run_in_executor(None, merges.check, home, merged)
             _resolving.add(pass_)
             pass_.add_done_callback(_resolving.discard)
-        return web.json_response({"object": "memento.prs", "prs": prs, "unread": unread})
+        return web.json_response({"object": "gots.prs", "prs": prs, "unread": unread})
 
     async def session_library(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1867,7 +1867,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not record:
             return web.json_response(
                 {
-                    "object": "memento.library",
+                    "object": "gots.library",
                     "session_id": session_id,
                     "worktree": None,
                     "folders": [],
@@ -1877,7 +1877,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         folders = await asyncio.to_thread(library.tree, root, slug)
         return web.json_response(
             {
-                "object": "memento.library",
+                "object": "gots.library",
                 "session_id": session_id,
                 "worktree": slug,
                 "folders": folders,
@@ -1894,10 +1894,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         path, home = store_path(), hermes_home()
         record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
         if not record:
-            return web.json_response({"object": "memento.closed", "removed": True, "kept": [], "results": []})
+            return web.json_response({"object": "gots.closed", "removed": True, "kept": [], "results": []})
         # The same sequence the recorded close runs, so the two paths cannot drift.
         report = await asyncio.to_thread(closes.work, path, home, record)
-        return web.json_response({"object": "memento.closed", **report})
+        return web.json_response({"object": "gots.closed", **report})
 
     async def start_close(request: "web.Request") -> "web.Response":
         """Records a session's close and answers before any of it runs (closes.py, ADR 0080)."""
@@ -1919,7 +1919,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # Never a 404: the app reads one as a plugin without the route, and a session this host
             # was never asked about has no close to fail over.
             return web.json_response(
-                {"object": "memento.closing", "session_id": session_id, "state": "none"}
+                {"object": "gots.closing", "session_id": session_id, "state": "none"}
             )
         return web.json_response(closes.public(row))
 
@@ -1929,7 +1929,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         rows = await asyncio.to_thread(closes.recent, store_path())
         return web.json_response(
-            {"object": "memento.closes", "closes": [closes.public(row) for row in rows]}
+            {"object": "gots.closes", "closes": [closes.public(row) for row in rows]}
         )
 
     async def live_runs(request: "web.Request") -> "web.Response":
@@ -1959,30 +1959,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 asked=asked,
             )
         except Exception:
-            logger.debug("memento: reading waiting sessions failed", exc_info=True)
+            logger.debug("gots: reading waiting sessions failed", exc_info=True)
             waiting = {}
         try:
             host_side = await asyncio.to_thread(afk.stalled, home, live)
         except Exception:
-            logger.debug("memento: reading stalled AFK sessions failed", exc_info=True)
+            logger.debug("gots: reading stalled AFK sessions failed", exc_info=True)
             host_side = {}
         for session_id, reason in host_side.items():
             waiting.setdefault(session_id, reason)
         try:
             subagents = await asyncio.to_thread(delegation.live_sessions, home)
         except Exception:
-            logger.debug("memento: reading live subagents failed", exc_info=True)
+            logger.debug("gots: reading live subagents failed", exc_info=True)
             subagents = {}
         try:
             # The wakes still owed, so a session never reads at rest between its last subagent
             # ending and the wake turn starting; see delegation.waking_sessions.
             wakes = await asyncio.to_thread(delegation.waking_sessions, home)
         except Exception:
-            logger.debug("memento: reading owed wakes failed", exc_info=True)
+            logger.debug("gots: reading owed wakes failed", exc_info=True)
             wakes = {}
         return web.json_response(
             {
-                "object": "memento.runs",
+                "object": "gots.runs",
                 "sessions": held,
                 "run_ids": run_ids,
                 "waiting": waiting,
@@ -2018,7 +2018,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(push.subscribe, store_path(), body)
         except push.PushError as exc:
             return _error(web, str(exc), 400)
-        return web.json_response({"object": "memento.push", "subscribed": True})
+        return web.json_response({"object": "gots.push", "subscribed": True})
 
     async def push_mute(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2035,7 +2035,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(push.set_bot_muted, store_path(), muted)
         if character:
             await asyncio.to_thread(push.set_bot, store_path(), character)
-        return web.json_response({"object": "memento.push", "muted": muted})
+        return web.json_response({"object": "gots.push", "muted": muted})
 
     async def push_unsubscribe(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2046,7 +2046,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not isinstance(endpoint, str) or not endpoint:
             return _error(web, "Missing endpoint", 400)
         await asyncio.to_thread(push.unsubscribe, store_path(), endpoint)
-        return web.json_response({"object": "memento.push", "subscribed": False})
+        return web.json_response({"object": "gots.push", "subscribed": False})
 
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
@@ -2142,7 +2142,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if clarify_id is None:
             return _error(web, f"Run has no pending question: {run_id}", 409)
         return web.json_response(
-            {"object": "memento.clarify_response", "run_id": run_id, "clarify_id": clarify_id, "resolved": True}
+            {"object": "gots.clarify_response", "run_id": run_id, "clarify_id": clarify_id, "resolved": True}
         )
 
     async def upload_attachment(request: "web.Request") -> "web.Response":
@@ -2165,10 +2165,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ValueError as exc:
             return _error(web, str(exc), 400)
         except OSError:
-            logger.warning("memento: couldn't save an attachment", exc_info=True)
+            logger.warning("gots: couldn't save an attachment", exc_info=True)
             return _error(web, "Couldn't save the file on the server.", 500)
         return web.json_response(
-            {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
+            {"object": "gots.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
         )
 
     async def dictation_piece(request: "web.Request") -> "web.Response":
@@ -2206,16 +2206,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except dictation.DictationError as error:
             return _error(web, str(error), error.status)
         except Exception:
-            logger.warning("memento: couldn't take a dictation Piece", exc_info=True)
+            logger.warning("gots: couldn't take a dictation Piece", exc_info=True)
             return _error(web, "Transcription failed.", 502)
-        return web.json_response({"object": "memento.dictation_piece", **recorded}, status=202)
+        return web.json_response({"object": "gots.dictation_piece", **recorded}, status=202)
 
     async def warm_dictation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         result = await asyncio.to_thread(dictation.warm)
-        return web.json_response({"object": "memento.dictation_warm", **result})
+        return web.json_response({"object": "gots.dictation_warm", **result})
 
     async def confirm_dictation(request: "web.Request") -> "web.Response":
         """The one call that carries a take's words: what was heard, tidied at the bot's level where
@@ -2248,9 +2248,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except dictation.DictationError as error:
             return _error(web, str(error), error.status)
         except Exception:
-            logger.warning("memento: couldn't answer a dictation take", exc_info=True)
+            logger.warning("gots: couldn't answer a dictation take", exc_info=True)
             return _error(web, "Transcription failed.", 502)
-        return web.json_response({"object": "memento.dictation", **result})
+        return web.json_response({"object": "gots.dictation", **result})
 
     async def cancel_dictation(request: "web.Request") -> "web.Response":
         """Takes a take off the host at once, rather than leaving its audio to expire."""
@@ -2260,7 +2260,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         removed = await asyncio.to_thread(
             dictation.cancel, store_path(), request.match_info["take"]
         )
-        return web.json_response({"object": "memento.dictation_cancelled", "removed": bool(removed)})
+        return web.json_response({"object": "gots.dictation_cancelled", "removed": bool(removed)})
 
     async def served_file(
         request: "web.Request", resolve: Any, allowed: Any = None
@@ -2315,7 +2315,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
         return web.json_response(
             {
-                "object": "memento.media_url",
+                "object": "gots.media_url",
                 "path": path,
                 "url": url,
                 "expires": expires,
@@ -2384,9 +2384,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             payload = await asyncio.to_thread(run)
         except Exception:
-            logger.warning("memento: couldn't read the host's speech settings", exc_info=True)
+            logger.warning("gots: couldn't read the host's speech settings", exc_info=True)
             return _error(web, "Couldn't read the host's speech settings.", 502)
-        return web.json_response({"object": "memento.speech", "speech": payload})
+        return web.json_response({"object": "gots.speech", "speech": payload})
 
     async def set_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2425,9 +2425,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, "This Hermes version can't read speech settings from here.", 501)
         except Exception as error:
-            logger.warning("memento: couldn't save the speech settings", exc_info=True)
+            logger.warning("gots: couldn't save the speech settings", exc_info=True)
             return _error(web, f"The host couldn't save the speech setting: {error}", 502)
-        return web.json_response({"object": "memento.speech", "speech": payload})
+        return web.json_response({"object": "gots.speech", "speech": payload})
 
     app.router.add_get(f"{PREFIX}/speech", get_speech)
     app.router.add_post(f"{PREFIX}/speech", set_speech)
@@ -2459,9 +2459,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except speech_probe.Unavailable as error:
             return _error(web, str(error), 501)
         except Exception as error:
-            logger.warning("memento: couldn't measure this host's speech models", exc_info=True)
+            logger.warning("gots: couldn't measure this host's speech models", exc_info=True)
             return _error(web, f"The host couldn't measure its speech models: {error}", 502)
-        return web.json_response({"object": "memento.speech", "speech": payload})
+        return web.json_response({"object": "gots.speech", "speech": payload})
 
     app.router.add_post(f"{PREFIX}/speech/probe", probe_speech)
 
@@ -2514,7 +2514,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     set_stt = keyed_settings_route(
         write=speech.set_stt_value,
         read=speech.stt_settings,
-        object_name="memento.stt",
+        object_name="gots.stt",
         field="stt",
         no_schema="This Hermes version can't read speech settings from here.",
         failed="The host couldn't save the speech setting",
@@ -2559,7 +2559,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         (general.DELEGATION, "delegation-settings", "Delegation"),
     ):
         read_tab = partial(general.read, tab=tab)
-        object_name = f"memento.{route.replace('-', '_')}"
+        object_name = f"gots.{route.replace('-', '_')}"
         field = route.split("-")[0]
         no_schema = f"This Hermes version can't show its own {label} settings."
         app.router.add_get(
@@ -2569,7 +2569,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 object_name=object_name,
                 field=field,
                 no_schema=no_schema,
-                failed=f"memento: couldn't read the host's {label} settings",
+                failed=f"gots: couldn't read the host's {label} settings",
             ),
         )
         app.router.add_post(
@@ -2593,7 +2593,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         state = outbox.state(runs, found["resumed_at"])
         return web.json_response(
             {
-                "object": "memento.queue",
+                "object": "gots.queue",
                 "items": found["items"],
                 "sent": found["sent"],
                 "paused": state == "paused",
@@ -2631,7 +2631,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ValueError as error:
             return _error(web, str(error), 400)
         follow_queue(request, session_id, path)
-        return web.json_response({"object": "memento.queued", "item": item})
+        return web.json_response({"object": "gots.queued", "item": item})
 
     async def record_move(
         path, key, session_id, text, thread, thread_session, item, body, files, new=False, at=None
@@ -2645,7 +2645,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 files=files, at=at,
             )
         except Exception:
-            logger.debug("memento: couldn't record a move", exc_info=True)
+            logger.debug("gots: couldn't record a move", exc_info=True)
 
     async def triage_message(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2677,7 +2677,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 )
             except asyncio.TimeoutError:
                 found = {"decision": triage.MAIN}
-            answer: Dict[str, Any] = {"object": "memento.triage", "decision": triage.MAIN}
+            answer: Dict[str, Any] = {"object": "gots.triage", "decision": triage.MAIN}
             if time.monotonic() > deadline + 0.5:
                 found = {"decision": triage.MAIN}
             files = outbox.clean_files(body.get("attachments"))
@@ -2700,16 +2700,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         started["item"]["id"], body, files, new=True, at=at,
                     )
                     events.note("session", session_id, path, True)
-                    answer = {"object": "memento.triage", "decision": triage.NEW, **started}
+                    answer = {"object": "gots.triage", "decision": triage.NEW, **started}
                 except Exception:
-                    logger.debug("memento: triage couldn't open a thread", exc_info=True)
+                    logger.debug("gots: triage couldn't open a thread", exc_info=True)
                 # Outside the try: the thread and its queued message exist by now, and a failure
                 # here must not tell the app to send the message to Main as well.
                 if answer["decision"] == triage.NEW:
                     try:
                         follow_queue(request, answer["session_id"], path)
                     except Exception:
-                        logger.debug("memento: triage couldn't follow a new thread", exc_info=True)
+                        logger.debug("gots: triage couldn't follow a new thread", exc_info=True)
             elif found["decision"] == triage.THREAD:
                 try:
                     delivered = await triage.deliver(
@@ -2732,7 +2732,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         delivered["item"]["id"], body, files, at=at,
                     )
                     events.note("session", session_id, path, True)
-                    answer = {"object": "memento.triage", "decision": triage.THREAD, **delivered}
+                    answer = {"object": "gots.triage", "decision": triage.THREAD, **delivered}
             triage.remember(memo, answer)
         return web.json_response(answer)
 
@@ -2764,7 +2764,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         phases = await move_phases(path, [m for m in found if not m["undone"]])
         return web.json_response(
             {
-                "object": "memento.moves",
+                "object": "gots.moves",
                 "moves": [
                     moves.public(m, m["id"] in phases and moves.undoable(m, phases[m["id"]][0]))
                     for m in found
@@ -2783,7 +2783,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             if move is None:
                 return _error(web, "No such move.", 404)
             if move["undone"]:
-                return web.json_response({"object": "memento.move.undone", "undone": True})
+                return web.json_response({"object": "gots.move.undone", "undone": True})
             where, item = (await move_phases(path, [move]))[key]
             if not moves.undoable(move, where) or (where != moves.QUEUED and item is None):
                 return _error(web, "The thread has already replied to this message.", 409)
@@ -2815,7 +2815,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     outbox.add, path, session_id, _request_profile(), move["text"], move["files"], run
                 )
             except Exception:
-                logger.debug("memento: couldn't queue an undone move on Main", exc_info=True)
+                logger.debug("gots: couldn't queue an undone move on Main", exc_info=True)
                 if taken is not None:
                     await asyncio.to_thread(outbox.put_back, path, taken)
                 return _error(web, "Couldn't put the message back in Main.", 500)
@@ -2838,7 +2838,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         follow_queue(request, session_id, path)
         events.note("session", session_id, path, True)
         events.note("session", thread_session, path, True)
-        return web.json_response({"object": "memento.move.undone", "undone": True})
+        return web.json_response({"object": "gots.move.undone", "undone": True})
 
     async def remove_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2848,7 +2848,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         path = store_path()
         removed = await asyncio.to_thread(outbox.remove, path, session_id, request.match_info["item_id"])
         events.note("session", session_id, path, True)
-        return web.json_response({"object": "memento.queue.removed", "removed": removed})
+        return web.json_response({"object": "gots.queue.removed", "removed": removed})
 
     async def send_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2903,7 +2903,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except pending.PendingError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.pending", **found})
+        return web.json_response({"object": "gots.pending", **found})
 
     async def discard_pending(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2920,7 +2920,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The discarded row can let a queued turn start at once: screens read the run and the queue.
         events.note("runs", session_id, path, True)
         events.note("session", session_id, path, True)
-        return web.json_response({"object": "memento.pending.discarded", **found})
+        return web.json_response({"object": "gots.pending.discarded", **found})
 
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/pending", get_pending)
     app.router.add_post(
@@ -2931,7 +2931,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         found = await asyncio.to_thread(research.mission, path, mission_id)
         if found is None:
             return _error(web, "No such mission.", 404)
-        return web.json_response({"object": "memento.research.mission", "mission": found})
+        return web.json_response({"object": "gots.research.mission", "mission": found})
 
     async def research_step(request: "web.Request", step, *args) -> "web.Response":
         """Runs a step on a mission and answers with the mission as it now is."""
@@ -2943,7 +2943,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             found = await asyncio.to_thread(step, path, mission_id, *args)
         except research.ResearchError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.research.mission", "mission": found})
+        return web.json_response({"object": "gots.research.mission", "mission": found})
 
     async def list_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2954,7 +2954,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(research.resume, path)
         rows = await asyncio.to_thread(research.missions, path)
         return web.json_response(
-            {"object": "memento.research", "missions": rows, "unavailable": research.available()}
+            {"object": "gots.research", "missions": rows, "unavailable": research.available()}
         )
 
     async def create_research(request: "web.Request") -> "web.Response":
@@ -2975,7 +2975,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except research.ResearchError as error:
             return _error(web, str(error), error.status)
         research.spawn(path, found["id"], profile)
-        return web.json_response({"object": "memento.research.mission", "mission": found}, status=202)
+        return web.json_response({"object": "gots.research.mission", "mission": found}, status=202)
 
     async def get_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3094,14 +3094,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     authorization=request.headers.get("Authorization"),
                 )
             except outbox.StartError:
-                logger.debug("memento: couldn't stop the researcher of %s", mission_id, exc_info=True)
-        return web.json_response({"object": "memento.research.removed", "removed": True})
+                logger.debug("gots: couldn't stop the researcher of %s", mission_id, exc_info=True)
+        return web.json_response({"object": "gots.research.removed", "removed": True})
 
     async def meeting_view(path: Path, meeting_id: str) -> "web.Response":
         found = await asyncio.to_thread(meetings.meeting, path, meeting_id)
         if found is None:
             return _error(web, "No such meeting.", 404)
-        return web.json_response({"object": "memento.meeting", "meeting": found})
+        return web.json_response({"object": "gots.meeting", "meeting": found})
 
     async def list_meetings(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3111,7 +3111,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(meetings.resume, path)
         rows = await asyncio.to_thread(meetings.meetings, path, _request_profile())
         return web.json_response(
-            {"object": "memento.meetings", "meetings": rows, "unavailable": meetings.available()}
+            {"object": "gots.meetings", "meetings": rows, "unavailable": meetings.available()}
         )
 
     async def create_meeting(request: "web.Request") -> "web.Response":
@@ -3135,7 +3135,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         if found["stage"] == "writing":
             meetings.spawn(store_path(), found["id"])
-        return web.json_response({"object": "memento.meeting", "meeting": found}, status=201)
+        return web.json_response({"object": "gots.meeting", "meeting": found}, status=201)
 
     async def get_meeting(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3166,7 +3166,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except meetings.MeetingError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.meeting", "meeting": found})
+        return web.json_response({"object": "gots.meeting", "meeting": found})
 
     async def meeting_step(request: "web.Request", step) -> "web.Response":
         denied = unauthorized(request)
@@ -3179,7 +3179,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         if found["stage"] in ("transcribing", "writing") and not found["error"]:
             meetings.spawn(path, meeting_id)
-        return web.json_response({"object": "memento.meeting", "meeting": found})
+        return web.json_response({"object": "gots.meeting", "meeting": found})
 
     async def ask_meeting(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3194,7 +3194,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except meetings.MeetingError as error:
             return _error(web, str(error), error.status)
         meetings.spawn_answer(path, meeting_id)
-        return web.json_response({"object": "memento.meeting", "meeting": found}, status=202)
+        return web.json_response({"object": "gots.meeting", "meeting": found}, status=202)
 
     async def finish_meeting(request: "web.Request") -> "web.Response":
         return await meeting_step(request, meetings.finish)
@@ -3209,7 +3209,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         found = await asyncio.to_thread(meetings.remove, store_path(), request.match_info["meeting_id"])
         if found is None:
             return _error(web, "No such meeting.", 404)
-        return web.json_response({"object": "memento.meeting.removed", "removed": True})
+        return web.json_response({"object": "gots.meeting.removed", "removed": True})
 
     async def list_dictations(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3232,14 +3232,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             request.query.get("before_id"),
             limit,
         )
-        return web.json_response({"object": "memento.dictations", "dictations": rows})
+        return web.json_response({"object": "gots.dictations", "dictations": rows})
 
     async def dictation_stats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         answer = await asyncio.to_thread(dictations.stats, store_path(), _request_profile())
-        return web.json_response({"object": "memento.dictations.stats", "stats": answer})
+        return web.json_response({"object": "gots.dictations.stats", "stats": answer})
 
     async def write_dictation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3254,7 +3254,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except dictations.DictationLogError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.dictation", "dictation": found}, status=201)
+        return web.json_response({"object": "gots.dictation", "dictation": found}, status=201)
 
     async def remove_dictation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3266,14 +3266,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             _request_profile(),
             request.match_info["dictation_id"],
         )
-        return web.json_response({"object": "memento.dictation.removed", "removed": bool(removed)})
+        return web.json_response({"object": "gots.dictation.removed", "removed": bool(removed)})
 
     async def clear_dictations(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         answer = await asyncio.to_thread(dictations.clear, store_path(), _request_profile())
-        return web.json_response({"object": "memento.dictations.cleared", "stats": answer})
+        return web.json_response({"object": "gots.dictations.cleared", "stats": answer})
 
     async def list_apps(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3282,7 +3282,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         rows = await asyncio.to_thread(
             apps.listing, store_path(), request.query.get("hidden") == "1"
         )
-        return web.json_response({"object": "memento.apps", "apps": rows})
+        return web.json_response({"object": "gots.apps", "apps": rows})
 
     async def query_usage(args: Dict[str, Any]) -> Dict[str, Any]:
         provider = str(args.get("provider") or "").strip().lower()
@@ -3345,7 +3345,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         except ImportError:
             return _error(web, f"This Hermes version cannot answer {shape}.", 501)
-        return web.json_response({"object": "memento.app.query", "shape": shape, "value": value})
+        return web.json_response({"object": "gots.app.query", "shape": shape, "value": value})
 
     app_queries = {
         "usage": query_usage,
@@ -3367,7 +3367,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except apps.AppsError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "memento.app.page", "page": found})
+        return web.json_response({"object": "gots.app.page", "page": found})
 
     app.router.add_get(f"{PREFIX}/dictations", list_dictations)
     app.router.add_get(f"{PREFIX}/dictations/stats", dictation_stats)
@@ -3409,7 +3409,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             made = await asyncio.to_thread(work, store_path(), sent)
         except apps.AppsError as error:
             return _error(web, str(error), error.status)
-        label = "memento.app" if key == "app" else "memento.app.page"
+        label = "gots.app" if key == "app" else "gots.app.page"
         return web.json_response({"object": label, key: made}, status=status)
 
     async def create_app(request: "web.Request") -> "web.Response":
@@ -3440,7 +3440,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
         if not marked:
             return _error(web, "A build needs a session id.", 400)
-        return web.json_response({"object": "memento.app.build", "marked": True}, status=201)
+        return web.json_response({"object": "gots.app.build", "marked": True}, status=201)
 
     async def write_app_page(request: "web.Request") -> "web.Response":
         info = request.match_info
@@ -3516,7 +3516,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}/undo", undo_app_page)
     app.router.add_get(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", get_app_page)
     mirror_for_profiles(app, web)
-    logger.info("memento: serving %s on the API server", PREFIX)
+    logger.info("gots: serving %s on the API server", PREFIX)
 
 
 def register(ctx) -> None:
@@ -3576,10 +3576,10 @@ def register(ctx) -> None:
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(
-            name="memento",
+            name="gots",
             help="Link this profile to the Gots app",
             setup_fn=link.setup_cli,
-            description="hermes memento link <code> --site <url>, unlink or status",
+            description="hermes gots link <code> --site <url>, unlink or status",
         )
     ship.register(ctx)
     gate.register(ctx)
@@ -3595,6 +3595,6 @@ def register(ctx) -> None:
     platform_gots.register_section(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
-        logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
+        logger.warning("gots: this Hermes version can't add API server routes; update Hermes")
         return
     register_handler("api_server", _wire_api_server)

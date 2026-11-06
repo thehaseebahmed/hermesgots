@@ -203,7 +203,7 @@ export function host(
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
     const method = init?.method ?? "GET"
-    if (path.endsWith("/api/plugins/memento/info"))
+    if (path.endsWith("/api/plugins/gots/info"))
       return json({
         features,
         research: { writers: options.writers ?? { model: true, provider: true } },
@@ -211,21 +211,21 @@ export function host(
     // The bot's Hermes, which the cleanup pick's own picker lists: two providers, so the picker
     // offers its "Default" row over them rather than drilling into the only one it has.
     if (path.endsWith("/api/model/options")) return json(options.models ?? BOT_MODELS)
-    if (path.endsWith("/api/plugins/memento/stt")) {
+    if (path.endsWith("/api/plugins/gots/stt")) {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ path, method, body })
       if (options.refuseStt) return json({ error: { message: options.refuseStt } }, 400)
       written = true
       return json({ stt: options.nextStt ?? options.speech?.stt })
     }
-    if (path.endsWith("/api/plugins/memento/speech/probe")) {
+    if (path.endsWith("/api/plugins/gots/speech/probe")) {
       calls.push({ path, method, body: undefined })
       if (options.failProbe) throw new TypeError("Failed to fetch")
       if (options.refuseProbe) return json({ error: { message: options.refuseProbe } }, 409)
       await options.holdProbe
       return json({ speech: options.probed ?? options.speech })
     }
-    if (path.endsWith("/api/plugins/memento/speech")) {
+    if (path.endsWith("/api/plugins/gots/speech")) {
       if (method === "POST") {
         const body = init?.body ? JSON.parse(String(init.body)) : undefined
         calls.push({ path, method, body })

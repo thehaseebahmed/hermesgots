@@ -2720,7 +2720,7 @@ for it. A vendor call that *refuses* returns in milliseconds and leaves nothing 
 interrupted, so its thread outlives the Confirm that gave up on it, and nothing counts them.
 
 - Measured (this container, the branch's own module): 5 timed-out cloud uploads left 5 live
-  `memento-dictation-upload` threads (`threading.active_count()` 2 → 7), each still holding the take's
+  `gots-dictation-upload` threads (`threading.active_count()` 2 → 7), each still holding the take's
   joined audio (up to `MAX_BYTES`, 9 MB). Carrying the request's profile scope onto the thread — what
   this branch added — means each also holds that bot's home override and `.env` mapping for as long as
   the vendor sits on the call.

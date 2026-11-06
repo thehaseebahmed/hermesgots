@@ -90,7 +90,7 @@ overlap the drop reads.
    cannot work explains itself instead of doing nothing.
 5. As someone whose words could not be typed into a field, I want to be told and to keep the words,
    so that a take is never silently lost.
-6. As someone whose Memento app is already dictating to that bot, I want the Bubble to say so, so that
+6. As someone whose Gots app is already dictating to that bot, I want the Bubble to say so, so that
    I know why it refused rather than thinking it is broken.
 7. As a maintainer, I want the Bubble to speak the routes the app already speaks, so that there is one
    take, one Confirm and one Cleanup, and no second way for words to be made.
@@ -99,7 +99,7 @@ overlap the drop reads.
 
 ## Implementation Decisions
 
-**The insertion is an accessibility service's, and the mark is its own window.** `MementoAccessibilityService`
+**The insertion is an accessibility service's, and the mark is its own window.** `GotsAccessibilityService`
 reads the focused editable node, sets its text to *before the selection + the words + after it*, and
 falls back to clipboard-and-paste with the previous clipboard restored and the transcript marked
 sensitive. `SYSTEM_ALERT_WINDOW` draws the Bubble; the accessibility grant types. Two grants because

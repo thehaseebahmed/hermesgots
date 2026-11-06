@@ -199,7 +199,7 @@ def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[
                 found.append(_child(row, tip, running, row["id"] in working or tip["id"] in working))
             return found
     except sqlite3.Error:
-        logger.debug("memento: couldn't read %s's delegations", session_id, exc_info=True)
+        logger.debug("gots: couldn't read %s's delegations", session_id, exc_info=True)
         return []
 
 
@@ -352,7 +352,7 @@ def pending(hermes_home: Path, since: int, offset: int = 0) -> List[Dict[str, An
                 (since, offset),
             ).fetchall()
     except sqlite3.Error:
-        logger.debug("memento: couldn't read the delegations of %s", hermes_home, exc_info=True)
+        logger.debug("gots: couldn't read the delegations of %s", hermes_home, exc_info=True)
         return []
     return [one for one in (_delegation(row) for row in rows) if one is not None]
 
@@ -404,7 +404,7 @@ async def sweep(adapter: Any, home: Path) -> int:
     for row in rows:
         if (row["ended_at"] or 0) * 1000 < now - WAKE_MAX_AGE_MS:
             stale.setdefault(row["parent_id"], []).append(row["id"])
-            logger.debug("memento: subagent %s's wake is stale: it ended too long ago", row["id"])
+            logger.debug("gots: subagent %s's wake is stale: it ended too long ago", row["id"])
             continue
         owed.append(row)
     for parent, ids in stale.items():
@@ -415,7 +415,7 @@ async def sweep(adapter: Any, home: Path) -> int:
         try:
             posted += await _wake_root(adapter, home, root, children)
         except Exception:
-            logger.debug("memento: couldn't wake %s for its subagents", root, exc_info=True)
+            logger.debug("gots: couldn't wake %s for its subagents", root, exc_info=True)
     return posted
 
 
@@ -438,12 +438,12 @@ async def _settle_orphans(home: Path, path: Path) -> int:
             try:
                 row = conn.execute("SELECT 1 FROM sessions WHERE id = ?", (parent_id,)).fetchone()
             except sqlite3.Error:
-                logger.debug("memento: couldn't check the conversation of held wakes", exc_info=True)
+                logger.debug("gots: couldn't check the conversation of held wakes", exc_info=True)
                 return dropped
             if row is None:
                 await asyncio.to_thread(sessions.drop_wakes, path, parent_id, ids, DROP_GONE)
                 logger.debug(
-                    "memento: dropped %d held wake(s): the conversation %s is gone",
+                    "gots: dropped %d held wake(s): the conversation %s is gone",
                     len(ids),
                     parent_id,
                 )
@@ -561,7 +561,7 @@ async def _wakeable(
         if answers[parent] is True:
             staged.setdefault(parent, []).append(child["id"])
         elif answers[parent] is None:
-            logger.debug("memento: %s's stage check couldn't be answered; it waits", child["id"])
+            logger.debug("gots: %s's stage check couldn't be answered; it waits", child["id"])
         else:
             wakeable.append(child)
     return wakeable, staged
@@ -574,7 +574,7 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
     gate before the post and again after it, a stage's one run, the batch's bounds. A wake is an
     ordinary run of the conversation and may cross neither a confirmation gate nor a live turn.
 
-    The gate is asked before anything that costs more than ``memento.db`` — a conversation that
+    The gate is asked before anything that costs more than ``gots.db`` — a conversation that
     waits on its user for hours holds its batch every look, and waiting must cost nothing beyond
     the stage reads, which are store reads of their own and settle a stage's children outright.
 
@@ -595,7 +595,7 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         wakeable, staged = await _wakeable(home, children)
         for stage_parent, ids in staged.items():
             await asyncio.to_thread(sessions.drop_wakes, path, stage_parent, ids, DROP_STAGE)
-            logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", root)
+            logger.debug("gots: %s's completion doesn't wake it: a stage keeps its one run", root)
         children = wakeable[:WAKE_BATCH_MEMBERS]
         if not children:
             return 0
@@ -605,7 +605,7 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         # A stored batch's members hang off the conversation; fresh children off their parent.
         hold_parent = root if stored else parent_id
         await asyncio.to_thread(sessions.hold_wakes, path, hold_parent, ids, held)
-        logger.debug("memento: the wake for %s waits: %s", root, held)
+        logger.debug("gots: the wake for %s waits: %s", root, held)
         return 0
     if stored:
         # The batch's text and model froze at its intent, so a retry re-posts them byte-for-byte
@@ -674,7 +674,7 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         # The gate closed while the post was in flight: nothing is marked sent, so the retry
         # re-posts this key and the host answers with the run it already started.
         await asyncio.to_thread(sessions.hold_wakes, path, parent_id, members, post_held)
-        logger.debug("memento: %s's wake landed into a gate and waits: %s", root, post_held)
+        logger.debug("gots: %s's wake landed into a gate and waits: %s", root, post_held)
         return 0
     # Marks first, then the confirm: a crash between them is read as finished, never as still owed.
     await asyncio.to_thread(sessions.mark_wakes, path, parent_id, members, run_id)
@@ -701,16 +701,16 @@ def _failed(
         return
     if permanent:
         sessions.drop_wakes(path, parent_id, ids, DROP_GONE)
-        logger.warning("memento: couldn't wake %s for its subagents: %s", parent_id, reason)
+        logger.warning("gots: couldn't wake %s for its subagents: %s", parent_id, reason)
         return
     attempts = max((marks.get(one, {}).get("attempts") or 0) for one in ids) + 1
     if attempts >= WAKE_MAX_ATTEMPTS:
         sessions.drop_wakes(path, parent_id, ids, DROP_EXHAUSTED)
-        logger.debug("memento: dropping the wake for %s after %d attempts", parent_id, attempts)
+        logger.debug("gots: dropping the wake for %s after %d attempts", parent_id, attempts)
         return
     wait = WAKE_BACKOFF_SECONDS[min(attempts, len(WAKE_BACKOFF_SECONDS)) - 1]
     sessions.backoff_wakes(path, parent_id, ids, attempts, _now_ms() + int(wait * 1000), reason)
-    logger.debug("memento: couldn't wake %s for its subagents: %s", parent_id, reason)
+    logger.debug("gots: couldn't wake %s for its subagents: %s", parent_id, reason)
 
 
 def _now_ms() -> int:
@@ -746,7 +746,7 @@ async def _deferred(adapter: Any, home: Path, root: str) -> Optional[str]:
     path = db_path(home)
     # The cheap checks first, since a child usually ends while its parent's turn still runs: the
     # conversation's own run statuses live in the API server's memory, while ``waiting`` reads
-    # ``memento.db`` and is only asked when nothing of the conversation is even running.
+    # ``gots.db`` and is only asked when nothing of the conversation is even running.
     ids = await outbox.session_ids(adapter, root)
     runs = [run for run in outbox.session_runs(adapter, ids) if run.get("status") in outbox.ACTIVE]
     if any(run.get("status") != "waiting_for_approval" for run in runs):
@@ -777,7 +777,7 @@ def _stage(home: Path, session_id: str) -> Optional[bool]:
     try:
         return afk.staged_session(home, session_id)
     except Exception:
-        logger.debug("memento: couldn't tell whether %s is a stage", session_id, exc_info=True)
+        logger.debug("gots: couldn't tell whether %s is a stage", session_id, exc_info=True)
         return None
 
 
@@ -804,7 +804,7 @@ def _ending(
                 return _ending_of(conn, child)
         return _ending_of(conn, child)
     except sqlite3.Error:
-        logger.debug("memento: couldn't read subagent %s's end", child["id"], exc_info=True)
+        logger.debug("gots: couldn't read subagent %s's end", child["id"], exc_info=True)
         return None
 
 
@@ -1023,7 +1023,7 @@ async def run(adapter: Any) -> None:
             try:
                 await sweep(adapter, home)
             except Exception:
-                logger.debug("memento: the subagent watch failed for %s", home, exc_info=True)
+                logger.debug("gots: the subagent watch failed for %s", home, exc_info=True)
         try:
             await asyncio.wait_for(_event.wait(), SWEEP_SECONDS)
         except asyncio.TimeoutError:
@@ -1054,7 +1054,7 @@ def started(
         home = _home()
         sessions.remember_agent(db_path(home), str(child_session_id), str(child_subagent_id))
     except Exception:
-        logger.debug("memento: couldn't keep subagent %s's id", child_session_id, exc_info=True)
+        logger.debug("gots: couldn't keep subagent %s's id", child_session_id, exc_info=True)
 
 
 def stop(hermes_home: Path, parent_id: str, subagent_id: str) -> Dict[str, Any]:
@@ -1158,7 +1158,7 @@ def _settle_stopped_wakes(hermes_home: Path, parent_id: str, child_ids: Iterable
     except (sqlite3.Error, OSError):
         # A store that can't take the mark leaves the wakes owed, so the chat may still start a run
         # behind the press — the very symptom this settles — and only this line says so.
-        logger.warning("memento: couldn't settle the wakes of %s", ", ".join(ids), exc_info=True)
+        logger.warning("gots: couldn't settle the wakes of %s", ", ".join(ids), exc_info=True)
 
 
 def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:
@@ -1179,12 +1179,12 @@ def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:
     try:
         from tools.delegate_tool_registry import interrupt_subagent
     except Exception:
-        logger.debug("memento: this Hermes has no subagent registry to stop %s", subagent_id)
+        logger.debug("gots: this Hermes has no subagent registry to stop %s", subagent_id)
         return None
     try:
         return bool(interrupt_subagent(agent_id))
     except Exception:
-        logger.debug("memento: core couldn't stop %s", subagent_id, exc_info=True)
+        logger.debug("gots: core couldn't stop %s", subagent_id, exc_info=True)
         return False
 
 
@@ -1268,7 +1268,7 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
     ]
     for row in _stop_children(home, session_id, named):
         if not row["stopped"]:
-            logger.debug("memento: %s named no subagent core could stop", row["id"])
+            logger.debug("gots: %s named no subagent core could stop", row["id"])
     return named
 
 
@@ -1284,7 +1284,7 @@ async def watch_stops(adapter: Any) -> None:
         try:
             await asyncio.to_thread(sweep_stops, adapter, link.served_homes(adapter), handed)
         except Exception:
-            logger.debug("memento: couldn't stop a stopped run's subagents", exc_info=True)
+            logger.debug("gots: couldn't stop a stopped run's subagents", exc_info=True)
         await asyncio.sleep(STOP_SECONDS)
 
 

@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import android.animation.ValueAnimator
 import android.content.Context

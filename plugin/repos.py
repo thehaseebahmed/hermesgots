@@ -3,7 +3,7 @@
 Both answer at once and finish on a thread of their own, so they carry on with the app closed. An
 added repo is cloned into ``$HERMES_HOME/projects/<slug>/`` and joins the project in ``projects.db``
 only once the clone is in, so a session never gets a worktree in a half-made clone; until then it's
-a row in ``memento.db``'s ``project_repos``. A removed repo leaves ``projects.db`` at once, so no new
+a row in ``gots.db``'s ``project_repos``. A removed repo leaves ``projects.db`` at once, so no new
 worktree is made in it, and its clone (only one the plugin made) is deleted after. Sessions that
 worked in it are left read-only (``sessions.blocked``). A restart picks both up again (``resume``).
 """
@@ -238,7 +238,7 @@ def _cancel(hermes_home: Path, project_id: str, repo: str) -> None:
 def _spawn(hermes_home: Path, project_id: str, repo: str) -> None:
     # A clone can take minutes and shouldn't hold one of the loop's workers.
     threading.Thread(
-        target=run, args=(hermes_home, project_id, repo), name=f"memento-repo-{repo}", daemon=True
+        target=run, args=(hermes_home, project_id, repo), name=f"gots-repo-{repo}", daemon=True
     ).start()
 
 
@@ -262,7 +262,7 @@ def run(hermes_home: Path, project_id: str, repo: str) -> None:
     except github.GitHubError as error:
         _set(hermes_home, project_id, repo, "failed", str(error))
     except Exception:
-        logger.exception("memento: changing %s in project %s failed", repo, project_id)
+        logger.exception("gots: changing %s in project %s failed", repo, project_id)
         _set(hermes_home, project_id, repo, "failed", f"Couldn't add {repo}.")
     finally:
         with _lock:

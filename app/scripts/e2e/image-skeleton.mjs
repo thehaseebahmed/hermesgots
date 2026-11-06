@@ -29,7 +29,7 @@ for (const width of [390, 1024]) {
       `image-skeleton-${look}`,
       async ({ page, held, seed, send, shot, skeletons, stopSkeletons, until, watchSkeletons }) => {
         // Every image the plugin serves waits here, so the reply shows its placeholders first.
-        const media = await held("**/api/plugins/memento/media**")
+        const media = await held("**/api/plugins/gots/media**")
 
         for (const [what, chat] of [
           ["chat", { id: "img-chat", title: "Images" }],

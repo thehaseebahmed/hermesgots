@@ -254,7 +254,7 @@ test("a pin write moves the sync clock and leaves the row's time alone", async (
 
 test("a mark never moves back, and the oldest drop once the store is full", () => {
   const store = () =>
-    JSON.parse(localStorage.getItem("memento:read-marks") ?? "{}") as Record<string, number>
+    JSON.parse(localStorage.getItem("gots:read-marks") ?? "{}") as Record<string, number>
   markRead("mono", 100)
   markRead("mono", 50)
   assert.equal(store()["mono"], 100, "an older moment never moves a mark back")

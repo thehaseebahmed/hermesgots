@@ -22,7 +22,7 @@ import {
 
 const bot = botProfile("card-undo", { id: "bot-1", name: "Cards" })
 const MAIN = mainThreadId(bot.id)
-const MAIN_SESSION = `memento-${MAIN}`
+const MAIN_SESSION = `gots-${MAIN}`
 const MOVED = "Plan my move"
 
 const undos: string[] = []
@@ -60,7 +60,7 @@ function host(moves: Move[], { refuse = false } = {}) {
         })
         if (move.new) discarded.add(move.threadId)
       }
-      return json({ object: "memento.move.undone", undone: true })
+      return json({ object: "gots.move.undone", undone: true })
     }
     if (url.pathname.endsWith("/moves"))
       return json({
@@ -71,15 +71,15 @@ function host(moves: Move[], { refuse = false } = {}) {
           undoable: undone || replied ? false : move.undoable,
         })),
       })
-    if (url.pathname.endsWith("/plugins/memento/info"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ features: ["moves", "queue"] })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/chats")) {
+    if (url.pathname.endsWith("/plugins/gots/chats")) {
       const posted = init?.body ? (JSON.parse(String(init.body)).chats ?? {}) : {}
       const chats: Record<string, unknown> = { ...posted }
       for (const id of discarded) chats[id] = { at: Date.now() + 1, deleted: true }
-      return json({ object: "memento.chats", chats })
+      return json({ object: "gots.chats", chats })
     }
     if (url.pathname.endsWith("/queue")) return json({ items: queued, sent: [] })
     return json({})
@@ -107,7 +107,7 @@ async function seed(moves: Move[], { copy = true } = {}) {
       id: "t-old",
       profileId: bot.id,
       title: "Older thread",
-      hermesSessionId: "memento-t-old",
+      hermesSessionId: "gots-t-old",
       createdAt: 2,
       updatedAt: 5,
       changedAt: 0,
@@ -116,7 +116,7 @@ async function seed(moves: Move[], { copy = true } = {}) {
       id: "n1",
       profileId: bot.id,
       title: "New thread",
-      hermesSessionId: "memento-n1",
+      hermesSessionId: "gots-n1",
       createdAt: 20,
       updatedAt: 20,
       changedAt: 0,
@@ -278,12 +278,12 @@ function answerWithoutPick(id: string) {
   const answer = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/memento/chats") && init?.body) {
+    if (url.pathname.endsWith("/plugins/gots/chats") && init?.body) {
       const posted = JSON.parse(String(init.body)).chats ?? {}
       const record = posted[id]
       if (record)
         return json({
-          object: "memento.chats",
+          object: "gots.chats",
           chats: {
             ...posted,
             [id]: { at: record.at + 1, value: { ...record.value, modelChoice: undefined } },
@@ -299,12 +299,12 @@ function answerWithPick(id: string, choice: { provider: string; model: string })
   const answer = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/memento/chats") && init?.body) {
+    if (url.pathname.endsWith("/plugins/gots/chats") && init?.body) {
       const posted = JSON.parse(String(init.body)).chats ?? {}
       const record = posted[id]
       if (record)
         return json({
-          object: "memento.chats",
+          object: "gots.chats",
           chats: {
             ...posted,
             [id]: { at: record.at + 1, value: { ...record.value, modelChoice: choice } },

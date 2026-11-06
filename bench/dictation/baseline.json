@@ -1,5 +1,5 @@
 {
-  "object": "memento.bench.dictation.baseline",
+  "object": "gots.bench.dictation.baseline",
   "note": "What the same fixture bytes and the same model must keep saying. No timing lives here: a millisecond belongs to the machine that measured it, and the run's own record carries those beside the machine, the model, the level and the cut policy.",
   "fixtures": {
     "sha256": "46862ea23bbd4072f3c935967d4df1be6d647b9e179c18715e8c54bd1c84183e",
@@ -166,13 +166,13 @@
       "pieces_ms": [
         4354
       ],
-      "heard": "I pushed the Gots plugin to the Memento branch for Haseeb at News Research.",
-      "reference": "I pushed the Gots plugin to the Memento branch for Haseeb at Nous Research.",
+      "heard": "I pushed the Gots plugin to the Gots branch for Haseeb at News Research.",
+      "reference": "I pushed the Gots plugin to the Gots branch for Haseeb at Nous Research.",
       "wer": 0.071,
       "vocabulary": {
         "words": [
           "Gots",
-          "Memento",
+          "Gots",
           "Haseeb",
           "Nous Research"
         ],

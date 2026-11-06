@@ -107,13 +107,13 @@ class SessionPins(unittest.TestCase):
     def test_a_session_keyed_record_is_found_by_its_own_id(self):
         # AFK's record: the id it is keyed by is the session the run goes to.
         self.merge(
-            "memento-afk-1",
+            "gots-afk-1",
             {
-                "hermesSessionId": "memento-afk-1",
+                "hermesSessionId": "gots-afk-1",
                 "modelChoice": {"provider": "deepseek", "model": "deepseek-v4-pro"},
             },
         )
-        found = chats.by_session(self.path, "memento-afk-1")
+        found = chats.by_session(self.path, "gots-afk-1")
         self.assertEqual(chats.choice(found), {"provider": "deepseek", "model": "deepseek-v4-pro"})
 
     def test_a_chat_keyed_record_is_found_by_the_session_its_value_names(self):
@@ -121,19 +121,19 @@ class SessionPins(unittest.TestCase):
         self.merge(
             "chat-1",
             {
-                "hermesSessionId": "memento-chat-1",
+                "hermesSessionId": "gots-chat-1",
                 "modelChoice": {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
             },
         )
-        found = chats.by_session(self.path, "memento-chat-1")
+        found = chats.by_session(self.path, "gots-chat-1")
         self.assertEqual(
             chats.choice(found), {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}
         )
 
     def test_a_session_with_no_record_or_no_pick_pins_nothing(self):
-        self.assertEqual(chats.by_session(self.path, "memento-nothing"), None)
-        self.merge("chat-1", {"hermesSessionId": "memento-chat-1"})
-        self.assertIsNone(chats.choice(chats.by_session(self.path, "memento-chat-1")))
+        self.assertEqual(chats.by_session(self.path, "gots-nothing"), None)
+        self.merge("chat-1", {"hermesSessionId": "gots-chat-1"})
+        self.assertIsNone(chats.choice(chats.by_session(self.path, "gots-chat-1")))
         self.assertIsNone(chats.by_session(self.path, ""))
 
     def test_a_closed_record_is_no_session(self):
@@ -141,8 +141,8 @@ class SessionPins(unittest.TestCase):
         # nothing posts a run of one.
         self.merge("chat-1", {"hermesSessionId": "s", "discardedAt": 2}, at=5)
         self.merge("chat-2", {"hermesSessionId": "t", "resolvedAt": 2}, at=5)
-        chats.merge(self.path, {"memento-afk-1": {"at": 6, "deleted": True}})
-        for session_id in ("s", "t", "memento-afk-1"):
+        chats.merge(self.path, {"gots-afk-1": {"at": 6, "deleted": True}})
+        for session_id in ("s", "t", "gots-afk-1"):
             self.assertIsNone(chats.by_session(self.path, session_id), session_id)
 
     def test_a_half_written_pick_pins_nothing(self):
@@ -232,12 +232,12 @@ class ThePinRule(unittest.TestCase):
         self.assertEqual(
             chats.pin(self.path, "s"), {"provider": "deepseek", "model": "deepseek-v4-pro"}
         )
-        self.assertIsNone(chats.pin(self.path, "memento-nothing"))
+        self.assertIsNone(chats.pin(self.path, "gots-nothing"))
         self.assertIsNone(chats.pin(self.path, ""))
 
     def test_a_store_it_cannot_read_is_no_pin(self):
         """A pick is never worth losing a run over: the answer is None, not an exception."""
-        broken = Path(self.tmp.name) / "memento" / "broken.db"
+        broken = Path(self.tmp.name) / "plugin-data" / "gots" / "broken.db"
         broken.parent.mkdir(parents=True, exist_ok=True)
         broken.write_bytes(b"a store that isn't one")
         self.assertIsNone(chats.pin(broken, "s"))
@@ -275,7 +275,7 @@ class ThePinRule(unittest.TestCase):
         self.assertEqual(chats.read(self.path), {}, "nothing to pin, and nothing invented")
 
     def test_a_home_with_no_store_is_no_pin_and_stays_that_way(self):
-        missing = Path(self.tmp.name) / "elsewhere" / "memento.db"
+        missing = Path(self.tmp.name) / "elsewhere" / "gots.db"
         self.assertIsNone(chats.pin(missing, "s"))
         self.assertFalse(missing.exists(), "reading a pin never makes a store")
 
@@ -290,7 +290,7 @@ class ThePinRule(unittest.TestCase):
         self.merge(
             "chat-target",
             {
-                "hermesSessionId": "memento-target",
+                "hermesSessionId": "gots-target",
                 "modelChoice": {"provider": "deepseek", "model": "d"},
             },
             at=2,
@@ -298,7 +298,7 @@ class ThePinRule(unittest.TestCase):
         with mock.patch.object(
             chats, "_records", side_effect=AssertionError("the whole list was read")
         ):
-            found = chats.by_session(self.path, "memento-target")
+            found = chats.by_session(self.path, "gots-target")
         self.assertEqual(chats.choice(found), {"provider": "deepseek", "model": "d"})
 
 

@@ -20,7 +20,7 @@ const titleDelay = (ms) => mockPost("/__mock/title-delay", { ms })
 await flow("chat-title", async ({ page, send, lastReply, newChat, until, shot }) => {
   // Whether this host streams its changes at all — the same list the app reads to decide whether
   // to listen; a `polling` lane's mock answers /events with nothing and says so here.
-  const info = await (await fetch(`${mock}/api/plugins/memento/info`, { headers: mockAuth })).json()
+  const info = await (await fetch(`${mock}/api/plugins/gots/info`, { headers: mockAuth })).json()
   const live = Boolean(info?.features?.includes("events"))
 
   let streaming = false

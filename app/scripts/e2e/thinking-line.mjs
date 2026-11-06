@@ -909,7 +909,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     assert.ok(sessionId, "the chat has a Hermes session")
     const hosted = async () => {
       const answered = await fetch(
-        `${mock}/api/plugins/memento/sessions/${encodeURIComponent(sessionId)}/agents`,
+        `${mock}/api/plugins/gots/sessions/${encodeURIComponent(sessionId)}/agents`,
       )
       return (await answered.json()).agents ?? []
     }
@@ -946,7 +946,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     )
     assert.equal(delegated.length, 1, "one subagent was dispatched")
     await page.route(/\/sessions\/[^/]+\/agents$/, (route) =>
-      route.fulfill({ json: { object: "memento.agents", agents: delegated } }),
+      route.fulfill({ json: { object: "gots.agents", agents: delegated } }),
     )
 
     // The question the delegation asked in the composer's place, answered: the turn goes on working

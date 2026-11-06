@@ -51,7 +51,7 @@ def _repo(name: str) -> dict:
 
 
 SINGLE = {
-    "session_id": "memento-1",
+    "session_id": "gots-1",
     "path": str(_repos / "web"),
     "branch": BRANCH,
     "mode": "accept_edits",
@@ -94,7 +94,7 @@ TASK: Dict[str, Any] = {
 
 AFK = {
     **SINGLE,
-    "session_id": "memento-afk-0123456789ab",
+    "session_id": "gots-afk-0123456789ab",
     "branch": "hermes/afk-265",
     "repos": [{**_repo("web"), "branch": "hermes/afk-265"}],
 }
@@ -125,7 +125,7 @@ AFK_VARIANTS = [
 
 # What dictation's calls are shown, and the words the bot spells its own way: the same three the
 # cleanup rules say to spell from the vocabulary, so a reader sees what the input really looks like.
-VOCABULARY = ("memento", "haseeb", "hermes-agent")
+VOCABULARY = ("gots", "haseeb", "hermes-agent")
 HEARD = (
     "so i was thinking um we should move the retry logic into the plugin and then uh check the logs"
 )
@@ -133,7 +133,7 @@ WHOLE = (
     HEARD
     + ". and then we could move them to the third of March and i will run it half past four tomorrow"
 )
-HINT = "Gots, memento, hermes-agent, spry-puffin"
+HINT = "Gots, gots, hermes-agent, spry-puffin"
 
 
 def _model_prompt(system: str, instructions: str, example: str) -> str:

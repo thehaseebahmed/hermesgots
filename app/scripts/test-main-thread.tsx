@@ -80,7 +80,7 @@ test("a Main row that lost its flag is healed, not left reading as a thread", as
     profileId: bot.id,
     title: "Main",
     titleEdited: true,
-    hermesSessionId: `memento-${id}`,
+    hermesSessionId: `gots-${id}`,
     createdAt: 5,
     updatedAt: 5,
     changedAt: 5,

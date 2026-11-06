@@ -57,7 +57,7 @@ function serve({
   features,
   answer,
   gate,
-  info = () => json({ name: "memento", version: "0.99.2", features }),
+  info = () => json({ name: "gots", version: "0.99.2", features }),
 }: {
   features: string[]
   answer: (asked: URLSearchParams) => unknown
@@ -68,7 +68,7 @@ function serve({
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) return info()
-    if (url.pathname.endsWith("/memento/prs")) {
+    if (url.pathname.endsWith("/gots/prs")) {
       seen.push(`batch:${url.searchParams.getAll("session").join(",")}`)
       if (gate) await gate
       const said = answer(url.searchParams)
@@ -77,7 +77,7 @@ function serve({
     const one = /\/sessions\/([^/]+)\/prs$/.exec(url.pathname)
     if (one) {
       seen.push(`one:${decodeURIComponent(one[1])}`)
-      return json({ object: "memento.prs", prs: [pr(9)] })
+      return json({ object: "gots.prs", prs: [pr(9)] })
     }
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
@@ -89,7 +89,7 @@ test("one read answers the list, and the session it names unread keeps what the 
   const seen = serve({
     features: ["prs", "prs_batch"],
     answer: () => ({
-      object: "memento.prs",
+      object: "gots.prs",
       prs: { "prs-a-hermes": [pr(7)] },
       unread: ["prs-b-hermes"],
     }),
@@ -117,7 +117,7 @@ test("a chat's own read of a row joins the batch already out", async () => {
   const gate = new Promise<void>((resolve) => (release = resolve))
   const seen = serve({
     features: ["prs", "prs_batch"],
-    answer: () => ({ object: "memento.prs", prs: {}, unread: [] }),
+    answer: () => ({ object: "gots.prs", prs: {}, unread: [] }),
     gate,
   })
 
@@ -201,12 +201,12 @@ test("an older plugin's list is read a few sessions at a time, never the whole s
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["prs"] })
+      return json({ name: "gots", version: "0.99.2", features: ["prs"] })
     open += 1
     peak.push(open)
     await new Promise((done) => setTimeout(done, 20))
     open -= 1
-    return json({ object: "memento.prs", prs: [pr(9)] })
+    return json({ object: "gots.prs", prs: [pr(9)] })
   }) as unknown as typeof fetch
 
   await refreshPrsOf(ids, { force: true })
@@ -237,12 +237,12 @@ test("a screen's worktrees are read a few at a time, so a stall doesn't hold the
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["sessions"] })
+      return json({ name: "gots", version: "0.99.2", features: ["sessions"] })
     open += 1
     peak.push(open)
     await new Promise((done) => setTimeout(done, 20))
     open -= 1
-    return json({ object: "memento.workspace", workspace: null })
+    return json({ object: "gots.workspace", workspace: null })
   }) as unknown as typeof fetch
 
   await refreshWorkspaces(ids)
@@ -268,10 +268,10 @@ test("a screen of hundreds of sessions is read a tick at a time, oldest row firs
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["prs", "prs_batch"] })
+      return json({ name: "gots", version: "0.99.2", features: ["prs", "prs_batch"] })
     const asked = url.searchParams.getAll("session")
     seen.push(...asked)
-    return json({ object: "memento.prs", prs: {}, unread: asked })
+    return json({ object: "gots.prs", prs: {}, unread: asked })
   }) as unknown as typeof fetch
 
   await refreshPrsOf(ids, { force: true })
@@ -299,15 +299,15 @@ test("a closed session's branch is left alone by the list, and read again by its
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["prs", "prs_batch"] })
-    if (url.pathname.endsWith("/memento/prs")) {
+      return json({ name: "gots", version: "0.99.2", features: ["prs", "prs_batch"] })
+    if (url.pathname.endsWith("/gots/prs")) {
       seen.push(`batch:${url.searchParams.getAll("session").join(",")}`)
-      return json({ object: "memento.prs", prs: {}, unread: [] })
+      return json({ object: "gots.prs", prs: {}, unread: [] })
     }
     const one = /\/sessions\/([^/]+)\/prs$/.exec(url.pathname)
     if (one) {
       seen.push(`one:${decodeURIComponent(one[1])}`)
-      return json({ object: "memento.prs", prs: [pr(9)] })
+      return json({ object: "gots.prs", prs: [pr(9)] })
     }
     return json({}, 404)
   }) as unknown as typeof fetch
@@ -347,10 +347,10 @@ test("each bot gets its own tick's worth of rows, not the call's", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["prs", "prs_batch"] })
+      return json({ name: "gots", version: "0.99.2", features: ["prs", "prs_batch"] })
     const host = url.host
     perBot[host] = (perBot[host] ?? 0) + url.searchParams.getAll("session").length
-    return json({ object: "memento.prs", prs: {}, unread: [] })
+    return json({ object: "gots.prs", prs: {}, unread: [] })
   }) as unknown as typeof fetch
 
   await refreshPrsOf(ids, { force: true })
@@ -370,15 +370,15 @@ test("a discarded session is closed too, and its own screen still reads it", asy
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["prs", "prs_batch"] })
-    if (url.pathname.endsWith("/memento/prs")) {
+      return json({ name: "gots", version: "0.99.2", features: ["prs", "prs_batch"] })
+    if (url.pathname.endsWith("/gots/prs")) {
       seen.push("batch")
-      return json({ object: "memento.prs", prs: {}, unread: [] })
+      return json({ object: "gots.prs", prs: {}, unread: [] })
     }
     const one = /\/sessions\/([^/]+)\/prs$/.exec(url.pathname)
     if (one) {
       seen.push(`one:${decodeURIComponent(one[1])}`)
-      return json({ object: "memento.prs", prs: [pr(9)] })
+      return json({ object: "gots.prs", prs: [pr(9)] })
     }
     return json({}, 404)
   }) as unknown as typeof fetch
@@ -417,7 +417,7 @@ test("a read that lands is enough to trust the bot again", async () => {
     answer: () =>
       fail
         ? json({ error: { message: "busy" } }, 502)
-        : { object: "memento.prs", prs: {}, unread: [] },
+        : { object: "gots.prs", prs: {}, unread: [] },
   })
 
   await refreshPrsOf(["prs-i2", "prs-j2"])
@@ -446,7 +446,7 @@ test("worktree reads stop when the host answers none of them", async () => {
     // A plugin that has the route, on a host that isn't answering: the missing-route cooldown is
     // not what this case is about.
     if (url.pathname.endsWith("/info"))
-      return json({ name: "memento", version: "0.99.2", features: ["sessions"] })
+      return json({ name: "gots", version: "0.99.2", features: ["sessions"] })
     if (!/\/workspace$/.test(url.pathname)) return json({})
     reads += 1
     throw new TypeError("Failed to fetch")
@@ -477,11 +477,11 @@ test("a tick that asked nothing leaves the rows' turn where it was", async () =>
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info"))
       return up
-        ? json({ name: "memento", version: "0.99.2", features: ["prs", "prs_batch"] })
+        ? json({ name: "gots", version: "0.99.2", features: ["prs", "prs_batch"] })
         : json({ error: { message: "busy" } }, 503)
     const asked = url.searchParams.getAll("session")
     seen.push(...asked)
-    return json({ object: "memento.prs", prs: {}, unread: asked })
+    return json({ object: "gots.prs", prs: {}, unread: asked })
   }) as unknown as typeof fetch
 
   await refreshPrsOf(ids)

@@ -300,7 +300,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
   )
 }
 
-const DISMISSED_KEY = "memento:code:plugin-notice"
+const DISMISSED_KEY = "gots:code:plugin-notice"
 
 /**
  * Bots whose missing plugin the user has already been told about; a bot missing it later brings the

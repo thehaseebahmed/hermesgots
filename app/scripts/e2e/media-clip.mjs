@@ -124,7 +124,7 @@ await flow("media-clip", async ({ page, seed, until, shot }) => {
   }))
   assert.equal(start.paused, true, "the clip opens paused: a reader is not talked at")
   assert.equal(start.controls, true, "with the platform's own controls")
-  assert.match(start.source, /\/plugins\/memento\/media\?path=.*token=/, "read from the signed URL")
+  assert.match(start.source, /\/plugins\/gots\/media\?path=.*token=/, "read from the signed URL")
   assert.equal(tabs.length, 0, "nothing left the app")
   await shot("previewer")
 

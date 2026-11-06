@@ -190,9 +190,9 @@ class ArtifactTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             copy = Path(folder) / "openui.py"
             shutil.copyfile(openui.__file__, copy)
-            spec = importlib.util.spec_from_file_location("memento_openui_unreadable", copy)
+            spec = importlib.util.spec_from_file_location("gots_openui_unreadable", copy)
             module = importlib.util.module_from_spec(spec)
-            with self.assertLogs("memento_openui_unreadable", level="WARNING"):
+            with self.assertLogs("gots_openui_unreadable", level="WARNING"):
                 spec.loader.exec_module(module)
         self.assertEqual(module.TEXT, "")
         self.assertIsNone(module.VERSION)
@@ -209,7 +209,7 @@ class ArtifactTest(unittest.TestCase):
             (sibling / "prompt.txt").write_text(
                 "# @openuidev/react-lang 1.0.1\n\n" + "x" * 4_000, encoding="utf-8"
             )
-            spec = importlib.util.spec_from_file_location("memento_openui_oversize", copy)
+            spec = importlib.util.spec_from_file_location("gots_openui_oversize", copy)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         self.assertGreater(len(module.TEXT), module.LIMIT)

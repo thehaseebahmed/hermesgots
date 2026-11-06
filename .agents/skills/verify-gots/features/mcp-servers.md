@@ -74,7 +74,7 @@ Preconditions:
   sheet shows the Host's URL read-only and keeps waiting, refuses an address that isn't the flow's
   own, and the pasted callback clears the row by itself.
 - **Proof of a whole pass.** `mcps-*.png` at every width and mode the journey claims, and the mock's
-  state read back (`GET /api/plugins/memento/mcp`) where a write is part of the claim.
+  state read back (`GET /api/plugins/gots/mcp`) where a write is part of the claim.
 
 ## Gotchas
 

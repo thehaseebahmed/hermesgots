@@ -9,7 +9,7 @@ const HELD = 265
 const TITLE = "#265 The frontier is read from GitHub and listed"
 // A message a person sends is shown as written, so the opener's link reads as the Markdown the plugin
 // wrote rather than as a link.
-const ISSUE_LINK = "[Issue #265](https://github.com/mock-user/memento/issues/265)"
+const ISSUE_LINK = "[Issue #265](https://github.com/mock-user/gots/issues/265)"
 const ISSUE_BODY = "Read the project's tasks from GitHub and list them."
 
 const run = async ({ page, profileId, shot, until }) => {

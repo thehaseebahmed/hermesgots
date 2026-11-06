@@ -35,11 +35,11 @@ function host(handler?: (path: string) => Response | undefined) {
     calls.push({ method, path: url.pathname })
     const answer = handler?.(url.pathname)
     if (answer) return answer
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["agents", "subagent_stop", "subagents_stop_all"] })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["agents", "subagent_stop", "subagents_stop_all"] })
     if (url.pathname.endsWith("/agents/stop") && method === "POST")
       return json({
-        object: "memento.agents_stop",
+        object: "gots.agents_stop",
         session_id: SESSION,
         stopped: 2,
         agents: [
@@ -48,7 +48,7 @@ function host(handler?: (path: string) => Response | undefined) {
         ],
       })
     if (url.pathname.endsWith("/stop") && method === "POST")
-      return json({ object: "memento.agent_stop", session_id: SESSION, stopped: true })
+      return json({ object: "gots.agent_stop", session_id: SESSION, stopped: true })
     return json({ error: "not found" }, 404)
   }) as typeof fetch
   return calls
@@ -60,7 +60,7 @@ test("one call stops every subagent a session holds, and reads the host's answer
   const answer = await stopSubagents(server, SESSION, agents, { stopAll: true })
   const posted = calls.filter((call) => call.path.endsWith("/stop"))
   assert.equal(posted.length, 1, "one press, one call")
-  assert.equal(posted[0].path, `/api/plugins/memento/sessions/${SESSION}/agents/stop`)
+  assert.equal(posted[0].path, `/api/plugins/gots/sessions/${SESSION}/agents/stop`)
   assert.deepEqual(
     answer.rows.map((row) => [row.id, row.stopped]),
     [
@@ -83,8 +83,8 @@ test("a host from before the route is asked once per agent instead", async () =>
   assert.deepEqual(
     posted.map((call) => call.path),
     [
-      `/api/plugins/memento/sessions/${SESSION}/agents/first/stop`,
-      `/api/plugins/memento/sessions/${SESSION}/agents/second/stop`,
+      `/api/plugins/gots/sessions/${SESSION}/agents/first/stop`,
+      `/api/plugins/gots/sessions/${SESSION}/agents/second/stop`,
     ],
     "one call per agent at work, and none for the one that finished",
   )

@@ -67,7 +67,7 @@ class MeetingsTest(unittest.TestCase):
         self.addCleanup(pusher.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        self.path = Path(self.dir.name) / "memento" / "memento.db"
+        self.path = Path(self.dir.name) / "plugin-data" / "gots" / "gots.db"
 
     def audio(self, chunks=2, seconds=400):
         """A host that decodes any recording to ``seconds`` of silence: two 5-minute windows by default."""
@@ -319,7 +319,7 @@ class MeetingsTest(unittest.TestCase):
         done = self.written(
             lines, *([piece] * parts), notes("Whole.", decisions=[{"text": "Go", "cites": ["0:00", "1:00"]}])
         )
-        written = [c for c in self.llm.calls if c["purpose"] != "memento.meetings.topics"]
+        written = [c for c in self.llm.calls if c["purpose"] != "gots.meetings.topics"]
         self.assertEqual(len(written), parts + 1)
         self.assertEqual(done["notes"]["summary"], "Whole.")
         self.assertEqual(done["notes"]["decisions"][0]["cites"], ["0:00", "1:00"])
@@ -375,7 +375,7 @@ class MeetingsTest(unittest.TestCase):
         meetings.ask(self.path, meeting_id, question)
         meetings.spawn_answer(self.path, meeting_id)
         for thread in __import__("threading").enumerate():
-            if thread.name.startswith("memento-meeting-ask"):
+            if thread.name.startswith("gots-meeting-ask"):
                 thread.join(5)
         return meetings.meeting(self.path, meeting_id)["chat"]
 
@@ -386,7 +386,7 @@ class MeetingsTest(unittest.TestCase):
             ("user", "What did we decide?", []),
             ("bot", "Thursday.", ["1:00"]),
         ])
-        asked = [c for c in self.llm.calls if c["purpose"] == "memento.meetings.ask"][0]
+        asked = [c for c in self.llm.calls if c["purpose"] == "gots.meetings.ask"][0]
         self.assertIn("[1:00] Thursday works", asked["input"][0]["text"])
 
     def test_a_question_that_cannot_be_answered_says_why(self):

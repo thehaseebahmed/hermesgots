@@ -1,4 +1,4 @@
-"""``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
+"""``$HERMES_HOME/plugin-data/gots/gots.db``: the chat list (``chats.py``), context use (``context.py``) and
 the models each chat's calls ran on (``model_changes.py``), project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
 pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch and
@@ -42,9 +42,19 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 57
 
 
+def data_dir(hermes_home: Path) -> Path:
+    """Hermes's own per-plugin data directory (``PluginState.data_dir``), outside the plugin's folder, so
+    ``hermes plugins update`` never touches it."""
+    return hermes_home / "plugin-data" / "gots"
+
+
+def home_of(path: Path) -> Path:
+    """The profile home a store at ``db_path(home)`` sits under."""
+    return path.parents[len(data_dir(Path()).parts)]
+
+
 def db_path(hermes_home: Path) -> Path:
-    # Outside the plugin's own folder, so `hermes plugins update` never touches it.
-    return hermes_home / "memento" / "memento.db"
+    return data_dir(hermes_home) / "gots.db"
 
 
 def current_path() -> Path:
@@ -84,7 +94,7 @@ def get_setting(path: Path, key: str) -> Optional[Any]:
     try:
         return json.loads(row[0]) if row else None
     except ValueError:
-        logger.debug("memento: the %s setting isn't valid JSON", key)
+        logger.debug("gots: the %s setting isn't valid JSON", key)
         return None
 
 
@@ -110,7 +120,7 @@ def get_settings(path: Path, keys: Iterable[str]) -> Dict[str, Any]:
         try:
             found[key] = json.loads(value)
         except ValueError:
-            logger.debug("memento: the %s setting isn't valid JSON", key)
+            logger.debug("gots: the %s setting isn't valid JSON", key)
     return found
 
 
@@ -735,7 +745,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                        ON chats (json_extract(value, '$.hermesSessionId'))"""
             )
         except sqlite3.Error:
-            logger.debug("memento: the chat list carries a value that isn't JSON")
+            logger.debug("gots: the chat list carries a value that isn't JSON")
         # v44: a bot's dictations — one row per finished take, written by the app when its words
         # landed — and the clock its last clear stamped, which is how a device's mirror learns that
         # its rows above the stamp are gone without comparing ids (dictations.py, ADR 0060).

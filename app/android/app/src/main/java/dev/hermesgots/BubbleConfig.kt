@@ -1,4 +1,4 @@
-package app.memento
+package dev.hermesgots
 
 import android.content.Context
 import org.json.JSONArray
@@ -13,7 +13,7 @@ import org.json.JSONObject
  * profile path included — so the service never has to know how a multiplexed host spells a bot.
  */
 object BubbleConfig {
-    private const val FILE = "memento-bubble"
+    private const val FILE = "gots-bubble"
     private const val ROOT = "root"
     private const val KEY = "apiKey"
     private const val NAME = "name"

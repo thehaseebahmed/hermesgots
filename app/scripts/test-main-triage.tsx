@@ -26,7 +26,7 @@ import { TRIAGE_MS } from "@/lib/freshness"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
 const MAIN = mainThreadId("bot-1")
-const MAIN_SESSION = `memento-${MAIN}`
+const MAIN_SESSION = `gots-${MAIN}`
 
 type Answer = "stay" | "thread" | "new" | "fail" | "hang"
 
@@ -51,7 +51,7 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
     seen.push({ path: url.pathname, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
     if (url.pathname.endsWith("/triage")) {
       if (triage === "fail") return json({ error: { message: "no" } }, 500)
       if (triage === "hang")
@@ -67,7 +67,7 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
         triage === "thread"
           ? { decision: "thread", thread: "t1", session_id: "t1-hermes", item: { id: "q_1" } }
           : triage === "new"
-            ? { decision: "new", thread: "n1", session_id: "memento-n1", item: { id: "q_2" } }
+            ? { decision: "new", thread: "n1", session_id: "gots-n1", item: { id: "q_2" } }
             : { decision: "main" },
       )
     }
@@ -498,7 +498,7 @@ test("two turns the host started in one pass take a time each, after the move", 
     id: ADOPTED,
     profileId: (await db.profiles.toArray())[0].id,
     title: "Adopted",
-    hermesSessionId: `memento-${ADOPTED}`,
+    hermesSessionId: `gots-${ADOPTED}`,
     createdAt: 1,
     updatedAt: 1,
     changedAt: 0,

@@ -186,7 +186,7 @@ class SignatureTest(unittest.TestCase):
     """The token a minted URL carries: one path, one profile, minutes long, checked here only."""
 
     KEY = b"\x01" * 32
-    PATH = "/home/h/.hermes/memento/attachments/session-1/chart.png"
+    PATH = "/home/h/.hermes/plugin-data/gots/attachments/session-1/chart.png"
 
     def test_a_minted_token_covers_the_file_it_names(self) -> None:
         token, _ = media.mint(self.KEY, self.PATH, "work", now=1000)
@@ -222,7 +222,7 @@ class SignatureTest(unittest.TestCase):
     def test_the_key_is_made_once_and_kept(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        store = Path(tmp.name) / "memento" / "memento.db"
+        store = Path(tmp.name) / "plugin-data" / "gots" / "gots.db"
         first = media.signing_key(store)
         self.assertEqual(len(first), 32)
         self.assertEqual(media.signing_key(store), first, "a second ask keeps the same secret")

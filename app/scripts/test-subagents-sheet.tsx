@@ -59,12 +59,12 @@ function host() {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
     calls.push({ method, path: url.pathname })
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["agents", "subagent_stop", "subagents_stop_all"] })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["agents", "subagent_stop", "subagents_stop_all"] })
     if (url.pathname.endsWith("/stop") && method === "POST") {
       const id = url.pathname.split("/").at(-2) ?? ""
       return json({
-        object: "memento.agent_stop",
+        object: "gots.agent_stop",
         session_id: SESSION,
         agent_id: id,
         stopped: true,
@@ -158,7 +158,7 @@ test("a card stopped in the sheet stops on the host and reads it at once", async
     assert.equal(posted.length, 1)
     assert.equal(
       posted[0].path,
-      `/api/plugins/memento/sessions/${SESSION}/agents/child-session/stop`,
+      `/api/plugins/gots/sessions/${SESSION}/agents/child-session/stop`,
     )
     assert.match(text(), /Stopped after/, "the card reads the host's answer where it stands")
     await sheet.rerender(

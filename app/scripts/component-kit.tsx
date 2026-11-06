@@ -266,7 +266,7 @@ export async function seedChats(
       title: chat.title ?? "A chat",
       main: chat.main,
       titleEdited: true,
-      hermesSessionId: `memento-${chat.id}`,
+      hermesSessionId: `gots-${chat.id}`,
       createdAt: at(chat, place),
       updatedAt: at(chat, place),
       changedAt: 10,
@@ -738,11 +738,11 @@ export function mediaHost({
       body: typeof init?.body === "string" ? init.body : undefined,
       authorization: sent.get("authorization") ?? request?.headers.get("authorization") ?? null,
     })
-    if (url.pathname.endsWith("/plugins/memento/general"))
-      return json({ object: "memento.general", general: general ?? null })
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return features === "away" ? json({}, 503) : json({ name: "memento", features })
-    if (url.pathname.endsWith("/plugins/memento/media/url")) {
+    if (url.pathname.endsWith("/plugins/gots/general"))
+      return json({ object: "gots.general", general: general ?? null })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return features === "away" ? json({}, 503) : json({ name: "gots", features })
+    if (url.pathname.endsWith("/plugins/gots/media/url")) {
       // The mint: a URL for one path, signed by the host and good for minutes. Nothing is read
       // into the app here — an <img> or a <video> draws from this URL itself.
       const path = String(JSON.parse(String(init?.body ?? "{}")).path ?? "")
@@ -752,7 +752,7 @@ export function mediaHost({
       const kind = served ?? "application/octet-stream"
       const media = `${url.origin}${url.pathname.replace(/\/url$/, "")}`
       return json({
-        object: "memento.media_url",
+        object: "gots.media_url",
         path,
         url: `${media}?path=${encodeURIComponent(path)}&token=mock-token`,
         ...(namesLife ? { expires: Math.floor(Date.now() / 1000) + life } : {}),
@@ -760,7 +760,7 @@ export function mediaHost({
         size: 12,
       })
     }
-    if (url.pathname.endsWith("/plugins/memento/media")) {
+    if (url.pathname.endsWith("/plugins/gots/media")) {
       const path = url.searchParams.get("path") ?? ""
       if (fail.some((suffix) => path.endsWith(suffix)))
         return json({ error: { message: "No such file." } }, failure)
@@ -782,7 +782,7 @@ export const askedFor = (asked: HostAsk[], part: string) =>
 /** What a faked host was asked to sign a URL for, and the key it was asked with, in order. */
 export const mediaAsks = (asked: HostAsk[]) =>
   asked
-    .filter((one) => one.path.endsWith("/plugins/memento/media/url"))
+    .filter((one) => one.path.endsWith("/plugins/gots/media/url"))
     .map((one) => ({
       path: String(JSON.parse(one.body ?? "{}").path ?? ""),
       authorization: one.authorization,
@@ -929,13 +929,13 @@ export function afkHost({
   // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
   let threshold = usageThreshold
   const botAnswer = () => ({
-    object: "memento.afk.bot",
+    object: "gots.afk.bot",
     pick_budget: budget ?? 5,
     usage_threshold: threshold,
     holds_held: holdsHeld ?? 0,
   })
   const answer = () => ({
-    object: "memento.afk",
+    object: "gots.afk",
     project_id: projectId,
     on: true,
     reason: null,
@@ -964,7 +964,7 @@ export function afkHost({
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ name: "gots", features })
     // The host's main model, which is the account a pickup's first run spends: the Coding tab reads
     // the provider from here and asks the usage route for that account's windows.
     if (url.pathname.endsWith("/api/model/options"))
@@ -973,9 +973,9 @@ export function afkHost({
         provider: hostProvider,
         providers: [{ provider: hostProvider, authenticated: true, models: ["test/model"] }],
       })
-    if (url.pathname.endsWith("/plugins/memento/usage"))
+    if (url.pathname.endsWith("/plugins/gots/usage"))
       return json({
-        object: "memento.usage",
+        object: "gots.usage",
         provider: hostProvider,
         plan: null,
         windows: (windows ?? []).map((window) => ({
@@ -996,7 +996,7 @@ export function afkHost({
           : null,
       })
     // The bot's own AFK route, beside the project's: no project segment, one write of its own.
-    if (url.pathname.endsWith("/plugins/memento/afk")) {
+    if (url.pathname.endsWith("/plugins/gots/afk")) {
       if (method === "POST" && typeof body?.pick_budget === "number") {
         if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
         budget = body.pick_budget
@@ -1008,7 +1008,7 @@ export function afkHost({
       }
       return json(botAnswer())
     }
-    if (url.pathname.endsWith("/plugins/memento/skills"))
+    if (url.pathname.endsWith("/plugins/gots/skills"))
       return json({
         object: "list",
         data: [
@@ -1016,9 +1016,9 @@ export function afkHost({
           { name: "plan", description: "Write a plan first.", category: null },
         ],
       })
-    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "GET")
-      return json({ object: "memento.workflows", workflows: library })
-    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "POST") {
+    if (url.pathname.endsWith("/plugins/gots/workflows") && method === "GET")
+      return json({ object: "gots.workflows", workflows: library })
+    if (url.pathname.endsWith("/plugins/gots/workflows") && method === "POST") {
       library.push({
         id: `wf-${library.length}`,
         name: body?.name,
@@ -1026,7 +1026,7 @@ export function afkHost({
         at: 9,
         stages: body?.stages,
       })
-      return json({ object: "memento.workflows", workflows: library })
+      return json({ object: "gots.workflows", workflows: library })
     }
     if (url.pathname.endsWith(`/projects/${projectId}/afk`) && method === "GET")
       return json(answer())

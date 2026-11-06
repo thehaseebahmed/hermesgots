@@ -42,7 +42,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from . import link
-from .store import connect, current_path
+from .store import connect, current_path, home_of
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +358,7 @@ def _on_screen_devices(path: Path) -> List[str]:
 
 def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[str, str]) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
-    home = path.parent.parent
+    home = home_of(path)
     state = link.load_state(home)
     if not state.get("token") or state.get("revoked") or not state.get("site"):
         return
@@ -386,10 +386,10 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
                 time.sleep(RELAY_RETRY_SECONDS)
                 continue
             # 503: the site has no Firebase key. Not worth a retry.
-            logger.warning("memento: the registry wouldn't push (%s)", error)
+            logger.warning("gots: the registry wouldn't push (%s)", error)
             return
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
-        logger.warning("memento: the registry couldn't deliver the push (%s)", answer)
+        logger.warning("gots: the registry couldn't deliver the push (%s)", answer)
 
 
 def reachable(path: Path) -> bool:
@@ -398,7 +398,7 @@ def reachable(path: Path) -> bool:
 
 
 def _linked(path: Path) -> bool:
-    state = link.load_state(path.parent.parent)
+    state = link.load_state(home_of(path))
     return bool(state.get("token") and not state.get("revoked") and state.get("site"))
 
 
@@ -415,7 +415,7 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optio
             # The browser dropped the subscription (or the user revoked it).
             unsubscribe(path, row["endpoint"])
         elif status is None or status >= 300:
-            logger.debug("memento: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
+            logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
     _relay(path, kind, category, session_id, extra)
 
 
@@ -472,10 +472,10 @@ def notify(
         if not reachable(path):
             return
         threading.Thread(
-            target=_run, args=(path, kind, session_id, title), name="memento-push", daemon=True
+            target=_run, args=(path, kind, session_id, title), name="gots-push", daemon=True
         ).start()
     except Exception:
-        logger.debug("memento: couldn't send a push", exc_info=True)
+        logger.debug("gots: couldn't send a push", exc_info=True)
 
 
 BOT_ID = re.compile(r"^[a-z0-9-]{1,32}$")
@@ -535,7 +535,7 @@ def _lineage(path: Path, session_id: str) -> List[str]:
         if not current or current in found:
             break
         found.append(current)
-        current = sessions._parent_of(path.parent.parent, current)
+        current = sessions._parent_of(home_of(path), current)
     return found
 
 
@@ -561,7 +561,7 @@ def thread_muted(path: Path, session_id: str) -> bool:
 
 def _hermes_title(path: Path, session_id: str) -> Optional[str]:
     """The title Hermes gave the session or its nearest ancestor, for a chat the app hasn't synced."""
-    state = path.parent.parent / "state.db"
+    state = home_of(path) / "state.db"
     if not state.exists():
         return None
     try:
@@ -600,7 +600,7 @@ def muted(path: Path, kind: str, session_id: str) -> bool:
 def _project_session(path: Path, session_id: str) -> bool:
     from . import sessions
 
-    return bool(sessions.record_for(path, path.parent.parent, session_id))
+    return bool(sessions.record_for(path, home_of(path), session_id))
 
 
 def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) -> None:
@@ -613,4 +613,4 @@ def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) ->
         message = {"title": _short(title), "bot": bot(path)}
         _deliver(path, kind, category_of(kind, project), session_id, {k: v for k, v in message.items() if v})
     except Exception:
-        logger.debug("memento: a push failed", exc_info=True)
+        logger.debug("gots: a push failed", exc_info=True)

@@ -163,13 +163,13 @@ test("the editor says what the host would refuse, before it asks", async () => {
 test("a bot without afk_workflows shows the pop-up it always showed", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["afk", "afk_switch", "afk_skills"] })
-    if (url.pathname.endsWith("/plugins/memento/skills"))
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["afk", "afk_switch", "afk_skills"] })
+    if (url.pathname.endsWith("/plugins/gots/skills"))
       return json({ object: "list", data: [{ name: "plan", description: null, category: null }] })
     if (url.pathname.endsWith("/afk"))
       return json({
-        object: "memento.afk",
+        object: "gots.afk",
         on: true,
         reason: null,
         task: null,

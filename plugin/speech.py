@@ -72,7 +72,7 @@ MODELS: Sequence[Dict[str, Any]] = (
 # Hermes resolves these two spellings of a model it knows.
 ALIASES = {"large": "large-v3", "turbo": "large-v3-turbo"}
 
-DENIED = "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+DENIED = "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`."
 
 
 class Withheld(Exception):
@@ -225,7 +225,7 @@ def read(
         try:
             payload["stt"] = stt_settings(config_path, stt)
         except ImportError:
-            logger.debug("memento: this host declares no speech settings", exc_info=True)
+            logger.debug("gots: this host declares no speech settings", exc_info=True)
     return payload
 
 
@@ -349,7 +349,7 @@ def provider_model(provider: str, section: Dict[str, Any]) -> str:
     try:
         defaults = _flatten(_defaults())
     except Exception:
-        logger.debug("memento: this host declares no speech defaults", exc_info=True)
+        logger.debug("gots: this host declares no speech defaults", exc_info=True)
         defaults = {}
     field = next(
         (one for one in MODEL_FIELDS if f"{STT_KEY}.{name}.{one}" in defaults),
@@ -409,7 +409,7 @@ def _catalogues() -> Dict[str, List[str]]:
     try:
         from tools.transcription_common import STT_MODEL_CATALOG
     except Exception:
-        logger.debug("memento: no speech model catalogues on this host", exc_info=True)
+        logger.debug("gots: no speech model catalogues on this host", exc_info=True)
         return {}
     if not isinstance(STT_MODEL_CATALOG, dict):
         return {}
@@ -425,7 +425,7 @@ def _env_lookup() -> Optional[Callable[[str], Any]]:
     try:
         from agent.credential_pool import get_env_prefer_dotenv
     except Exception:
-        logger.debug("memento: no credential pool: provider keys unknown", exc_info=True)
+        logger.debug("gots: no credential pool: provider keys unknown", exc_info=True)
         return None
     return get_env_prefer_dotenv
 
@@ -438,7 +438,7 @@ def _key_set(provider: str, lookup: Optional[Callable[[str], Any]]) -> Optional[
     try:
         return bool(lookup(variable))
     except Exception:
-        logger.debug("memento: couldn't ask for %s's key", provider, exc_info=True)
+        logger.debug("gots: couldn't ask for %s's key", provider, exc_info=True)
         return None
 
 

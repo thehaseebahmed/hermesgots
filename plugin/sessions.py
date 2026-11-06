@@ -102,10 +102,15 @@ LIVE_STATUSES = {
 }
 
 API_SOURCE = "api_server"
-SOURCES_THIS_PLUGIN_WROTE = ("Gots", "Gots Code", "memento", "Memento", "memento-code", "Memento Code")
+# The first four are what this plugin writes now; the rest are what it wrote as "memento", still read so
+# older sessions keep working.
+SOURCES_THIS_PLUGIN_WROTE = ("Gots", "Gots Code", "gots", "gots-code", "memento", "Memento", "memento-code", "Memento Code")
 _WRITTEN_SOURCE_MARKS = ", ".join("?" for _ in SOURCES_THIS_PLUGIN_WROTE)
 # How the app starts the session ids of its chats (`createConversation`).
-MEMENTO_ID_PREFIX = "memento-"
+GOTS_ID_PREFIX = "gots-"
+# What the app started the ids of its chats with before the rename; those sessions are still read.
+LEGACY_ID_PREFIXES = ("memento-",)
+ID_PREFIXES = (GOTS_ID_PREFIX, *LEGACY_ID_PREFIXES)
 
 # The API server adapter, kept by _wire_api_server so the hooks can reach its session store.
 adapter: Any = None
@@ -208,7 +213,7 @@ def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:
             (json.dumps(value, separators=(",", ":")) if value else None, session_id),
         )
         if cursor.rowcount == 0:
-            logger.warning("memento: no session row for %s to write its %s on", session_id, column)
+            logger.warning("gots: no session row for %s to write its %s on", session_id, column)
     finally:
         conn.close()
 
@@ -225,7 +230,7 @@ def _open_state(home: Path) -> Optional[sqlite3.Connection]:
     try:
         conn = sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2)
     except sqlite3.Error:
-        logger.debug("memento: couldn't open %s", state, exc_info=True)
+        logger.debug("gots: couldn't open %s", state, exc_info=True)
         return None
     conn.row_factory = sqlite3.Row
     return conn
@@ -365,9 +370,9 @@ def _fetch_origin(repo_root: str, auth: Optional[str] = None) -> None:
     try:
         result = _git(repo_root, *args)
         if result.returncode != 0:
-            logger.debug("memento: fetch origin in %s failed: %s", repo_root, result.stderr.strip())
+            logger.debug("gots: fetch origin in %s failed: %s", repo_root, result.stderr.strip())
     except WorkspaceError:
-        logger.debug("memento: fetch origin in %s failed", repo_root, exc_info=True)
+        logger.debug("gots: fetch origin in %s failed", repo_root, exc_info=True)
 
 
 def _create_worktree(repo_root: str, name: str, auth: Optional[str] = None) -> Dict[str, str]:
@@ -378,7 +383,7 @@ def _create_worktree(repo_root: str, name: str, auth: Optional[str] = None) -> D
     try:
         info = _setup_worktree(repo_root=repo_root, sync_base=True, name=name)
     except Exception:
-        logger.debug("memento: worktree setup with a fetch failed in %s", repo_root, exc_info=True)
+        logger.debug("gots: worktree setup with a fetch failed in %s", repo_root, exc_info=True)
     if not info:
         # Offline, or no remote: branch from what's checked out.
         try:
@@ -490,7 +495,7 @@ def ensure(
 
         auth, _ = github.token(hermes_home)
     except Exception:
-        logger.debug("memento: couldn't resolve GitHub token for fetch", exc_info=True)
+        logger.debug("gots: couldn't resolve GitHub token for fetch", exc_info=True)
     repos = []
     for root in roots:
         kept = existing.get(root)
@@ -542,7 +547,7 @@ def _exclude_from_git(root: str, name: str) -> None:
         with exclude.open("a", encoding="utf-8") as handle:
             handle.write(("" if not current or current.endswith("\n") else "\n") + line + "\n")
     except OSError:
-        logger.debug("memento: couldn't exclude %s from git in %s", name, root, exc_info=True)
+        logger.debug("gots: couldn't exclude %s from git in %s", name, root, exc_info=True)
 
 
 def save_plan(path: Path, hermes_home: Path, record: Dict[str, Any], text: Any) -> Optional[str]:
@@ -587,7 +592,7 @@ def apply_cwd(session_id: str, cwd: str) -> None:
     try:
         from tools.terminal_tool import register_task_env_overrides
     except ImportError:
-        logger.debug("memento: this Hermes has no per-task cwd override")
+        logger.debug("gots: this Hermes has no per-task cwd override")
         return
     register_task_env_overrides(session_id, {"cwd": cwd})
 
@@ -760,7 +765,7 @@ def heal_sources(home: Path) -> Optional[int]:
                 (API_SOURCE, *SOURCES_THIS_PLUGIN_WROTE),
             ).rowcount or 0
     except sqlite3.Error:
-        logger.warning("memento: couldn't repair session labels in %s", home / "state.db", exc_info=True)
+        logger.warning("gots: couldn't repair session labels in %s", home / "state.db", exc_info=True)
         return None
 
 
@@ -771,7 +776,7 @@ def _open_state_for_write(home: Path) -> Optional[sqlite3.Connection]:
     try:
         return sqlite3.connect(f"{state.as_uri()}?mode=rw", uri=True, timeout=2, isolation_level=None)
     except sqlite3.Error:
-        logger.warning("memento: couldn't open %s to repair session labels", state, exc_info=True)
+        logger.warning("gots: couldn't open %s to repair session labels", state, exc_info=True)
         return None
 
 
@@ -845,7 +850,7 @@ def chat_session(
             # avoid — so say it once per profile, and never cache the failure.
             if home not in _walk_warned:
                 _walk_warned.add(home)
-                logger.warning("memento: couldn't walk a chat's compression lineage", exc_info=True)
+                logger.warning("gots: couldn't walk a chat's compression lineage", exc_info=True)
             return session_id
     if roots is not None:
         for session in walked:
@@ -1025,7 +1030,7 @@ def project_names(hermes_home: Path) -> Dict[str, str]:
         with pdb.connect_closing(db_path=projects_db) as conn:
             return {str(p.id): p.name for p in pdb.list_projects(conn, include_archived=True)}
     except Exception:
-        logger.debug("memento: couldn't read project names", exc_info=True)
+        logger.debug("gots: couldn't read project names", exc_info=True)
         return {}
 
 
@@ -1067,7 +1072,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
     try:
         return _before_tool(kwargs)
     except Exception:
-        logger.debug("memento: pre_tool_call failed", exc_info=True)
+        logger.debug("gots: pre_tool_call failed", exc_info=True)
         return None
 
 
@@ -1104,7 +1109,7 @@ def follow_auto(auto: bool) -> None:
         )
         from tools.approval_context import get_current_session_key
     except ImportError:
-        logger.debug("memento: this Hermes has no per-session approval bypass")
+        logger.debug("gots: this Hermes has no per-session approval bypass")
         return
     key = get_current_session_key(default="")
     if not key or key == "default" or is_session_yolo_enabled(key) == auto:
@@ -1147,7 +1152,7 @@ def before_llm(**kwargs: Any) -> None:
         if record and record["plan_pending"]:
             set_plan_pending(path, record["session_id"], False)
     except Exception:
-        logger.debug("memento: pre_llm_call failed", exc_info=True)
+        logger.debug("gots: pre_llm_call failed", exc_info=True)
 
 
 def after_llm(**kwargs: Any) -> None:
@@ -1165,7 +1170,7 @@ def after_llm(**kwargs: Any) -> None:
         if record and record["mode"] == "plan":
             save_plan(path, home, record, kwargs.get("assistant_response"))
     except Exception:
-        logger.debug("memento: post_llm_call failed", exc_info=True)
+        logger.debug("gots: post_llm_call failed", exc_info=True)
 
 
 class Outcome(NamedTuple):
@@ -1202,7 +1207,7 @@ def after_run(**kwargs: Any) -> None:
         if db is not None:
             stamp(db, record)
     except Exception:
-        logger.debug("memento: on_session_end failed", exc_info=True)
+        logger.debug("gots: on_session_end failed", exc_info=True)
 
 
 # A mark's dispositions: a settled one is never collected again, and a held one is owed again once

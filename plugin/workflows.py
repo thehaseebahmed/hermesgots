@@ -415,7 +415,7 @@ def _named(hermes_home: Path, project_id: str) -> Optional[str]:
             "SELECT workflow_id FROM project_afk WHERE project_id = ?", (project_id,)
         ).fetchone()
     except Exception:
-        logger.debug("memento: couldn't read project %s's workflow", project_id, exc_info=True)
+        logger.debug("gots: couldn't read project %s's workflow", project_id, exc_info=True)
         return None
     finally:
         conn.close()
@@ -556,7 +556,7 @@ def any_steps(hermes_home: Path) -> bool:
         finally:
             conn.close()
     except Exception:
-        logger.debug("memento: couldn't read the workflow library", exc_info=True)
+        logger.debug("gots: couldn't read the workflow library", exc_info=True)
         return True
     return any(steps_of((read_body(row[0]) or {"stages": []})["stages"]) for row in rows)
 

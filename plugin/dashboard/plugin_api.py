@@ -1,4 +1,4 @@
-"""Gots dashboard plugin backend, mounted at /api/plugins/memento/ on the dashboard."""
+"""Gots dashboard plugin backend, mounted at /api/plugins/gots/ on the dashboard."""
 
 from __future__ import annotations
 
@@ -43,8 +43,8 @@ def _ledger() -> Dict[str, Any]:
 
 
 def _chats() -> Dict[str, Any]:
-    # Same file as ../chats.py; this module loads on its own, so it can't import that one.
-    path = Path(get_hermes_home()) / "memento" / "memento.db"
+    # Same file as ../store.py's db_path; this module loads on its own, so it can't import that one.
+    path = Path(get_hermes_home()) / "plugin-data" / "gots" / "gots.db"
     if not path.exists():
         return {"exists": False, "chats": 0}
     with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
@@ -57,13 +57,13 @@ def _enabled() -> bool | None:
         from hermes_cli.plugins_cmd import _get_disabled_set, _get_enabled_set
     except ImportError:
         return None
-    return "memento" in _get_enabled_set() and "memento" not in _get_disabled_set()
+    return "gots" in _get_enabled_set() and "gots" not in _get_disabled_set()
 
 
 def _link() -> Any:
     """``../link.py``, loaded under a stand-in package: Hermes imports this file on its own, so it
     can't import its siblings, and link.py only needs the package for ``VERSION``."""
-    package = "hermes_dashboard_plugin_memento_pkg"
+    package = "hermes_dashboard_plugin_gots_pkg"
     loaded = sys.modules.get(f"{package}.link")
     if loaded:
         return loaded
@@ -109,13 +109,13 @@ def _platform_state(link: Any, home: Path) -> Dict[str, Any]:
     """Turns delivery on for the profile being linked, and says whether the gateway has to restart.
 
     A routine's answer arrives over the ``gots`` platform, and Hermes refuses a platform that isn't
-    enabled in the profile's config — so the tab's own link step writes it, the way ``memento link``
+    enabled in the profile's config — so the tab's own link step writes it, the way ``gots link``
     does. Only a file that changed needs the restart, which is what the tab then tells the user.
     """
     try:
         changed = link.enable_platform(home)
     except Exception:
-        logger.debug("memento: couldn't enable the gots platform", exc_info=True)
+        logger.debug("gots: couldn't enable the gots platform", exc_info=True)
         return {}
     if not changed:
         return {}
@@ -183,25 +183,25 @@ def status() -> Dict[str, Any]:
     except sqlite3.Error as error:
         chats = {"exists": True, "chats": None, "error": str(error)}
     return {
-        "name": "memento",
+        "name": "gots",
         "version": _version(),
         "enabled": _enabled(),
         "ledger": ledger,
         "chats": chats,
         "routes": [
-            "/api/plugins/memento/info",
-            "/api/plugins/memento/cron/runs",
-            "/api/plugins/memento/chats",
-            "/api/plugins/memento/projects",
-            "/api/plugins/memento/github",
-            "/api/plugins/memento/github/repos",
-            "/api/plugins/memento/runs/live",
-            "/api/plugins/memento/sessions/{session_id}/label",
-            "/api/plugins/memento/sessions/{session_id}/context",
-            "/api/plugins/memento/sessions/{session_id}/todos",
-            "/api/plugins/memento/sessions/{session_id}/workspace",
-            "/api/plugins/memento/sessions/{session_id}/workspace/remove",
-            "/api/plugins/memento/sessions/{session_id}/mode",
-            "/api/plugins/memento/sessions/{session_id}/prs",
+            "/api/plugins/gots/info",
+            "/api/plugins/gots/cron/runs",
+            "/api/plugins/gots/chats",
+            "/api/plugins/gots/projects",
+            "/api/plugins/gots/github",
+            "/api/plugins/gots/github/repos",
+            "/api/plugins/gots/runs/live",
+            "/api/plugins/gots/sessions/{session_id}/label",
+            "/api/plugins/gots/sessions/{session_id}/context",
+            "/api/plugins/gots/sessions/{session_id}/todos",
+            "/api/plugins/gots/sessions/{session_id}/workspace",
+            "/api/plugins/gots/sessions/{session_id}/workspace/remove",
+            "/api/plugins/gots/sessions/{session_id}/mode",
+            "/api/plugins/gots/sessions/{session_id}/prs",
         ],
     }

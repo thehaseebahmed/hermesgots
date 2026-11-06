@@ -22,7 +22,7 @@ on:
       - "plugin/**"
       - "bench/**"
       - "app/src/lib/dictation.ts"
-      - "app/android/app/src/main/java/app/memento/BubbleRecorder.kt"
+      - "app/android/app/src/main/java/dev/hermesgots/BubbleRecorder.kt"
       - ".github/workflows/dictation-bench.yml"
   workflow_dispatch:
 

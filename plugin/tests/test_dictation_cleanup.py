@@ -205,7 +205,7 @@ class FinishTest(unittest.TestCase):
     def test_the_call_carries_the_level_s_prompt(self) -> None:
         _, llm = cleaned(HIGH, {"text": "Hello there."})
         call = llm.calls[0]
-        self.assertEqual(call["purpose"], "memento.dictation.cleanup")
+        self.assertEqual(call["purpose"], "gots.dictation.cleanup")
         self.assertEqual(call["temperature"], 0)
         self.assertEqual(call["json_schema"], dictation_cleanup.SCHEMA)
         self.assertEqual(call["system_prompt"], dictation_cleanup.SYSTEM)
@@ -301,14 +301,14 @@ class FinishTest(unittest.TestCase):
             {"text": "Gots ships it."},
             text="gots ships it",
             vocabulary=["Gots"],
-            hint="Gots, memento",
+            hint="Gots, gots",
         )
         self.assertEqual(
             llm.calls[0]["input"],
             [
                 {
                     "type": "text",
-                    "text": "Names: Gots, memento\nVocabulary: Gots\nDictation: gots ships it",
+                    "text": "Names: Gots, gots\nVocabulary: Gots\nDictation: gots ships it",
                 }
             ],
         )

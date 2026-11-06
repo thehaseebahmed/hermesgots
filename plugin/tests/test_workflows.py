@@ -169,11 +169,11 @@ class DeleteTests(unittest.TestCase):
 
     def test_deleting_a_workflow_a_project_names_is_refused_and_names_it(self) -> None:
         entry = self.choose("p1")
-        patch_db = stub_projects_db(projects=[SimpleNamespace(id="p1", name="Memento")])
+        patch_db = stub_projects_db(projects=[SimpleNamespace(id="p1", name="Gots")])
         with patch_db:
             with self.assertRaises(workflows.Refused) as refused:
                 workflows.delete(self.home, entry["id"])
-        self.assertIn("Memento", str(refused.exception), "the user is told which project it is")
+        self.assertIn("Gots", str(refused.exception), "the user is told which project it is")
         self.assertIsNotNone(workflows.get(self.home, entry["id"]), "and nothing was deleted")
 
     def test_a_workflow_no_project_names_is_deleted(self) -> None:

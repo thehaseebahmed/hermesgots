@@ -45,7 +45,7 @@ const openVault = async (page, profileId) => {
       const { db } = await import("/src/lib/db.ts")
       const { key } = await db.vault.get("key")
       const answers = {}
-      for (const doc of docs) answers[doc] = await vault.seal(key, {}, `memento:${userId}:${doc}`)
+      for (const doc of docs) answers[doc] = await vault.seal(key, {}, `gots:${userId}:${doc}`)
       return answers
     },
     { userId: accountUser.id, docs },

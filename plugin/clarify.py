@@ -4,7 +4,7 @@ The API server's toolset leaves ``clarify`` out and its agents get no ``clarify_
 this surface the agent has no way to ask the user anything. This module gives every agent the
 adapter builds the tool and a callback that answers it from the app: the questions go into the
 run's event stream as ``clarify.request`` (and onto its pollable status), the app posts the answers
-to ``POST /api/plugins/memento/runs/{run_id}/clarify``, and the agent carries on in the same turn
+to ``POST /api/plugins/gots/runs/{run_id}/clarify``, and the agent carries on in the same turn
 with the result, as it does after an approval.
 """
 
@@ -70,12 +70,12 @@ def include_toolset() -> bool:
 
         tools_config = importlib.import_module("hermes_cli.tools_config")
     except Exception:
-        logger.debug("memento: no hermes_cli.tools_config", exc_info=True)
+        logger.debug("gots: no hermes_cli.tools_config", exc_info=True)
         return False
     original = getattr(tools_config, "_get_platform_tools", None)
     if not callable(original):
         return False
-    if getattr(original, "memento_clarify", False):
+    if getattr(original, "gots_clarify", False):
         return True
 
     def get_platform_tools(config: Any, platform: Any, *args: Any, **kwargs: Any) -> Any:
@@ -84,7 +84,7 @@ def include_toolset() -> bool:
             return set(enabled) | {TOOL}
         return enabled
 
-    get_platform_tools.memento_clarify = True  # type: ignore[attr-defined]
+    get_platform_tools.gots_clarify = True  # type: ignore[attr-defined]
     tools_config._get_platform_tools = get_platform_tools
     return True
 
@@ -114,7 +114,7 @@ def _wire_agents(adapter: Any) -> bool:
     are added after Hermes's own setup. False when this Hermes has no such seam."""
     original = getattr(adapter, "_create_agent", None)
     if not callable(original):
-        logger.warning("memento: this Hermes has no _create_agent; the agent can't ask questions")
+        logger.warning("gots: this Hermes has no _create_agent; the agent can't ask questions")
         return False
 
     def create_agent(*args: Any, **kwargs: Any) -> Any:
@@ -128,7 +128,7 @@ def _wire_agents(adapter: Any) -> bool:
                 loop = None
             equip(adapter, agent, loop)
         except Exception:
-            logger.debug("memento: couldn't add the clarify tool to an agent", exc_info=True)
+            logger.debug("gots: couldn't add the clarify tool to an agent", exc_info=True)
         return agent
 
     adapter._create_agent = create_agent
@@ -161,7 +161,7 @@ def tool_definition() -> Optional[Dict[str, Any]]:
                 (d for d in found if (d.get("function") or {}).get("name") == TOOL), False
             )
         except Exception:
-            logger.debug("memento: no clarify tool definition", exc_info=True)
+            logger.debug("gots: no clarify tool definition", exc_info=True)
             _definition = False
     return _definition or None
 
@@ -378,7 +378,7 @@ def _set_status(adapter: Any, run_id: str, status: str, **fields: Any) -> None:
         try:
             setter(run_id, status, **fields)
         except Exception:
-            logger.debug("memento: couldn't set the run's status", exc_info=True)
+            logger.debug("gots: couldn't set the run's status", exc_info=True)
         # A run waiting on a question, or carrying on after one, is news to every device.
         events.note("runs", None, None, True)
 
@@ -392,4 +392,4 @@ def _push(loop: asyncio.AbstractEventLoop, stream: Any, event: Dict[str, Any]) -
     try:
         loop.call_soon_threadsafe(stream.put_nowait, event)
     except Exception:
-        logger.debug("memento: couldn't push a clarify event", exc_info=True)
+        logger.debug("gots: couldn't push a clarify event", exc_info=True)

@@ -26,7 +26,7 @@ import {
 } from "./chat-next-devices.tsx"
 
 const setUp = (name: string) => {
-  const host = fakeHost(`memento-matrix-${name}`)
+  const host = fakeHost(`gots-matrix-${name}`)
   return host
 }
 

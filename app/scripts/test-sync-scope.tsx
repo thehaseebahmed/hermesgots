@@ -113,11 +113,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (fake.reachable) {
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["draft_text"] })
-    if (url.pathname.endsWith("/plugins/memento/chats")) {
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["draft_text"] })
+    if (url.pathname.endsWith("/plugins/gots/chats")) {
       fake.chats += 1
       return json({
-        object: "memento.chats",
+        object: "gots.chats",
         chats: { ...(body?.chats ?? {}), ...Object.fromEntries(incoming) },
       })
     }
@@ -157,7 +157,7 @@ async function sealToInbox(publicKey: string, value: unknown, aad: string) {
   )
   const material = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"])
   const key = await crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: epk, info: encoder.encode("memento-inbox-v1") },
+    { name: "HKDF", hash: "SHA-256", salt: epk, info: encoder.encode("gots-inbox-v1") },
     material,
     { name: "AES-GCM", length: 256 },
     false,
@@ -338,7 +338,7 @@ test("a bot the registry adds is merged in the same pass", async () => {
       sealed: await sealToInbox(
         publicKey!,
         { name: "Registered", profile: "default", baseUrl: "http://registered.test", apiKey: "k" },
-        `memento:${USER}:bot:${REGISTRY_BOT}`,
+        `gots:${USER}:bot:${REGISTRY_BOT}`,
       ),
       enabled: true,
     },

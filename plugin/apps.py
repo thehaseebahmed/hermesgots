@@ -94,7 +94,7 @@ def _read_bundle(root: Path) -> Dict[str, Dict[str, Any]]:
             }
         return found
     except (OSError, ValueError, KeyError, TypeError, AttributeError, AppsError):
-        logger.warning("memento: couldn't read the built-in apps bundle", exc_info=True)
+        logger.warning("gots: couldn't read the built-in apps bundle", exc_info=True)
         return {}
 
 

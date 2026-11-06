@@ -66,7 +66,7 @@ async function seed({ without = [] }: { without?: string[] } = {}) {
       id,
       profileId: bot.id,
       title,
-      hermesSessionId: `memento-${id}`,
+      hermesSessionId: `gots-${id}`,
       createdAt,
       updatedAt: createdAt,
       changedAt: 0,
@@ -259,7 +259,7 @@ test("a card and a marker in one gap stand by their own times, not one producer'
     id: "t-late",
     profileId: bot.id,
     title: "A thread begun this morning",
-    hermesSessionId: "memento-t-late",
+    hermesSessionId: "gots-t-late",
     createdAt: at(-2, 12),
     updatedAt: at(-2, 12),
     changedAt: 0,
@@ -293,12 +293,12 @@ test("a card and a marker in one gap stand by their own times, not one producer'
 })
 
 /** The thread four messages were triaged into. */
-const TAKING = { id: "t-memento", title: "Memento updates & Hermes docker restart" }
+const TAKING = { id: "t-gots", title: "Gots updates & Hermes docker restart" }
 const MOVED = [
-  { id: "mv1", text: "Update memento plugin for all profiles in hermes container.", at: at(0, 6) },
-  { id: "mv2", text: "Update memento plugin for all working profiles please!", at: at(0, 6.1) },
-  { id: "mv3", text: "Update memento plugin for all working profiles please!", at: at(0, 6.2) },
-  { id: "mv4", text: "Update memento plugin.", at: at(0, 6.3) },
+  { id: "mv1", text: "Update gots plugin for all profiles in hermes container.", at: at(0, 6) },
+  { id: "mv2", text: "Update gots plugin for all working profiles please!", at: at(0, 6.1) },
+  { id: "mv3", text: "Update gots plugin for all working profiles please!", at: at(0, 6.2) },
+  { id: "mv4", text: "Update gots plugin.", at: at(0, 6.3) },
 ]
 const STARTED_LATER = [
   { id: "t-clef", title: "clef:27b vs d3 comparison", createdAt: at(0, 8) },
@@ -316,7 +316,7 @@ async function seedTriaged() {
       id: TAKING.id,
       profileId: bot.id,
       title: TAKING.title,
-      hermesSessionId: `memento-${TAKING.id}`,
+      hermesSessionId: `gots-${TAKING.id}`,
       createdAt: at(-1, 9),
       updatedAt: at(0, 6.3),
       changedAt: 0,
@@ -325,7 +325,7 @@ async function seedTriaged() {
       id,
       profileId: bot.id,
       title,
-      hermesSessionId: `memento-${id}`,
+      hermesSessionId: `gots-${id}`,
       createdAt,
       updatedAt: createdAt,
       changedAt: 0,
@@ -374,7 +374,7 @@ test("a Main left with no messages reads its moves and its cards by one clock", 
       flow(),
       [
         heading(at(-1, 9)),
-        "card:t-memento",
+        "card:t-gots",
         heading(at(0, 6)),
         // Every one of these moves was made before the first of these threads began, so all four lead
         // the cards — the order the clock gives them, not the order the screens once appended their

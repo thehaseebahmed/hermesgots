@@ -54,16 +54,16 @@ function host({
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/api/plugins/memento/info"))
-      return json({ name: "memento", version: "0.29.1", features })
-    if (url.pathname.endsWith("/api/plugins/memento/openui")) {
+    if (url.pathname.endsWith("/api/plugins/gots/info"))
+      return json({ name: "gots", version: "0.29.1", features })
+    if (url.pathname.endsWith("/api/plugins/gots/openui")) {
       if (!features.includes("openui")) return json({ error: { message: "Not Found" } }, 404)
       if (method === "POST") {
         if (refuse) return json({ error: { message: refuse } }, 500)
         state.enabled = body?.enabled === true
       }
       await gate
-      return json({ object: "memento.openui", enabled: state.enabled, version: "1.0.1" })
+      return json({ object: "gots.openui", enabled: state.enabled, version: "1.0.1" })
     }
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: [] })
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
@@ -108,7 +108,7 @@ test("changing the switch writes it to the host and shows what the host answers"
     const writes = fake.calls.filter((call) => call.method === "POST")
     assert.deepEqual(
       writes.map((call) => [call.path, call.body]),
-      [["/api/plugins/memento/openui", { enabled: false }]],
+      [["/api/plugins/gots/openui", { enabled: false }]],
       "one write, of the one field the route takes",
     )
     assert.equal(checked(switchOf()), false, "the switch shows what the host now holds")

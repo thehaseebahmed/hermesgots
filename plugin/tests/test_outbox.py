@@ -45,7 +45,7 @@ class Adapter:
 class OutboxTest(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
-        self.path = Path(self.dir.name) / "memento.db"
+        self.path = Path(self.dir.name) / "gots.db"
         self.adapter = Adapter()
         self.posted: list = []
 

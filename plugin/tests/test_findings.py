@@ -19,7 +19,7 @@ from plugin import findings, pipeline, sessions
 from plugin.store import db_path
 from plugin.tests._helpers import staged as staged_record
 
-SESSION = "memento-afk-findings"
+SESSION = "gots-afk-findings"
 
 
 class FindingsTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class FindingsTests(unittest.TestCase):
             "p1",
             [
                 {
-                    "name": "mock-user/memento",
+                    "name": "mock-user/gots",
                     "repo_root": str(self.home / "checkout"),
                     "path": str(self.home / "trees" / "afk-337"),
                     "branch": "hermes/afk-337",
@@ -130,7 +130,7 @@ class FindingsTests(unittest.TestCase):
 
     def test_an_unknown_session_is_refused(self) -> None:
         self.staged()
-        answer = self.call({"skill": "code-review", "findings": ["one"]}, session_id="memento-nope")
+        answer = self.call({"skill": "code-review", "findings": ["one"]}, session_id="gots-nope")
         self.assertIn("error", answer)
         self.assertEqual(pipeline.stage_findings(self.read()), [])
 

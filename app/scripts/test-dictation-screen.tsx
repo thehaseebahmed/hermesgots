@@ -89,7 +89,7 @@ type Bot = {
 /** What a host says about its own log, off the rule the app compares a mirror with. */
 const statsOf = (bot: Bot) => dictationTotals(bot.rows ?? [], bot.clearedAt ?? 0)
 
-const pluginPath = "/api/plugins/memento"
+const pluginPath = "/api/plugins/gots"
 
 function host(bots: Bot[]) {
   const calls: { path: string; method: string }[] = []

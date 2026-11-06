@@ -109,7 +109,7 @@ function seed(
           profileId: profile.id,
           title,
           titleEdited: true,
-          hermesSessionId: `memento-${id}`,
+          hermesSessionId: `gots-${id}`,
           createdAt: index === 0 ? now - 2.5 * day : now - hour,
           updatedAt: now - hour,
           changedAt: now,
@@ -452,7 +452,7 @@ async function useMock(page, profileId, mock, mainId) {
 }
 
 async function mockChats(mock) {
-  const response = await fetch(`${mock}/api/plugins/memento/chats`, { headers: mockAuth })
+  const response = await fetch(`${mock}/api/plugins/gots/chats`, { headers: mockAuth })
   if (!response.ok) return {}
   return (await response.json()).chats ?? {}
 }
@@ -514,7 +514,7 @@ function threadFor(page, profileId, { id, title, says }) {
         profileId,
         title,
         titleEdited: true,
-        hermesSessionId: `memento-${id}`,
+        hermesSessionId: `gots-${id}`,
         createdAt: now - 2 * 3_600_000,
         updatedAt: now - 3_600_000,
         changedAt: now,

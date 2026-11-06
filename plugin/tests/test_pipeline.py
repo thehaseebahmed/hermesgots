@@ -32,7 +32,7 @@ ONCE: Dict[str, Any] = {
 
 def tree(changed: int = 0, ahead: int = 1) -> List[Dict[str, Any]]:
     """A worktree as ``ship.status`` reports it: what is uncommitted and what is committed."""
-    return [{"name": "mock-user/memento", "changed": changed, "ahead": ahead}]
+    return [{"name": "mock-user/gots", "changed": changed, "ahead": ahead}]
 
 
 def gate(*codes: int) -> List[Dict[str, Any]]:

@@ -383,7 +383,7 @@ async def session_ids(adapter: Any, session_id: str) -> set:
             if tip:
                 ids.add(tip)
     except Exception:
-        logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+        logger.debug("gots: couldn't resolve session %s", session_id, exc_info=True)
     return ids
 
 
@@ -522,7 +522,7 @@ async def steer(
         await asyncio.to_thread(put_back, path, row)
         return None, (str(error), 409 if error.permanent else 502)
     # A steer the agent never reads comes back when the run ends; see tick.
-    return {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": said}, None
+    return {"object": "gots.queue.steered", "id": row["id"], "run_id": run_id, "text": said}, None
 
 
 async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path) -> None:
@@ -547,7 +547,7 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
             adapter, profile, "/v1/runs", json.loads(row["body"]), idempotency_key=row["id"]
         )
     except StartError as error:
-        logger.warning("memento: couldn't start the queued turn for %s: %s", session_id, error)
+        logger.warning("gots: couldn't start the queued turn for %s: %s", session_id, error)
         if error.permanent:
             await asyncio.to_thread(mark, path, row["id"], None, str(error))
             events.note("session", session_id, path, True)
@@ -569,13 +569,13 @@ async def run(adapter: Any, home: Path) -> None:
             try:
                 await tick(adapter, session_id, profile, path)
             except Exception:
-                logger.debug("memento: queue tick failed for %s", session_id, exc_info=True)
+                logger.debug("gots: queue tick failed for %s", session_id, exc_info=True)
 
     async def resume() -> None:
         try:
             found = await asyncio.to_thread(waiting_sessions, db_path(home))
         except Exception:
-            logger.debug("memento: couldn't read the queue", exc_info=True)
+            logger.debug("gots: couldn't read the queue", exc_info=True)
             return
         for session_id, profile in found:
             if not profile or profile == "default":
