@@ -207,6 +207,10 @@ async function device() {
   await settle()
   await (await setUpSync()).confirm()
   await settle()
+  await until(
+    async () => !syncState().syncingAccount && !syncState().syncingChats,
+    "the setup's own sync to finish",
+  )
 }
 
 function syncState() {
@@ -364,7 +368,11 @@ test("a record's text with no saved draft is kept out of this device's row and d
     const row = await db.conversations.get("legacy-chat")
     assert.ok(row, "the record itself is taken")
     assert.equal(row?.draftText, undefined, "a live composer's text is not")
-    assert.equal(await db.drafts.get(draftKey("legacy-chat")), undefined, "and is never adopted here")
+    assert.equal(
+      await db.drafts.get(draftKey("legacy-chat")),
+      undefined,
+      "and is never adopted here",
+    )
   } finally {
     incoming.clear()
     await db.conversations.delete("legacy-chat")
