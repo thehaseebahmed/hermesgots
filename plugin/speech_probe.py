@@ -286,7 +286,7 @@ def measure(
 
     measured: Dict[str, Dict[str, Any]] = {}
     with _probing:
-        keep = here(path) if keep is None else {**here(path), **keep}
+        keep = {**here(path), **(keep or {})}
         models = [name for name in models if name not in keep]
         if not models:
             return None

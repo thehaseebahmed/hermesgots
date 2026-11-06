@@ -175,6 +175,8 @@ export function host(
     next?: Speech
     /** The record a probe answers with: the host's own measurement, drawn on the picker's rows. */
     probed?: Speech
+    /** A probe the host is still timing: its answer waits on this. */
+    holdProbe?: Promise<void>
     /** The host's own sentence for a probe it refused, as a take being heard answers one. */
     refuseProbe?: string
     /** The probe never reached the host at all: a request a phone's dead connection drops. */
@@ -220,6 +222,7 @@ export function host(
       calls.push({ path, method, body: undefined })
       if (options.failProbe) throw new TypeError("Failed to fetch")
       if (options.refuseProbe) return json({ error: { message: options.refuseProbe } }, 409)
+      await options.holdProbe
       return json({ speech: options.probed ?? options.speech })
     }
     if (path.endsWith("/api/plugins/memento/speech")) {

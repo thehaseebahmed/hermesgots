@@ -981,9 +981,10 @@ function ProbeNote({
   problem: string | null
 }) {
   // A host that owes nothing has answered for itself: a failure latched before that is spent.
-  const note = probe?.owed === false ? probeNote(probe) : (problem ?? probeNote(probe, measuring))
+  if (probe?.owed === false) return null
+  const note = problem ?? probeNote(probe, measuring)
   if (!note) return null
-  const working = measuring && !problem && probe?.owed !== false
+  const working = measuring && !problem
   return (
     <p
       className={cn(

@@ -400,6 +400,35 @@ test("a pick answered without the page's settings leaves every setting where it 
   })
 })
 
+test("while the host times its models the note says so the same way, centered and pulsing", async () => {
+  let finish = () => {}
+  const held = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  await seed(
+    "speech-probe-measuring",
+    ["dictation", "speech_model", "speech_probe"],
+    {},
+    { speech: unmeasured(), probed: speech(), holdProbe: held },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await openSpeech()
+    await until(
+      () => /Timing this host's speech models…/.test(find("[data-speech-probe]")?.textContent ?? ""),
+      "the note names the timing while the host works",
+    )
+    const note = find("[data-speech-probe]")
+    assert.match(note?.className ?? "", /text-center/)
+    assert.match(note?.className ?? "", /motion-safe:animate-/)
+    finish()
+    await until(
+      () => /9\.4× realtime/.test(speechOption("base")?.textContent ?? ""),
+      "the rows are redrawn once it answers",
+    )
+    assert.doesNotMatch(find("[data-speech-probe]")?.className ?? "", /text-center/)
+  })
+})
+
 test("a host that lists no models leaves the Speech model row with nothing to open", async () => {
   await seed(
     "speech-nomodels",

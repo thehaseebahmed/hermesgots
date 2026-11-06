@@ -331,11 +331,7 @@ export function marked(row: SpeechModel): string | null {
   return null
 }
 
-/**
- * An answer to a write or a probe, with the page's `stt` block kept where the answer carries none:
- * the block is the host's whole Speech-to-text page, and an answer that lacks it is a host that
- * left it out, not one that removed every setting.
- */
+/** An answer to a write or a probe, keeping the held `stt` block where the host left it out. */
 export function keepStt(fresh: SpeechSettings, held?: SpeechSettings): SpeechSettings {
   if (fresh.stt || !held?.stt) return fresh
   return { ...fresh, stt: held.stt }
