@@ -19,6 +19,15 @@ RUN apt-get update \
       python3 python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
+# GitHub CLI, from GitHub's own apt repository (Debian's packaged gh lags well behind).
+RUN install -d -m 755 /etc/apt/keyrings \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+
 # `psmisc` is fuser, which `pnpm e2e down` shells out to. Debian 13's python3 is 3.13, the version
 # the plugin's tests run on in CI, and they import cryptography the same way — into the
 # interpreter itself, not a venv: Debian's /etc/profile rewrites PATH for login shells, so a
@@ -69,7 +78,7 @@ RUN cd /tmp/warm/app && pnpm fetch \
 ARG BUILD_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/memento" \
       org.opencontainers.image.title="Gots development container" \
-      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium and the Reticle verification CLI for developing the Gots app, plugin and website" \
+      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision=$BUILD_REVISION
 
