@@ -1,9 +1,3 @@
-/**
- * The plugin is installed from one path, and every instruction that says how has to name that path.
- * The repository was renamed once (its old name still redirects), and each copy of the command went
- * stale on its own: a literal in a doc, a component or a release script is invisible to tsc, lint and
- * the build, so this sweep — not the compiler — is what keeps them one.
- */
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
@@ -19,11 +13,7 @@ import {
 
 const ROOT = resolve(import.meta.dirname, "../..")
 
-/** What points a reader at the repository before its rename: its install path, and a link to it. */
-const OLD = [
-  ["thehaseebahmed", "memento", "plugin"].join("/"),
-  ["github.com", "thehaseebahmed", "memento"].join("/"),
-]
+const OLD = ["thehaseebahmed/memento/plugin", "github.com/thehaseebahmed/memento"]
 
 const TEXT = new Set([
   ".md",
@@ -43,8 +33,8 @@ const TEXT = new Set([
 const NAMED = new Set(["Dockerfile"])
 const SKIP = new Set([".git", "node_modules", "dist", "build", ".venv", "__pycache__"])
 
-/** Where the old path is deliberate, each with the reason it stays. */
 const ALLOWED = [
+  ["app/scripts/test-install-instructions.mjs", "this sweep names what it looks for"],
   ["docs/adr/", "a dated decision record quotes the command as it was; ADRs are not rewritten"],
   [`app/scripts/fixtures${sep}`, "recorded transcripts of real sessions, kept verbatim"],
 ]
@@ -78,7 +68,7 @@ test("a bot's linking commands install the plugin and claim the code at the site
   assert.equal(
     linkProfileAt("mk_abc-def", site),
     `hermes -p <name> gots link mk_abc-def --site ${site}`,
-    "another profile on the same host is already installed",
+    "a profile is linked by name, and the plugin has to be installed there too",
   )
 })
 
