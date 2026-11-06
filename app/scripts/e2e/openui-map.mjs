@@ -1,4 +1,4 @@
-import { app, assert, centreOf, dragBy, flow, pass, settled } from "./lib.mjs"
+import { app, assert, basemapOf, centreOf, dragBy, flow, pass, settled } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const MAP = "[data-slot=map]"
@@ -58,11 +58,7 @@ const facts = (page, place = false) =>
         summary: frame.getAttribute("aria-label"),
         labels,
         tiles: tiles.length,
-        basemap: tiles.some((src) => src.includes("World_Dark_Gray_Base"))
-          ? "dark"
-          : tiles.some((src) => src.includes("World_Street_Map"))
-            ? "light"
-            : "none",
+        tileUrls: tiles,
         attribution: attribution?.textContent ?? "",
         creditedInside:
           credited && credited.width > 0 && credited.height > 0 ? inside(credited) : null,
@@ -187,7 +183,7 @@ await flow(
         const at = `${width}px in ${theme}`
         await page.emulateMedia({ colorScheme: theme })
         await until(
-          async () => (await facts(page)).basemap === theme,
+          async () => basemapOf((await facts(page)).tileUrls) === theme,
           10_000,
           `the ${theme} basemap at ${at}`,
         )
@@ -205,7 +201,11 @@ await flow(
             label.inside,
             `"${label.text}" still lies inside the map at ${at} (${label.left},${label.top})`,
           )
-        assert.equal(shape.basemap, theme, `the ${theme} tiles are the ones asked for at ${at}`)
+        assert.equal(
+          basemapOf(shape.tileUrls),
+          theme,
+          `the ${theme} tiles are the ones asked for at ${at}`,
+        )
         assert.match(shape.attribution, /OpenStreetMap/, `the attribution draws at ${at}`)
         seen.set(`${width}-${theme}`, `${shape.box.width}×${shape.box.height}`)
         const path = await shot(`map-${width}-${theme}`)
@@ -221,7 +221,7 @@ await flow(
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme: "light" })
     await until(
-      async () => (await facts(page)).basemap === "light",
+      async () => basemapOf((await facts(page)).tileUrls) === "light",
       10_000,
       "the light basemap again",
     )

@@ -179,6 +179,12 @@ export async function flow(
       ...(touch ? { hasTouch: true } : {}),
     }),
   )
+  // The component library mounts a devtools bunny of its own in a development build, in a root of
+  // its own over the bottom-right of every page — where a screen's Send sits. Its own opt-out is
+  // the flag it checks before mounting, so no flow has to click around a widget no user has.
+  await page.addInitScript(() => {
+    globalThis[Symbol.for("openui.devtools.autoMount")] = true
+  })
   // The account has to be in place before the document that reads it: the init script lands on the
   // next navigation, which is the flow's own `goto`.
   if (account) await signIn(page.context())
@@ -476,6 +482,18 @@ export const LOOKS = [1440, 390].map((width) => ({
  */
 export const cardSelector = (id) => `[data-slot="thread-card"][data-thread="${id}"]`
 export const cardOf = (page, id) => page.locator(cardSelector(id))
+
+/**
+ * The basemap a map's tiles were asked for, from their URLs: the theme `map-surface.tsx` names, and
+ * `none` where the layer hasn't been pointed anywhere yet. One reading for every flow that checks
+ * that the map follows the screen.
+ */
+export const basemapOf = (tiles) =>
+  tiles.some((tile) => tile.includes("World_Dark_Gray_Base"))
+    ? "dark"
+    : tiles.some((tile) => tile.includes("World_Street_Map"))
+      ? "light"
+      : "none"
 
 /** The middle of the element a selector reaches, in the page's own px: where a drag starts. */
 export const centreOf = (page, selector) =>

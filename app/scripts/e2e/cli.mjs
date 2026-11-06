@@ -399,10 +399,20 @@ export const FLOWS = {
     about:
       "A reply's interface draws at 390 and 768px, light and dark; a block that can't draw stays code; a patch landing while the thread is scrolled up doesn't move the reader",
   },
+  apps: {
+    script: "e2e/apps.mjs",
+    about:
+      "A bot's built-in apps draw their sample and lead page to page; an app built from the list's + opens on its page, a change streams into it before it is written, Undo puts the page back, a stopped host still draws the app and the list from this device, and a hidden built-in leaves the list at 390 and 768px",
+  },
   "openui-map": {
     script: "e2e/openui-map.mjs",
     about:
       "A reply's places draw as a map fitted to its points at 390 and 768px, light and dark, with its basemap following the theme and its attribution in the chrome; an untouched map lets one finger scroll the thread, a tap takes pan and zoom, and the button hands them back",
+  },
+  "openui-reference": {
+    script: "e2e/openui-reference.mjs",
+    about:
+      "The component reference at 390 and 768px, light and dark: one entry per library component in its order, every drawing on the reference's own column, the chart and the map drawn through the lazy chunks that arrive only when an entry draws them, a pasted block drawn and a bad one refused in words beside its source, and nothing kept across a reload",
   },
   screens: {
     script: "e2e/screens.mjs",
