@@ -416,9 +416,13 @@ def env_changes(home: Path, url: str, origins: List[str]) -> Dict[str, str]:
     return changes
 
 
-def is_linked(state: Dict[str, Any]) -> bool:
-    """Linked, and the registry still knows this host's token."""
+def is_linked(state: Dict[str, Any], site: str = "") -> bool:
+    """Linked, and the registry still knows this host's token. Linked to another site than `site`
+    is not linked here: a state copied over by `migrate` names the site it was claimed at, and
+    answering for that one would skip the claim the new site is waiting on."""
     if not state.get("token") or state.get("revoked"):
+        return False
+    if site and str(state.get("site") or "").rstrip("/") != site:
         return False
     try:
         call(state["site"], "GET", "inbox", token=state["token"])
@@ -527,7 +531,7 @@ def cmd_link(args: Any) -> int:
     assume = bool(args.yes)
 
     try:
-        if is_linked(state):
+        if is_linked(state, site):
             print("This profile is already linked. To link it to another account, run "
                   "`hermes gots unlink` first.")
         else:
