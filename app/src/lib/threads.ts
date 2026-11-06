@@ -21,7 +21,8 @@ import { byName } from "@/lib/compare"
 import { oneLine } from "@/lib/words"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
-import { threadState, type ThreadState } from "@/lib/session-work"
+import { isUnread, threadState, type ThreadState } from "@/lib/session-work"
+import { useReadMarks } from "@/lib/read-marks"
 import {
   useAllLiveRuns,
   useLiveSubagents,
@@ -220,6 +221,11 @@ export interface BotSummary {
   threadLine?: string
   /** Threads waiting on the user. */
   waiting: number
+  /**
+   * A thread this device holds past its read mark — Main among them, and never a coding session's,
+   * because the row leads to Main and previews the bot's own words (ADR 0110).
+   */
+  unread: boolean
 }
 
 /** The keys the sidebar's bots rank by, each with the way it reads best (ADR 0091). */
@@ -257,10 +263,13 @@ export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] 
 
 /**
  * Every bot that's turned on, with its newest thread and — once this device has opened it — its
- * Main thread and the line it last said, for the sidebar, in the order linked.
+ * Main thread and the line it last said, for the sidebar, in the order linked. Its dot reads the
+ * same threads, never a coding session's: a row that leads to Main must not say its news is in a
+ * screen it cannot reach.
  */
 export function useBotSummaries(): BotSummary[] | undefined {
   const live = useWaiting()
+  const marks = useReadMarks()
   const rows = useLiveQuery(async () => {
     const bots = await listEnabledProfiles()
     return Promise.all(
@@ -316,6 +325,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
     preview,
     threadLine,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,
+    unread: chats.some((chat) => isUnread(chat.updatedAt, marks[chat.id])),
   }))
 }
 

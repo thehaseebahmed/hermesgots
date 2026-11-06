@@ -1364,16 +1364,19 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     beside,
     unsent: hasNoMessages,
   })
-  // This device has the session's thread on screen as of now — its read mark, written when the
-  // thread renders and again while new activity lands in front of the reader, which is what clears
-  // the row's unread dot (never synced: a mark is about where the reader was sitting).
-  const threadId = session?.id
-  const sessionActivity = session ? lastActivityAt(session) : 0
+  // This device has the chat's thread on screen as of now — its read mark, written when the thread
+  // renders and again while new activity lands in front of the reader, which is what clears a row's
+  // dot (never synced: a mark is about where the reader was sitting). Every chat writes one, not
+  // only a coding session: the sidebar's bot row reads the marks of the bot's own threads (ADR
+  // 0110). A session's moment is its last activity, which a pull request or a close moves too; a
+  // thread's is its last turn.
+  const seenId = conversation?.id
+  const seenAt = session ? lastActivityAt(session) : (conversation?.updatedAt ?? 0)
   // The mark rides the activity it has seen, not the wall clock: a re-render with nothing new
   // writes nothing, and the list's dot still clears.
   useEffect(() => {
-    if (threadId) markRead(threadId, sessionActivity)
-  }, [threadId, sessionActivity])
+    if (seenId && seenAt > 0) markRead(seenId, seenAt)
+  }, [seenId, seenAt])
   // A thread beside Main says how many replies it has under its title.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
   const repliesLine =

@@ -69,7 +69,7 @@ The most recent event a session has seen — a turn ending, its pull request mov
 _Avoid_: updated at, updatedAt, last update
 
 **Read mark**:
-When a device last had a session's thread rendered on it. It stays on that device, is never synced, and a session with anything newer than its mark has not been read there — one this device has never opened has no mark at all, so nothing about it is called unread.
+When a device last had a chat's thread rendered on it. It stays on that device, is never synced, and a chat with anything newer than its mark has not been read there — one this device has never opened has no mark at all, so nothing about it is called unread. It is what a Code row's dot measures a session's last activity against, and what the sidebar's bot row measures the bot's own threads against — Main among them, never a coding session of that bot's, since that row leads to Main.
 _Avoid_: last seen, read receipt, unread count
 
 **Question**:

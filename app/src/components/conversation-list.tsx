@@ -195,10 +195,14 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
   const bots = summaries && sortBots(summaries, sort)
   const { pathname } = useLocation()
   const chat = matchPath("/c/:id", pathname)?.params.id
-  const owner = useLiveQuery(
-    async () => (chat ? (await db.conversations.get(chat))?.profileId : undefined),
-    [chat],
-  )
+  // The bot whose screen the address is, for the row that says so. A coding session belongs to its
+  // bot but is not one of its threads — Code's list is where it stands — so opening one leaves the
+  // bot's row alone.
+  const owner = useLiveQuery(async () => {
+    if (!chat) return undefined
+    const found = await db.conversations.get(chat)
+    return found && !found.projectId ? found.profileId : undefined
+  }, [chat])
   const now = useNow()
 
   return (
@@ -222,7 +226,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, latest, main, preview, threadLine, waiting }) => {
+        {bots?.map(({ bot, latest, main, preview, threadLine, waiting, unread }) => {
           const age = (main ?? latest)?.updatedAt
           return (
             <li key={bot.id}>
@@ -236,7 +240,20 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                     : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
                 }
               >
-                <Bot id={bot.botId} className="size-9" />
+                <span className="relative shrink-0">
+                  <Bot id={bot.botId} className="size-9" />
+                  {/* New since this device last looked at one of the bot's threads (ADR 0110). */}
+                  {unread && (
+                    <>
+                      <span className="sr-only">New activity</span>
+                      <span
+                        data-unread
+                        aria-hidden
+                        className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-info ring-2 ring-sidebar"
+                      />
+                    </>
+                  )}
+                </span>
                 {!collapsed && (
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline gap-2">
