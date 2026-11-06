@@ -452,9 +452,6 @@ class Queries(unittest.TestCase):
         request.json = read
         return asyncio.run(route(self.app, plugin.PREFIX + "/apps/query", "POST")(request))
 
-    def test_the_host_shapes_are_the_four_reads_the_plugin_already_serves(self) -> None:
-        self.assertEqual(apps.HOST_SHAPES, ("usage", "routines", "projects", "sessions"))
-
     def test_sessions_answers_the_hosts_chats(self) -> None:
         answer = self.ask({"shape": "sessions"})
         self.assertEqual(answer["status"], 200)
@@ -475,10 +472,10 @@ class Queries(unittest.TestCase):
         self.assertIn("provider", answer["payload"]["error"]["message"])
 
     def test_anything_but_a_host_shape_is_refused_naming_the_shapes(self) -> None:
-        for shape in ("mcp_call", "skills", None, 3, ""):
+        for shape in ("mcp_call", "skills", None, 3, "", ["usage"], {}):
             answer = self.ask({"shape": shape})
             self.assertEqual(answer["status"], 400, shape)
-            for name in apps.HOST_SHAPES:
+            for name in ("usage", "routines", "projects", "sessions"):
                 self.assertIn(name, answer["payload"]["error"]["message"])
 
     def test_a_body_that_is_not_an_object_is_refused(self) -> None:

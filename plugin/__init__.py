@@ -3250,8 +3250,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         rows = await asyncio.to_thread(apps.listing, store_path())
         return web.json_response({"object": "memento.apps", "apps": rows})
 
-    async def read_routines() -> Dict[str, Any]:
+    async def query_usage(args: Dict[str, Any]) -> Dict[str, Any]:
+        provider = str(args.get("provider") or "").strip().lower()
+        if not provider:
+            raise ValueError("usage needs a provider")
+        return await read_usage(provider)
+
+    async def query_projects(args: Dict[str, Any]) -> Dict[str, Any]:
+        return {"projects": await read_projects()}
+
+    async def query_routines(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"jobs": await asyncio.to_thread(_runs_by_job, None, DEFAULT_PER_JOB)}
+
+    async def query_sessions(args: Dict[str, Any]) -> Dict[str, Any]:
+        return {"sessions": await asyncio.to_thread(chats.read, store_path())}
 
     async def query_app(request: "web.Request") -> "web.Response":
         """A page's `Query` answered from the host's own reads (ADR 0102). Only a host shape is
@@ -3263,30 +3275,29 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if sent is None:
             return _error(web, "Body must be a JSON object", 400)
         shape = sent.get("shape")
-        given = sent.get("args")
-        args = given if isinstance(given, dict) else {}
-        if shape not in apps.HOST_SHAPES:
+        read = app_queries.get(shape) if isinstance(shape, str) else None
+        if read is None:
             return _error(
                 web,
                 f"{shape!r} is not something the bot can read. Ask for one of: "
-                + ", ".join(apps.HOST_SHAPES),
+                + ", ".join(app_queries),
                 400,
             )
+        args = sent.get("args")
         try:
-            if shape == "usage":
-                provider = str(args.get("provider") or "").strip().lower()
-                if not provider:
-                    return _error(web, "usage needs a provider", 400)
-                value = await read_usage(provider)
-            elif shape == "projects":
-                value = {"projects": await read_projects()}
-            elif shape == "routines":
-                value = await read_routines()
-            else:
-                value = {"sessions": await asyncio.to_thread(chats.read, store_path())}
+            value = await read(args if isinstance(args, dict) else {})
+        except ValueError as error:
+            return _error(web, str(error), 400)
         except ImportError:
             return _error(web, f"This Hermes version cannot answer {shape}.", 501)
         return web.json_response({"object": "memento.app.query", "shape": shape, "value": value})
+
+    app_queries = {
+        "usage": query_usage,
+        "routines": query_routines,
+        "projects": query_projects,
+        "sessions": query_sessions,
+    }
 
     async def get_app_page(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

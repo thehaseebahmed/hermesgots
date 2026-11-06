@@ -165,7 +165,7 @@ const APP_ARTIFACT_SAYS = [
   ...SAYS_IN_BOTH,
   "A page's first line is its `# id: <slug>`, and no two pages share one.",
   "A build answers with one block per page, the first the root; a change answers with the page's whole replacement.",
-  'A page fetches its own data and may write: `Query("tool", {args}, {defaults})` draws its defaults until the tool answers; `Mutation("tool", {args})` writes.',
+  'A page reads the bot with `Query("usage" | "routines" | "projects" | "sessions", {args}, {defaults})`, which draws its defaults until the bot answers; usage takes `{provider}`. A refused read answers `{error}`. `Mutation("tool", {args})` writes.',
   "Moves to the page it names.",
 ]
 

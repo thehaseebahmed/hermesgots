@@ -4482,20 +4482,18 @@ function appsRoot(config: HermesConfig) {
 }
 
 /**
- * What a page's `Query` reads of the host: one of the shapes `apps.py` names. A refusal is a
+ * What a page's `Query` reads of the host: one of the four shapes the plugin's query route answers. A refusal is a
  * `HermesError` carrying the host's own words and status.
  */
 export async function queryApp(
   config: HermesConfig,
   shape: string,
   args: Record<string, unknown>,
-  signal?: AbortSignal,
 ): Promise<unknown> {
   const response = await request(`${appsRoot(config)}/query`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ shape, args }),
-    signal,
   })
   return (await response.json())?.value
 }

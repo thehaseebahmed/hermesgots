@@ -703,6 +703,10 @@ _Avoid_: screen, view, tab, sheet
 The most characters one page's source may hold. A write past it is refused whole, never cut to fit, and the refusal names the cap.
 _Avoid_: page limit, size limit, truncation
 
+**Host shape**:
+One of the four reads a page's query may name — usage, routines, projects or sessions — answered by the plugin's query route from the routes it already serves. The route refuses any other name.
+_Avoid_: data source, tool, endpoint
+
 **Root page**:
 The page an app opens on.
 _Avoid_: home page, first page, index
