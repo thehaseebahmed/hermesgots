@@ -6,8 +6,12 @@
 // `test-bot-settings-list.tsx`'s.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
-/** The banner a bot whose plugin is behind wears over its list, verbatim. */
-const BANNER = "This bot's plugin is out of date! Update it to 0.80.0 or newer."
+/** The banner a bot whose plugin is behind wears over its list, verbatim, for the app's own floor. */
+const bannerOf = (page) =>
+  page.evaluate(async () => {
+    const { MIN_PLUGIN_VERSION } = await import("/src/lib/version.ts")
+    return `This bot's plugin is out of date! Update it to ${MIN_PLUGIN_VERSION} or newer.`
+  })
 /** One row's subtitle, so a row is proved to say what it holds rather than only to be there. */
 const CODING = "Away From Keyboard and this bot's pick budget"
 const PACES = [
@@ -24,7 +28,7 @@ const menuRow = (page) => page.locator('a[href="/settings/appearance"]')
 const seedPlugin = (page, profileId) =>
   page.evaluate(async (id) => {
     const { db } = await import("/src/lib/db.ts")
-    await db.profiles.update(id, { pluginVersion: "0.79.0" })
+    await db.profiles.update(id, { pluginVersion: "0.1.0" })
   }, profileId)
 
 /** Opens the Settings menu and answers the row naming the flow's bot. */
@@ -53,7 +57,7 @@ const assertList = async (page, viewport) => {
     `the list is on screen at ${viewport.width}px (${Math.round(box.x)}…${Math.round(box.x + box.width)})`,
   )
   assert.equal(
-    await list.getByText(BANNER, { exact: true }).count(),
+    await list.getByText(await bannerOf(page), { exact: true }).count(),
     1,
     "the list wears the out-of-date plugin's banner, in its own words",
   )
@@ -73,7 +77,9 @@ const assertList = async (page, viewport) => {
     0,
     "the list carries no headings — its groups are cards, not headings",
   )
-  const cards = list.locator("[data-settings-group]")
+  const cards = list
+    .locator("[data-settings-group]")
+    .filter({ has: page.locator("[data-bot-page]") })
   const count = await cards.count()
   assert.equal(count, 1, `every settings page is one card (${count})`)
   let previous = null

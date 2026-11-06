@@ -38,16 +38,47 @@ const FEATURES = ["delegation_model"]
 
 const DELEGATION = {
   fields: [
+    { key: "delegation.backend", kind: "string" as const, section: "" },
+    { key: "delegation.compression_threshold_tokens", kind: "number" as const, section: "" },
+    { key: "delegation.inherit_mcp_toolsets", kind: "boolean" as const, section: "" },
     { key: "delegation.max_iterations", kind: "number" as const, section: "" },
+    { key: "delegation.max_summary_chars", kind: "number" as const, section: "" },
+    { key: "delegation.child_timeout_seconds", kind: "number" as const, section: "" },
     {
       key: "delegation.reasoning_effort",
       kind: "select" as const,
       section: "",
       options: ["", "low", "high"],
     },
+    { key: "delegation.max_concurrent_children", kind: "number" as const, section: "" },
+    { key: "delegation.independent_completions", kind: "boolean" as const, section: "" },
+    { key: "delegation.max_spawn_depth", kind: "number" as const, section: "" },
+    { key: "delegation.orchestrator_enabled", kind: "boolean" as const, section: "" },
+    { key: "delegation.oneshot_max_children", kind: "number" as const, section: "" },
+    { key: "delegation.subagent_auto_approve", kind: "boolean" as const, section: "" },
+    {
+      key: "delegation.surface_child_process_notifications",
+      kind: "boolean" as const,
+      section: "",
+    },
   ],
   values: {},
-  defaults: { "delegation.max_iterations": 250, "delegation.reasoning_effort": "" },
+  defaults: {
+    "delegation.backend": "default",
+    "delegation.compression_threshold_tokens": 0,
+    "delegation.inherit_mcp_toolsets": true,
+    "delegation.max_iterations": 250,
+    "delegation.max_summary_chars": 24000,
+    "delegation.child_timeout_seconds": 0,
+    "delegation.reasoning_effort": "",
+    "delegation.max_concurrent_children": 10,
+    "delegation.independent_completions": false,
+    "delegation.max_spawn_depth": 1,
+    "delegation.orchestrator_enabled": true,
+    "delegation.oneshot_max_children": 2,
+    "delegation.subagent_auto_approve": false,
+    "delegation.surface_child_process_notifications": false,
+  },
 }
 
 function LivePage() {
@@ -489,7 +520,7 @@ test("the Delegation page's Subagent model row opens the host's models, and a pi
       [...(find("[data-bot-delegation]")?.querySelectorAll("[data-setting]") ?? [])].map((one) =>
         one.getAttribute("data-setting"),
       ),
-      ["subagent-model", "delegation.max_iterations", "delegation.reasoning_effort"],
+      ["subagent-model", ...DELEGATION.fields.map((field) => field.key)],
       "the model leads, then the host's own keys, with no caption between",
     )
     assert.equal(accent("subagent-model"), "Default model", "nothing set says Default model")
