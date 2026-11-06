@@ -30,7 +30,7 @@ Switch between multiple Hermes profiles with distinct models and keys, or let yo
 Install the Gots plugin on your Hermes host and restart the gateway:
 
 ```bash
-hermes plugins install thehaseebahmed/memento/plugin --enable
+hermes plugins install thehaseebahmed/hermesgots/plugin --enable
 hermes gateway restart
 ```
 
@@ -44,14 +44,14 @@ API_SERVER_CORS_ORIGINS=https://app.hermesgots.dev,https://<your-site>.netlify.a
 
 > **Profiles & Multiplexing:** To connect multiple Bots from different Hermes profiles on the same gateway, configure `gateway.multiplex_profiles` and point Gots to `/p/<profile>/v1` with that profile's `API_SERVER_KEY`. Ensure the plugin is installed per profile:
 > ```bash
-> hermes -p <profile> plugins install thehaseebahmed/memento/plugin --enable
+> hermes -p <profile> plugins install thehaseebahmed/hermesgots/plugin --enable
 > ```
 
 ### 2. Connect Your Bot
 
 Open Gots on your device:
 - **Web / PWA:** Open [hermesgots.dev](https://hermesgots.dev) in your browser and install it as a PWA.
-- **Android:** Download the signed APK from [Releases](https://github.com/thehaseebahmed/memento/releases).
+- **Android:** Download the signed APK from [Releases](https://github.com/thehaseebahmed/hermesgots/releases).
 
 Follow the first-run setup wizard, enter your Host API URL (e.g. `http://localhost:8642/v1` or your HTTPS server URL) and API key, and tap **Test connection**.
 

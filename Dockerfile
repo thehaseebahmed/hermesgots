@@ -76,7 +76,7 @@ RUN cd /tmp/warm/app && pnpm fetch \
  && rm -rf /tmp/warm
 
 ARG BUILD_REVISION=unknown
-LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/memento" \
+LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/hermesgots" \
       org.opencontainers.image.title="Gots development container" \
       org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
       org.opencontainers.image.licenses="MIT" \

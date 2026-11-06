@@ -6,8 +6,9 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { listEnabledProfiles } from "@/lib/db"
 import { getPluginVersion } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
+import { REPO_URL } from "@/lib/repo"
 
-const ISSUES = "https://github.com/thehaseebahmed/memento/issues/new"
+const ISSUES = `${REPO_URL}/issues/new`
 
 type Kind = "bug" | "feature"
 

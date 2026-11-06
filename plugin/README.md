@@ -79,7 +79,7 @@ It has two parts:
 ## Install
 
 ```bash
-hermes plugins install thehaseebahmed/memento/plugin --enable
+hermes plugins install thehaseebahmed/hermesgots/plugin --enable
 hermes gateway restart
 ```
 

@@ -14,7 +14,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 
 /** Where the plugin is installed from: the repository's own path. */
-const PLUGIN_INSTALL = "thehaseebahmed/memento/plugin"
+const PLUGIN_INSTALL = "thehaseebahmed/hermesgots/plugin"
 
 /** The file that carries each artifact's version, and the only place a bump is looked for. */
 const VERSION_FILE = { app: "app/package.json", plugin: "plugin/plugin.yaml" }

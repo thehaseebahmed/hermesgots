@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 /**
  * A session's pull request as a pill above the composer, coloured by state (orange while its
  * checks run, orange with an alert when they fail); opens it on GitHub. `label` is the precomputed
- * display text (e.g. "PR #142", "gots #142", or "thehaseebahmed/memento #142").
+ * display text (e.g. "PR #142", "gots #142", or "thehaseebahmed/hermesgots #142").
  */
 export function PrPill({
   pr,

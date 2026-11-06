@@ -1592,9 +1592,6 @@ export interface CronExecutionRun extends CronExecution {
 
 export { pluginRoot }
 
-export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
-hermes gateway restart`
-
 /** What one read of the plugin's `info` answered: its version and features, or nulls. */
 export interface PluginInfo {
   version: string | null

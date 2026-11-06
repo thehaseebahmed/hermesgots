@@ -9,7 +9,7 @@ name: Release
 # The tag publishes what moved: the app to production (15 credits) and the signed release APK, both
 # only when app/** moved, because a release publishes what changed rather than re-publishing bytes that
 # are already live. Nobody deploys the plugin — a release records its version, and it is installed with
-# `hermes plugins install thehaseebahmed/memento/plugin --ref v2026.09.17`. The GitHub release carries
+# `hermes plugins install thehaseebahmed/hermesgots/plugin --ref v2026.09.17`. The GitHub release carries
 # the record: the commit, the versions, and what moved.
 #
 # The publishes are dispatched at the tag from here rather than triggered by it: a push made with a

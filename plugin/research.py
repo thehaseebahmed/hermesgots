@@ -970,7 +970,7 @@ def _fetch_words(url: str) -> Optional[str]:
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (compatible; Gots research; +https://github.com/thehaseebahmed/memento)",
+            "User-Agent": "Mozilla/5.0 (compatible; Gots research; +https://github.com/thehaseebahmed/hermesgots)",
             "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
         },
     )

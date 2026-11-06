@@ -12,6 +12,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { isNative, SITE_URL } from "@/lib/native"
+import { installAndLink, linkProfileAt } from "@/lib/repo"
 import { inboxKey, inboxPublic } from "@/lib/sync"
 import { inboxFingerprint, openFromInbox, toBase32, type SealedToInbox } from "@/lib/vault"
 
@@ -102,12 +103,11 @@ export async function mintLinkCode(): Promise<LinkCode> {
 
 /** The commands that install the plugin and link a profile with `code`. */
 export function linkCommands(code: string) {
-  return `hermes plugins install thehaseebahmed/memento/plugin --enable
-hermes gots link ${code} --site ${siteUrl()}`
+  return installAndLink(code, siteUrl())
 }
 
 export function linkProfileCommand(code: string) {
-  return `hermes -p <name> gots link ${code} --site ${siteUrl()}`
+  return linkProfileAt(code, siteUrl())
 }
 
 /** Turns a bot on or off on every device. */

@@ -40,7 +40,8 @@ import { useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
-import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
+import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
+import { INSTALL_PLUGIN } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
 /** Hermes cron jobs, grouped by bot, each with its recent runs as Gatus-style bars. */
