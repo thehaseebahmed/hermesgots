@@ -1,5 +1,8 @@
 # A stage ends only when its own run ends
 
+**Superseded by [ADR 0110](0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md):**
+the stage machine is removed, and with it this rule.
+
 An AFK session is an ordinary session: the user can stop its run, type a message, or queue one to go
 after. The staged engine reads every one of those ends as the current stage's end, because
 `afk.after_run` has only the session id to go on — `on_session_end` carries `session_id`, `task_id`,

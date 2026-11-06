@@ -1,5 +1,9 @@
 # AFK's default is one prompt run, and workflows are the opt-in
 
+**Superseded in its workflow clause by
+[ADR 0110](0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md):** the one prompt run
+stands as this record set it, and the library behind the developer setting is removed.
+
 ADR 0020 made staging the default: a project that picked nothing ran Build · Test · Review · Summary,
 four runs of its session, with the workflow library and its picker on screen. That was more machine
 than the problem needed. What a project actually has is one instruction — how its work should be

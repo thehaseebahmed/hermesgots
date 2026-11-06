@@ -1,5 +1,8 @@
 # A workflow is the bot's, and a task keeps the one it ran
 
+**Superseded by [ADR 0110](0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md):**
+the library is removed, so no workflow is picked, shared or snapshotted.
+
 A workflow is picked per project and edited in AFK's pop-up, but it is not the project's: it lives in
 a library the bot holds, beside the presets it ships with. Several projects can work under the same
 workflow — "Build · Test · Review" is one thing, not five copies of it — and a fix to it reaches all

@@ -2,7 +2,8 @@
 
 **Superseded in part by ADR 0020**: the stages are a project's workflow now, staging is on by default,
 and the critique no longer spawns reviewers of its own. The gate — that the host runs the commands and
-reads their exit codes — stands as written here.
+reads their exit codes — stands as written here, until [ADR 0110](0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md)
+removes the stage machine and the gate with it.
 
 An AFK task was one run: one agent read the issue, implemented it, ran the repo's gates and shipped a draft
 pull request. Everything that decided whether the work was finished was that agent's own word, and nothing
