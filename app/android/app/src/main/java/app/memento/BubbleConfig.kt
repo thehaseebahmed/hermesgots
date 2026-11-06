@@ -23,6 +23,8 @@ object BubbleConfig {
     private const val CLOUD = "cloud"
     private const val ENABLED = "enabled"
     private const val KEPT = "kept"
+    private const val DOCK_RIGHT = "dockRight"
+    private const val DOCK_SHARE = "dockShare"
 
     /** How long the host said its Confirm can take. A bot never asked answers nothing, so it keeps the floor. */
     const val DEFAULT_WAIT_MS = 45_000
@@ -161,6 +163,21 @@ object BubbleConfig {
 
     /** A row written before ids existed: the same pair answers the same id between peek and forget. */
     private fun stableId(at: Long, text: String) = "$at-${text.hashCode()}"
+
+    data class Dock(val right: Boolean = true, val share: Float = 0.5f)
+
+    fun dock(context: Context): Dock {
+        val prefs = prefs(context)
+        val home = Dock()
+        return Dock(
+            prefs.getBoolean(DOCK_RIGHT, home.right),
+            prefs.getFloat(DOCK_SHARE, home.share).coerceIn(0f, 1f),
+        )
+    }
+
+    fun saveDock(context: Context, dock: Dock) {
+        prefs(context).edit().putBoolean(DOCK_RIGHT, dock.right).putFloat(DOCK_SHARE, dock.share).apply()
+    }
 
     fun enabled(context: Context) = prefs(context).getBoolean(ENABLED, false)
 

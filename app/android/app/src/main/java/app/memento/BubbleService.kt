@@ -84,8 +84,8 @@ class BubbleService : Service() {
      * rather than as the window's pixels: a screen that changes shape moves no pixel the window holds,
      * so what the mark is docked to has to be kept beside them (see [reflow]).
      */
-    private var dockedRight = true
-    private var downShare = 0.5f
+    private var dockedRight = BubbleConfig.Dock().right
+    private var downShare = BubbleConfig.Dock().share
 
     /** The density the mark's face was measured at, so a screen that rescaled itself gets a new face. */
     private var builtDensity = 0f
@@ -113,6 +113,9 @@ class BubbleService : Service() {
         running = this
         windows = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         channel()
+        val saved = BubbleConfig.dock(this)
+        dockedRight = saved.right
+        downShare = saved.share
     }
 
     /**
@@ -436,6 +439,7 @@ class BubbleService : Service() {
         // change shape under it ([reflow]).
         dockedRight = layout.x + layout.width / 2 >= screen.widthPixels / 2
         downShare = ((layout.y - px(SNAP_TOP_DP)).toFloat() / roomY(screen)).coerceIn(0f, 1f)
+        BubbleConfig.saveDock(this, BubbleConfig.Dock(dockedRight, downShare))
         dock(layout, screen)
         push(layout)
     }
@@ -852,8 +856,8 @@ class BubbleService : Service() {
         /** How small the mark is as it arrives and leaves: a grow out of its edge, not a whole screen's. */
         private const val SHRUNK = 0.6f
         /** How long the mark takes to grow in, and to shrink back out, in ms. */
-        private const val ENTER_MS = 170L
-        private const val EXIT_MS = 120L
+        private const val ENTER_MS = 113L
+        private const val EXIT_MS = 80L
         /** The band the mark may be dropped in: clear of the top edge and of the bin at the foot. */
         private const val SNAP_TOP_DP = 24
         /** The bin the mark is dropped on: its size, and its gap from the bottom of the screen. */

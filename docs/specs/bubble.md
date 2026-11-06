@@ -114,12 +114,13 @@ because there is no mark left to put one in.
 an absolute offset, and a window keeps that offset whatever the screen does — so a phone unfolded to a
 wider screen would leave the mark standing away from the glass, in the middle of the room it now has.
 The service therefore keeps the two choices beside the window: the side the mark is docked to (the one
-it was dropped on, or the right by default) and the share of the height it was left at, and
-`onConfigurationChanged` re-places the window from them — the same 20 dp gap, the same share of the
-band the mark may be dropped in (`snap` writes those two when a drag lands, so a drag and a fold use
-one rule). A screen that changed its own density gets a new face drawn rather than a window it has
+it was dropped on, or the right by default) and the share of the height it was left at.
+`snap` writes both when a drag lands, to the service and to the Bubble's preferences, so a restart or an
+app update puts the mark back where it was left; `onConfigurationChanged` re-places the window from
+them — the same 20 dp gap, the same share of the band the mark may be dropped in — so a drag, a fold
+and a restart use one rule. A screen that changed its own density gets a new face drawn rather than a window it has
 outgrown, since every part of it is measured in dp when it is built. The mark grows out of its edge on
-the way in and shrinks back into it on the way out (170 ms, then 120 ms, pivoted on that edge): a change
+the way in and shrinks back into it on the way out (113 ms, then 80 ms, pivoted on that edge): a change
 of whether the mark is drawn, not of what it shows, so it plays once per appearance and a phone set to
 no animations plays it as a jump.
 
