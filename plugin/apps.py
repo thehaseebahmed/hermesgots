@@ -524,10 +524,10 @@ def consent(path: Path, app_id: str, agreed: Any) -> Dict[str, Any]:
     return {"id": app_id, "tools": named, "pending": NONE}
 
 
-def may_read(path: Path, app_id: Any, tool: Any) -> bool:
-    """Whether an app was agreed to read ``tool``: false for an app that isn't there, a name that
-    isn't a string, and every tool its pages named after the list was agreed to. Only reads are
-    asked: the host has no route that runs an act yet."""
+def may_call(path: Path, app_id: Any, tool: Any, write: bool = False) -> bool:
+    """Whether an app was agreed to read ``tool``, or to write with it when ``write``: false for an app
+    that isn't there, a name that isn't a string, and every tool its pages named after the list was
+    agreed to."""
     if not isinstance(app_id, str) or not isinstance(tool, str) or not path.exists():
         return False
     conn = open_rows(path)
@@ -535,4 +535,4 @@ def may_read(path: Path, app_id: Any, tool: Any) -> bool:
         row = conn.execute("SELECT consent FROM apps WHERE id = ?", (app_id,)).fetchone()
     finally:
         conn.close()
-    return row is not None and tool in load(row["consent"])["reads"]
+    return row is not None and tool in load(row["consent"])["acts" if write else "reads"]

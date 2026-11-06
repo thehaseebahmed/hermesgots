@@ -144,7 +144,14 @@ export function AppPage() {
   const { page, error, missing, offline, undo, change, draft } = useAppPage(id, root)
   const [undoing, setUndoing] = useState(false)
   const profile = useActiveProfile()
-  const tools = useMemo(() => (profile ? appTools(profile, id) : undefined), [profile, id])
+  const acts = app?.tools.acts.join("\n")
+  const tools = useMemo(
+    () =>
+      profile && acts !== undefined
+        ? appTools(profile, id, acts ? acts.split("\n") : [])
+        : undefined,
+    [profile, id, acts],
+  )
   const [asked, setAsked] = useState("")
   const [failure, setFailure] = useState<string>()
   const [busy, setBusy] = useState(false)

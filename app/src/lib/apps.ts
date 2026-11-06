@@ -213,13 +213,17 @@ export function useApps() {
 }
 
 /**
- * The tools a page's `Query` calls, answered by the host's query route for this app, which refuses
- * any tool the app was never agreed to. A read the host refused or
- * failed answers `{ error }`, which the page draws; a server the host could not read (502) is logged
- * and answers nothing, and a host that cannot be reached throws, so the page keeps the defaults it
- * declared.
+ * The tools a page's `Query` and `Mutation` call, answered by the host's query route. A refused or
+ * failed read answers `{ error }` for the page to draw, or nothing on a 502 so it keeps its defaults;
+ * a refused or failed write (a tool in `acts`) answers an error result, which the renderer shows
+ * while the control keeps its value. A host that cannot be reached throws.
  */
-export function appTools(profile: Profile, appId: string, read: typeof queryApp = queryApp) {
+export function appTools(
+  profile: Profile,
+  appId: string,
+  acts: readonly string[],
+  call: typeof queryApp = queryApp,
+) {
   return {
     async callTool({
       name,
@@ -228,19 +232,23 @@ export function appTools(profile: Profile, appId: string, read: typeof queryApp 
       name: string
       arguments?: Record<string, unknown>
     }) {
+      const writes = acts.includes(name)
       try {
         return {
           content: [],
-          structuredContent: (await read(profile, appId, name, args ?? {})) ?? null,
+          structuredContent: (await call(profile, appId, name, args ?? {}, writes)) ?? null,
         }
       } catch (failure) {
-        if (failure instanceof HermesError && failure.status === 502) {
+        if (!(failure instanceof HermesError && failure.status !== undefined)) throw failure
+        if (writes) {
+          console.warn(`MCP write ${name} failed: ${failure.message}`)
+          return { content: [{ type: "text", text: failure.message }], isError: true }
+        }
+        if (failure.status === 502) {
           console.warn(`MCP read ${name} failed: ${failure.message}`)
           return { content: [], structuredContent: null }
         }
-        if (failure instanceof HermesError && failure.status !== undefined)
-          return { content: [], structuredContent: { error: failure.message } }
-        throw failure
+        return { content: [], structuredContent: { error: failure.message } }
       }
     },
   }

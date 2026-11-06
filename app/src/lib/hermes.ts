@@ -4493,19 +4493,21 @@ function appsRoot(config: HermesConfig) {
 }
 
 /**
- * What a page's `Query` reads of the host, for the app that asked: one of the host's own four shapes,
- * or a tool the app was agreed to. A refusal is a `HermesError` carrying the host's own words and status.
+ * What a page's `Query` reads of the host, or its `Mutation` writes with `write`, for the app that
+ * asked: one of the host's own four shapes, or a tool the app was agreed to read or to write with. A
+ * refusal is a `HermesError` carrying the host's own words and status.
  */
 export async function queryApp(
   config: HermesConfig,
   appId: string,
   shape: string,
   args: Record<string, unknown>,
+  write = false,
 ): Promise<unknown> {
   const response = await request(`${appsRoot(config)}/query`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ app: appId, shape, args }),
+    body: JSON.stringify({ app: appId, shape, args, write }),
   })
   return (await response.json())?.value
 }

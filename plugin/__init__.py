@@ -3299,9 +3299,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def query_sessions(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"sessions": await asyncio.to_thread(chats.read, store_path())}
 
+    act_locks: Dict[str, asyncio.Lock] = {}
+
     async def query_app(request: "web.Request") -> "web.Response":
         """A page's `Query` answered from the host's own reads (ADR 0102), which carry no consent.
-        Any other name is refused unless the calling app was agreed to it, and an agreed
+        Any other name is refused unless the calling app was agreed to read or write it, and an agreed
         `<server>.<tool>` is answered by the plugin's own MCP client (`mcp_call.py`)."""
         denied = unauthorized(request)
         if denied is not None:
@@ -3310,13 +3312,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if sent is None:
             return _error(web, "Body must be a JSON object", 400)
         shape = sent.get("shape")
+        write = sent.get("write") is True
         read = app_queries.get(shape) if isinstance(shape, str) else None
+        if read is not None and write:
+            return _error(web, f"{shape!r} is a read of the bot's own; it has no write.", 400)
         if read is None:
-            if not await asyncio.to_thread(apps.may_read, store_path(), sent.get("app"), shape):
+            allowed = await asyncio.to_thread(
+                apps.may_call, store_path(), sent.get("app"), shape, write
+            )
+            if not allowed:
                 return _error(
                     web,
-                    f"This app was never agreed to call {shape!r}. Its pages name it, so the app"
-                    " asks to agree to it first.",
+                    f"This app was never agreed to {'write with' if write else 'read'} {shape!r}."
+                    " Its pages name it, so the app asks to agree to it first.",
                     403,
                 )
             if "." not in shape:
@@ -3326,7 +3334,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             read = functools.partial(mcp_call.call_async, _request_profile(), shape)
         args = sent.get("args")
         try:
-            value = await read(args if isinstance(args, dict) else {})
+            if write:
+                async with act_locks.setdefault(shape.split(".")[0], asyncio.Lock()):
+                    value = await read(args if isinstance(args, dict) else {})
+            else:
+                value = await read(args if isinstance(args, dict) else {})
         except ValueError as error:
             return _error(web, str(error), 400)
         except mcp.McpError as error:

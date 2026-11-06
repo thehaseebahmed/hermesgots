@@ -1,4 +1,5 @@
-"""A page's ``Query`` answered by a tool on a local MCP server the profile has configured (ADR 0102).
+"""A page's ``Query`` or ``Mutation`` answered by a tool on a local MCP server the profile
+has configured (ADR 0102).
 
 The plugin carries its own client rather than borrowing Hermes's: Hermes's path asks a person before
 a call and trips a breaker on failures, neither of which an app opening on a phone can answer. A
@@ -64,7 +65,7 @@ def call(profile: Optional[str], name: str, args: Dict[str, Any], timeout: float
     except McpError:
         raise
     except asyncio.TimeoutError as error:
-        raise McpError(f"The MCP server {server!r} did not answer in {timeout:.0f}s.", 502) from error
+        raise McpError(f"The MCP server {server!r} did not answer in {timeout:.0f}s; the call may still have run.", 502) from error
     except Exception as error:  # noqa: BLE001 - a server's own failure must never leave this call
         raise McpError(f"The MCP server {server!r} failed: {error or type(error).__name__}", 502) from error
 
@@ -72,7 +73,7 @@ def call(profile: Optional[str], name: str, args: Dict[str, Any], timeout: float
 def _remote(server: str, block: Dict[str, Any]) -> str:
     kind = "an OAuth-authenticated remote server" if block.get("auth") == "oauth" else "a remote server"
     return (
-        f"The MCP server {server!r} is {kind}; a page can only read a local server, because a remote"
+        f"The MCP server {server!r} is {kind}; a page can only call a local server, because a remote"
         " server's access is held by Hermes."
     )
 

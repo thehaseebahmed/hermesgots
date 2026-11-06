@@ -7,7 +7,9 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { connectionKey } from "@/lib/connection"
+import { appTools } from "@/lib/apps"
 import { clearAllData, db } from "@/lib/db"
+import { HermesError } from "@/lib/hermes"
 import { AppPage, AppsPage } from "@/routes/apps"
 import {
   Path,
@@ -343,4 +345,42 @@ test("a refused read draws a value the page renders", async () => {
   await mount(screen("/apps/house"), async () => {
     await drawn(() => title().includes("not something the bot can read"), "the refusal")
   })
+})
+
+const asked = (name: string, acts: string[], refusal: Error) =>
+  appTools(botProfile("house"), "house", acts, async () => {
+    throw refusal
+  }).callTool({ name })
+
+test("a refused write answers an error result the renderer shows, and a refused read a value", async () => {
+  const refusal = new HermesError("This app was never agreed to call 'home.switch'.", 403)
+  const write = await asked("home.switch", ["home.switch"], refusal)
+  assert.deepEqual(write, { content: [{ type: "text", text: refusal.message }], isError: true })
+  const read = await asked("home.light", ["home.switch"], refusal)
+  assert.deepEqual(read, { content: [], structuredContent: { error: refusal.message } })
+})
+
+test("a write the server could not run answers an error result, not defaults", async () => {
+  const down = new HermesError("The MCP server 'home' is off.", 502)
+  const write = await asked("home.switch", ["home.switch"], down)
+  assert.equal((write as { isError?: boolean }).isError, true)
+  assert.deepEqual(await asked("home.light", [], down), { content: [], structuredContent: null })
+})
+
+test("a host that cannot be reached throws for a write, so nothing is claimed", async () => {
+  await assert.rejects(asked("home.switch", ["home.switch"], new TypeError("Failed to fetch")))
+})
+
+test("a tool in the app's acts is asked as a write and any other as a read", async () => {
+  const sent: [string, boolean | undefined][] = []
+  const tools = appTools(botProfile("house"), "house", ["home.switch"], async (...call) => {
+    sent.push([call[2], call[4]])
+    return { on: true }
+  })
+  await tools.callTool({ name: "home.switch" })
+  await tools.callTool({ name: "home.light" })
+  assert.deepEqual(sent, [
+    ["home.switch", true],
+    ["home.light", false],
+  ])
 })

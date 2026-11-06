@@ -494,7 +494,7 @@ class Consent(unittest.TestCase):
         conn.commit()
         conn.close()
         self.assertEqual(apps.listing(self.path)[0]["tools"], {"reads": ["light"], "acts": []})
-        self.assertTrue(apps.may_read(self.path, made["id"], "light"))
+        self.assertTrue(apps.may_call(self.path, made["id"], "light"))
 
     def setUp(self) -> None:
         bundle_of(self, {})
@@ -537,7 +537,7 @@ class Consent(unittest.TestCase):
         agreed = apps.consent(self.path, made["id"], {"reads": ["lock"], "acts": []})
         self.assertEqual(agreed["tools"], {"reads": ["lock"], "acts": []})
         self.assertEqual(apps.listing(self.path)[0]["pending"], NONE)
-        self.assertTrue(apps.may_read(self.path, made["id"], "lock"))
+        self.assertTrue(apps.may_call(self.path, made["id"], "lock"))
 
     def test_a_tool_dropped_and_named_again_is_asked_about_again(self) -> None:
         made = apps.create(self.path, "House", '# id: root\nroot = Query("light", {}, {})')
@@ -678,10 +678,39 @@ class Queries(unittest.TestCase):
         self.assertEqual(answer["status"], 403)
         called.assert_not_called()
 
-    def test_an_act_is_never_answered_by_the_read_route(self) -> None:
+    def test_an_agreed_act_is_answered_by_the_mcp_client(self) -> None:
         path = db_path(self.home)
-        made = apps.create(path, "House", '# id: root\nroot = Mutation("light", {})')
-        self.assertEqual(self.ask({"app": made["id"], "shape": "light"})["status"], 403)
+        made = apps.create(path, "House", '# id: root\nroot = Mutation("home.switch", {})')
+        with mock.patch.object(plugin.mcp_call, "call", return_value={"on": False}) as called:
+            answer = self.ask(
+                {"app": made["id"], "shape": "home.switch", "args": {"on": False}, "write": True}
+            )
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["value"], {"on": False})
+        self.assertEqual(called.call_args.args[1:], ("home.switch", {"on": False}))
+
+    def test_an_agreed_act_is_never_answered_as_a_read_and_a_read_never_as_a_write(self) -> None:
+        path = db_path(self.home)
+        source = '# id: root\nroot = Stack([])\na = Mutation("home.switch", {})\nr = Query("home.light", {})'
+        made = apps.create(path, "House", source)
+        with mock.patch.object(plugin.mcp_call, "call") as called:
+            as_read = self.ask({"app": made["id"], "shape": "home.switch"})
+            as_write = self.ask({"app": made["id"], "shape": "home.light", "write": True})
+        self.assertEqual((as_read["status"], as_write["status"]), (403, 403))
+        called.assert_not_called()
+
+    def test_a_host_shape_is_never_answered_as_a_write(self) -> None:
+        answer = self.ask({"shape": "sessions", "write": True})
+        self.assertEqual(answer["status"], 400)
+
+    def test_an_act_the_app_was_never_agreed_to_is_never_called(self) -> None:
+        path = db_path(self.home)
+        made = apps.create(path, "House", '# id: root\nroot = Mutation("home.switch", {})')
+        apps.write(path, made["id"], "root", '# id: root\nroot = Mutation("home.lock", {})')
+        with mock.patch.object(plugin.mcp_call, "call") as called:
+            answer = self.ask({"app": made["id"], "shape": "home.lock", "write": True})
+        self.assertEqual(answer["status"], 403)
+        called.assert_not_called()
 
     def test_the_hosts_own_reads_carry_no_consent(self) -> None:
         self.assertEqual(self.ask({"shape": "sessions"})["status"], 200)
