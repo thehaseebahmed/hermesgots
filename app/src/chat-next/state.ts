@@ -5,6 +5,7 @@ import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
 import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { promptFrom, type RunPrompt } from "@/lib/run-prompt"
+import { isCountedPreview } from "@/lib/tool-preview"
 
 import type { Agent } from "./agents"
 import type { Queued, RunEvent } from "./api"
@@ -255,6 +256,39 @@ function patchCall(
     },
     call,
   }
+}
+
+const counted = (call: ToolCall) =>
+  call.arguments === undefined && isCountedPreview(call.name, call.label ?? "")
+
+/**
+ * Whether a call the stream is drawing wears Hermes's count of commands ("sleep 8 + 1 command") and
+ * so waits on the transcript for the command itself.
+ */
+export const wantsCommandWords = (state: ThreadState): boolean =>
+  Boolean(state.live?.turn.parts.some((part) => part.kind === "tools" && part.calls.some(counted)))
+
+/**
+ * The live turn with each counted call given the arguments the transcript's row for it holds, by
+ * the call's id, so it is worded as the transcript words it: the whole command, with no count. A
+ * call the rows do not hold yet stays as it is, and a turn nothing changes is the turn itself.
+ */
+function withCommandWords(held: LiveTurn, rows: Row[]): LiveTurn {
+  const known = new Map<string, string>()
+  for (const row of rows)
+    for (const call of row.tool_calls ?? []) known.set(call.id, call.function.arguments)
+  let changed = false
+  const parts = held.turn.parts.map((part) => {
+    if (part.kind !== "tools" || !part.calls.some(counted)) return part
+    const calls = part.calls.map((call) => {
+      const found = counted(call) ? known.get(call.id) : undefined
+      if (found === undefined) return call
+      changed = true
+      return { ...call, arguments: found }
+    })
+    return { ...part, calls }
+  })
+  return changed ? { ...held, turn: { ...held.turn, parts } } : held
 }
 
 /** One question, answered: the shape the app gives the reducer when a card is sent. */
@@ -615,10 +649,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The call's row is the only place the rest of its questions survive, so it is read for a prompt
       // that names one, even mid-stream.
       const found = questionsFor(state, state.waiting, event.rows)
-      if (state.running && !event.final)
+      if (state.running && !event.final) {
+        // A call the stream drew as a count of commands is worded from its row, mid-stream too.
+        const worded = state.live && withCommandWords(state.live, event.rows)
+        const next = worded && worded !== state.live ? { ...state, live: worded } : state
         return !found || sameQuestions(found, state.questionSet)
-          ? state
-          : { ...state, questionSet: found }
+          ? next
+          : { ...next, questionSet: found }
+      }
       const rows = event.joined ? overlay(state.rows, event.rows) : event.rows
       if (!rows) return state
       const partial = event.more ?? state.partial

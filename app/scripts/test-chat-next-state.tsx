@@ -6,7 +6,14 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
-import { initial, reduce, threadTurns, type ThreadState, type Waiting } from "@/chat-next/state"
+import {
+  initial,
+  reduce,
+  threadTurns,
+  wantsCommandWords,
+  type ThreadState,
+  type Waiting,
+} from "@/chat-next/state"
 import { questionAt } from "@/lib/clarify"
 import type { Row } from "@/chat-next/fold"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
@@ -1018,4 +1025,36 @@ test("a chat's record of its compactions wakes the thread only when it says some
   assert.deepEqual([...(two.summaries ?? [])], [4, 9], "a record that moved lands")
   const emptied = reduce(two, { type: "summaries", summaries: undefined })
   assert.equal(emptied.summaries, undefined, "a chat whose record is gone stops naming rows")
+})
+
+test("a call streamed as a count of commands is worded whole from its transcript row, mid-run", () => {
+  const streamed = play([
+    { event: "tool.started", tool: "terminal", tool_call_id: "t1", preview: "which gh + 3 commands" },
+    { event: "tool.started", tool: "terminal", tool_call_id: "t2", preview: "ls -la" },
+    { event: "tool.completed", tool: "terminal", tool_call_id: "t1", preview: "" },
+  ])
+  assert.equal(wantsCommandWords(streamed), true, "a count waits on the transcript")
+  const whole = JSON.stringify({ command: "which gh; gh auth status; echo a; echo b" })
+  const rows: Row[] = [
+    { id: 1, role: "user", content: "go" },
+    {
+      id: 2,
+      role: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      tool_calls: [
+        { id: "t1", function: { name: "terminal", arguments: whole } },
+        { id: "t2", function: { name: "terminal", arguments: JSON.stringify({ command: "ls -la" }) } },
+      ],
+    },
+  ]
+  const read = reduce(streamed, { type: "transcript", rows })
+  assert.deepEqual(
+    calls(read).map((call) => call.arguments),
+    [whole, undefined],
+    "the counted call takes its row's arguments, a plain one is left as streamed",
+  )
+  assert.equal(wantsCommandWords(read), false)
+  const early = reduce(streamed, { type: "transcript", rows: [rows[0]] })
+  assert.equal(early, streamed, "a row the host has not written yet changes nothing")
 })

@@ -67,7 +67,14 @@ import { WAITING_ON_ANSWER } from "@/lib/format"
 import { PROMPT_RETRY_MS } from "@/lib/freshness"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { isLast, nextOffset, originOf, shift } from "./pages"
-import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
+import {
+  foldedOf,
+  threadTurns,
+  turnsOf,
+  wantsCommandWords,
+  type ThreadEvent,
+  type Waiting,
+} from "./state"
 import { readRows, storeFor } from "./store"
 import type { PreparedTurn } from "./turn"
 
@@ -1075,7 +1082,11 @@ export function ChatNextThread({
           (event) => {
             lastEvent.current = Date.now()
             landed()
+            // A call the host previewed as a count of commands is read from the transcript once it
+            // ends, which is when its row is written; the stream never carries the command itself.
+            const wording = event.event === "tool.completed" && wantsCommandWords(store.get())
             dispatch({ type: "run", event, at: Date.now() })
+            if (wording) void catchUp()
           },
           alive.current.signal,
         )
