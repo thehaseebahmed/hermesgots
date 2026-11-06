@@ -8,6 +8,7 @@
  * a `no`, and a switch not read yet is not an off (features.ts).
  */
 import type { PluginFeatureAnswer } from "@/lib/features"
+import type { HostAppTools } from "@/lib/hermes"
 import { openuiParts } from "./openui-block.ts"
 
 /** Why a build cannot start on this bot, if it can't. */
@@ -68,13 +69,15 @@ export function changePrompt(request: string, source: string): string {
 }
 
 /** What an app may call, read off its own pages: reads from queries, acts from mutations. */
-export type Consent = { reads: string[]; acts: string[] }
+export type Consent = HostAppTools
 
 const CALL = /\b(Query|Mutation)\(\s*"([^"\\]+)"/g
 const TOOL = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/
 
 /** The host's own reads: answered from routes it already serves, so never a tool an app is asked about. */
 const HOST_SHAPES = ["usage", "routines", "projects", "sessions"]
+
+const isTool = (name: string) => TOOL.test(name) && !HOST_SHAPES.includes(name)
 
 /**
  * The tools a set of pages names, each once, sorted: the list the sheet asks the user to agree to.
@@ -86,8 +89,7 @@ export function consentOf(pages: readonly string[]): Consent {
   const acts = new Set<string>()
   for (const source of pages)
     for (const [, kind, tool] of source.matchAll(CALL))
-      if (TOOL.test(tool) && !HOST_SHAPES.includes(tool))
-        (kind === "Query" ? reads : acts).add(tool)
+      if (isTool(tool)) (kind === "Query" ? reads : acts).add(tool)
   return { reads: [...reads].sort(), acts: [...acts].sort() }
 }
 

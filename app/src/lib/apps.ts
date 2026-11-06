@@ -17,8 +17,9 @@ import {
   undoAppPage,
   writeAppPage,
   type HostApp,
-  type HostAppTools,
   type HostAppPage,
+  type HostAppTools,
+  toTools,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { createStore } from "@/lib/store"
@@ -63,13 +64,11 @@ const keepList = (profile: Profile, apps: HostApp[]) => {
     .catch(warn("cache the apps"))
 }
 
-const NO_TOOLS: HostAppTools = { reads: [], acts: [] }
-
 /** An app kept by a build that didn't know tools: nothing agreed and nothing to ask. */
 const withTools = (app: HostApp): HostApp => ({
   ...app,
-  tools: app.tools ?? NO_TOOLS,
-  pending: app.pending ?? NO_TOOLS,
+  tools: toTools(app.tools),
+  pending: toTools(app.pending),
 })
 
 const listed = createStore<Listed | undefined>(undefined)
@@ -82,10 +81,13 @@ export const useActiveProfile = () =>
 const wordsOf = (error: unknown) =>
   error instanceof Error ? error.message : "Couldn't reach the bot."
 
-/** Reads the bot's apps once however many screens ask at the same time. */
-function refreshApps(profile: Profile) {
+/**
+ * Reads the bot's apps once however many screens ask at the same time. A read already under way may
+ * have left before a page was written, so `after` a write asks again once it lands.
+ */
+function refreshApps(profile: Profile, after = false): Promise<void> {
   const joined = reading.get(profile.id)
-  if (joined) return joined
+  if (joined) return after ? joined.then(() => refreshApps(profile)) : joined
   const read = listApps(profile)
     .then((apps) => {
       keepList(profile, apps)
@@ -276,7 +278,7 @@ export function useAppPage(appId: string, pageId: string | undefined) {
     const page = await undoAppPage(profile, appId, pageId)
     keepPage(profile, appId, page)
     setRead({ key, page })
-    void refreshApps(profile)
+    void refreshApps(profile, true)
   }, [profile, appId, pageId, key])
   const [draft, setDraft] = useState<string>()
   const change = useCallback(
@@ -286,7 +288,7 @@ export function useAppPage(appId: string, pageId: string | undefined) {
         const page = await changePage(profile, appId, pageId, source, request, setDraft, signal)
         keepPage(profile, appId, page)
         setRead({ key, page })
-        void refreshApps(profile)
+        void refreshApps(profile, true)
       } finally {
         setDraft(undefined)
       }

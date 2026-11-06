@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from .app_tools import difference, dump, load, tools_of
+from .app_tools import NONE, Tools, difference, dump, is_tools, load, tools_of
 from .store import now_ms, open_rows
 
 logger = logging.getLogger(__name__)
@@ -118,8 +118,8 @@ def _owed(recorded: Dict[str, sqlite3.Row], bundle: Dict[str, Dict[str, Any]]) -
 
 
 def _agreed(pages: List[Any]) -> str:
-    """The tools a bundled app's pages name, as stored: the bundle ships with the plugin, so what
-    it names is what it is agreed to."""
+    """The tools a set of pages names, as stored: a bundled app ships with the plugin, and a built
+    one is saved after the person was shown this same list, so what they name is what is agreed."""
     return dump(tools_of(source for _, source in pages))
 
 
@@ -212,7 +212,9 @@ def listing(path: Path, include_hidden: bool = False) -> List[Dict[str, Any]]:
             + " ORDER BY created_at DESC, id"
         ).fetchall()
         pages = conn.execute(
-            "SELECT app_id, page_id, source FROM app_pages ORDER BY app_id, position"
+            "SELECT app_id, page_id, source FROM app_pages WHERE app_id IN (SELECT id FROM apps"
+            + ("" if include_hidden else " WHERE hidden = 0")
+            + ") ORDER BY app_id, position"
         ).fetchall()
         owed = _owed(_recorded(conn), bundle)
     finally:
@@ -232,7 +234,7 @@ def listing(path: Path, include_hidden: bool = False) -> List[Dict[str, Any]]:
             hidden=bool(row["hidden"]),
             update=owed.get(row["builtin_key"]) == "update",
             tools=load(row["consent"]),
-            named=tools_of(sources.get(row["id"], [])),
+            pending=difference(tools_of(sources.get(row["id"], [])), load(row["consent"])),
         )
         for row in rows
     ]
@@ -247,15 +249,14 @@ def _summary(
     builtin: Optional[str] = None,
     hidden: bool = False,
     update: bool = False,
-    tools: Optional[Dict[str, List[str]]] = None,
-    named: Optional[Dict[str, List[str]]] = None,
+    tools: Tools = NONE,
+    pending: Tools = NONE,
 ) -> Dict[str, Any]:
-    """An app as the list and a create both answer it, so the two can't drift.
+    """An app as the list and a create answer it.
 
     ``tools`` is what the app was agreed to call and ``pending`` what its pages name beyond that
-    (ADR 0102): empty groups where there is nothing to ask.
+    (ADR 0102): empty where there is nothing to ask.
     """
-    tools = tools or {"reads": [], "acts": []}
     return {
         "id": app_id,
         "title": title,
@@ -265,7 +266,7 @@ def _summary(
         "hidden": hidden,
         "update": update,
         "tools": tools,
-        "pending": difference(named or tools, tools),
+        "pending": pending,
     }
 
 
@@ -506,31 +507,27 @@ def consent(path: Path, app_id: str, agreed: Any) -> Dict[str, Any]:
     Raises ``AppsError`` (400 for a list that isn't one, 404 for no such app, 409 where the pages
     now name something else).
     """
-    if not isinstance(agreed, dict) or not all(
-        isinstance(agreed.get(group), list) and all(isinstance(n, str) for n in agreed[group])
-        for group in ("reads", "acts")
-    ):
+    if not is_tools(agreed):
         raise AppsError("Agree to a list of reads and acts.", 400)
     with _writing(path) as conn:
         row = conn.execute("SELECT id, consent FROM apps WHERE id = ?", (app_id,)).fetchone()
         if row is None:
             raise AppsError("No such app.", 404)
         named = tools_of(
-            one[0]
-            for one in conn.execute(
-                "SELECT source FROM app_pages WHERE app_id = ? ORDER BY position", (app_id,)
-            )
+            one["source"]
+            for one in conn.execute("SELECT source FROM app_pages WHERE app_id = ?", (app_id,))
         )
         shown = difference(named, load(row["consent"]))
         if {group: sorted(set(agreed[group])) for group in shown} != shown:
             raise AppsError("The pages name other tools now; read the list again.", 409)
         conn.execute("UPDATE apps SET consent = ? WHERE id = ?", (dump(named), app_id))
-    return {"id": app_id, "tools": named, "pending": difference(named, named)}
+    return {"id": app_id, "tools": named, "pending": NONE}
 
 
-def allowed(path: Path, app_id: Any, tool: Any) -> bool:
+def may_read(path: Path, app_id: Any, tool: Any) -> bool:
     """Whether an app was agreed to read ``tool``: false for an app that isn't there, a name that
-    isn't a string, and every tool its pages named after the list was agreed to."""
+    isn't a string, and every tool its pages named after the list was agreed to. Only reads are
+    asked: the host has no route that runs an act yet."""
     if not isinstance(app_id, str) or not isinstance(tool, str) or not path.exists():
         return False
     conn = open_rows(path)

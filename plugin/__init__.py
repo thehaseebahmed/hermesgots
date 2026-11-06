@@ -3298,9 +3298,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return {"sessions": await asyncio.to_thread(chats.read, store_path())}
 
     async def query_app(request: "web.Request") -> "web.Response":
-        """A page's `Query` answered from the host's own reads (ADR 0102). Those carry no consent;
-        any other name is refused unless the calling app was agreed to it, and then the route has
-        no way to call it yet, so it is never a way into another tool."""
+        """A page's `Query` answered from the host's own reads (ADR 0102), which carry no consent.
+        Any other name is refused unless the calling app was agreed to it; the route cannot call
+        one yet, so it is never a way into another tool."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3310,7 +3310,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         shape = sent.get("shape")
         read = app_queries.get(shape) if isinstance(shape, str) else None
         if read is None:
-            if not await asyncio.to_thread(apps.allowed, store_path(), sent.get("app"), shape):
+            if not await asyncio.to_thread(apps.may_read, store_path(), sent.get("app"), shape):
                 return _error(
                     web,
                     f"This app was never agreed to call {shape!r}. Its pages name it, so the app"

@@ -477,6 +477,25 @@ class Writes(unittest.TestCase):
 class Consent(unittest.TestCase):
     """What an app may call is read off its pages, kept with it, and grown only by agreeing."""
 
+    def test_the_cases_the_app_also_reads_name_the_same_tools(self) -> None:
+        from plugin.app_tools import tools_of
+
+        cases = json.loads((Path(__file__).parent / "consent-cases.json").read_text())
+        for case in cases:
+            self.assertEqual(tools_of(case["sources"]), case["consent"], case["name"])
+
+    def test_a_row_left_without_a_list_by_a_cut_short_migration_is_filled_on_the_next_open(
+        self,
+    ) -> None:
+        made = apps.create(self.path, "House", '# id: root\nroot = Stack([a])\na = Query("light", {})')
+        conn = connect(self.path)
+        conn.execute("UPDATE apps SET consent = NULL")
+        conn.execute("PRAGMA user_version = 56")
+        conn.commit()
+        conn.close()
+        self.assertEqual(apps.listing(self.path)[0]["tools"], {"reads": ["light"], "acts": []})
+        self.assertTrue(apps.may_read(self.path, made["id"], "light"))
+
     def setUp(self) -> None:
         bundle_of(self, {})
         self.path = db_path(temp_hermes_home(self))
@@ -518,7 +537,7 @@ class Consent(unittest.TestCase):
         agreed = apps.consent(self.path, made["id"], {"reads": ["lock"], "acts": []})
         self.assertEqual(agreed["tools"], {"reads": ["lock"], "acts": []})
         self.assertEqual(apps.listing(self.path)[0]["pending"], NONE)
-        self.assertTrue(apps.allowed(self.path, made["id"], "lock"))
+        self.assertTrue(apps.may_read(self.path, made["id"], "lock"))
 
     def test_a_tool_dropped_and_named_again_is_asked_about_again(self) -> None:
         made = apps.create(self.path, "House", '# id: root\nroot = Query("light", {}, {})')
@@ -594,6 +613,13 @@ class Queries(unittest.TestCase):
 
         request.json = read
         return asyncio.run(route(self.app, plugin.PREFIX + "/apps/query", "POST")(request))
+
+    def test_the_hosts_reserved_names_are_the_shapes_its_query_route_answers(self) -> None:
+        from plugin.app_tools import HOST_SHAPES
+
+        for shape in HOST_SHAPES:
+            self.assertNotEqual(self.ask({"shape": shape})["status"], 403, shape)
+        self.assertEqual(self.ask({"shape": "ghost"})["status"], 403)
 
     def test_sessions_answers_the_hosts_chats(self) -> None:
         answer = self.ask({"shape": "sessions"})

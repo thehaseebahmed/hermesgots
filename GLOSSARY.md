@@ -706,6 +706,10 @@ _Avoid_: screen, view, tab, sheet
 The most characters one page's source may hold. A write past it is refused whole, never cut to fit, and the refusal names the cap.
 _Avoid_: page limit, size limit, truncation
 
+**Agreed tools**:
+The reads and acts an app's own pages name — `Query` names are reads, `Mutation` names are acts — shown when the app is saved, stored with it and enforced where the app calls the host. A page that later names a tool the app was never agreed to asks again, showing only the new ones. `consent` in code and in ADR 0102; unrelated to an **Approval**, which a bot asks for mid-run.
+_Avoid_: permission
+
 **Host shape**:
 One of the four reads a page's query may name — usage, routines, projects or sessions — answered by the plugin's query route from the routes it already serves. The route needs no consent for these; it refuses any other name unless the calling app was agreed to it.
 _Avoid_: data source, tool, endpoint

@@ -1688,9 +1688,7 @@ function queueItem(raw: Record<string, unknown>): QueueItem {
 function objects<T>(value: unknown, row: (raw: Record<string, unknown>) => T): T[] {
   return Array.isArray(value)
     ? value
-        .filter(
-          (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
-        )
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
         .map(row)
     : []
 }
@@ -1876,7 +1874,11 @@ export async function getPending(config: HermesConfig, sessionId: string) {
  * Acknowledges a lost turn so the messages queued behind it run, and answers what the host holds
  * afterwards. The lost input is not replayed: it stays in the transcript, to be sent again.
  */
-export async function discardPending(config: HermesConfig, sessionId: string, admissionId: string) {
+export async function discardPending(
+  config: HermesConfig,
+  sessionId: string,
+  admissionId: string,
+) {
   const response = await request(
     `${pendingRoot(config, sessionId)}/${encodeURIComponent(admissionId)}/discard`,
     { method: "POST", headers: headers(config), signal: AbortSignal.timeout(WRITE_TIMEOUT_MS) },
@@ -4525,7 +4527,7 @@ export interface HostApp {
 
 export type HostAppTools = { reads: string[]; acts: string[] }
 
-function toTools(raw: unknown): HostAppTools {
+export function toTools(raw: unknown): HostAppTools {
   const found = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>
   const names = (one: unknown) => (Array.isArray(one) ? one.map(String) : [])
   return { reads: names(found.reads), acts: names(found.acts) }
@@ -4551,12 +4553,11 @@ function toHostApp(raw: Record<string, unknown>): HostApp {
 
 /** Agrees to the tools an app's pages now name beyond what it held; a 409 says the pages moved on, so ask again. */
 export async function agreeAppTools(config: HermesConfig, appId: string, tools: HostAppTools) {
-  const response = await request(`${appsRoot(config)}/${encodeURIComponent(appId)}/consent`, {
+  await request(`${appsRoot(config)}/${encodeURIComponent(appId)}/consent`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(tools),
   })
-  return toTools(((await response.json())?.app as Record<string, unknown>)?.tools)
 }
 
 function toHostAppPage(raw: Record<string, unknown>): HostAppPage {

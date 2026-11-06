@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 # its last change replaced — the one step of undo. Both are new tables, so nothing already written
 # has to move. 56 gives an app the columns a built-in one lives by (`apps.py`, #865): its bundle key,
 # the bundle version it was seeded at, whether a person has edited it and whether it is hidden.
-# 57 stores the tools an app was agreed to call (`app_tools.py`, ADR 0102), read off the pages each
-# app already has, so no app loses a tool it was already drawing.
+# 57 keeps the tools an app was agreed to call (`app_tools.py`, ADR 0102), filled from the pages each
+# app already has so none loses a tool it was drawing.
 SCHEMA_VERSION = 57
 
 
@@ -901,19 +901,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS apps_builtin_key ON apps (builtin_key)"
             " WHERE builtin_key IS NOT NULL"
         )
-        # v57 (app_tools.py): an app's agreed tools; apps that exist are agreed to what they name.
         if "consent" not in {row[1] for row in conn.execute("PRAGMA table_info(apps)")}:
             conn.execute("ALTER TABLE apps ADD COLUMN consent TEXT")
-            from .app_tools import dump, tools_of
+        # Imported here: app_tools stays free of the store.
+        from .app_tools import dump, tools_of
 
-            for (app_id,) in conn.execute("SELECT id FROM apps").fetchall():
-                sources = [
-                    row[0]
-                    for row in conn.execute(
-                        "SELECT source FROM app_pages WHERE app_id = ?", (app_id,)
-                    )
-                ]
-                conn.execute(
-                    "UPDATE apps SET consent = ? WHERE id = ?", (dump(tools_of(sources)), app_id)
-                )
+        for (app_id,) in conn.execute("SELECT id FROM apps WHERE consent IS NULL").fetchall():
+            sources = [
+                row[0]
+                for row in conn.execute("SELECT source FROM app_pages WHERE app_id = ?", (app_id,))
+            ]
+            conn.execute(
+                "UPDATE apps SET consent = ? WHERE id = ?", (dump(tools_of(sources)), app_id)
+            )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

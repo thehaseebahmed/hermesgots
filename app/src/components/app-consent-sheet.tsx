@@ -3,23 +3,10 @@ import { CircleAlertIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import { ToolList } from "@/components/tool-list"
 import { Spinner } from "@/components/ui/spinner"
 import { agreeToTools, useActiveProfile } from "@/lib/apps"
 import type { HostAppTools } from "@/lib/hermes"
-
-export function ToolList({ label, tools }: { label: string; tools: string[] }) {
-  if (tools.length === 0) return null
-  return (
-    <section aria-label={label} className="flex flex-col gap-1">
-      <h3 className="text-sm font-medium">{label}</h3>
-      <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-        {tools.map((tool) => (
-          <li key={tool}>{tool}</li>
-        ))}
-      </ul>
-    </section>
-  )
-}
 
 /**
  * Asks again where an app's pages came to name tools it was never agreed to, showing only those.

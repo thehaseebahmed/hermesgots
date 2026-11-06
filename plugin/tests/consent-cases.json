@@ -1,0 +1,72 @@
+[
+  {
+    "name": "queries are reads and mutations are acts",
+    "sources": [
+      "a = Query(\"lock\", {}, {})\nb = Mutation(\"switch\", {})"
+    ],
+    "consent": {
+      "reads": [
+        "lock"
+      ],
+      "acts": [
+        "switch"
+      ]
+    }
+  },
+  {
+    "name": "each name once, sorted, across pages",
+    "sources": [
+      "Query(\"b\", {})\nQuery(\"a\", {})",
+      "Query(\"a\", {})"
+    ],
+    "consent": {
+      "reads": [
+        "a",
+        "b"
+      ],
+      "acts": []
+    }
+  },
+  {
+    "name": "the host's own reads are never tools",
+    "sources": [
+      "Query(\"usage\", {})\nQuery(\"routines\", {})\nQuery(\"projects\", {})\nQuery(\"sessions\", {})"
+    ],
+    "consent": {
+      "reads": [],
+      "acts": []
+    }
+  },
+  {
+    "name": "a path or a URL is not a tool",
+    "sources": [
+      "Query(\"/apps/query\", {})\nQuery(\"https://x.test/a\", {})\nQuery(\"a b\", {})\nQuery(\"1up\", {})"
+    ],
+    "consent": {
+      "reads": [],
+      "acts": []
+    }
+  },
+  {
+    "name": "a dotted name is a tool",
+    "sources": [
+      "Query(\"home.lock-state_2\", {})"
+    ],
+    "consent": {
+      "reads": [
+        "home.lock-state_2"
+      ],
+      "acts": []
+    }
+  },
+  {
+    "name": "a page naming nothing",
+    "sources": [
+      "root = Stack([])"
+    ],
+    "consent": {
+      "reads": [],
+      "acts": []
+    }
+  }
+]

@@ -4,6 +4,7 @@
  * that hasn't come yet is not an absence, and the Interfaces switch refuses in its own words.
  */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { buildBlocked } from "../src/lib/app-build.ts"
@@ -57,13 +58,11 @@ test("the consent is read off the pages' own queries and mutations", async () =>
   ])
   assert.deepEqual(consent, { reads: ["light.list", "temp.read"], acts: ["light.set"] })
   assert.deepEqual(consentOf(["root = Stack([])"]), { reads: [], acts: [] })
-  assert.deepEqual(
-    consentOf([
-      'a = Query("usage", {}, {})\nb = Query("sessions", {}, {})\nc = Query("/apps/query", {}, {})',
-    ]),
-    { reads: [], acts: [] },
-    "the host's own routes are never on the list",
+  const cases = JSON.parse(
+    readFileSync(new URL("../../plugin/tests/consent-cases.json", import.meta.url), "utf8"),
   )
+  for (const one of cases)
+    assert.deepEqual(consentOf(one.sources), one.consent, `${one.name}: the host reads the same`)
 })
 
 test("a title is the prompt's first line, cut at a word when long", async () => {
