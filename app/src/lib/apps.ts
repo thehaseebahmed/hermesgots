@@ -212,11 +212,17 @@ export function useApps() {
   return { apps: mine?.apps, error: mine?.error, offline: mine?.offline, loaded: Boolean(mine) }
 }
 
+/** The refusals that leave a page its declared defaults: never agreed to (403), server unread (502). */
+const UNANSWERED = [403, 502]
+
 /**
- * The tools a page's `Query` and `Mutation` call, answered by the host's query route. A refused or
- * failed read answers `{ error }` for the page to draw, or nothing on a 502 so it keeps its defaults;
- * a refused or failed write (a tool in `acts`) answers an error result, which the renderer shows
- * while the control keeps its value. A host that cannot be reached throws.
+ * The tools a page's `Query` and `Mutation` call, answered by the host's query route, which refuses
+ * any tool the app was never agreed to. A refused or failed write (a tool in `acts`) answers an
+ * error result, which the renderer shows while the control keeps its value. A read the host refused
+ * as unagreed (403) or could not make of the server (502), like a host that cannot be reached,
+ * throws, so the page keeps the defaults it declared: declining consent leaves the sample drawn,
+ * where an `{ error }` or empty answer would replace every field the page reads. Any other refused
+ * read answers `{ error }`, which the page draws.
  */
 export function appTools(
   profile: Profile,
@@ -244,10 +250,7 @@ export function appTools(
           console.warn(`MCP write ${name} failed: ${failure.message}`)
           return { content: [{ type: "text", text: failure.message }], isError: true }
         }
-        if (failure.status === 502) {
-          console.warn(`MCP read ${name} failed: ${failure.message}`)
-          return { content: [], structuredContent: null }
-        }
+        if (UNANSWERED.includes(failure.status)) throw failure
         return { content: [], structuredContent: { error: failure.message } }
       }
     },

@@ -1,5 +1,6 @@
 /** The apps screen, with the host faked at the fetch boundary using the plugin's own routes and answers. */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import { act } from "react"
 
@@ -293,16 +294,13 @@ test("a page whose query names a host shape draws that shape's live value", asyn
   })
 })
 
-test("a call the host refuses for an app never agreed to is drawn as a refusal", async () => {
-  const refused = READ.replace(
-    '{title: "Declared default"}',
-    '{error: "", title: "Declared default"}',
-  ).replace("data.title", "data.error")
-  await seed({ home: { source: refused } }, () =>
+test("a call the host refuses for an app never agreed to leaves the declared defaults", async () => {
+  await seed({ home: { source: READ } }, () =>
     json({ error: { message: "This app was never agreed to call 'projects'." } }, 403),
   )
   await mount(screen("/apps/house"), async () => {
-    await drawn(() => title().includes("never agreed to call"), "the refusal")
+    await drawn(() => text().includes("Read from the bot."), "the page")
+    assert.equal(title(), "Declared default")
   })
 })
 
@@ -352,19 +350,18 @@ const asked = (name: string, acts: string[], refusal: Error) =>
     throw refusal
   }).callTool({ name })
 
-test("a refused write answers an error result the renderer shows, and a refused read a value", async () => {
+test("a refused write answers an error result the renderer shows, and a refused read throws", async () => {
   const refusal = new HermesError("This app was never agreed to call 'home.switch'.", 403)
   const write = await asked("home.switch", ["home.switch"], refusal)
   assert.deepEqual(write, { content: [{ type: "text", text: refusal.message }], isError: true })
-  const read = await asked("home.light", ["home.switch"], refusal)
-  assert.deepEqual(read, { content: [], structuredContent: { error: refusal.message } })
+  await assert.rejects(asked("home.light", ["home.switch"], refusal), refusal)
 })
 
 test("a write the server could not run answers an error result, not defaults", async () => {
   const down = new HermesError("The MCP server 'home' is off.", 502)
   const write = await asked("home.switch", ["home.switch"], down)
   assert.equal((write as { isError?: boolean }).isError, true)
-  assert.deepEqual(await asked("home.light", [], down), { content: [], structuredContent: null })
+  await assert.rejects(asked("home.light", [], down), down)
 })
 
 test("a host that cannot be reached throws for a write, so nothing is claimed", async () => {
@@ -383,4 +380,97 @@ test("a tool in the app's acts is asked as a write and any other as a read", asy
     ["home.switch", true],
     ["home.light", false],
   ])
+})
+
+const HOME = (file: string) =>
+  readFileSync(new URL(`../../plugin/openui/apps/home/${file}`, import.meta.url), "utf8")
+const HOME_PAGES = () => ({
+  root: { source: HOME("root.txt") },
+  "living-room": { source: HOME("living-room.txt") },
+})
+const away = () => {
+  throw new TypeError("Failed to fetch")
+}
+const appPage = () => find("[data-slot=app-page]") ?? undefined
+
+for (const [name, answer] of [
+  ["the host is away", away],
+  [
+    "the read is refused",
+    () => json({ error: { message: "This app was never agreed to call it." } }, 403),
+  ],
+] as const) {
+  test(`the Home Assistant dashboard draws its labelled sample when ${name}`, async () => {
+    await seed(HOME_PAGES(), answer)
+    await mount(screen("/apps/house"), async () => {
+      await drawn(() => text().includes("Kitchen"), "the sample rooms")
+      assert.equal(codeOf(appPage()), null, "drawn, not shown as code")
+      const page = wordsOf(appPage() ?? null)
+      assert.match(page, /Sample data: these numbers/)
+      assert.match(page, /22\.1 °C/)
+      assert.match(page, /back door has been open/)
+    })
+  })
+}
+
+test("the Home Assistant dashboard asks first, then draws what the server answers", async () => {
+  const live = {
+    notice: "Live from Home Assistant.",
+    presence: "1 person home.",
+    rooms: [["Study", "20.0 °C", "40%"]],
+    energy: [{ x: "00:00", y: 0.5 }],
+    energySummary: "One reading.",
+    open: "Nothing is open.",
+  }
+  const owed = { pending: { reads: ["homeassistant.overview"], acts: [] }, agreed: [] as Tools[] }
+  await seed(HOME_PAGES(), () => json({ value: live }), owed)
+  await mount(screen("/apps/house"), async () => {
+    await until(async () => Boolean(find("[data-slot=app-consent]")), "the consent sheet")
+    assert.match(wordsOf(find("[data-slot=app-consent]")), /homeassistant\.overview/)
+    const allow = findAll("[data-slot=app-consent] button").find(
+      (one) => one.textContent?.trim() === "Allow",
+    )
+    await click(allow ?? null)
+    await drawn(() => text().includes("Live from Home Assistant."), "the live notice")
+    assert.match(wordsOf(appPage() ?? null), /Study/)
+  })
+})
+
+test("declining the consent leaves the sample drawn", async () => {
+  const owed = { pending: { reads: ["homeassistant.overview"], acts: [] }, agreed: [] as Tools[] }
+  await seed(HOME_PAGES(), () => json({ error: { message: "never agreed" } }, 403), owed)
+  await mount(screen("/apps/house"), async () => {
+    await until(async () => Boolean(find("[data-slot=app-consent]")), "the consent sheet")
+    const decline = findAll("[data-slot=app-consent] button").find(
+      (one) => one.textContent?.trim() === "Not now",
+    )
+    await click(decline ?? null)
+    await until(async () => !find("[data-slot=app-consent]"), "the sheet gone")
+    assert.match(wordsOf(appPage() ?? null), /Sample data: these numbers/)
+    assert.equal(owed.agreed.length, 0, "nothing was agreed")
+  })
+})
+
+test("the dashboard's link opens the room page, and back returns to the house", async () => {
+  await seed(HOME_PAGES(), away)
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => text().includes("Kitchen"), "the house")
+    const link = findAll("button").find((one) => wordsOf(one) === "Open the living room")
+    assert.ok(link && !link.hasAttribute("disabled"), "the link is live")
+    await click(link ?? null)
+    await drawn(() => text().includes("Ceiling light"), "the room page")
+    await drawn(() => text().includes("Sample data: these entities"), "the room's sample notice")
+    const back = findAll("button").find((one) => wordsOf(one) === "Back to the house")
+    await click(back ?? null)
+    await drawn(() => text().includes("Kitchen"), "the house again")
+  })
+})
+
+test("a link to a page the app does not hold draws disabled", async () => {
+  await seed({ root: { source: HOME("root.txt") } }, away)
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => text().includes("Kitchen"), "the house")
+    const link = findAll("button").find((one) => wordsOf(one) === "Open the living room")
+    assert.ok(link?.hasAttribute("disabled"), "the link has nowhere to go")
+  })
 })

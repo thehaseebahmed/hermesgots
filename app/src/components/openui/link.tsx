@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef } from "react"
+import { useContext, useEffect, useRef } from "react"
 import { defineComponent, type ComponentRenderProps } from "@openuidev/react-lang"
 import { ChevronRightIcon } from "lucide-react"
 import { z } from "zod/v4"
@@ -7,14 +7,8 @@ import { Button } from "@/components/ui/button"
 import { linkResolves, type AppPages } from "@/lib/app-pages"
 import { noteFailure } from "@/lib/report"
 
+import { AppPagesContext } from "./app-pages-context.ts"
 import { signatureRule } from "./prose.ts"
-
-/**
- * The navigation the apps screen provides around a drawn page: the pages the open app holds, and
- * the move to one of them. A context rather than an action (ADR 0101) — no action syntax in the
- * prompt, and no action runtime in the app. The screen provides it; a `Link` inside it resolves.
- */
-export const AppPagesContext = createContext<AppPages | null>(null)
 
 /** The open app's pages as the screen provides them, or `null` where no screen is drawing. */
 export function useAppPages(): AppPages | null {

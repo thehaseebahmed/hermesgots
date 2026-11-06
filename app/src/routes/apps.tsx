@@ -12,6 +12,7 @@ import {
 import { attempt } from "@/lib/attempt"
 import { BackButton } from "@/components/back-button"
 import { AppBuildSheet } from "@/components/app-build-sheet"
+import { AppPagesContext } from "@/components/openui/app-pages-context.ts"
 import { AppConsentSheet } from "@/components/app-consent-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow } from "@/components/item-list"
@@ -136,12 +137,18 @@ export function AppPage() {
   const { apps, error: listError, loaded } = useApps()
   const { up } = useNav()
   const beside = Boolean(useAppsPane())
-  const back = useCallback(() => up("/apps"), [up])
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   const app = apps?.find((item) => item.id === id)
-  useRememberOpened("apps", app?.id)
   const root = app?.pages[0]
-  const { page, error, missing, offline, undo, change, draft } = useAppPage(id, root)
+  const [moved, setMoved] = useState<{ id: string; page: string }>()
+  const at = moved?.id === id && app?.pages.includes(moved.page) ? moved.page : root
+  const back = useCallback(
+    () => (at !== root ? setMoved(undefined) : up("/apps")),
+    [at, root, up, setMoved],
+  )
+  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  useRememberOpened("apps", app?.id)
+  const links = { pages: app?.pages ?? [], open: (page: string) => setMoved({ id, page }) }
+  const { page, error, missing, offline, undo, change, draft } = useAppPage(id, at)
   const [undoing, setUndoing] = useState(false)
   const profile = useActiveProfile()
   const acts = app?.tools.acts.join("\n")
@@ -195,7 +202,7 @@ export function AppPage() {
       <AppConsentSheet appId={app.id} pending={app.pending} />
       <header className={HEADER}>
         <div className="flex items-center gap-3">
-          {!beside && <BackButton label="Back to Apps" onClick={back} />}
+          {!beside && <BackButton label={at === root ? "Back to Apps" : "Back"} onClick={back} />}
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight">
             {app.title}
           </h1>
@@ -221,15 +228,18 @@ export function AppPage() {
       >
         {offline && <OfflineNote />}
         {page ? (
-          <Suspense fallback={null}>
-            <OpenUIBlock
-              source={draft ?? page.source}
-              open={draft !== undefined}
-              streaming={draft !== undefined}
-              draw="interface"
-              tools={tools}
-            />
-          </Suspense>
+          <AppPagesContext.Provider value={links}>
+            <Suspense fallback={null}>
+              <OpenUIBlock
+                app
+                source={draft ?? page.source}
+                open={draft !== undefined}
+                streaming={draft !== undefined}
+                draw="interface"
+                tools={tools}
+              />
+            </Suspense>
+          </AppPagesContext.Provider>
         ) : error ? (
           <p className="py-8 text-center text-sm text-warning">
             {missing

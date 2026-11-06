@@ -9,10 +9,10 @@ import { noteFailure } from "@/lib/report"
 import { gate, type Props } from "./gate.ts"
 
 export { blockProblem } from "./gate.ts"
-import { library } from "./library.tsx"
+import { appLibrary, appParser, library } from "./library.tsx"
 
-function OpenUIBlock(props: Props & { tools?: McpClientLike }) {
-  const { answer, failure } = gate(props)
+function OpenUIBlock(props: Props & { tools?: McpClientLike; app?: boolean }) {
+  const { answer, failure } = gate(props, props.app ? appParser : undefined)
   const noted = useRef(false)
   useEffect(() => {
     if (noted.current || props.streaming || answer !== "code") return
@@ -25,7 +25,7 @@ function OpenUIBlock(props: Props & { tools?: McpClientLike }) {
   return (
     <Renderer.Root
       response={props.source}
-      library={library}
+      library={props.app ? appLibrary : library}
       isStreaming={props.streaming}
       toolProvider={props.tools}
     >
@@ -41,5 +41,6 @@ export default memo(
     a.open === b.open &&
     a.streaming === b.streaming &&
     a.draw === b.draw &&
-    a.tools === b.tools,
+    a.tools === b.tools &&
+    a.app === b.app,
 )

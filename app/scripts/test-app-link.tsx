@@ -10,7 +10,7 @@ import test from "node:test"
 import { useMemo, useState } from "react"
 import { Renderer } from "@openuidev/react-lang"
 
-import { AppPagesContext } from "@/components/openui/link"
+import { AppPagesContext } from "@/components/openui/app-pages-context.ts"
 import { appLibrary, appParser, parser } from "@/components/openui/library.tsx"
 
 import { click, findText, mount, settle, text, until, watchNotes } from "./component-kit.tsx"
