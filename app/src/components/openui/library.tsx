@@ -12,6 +12,7 @@ import { z } from "zod/v4"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
+import { ActionButton } from "./action-button.tsx"
 import { Chart } from "./chart.tsx"
 import { Link } from "./link.tsx"
 import { Map } from "./map.tsx"
@@ -169,9 +170,9 @@ export const library = createLibrary({
 })
 export const parser = createParser(library.toJSONSchema(), OPENUI_ROOT)
 
-const app = containers(() => [app.Card, Table, List, Callout, Chart, Map, Link])
+const app = containers(() => [app.Card, Table, List, Callout, Chart, Map, Link, ActionButton])
 export const appLibrary = createLibrary({
-  components: [app.Stack, app.Card, Table, List, Callout, Chart, Map, Link],
+  components: [app.Stack, app.Card, Table, List, Callout, Chart, Map, Link, ActionButton],
   root: OPENUI_ROOT,
 })
 export const appParser = createParser(appLibrary.toJSONSchema(), OPENUI_ROOT)

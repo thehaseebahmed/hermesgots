@@ -25,6 +25,7 @@ Callout(tone: "info" | "warn" | "good", text: string)
 Chart(kind: "bar" | "line" | "area" | "pie", series: {name: string, points: {x: string, y: number}[]}[], xLabel?: string, yLabel?: string, summary: string) — A bar, line, area or pie chart; summary in words.
 Map(points: {lat: number, lng: number, label: string, detail?: string}[], summary: string) — Labeled places on a map at coordinates you supply, never looked up; summary in words.
 Link(label: string, page: string) — Moves to the page it names.
+Button(label: string, action?: any, pending?: boolean) — Runs its action, `Action([@Run(mutation)])`; `pending` is true while that mutation's status is "loading".
 
 ## Hoisting & Streaming (CRITICAL)
 

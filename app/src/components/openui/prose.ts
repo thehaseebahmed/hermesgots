@@ -77,6 +77,13 @@ export const PROSE_RULES: readonly ProseRule[] = [
     gloss: "Moves to the page it names.",
     in: "app",
   },
+  {
+    component: "Button",
+    gloss:
+      "Runs its action, `Action([@Run(mutation)])`; `pending` is true while that mutation's status is " +
+      '"loading".',
+    in: "app",
+  },
 ]
 
 /** The rules one section carries — the one place `in` is read. */

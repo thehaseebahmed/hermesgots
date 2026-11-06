@@ -1,5 +1,6 @@
 # id: project-website
 root = Stack([sample, tasks, back])
-sample = Callout("info", "Sample data: these tasks are an example, not your project.")
-tasks = List([{"label": "Review the draft", "detail": "Next action"}, {"label": "Pick the colours", "detail": "Open"}, {"label": "Publish the page", "detail": "Open"}], true)
+data = Query("todoist.project", {project: "website"}, {notice: "Sample data: these tasks are an example, not your project.", tasks: [{label: "Review the draft", detail: "Next action"}, {label: "Pick the colours", detail: "Open"}, {label: "Publish the page", detail: "Open"}]})
+sample = Callout("info", data.notice)
+tasks = List(data.tasks, true)
 back = Link("Back to the list", "root")
