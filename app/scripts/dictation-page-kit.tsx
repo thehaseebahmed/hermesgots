@@ -18,6 +18,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { SettingsPage } from "@/routes/settings"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf, botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
@@ -270,6 +271,20 @@ export const editor = (path: string) => (
     <Where />
     <Routes>
       <Route path="/settings/bots/:botId/:tab?/:sub?/:leaf?" element={<LiveEditor />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+/**
+ * The same address, drawn as the app's own settings route draws it: the Screen a page sits in, and so
+ * the header a sub-screen wears — the title it takes over, and the back that leaves it. The page's
+ * own back control is this mount's, never the page's.
+ */
+export const routedEditor = (path: string) => (
+  <MemoryRouter initialEntries={[path]}>
+    <Where />
+    <Routes>
+      <Route path="/settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />
     </Routes>
   </MemoryRouter>
 )

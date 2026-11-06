@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   speech,
   editor,
+  routedEditor,
   here,
   speechPage,
   speechRow,
@@ -38,6 +39,10 @@ import {
 import { click, find, findAll, mount, type, until } from "./component-kit.tsx"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
+
+/** Any button on screen showing nothing but Done: the footer every drill-in used to end with. */
+const doneFooter = () =>
+  findAll("button").find((one) => one.textContent?.trim() === "Done") ?? null
 
 test("a host that can hear speech has a Speech-to-text page, its Vocabulary row counting the words", async () => {
   await seed("dictating", ["dictation"], { vocabulary: ["Haseeb"] })
@@ -178,12 +183,20 @@ test("a word removed from the screen leaves the record", async () => {
   })
 })
 
-test("the Vocabulary detail's Done takes the page back over the list", async () => {
-  await seed("vocabulary-done", ["dictation"], { vocabulary: ["Gots"] })
-  await mount(editor("/settings/bots/bot-1/speech-to-text/vocabulary"), async () => {
-    await click(detailButton("Done"))
+/**
+ * A drill-in closes the way General's one detail does: the screen's header carries the back, and the
+ * page adds no footer button repeating it. Mounted on the app's own route, so the header and its
+ * back are the ones a user has.
+ */
+test("the Vocabulary page has no Done of its own: the screen's back returns to the page", async () => {
+  await seed("vocabulary-back", ["dictation"], { vocabulary: ["Gots"] })
+  await mount(routedEditor("/settings/bots/bot-1/speech-to-text/vocabulary"), async () => {
+    await until(async () => Boolean(vocabulary()), "the words")
+    assert.equal(find("h1")?.textContent, "Vocabulary", "the screen is titled with the page")
+    assert.equal(doneFooter(), null, "and no Done footer repeats the header's way out")
+    await click(find('button[aria-label="Back"]'))
+    await until(async () => Boolean(speechPage()), "the page the row sits in")
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "the page's own address")
-    assert.ok(speechPage(), "and the page is drawn again")
     assert.ok(!vocabulary(), "with the list gone")
   })
 })

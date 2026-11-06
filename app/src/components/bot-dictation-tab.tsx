@@ -23,7 +23,6 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
-import { botTabPath } from "@/lib/bot-tabs"
 import { getSettings, updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
@@ -73,6 +72,9 @@ import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/
  *
  * The page opens on the last answer this device read, every row of it muted and untappable until a
  * fresh one lands, and a loader where it never read one (ADR 0082).
+ *
+ * A drill-in — Vocabulary, a provider's page — is left with the screen's own back, as General's one
+ * detail is: the header already carries the way out, and a footer button would be a second one.
  */
 export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const speech = useSpeech(profile)
@@ -106,14 +108,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   // 1024px it is the pane the page would have drawn in. A provider's page is asked for first, since
   // it is the one detail whose address is two segments deep.
   if (sub?.item)
-    return (
-      <ProviderPage
-        block={block}
-        speech={speech}
-        name={sub.item}
-        back={botTabPath(profile.id, "speech-to-text")}
-      />
-    )
+    return <ProviderPage block={block} speech={speech} name={sub.item} />
   if (sub?.id === "vocabulary") return <VocabularyPage profile={profile} words={words} />
 
   // A bot this device has never read draws a loader where the rows would be, rather than a page
@@ -679,14 +674,11 @@ function ProviderPage({
   block,
   speech,
   name,
-  back,
 }: {
   block: SttSettings | undefined
   speech: ReturnType<typeof useSpeech>
   name: string
-  back: string
 }) {
-  const navigate = useNavigate()
   const [open, setOpen] = useState<SttSetting>()
   const rows = providerPage(name)
   // A provider this host doesn't declare, or DeepInfra before it has said which models it can hear
@@ -721,17 +713,7 @@ function ProviderPage({
           </p>
         )}
       </Group>
-      <Done onClick={() => navigate(back)} />
     </div>
-  )
-}
-
-/** The footer a drill-in page closes with. */
-function Done({ onClick }: { onClick: () => void }) {
-  return (
-    <Button variant="ghost" className="self-start text-muted-foreground" onClick={onClick}>
-      Done
-    </Button>
   )
 }
 
@@ -910,7 +892,6 @@ function LevelPick({
 /** The words this bot's speech leans towards: the list, with removing and adding in it. */
 function VocabularyPage({ profile, words }: { profile: Profile; words: string[] }) {
   const [draft, setDraft] = useState("")
-  const navigate = useNavigate()
   const save = (next: string[]) => void updateProfile(profile.id, { vocabulary: next })
   const ready = Boolean(cleanWord(draft))
 
@@ -965,8 +946,6 @@ function VocabularyPage({ profile, words }: { profile: Profile; words: string[] 
           Add
         </Button>
       </form>
-
-      <Done onClick={() => navigate(botTabPath(profile.id, "speech-to-text"))} />
     </div>
   )
 }

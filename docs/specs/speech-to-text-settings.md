@@ -86,7 +86,8 @@ Where each setting sits, and why:
 **Providers** is a caption and a card on the page itself, not a screen: one row per provider the
 host declares except `local`, each the provider's name over the model it holds, marked *In use*
 where Hermes is using it and *Key not set* where the host holds no key for it. A row opens that
-provider's own page, whose **Done** returns to the page. Those pages hold:
+provider's own page, which the screen's header leaves again with its back — no **Done** footer under
+it, as on General's one detail. Those pages hold:
 
 | Provider | Rows |
 | --- | --- |

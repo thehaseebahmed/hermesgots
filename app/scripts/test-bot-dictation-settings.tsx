@@ -11,6 +11,7 @@ import {
   here,
   lines,
   row,
+  routedEditor,
   seed,
   sheetButton,
   switchIn,
@@ -287,9 +288,32 @@ test("a provider's page draws its own rows, and a pick writes that provider's ke
       "one key, under the provider whose page it is",
     )
     assert.equal(valueOf(row("stt.groq.model")), "whisper-large-v3", "and the row follows it")
-    await click(sheetButton("Done"))
+    assert.equal(
+      findAll("button").filter((one) => one.textContent?.trim() === "Done").length,
+      0,
+      "and the page ends with its rows: no Done footer repeats the header's way out",
+    )
+  })
+})
+
+/**
+ * A provider's page is left the way General's one detail is: the screen's header takes the provider's
+ * name and carries the back, so the page itself needs no footer of its own.
+ */
+test("a provider's page is left by the screen's back, which takes the provider's name", async () => {
+  await seed(
+    "stt-provider-back",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    { speech: speech({ stt: STT() }) },
+  )
+  await mount(routedEditor("/settings/bots/bot-1/speech-to-text/providers/groq"), async () => {
+    await until(async () => Boolean(find('[data-stt-provider="groq"]')), "the provider's page")
+    assert.equal(find("h1")?.textContent, "Groq", "the screen is titled with the provider")
+    await click(find('button[aria-label="Back"]'))
     await until(async () => Boolean(speechPage()), "back on the page the card sits in")
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "which is the page itself")
+    assert.equal(find("[data-stt-provider]"), null, "with the provider's page gone")
   })
 })
 
