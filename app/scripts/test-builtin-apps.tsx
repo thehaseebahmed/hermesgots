@@ -47,6 +47,7 @@ for (const [key, entry] of Object.entries(manifest.apps)) {
         `${file} fails the library`,
       )
       assert.deepEqual(result.meta.unresolved, [], `${file} leaves a reference unresolved`)
+      assert.match(source, /Sample data/, `${file} does not say its data is sample`)
     }
   })
 

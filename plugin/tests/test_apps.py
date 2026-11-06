@@ -533,8 +533,6 @@ def built(version: int = 1, **pages: str) -> Dict[str, Any]:
 
 
 class Decision(unittest.TestCase):
-    """What the bundle owes one built-in app, as the pure rule."""
-
     def test_a_missing_app_is_created(self) -> None:
         self.assertEqual(apps.decide(1, None, False), "create")
 
@@ -585,7 +583,6 @@ class BuiltIns(unittest.TestCase):
     def test_a_reinstall_creates_no_duplicate(self) -> None:
         self.bundle(home=built())
         apps.listing(self.path)
-        apps.seed(self.path)
         bundle_of(self, {"home": built()})
         apps.listing(self.path)
         self.assertEqual(len(self.rows()), 1)

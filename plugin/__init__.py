@@ -3415,7 +3415,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         info = request.match_info
         return await apps_write(
             request,
-            lambda path, _: apps.remove(path, info["app_id"]) or {"id": info["app_id"]},
+            lambda path, _: apps.remove(path, info["app_id"]),
             "app",
             200,
             body=False,

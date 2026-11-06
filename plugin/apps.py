@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 import re
 import sqlite3
 import uuid
@@ -69,12 +70,19 @@ def decide(bundle_version: int, recorded: Optional[int], edited: bool) -> str:
 def _bundle() -> Dict[str, Dict[str, Any]]:
     """The bundle's apps by key, each with its version, title, library version and ordered
     ``(page_id, source)`` pairs; empty where the bundle can't be read, so a broken bundle never
-    breaks the list."""
+    breaks the list. Read once per folder: it ships with the plugin and changes only with it."""
+    return _read_bundle(BUNDLE)
+
+
+@lru_cache(maxsize=4)
+def _read_bundle(root: Path) -> Dict[str, Dict[str, Any]]:
     try:
-        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         found: Dict[str, Dict[str, Any]] = {}
         for key, entry in manifest["apps"].items():
-            sources = [_checked((BUNDLE / name).read_text(encoding="utf-8")) for name in entry["pages"]]
+            sources = [
+                _checked((root / name).read_text(encoding="utf-8")) for name in entry["pages"]
+            ]
             if not sources or not isinstance(entry["version"], int):
                 raise ValueError(f"{key} has no pages or no version")
             found[key] = {
@@ -96,8 +104,7 @@ def _recorded(conn: sqlite3.Connection) -> Dict[str, sqlite3.Row]:
     return {row["builtin_key"]: row for row in rows}
 
 
-def _owed(conn: sqlite3.Connection, bundle: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
-    recorded = _recorded(conn)
+def _owed(recorded: Dict[str, sqlite3.Row], bundle: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
     owed = {}
     for key, entry in bundle.items():
         row = recorded.get(key)
@@ -117,24 +124,25 @@ def _lay_pages(conn: sqlite3.Connection, app_id: str, pages: List[Any]) -> None:
         )
 
 
-def seed(path: Path) -> None:
+def seed(path: Path, bundle: Dict[str, Dict[str, Any]]) -> None:
     """Creates the built-in apps that are missing and replaces the untouched ones the bundle has
     moved past, in one transaction; a store with nothing owed is not written.
 
     What is owed is read again inside the write lock, so two first reads cannot both create an app.
     """
-    bundle = _bundle()
     if not bundle:
         return
-    conn = open_rows(path)
-    try:
-        if not any(v in ("create", "replace") for v in _owed(conn, bundle).values()):
+    if path.exists():
+        conn = open_rows(path)
+        try:
+            owed = _owed(_recorded(conn), bundle)
+        finally:
+            conn.close()
+        if not any(action in ("create", "replace") for action in owed.values()):
             return
-    finally:
-        conn.close()
     with _writing(path, building=True) as conn:
         recorded = _recorded(conn)
-        for key, action in _owed(conn, bundle).items():
+        for key, action in _owed(recorded, bundle).items():
             entry = bundle[key]
             if action == "create":
                 app_id = f"builtin-{key}"
@@ -178,7 +186,8 @@ def listing(path: Path, include_hidden: bool = False) -> List[Dict[str, Any]]:
     page per place — so the first id is the root the app opens on and a reader needs no second
     field to find it.
     """
-    seed(path)
+    bundle = _bundle()
+    seed(path, bundle)
     if not path.exists():
         return []
     conn = open_rows(path)
@@ -191,24 +200,46 @@ def listing(path: Path, include_hidden: bool = False) -> List[Dict[str, Any]]:
         pages = conn.execute(
             "SELECT app_id, page_id FROM app_pages ORDER BY app_id, position"
         ).fetchall()
-        owed = _owed(conn, _bundle())
+        owed = _owed(_recorded(conn), bundle)
     finally:
         conn.close()
     ids: Dict[str, List[str]] = {}
     for row in pages:
         ids.setdefault(row["app_id"], []).append(row["page_id"])
     return [
-        {
-            "id": row["id"],
-            "title": row["title"],
-            "library_version": row["library_version"],
-            "pages": ids.get(row["id"], []),
-            "builtin": row["builtin_key"],
-            "hidden": bool(row["hidden"]),
-            "update": owed.get(row["builtin_key"]) == "update",
-        }
+        _summary(
+            row["id"],
+            row["title"],
+            row["library_version"],
+            ids.get(row["id"], []),
+            builtin=row["builtin_key"],
+            hidden=bool(row["hidden"]),
+            update=owed.get(row["builtin_key"]) == "update",
+        )
         for row in rows
     ]
+
+
+def _summary(
+    app_id: str,
+    title: str,
+    library_version: str,
+    pages: List[str],
+    *,
+    builtin: Optional[str] = None,
+    hidden: bool = False,
+    update: bool = False,
+) -> Dict[str, Any]:
+    """An app as the list and a create both answer it, so the two can't drift."""
+    return {
+        "id": app_id,
+        "title": title,
+        "library_version": library_version,
+        "pages": pages,
+        "builtin": builtin,
+        "hidden": hidden,
+        "update": update,
+    }
 
 
 def _found(conn: sqlite3.Connection, app_id: str, page_id: str) -> sqlite3.Row:
@@ -338,15 +369,7 @@ def create(
             "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, ?, ?)",
             [(app_id, page_id, position, one) for position, (page_id, one) in enumerate(pages)],
         )
-    return {
-        "id": app_id,
-        "title": title,
-        "library_version": version,
-        "pages": ids,
-        "builtin": None,
-        "hidden": False,
-        "update": False,
-    }
+    return _summary(app_id, title, version, ids)
 
 
 def write(path: Path, app_id: str, page_id: str, source: Any) -> Dict[str, Any]:
@@ -400,8 +423,9 @@ def _builtin(conn: sqlite3.Connection, app_id: str) -> sqlite3.Row:
     return row
 
 
-def remove(path: Path, app_id: str) -> None:
-    """Deletes a generated app and its pages; a built-in app is refused and hidden instead.
+def remove(path: Path, app_id: str) -> Dict[str, Any]:
+    """Deletes a generated app and its pages and answers its id; a built-in app is refused and is
+    hidden instead.
 
     Raises ``AppsError`` (404 for no such app, 409 for a built-in one).
     """
@@ -410,6 +434,7 @@ def remove(path: Path, app_id: str) -> None:
             raise AppsError("A built-in app can't be deleted; hide it instead.", 409)
         conn.execute("DELETE FROM app_pages WHERE app_id = ?", (app_id,))
         conn.execute("DELETE FROM apps WHERE id = ?", (app_id,))
+    return {"id": app_id}
 
 
 def set_hidden(path: Path, app_id: str, hidden: Any) -> Dict[str, Any]:

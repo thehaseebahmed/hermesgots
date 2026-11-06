@@ -885,9 +885,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    UNIQUE (app_id, position)
                )"""
         )
-        # v56: a built-in app is an ordinary row with a bundle key, the bundle version it was seeded
-        # at, an edit mark and a hidden mark (apps.py). Guarded by the table's own columns, since a
-        # store may already carry some of them.
+        # v56 (apps.py): guarded by the table's own columns, since a store may already carry some.
         app_columns = {row[1] for row in conn.execute("PRAGMA table_info(apps)")}
         for column, definition in (
             ("builtin_key", "TEXT"),
