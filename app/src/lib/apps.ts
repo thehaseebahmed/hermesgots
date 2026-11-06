@@ -176,7 +176,9 @@ export async function saveApp(profile: Profile, title: string, pages: string[]) 
   const app = await createApp(profile, title, pages)
   const kept = listed.get()
   const apps = kept?.profileId === profile.id ? (kept.apps ?? []) : []
-  listed.set({ profileId: profile.id, apps: [app, ...apps.filter((one) => one.id !== app.id)] })
+  const next = [app, ...apps.filter((one) => one.id !== app.id)]
+  keepList(profile, next)
+  listed.set({ profileId: profile.id, apps: next })
   return app
 }
 
