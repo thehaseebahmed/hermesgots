@@ -377,6 +377,29 @@ test("a model picked in the sheet is written to the host, and the row says which
   })
 })
 
+test("a pick answered without the page's settings leaves every setting where it was", async () => {
+  const calls = await seed(
+    "speech-pick-keeps-stt",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    { speech: speech({ stt: STT() }), next: speech({ model: "base" }) },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    const before = findAll("[data-stt-group]").length
+    assert.ok(before > 0, "the page draws the host's settings to begin with")
+    await openSpeech()
+    await click(speechOption("base"))
+    assert.deepEqual(calls[0]?.body, { model: "base" }, "the pick was written")
+    await until(async () => speechOptions().length === 0, "the sheet to close behind the pick")
+    assert.equal(valueOf(row("speech-model")), "base", "the row names the new model")
+    assert.equal(
+      findAll("[data-stt-group]").length,
+      before,
+      "and the rest of the page is not lost until the next visit",
+    )
+  })
+})
+
 test("a host that lists no models leaves the Speech model row with nothing to open", async () => {
   await seed(
     "speech-nomodels",

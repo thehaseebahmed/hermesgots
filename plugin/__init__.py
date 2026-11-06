@@ -2414,7 +2414,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     speech.set_level(path, body.get("cleanup_level"))
                 if "hearing_prompt" in body:
                     speech.set_hearing(path, body.get("hearing_prompt"))
-                return speech.read(config_path, path, gate)
+                return speech.read(config_path, path, gate, with_stt=True)
 
         try:
             payload = await asyncio.to_thread(run)

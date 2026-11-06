@@ -61,9 +61,9 @@ NO_FIXTURE = "This plugin is missing the recording it times a model with, so not
 NO_DECODER = "This Hermes has no local speech-to-text, so there is nothing on this host to time."
 BUSY = "This host is hearing a take right now, so it can't time a model without getting in its way."
 NOTHING_LOADED = "None of the models on disk could be loaded here, so this host measured nothing."
-ALREADY_MEASURING = "This host is already timing its speech models."
 
-# One probe at a time per process: two devices opening the picker at once ask one measurement of it.
+# One probe at a time per process: two devices opening the picker at once ask one measurement of it,
+# so the second waits its turn and times only what the first left unmeasured.
 _probing = threading.Lock()
 
 _machine: Optional[Dict[str, Any]] = None
@@ -270,7 +270,8 @@ def measure(
     half-fetched model is a real state on a host — and a probe that loaded nothing raises, since a
     record of no measurements is not a measurement. A probe asked only for models the host has not
     measured yet (``keep`` is what the record already holds) adds to that record and answers None
-    where it measured nothing new: the earlier numbers still stand.
+    where it measured nothing new: the earlier numbers still stand. A probe asked while another runs
+    waits its turn and then times only what that one left unmeasured.
 
     A take arriving mid-probe ends it with nothing written: loading the next model under a take is
     the one thing this stands aside for. Hermes's lazy install is never reached, so a question about
@@ -282,11 +283,13 @@ def measure(
     decode = dictation.local_decoder()
     if decode is None:
         raise Unavailable(NO_DECODER)
-    if not _probing.acquire(blocking=False):
-        raise Busy(ALREADY_MEASURING)
 
     measured: Dict[str, Dict[str, Any]] = {}
-    try:
+    with _probing:
+        keep = here(path) if keep is None else {**here(path), **keep}
+        models = [name for name in models if name not in keep]
+        if not models:
+            return None
         for name in models:
             if dictation.holds_a_take():
                 raise Busy(BUSY)
@@ -302,8 +305,6 @@ def measure(
                 "load_ms": load_ms,
                 "at": stamp(),
             }
-    finally:
-        _probing.release()
 
     if not measured:
         if keep:

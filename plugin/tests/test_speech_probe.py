@@ -14,6 +14,7 @@ No faster-whisper, no network, no sleep worth the wall clock.
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List
@@ -159,6 +160,22 @@ class MeasureTest(Base):
             with self.assertRaises(speech_probe.Busy):
                 speech_probe.measure(self.path, ["base"])
         self.assertIsNone(get_setting(self.path, speech_probe.KEY), "nothing is measured under a take")
+
+    def test_a_probe_asked_while_another_runs_waits_and_times_nothing_twice(self) -> None:
+        host, hearing = self.host()
+        answers: List[Any] = []
+        with host, mock.patch.object(speech_probe, "FIXTURE", self.fixture):
+            self.fixture.write_bytes(self.real.read_bytes())
+            speech_probe._probing.acquire()
+            asked = threading.Thread(
+                target=lambda: answers.append(speech_probe.measure(self.path, ["base"]))
+            )
+            asked.start()
+            put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.4}))
+            speech_probe._probing.release()
+            asked.join(5)
+        self.assertEqual(answers, [None], "it waited its turn rather than refusing")
+        self.assertEqual(hearing.models(), [], "and the model the other probe timed was not timed again")
 
     def test_a_probe_asked_for_one_model_adds_to_the_record_it_held(self) -> None:
         timed = Timed({"small": (900, 2000)})

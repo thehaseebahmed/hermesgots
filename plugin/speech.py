@@ -263,7 +263,7 @@ def probe(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any
                if name not in held]
     if missing:
         speech_probe.measure(path, missing, keep=held)
-    return read(config_path, path, gate, stt=stt)
+    return read(config_path, path, gate, with_stt=True, stt=stt)
 
 
 def set_model(config_path: Path, value: Any) -> str:

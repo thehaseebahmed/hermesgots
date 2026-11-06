@@ -255,6 +255,16 @@ class MeasurementTest(TempStore):
         self.assertEqual(heard.call_args.args[1], ["small"], "only what the record does not speak for")
         self.assertEqual(heard.call_args.kwargs["keep"]["base"]["realtime"], 9.4)
 
+    def test_a_probe_answers_the_whole_page_the_read_does(self) -> None:
+        put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.4}))
+        root = Path(self.tmp.name) / "hub"
+        (root / "models--Systran--faster-whisper-base").mkdir(parents=True)
+        with SttHost({"enabled": True, "local": {"model": "base"}}), \
+                mock.patch.object(speech, "cache_roots", lambda section: [root]), \
+                mock.patch.object(speech_probe, "measure"):
+            payload = speech.probe(self.config, self.path, {})
+        self.assertIn("stt", payload, "an answer without the page's own rows would blank them")
+
     def test_a_probe_with_nothing_new_to_hear_measures_nothing(self) -> None:
         put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.4, "small": 3.2}))
         root = Path(self.tmp.name) / "hub"

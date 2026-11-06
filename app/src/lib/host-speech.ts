@@ -15,6 +15,7 @@ import { noteFailure } from "@/lib/report"
 import {
   CLEANUP_LEVELS_FEATURE,
   HEARING_PROMPT_FEATURE,
+  keepStt,
   readSpeech,
   SPEECH_MODEL,
   SPEECH_PROBE_FEATURE,
@@ -186,13 +187,13 @@ export function useSpeech(profile?: Server | null) {
         setSpeech({ baseUrl, apiKey }, patch, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
       )
       if (!settings) return false
-      setState({ key, settings })
+      setState({ key, settings: keepStt(settings, state?.settings) })
       // A fresh block is the host's word on its own measurement, so a probe that failed before it
       // has nothing left to say.
       setMeasureProblem(undefined)
       return true
     },
-    [save, settled, baseUrl, apiKey],
+    [save, settled, state, key, baseUrl, apiKey],
   )
 
   /** One speech setting, written on its own: the host answers the whole block it now holds. */
@@ -244,7 +245,7 @@ export function useSpeech(profile?: Server | null) {
         { baseUrl, apiKey },
         AbortSignal.timeout(PROBE_TIMEOUT_MS),
       )
-      setState({ key, settings })
+      setState({ key, settings: keepStt(settings, state?.settings) })
     } catch (error) {
       // Only an answer that came back is the host's to say: a status means it refused, and its own
       // sentence is drawn under the rows. A request that never landed is noted and left out of them,

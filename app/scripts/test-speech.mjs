@@ -216,7 +216,7 @@ test("a settled host says nothing under the rows, and an unsettled one says why"
     null,
     "a host that owes nothing captions nothing: each row carries its own measurement",
   )
-  assert.equal(probeNote(probe, true), "Measuring this host's hearing…")
+  assert.equal(probeNote(probe, true), "Timing this host's speech models…")
   assert.equal(
     probeNote({ ...probe, owed: true, measured: 0, elsewhere: { name: "a-laptop", at: "" } }),
     "Measured on a-laptop, not this host.",
