@@ -945,6 +945,15 @@ async function pullRegistry(): Promise<string[]> {
 /** Reads the registry now, for screens that wait on a bot to link. */
 export async function refreshBots() {
   if (state.vault !== "unlocked") return
+  // A device holding the data key but not the inbox's copy can't open any bot record; the sync pass
+  // stores it, but its failure only shows in Settings, which setup hides. Here it is the screen's.
+  try {
+    const key = await currentKey()
+    if (key && !(await inboxKey())) await ensureInbox(key)
+  } catch (error) {
+    setState({ registryError: error instanceof Error ? error.message : "Couldn't open the inbox" })
+    return
+  }
   await pullRegistry()
 }
 

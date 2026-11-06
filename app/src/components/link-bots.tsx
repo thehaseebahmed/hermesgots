@@ -15,7 +15,7 @@ import {
   useReachable,
   type LinkCode,
 } from "@/lib/registry"
-import { refreshBots } from "@/lib/sync"
+import { refreshBots, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 /** While linking, the registry is read this often, so a bot shows up moments after it links. */
@@ -47,6 +47,7 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
     [],
   )
   const [reachable, setReachable] = useState<Record<string, boolean>>({})
+  const { registryError, vault } = useSyncState()
 
   useEffect(() => {
     if (code) {
@@ -130,6 +131,11 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
           <li className="flex min-h-14 items-center gap-3 rounded-2xl border border-dashed border-foreground/25 px-3 text-sm text-muted-foreground">
             <Spinner />
             Waiting for a bot to link…
+          </li>
+        )}
+        {bots?.length === 0 && (registryError || vault !== "unlocked") && (
+          <li className="text-sm text-destructive" role="alert">
+            {registryError ?? "Sync is locked on this device."}
           </li>
         )}
       </ul>
