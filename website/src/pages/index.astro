@@ -8,7 +8,6 @@ import Base from "../layouts/Base.astro"
 const stages = [
   {
     id: "code",
-    word: "Code",
     tag: "Code",
     title: "Sessions that end in a pull request.",
     body: "Every session gets a worktree of its own and opens a draft pull request. Use plan mode to read the plan before anything is written. Leave AFK on and your host works through the issues you've labelled, runs your tests itself and never merges.",
@@ -17,7 +16,6 @@ const stages = [
   },
   {
     id: "research",
-    word: "Research",
     tag: "Research missions",
     title: "Answers with receipts.",
     body: "A mission reads the web, then writes a guide where every sentence points at its source. The host re-checks each quote and flags anything unsourced. Compare and decide scores your options against the criteria you set.",
@@ -26,7 +24,6 @@ const stages = [
   },
   {
     id: "dictate",
-    word: "Dictate",
     tag: "Dictation",
     title: "Dictation that runs on your own bot.",
     body: "Talk into any chat. Your Hermes host transcribes it with the speech model you pick, tidies it to the level you want and drops the words where your cursor was. Teach it your names and jargon once.",
@@ -35,13 +32,24 @@ const stages = [
   },
   {
     id: "generate",
-    word: "Generate",
     tag: "Generative UI",
     title: "Replies that are interfaces.",
     body: "Built on OpenUI. An answer can come back as a table, a chart, a form or buttons you use in place, so a decision is a tap instead of a paragraph.",
     chips: ["OpenUI", "Approvals in place", "Tables & charts"],
     shot: "approve",
   },
+]
+
+const journey = [
+  { n: "01", title: "Ask", body: "Say what you want done, by typing or by talking. Attach a repo, a file or a photo." },
+  { n: "02", title: "Step away", body: "Close the app. The work runs on your Hermes host, not on your phone, so it carries on." },
+  { n: "03", title: "Come back", body: "Open it on whichever screen is nearest. A draft pull request, a cited guide or a question waits for you." },
+]
+
+const yours = [
+  { title: "Runs on your host", body: "Chats, runs and keys stay with your Hermes agent. Gots is the window onto it." },
+  { title: "Sealed sync", body: "Your devices sync through an end-to-end encrypted vault. The server never holds a key that opens it." },
+  { title: "Open source", body: "MIT licensed. Read it, run it, change it." },
 ]
 
 const coming = [
@@ -66,6 +74,25 @@ const coming = [
     body: "Ring a bot and talk it through, or let it ring you when something is waiting on you.",
   },
 ]
+
+const faq = [
+  {
+    q: "Do I need a Hermes host?",
+    a: "Yes. Gots is the app for a Hermes agent, and the agent runs on a machine you control. Self-hosting is free. The hosted plan, for people who'd rather not run one, is on the waiting list.",
+  },
+  {
+    q: "Where does it run?",
+    a: "On your phone, tablet and laptop. It installs as an app from the browser, and there is an Android app. Your chats are the same on each.",
+  },
+  {
+    q: "What happens when I close the app?",
+    a: "Nothing stops. Work that has to keep going lives on your host, so you can ask for something, close the app and find it done later.",
+  },
+  {
+    q: "Which features are ready?",
+    a: "Coding sessions, research missions, dictation and generative UI work today. Bot chatrooms, meeting transcription, apps from replies and calling are marked Coming soon.",
+  },
+]
 ---
 
 <Base
@@ -74,6 +101,7 @@ const coming = [
 >
   <main>
     <section class="home-hero">
+      <div class="glow" aria-hidden="true"></div>
       <div class="wrap hero-copy">
         <p class="tag" data-reveal>Hermes Bots that got your back</p>
         <h1 data-reveal style="--d:60ms">Ask. Close the app. Come back to it <em>done.</em></h1>
@@ -96,39 +124,96 @@ const coming = [
           <div class="phone"><div class="phone-screen"><Chat variant="phone" /></div></div>
         </div>
         <p class="hero-bubble"><img src="/bots/hex.png" alt="" width="48" height="48" />On it.</p>
+        <img class="float float-a" src="/bots/stella.png" alt="" width="72" height="72" />
+        <img class="float float-b" src="/bots/gem.png" alt="" width="72" height="72" />
       </figure>
+    </section>
+
+    <section class="journey" aria-labelledby="journey-title">
+      <div class="wrap">
+        <span class="tag" data-reveal>How it works</span>
+        <h2 id="journey-title" class="section-title" data-reveal>Works while you're there, and while you're not.</h2>
+
+        <ol class="journey-grid">
+          <li class="jcard" data-reveal>
+            <div class="jart" aria-hidden="true">
+              <p class="bubble-user">Fix the flaky retry test and open a PR.</p>
+              <p class="bubble-bot"><img src="/bots/hex.png" alt="" width="40" height="40" />On it.</p>
+            </div>
+            <span class="jn">{journey[0].n}</span>
+            <h3>{journey[0].title}</h3>
+            <p>{journey[0].body}</p>
+          </li>
+          <li class="jcard" data-reveal style="--d:90ms">
+            <div class="jart jart-away" aria-hidden="true">
+              <p class="away-state"><i></i>Running on your host</p>
+              <ul class="away-lines">
+                <li>Ran 3 commands</li>
+                <li>Edited <code>retry.test.ts</code></li>
+                <li>Tests passing</li>
+              </ul>
+              <div class="bar"><span></span></div>
+            </div>
+            <span class="jn">{journey[1].n}</span>
+            <h3>{journey[1].title}</h3>
+            <p>{journey[1].body}</p>
+          </li>
+          <li class="jcard" data-reveal style="--d:180ms">
+            <div class="jart" aria-hidden="true">
+              <p class="push"><img src="/bots/hex.png" alt="" width="36" height="36" /><span><b>Draft PR ready</b><small>Checks passing · 2m 14s</small></span></p>
+            </div>
+            <span class="jn">{journey[2].n}</span>
+            <h3>{journey[2].title}</h3>
+            <p>{journey[2].body}</p>
+          </li>
+        </ol>
+      </div>
     </section>
 
     <div id="features">
       {
         stages.map((s, i) => (
-          <>
-            <div class="wedge" aria-hidden="true"><span>{s.word}</span></div>
-            <section class:list={["stage", { flip: i % 2 === 1 }]} aria-labelledby={`${s.id}-title`}>
-              <div class="wrap stage-grid">
-                <div class="stage-copy" data-reveal>
-                  <span class="tag">{s.tag}</span>
-                  <h2 id={`${s.id}-title`}>{s.title}</h2>
-                  <p>{s.body}</p>
-                  <ul class="chips">
-                    {s.chips.map((chip) => <li>{chip}</li>)}
-                  </ul>
-                </div>
-                <div class="stage-art" data-reveal style="--d:100ms">
-                  {s.dictate ? (
-                    <Dictation />
-                  ) : (
-                    <div class="phone art-phone">
-                      <Phone shot={s.shot!} alt={s.title} />
-                    </div>
-                  )}
-                </div>
+          <section class:list={["stage", { flip: i % 2 === 1 }]} aria-labelledby={`${s.id}-title`}>
+            <div class="wrap stage-grid">
+              <div class="stage-copy" data-reveal>
+                <span class="tag">{s.tag}</span>
+                <h2 id={`${s.id}-title`}>{s.title}</h2>
+                <p>{s.body}</p>
+                <ul class="chips">
+                  {s.chips.map((chip) => <li>{chip}</li>)}
+                </ul>
               </div>
-            </section>
-          </>
+              <div class="stage-art" data-reveal style="--d:100ms">
+                {s.dictate ? (
+                  <Dictation />
+                ) : (
+                  <div class="phone art-phone">
+                    <Phone shot={s.shot!} alt={s.title} dark />
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
         ))
       }
     </div>
+
+    <section class="yours" aria-labelledby="yours-title">
+      <div class="wrap">
+        <span class="tag" data-reveal>Yours</span>
+        <h2 id="yours-title" class="section-title" data-reveal>Your agent, your host, your say.</h2>
+        <ul class="yours-grid">
+          {
+            yours.map((y, i) => (
+              <li data-reveal style={`--d:${i * 80}ms`}>
+                <h3>{y.title}</h3>
+                <p>{y.body}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
 
     <section id="coming" class="coming">
       <div class="wrap">
@@ -189,6 +274,24 @@ const coming = [
         </div>
       </div>
     </section>
+
+    <section class="faq" aria-labelledby="faq-title">
+      <div class="wrap faq-wrap">
+        <h2 id="faq-title" class="section-title" data-reveal>Questions</h2>
+        <div class="faq-list" data-reveal style="--d:80ms">
+          {
+            faq.map((f) => (
+              <details>
+                <summary>{f.q}</summary>
+                <p>{f.a}</p>
+              </details>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <p class="bigword" aria-hidden="true">Gots</p>
   </main>
 
   <div class="dock" data-dock>

@@ -1,13 +1,30 @@
-/* The landing page's own sections. The page sits on warm paper in light mode, with the app's
-   green as its one accent; the bots are the only other colour. */
+/* The landing page's own sections. The page is always dark, with the app's green as its one
+   accent; the bots are the only other colour. These tokens replace the light/dark pair for this page. */
 :root {
-  --background: oklch(0.975 0.007 95);
+  --background: oklch(0.13 0.005 150);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.19 0.006 150);
+  --primary: oklch(0.55 0.16 150);
+  --primary-foreground: oklch(0.99 0.01 155);
+  --muted: oklch(0.25 0.006 150);
+  --muted-foreground: oklch(0.72 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --ring: oklch(0.7 0.1 150);
+  --glow: oklch(0.8 0.17 150);
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-  }
+.tag,
+.thanks {
+  color: var(--glow);
+}
+
+.ticks li::before {
+  border-color: var(--glow);
+}
+
+.btn:active {
+  transform: scale(0.95);
 }
 
 /* Hero */
@@ -36,12 +53,59 @@
 
 .home-hero h1 em {
   font-style: normal;
-  color: var(--primary);
+  color: var(--glow);
 }
 
-@media (prefers-color-scheme: dark) {
-  .home-hero h1 em {
-    color: oklch(0.8 0.15 150);
+.glow {
+  position: absolute;
+  inset: -20% 0 auto;
+  height: 38rem;
+  background:
+    radial-gradient(40% 50% at 50% 30%, oklch(0.5 0.15 150 / 45%), transparent),
+    radial-gradient(25% 35% at 80% 20%, oklch(0.5 0.14 255 / 25%), transparent);
+  pointer-events: none;
+}
+
+.home-hero > .wrap,
+.hero-art {
+  position: relative;
+}
+
+.float {
+  position: absolute;
+  z-index: 2;
+  height: auto;
+  filter: drop-shadow(0 0.75rem 1rem oklch(0 0 0 / 40%));
+}
+
+.float-a {
+  left: -1%;
+  bottom: 22%;
+  width: clamp(3rem, 7vw, 5rem);
+}
+
+.float-b {
+  right: 20%;
+  top: -1.5rem;
+  width: clamp(2.5rem, 6vw, 4.5rem);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .float-a {
+    animation: bob 4s ease-in-out infinite;
+  }
+  .float-b {
+    animation: bob 5s ease-in-out -2s infinite;
+  }
+  .hero-bubble {
+    animation: bob 3.4s ease-in-out -1s infinite;
+  }
+}
+
+@keyframes bob {
+  50% {
+    translate: 0 -0.6rem;
+    rotate: 4deg;
   }
 }
 
@@ -103,7 +167,7 @@
   height: 0.8rem;
   margin-inline: -3%;
   border-radius: 0 0 1.2rem 1.2rem;
-  background: linear-gradient(oklch(0.84 0 0), oklch(0.7 0 0));
+  background: linear-gradient(oklch(0.34 0 0), oklch(0.24 0 0));
 }
 
 .hero-phone {
@@ -401,58 +465,313 @@
   }
 }
 
-/* Chapter wipes: a green wedge between stages, with the stage's word on it. */
-.wedge {
+/* How it works: ask, step away, come back. */
+.journey {
+  padding-block: clamp(4rem, 9vw, 7rem);
+}
+
+.journey .section-title {
+  max-width: 18ch;
+}
+
+.journey-grid {
   display: grid;
-  place-items: center;
-  height: clamp(10rem, 30vw, 20rem);
-  margin-block: -1px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  clip-path: polygon(0 14%, 100% 0, 100% 86%, 0 100%);
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin: 2.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jcard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  background: var(--card);
+  transition: translate 0.3s var(--ease), border-color 0.3s;
+}
+
+.jcard:hover {
+  translate: 0 -0.35rem;
+  border-color: color-mix(in oklab, var(--glow) 45%, var(--border));
+}
+
+.jcard h3 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.03em;
+}
+
+.jcard p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.jn {
+  margin-top: 1rem;
+  color: var(--glow);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.jart {
+  display: grid;
+  align-content: center;
+  gap: 0.7rem;
+  min-height: 12rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: var(--background);
+}
+
+.jart p,
+.jart ul {
+  margin: 0;
+}
+
+.bubble-user {
+  justify-self: end;
+  max-width: 85%;
+  padding: 0.6rem 0.9rem;
+  border-radius: 1.1rem 1.1rem 0.3rem 1.1rem;
+  background: var(--muted);
+  font-size: 0.95rem;
+}
+
+.bubble-bot,
+.push {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+}
+
+.bubble-bot img,
+.push img {
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.push {
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.1rem;
+  background: var(--card);
+  font-weight: 400;
+}
+
+.push span {
+  display: grid;
+}
+
+.push small {
+  color: var(--muted-foreground);
+}
+
+.away-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--glow);
+}
+
+.away-state i {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--glow);
+}
+
+.away-lines {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-foreground);
+  font-size: 0.88rem;
+}
+
+.away-lines li {
+  padding: 0.3rem 0.7rem;
+  border-radius: 0.6rem;
+  background: var(--card);
+}
+
+.away-lines code {
+  font-family: var(--mono);
+  color: var(--foreground);
+}
+
+.bar {
+  height: 0.4rem;
+  border-radius: 99px;
+  background: var(--muted);
   overflow: hidden;
 }
 
-.wedge span {
-  font-size: clamp(4rem, 17vw, 13rem);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.06em;
+.bar span {
+  display: block;
+  width: 70%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--glow);
 }
 
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .wedge {
-      animation: wedge-tilt linear both;
-      animation-timeline: view();
-      animation-range: entry 0% cover 55%;
-    }
-    .wedge span {
-      animation: wedge-word linear both;
-      animation-timeline: view();
-      animation-range: entry 0% exit 100%;
-    }
+@media (prefers-reduced-motion: no-preference) {
+  .away-state i {
+    animation: blink 1.4s steps(2, jump-none) infinite;
+  }
+  .away-lines li {
+    animation: line-in 0.5s var(--ease) both;
+  }
+  .away-lines li:nth-child(2) {
+    animation-delay: 0.7s;
+  }
+  .away-lines li:nth-child(3) {
+    animation-delay: 1.4s;
+  }
+  .bar span {
+    animation: fill 4s ease-in-out infinite alternate;
+  }
+  .push {
+    animation: bob 3s ease-in-out infinite;
   }
 }
 
-@keyframes wedge-tilt {
+@keyframes fill {
   from {
-    clip-path: polygon(0 50%, 100% 50%, 100% 50%, 0 50%);
-  }
-}
-
-@keyframes wedge-word {
-  from {
-    translate: -18% 0;
+    width: 25%;
   }
   to {
-    translate: 18% 0;
+    width: 92%;
   }
+}
+
+@media (max-width: 860px) {
+  .journey-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Yours: three plain promises. */
+.yours {
+  padding-block: clamp(3rem, 7vw, 5rem);
+}
+
+.yours-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+  margin: 2.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.yours-grid li {
+  padding-top: 1.25rem;
+  border-top: 2px solid var(--glow);
+}
+
+.yours-grid h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.02em;
+}
+
+.yours-grid p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 760px) {
+  .yours-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+}
+
+/* FAQ */
+.faq {
+  padding-block: clamp(2rem, 5vw, 4rem) clamp(3rem, 7vw, 5rem);
+}
+
+.faq-wrap {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 2rem;
+}
+
+.faq .section-title {
+  margin: 0;
+}
+
+.faq-list details {
+  border-bottom: 1px solid var(--border);
+}
+
+.faq-list summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1.1rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.faq-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-list summary::after {
+  content: "+";
+  color: var(--glow);
+  font-size: 1.5rem;
+  line-height: 1;
+  transition: rotate 0.3s var(--ease);
+}
+
+.faq-list details[open] summary::after {
+  rotate: 45deg;
+}
+
+.faq-list details p {
+  margin: 0 0 1.25rem;
+  max-width: 40rem;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 760px) {
+  .faq-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A wordmark as big as the page, cut off by the footer. */
+.bigword {
+  margin: 0;
+  overflow: hidden;
+  color: var(--card);
+  font-size: clamp(7rem, 30vw, 26rem);
+  font-weight: 800;
+  line-height: 0.8;
+  letter-spacing: -0.07em;
+  text-align: center;
+  user-select: none;
 }
 
 /* Stages */
 .stage {
   padding-block: clamp(3rem, 8vw, 6rem);
+  border-top: 1px solid var(--border);
 }
 
 .stage-grid {

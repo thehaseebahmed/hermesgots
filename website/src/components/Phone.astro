@@ -3,15 +3,16 @@ interface Props {
   shot: string
   alt?: string
   eager?: boolean
+  dark?: boolean
 }
 
-const { shot, alt = "", eager = false } = Astro.props
+const { shot, alt = "", eager = false, dark = false } = Astro.props
 ---
 
 <picture class="shot">
-  <source media="(prefers-color-scheme: dark)" srcset={`/shots/${shot}-dark.webp`} />
+  {!dark && <source media="(prefers-color-scheme: dark)" srcset={`/shots/${shot}-dark.webp`} />}
   <img
-    src={`/shots/${shot}-light.webp`}
+    src={`/shots/${shot}-${dark ? "dark" : "light"}.webp`}
     alt={alt}
     width="780"
     height="1688"
