@@ -57,6 +57,13 @@ test("the consent is read off the pages' own queries and mutations", async () =>
   ])
   assert.deepEqual(consent, { reads: ["light.list", "temp.read"], acts: ["light.set"] })
   assert.deepEqual(consentOf(["root = Stack([])"]), { reads: [], acts: [] })
+  assert.deepEqual(
+    consentOf([
+      'a = Query("usage", {}, {})\nb = Query("sessions", {}, {})\nc = Query("/apps/query", {}, {})',
+    ]),
+    { reads: [], acts: [] },
+    "the host's own routes are never on the list",
+  )
 })
 
 test("a title is the prompt's first line, cut at a word when long", async () => {

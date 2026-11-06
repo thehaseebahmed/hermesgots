@@ -12,6 +12,7 @@ import {
 import { attempt } from "@/lib/attempt"
 import { BackButton } from "@/components/back-button"
 import { AppBuildSheet } from "@/components/app-build-sheet"
+import { AppConsentSheet } from "@/components/app-consent-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow } from "@/components/item-list"
 import { Button } from "@/components/ui/button"
@@ -143,7 +144,7 @@ export function AppPage() {
   const { page, error, missing, offline, undo, change, draft } = useAppPage(id, root)
   const [undoing, setUndoing] = useState(false)
   const profile = useActiveProfile()
-  const tools = useMemo(() => (profile ? appTools(profile) : undefined), [profile])
+  const tools = useMemo(() => (profile ? appTools(profile, id) : undefined), [profile, id])
   const [asked, setAsked] = useState("")
   const [failure, setFailure] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -184,6 +185,7 @@ export function AppPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <AppConsentSheet appId={app.id} pending={app.pending} />
       <header className={HEADER}>
         <div className="flex items-center gap-3">
           {!beside && <BackButton label="Back to Apps" onClick={back} />}

@@ -30,7 +30,14 @@ import { SALES, cardOf, codeOf, drawn, warm } from "./openui-kit.tsx"
 type Page = { source: string; previous?: string }
 
 /** A host keeping one app, answering the apps routes the way `apps.py` does. */
-function host(pages: Record<string, Page>, query?: (body: Record<string, unknown>) => Response) {
+type Tools = { reads: string[]; acts: string[] }
+const NONE: Tools = { reads: [], acts: [] }
+
+function host(
+  pages: Record<string, Page>,
+  query?: (body: Record<string, unknown>) => Response,
+  owed: { pending: Tools; agreed: Tools[] } = { pending: NONE, agreed: [] },
+) {
   const calls: string[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -39,11 +46,23 @@ function host(pages: Record<string, Page>, query?: (body: Record<string, unknown
     const tail = url.pathname.split("/plugins/memento/")[1] ?? ""
     if (tail === "apps/query" && method === "POST" && query)
       return query(JSON.parse(String(init?.body)))
+    if (tail === "apps/house/consent" && method === "POST") {
+      owed.agreed.push(JSON.parse(String(init?.body)))
+      owed.pending = NONE
+      return json({ object: "memento.app", app: { id: "house", tools: owed.agreed.at(-1) } })
+    }
     if (tail === "apps")
       return json({
         object: "memento.apps",
         apps: [
-          { id: "house", title: "House", library_version: "1.0.1", pages: Object.keys(pages) },
+          {
+            id: "house",
+            title: "House",
+            library_version: "1.0.1",
+            pages: Object.keys(pages),
+            tools: NONE,
+            pending: owed.pending,
+          },
         ],
       })
     const found = /^apps\/house\/pages\/([^/]+)(\/undo)?$/.exec(tail)
@@ -70,11 +89,12 @@ function host(pages: Record<string, Page>, query?: (body: Record<string, unknown
 async function seed(
   pages: Record<string, Page>,
   query?: (body: Record<string, unknown>) => Response,
+  owed?: { pending: Tools; agreed: Tools[] },
 ) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile("apps-screen"))
-  const server = host(pages, query)
+  const server = host(pages, query, owed)
   globalThis.fetch = server.fetch
   await warm()
   return server
@@ -267,6 +287,38 @@ test("a page whose query names a host shape draws that shape's live value", asyn
   await mount(screen("/apps/house"), async () => {
     await drawn(() => title() === "Live value", "the live value")
     assert.equal(asked[0]?.shape, "projects")
+    assert.equal(asked[0]?.app, "house", "the call says which app makes it")
+  })
+})
+
+test("a call the host refuses for an app never agreed to is drawn as a refusal", async () => {
+  const refused = READ.replace(
+    '{title: "Declared default"}',
+    '{error: "", title: "Declared default"}',
+  ).replace("data.title", "data.error")
+  await seed({ home: { source: refused } }, () =>
+    json({ error: { message: "This app was never agreed to call 'projects'." } }, 403),
+  )
+  await mount(screen("/apps/house"), async () => {
+    await drawn(() => title().includes("never agreed to call"), "the refusal")
+  })
+})
+
+test("a page that names a new tool asks again, showing only the difference", async () => {
+  const owed = { pending: { reads: ["lock"], acts: ["switch"] }, agreed: [] as Tools[] }
+  await seed({ home: { source: SALES } }, undefined, owed)
+  await mount(screen("/apps/house"), async () => {
+    await until(async () => Boolean(find("[data-slot=app-consent]")), "the consent sheet")
+    const sheet = wordsOf(find("[data-slot=app-consent]"))
+    assert.match(sheet, /It can also read\s*lock/)
+    assert.match(sheet, /It can also act on\s*switch/)
+    const allow = findAll("[data-slot=app-consent] button").find(
+      (one) => one.textContent?.trim() === "Allow",
+    )
+    await click(allow ?? null)
+    await until(async () => owed.agreed.length === 1, "the agreement sent")
+    assert.deepEqual(owed.agreed[0], { reads: ["lock"], acts: ["switch"] })
+    await until(async () => !find("[data-slot=app-consent]"), "the sheet gone")
   })
 })
 

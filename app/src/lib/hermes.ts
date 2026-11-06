@@ -1688,7 +1688,9 @@ function queueItem(raw: Record<string, unknown>): QueueItem {
 function objects<T>(value: unknown, row: (raw: Record<string, unknown>) => T): T[] {
   return Array.isArray(value)
     ? value
-        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .filter(
+          (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+        )
         .map(row)
     : []
 }
@@ -1874,11 +1876,7 @@ export async function getPending(config: HermesConfig, sessionId: string) {
  * Acknowledges a lost turn so the messages queued behind it run, and answers what the host holds
  * afterwards. The lost input is not replayed: it stays in the transcript, to be sent again.
  */
-export async function discardPending(
-  config: HermesConfig,
-  sessionId: string,
-  admissionId: string,
-) {
+export async function discardPending(config: HermesConfig, sessionId: string, admissionId: string) {
   const response = await request(
     `${pendingRoot(config, sessionId)}/${encodeURIComponent(admissionId)}/discard`,
     { method: "POST", headers: headers(config), signal: AbortSignal.timeout(WRITE_TIMEOUT_MS) },
@@ -4493,18 +4491,19 @@ function appsRoot(config: HermesConfig) {
 }
 
 /**
- * What a page's `Query` reads of the host: one of the four shapes the plugin's query route answers. A refusal is a
- * `HermesError` carrying the host's own words and status.
+ * What a page's `Query` reads of the host, for the app that asked: one of the host's own four shapes,
+ * or a tool the app was agreed to. A refusal is a `HermesError` carrying the host's own words and status.
  */
 export async function queryApp(
   config: HermesConfig,
+  appId: string,
   shape: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await request(`${appsRoot(config)}/query`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ shape, args }),
+    body: JSON.stringify({ app: appId, shape, args }),
   })
   return (await response.json())?.value
 }
@@ -4519,6 +4518,17 @@ export interface HostApp {
   title: string
   libraryVersion: string
   pages: string[]
+  /** What the app was agreed to call, and what its pages name beyond that: the difference to ask about. */
+  tools: HostAppTools
+  pending: HostAppTools
+}
+
+export type HostAppTools = { reads: string[]; acts: string[] }
+
+function toTools(raw: unknown): HostAppTools {
+  const found = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>
+  const names = (one: unknown) => (Array.isArray(one) ? one.map(String) : [])
+  return { reads: names(found.reads), acts: names(found.acts) }
 }
 
 export interface HostAppPage {
@@ -4534,7 +4544,19 @@ function toHostApp(raw: Record<string, unknown>): HostApp {
     title: String(raw.title ?? ""),
     libraryVersion: String(raw.library_version ?? ""),
     pages: Array.isArray(raw.pages) ? raw.pages.map(String) : [],
+    tools: toTools(raw.tools),
+    pending: toTools(raw.pending),
   }
+}
+
+/** Agrees to the tools an app's pages now name beyond what it held; a 409 says the pages moved on, so ask again. */
+export async function agreeAppTools(config: HermesConfig, appId: string, tools: HostAppTools) {
+  const response = await request(`${appsRoot(config)}/${encodeURIComponent(appId)}/consent`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(tools),
+  })
+  return toTools(((await response.json())?.app as Record<string, unknown>)?.tools)
 }
 
 function toHostAppPage(raw: Record<string, unknown>): HostAppPage {

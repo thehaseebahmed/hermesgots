@@ -707,7 +707,7 @@ The most characters one page's source may hold. A write past it is refused whole
 _Avoid_: page limit, size limit, truncation
 
 **Host shape**:
-One of the four reads a page's query may name — usage, routines, projects or sessions — answered by the plugin's query route from the routes it already serves. The route refuses any other name.
+One of the four reads a page's query may name — usage, routines, projects or sessions — answered by the plugin's query route from the routes it already serves. The route needs no consent for these; it refuses any other name unless the calling app was agreed to it.
 _Avoid_: data source, tool, endpoint
 
 **Root page**:

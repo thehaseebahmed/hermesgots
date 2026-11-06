@@ -71,13 +71,23 @@ export function changePrompt(request: string, source: string): string {
 export type Consent = { reads: string[]; acts: string[] }
 
 const CALL = /\b(Query|Mutation)\(\s*"([^"\\]+)"/g
+const TOOL = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/
 
-/** The tools a set of pages names, each once, sorted: the list the sheet asks the user to agree to. */
+/** The host's own reads: answered from routes it already serves, so never a tool an app is asked about. */
+const HOST_SHAPES = ["usage", "routines", "projects", "sessions"]
+
+/**
+ * The tools a set of pages names, each once, sorted: the list the sheet asks the user to agree to.
+ * The host's own reads and anything that isn't a bare tool name are not tools, so they are not on it;
+ * the host reads the same list off the saved pages and enforces it (`plugin/app_tools.py`).
+ */
 export function consentOf(pages: readonly string[]): Consent {
   const reads = new Set<string>()
   const acts = new Set<string>()
   for (const source of pages)
-    for (const [, kind, tool] of source.matchAll(CALL)) (kind === "Query" ? reads : acts).add(tool)
+    for (const [, kind, tool] of source.matchAll(CALL))
+      if (TOOL.test(tool) && !HOST_SHAPES.includes(tool))
+        (kind === "Query" ? reads : acts).add(tool)
   return { reads: [...reads].sort(), acts: [...acts].sort() }
 }
 

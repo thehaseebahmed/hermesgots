@@ -45,7 +45,8 @@ def bundle_of(test: unittest.TestCase, apps_: Dict[str, Dict[str, Any]]) -> Path
     return root
 
 
-GENERATED = {"builtin": None, "hidden": False, "update": False}
+NONE = {"reads": [], "acts": []}
+GENERATED = {"builtin": None, "hidden": False, "update": False, "tools": NONE, "pending": NONE}
 
 
 class Page(NamedTuple):
@@ -295,6 +296,8 @@ class Routes(unittest.TestCase):
                         "builtin": None,
                         "hidden": False,
                         "update": False,
+                        "tools": NONE,
+                        "pending": NONE,
                     }
                 ],
             },
@@ -471,6 +474,107 @@ class Writes(unittest.TestCase):
         self.assertEqual(apps.listing(self.path), [])
 
 
+class Consent(unittest.TestCase):
+    """What an app may call is read off its pages, kept with it, and grown only by agreeing."""
+
+    def setUp(self) -> None:
+        bundle_of(self, {})
+        self.path = db_path(temp_hermes_home(self))
+
+    def test_saving_groups_the_tools_as_reads_and_acts_and_leaves_the_hosts_own_out(self) -> None:
+        source = (
+            '# id: root\nroot = Stack([a, b, c, d])\na = Query("light", {}, {})\n'
+            'b = Mutation("switch", {})\nc = Query("usage", {}, {})\n'
+            'd = Query("/apps/query", {}, {})'
+        )
+        made = apps.create(self.path, "House", source)
+        self.assertEqual(made["tools"], {"reads": ["light"], "acts": ["switch"]})
+        self.assertEqual(made["pending"], NONE)
+
+    def test_a_page_that_names_a_new_tool_asks_for_only_the_difference(self) -> None:
+        made = apps.create(
+            self.path, "House", '# id: root\nroot = Stack([a])\na = Query("light", {}, {})'
+        )
+        apps.write(
+            self.path,
+            made["id"],
+            "root",
+            '# id: root\nroot = Stack([a, b, c])\na = Query("light", {}, {})\n'
+            'b = Query("lock", {}, {})\nc = Mutation("switch", {})',
+        )
+        (listed,) = apps.listing(self.path)
+        self.assertEqual(listed["tools"], {"reads": ["light"], "acts": []})
+        self.assertEqual(listed["pending"], {"reads": ["lock"], "acts": ["switch"]})
+
+    def test_agreeing_takes_the_list_shown_and_nothing_else(self) -> None:
+        made = apps.create(self.path, "House", '# id: root\nroot = Query("light", {}, {})')
+        apps.write(self.path, made["id"], "root", '# id: root\nr = Query("lock", {}, {})')
+        with self.assertRaises(apps.AppsError) as stale:
+            apps.consent(self.path, made["id"], {"reads": ["alarm"], "acts": []})
+        self.assertEqual(stale.exception.status, 409)
+        with self.assertRaises(apps.AppsError) as junk:
+            apps.consent(self.path, made["id"], {"reads": "lock"})
+        self.assertEqual(junk.exception.status, 400)
+        agreed = apps.consent(self.path, made["id"], {"reads": ["lock"], "acts": []})
+        self.assertEqual(agreed["tools"], {"reads": ["lock"], "acts": []})
+        self.assertEqual(apps.listing(self.path)[0]["pending"], NONE)
+        self.assertTrue(apps.allowed(self.path, made["id"], "lock"))
+
+    def test_a_tool_dropped_and_named_again_is_asked_about_again(self) -> None:
+        made = apps.create(self.path, "House", '# id: root\nroot = Query("light", {}, {})')
+        apps.write(self.path, made["id"], "root", "# id: root\nroot = Stack([])")
+        apps.consent(self.path, made["id"], NONE)
+        apps.write(self.path, made["id"], "root", '# id: root\nroot = Query("light", {}, {})')
+        self.assertEqual(apps.listing(self.path)[0]["pending"], {"reads": ["light"], "acts": []})
+
+    def test_consent_for_an_app_that_is_gone_is_a_404(self) -> None:
+        with self.assertRaises(apps.AppsError) as gone:
+            apps.consent(self.path, "app-x", NONE)
+        self.assertEqual(gone.exception.status, 404)
+
+    def test_an_upgraded_store_agrees_its_apps_to_what_they_already_name(self) -> None:
+        connect(self.path).close()
+        plant(
+            self.path,
+            "old",
+            pages=[Page(0, "root", '# id: root\nroot = Query("light", {}, {})', None)],
+        )
+        conn = connect(self.path)
+        conn.execute("ALTER TABLE apps DROP COLUMN consent")
+        conn.execute("PRAGMA user_version = 56")
+        conn.close()
+        (listed,) = apps.listing(self.path)
+        self.assertEqual(listed["tools"], {"reads": ["light"], "acts": []})
+
+    def test_a_built_in_app_is_agreed_to_what_its_bundle_names(self) -> None:
+        bundle_of(
+            self,
+            {"home": built(1, root='# id: root\nroot = Query("light", {}, {})')},
+        )
+        (listed,) = apps.listing(self.path)
+        self.assertEqual(listed["tools"], {"reads": ["light"], "acts": []})
+
+    def test_the_consent_route_needs_the_key_and_answers_the_list(self) -> None:
+        adapter = RouteAdapter()
+        app = wire(self, adapter)
+        made = apps.create(self.path, "House", '# id: root\nroot = Query("light", {}, {})')
+        apps.write(self.path, made["id"], "root", '# id: root\nr = Query("lock", {}, {})')
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {"app_id": made["id"]}, {}
+
+        async def read() -> Any:
+            return {"reads": ["lock"], "acts": []}
+
+        request.json = read
+        handler = route(app, plugin.PREFIX + "/apps/{app_id}/consent", "POST")
+        adapter.denied = {"status": 401, "payload": {}}
+        self.assertEqual(asyncio.run(handler(request)), {"status": 401, "payload": {}})
+        adapter.denied = None
+        answer = asyncio.run(handler(request))
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["app"]["tools"], {"reads": ["lock"], "acts": []})
+
+
 class Queries(unittest.TestCase):
     """A page's `Query` as the host answers it: only a host shape, and a refusal that says why."""
 
@@ -510,12 +614,26 @@ class Queries(unittest.TestCase):
         self.assertEqual(answer["status"], 400)
         self.assertIn("provider", answer["payload"]["error"]["message"])
 
-    def test_anything_but_a_host_shape_is_refused_naming_the_shapes(self) -> None:
+    def test_a_tool_no_app_was_agreed_to_is_refused_where_the_call_happens(self) -> None:
         for shape in ("mcp_call", "skills", None, 3, "", ["usage"], {}):
             answer = self.ask({"shape": shape})
-            self.assertEqual(answer["status"], 400, shape)
-            for name in ("usage", "routines", "projects", "sessions"):
-                self.assertIn(name, answer["payload"]["error"]["message"])
+            self.assertEqual(answer["status"], 403, shape)
+            self.assertIn("never agreed", answer["payload"]["error"]["message"])
+
+    def test_an_app_is_refused_a_tool_its_pages_named_after_it_was_saved(self) -> None:
+        path = db_path(self.home)
+        made = apps.create(path, "House", '# id: root\nroot = Stack([])\nl = Query("light", {}, {})')
+        self.assertEqual(self.ask({"app": made["id"], "shape": "light"})["status"], 501)
+        apps.write(path, made["id"], "root", '# id: root\nr = Query("lock", {}, {})')
+        self.assertEqual(self.ask({"app": made["id"], "shape": "lock"})["status"], 403)
+
+    def test_an_act_is_never_answered_by_the_read_route(self) -> None:
+        path = db_path(self.home)
+        made = apps.create(path, "House", '# id: root\nroot = Mutation("light", {})')
+        self.assertEqual(self.ask({"app": made["id"], "shape": "light"})["status"], 403)
+
+    def test_the_hosts_own_reads_carry_no_consent(self) -> None:
+        self.assertEqual(self.ask({"shape": "sessions"})["status"], 200)
 
     def test_a_body_that_is_not_an_object_is_refused(self) -> None:
         self.assertEqual(self.ask(None)["status"], 400)

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { ToolList } from "@/components/app-consent-sheet"
 import { buildBlocked, consentOf, titleOf } from "@/lib/app-build"
 import { buildPages, saveApp } from "@/lib/apps"
 import { getActiveProfile } from "@/lib/db"
@@ -176,19 +177,5 @@ function Consent({
         </Button>
       </div>
     </div>
-  )
-}
-
-function ToolList({ label, tools }: { label: string; tools: string[] }) {
-  if (tools.length === 0) return null
-  return (
-    <section aria-label={label} className="flex flex-col gap-1">
-      <h3 className="text-sm font-medium">{label}</h3>
-      <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-        {tools.map((tool) => (
-          <li key={tool}>{tool}</li>
-        ))}
-      </ul>
-    </section>
   )
 }

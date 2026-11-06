@@ -3298,8 +3298,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return {"sessions": await asyncio.to_thread(chats.read, store_path())}
 
     async def query_app(request: "web.Request") -> "web.Response":
-        """A page's `Query` answered from the host's own reads (ADR 0102). Only a host shape is
-        answered; any other name is refused, so the route is never a way into another tool."""
+        """A page's `Query` answered from the host's own reads (ADR 0102). Those carry no consent;
+        any other name is refused unless the calling app was agreed to it, and then the route has
+        no way to call it yet, so it is never a way into another tool."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3309,12 +3310,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         shape = sent.get("shape")
         read = app_queries.get(shape) if isinstance(shape, str) else None
         if read is None:
-            return _error(
-                web,
-                f"{shape!r} is not something the bot can read. Ask for one of: "
-                + ", ".join(app_queries),
-                400,
-            )
+            if not await asyncio.to_thread(apps.allowed, store_path(), sent.get("app"), shape):
+                return _error(
+                    web,
+                    f"This app was never agreed to call {shape!r}. Its pages name it, so the app"
+                    " asks to agree to it first.",
+                    403,
+                )
+            return _error(web, f"This Hermes version cannot call {shape!r} for an app yet.", 501)
         args = sent.get("args")
         try:
             value = await read(args if isinstance(args, dict) else {})
@@ -3461,6 +3464,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             body=True,
         )
 
+    async def consent_app(request: "web.Request") -> "web.Response":
+        info = request.match_info
+        return await apps_write(
+            request,
+            lambda path, sent: apps.consent(path, info["app_id"], sent),
+            "app",
+            200,
+            body=True,
+        )
+
     async def update_app(request: "web.Request") -> "web.Response":
         info = request.match_info
         return await apps_write(
@@ -3476,6 +3489,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_delete(f"{PREFIX}/apps/{{app_id}}", remove_app)
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/hidden", hide_app)
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/update", update_app)
+    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/consent", consent_app)
     app.router.add_post(f"{PREFIX}/apps", create_app)
     app.router.add_post(f"{PREFIX}/apps/builds", mark_app_build)
     app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", write_app_page)

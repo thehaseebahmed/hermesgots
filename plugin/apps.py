@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from .app_tools import difference, dump, load, tools_of
 from .store import now_ms, open_rows
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,12 @@ def _owed(recorded: Dict[str, sqlite3.Row], bundle: Dict[str, Dict[str, Any]]) -
     return owed
 
 
+def _agreed(pages: List[Any]) -> str:
+    """The tools a bundled app's pages name, as stored: the bundle ships with the plugin, so what
+    it names is what it is agreed to."""
+    return dump(tools_of(source for _, source in pages))
+
+
 def _lay_pages(conn: sqlite3.Connection, app_id: str, pages: List[Any]) -> None:
     for position, (page_id, source) in enumerate(pages):
         conn.execute(
@@ -148,7 +155,7 @@ def seed(path: Path, bundle: Dict[str, Dict[str, Any]]) -> None:
                 app_id = f"builtin-{key}"
                 conn.execute(
                     "INSERT INTO apps (id, title, library_version, created_at, builtin_key,"
-                    " builtin_version) VALUES (?, ?, ?, ?, ?, ?)",
+                    " builtin_version, consent) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         app_id,
                         entry["title"],
@@ -156,6 +163,7 @@ def seed(path: Path, bundle: Dict[str, Dict[str, Any]]) -> None:
                         now_ms(),
                         key,
                         entry["version"],
+                        _agreed(entry["pages"]),
                     ),
                 )
                 _lay_pages(conn, app_id, entry["pages"])
@@ -168,9 +176,15 @@ def _replace(conn: sqlite3.Connection, app_id: str, entry: Dict[str, Any]) -> No
     leaves half of an old page beside half of a new one; clears the edit mark."""
     conn.execute("DELETE FROM app_pages WHERE app_id = ?", (app_id,))
     conn.execute(
-        "UPDATE apps SET title = ?, library_version = ?, builtin_version = ?, edited = 0"
-        " WHERE id = ?",
-        (entry["title"], entry["library_version"], entry["version"], app_id),
+        "UPDATE apps SET title = ?, library_version = ?, builtin_version = ?, edited = 0,"
+        " consent = ? WHERE id = ?",
+        (
+            entry["title"],
+            entry["library_version"],
+            entry["version"],
+            _agreed(entry["pages"]),
+            app_id,
+        ),
     )
     _lay_pages(conn, app_id, entry["pages"])
 
@@ -193,19 +207,21 @@ def listing(path: Path, include_hidden: bool = False) -> List[Dict[str, Any]]:
     conn = open_rows(path)
     try:
         rows = conn.execute(
-            "SELECT id, title, library_version, builtin_key, hidden FROM apps"
+            "SELECT id, title, library_version, builtin_key, hidden, consent FROM apps"
             + ("" if include_hidden else " WHERE hidden = 0")
             + " ORDER BY created_at DESC, id"
         ).fetchall()
         pages = conn.execute(
-            "SELECT app_id, page_id FROM app_pages ORDER BY app_id, position"
+            "SELECT app_id, page_id, source FROM app_pages ORDER BY app_id, position"
         ).fetchall()
         owed = _owed(_recorded(conn), bundle)
     finally:
         conn.close()
     ids: Dict[str, List[str]] = {}
+    sources: Dict[str, List[str]] = {}
     for row in pages:
         ids.setdefault(row["app_id"], []).append(row["page_id"])
+        sources.setdefault(row["app_id"], []).append(row["source"])
     return [
         _summary(
             row["id"],
@@ -215,6 +231,8 @@ def listing(path: Path, include_hidden: bool = False) -> List[Dict[str, Any]]:
             builtin=row["builtin_key"],
             hidden=bool(row["hidden"]),
             update=owed.get(row["builtin_key"]) == "update",
+            tools=load(row["consent"]),
+            named=tools_of(sources.get(row["id"], [])),
         )
         for row in rows
     ]
@@ -229,8 +247,15 @@ def _summary(
     builtin: Optional[str] = None,
     hidden: bool = False,
     update: bool = False,
+    tools: Optional[Dict[str, List[str]]] = None,
+    named: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
-    """An app as the list and a create both answer it, so the two can't drift."""
+    """An app as the list and a create both answer it, so the two can't drift.
+
+    ``tools`` is what the app was agreed to call and ``pending`` what its pages name beyond that
+    (ADR 0102): empty groups where there is nothing to ask.
+    """
+    tools = tools or {"reads": [], "acts": []}
     return {
         "id": app_id,
         "title": title,
@@ -239,6 +264,8 @@ def _summary(
         "builtin": builtin,
         "hidden": hidden,
         "update": update,
+        "tools": tools,
+        "pending": difference(named or tools, tools),
     }
 
 
@@ -360,16 +387,18 @@ def create(
         library_version if isinstance(library_version, str) and library_version else LIBRARY_VERSION
     )
     app_id = f"app-{uuid.uuid4().hex[:12]}"
+    agreed = tools_of(one for _, one in pages)
     with _writing(path, building=True) as conn:
         conn.execute(
-            "INSERT INTO apps (id, title, library_version, created_at) VALUES (?, ?, ?, ?)",
-            (app_id, title, version, now_ms()),
+            "INSERT INTO apps (id, title, library_version, created_at, consent)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (app_id, title, version, now_ms(), dump(agreed)),
         )
         conn.executemany(
             "INSERT INTO app_pages (app_id, page_id, position, source) VALUES (?, ?, ?, ?)",
             [(app_id, page_id, position, one) for position, (page_id, one) in enumerate(pages)],
         )
-    return _summary(app_id, title, version, ids)
+    return _summary(app_id, title, version, ids, tools=agreed)
 
 
 def write(path: Path, app_id: str, page_id: str, source: Any) -> Dict[str, Any]:
@@ -467,3 +496,46 @@ def take_update(path: Path, app_id: str) -> Dict[str, Any]:
             raise AppsError("There is no update to take.", 409)
         _replace(conn, app_id, entry)
     return {"id": app_id, "pages": [page_id for page_id, _ in entry["pages"]]}
+
+
+def consent(path: Path, app_id: str, agreed: Any) -> Dict[str, Any]:
+    """Takes the app's pages as they stand as agreed to, when ``agreed`` is exactly the tools they
+    name beyond what the app already held — the list the person was shown, so a page changed
+    again since cannot ride in on an answer to an older one.
+
+    Raises ``AppsError`` (400 for a list that isn't one, 404 for no such app, 409 where the pages
+    now name something else).
+    """
+    if not isinstance(agreed, dict) or not all(
+        isinstance(agreed.get(group), list) and all(isinstance(n, str) for n in agreed[group])
+        for group in ("reads", "acts")
+    ):
+        raise AppsError("Agree to a list of reads and acts.", 400)
+    with _writing(path) as conn:
+        row = conn.execute("SELECT id, consent FROM apps WHERE id = ?", (app_id,)).fetchone()
+        if row is None:
+            raise AppsError("No such app.", 404)
+        named = tools_of(
+            one[0]
+            for one in conn.execute(
+                "SELECT source FROM app_pages WHERE app_id = ? ORDER BY position", (app_id,)
+            )
+        )
+        shown = difference(named, load(row["consent"]))
+        if {group: sorted(set(agreed[group])) for group in shown} != shown:
+            raise AppsError("The pages name other tools now; read the list again.", 409)
+        conn.execute("UPDATE apps SET consent = ? WHERE id = ?", (dump(named), app_id))
+    return {"id": app_id, "tools": named, "pending": difference(named, named)}
+
+
+def allowed(path: Path, app_id: Any, tool: Any) -> bool:
+    """Whether an app was agreed to read ``tool``: false for an app that isn't there, a name that
+    isn't a string, and every tool its pages named after the list was agreed to."""
+    if not isinstance(app_id, str) or not isinstance(tool, str) or not path.exists():
+        return False
+    conn = open_rows(path)
+    try:
+        row = conn.execute("SELECT consent FROM apps WHERE id = ?", (app_id,)).fetchone()
+    finally:
+        conn.close()
+    return row is not None and tool in load(row["consent"])["reads"]
