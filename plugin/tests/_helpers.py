@@ -290,6 +290,48 @@ def make_fake_agent(lookup_fn, scope_already=None):
     )
 
 
+def hermes_secret_scope(case: unittest.TestCase) -> ModuleType:
+    """Stands in for Hermes's ``agent.secret_scope`` for the length of ``case``.
+
+    ``build_profile_secret_scope`` reads ``<home>/.env`` the way Hermes does, so a test that writes a
+    home's ``.env`` sees that home's values through the plugin's ``link.secret`` — the read the
+    plugin itself never makes. ``get_secret`` answers the installed scope, or the default.
+    """
+    current: contextvars.ContextVar = contextvars.ContextVar("fake_secret_scope", default=None)
+    scope = ModuleType("agent.secret_scope")
+
+    def build(home: Any) -> Dict[str, str]:
+        values: Dict[str, str] = {}
+        try:
+            lines = (Path(home) / ".env").read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return values
+        for line in lines:
+            key, sep, value = line.strip().removeprefix("export ").partition("=")
+            if sep and key and not key.startswith("#"):
+                values[key.strip()] = value.strip().strip("'\"")
+        return values
+
+    scope.build_profile_secret_scope = build  # type: ignore[attr-defined]
+    scope.set_secret_scope = lambda secrets, profile_home=None: current.set(secrets)  # type: ignore[attr-defined]
+    scope.reset_secret_scope = lambda token: current.reset(token)  # type: ignore[attr-defined]
+    scope.current_secret_scope = lambda: current.get()  # type: ignore[attr-defined]
+    scope.get_secret = lambda name, default=None: (current.get() or {}).get(name, default)  # type: ignore[attr-defined]
+    modules: Dict[str, Any] = {"agent.secret_scope": scope}
+    agent = sys.modules.get("agent")
+    if agent is None:
+        agent = ModuleType("agent")
+        agent.__path__ = []  # type: ignore[attr-defined]
+        modules["agent"] = agent
+    patcher = patch.dict(sys.modules, modules)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    previous = getattr(agent, "secret_scope", None)
+    agent.secret_scope = scope  # type: ignore[attr-defined]
+    case.addCleanup(lambda: setattr(agent, "secret_scope", previous) if previous else None)
+    return scope
+
+
 class _FakeProjectsContext:
     """Stands in for projects_db.connect_closing's context manager."""
 

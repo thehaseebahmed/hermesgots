@@ -54,6 +54,23 @@ class PlanModeTest(unittest.TestCase):
             }
         )
 
+    def test_auto_reads_as_accept_edits_and_never_touches_hermess_approvals(self) -> None:
+        """Catalog rule 12: no mode switches Hermes's per-run approval bypass on."""
+        approval = types.ModuleType("tools.approval")
+        approval.enable_session_yolo = mock.MagicMock()  # type: ignore[attr-defined]
+        approval.disable_session_yolo = mock.MagicMock()  # type: ignore[attr-defined]
+        approval.is_session_yolo_enabled = mock.MagicMock(return_value=False)  # type: ignore[attr-defined]
+        approval.resolve_gateway_approval = mock.MagicMock()  # type: ignore[attr-defined]
+        with mock.patch.dict(
+            sys.modules, {"tools": types.ModuleType("tools"), "tools.approval": approval}
+        ):
+            self.assertIsNone(self._before_tool("terminal", "auto"))
+        self.assertEqual(sessions.read(self.db, "gots-1")["mode"], "accept_edits")
+        approval.enable_session_yolo.assert_not_called()
+        approval.resolve_gateway_approval.assert_not_called()
+        self.assertEqual(sessions.LEGACY_MODES.get("auto", "auto"), "accept_edits")
+        self.assertNotIn("auto", sessions.MODES)
+
     def test_a_mutating_tool_is_blocked(self) -> None:
         # library_add moves a file out of the worktree, so plan mode blocks it like the rest.
         self.assertEqual(

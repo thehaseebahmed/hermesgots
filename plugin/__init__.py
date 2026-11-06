@@ -386,19 +386,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     sessions.adapter = adapter
     # Approvals that end without an answer leave the run looking stuck; see approvals.py.
     approvals.adapter = adapter
-    # The API server's agents can't ask questions on their own; see clarify.py.
+    # Whether the agent can ask the user here: the profile's toolsets carry clarify; see clarify.py.
     asks = clarify.wire(adapter)
-    # Hermes defers todo_list behind tool_search, where the agent can't always find it; see todos.py.
+    # Hermes's own todo_list is part of the API server's toolset; see todos.py.
     todo_tool = todos.wire(adapter)
-    # The agent ships its own work; see ship.py.
-    ship.wire(adapter)
-    # And it runs its build's gate on the host, not its own word for it; see gate.py.
+    # The plugin's own tools (pull_request, library_add, claim_add) reach the API server's agents
+    # through Hermes's default-on plugin toolset, with no wrap. The two below still wire through
+    # tools_common while gate.py and findings.py are reworked apart from this; see tools_common.py.
+    # It runs its build's gate on the host, not its own word for it; see gate.py.
     gate.wire(adapter)
     # A review reports what its skills found, so the sheet can count it; see findings.py.
     findings.wire(adapter)
-    # The agent files its generated files in the project's library; see library.py.
-    library.wire(adapter)
-    # Research missions' researchers record their claims; see research.py.
+    # Research missions read their researcher's run status off the adapter; see research.py.
     research.wire(adapter)
     meetings.wire(adapter)
 
@@ -1732,12 +1731,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         if record is None:
             return _error(web, "This session has no workspace yet", 404)
-        if record["mode"] == "auto":
-            # On the loop thread: Hermes's approval queues belong to it.
-            try:
-                sessions.answer_waiting(request.match_info["session_id"])
-            except Exception:
-                logger.debug("gots: answering waiting approvals failed", exc_info=True)
         return await workspace_response(record)
 
     async def remove_workspace(request: "web.Request") -> "web.Response":

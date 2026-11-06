@@ -145,11 +145,7 @@ export function AttachMenu({
           {session && (
             <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
               <h3 className="px-1 text-sm text-muted-foreground">Mode</h3>
-              <ModeOptions
-                mode={session.mode}
-                autoAvailable={session.autoAvailable}
-                onPick={pickMode}
-              />
+              <ModeOptions mode={session.mode} onPick={pickMode} />
             </section>
           )}
         </PopupContent>

@@ -457,7 +457,7 @@ export const FLOWS = {
   },
   onboarding: {
     script: "e2e/onboarding.mjs",
-    about: "The setup wizard's Join the leaderboard step: on by default, and Continue joins or not",
+    about: "The setup wizard's Join the leaderboard step: off by default, and Continue joins only if switched on",
   },
   "recovery-code": {
     script: "e2e/recovery-code.mjs",

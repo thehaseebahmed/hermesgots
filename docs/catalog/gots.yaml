@@ -1,0 +1,38 @@
+# DRAFT of the Hermes plugin catalog entry (NousResearch/hermes-agent's plugin-catalog/gots.yaml).
+# Not submitted: it lives here so the capabilities it declares are held to what the plugin registers
+# (plugin/tests/test_catalog_capabilities.py). Before submitting, pin `sha` to the full 40-character
+# commit of the release being listed and set `version` to plugin/plugin.yaml's at that commit.
+# What the plugin does that a user would want to know first is docs/catalog/disclosures.md.
+name: gots
+repo: https://github.com/thehaseebahmed/hermesgots
+sha: 0000000000000000000000000000000000000000  # placeholder: the pinned commit goes here
+subdir: plugin
+title: Gots
+description: The Hermes side of the Gots companion app — chats, projects in git worktrees, AFK tasks from GitHub issues, research and push notifications.
+maintainer: thehaseebahmed
+tier: community
+category: platform
+requires_hermes: ">=0.22.5"
+version: "0.110.0"
+docs_url: https://hermesgots.dev
+readme: true
+capabilities:
+  provides_tools:
+    - afk_findings
+    - afk_gate
+    - claim_add
+    - library_add
+    - open_pull_request
+    - pull_request
+  provides_hooks:
+    - on_session_end
+    - post_api_request
+    - post_approval_response
+    - post_llm_call
+    - post_tool_call
+    - pre_approval_request
+    - pre_llm_call
+    - pre_tool_call
+    - subagent_start
+  provides_middleware: []
+  requires_env: []

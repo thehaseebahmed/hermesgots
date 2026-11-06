@@ -2,7 +2,7 @@
 
 ``POST /v1/runs/{id}/approval`` puts ``approval.responded`` on the run's stream and sets its status
 back to ``running``. An approval that times out, is withdrawn (the turn was stopped, the notify
-failed) or is answered by the plugin itself (a session switched to Auto) does neither: the run's
+failed) does neither: the run's
 status keeps the old request until the run moves on, so every client still shows it waiting, and
 answering it then is refused with ``approval_not_pending``. Hermes fires ``post_approval_response``
 for every ending, so the hook does both for those, the way ``clarify.py`` ends a question.

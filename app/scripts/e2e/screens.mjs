@@ -49,7 +49,7 @@ for (const width of [390, 1024]) {
             hermesSessionId: sessionId,
             title: SESSION_TITLE,
             projectId: "p_1a2b3c4d",
-            mode: "auto",
+            mode: "accept_edits",
             worktree: {
               branch: BRANCH,
               instructions: "",

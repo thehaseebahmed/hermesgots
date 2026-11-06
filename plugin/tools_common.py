@@ -1,9 +1,11 @@
-"""Wiring a plugin tool into the agents the API server builds, shared by the plugin's tools.
+"""The one ``_create_agent`` wrap left: ``afk_gate`` and ``afk_findings`` still wire through it.
 
-The API server builds its agents from a saved ``platform_toolsets.api_server``, which can leave
-the plugin's toolset out, so each tool's module wraps the adapter's ``_create_agent`` to add its
-definition to every agent — the same wrapper for every tool.
-
+Hermes enables a plugin's toolset on every platform by default (``_enabled_plugin_toolsets``), the
+API server included, so the plugin's tools reach its agents without any wrap; ``pull_request``,
+``library_add`` and ``claim_add`` no longer use it. ``gate.py`` and ``findings.py`` are being
+reworked apart from this change and still call ``wire_tool``, so it stays for them alone until that
+work drops the call — after which this module goes. It rebinds an attribute of the adapter Hermes
+hands the plugin, which the catalog's rule 9 forbids, so nothing new may use it.
 """
 
 from __future__ import annotations

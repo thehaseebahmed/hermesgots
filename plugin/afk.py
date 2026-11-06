@@ -15,7 +15,7 @@ than asking again in a loop. Lowering the count abandons nothing: a hold leaves 
 review, when the user closes its session, or when its start failed.
 
 Each task it takes is worked in a session of its own, made the way the app's workspace route makes
-one (`sessions.ensure`: its own worktree, branch and row, in Auto), and the chat record that makes
+one (`sessions.ensure`: its own worktree, branch and row, in Accept edits, so a dangerous command waits for the user), and the chat record that makes
 that session appear and open in the app is written here (ADR 0013) — the Code list hides a session
 nothing was sent in, and the app has no conversation for one it didn't make. The run then starts
 from this plugin: `prompt_builder.afk_prompt` is its instructions — AFK's fixed points, then the
@@ -1329,7 +1329,9 @@ def publish(
         "createdAt": now,
         "updatedAt": now + 1,
         "projectId": project_id,
-        "mode": "auto",
+        # Hermes's own approvals stand: a dangerous command waits for the user, which reads as a
+        # waiting session with a push (catalog rule 12).
+        "mode": "accept_edits",
         "afk": True,
         "titleEdited": True,
         **chats.pin_fields(pinned, choice=True),
@@ -1365,7 +1367,7 @@ async def start(
             session_id,
             project_id,
             task.get("title") or "",
-            "auto",
+            "accept_edits",
         )
     except Exception:
         logger.warning("gots: AFK couldn't make a session for %s", issue, exc_info=True)

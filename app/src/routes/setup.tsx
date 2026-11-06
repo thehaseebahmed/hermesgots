@@ -244,20 +244,22 @@ function SetupPage({
 }
 
 /**
- * Joining the leaderboard is on by default, so a new user is counted unless they turn it off here.
- * Settings > Community can still leave it later.
+ * Joining the leaderboard is opt-in: the switch starts off, or as the account already stands, and
+ * nothing is shared unless the user turns it on here. Settings > Community can change it later.
  */
 function CommunityStep({ onDone }: { onDone: () => void }) {
   const { me, setMe } = useCommunity()
-  const [on, setOn] = useState(true)
+  // Null until the user touches the switch: it then reads as the account stands.
+  const [picked, setPicked] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const joined = me?.joined === true
+  const on = picked ?? joined
 
   const next = async () => {
     setBusy(true)
     try {
-      // A read that failed leaves nothing to compare, so the choice is sent as it stands.
-      if (me !== undefined && on !== joined) {
+      // Only a choice the user made is sent, and never a join they didn't ask for.
+      if (picked !== null && picked !== joined) {
         setMe(on ? await joinCommunity() : await leaveCommunity())
       }
     } catch (error) {
@@ -292,7 +294,7 @@ function CommunityStep({ onDone }: { onDone: () => void }) {
           id="community-setup"
           checked={on}
           disabled={busy}
-          onCheckedChange={(checked) => setOn(checked)}
+          onCheckedChange={(checked) => setPicked(checked)}
         />
       </label>
       <SharingNotes />

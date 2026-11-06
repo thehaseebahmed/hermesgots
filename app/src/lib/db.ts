@@ -299,15 +299,15 @@ export interface Conversation {
 }
 
 /** How much a project session may do without asking. */
-export type SessionMode = "accept_edits" | "auto" | "plan"
+export type SessionMode = "accept_edits" | "plan"
 
 /**
- * A session's mode as the app works with it. An unset mode is Accept edits, Hermes's own behaviour;
- * sessions made before 0.42 stored Theseus as a mode of its own, and those read as Auto.
+ * A session's mode as the app works with it. An unset mode is Accept edits, Hermes's own behaviour.
+ * Auto (and Theseus before it) once skipped Hermes's approvals; nothing routes around them now, so
+ * a session stored in either reads as Accept edits, as the plugin reads it.
  */
-export function sessionMode(mode: SessionMode | "theseus" | undefined): SessionMode {
-  if (mode === "theseus") return "auto"
-  return mode === "auto" || mode === "plan" ? mode : "accept_edits"
+export function sessionMode(mode: SessionMode | "auto" | "theseus" | undefined): SessionMode {
+  return mode === "plan" ? mode : "accept_edits"
 }
 
 export type PrState = "open" | "draft" | "merged" | "closed"

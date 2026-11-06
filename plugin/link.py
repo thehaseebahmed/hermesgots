@@ -22,8 +22,9 @@ import re
 import socket
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import migrate, store
 
@@ -170,41 +171,86 @@ def root_home(home: Path) -> Path:
     return home.parent.parent if home.parent.name == "profiles" else home
 
 
-def read_env(home: Path) -> Dict[str, str]:
-    """The profile's ``.env``, read directly so it works for any home, not just the active one."""
-    values: Dict[str, str] = {}
+@contextmanager
+def home_override(home: Path) -> Iterator[None]:
+    """Points Hermes's own config and ``.env`` helpers at ``home`` for the block, unless it already
+    is the home they read: ``hermes_constants``'s public override, so a write lands in this
+    profile's files rather than the launch profile's."""
     try:
-        lines = (home / ".env").read_text(encoding="utf-8").splitlines()
+        from hermes_constants import get_hermes_home, reset_hermes_home_override, set_hermes_home_override
+    except ImportError:
+        yield
+        return
+    try:
+        same = Path(get_hermes_home()).resolve() == Path(home).resolve()
     except OSError:
-        return values
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.removeprefix("export ").partition("=")
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        values[key.strip()] = value
-    return values
+        same = False
+    if same:
+        yield
+        return
+    token = set_hermes_home_override(str(home))
+    try:
+        yield
+    finally:
+        reset_hermes_home_override(token)
 
 
-def env_value(home: Path, key: str, *, process: bool = False) -> str:
-    value = read_env(home).get(key, "")
-    if not value and process:
-        value = os.environ.get(key, "")
-    return value
+def secret(home: Path, key: str) -> str:
+    """A credential of this home's, through Hermes's own secret scope and never a read of the file.
+
+    ``agent.secret_scope.build_profile_secret_scope`` is how Hermes builds a profile's secrets (its
+    ``.env``, its external secret sources and an administrator's managed values), and ``get_secret``
+    reads one out of it: inside a multiplexing process a miss stays a miss rather than answering
+    the launch profile's environment, which is what lets the gateway's own loop — a check-in, a
+    wake, an AFK stage, with no request's scope set — read each served home's key."""
+    try:
+        from agent.secret_scope import (
+            build_profile_secret_scope,
+            get_secret,
+            reset_secret_scope,
+            set_secret_scope,
+        )
+    except ImportError:
+        return ""
+    try:
+        token = set_secret_scope(build_profile_secret_scope(Path(home)), profile_home=str(home))
+    except Exception:
+        logger.debug("gots: couldn't build %s's secret scope", home, exc_info=True)
+        return ""
+    try:
+        return str(get_secret(key, "") or "")
+    except Exception:
+        logger.debug("gots: couldn't read %s for %s", key, home, exc_info=True)
+        return ""
+    finally:
+        reset_secret_scope(token)
+
+
+def setting(home: Path, key: str) -> str:
+    """A non-secret deployment setting this home runs with (``API_SERVER_PORT``, its CORS origins),
+    read through Hermes's own ``hermes_cli.config.get_env_value``, which answers the process
+    environment, else the profile's ``.env``, honouring the active profile scope."""
+    try:
+        from hermes_cli.config import get_env_value
+    except ImportError:
+        return ""
+    try:
+        with home_override(home):
+            return str(get_env_value(key) or "")
+    except Exception:
+        logger.debug("gots: couldn't read %s for %s", key, home, exc_info=True)
+        return ""
 
 
 def authorization(home: Path) -> Optional[str]:
     """The key this home's own runs are posted with, or None to let ``outbox`` resolve its own.
 
-    Read from the home's own ``.env``, the same read ``record`` publishes a bot's key from, rather
-    than through Hermes's credential helper: the plugin posts runs from the gateway's loop — a wake
-    or an AFK stage — where no request's profile scope is set, so the helper would answer the launch
-    profile's key for every home a multiplexed process serves.
+    Read through that home's own secret scope (``secret``), the same read ``record`` publishes a
+    bot's key from: the plugin posts runs from the gateway's loop — a wake or an AFK stage — where
+    no request's profile scope is set, so a read that left the scope to the caller would answer the
+    launch profile's key for every home a multiplexed process serves.
     """
-    key = env_value(home, "API_SERVER_KEY")
+    key = secret(home, "API_SERVER_KEY")
     return f"Bearer {key}" if key else None
 
 
@@ -217,7 +263,7 @@ def record(home: Path, state: Dict[str, Any], *, process_env: bool) -> Dict[str,
     from . import VERSION
 
     profile = profile_name(home)
-    api_key = env_value(home, "API_SERVER_KEY", process=process_env)
+    api_key = secret(home, "API_SERVER_KEY")
     url = state.get("url")
     if not api_key or not url:
         return None
@@ -374,41 +420,32 @@ def default_url(home: Path, state: Dict[str, Any]) -> str:
 
         public = resolve_public_url()
     except Exception:
-        public = env_value(home, "HERMES_DASHBOARD_PUBLIC_URL", process=True)
+        public = setting(home, "HERMES_DASHBOARD_PUBLIC_URL")
     if public:
         return public.rstrip("/")
-    port = env_value(home, "API_SERVER_PORT", process=True) or str(DEFAULT_PORT)
+    port = setting(home, "API_SERVER_PORT") or str(DEFAULT_PORT)
     return f"http://{socket.gethostname()}:{port}"
 
 
 def _set_env(home: Path, key: str, value: str) -> None:
-    try:
-        from hermes_cli.config import get_env_path, save_env_value
+    """Writes one line of the profile's ``.env`` through Hermes's own ``save_env_value``."""
+    from hermes_cli.config import save_env_value
 
-        if Path(get_env_path()).resolve() == (home / ".env").resolve():
-            save_env_value(key, value)
-            return
-    except Exception:
-        pass
-    path = home / ".env"
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    pattern = re.compile(rf"^\s*(export\s+)?{re.escape(key)}=")
-    lines = [line for line in lines if not pattern.match(line)] + [f"{key}={value}"]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with home_override(home):
+        save_env_value(key, value)
 
 
 def env_changes(home: Path, url: str, origins: List[str]) -> Dict[str, str]:
     """Lines the profile's ``.env`` still needs for Gots to reach it at ``url``."""
-    env = read_env(home)
     changes: Dict[str, str] = {}
-    if not env.get("API_SERVER_KEY") and not os.environ.get("API_SERVER_KEY"):
+    if not secret(home, "API_SERVER_KEY"):
         changes["API_SERVER_KEY"] = os.urandom(32).hex()
     # A profile behind the main gateway's /p/<name> rides that gateway's server and CORS.
     if f"/p/{profile_name(home)}" in url:
         return changes
-    if env.get("API_SERVER_ENABLED", "").lower() not in ("true", "1", "yes"):
+    if setting(home, "API_SERVER_ENABLED").lower() not in ("true", "1", "yes"):
         changes["API_SERVER_ENABLED"] = "true"
-    current = [o.strip() for o in env.get("API_SERVER_CORS_ORIGINS", "").split(",") if o.strip()]
+    current = [o.strip() for o in setting(home, "API_SERVER_CORS_ORIGINS").split(",") if o.strip()]
     if "*" not in current:
         missing = [origin for origin in origins if origin not in current]
         if missing:
@@ -513,6 +550,67 @@ def enable_platform(home: Path) -> bool:
         return False
 
 
+# Hermes's API server toolset (``hermes-api-server``) leaves ``clarify`` out, so the agent can ask
+# the user a question in Gots only where the profile's own toolsets for the surface name it. Linking
+# offers to add it, with the user's consent, through Hermes's own config writer.
+API_SERVER_COMPOSITE = "hermes-api-server"
+CLARIFY = "clarify"
+
+
+def clarify_change(config: Dict[str, Any]) -> Optional[List[str]]:
+    """The ``platform_toolsets.api_server`` list that adds ``clarify``, or None when there is
+    nothing to add: it is already there, or the profile switched the toolset off for good
+    (``agent.disabled_toolsets``), which this never overrides."""
+    agent = config.get("agent") if isinstance(config.get("agent"), dict) else {}
+    disabled = agent.get("disabled_toolsets") or []
+    if isinstance(disabled, str):
+        disabled = [part.strip(" '\"[]") for part in disabled.split(",")]
+    if CLARIFY in [str(name).strip() for name in disabled]:
+        return None
+    toolsets = config.get("platform_toolsets") if isinstance(config.get("platform_toolsets"), dict) else {}
+    saved = toolsets.get("api_server")
+    if saved is None:
+        # Nothing saved means the surface's default composite: keep it whole and add the one tool.
+        return [API_SERVER_COMPOSITE, CLARIFY]
+    if isinstance(saved, str):
+        saved = [part.strip(" '\"[]") for part in saved.split(",") if part.strip(" '\"[]")]
+    if not isinstance(saved, list):
+        return None
+    names = [str(name) for name in saved]
+    return None if CLARIFY in names else names + [CLARIFY]
+
+
+def needs_clarify(home: Path) -> Optional[List[str]]:
+    """What ``enable_clarify`` would write for this profile, or None when nothing is needed or the
+    profile's config can't be read."""
+    try:
+        from hermes_cli.config import read_raw_config
+
+        with home_override(home):
+            return clarify_change(read_raw_config() or {})
+    except Exception:
+        logger.debug("gots: couldn't read %s's toolsets", home, exc_info=True)
+        return None
+
+
+def enable_clarify(home: Path) -> bool:
+    """Adds ``clarify`` to the profile's ``platform_toolsets.api_server`` with Hermes's own config
+    writer; True when the file changed. Only ever called after the user said yes."""
+    try:
+        from hermes_cli.config import read_raw_config, save_config
+
+        with home_override(home):
+            raw = read_raw_config() or {}
+            change = clarify_change(raw)
+            if change is None:
+                return False
+            save_config({"platform_toolsets": {"api_server": change}}, merge_existing=True)
+            return True
+    except Exception:
+        logger.warning("gots: couldn't add clarify to %s's toolsets", home, exc_info=True)
+        return False
+
+
 def http_warning(url: str) -> Optional[str]:
     if url.startswith("http://") and not re.match(r"^http://(localhost|127\.|\[::1\])", url):
         return "A browser on https won't call an http:// URL. Use https (Tailscale, a tunnel or a proxy)."
@@ -566,6 +664,19 @@ def cmd_link(args: Any) -> int:
         if enable_platform(home):
             restart = True
             print("Turned Gots on as a delivery platform, so a routine's answer can arrive in a chat.")
+        # The agent can ask the user questions in Gots only where the API server's toolsets name
+        # clarify, which Hermes leaves out of that surface by default.
+        toolsets = needs_clarify(home)
+        if toolsets is not None:
+            print("Gots can show the agent's questions, but this profile's API server toolsets "
+                  "leave out clarify. Adding it sets platform_toolsets.api_server in config.yaml to:")
+            print(f"  {toolsets}")
+            if _confirm("Add clarify?", assume):
+                if enable_clarify(home):
+                    restart = True
+                    print("Added clarify, so the agent can ask you questions in Gots.")
+            else:
+                print("Skipped. The agent will ask its questions in its reply instead.")
         if restart:
             print("Restart the gateway to apply the changes: hermes gateway restart")
         warning = http_warning(url)

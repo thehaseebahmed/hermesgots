@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import github, pipeline, projects, push, tools_common
+from . import github, pipeline, projects, push
 from .sessions import WorkspaceError, _git
 from .store import db_path
 
@@ -649,19 +649,6 @@ def register(ctx: Any) -> bool:
     except Exception:
         logger.warning("gots: couldn't register the pull_request tools", exc_info=True)
         return False
-
-
-def wire(adapter: Any) -> bool:
-    """Wires the tools into every agent the API server builds."""
-    current = tools_common.wire_tool(adapter, TOOL, SCHEMA, "pull_request")
-    if not tools_common.wire_tool(adapter, LEGACY_TOOL, LEGACY_SCHEMA, "open_pull_request"):
-        logger.warning("gots: couldn't wire the open_pull_request redirect stub")
-    return current
-
-
-def equip(agent: Any) -> None:
-    tools_common.equip_tool(agent, TOOL, SCHEMA)
-    tools_common.equip_tool(agent, LEGACY_TOOL, LEGACY_SCHEMA)
 
 
 def close(hermes_home: Path, record: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:

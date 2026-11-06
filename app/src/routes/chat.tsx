@@ -773,7 +773,6 @@ function NextComposerBody({
   if (session?.planPending && session.mode === "plan" && !controls.busy)
     return (
       <PlanReadyCard
-        autoAvailable={tracked}
         model={modelPill({ display: "block" })}
         onApprove={async (mode) => {
           await setSessionMode(session.id, mode)
@@ -807,11 +806,7 @@ function NextComposerBody({
         session={
           session
             ? {
-                mode:
-                  session.mode === "auto" && !tracked
-                    ? "accept_edits"
-                    : (session.mode ?? "accept_edits"),
-                autoAvailable: tracked,
+                mode: session.mode ?? "accept_edits",
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
                     toast.error(
@@ -1694,7 +1689,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
           />
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <PlanReadyCard
-            autoAvailable={tracked}
             model={modelPill({ display: "block" })}
             onApprove={async (mode) => {
               await setSessionMode(session.id, mode)
@@ -1765,11 +1759,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             session={
               session && {
                 // Without the plugin nothing answers for Auto, so the session runs as Accept edits.
-                mode:
-                  session.mode === "auto" && !tracked
-                    ? "accept_edits"
-                    : (session.mode ?? "accept_edits"),
-                autoAvailable: tracked,
+                mode: session.mode ?? "accept_edits",
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
                     toast.error(

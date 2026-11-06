@@ -83,7 +83,7 @@ const seed = (page, { id, projectId }) =>
         changedAt: at,
         titleEdited: true,
         projectId,
-        mode: "auto",
+        mode: "accept_edits",
         afk: true,
       })
       await db.messages.put({

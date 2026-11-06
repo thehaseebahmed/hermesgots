@@ -5,10 +5,8 @@ import {
   LockIcon,
   MapIcon,
   MessageCircleQuestionIcon,
-  PencilLineIcon,
   RotateCcwIcon,
   TimerOffIcon,
-  ZapIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -49,22 +47,20 @@ export const FLAT_CARD = `${CARD_BASE} bg-muted/40`
 
 /**
  * In place of the composer once a plan-mode turn has finished: the plan waits for the user, who
- * picks the mode it runs in.
+ * approves it — it then runs in Accept edits, where Hermes still asks before a risky command — or
+ * keeps planning.
  */
 export function PlanReadyCard({
-  autoAvailable,
   model,
   onApprove,
   onKeepPlanning,
 }: {
-  /** Auto is answered by the plugin on the server, so it needs the plugin. */
-  autoAvailable: boolean
   /** The chat's model pill, so the model the plan runs on can change here. */
   model?: ReactNode
-  onApprove: (mode: "auto" | "accept_edits") => Promise<void>
+  onApprove: (mode: "accept_edits") => Promise<void>
   onKeepPlanning: () => Promise<void>
 }) {
-  const [pending, setPending] = useState<"auto" | "accept_edits" | "keep" | null>(null)
+  const [pending, setPending] = useState<"accept_edits" | "keep" | null>(null)
   const run = async (which: NonNullable<typeof pending>, action: () => Promise<void>) => {
     setPending(which)
     try {
@@ -90,38 +86,16 @@ export function PlanReadyCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-[15px]">
-          {autoAvailable
-            ? "Approve to let the agent make the changes. In Auto it runs without asking; in Accept edits it still asks before risky commands."
-            : "Approve it to let the agent make the changes, or keep planning."}
-        </p>
+        <p className="text-[15px]">Approve it to let the agent make the changes, or keep planning.</p>
       </CardContent>
       <CardFooter className="flex flex-col items-stretch gap-2">
         {model}
-        {autoAvailable ? (
-          <>
-            <div className="grid grid-cols-2 gap-2">
-              <Button {...button("auto")}>
-                <ZapIcon data-icon="inline-start" />
-                Auto
-              </Button>
-              <Button variant="outline" {...button("accept_edits")}>
-                <PencilLineIcon data-icon="inline-start" />
-                Accept edits
-              </Button>
-            </div>
-            <Button variant="ghost" {...button("keep")} className="h-11">
-              Keep planning
-            </Button>
-          </>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" {...button("keep")}>
-              Keep planning
-            </Button>
-            <Button {...button("accept_edits")}>Approve</Button>
-          </div>
-        )}
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" {...button("keep")}>
+            Keep planning
+          </Button>
+          <Button {...button("accept_edits")}>Approve</Button>
+        </div>
       </CardFooter>
     </Card>
   )

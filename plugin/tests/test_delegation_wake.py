@@ -36,7 +36,7 @@ from unittest import mock
 
 import plugin
 from plugin import chats, delegation, outbox, sessions
-from plugin.tests._helpers import App, Context, FakeWeb, Router
+from plugin.tests._helpers import App, Context, FakeWeb, Router, hermes_secret_scope
 from plugin.store import SCHEMA_VERSION, connect, db_path, put_setting
 
 # Core's own machine-provenance footer (gateway/run_notifications.py `INTERNAL_NOTIFICATION_FOOTER`),
@@ -64,6 +64,7 @@ class WakeTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
+        hermes_secret_scope(self)
         self.state = self.home / "state.db"
         self.conn = sqlite3.connect(self.state)
         self.addCleanup(self.conn.close)

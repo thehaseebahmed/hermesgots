@@ -1,5 +1,5 @@
-// The setup wizard's Join the leaderboard step: on by default, Continue joins the board, and a user
-// who switches it off goes on to link bots without joining.
+// The setup wizard's Join the leaderboard step: opt-in, so it starts off and Continue joins nothing,
+// and a user who switches it on joins the board as they go on to link bots.
 import { app, assert, pass, signedIn } from "./lib.mjs"
 
 async function scenario(name, { width, dark, joinOn }) {
@@ -23,15 +23,15 @@ async function scenario(name, { width, dark, joinOn }) {
     await page.reload()
     const toggle = page.getByRole("switch")
     await toggle.waitFor({ timeout: 15_000 })
-    assert.equal(await toggle.getAttribute("aria-checked"), "true", "the switch starts on")
+    assert.equal(await toggle.getAttribute("aria-checked"), "false", "the switch starts off")
     await shot(`${name}-community`)
-    if (!joinOn) await toggle.click()
+    if (joinOn) await toggle.click()
     await page.getByRole("button", { name: "Continue" }).click()
     await page.getByRole("heading", { name: "Link your bots" }).waitFor({ timeout: 15_000 })
     await shot(`${name}-link`)
     assert.deepEqual(joins, joinOn ? ["POST"] : [], `join calls for ${name}`)
     assert.deepEqual(errors, [], `page errors for ${name}`)
-    pass(`${name}: ${joinOn ? "joins the board" : "switched off, does not join"}`)
+    pass(`${name}: ${joinOn ? "switched on, joins the board" : "left off, does not join"}`)
   } catch (error) {
     await shot(`${name}-failed`)
     throw error

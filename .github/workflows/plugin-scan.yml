@@ -8,6 +8,7 @@ on:
       - "plugin/**"
       - ".github/scripts/scan-plugin.py"
       - ".github/workflows/plugin-scan.yml"
+      - "docs/catalog/**"
   push:
     branches: [main]
     paths:
@@ -55,3 +56,34 @@ jobs:
           python-version: "3.13"
       - name: Scan the plugin
         run: python3 .github/scripts/scan-plugin.py .hermes plugin
+
+  # The catalog's own admission gate (`hermes plugins validate`, which its CI runs on an entry): the
+  # manifest, the capability probe against plugin.yaml's provides_* lists, the core-override and
+  # private-import lints and the install scan. Run through Hermes's own composite action, which builds
+  # Hermes's locked runtime; the plugin declares no Python dependencies, so `--install-deps` would add
+  # nothing to it.
+  validate:
+    name: Validate (Hermes ${{ matrix.hermes }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        hermes: [release, main]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick the Hermes ref
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ matrix.hermes }}" = release ]; then
+            ref=$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)
+          else
+            ref=main
+          fi
+          echo "Validating with NousResearch/hermes-agent@$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: NousResearch/hermes-agent/.github/actions/plugin-validate@main
+        with:
+          path: plugin
+          hermes-ref: ${{ steps.ref.outputs.ref }}

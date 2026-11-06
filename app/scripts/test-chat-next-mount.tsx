@@ -460,10 +460,11 @@ test("a plan waiting is approved from its card: the mode moves and the plan's ru
   host.workspace.mode = "plan"
   host.workspace.planPending = true
   await mount(chatScreen("c-plan"), async () => {
-    await until(() => Boolean(button("Accept edits")), "the plan waits on its card")
-    await click(button("Accept edits"))
+    await until(() => Boolean(button("Approve")), "the plan waits on its card")
+    assert.equal(button("Auto"), null, "no mode on it skips Hermes's approvals")
+    await click(button("Approve"))
     await until(() => host.asked.runs === 1, "approving starts the plan's run")
-    assert.equal(host.workspace.mode, "accept_edits", "in the mode it was approved in")
+    assert.equal(host.workspace.mode, "accept_edits", "and it runs in Accept edits")
     const input = host.latest.body!.input as { content: string }[]
     assert.match(input.at(-1)!.content, /plans\/hermes-x\.md/, "told to work through that plan")
   })

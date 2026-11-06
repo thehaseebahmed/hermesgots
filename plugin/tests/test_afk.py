@@ -53,6 +53,7 @@ from plugin.afk import (
 from plugin.store import connect, db_path, get_setting, put_setting
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
 from plugin.tests._helpers import (
+    hermes_secret_scope,
     issue_row,
     placed,
     preset,
@@ -2413,6 +2414,8 @@ class SessionTests(unittest.TestCase):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
+        # The home's key reaches the plugin through Hermes's secret scope, never its own read.
+        hermes_secret_scope(self)
         self.home.joinpath("projects.db").write_text("")
         (self.home / "checkout" / ".git").mkdir(parents=True)
         self.task = {
@@ -2482,13 +2485,15 @@ class SessionTests(unittest.TestCase):
     def chats(self) -> Dict[str, Any]:
         return chats.read(db_path(self.home))
 
-    def test_the_session_is_made_with_a_worktree_of_its_own_in_auto(self) -> None:
+    def test_the_session_is_made_with_a_worktree_of_its_own_in_accept_edits(self) -> None:
         self.start()
         self.assertEqual(len(self.ensured), 1)
         session_id, project_id, task, mode = self.ensured[0]
         self.assertEqual(project_id, "p1")
         self.assertEqual(task, self.task["title"], "the worktree is named after the task")
-        self.assertEqual(mode, "auto", "an AFK session runs in Auto")
+        self.assertEqual(
+            mode, "accept_edits", "Hermes's approvals stand: a dangerous command waits for the user"
+        )
         self.assertTrue(session_id.startswith("gots-"), "a session id Gots's own hooks label")
 
     def test_the_chat_record_it_publishes_is_what_makes_the_session_appear(self) -> None:
@@ -2500,7 +2505,7 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(value["title"], "#265 The frontier is read from GitHub and listed")
         self.assertEqual(value["hermesSessionId"], self.ensured[0][0])
         self.assertEqual(value["projectId"], "p1")
-        self.assertEqual(value["mode"], "auto")
+        self.assertEqual(value["mode"], "accept_edits")
         self.assertIs(value["afk"], True, "the list marks it as AFK's")
         self.assertIs(
             value["titleEdited"], True, "Hermes's title, sliced off the opener, never replaces it"

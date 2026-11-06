@@ -405,7 +405,13 @@ def _key(adapter: Any, profile: Optional[str]) -> str:
     if known:
         return known
     if not profile or profile == "default":
-        return str(getattr(adapter, "_api_key", "") or "")
+        # The launch profile's own key, through Hermes's secret scope rather than the adapter's
+        # private copy of it; see link.secret.
+        from hermes_constants import get_hermes_home
+
+        from . import link
+
+        return link.secret(Path(get_hermes_home()), "API_SERVER_KEY")
     return ""
 
 

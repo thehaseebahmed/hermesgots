@@ -33,7 +33,7 @@ export function SharingNotes() {
   )
 }
 
-/** Settings > Community: the leaderboard switch, on by default from setup and off here. */
+/** Settings > Community: the leaderboard switch, opt-in at setup and changeable here. */
 export function CommunitySettings() {
   const { me, setMe } = useCommunity()
   const [busy, setBusy] = useState(false)

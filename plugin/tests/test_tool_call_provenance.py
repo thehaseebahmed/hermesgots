@@ -1,4 +1,4 @@
-"""Provenance test: verify Gots's plugin wrappers don't duplicate tool calls.
+"""Provenance test: the plugin leaves agent creation alone, and its clarify delivery still holds.
 
 Replays identical synthetic provider events with plugin wrappers disabled and
 enabled, comparing assembled calls and dispatched invocations. Also tests that
@@ -48,108 +48,21 @@ class FakeAdapter:
 
 
 class TestToolCallProvenance(unittest.TestCase):
-    """Verify that wrapping _create_agent doesn't duplicate or alter tool calls."""
+    """The plugin never wraps agent creation: Hermes's own tool calls reach the agent untouched."""
 
-    def test_wrapped_create_agent_called_once(self) -> None:
-        """The wrapper must call the original exactly once per agent creation."""
+    def test_wiring_leaves_create_agent_alone(self) -> None:
         adapter = FakeAdapter()
-        original_count = adapter._create_agent_called
+        adapter._handle_run_clarify = lambda request: None  # type: ignore[attr-defined]
+        original = adapter._create_agent
 
         from plugin.clarify import wire as clarify_wire
 
         clarify_wire(adapter)
-        adapter._create_agent()  # type: ignore[assignment]
-        adapter._create_agent()  # type: ignore[assignment]
-
-        self.assertEqual(
-            adapter._create_agent_called - original_count,
-            2,
-            "Wrapped _create_agent must call original exactly once per invocation",
-        )
-
-    def test_wrapped_agent_has_original_tools_plus_clarify(self) -> None:
-        """Wrapping adds the clarify tool definition without removing existing tools."""
-        adapter = FakeAdapter()
-
-        # Pre-populate what the original would set
-        base_agent = FakeAgent()
-        base_agent.tools = [{"type": "function", "function": {"name": "terminal"}}]
-        base_agent.valid_tool_names = {"terminal"}
-
-        def original_create(*args: Any, **kwargs: Any) -> FakeAgent:
-            return base_agent
-
-        adapter._create_agent = original_create  # type: ignore[assignment]
-
-        from plugin.clarify import wire as clarify_wire
-
         clarify_wire(adapter)
+        adapter._create_agent()
 
-        # Simulate calling on the loop thread so loop is available
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            agent = adapter._create_agent()  # type: ignore[assignment]
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-
-        # Original tool must still be present
-        tool_names = {(t.get("function") or {}).get("name") for t in agent.tools}
-        self.assertIn("terminal", tool_names, "Original tools must survive wrapping")
-        # Clarify may or may not be added (depends on model_tools availability),
-        # but it must never duplicate an existing entry
-        clarify_entries = [t for t in agent.tools if (t.get("function") or {}).get("name") == "clarify"]
-        self.assertLessEqual(
-            len(clarify_entries),
-            1,
-            "At most one clarify tool definition, never duplicated",
-        )
-
-    def test_double_wrapping_does_not_multiply(self) -> None:
-        """Wrapping an already-wrapped adapter must not double-call the original."""
-        adapter = FakeAdapter()
-        original_count_before = adapter._create_agent_called
-
-        from plugin.clarify import wire as clarify_wire
-
-        clarify_wire(adapter)
-        clarify_wire(adapter)  # second wrap
-
-        adapter._create_agent()  # type: ignore[assignment]
-        self.assertEqual(
-            adapter._create_agent_called - original_count_before,
-            1,
-            "Double-wrapping must still call original exactly once",
-        )
-
-    def test_agent_returned_is_same_object(self) -> None:
-        """The wrapper must return the agent from the original, not a copy."""
-        base_agent = FakeAgent()
-
-        def original_create(*args: Any, **kwargs: Any) -> FakeAgent:
-            return base_agent
-
-        adapter = FakeAdapter()
-        adapter._create_agent = original_create  # type: ignore[assignment]
-
-        from plugin.clarify import wire as clarify_wire
-
-        clarify_wire(adapter)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            agent = adapter._create_agent()  # type: ignore[assignment]
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-
-        self.assertIs(
-            agent,
-            base_agent,
-            "Wrapper must return the same agent object, not a copy",
-        )
+        self.assertEqual(adapter._create_agent, original, "catalog rule 9: no rebind of core")
+        self.assertEqual(adapter._create_agent_called, 1)
 
 
 class TestClarifyDeliveryProvenance(unittest.TestCase):

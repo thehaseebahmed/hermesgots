@@ -45,7 +45,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import events, push, tools_common
+from . import events, push
 from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
@@ -1166,25 +1166,12 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives the researcher's agents the tool, and only them: every other session would carry a
-    tool it can't use."""
+    """Keeps the API server's adapter for reading a researcher's run status. ``claim_add`` reaches
+    the researcher's agents as a tool of the plugin's ``gots`` toolset, which Hermes enables on
+    every platform by default; ``before_tool`` keeps a researcher to its own tools, and the
+    handler refuses a session that isn't a mission's."""
     global adapter
     adapter = api_adapter
-    original = getattr(api_adapter, "_create_agent", None)
-    if not callable(original):
-        return False
-
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        session_id = kwargs.get("session_id") or getattr(agent, "session_id", None)
-        if mission_of_session(session_id):
-            try:
-                tools_common.equip_tool(agent, TOOL, SCHEMA)
-            except Exception:
-                logger.debug("gots: couldn't add the claim_add tool to an agent", exc_info=True)
-        return agent
-
-    api_adapter._create_agent = create_agent
     return True
 
 

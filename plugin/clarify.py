@@ -1,11 +1,13 @@
-"""Hermes's ``clarify`` tool on the API server, answered from the app.
+"""Hermes's ``clarify`` tool on the API server.
 
-The API server's toolset leaves ``clarify`` out and its agents get no ``clarify_callback``, so on
-this surface the agent has no way to ask the user anything. This module gives every agent the
-adapter builds the tool and a callback that answers it from the app: the questions go into the
-run's event stream as ``clarify.request`` (and onto its pollable status), the app posts the answers
-to ``POST /api/plugins/gots/runs/{run_id}/clarify``, and the agent carries on in the same turn
-with the result, as it does after an approval.
+From Hermes 0.22.5 (the plugin's floor) the callback and the answer route are Hermes's own: a
+question is a run control (``pending_controls``), answered on ``POST /v1/runs/{id}/clarify``. What
+the API server still leaves out is the toolset — ``hermes-api-server`` excludes ``clarify`` — so the
+agent can ask only where the profile's ``platform_toolsets.api_server`` names it, which
+``hermes gots link`` offers to write with the user's consent (``link.enable_clarify``). This module
+reports whether that holds (``wire``) and keeps the plugin's older answer route
+(``POST /api/plugins/gots/runs/{run_id}/clarify``) and its ``Asker``, which nothing installs on a
+supported Hermes any more: the route answers that nothing waits.
 """
 
 from __future__ import annotations
@@ -50,7 +52,6 @@ class Pending:
 
 _lock = threading.Lock()
 _pending: Dict[str, Pending] = {}  # by run id: the agent asks one thing at a time
-_definition: Any = None  # the tool's definition, looked up once; False when Hermes has none
 
 
 def native(adapter: Any) -> bool:
@@ -59,34 +60,18 @@ def native(adapter: Any) -> bool:
     return callable(getattr(adapter, "_handle_run_clarify", None))
 
 
-def include_toolset() -> bool:
-    """Puts ``clarify`` among the toolsets the API server builds its agents with, unless the user
-    disabled it. Hermes asks ``_get_platform_tools`` for them on every agent it builds, and from
-    0.22.5 rebuilds an agent's tool list from them and answers ``tool_search`` from them, so a tool
-    added to one agent afterwards is dropped and can't be found. False when this Hermes has no
-    such lookup."""
+def configured(config: Any) -> bool:
+    """Whether the profile's saved ``platform_toolsets.api_server`` names ``clarify`` and the
+    profile hasn't switched it off for good (``agent.disabled_toolsets``). The API server's
+    default toolset (``hermes-api-server``) leaves ``clarify`` out, so it reaches this surface only
+    where the user added it: ``hermes gots link`` offers to (``link.enable_clarify``)."""
     try:
-        import importlib
-
-        tools_config = importlib.import_module("hermes_cli.tools_config")
+        saved = ((config.get("platform_toolsets") or {}).get("api_server")) or []
     except Exception:
-        logger.debug("gots: no hermes_cli.tools_config", exc_info=True)
         return False
-    original = getattr(tools_config, "_get_platform_tools", None)
-    if not callable(original):
-        return False
-    if getattr(original, "gots_clarify", False):
-        return True
-
-    def get_platform_tools(config: Any, platform: Any, *args: Any, **kwargs: Any) -> Any:
-        enabled = original(config, platform, *args, **kwargs)
-        if platform == "api_server" and TOOL not in enabled and not _disabled(config):
-            return set(enabled) | {TOOL}
-        return enabled
-
-    get_platform_tools.gots_clarify = True  # type: ignore[attr-defined]
-    tools_config._get_platform_tools = get_platform_tools
-    return True
+    if isinstance(saved, str):
+        saved = [part.strip(" '\"[]") for part in saved.split(",")]
+    return TOOL in [str(name).strip() for name in saved] and not _disabled(config)
 
 
 def _disabled(config: Any) -> bool:
@@ -101,69 +86,20 @@ def _disabled(config: Any) -> bool:
 
 
 def wire(adapter: Any) -> bool:
-    """Lets the agent ask the user on the API server: ``clarify`` goes among its toolsets, and on a
-    Hermes that does not answer questions itself every agent also gets the plugin's callback."""
-    toolset = include_toolset()
-    if native(adapter):
-        return toolset
-    return _wire_agents(adapter) or toolset
+    """Whether the agent can ask the user on the API server: Hermes answers questions itself
+    (0.22.5, the plugin's floor) and the profile's toolsets for the surface carry ``clarify``.
 
-
-def _wire_agents(adapter: Any) -> bool:
-    """For a Hermes without native clarify: wraps ``_create_agent`` so the tool and its callback
-    are added after Hermes's own setup. False when this Hermes has no such seam."""
-    original = getattr(adapter, "_create_agent", None)
-    if not callable(original):
-        logger.warning("gots: this Hermes has no _create_agent; the agent can't ask questions")
+    Nothing here rebinds Hermes: the toolset is the user's own config, written with their consent
+    by ``hermes gots link``, and the questions travel on Hermes's own run controls."""
+    if not native(adapter):
         return False
+    try:
+        from hermes_cli.config import load_config
 
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        try:
-            # Runs build their agent on the loop thread; a chat completion builds it on a worker,
-            # where there is no run stream to push to anyway.
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            equip(adapter, agent, loop)
-        except Exception:
-            logger.debug("gots: couldn't add the clarify tool to an agent", exc_info=True)
-        return agent
-
-    adapter._create_agent = create_agent
-    return True
-
-
-def equip(adapter: Any, agent: Any, loop: Optional[asyncio.AbstractEventLoop]) -> None:
-    """Gives one agent the tool (unless it has it) and the callback (unless it has one)."""
-    if getattr(agent, "clarify_callback", None) is None:
-        agent.clarify_callback = Asker(adapter, agent, loop)
-    names = getattr(agent, "valid_tool_names", None)
-    tools = getattr(agent, "tools", None)
-    if not isinstance(tools, list) or not isinstance(names, set) or TOOL in names:
-        return
-    definition = tool_definition()
-    if definition:
-        tools.append(definition)
-        names.add(TOOL)
-
-
-def tool_definition() -> Optional[Dict[str, Any]]:
-    """The tool's definition as Hermes sends it, so the model sees exactly what the CLI shows."""
-    global _definition
-    if _definition is None:
-        try:
-            import model_tools
-
-            found = model_tools.get_tool_definitions(enabled_toolsets=[TOOL], quiet_mode=True)
-            _definition = next(
-                (d for d in found if (d.get("function") or {}).get("name") == TOOL), False
-            )
-        except Exception:
-            logger.debug("gots: no clarify tool definition", exc_info=True)
-            _definition = False
-    return _definition or None
+        return configured(load_config())
+    except Exception:
+        logger.debug("gots: couldn't read the profile's toolsets", exc_info=True)
+        return False
 
 
 class Asker:

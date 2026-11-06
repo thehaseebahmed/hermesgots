@@ -1217,7 +1217,10 @@ const DONT_RULES = "- Don't ask before shipping, and never merge or close: mergi
 // file the user is shown, and why it is never a path from outside the library.
 // prettier-ignore
 const MEDIA_RULES = "A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem \u2014 `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.\n\n- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path \u2014 the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.\n- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.\n\nIts extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else \u2014 a PDF, a document, an archive \u2014 is a row the user saves. So the file keeps its own name."
-const MODES = ["accept_edits", "auto", "plan"]
+const MODES = ["accept_edits", "plan"]
+// Auto (and Theseus before it) once skipped Hermes's approvals; the plugin reads either as Accept
+// edits now, and so does the mock.
+const LEGACY_MODES = { auto: "accept_edits", theseus: "accept_edits" }
 
 // The routine messages a chat holds, as the plugin's `sessions/{id}/routines` answers them: a
 // routine's answer delivered into a chat while its bot worked (ADR 0081). Say "routine message" and
@@ -1615,7 +1618,11 @@ function afkSession(project) {
   if (project.folders.some((f) => f.git))
     projectSessions.set(
       session,
-      workspaceRecord(project, { sessionId: session, slug: `afk-${held.number}`, mode: "auto" }),
+      workspaceRecord(project, {
+        sessionId: session,
+        slug: `afk-${held.number}`,
+        mode: "accept_edits",
+      }),
     )
   chatTitles.set(session, title)
   transcripts.set(session, [
@@ -1629,7 +1636,7 @@ function afkSession(project) {
       createdAt: now,
       updatedAt: now + 1,
       projectId: project.id,
-      mode: "auto",
+      mode: "accept_edits",
       afk: true,
       titleEdited: true,
     },
@@ -3067,17 +3074,14 @@ async function playTurn(req, body, last, out) {
       toolCallId: cleanupId,
       status: "running",
     })
-    // In Auto the plugin turns Hermes's own approval bypass on for the run, so nothing is asked.
-    const choice =
-      projectSessions.get(sessionOf(req, body))?.mode === "auto"
-        ? "once"
-        : await out.approve({
-            command: "find /var/log -name '*.log.*' -mtime +90 -delete",
-            pattern_key: "recursive_delete",
-            description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
-            allow_permanent: true,
-            allow_session: true,
-          })
+    // Hermes's approvals always stand: no mode answers one for the user.
+    const choice = await out.approve({
+      command: "find /var/log -name '*.log.*' -mtime +90 -delete",
+      pattern_key: "recursive_delete",
+      description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
+      allow_permanent: true,
+      allow_session: true,
+    })
     out.tool({ tool: "terminal", toolCallId: cleanupId, status: "completed" })
     await say(
       choice === "deny" || choice === "timeout"
@@ -6631,7 +6635,8 @@ http
             : null,
         })
       if (route === "workspace" && req.method === "POST") {
-        const { project_id, mode } = await readBody(req)
+        const { project_id, mode: asked } = await readBody(req)
+        const mode = asked === undefined ? undefined : (LEGACY_MODES[asked] ?? asked)
         const project = mockProjects().find((p) => p.id === String(project_id ?? ""))
         if (!project) return json(res, 400, { error: { message: "No such project." } })
         const reason = blockedReason(project, workspace)
@@ -6644,7 +6649,7 @@ http
         if (!gitFolders.length)
           return json(res, 400, { error: { message: "This project has no git repository." } })
         if (mode !== undefined && !MODES.includes(mode))
-          return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+          return json(res, 400, { error: { message: "mode must be accept_edits or plan." } })
         let record = workspace
         if (!record) {
           await sleep(800 * gitFolders.length)
@@ -6664,18 +6669,14 @@ http
       }
       if (route === "workspace") return answer(workspace ?? null)
       if (route === "mode" && req.method === "POST") {
-        const { mode } = await readBody(req)
+        const asked = (await readBody(req)).mode
+        const mode = LEGACY_MODES[asked] ?? asked
         if (!MODES.includes(mode))
-          return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+          return json(res, 400, { error: { message: "mode must be accept_edits or plan." } })
         if (!workspace)
           return json(res, 404, { error: { message: "This session has no workspace yet" } })
         workspace.mode = mode
         workspace.plan_pending = 0
-        // Switching to Auto answers what a run of the session already waits on, like the plugin.
-        if (mode === "auto")
-          for (const run of runs.values())
-            if (run.sessionId === id && run.status === "waiting_for_approval")
-              pendingApprovals.get(run.id)?.("once")
         return answer(workspace)
       }
       if (route === "workspace/remove" && req.method === "POST") {

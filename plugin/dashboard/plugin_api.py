@@ -95,7 +95,7 @@ def _link_state() -> Dict[str, Any]:
         "site": state.get("site") or "",
         "url": link.default_url(home, state),
         "name": record["name"] if record else None,
-        "has_key": bool(link.env_value(home, "API_SERVER_KEY")),
+        "has_key": bool(link.secret(home, "API_SERVER_KEY")),
         "env": {
             key: link.shown_env(key, value)
             for key, value in link.env_changes(home, state.get("url") or "", state.get("origins") or []).items()

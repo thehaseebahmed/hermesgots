@@ -21,7 +21,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import attachments, sessions, tools_common
+from . import attachments, sessions
 
 logger = logging.getLogger(__name__)
 
@@ -317,10 +317,3 @@ def register(ctx: Any) -> bool:
         return False
 
 
-def wire(adapter: Any) -> bool:
-    """Wires the tool into every agent the API server builds."""
-    return tools_common.wire_tool(adapter, TOOL, SCHEMA, "library_add")
-
-
-def equip(agent: Any) -> None:
-    tools_common.equip_tool(agent, TOOL, SCHEMA)

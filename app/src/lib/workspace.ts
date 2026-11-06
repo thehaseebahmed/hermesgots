@@ -70,7 +70,6 @@ export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
 
 export const MODE_LABELS: Record<SessionMode, string> = {
   accept_edits: "Accept edits",
-  auto: "Auto",
   plan: "Plan",
 }
 

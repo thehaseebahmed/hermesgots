@@ -1,5 +1,8 @@
 # AFK dispatches a project's tasks; it answers no gate on the user's behalf
 
+**Superseded in part by [ADR 0110](0110-no-mode-skips-hermess-approvals.md)**: AFK sessions run in
+Accept edits, and no mode turns on Hermes's approval bypass any more.
+
 The AFK switch works the ready tasks of a project's GitHub issues while the user is away, and it does
 exactly that: it claims a task, starts a session for it, and leaves a draft pull request. It decides
 nothing in the user's place. An approval, a plan approval and a clarify question all still wait for the

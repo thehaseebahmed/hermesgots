@@ -2771,7 +2771,7 @@ export interface SessionWorkspace {
   pipeline: SessionPipeline | null
 }
 
-const MODES = new Set<string>(["accept_edits", "auto", "plan"])
+const MODES = new Set<string>(["accept_edits", "plan"])
 
 function parseWorkspace(raw: unknown, sessionId: string): SessionWorkspace | null {
   const body = raw as {
