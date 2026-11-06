@@ -62,3 +62,14 @@ for (const [key, entry] of Object.entries(manifest.apps)) {
     }
   })
 }
+
+test("home: every page reads a Home Assistant tool and declares the sample it draws without one", () => {
+  for (const { file, source } of pagesOf(manifest.apps.home)) {
+    const queries = [...source.matchAll(/Query\("([^"]+)",\s*(\{.*?\}),\s*\{(.+)\}\)/g)]
+    assert.ok(queries.length > 0, `${file} reads nothing`)
+    for (const [, name, , defaults] of queries) {
+      assert.match(name, /^homeassistant\./, `${file} reads ${name}`)
+      assert.match(defaults, /notice: "Sample data/, `${file} declares no sample notice`)
+    }
+  }
+})
