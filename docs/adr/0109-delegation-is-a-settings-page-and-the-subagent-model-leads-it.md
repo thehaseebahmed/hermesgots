@@ -30,7 +30,8 @@ older one.
 categorised as delegation existed to move; the Hermes keys the dashboard files elsewhere stay
 where General draws them, so no key is drawn on two pages.
 
-**Known limit.** A section pinned by a hand-written `base_url` reads as "Default model", as it did
-on the card: the model's route answers one pick or none, and no value of it says "pinned". Picking a
-model then drops the pin, by design (Hermes prefers an endpoint to a provider). A blank endpoint key
+**A pinned endpoint reads Custom.** A section pinned by a hand-written `base_url` has no pick to
+name, so `GET /delegation` adds `custom: true` beside the null `delegation` and the row says
+"Custom" rather than "Default model"; an older plugin omits it and the row keeps the old word.
+Picking a model then drops the pin, by design (Hermes prefers an endpoint to a provider). A blank endpoint key
 pins nothing, as Hermes reads it.

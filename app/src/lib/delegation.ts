@@ -2,15 +2,30 @@ import type { ModelChoice } from "@/lib/db"
 import { getDelegationModel, setDelegationModel } from "@/lib/hermes"
 import { useHostRecord, type HostRoute } from "@/lib/host-record"
 
-const DELEGATION: HostRoute<ModelChoice | undefined> = {
+interface Delegation {
+  pick?: ModelChoice
+  custom?: boolean
+}
+
+const DELEGATION: HostRoute<Delegation> = {
   feature: "delegation_model",
   label: "the delegation model",
-  read: async (server, signal) => (await getDelegationModel(server, signal)) ?? undefined,
-  write: async (server, pick, signal) =>
-    (await setDelegationModel(server, pick ?? null, signal)) ?? undefined,
+  read: async (server, signal) => {
+    const { pick, custom } = await getDelegationModel(server, signal)
+    return { pick: pick ?? undefined, custom }
+  },
+  write: async (server, { pick }, signal) => ({
+    pick: (await setDelegationModel(server, pick ?? null, signal)) ?? undefined,
+  }),
 }
 
 export function useDelegationModel(profile?: { baseUrl: string; apiKey: string } | null) {
-  const { value: pick, supported, saving, save } = useHostRecord(profile, DELEGATION, undefined)
-  return { pick, supported, saving, save }
+  const { value, supported, saving, save } = useHostRecord<Delegation>(profile, DELEGATION, {})
+  return {
+    pick: value.pick,
+    custom: value.custom === true,
+    supported,
+    saving,
+    save: (pick: ModelChoice | undefined) => save({ pick }),
+  }
 }

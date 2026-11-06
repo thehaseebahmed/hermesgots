@@ -942,15 +942,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         config_path = host_config_path()
         scope = profile_scope()
 
-        def run() -> Optional[Dict[str, str]]:
+        def run() -> Tuple[Optional[Dict[str, str]], bool]:
             with scope():
-                return host_model.read_delegation(config_path)
+                return (
+                    host_model.read_delegation(config_path),
+                    host_model.delegation_is_custom(config_path),
+                )
 
         try:
-            pick = await asyncio.to_thread(run)
+            pick, custom = await asyncio.to_thread(run)
         except ImportError:
             return _error(web, "This Hermes version can't read models from here.", 501)
-        return web.json_response({"object": "memento.delegation", "delegation": pick})
+        return web.json_response(
+            {"object": "memento.delegation", "delegation": pick, "custom": custom}
+        )
 
     async def get_triage_model(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

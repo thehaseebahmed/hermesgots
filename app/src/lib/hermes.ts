@@ -1173,18 +1173,20 @@ const pickOf = (value: unknown) => picks([value])[0] ?? null
 
 /**
  * The model a bot's delegated tasks run on, from its host's `delegation` section (Hermes's own
- * `delegation.model`); `null` when a child inherits the bot's own model. Newer plugin only; a host
+ * `delegation.model`); `null` when a child inherits the bot's own model, with `custom` set when
+ * that is because the section points at an endpoint written by hand. Newer plugin only; a host
  * without the route answers 404.
  */
 export async function getDelegationModel(
   config: HermesConfig,
   signal?: AbortSignal,
-): Promise<ModelChoice | null> {
+): Promise<{ pick: ModelChoice | null; custom: boolean }> {
   const response = await request(`${pluginRoot(config.baseUrl)}/delegation`, {
     headers: headers(config),
     signal,
   })
-  return pickOf((await response.json())?.delegation)
+  const body = await response.json()
+  return { pick: pickOf(body?.delegation), custom: body?.custom === true }
 }
 
 /** Makes `pick` the model the bot's delegated tasks run on; `null` clears it, so a child inherits

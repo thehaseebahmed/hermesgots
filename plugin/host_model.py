@@ -240,6 +240,14 @@ def read_delegation(config_path: Path) -> Optional[Dict[str, str]]:
     return _delegation_of(_load_gateway_config(config_path=config_path) or {})
 
 
+def delegation_is_custom(config_path: Path) -> bool:
+    """Whether the delegation section points at an endpoint written by hand, which is why
+    ``read_delegation`` has no pick to give: the bot's settings say Custom rather than a model."""
+    from gateway.run import _load_gateway_config
+
+    return _pins_endpoint(_section_of(_load_gateway_config(config_path=config_path) or {}))
+
+
 def read_main(config_path: Path) -> Optional[Dict[str, str]]:
     """The profile's main model in ``config_path`` — what a run that names no model would take.
 

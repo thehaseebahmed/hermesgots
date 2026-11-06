@@ -300,6 +300,17 @@ class ReadDelegationTest(unittest.TestCase):
         )
         with patch:
             self.assertIsNone(host_model.read_delegation(self.path))
+            self.assertTrue(host_model.delegation_is_custom(self.path))
+
+    def test_only_an_endpoint_makes_a_section_custom(self) -> None:
+        for delegation in (
+            {},
+            {"provider": "relay", "model": "gpt-5"},
+            {"model": "gpt-5", "base_url": "  ", "api_key": ""},
+        ):
+            patch, _, _ = hermes({"delegation": delegation})
+            with patch:
+                self.assertFalse(host_model.delegation_is_custom(self.path), delegation)
 
     def test_nothing_set_is_the_bots_own_model(self) -> None:
         for config in (

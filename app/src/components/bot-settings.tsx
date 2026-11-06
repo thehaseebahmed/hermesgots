@@ -460,9 +460,9 @@ export function BotSettingsPage({
   // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
   // detail like any other and takes the generic path below.
   // Keyed by tab, so moving between the two never draws one tab's block under the other's route.
-  if ((shown in GENERAL_ROUTES) && own?.kind === "edit")
+  if (shown in GENERAL_ROUTES && own?.kind === "edit")
     return <GeneralPage key={shown} profile={profile} tab={shown} sub={own} close={close} />
-  if ((shown in GENERAL_ROUTES) && !own)
+  if (shown in GENERAL_ROUTES && !own)
     return <GeneralPage key={shown} profile={profile} tab={shown} close={close} />
 
   // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
@@ -825,7 +825,7 @@ function SubagentModelRow({
       <ValueRow
         title="Subagent model"
         purpose="The model every subagent runs on"
-        value={record.pick ? fullModel(record.pick) : "Default model"}
+        value={record.pick ? fullModel(record.pick) : record.custom ? "Custom" : "Default model"}
         disabled={record.saving}
         busy={record.saving}
         onClick={() => setOpen(true)}

@@ -124,6 +124,7 @@ function host({
   level = "normal" as string | null,
   refuse,
   noDelegation = false,
+  customDelegation = false,
 }: {
   features?: string[]
   version?: string | null
@@ -138,6 +139,8 @@ function host({
   refuse?: string
   /** A host whose schema carries no delegation category, so its page can't be read. */
   noDelegation?: boolean
+  /** A host whose delegation section points at an endpoint written by hand. */
+  customDelegation?: boolean
 } = {}) {
   const calls: Sent[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -154,7 +157,10 @@ function host({
         ? json({ error: { message: "No delegation category." } }, 501)
         : json({ object: "memento.delegation_settings", delegation: DELEGATION })
     if (url.pathname.endsWith("/plugins/memento/delegation"))
-      return json({ delegation: body ? body.delegation : null })
+      return json({
+        delegation: body ? body.delegation : null,
+        ...(customDelegation && !body ? { custom: true } : {}),
+      })
     if (url.pathname.endsWith("/api/model/options"))
       return json({
         model: "own-model",
@@ -506,6 +512,16 @@ test("a host that refuses the Delegation page says so, and draws no Subagent row
     await until(async () => Boolean(find('[role="alert"]')), "the refusal to be said")
     assert.equal(find('[role="alert"]')?.textContent, "No delegation category.")
     absent('[data-setting="subagent-model"]', "and no row is drawn over a page that can't be read")
+  })
+})
+
+test("a delegation section pointing at a hand-written endpoint reads Custom", async () => {
+  await seed("general-custom-delegation", { hostId: "host-1" }, [...FEATURES, "delegation_page"], {
+    customDelegation: true,
+  })
+  await mount(general("/settings/bots/bot-1/delegation"), async () => {
+    await until(async () => Boolean(row("subagent-model")), "the Delegation page's first row")
+    assert.equal(accent("subagent-model"), "Custom", "an endpoint the host runs on says Custom")
   })
 })
 
