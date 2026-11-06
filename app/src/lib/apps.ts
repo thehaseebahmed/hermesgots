@@ -235,6 +235,7 @@ export function useAppPage(appId: string, pageId: string | undefined) {
       if (!profile || !pageId) return
       try {
         const page = await changePage(profile, appId, pageId, source, request, setDraft, signal)
+        keepPage(profile, appId, page)
         setRead({ key, page })
       } finally {
         setDraft(undefined)
