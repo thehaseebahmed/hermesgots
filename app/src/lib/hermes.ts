@@ -1347,6 +1347,8 @@ export const GENERAL_ROUTES = {
 
 export type GeneralTab = keyof typeof GENERAL_ROUTES
 
+export const isGeneralTab = (tab: string): tab is GeneralTab => tab in GENERAL_ROUTES
+
 async function generalBlock(
   config: HermesConfig,
   tab: GeneralTab,

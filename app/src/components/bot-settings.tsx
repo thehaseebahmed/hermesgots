@@ -79,6 +79,7 @@ import {
 import {
   checkHealth,
   GENERAL_ROUTES,
+  isGeneralTab,
   getGeneralSettings,
   getPluginVersion,
   listModels,
@@ -125,8 +126,6 @@ type GatedPage = keyof typeof PAGE_FEATURES
 function gated(page: BotTab): page is GatedPage {
   return page in PAGE_FEATURES
 }
-
-const PAGE_ANSWERS = PAGE_FEATURES
 
 /** What the Models page's row needs: the Gots triage pick. */
 const MODELS_ANSWERS = { triage: "triage_model" } as const
@@ -460,9 +459,9 @@ export function BotSettingsPage({
   // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
   // detail like any other and takes the generic path below.
   // Keyed by tab, so moving between the two never draws one tab's block under the other's route.
-  if (shown in GENERAL_ROUTES && own?.kind === "edit")
+  if (isGeneralTab(shown) && own?.kind === "edit")
     return <GeneralPage key={shown} profile={profile} tab={shown} sub={own} close={close} />
-  if (shown in GENERAL_ROUTES && !own)
+  if (isGeneralTab(shown) && !own)
     return <GeneralPage key={shown} profile={profile} tab={shown} close={close} />
 
   // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
