@@ -231,6 +231,7 @@ export function AppPage() {
           <AppPagesContext.Provider value={links}>
             <Suspense fallback={null}>
               <OpenUIBlock
+                key={`${app.tools.reads}|${app.tools.acts}`}
                 app
                 source={draft ?? page.source}
                 open={draft !== undefined}

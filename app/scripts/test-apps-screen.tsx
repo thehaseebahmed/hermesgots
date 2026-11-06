@@ -63,7 +63,7 @@ function host(
             title: "House",
             library_version: "1.0.1",
             pages: Object.keys(pages),
-            tools: NONE,
+            tools: owed.agreed.at(-1) ?? NONE,
             pending: owed.pending,
           },
         ],
@@ -423,7 +423,14 @@ test("the Home Assistant dashboard asks first, then draws what the server answer
     open: "Nothing is open.",
   }
   const owed = { pending: { reads: ["homeassistant.overview"], acts: [] }, agreed: [] as Tools[] }
-  await seed(HOME_PAGES(), () => json({ value: live }), owed)
+  await seed(
+    HOME_PAGES(),
+    () =>
+      owed.agreed.length
+        ? json({ value: live })
+        : json({ error: { message: "This app was never agreed to call it." } }, 403),
+    owed,
+  )
   await mount(screen("/apps/house"), async () => {
     await until(async () => Boolean(find("[data-slot=app-consent]")), "the consent sheet")
     assert.match(wordsOf(find("[data-slot=app-consent]")), /homeassistant\.overview/)
