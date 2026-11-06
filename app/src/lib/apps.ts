@@ -215,8 +215,9 @@ export function useApps() {
 /**
  * The tools a page's `Query` calls, answered by the host's query route for this app, which refuses
  * any tool the app was never agreed to. A read the host refused or
- * failed answers `{ error }`, which the page draws; a host that cannot be reached throws, so the
- * page keeps the defaults it declared.
+ * failed answers `{ error }`, which the page draws; a server the host could not read (502) is logged
+ * and answers nothing, and a host that cannot be reached throws, so the page keeps the defaults it
+ * declared.
  */
 export function appTools(profile: Profile, appId: string, read: typeof queryApp = queryApp) {
   return {
@@ -233,6 +234,10 @@ export function appTools(profile: Profile, appId: string, read: typeof queryApp 
           structuredContent: (await read(profile, appId, name, args ?? {})) ?? null,
         }
       } catch (failure) {
+        if (failure instanceof HermesError && failure.status === 502) {
+          console.warn(`MCP read ${name} failed: ${failure.message}`)
+          return { content: [], structuredContent: null }
+        }
         if (failure instanceof HermesError && failure.status !== undefined)
           return { content: [], structuredContent: { error: failure.message } }
         throw failure

@@ -226,6 +226,15 @@ _TOOLS: Dict[str, Tuple[str, str]] = {
     "redact": ("hermes_cli.mcp_config", "redact_mcp_probe_text"),
 }
 
+# A page's call on a local server: the config read, and the resolution that fills in the ``${NAME}``
+# references a block holds, and Hermes's check of a block before anything is run from it.
+_CALL: Dict[str, Tuple[str, str]] = {
+    **_PROFILE_SCOPE,
+    **_SERVERS,
+    "resolve": ("hermes_cli.mcp_config", "_resolve_mcp_server_config"),
+    "validate": ("hermes_cli.mcp_security", "validate_mcp_server_entry"),
+}
+
 # Server access: Hermes's non-blocking card start, which is newer than the read and the writers.
 _ACCESS: Dict[str, Tuple[str, str]] = {
     **_PROFILE_SCOPE,

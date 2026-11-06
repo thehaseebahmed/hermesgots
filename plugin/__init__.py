@@ -17,6 +17,7 @@ import concurrent.futures
 import threading
 import time
 import contextlib
+import functools
 import json
 import logging
 import re
@@ -53,6 +54,7 @@ from . import (
     library,
     link,
     mcp,
+    mcp_call,
     media,
     model_changes,
     merges,
@@ -3299,8 +3301,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     async def query_app(request: "web.Request") -> "web.Response":
         """A page's `Query` answered from the host's own reads (ADR 0102), which carry no consent.
-        Any other name is refused unless the calling app was agreed to it; the route cannot call
-        one yet, so it is never a way into another tool."""
+        Any other name is refused unless the calling app was agreed to it, and an agreed
+        `<server>.<tool>` is answered by the plugin's own MCP client (`mcp_call.py`)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3317,12 +3319,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     " asks to agree to it first.",
                     403,
                 )
-            return _error(web, f"This Hermes version cannot call {shape!r} for an app yet.", 501)
+            if "." not in shape:
+                return _error(
+                    web, f"This Hermes version cannot call {shape!r} for an app yet.", 501
+                )
+            read = functools.partial(mcp_call.call_async, _request_profile(), shape)
         args = sent.get("args")
         try:
             value = await read(args if isinstance(args, dict) else {})
         except ValueError as error:
             return _error(web, str(error), 400)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
         except ImportError:
             return _error(web, f"This Hermes version cannot answer {shape}.", 501)
         return web.json_response({"object": "memento.app.query", "shape": shape, "value": value})

@@ -53,5 +53,7 @@ a short life.
 - **A refusal must be drawable.** An undeclared or failed call answers a value the page renders, never
   a silent no-op: an app that looks like it acted when it did not is the failure this record exists to
   prevent.
+- **A tool is named `<server>.<tool>`,** split at the first dot, and the plugin's client (`mcp_call.py`) opens
+  one stdio session per call. A server that is off, missing, remote or failing answers 502 with its reason.
 - **Remote servers are a second step.** Local stdio servers are the first case; a remote server's
   tokens are a question this record leaves open rather than pretends to answer.

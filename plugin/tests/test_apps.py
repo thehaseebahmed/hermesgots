@@ -653,6 +653,31 @@ class Queries(unittest.TestCase):
         apps.write(path, made["id"], "root", '# id: root\nr = Query("lock", {}, {})')
         self.assertEqual(self.ask({"app": made["id"], "shape": "lock"})["status"], 403)
 
+    def test_an_agreed_server_tool_is_answered_by_the_mcp_client(self) -> None:
+        path = db_path(self.home)
+        source = '# id: root\nroot = Stack([])\nl = Query("home.light", {}, {})'
+        made = apps.create(path, "House", source)
+        with mock.patch.object(plugin.mcp_call, "call", return_value={"on": True}) as called:
+            answer = self.ask({"app": made["id"], "shape": "home.light", "args": {"id": 1}})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["value"], {"on": True})
+        self.assertEqual(called.call_args.args[1:], ("home.light", {"id": 1}))
+
+    def test_a_server_that_cannot_answer_is_a_502_with_its_reason(self) -> None:
+        path = db_path(self.home)
+        made = apps.create(path, "House", '# id: root\nl = Query("home.light", {}, {})')
+        refusal = plugin.mcp.McpError("The MCP server 'home' is off.", 502)
+        with mock.patch.object(plugin.mcp_call, "call", side_effect=refusal):
+            answer = self.ask({"app": made["id"], "shape": "home.light"})
+        self.assertEqual(answer["status"], 502)
+        self.assertIn("is off", answer["payload"]["error"]["message"])
+
+    def test_an_unagreed_server_tool_is_never_called(self) -> None:
+        with mock.patch.object(plugin.mcp_call, "call") as called:
+            answer = self.ask({"app": "ghost", "shape": "home.light"})
+        self.assertEqual(answer["status"], 403)
+        called.assert_not_called()
+
     def test_an_act_is_never_answered_by_the_read_route(self) -> None:
         path = db_path(self.home)
         made = apps.create(path, "House", '# id: root\nroot = Mutation("light", {})')
