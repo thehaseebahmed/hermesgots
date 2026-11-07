@@ -1009,6 +1009,60 @@ await flow(
     )
     pass("closing the thread gives Main the whole lane")
 
+    // And forgotten is what "closed" means: the next launch opens Main alone, so a reload of this
+    // address keeps the one chat it names and brings none beside it (G5).
+    await page.reload()
+    // The page boots from nothing, so the shell's Main is waited for: the absence of a thread
+    // beside it only means something once Main itself is drawn.
+    await until(
+      () =>
+        page.evaluate(() => {
+          const main = document.querySelector('[data-pane="main"]')
+          const title = main?.querySelector('[data-slot="header-title"]')?.textContent?.trim() ?? ""
+          const content = main?.querySelector('[data-slot="message-scroller-content"]')
+          return Boolean(title) && Boolean(content?.children.length)
+        }),
+      20_000,
+      "Main drawn again after a reload",
+    )
+    await ready(page, "the laptop after a reload", "main")
+    await settled(page)
+    assert.equal(
+      await count(page, '[data-pane="thread"]'),
+      0,
+      "the thread the close put away is not drawn beside Main after a reload",
+    )
+    assert.equal(
+      await count(page, '[data-slot="header-row"]'),
+      1,
+      "one header after the reload: the bot's own",
+    )
+    assert.equal(
+      await page.evaluate(async (id) => {
+        const { lastThreadKey } = await import("/src/lib/threads.ts")
+        return localStorage.getItem(lastThreadKey(id))
+      }, profileId),
+      null,
+      "and nothing is remembered for the bot to reopen",
+    )
+    const reopened = await page.evaluate(() => {
+      const row = document.querySelector("main")
+      const chat = document.querySelector('[data-pane="main"]')
+      return {
+        lane: row ? row.getBoundingClientRect().width : null,
+        main: chat ? chat.getBoundingClientRect().width : null,
+      }
+    })
+    assert.ok(
+      reopened.lane && reopened.main,
+      `Main is drawn after the reload (the lane ${reopened.lane}, Main ${reopened.main})`,
+    )
+    assert.ok(
+      Math.abs(reopened.main - reopened.lane) <= 2,
+      `and keeps the lane's whole width (Main ${Math.round(reopened.main)} against the lane ${Math.round(reopened.lane)})`,
+    )
+    pass("a closed thread is gone after a reload")
+
     // And only opening one again brings it back: the card in Main is that door, and the lane splits
     // once more, which is the state the rest of this laptop section reads.
     await viewLink(cardOf(page, threadId)).click()
