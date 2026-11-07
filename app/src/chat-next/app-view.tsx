@@ -47,7 +47,7 @@ import { questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { describeActivity } from "@/lib/format"
-import { COLUMN_BOX, REPLY_EDGE } from "@/lib/layout"
+import { COLUMN_BOX, COMPOSER_SLOT, REPLY_EDGE } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import { retryText } from "@/lib/retry-message"
@@ -425,7 +425,7 @@ export function AppThreadView({
         <div
           data-slot="composer-slot"
           data-toast-above
-          className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+          className={COMPOSER_SLOT}
         >
           {waiting ? <div className={COLUMN_BOX}>{waiting}</div> : composer}
         </div>

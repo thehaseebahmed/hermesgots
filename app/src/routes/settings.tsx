@@ -321,16 +321,6 @@ function PaneBack({ bot, tab }: { bot: Profile; tab: BotTab }) {
   )
 }
 
-/** The docs routes the Developer page offers, in one list so a new page is one entry beside its route. */
-const DOCS: { to: string; title: string; subtitle: string; icon: LucideIcon }[] = [
-  {
-    to: "/docs/open-ui",
-    title: "Component reference",
-    subtitle: "The blocks a bot can draw",
-    icon: BookOpenCheckIcon,
-  },
-]
-
 function MenuScreen({
   className,
   profiles,
@@ -705,15 +695,12 @@ export function DeveloperSettings() {
         ))}
       </Group>
       <Group>
-        {DOCS.map(({ to, title, subtitle, icon: Icon }) => (
-          <LinkRow
-            key={to}
-            to={to}
-            leading={<Icon className="size-5 shrink-0 text-muted-foreground" />}
-            title={title}
-            subtitle={subtitle}
-          />
-        ))}
+        <LinkRow
+          to="/docs/open-ui"
+          leading={<BookOpenCheckIcon className="size-5 shrink-0 text-muted-foreground" />}
+          title="Component reference"
+          subtitle="The blocks a bot can draw"
+        />
       </Group>
       <Button
         variant="ghost"

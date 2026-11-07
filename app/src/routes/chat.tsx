@@ -271,16 +271,16 @@ export function ChatPage(props: ChatPageProps) {
   }, [id])
   // While the verdict for a chat just switched to is still out, the screen that drew the last one
   // keeps drawing: the current screen holds the chat it left until the new one is ready.
-  const [kind, subject] = verdict?.split("\n") ?? []
+  const [screenKind, subjectId] = verdict?.split("\n") ?? []
   // The screen this chat opens on, wrapped once: the one Previewer a screen mounts is the same
   // instance whichever screen drew the thread.
   const screen =
-    kind === "blank" && subject ? (
+    screenKind === "blank" && subjectId ? (
       // Keyed by the bot it draws: another bot's new chat is a fresh surface, with its own pick.
       <Suspense fallback={null}>
-        <ChatNextBlank key={subject} botId={subject} slot={props.slot} />
+        <ChatNextBlank key={subjectId} botId={subjectId} slot={props.slot} />
       </Suspense>
-    ) : kind === "next" && verdict === `next\n${id}` && id ? (
+    ) : screenKind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat
         // Keyed by the chat it draws: a thread opened from Main is a fresh instance, which is what
         // lets it take the handover meant for its own id (ADR 0096).
@@ -291,7 +291,7 @@ export function ChatPage(props: ChatPageProps) {
         paneThread={props.paneThread}
         closeThread={props.closeThread}
       />
-    ) : kind === "current" ? (
+    ) : screenKind === "current" ? (
       <CurrentChatPage {...props} />
     ) : null
   if (screen) return <PreviewerProvider>{screen}</PreviewerProvider>
