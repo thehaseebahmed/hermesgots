@@ -20,9 +20,6 @@ HOST_SHAPES = ("usage", "routines", "projects", "sessions")
 Read = Callable[[Dict[str, Any]], Awaitable[Any]]
 MayCall = Callable[[Any, Any, bool], bool]
 
-_act_locks: Dict[str, asyncio.Lock] = {}
-
-
 class CallRefused(Exception):
     """A refusal the route answers with ``status``."""
 
@@ -32,12 +29,19 @@ class CallRefused(Exception):
 
 
 async def answer(
-    sent: Dict[str, Any], *, reads: Dict[str, Read], may_call: MayCall, profile: Any
+    sent: Dict[str, Any],
+    *,
+    reads: Dict[str, Read],
+    may_call: MayCall,
+    profile: Any,
+    locks: Dict[str, asyncio.Lock],
 ) -> Any:
     """The value for a call body ``{app, shape, args, write}``, or a ``CallRefused``.
 
     ``reads`` maps each host shape to its read; ``may_call(app, tool, write)`` is the consent
-    predicate and may block, so it runs off the loop."""
+    predicate and may block, so it runs off the loop. ``locks`` is the caller's table of per-server
+    act locks, one per wiring: a lock binds to the loop that first contends on it, so the table
+    must not outlive the server it was made for."""
     shape = sent.get("shape")
     write = sent.get("write") is True
     read = reads.get(shape) if isinstance(shape, str) else None
@@ -57,7 +61,7 @@ async def answer(
     args = args if isinstance(args, dict) else {}
     try:
         if write:
-            async with _act_locks.setdefault(shape.split(".")[0], asyncio.Lock()):
+            async with locks.setdefault(shape.split(".")[0], asyncio.Lock()):
                 return await read(args)
         return await read(args)
     except ValueError as error:

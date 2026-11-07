@@ -11,7 +11,9 @@ from plugin import mcp, page_calls
 
 
 def run(sent, reads=None, allow=lambda app, tool, write: False, profile="p"):
-    return asyncio.run(page_calls.answer(sent, reads=reads or {}, may_call=allow, profile=profile))
+    return asyncio.run(
+        page_calls.answer(sent, reads=reads or {}, may_call=allow, profile=profile, locks={})
+    )
 
 
 class HostShapes(unittest.TestCase):
@@ -100,8 +102,13 @@ class Tools(unittest.TestCase):
             return shape
 
         async def both(first, second):
+            locks = {}
             ask = lambda shape, write: page_calls.answer(
-                {"shape": shape, "write": write}, reads={}, may_call=lambda *a: True, profile=None
+                {"shape": shape, "write": write},
+                reads={},
+                may_call=lambda *a: True,
+                profile=None,
+                locks=locks,
             )
             return await asyncio.gather(ask(first, True), ask(second, True))
 
@@ -110,6 +117,26 @@ class Tools(unittest.TestCase):
             self.assertEqual(most, 1)
             asyncio.run(both("one.a", "two.b"))
             self.assertEqual(most, 2)
+
+    def test_a_fresh_wiring_takes_writes_under_a_new_loop(self) -> None:
+        async def call(profile, shape, args):
+            await asyncio.sleep(0.01)
+            return shape
+
+        async def burst():
+            locks = {}
+            ask = lambda: page_calls.answer(
+                {"shape": "srv.a", "write": True},
+                reads={},
+                may_call=lambda *a: True,
+                profile=None,
+                locks=locks,
+            )
+            return await asyncio.gather(ask(), ask(), ask())
+
+        with mock.patch.object(page_calls.mcp_call, "call_async", call):
+            self.assertEqual(asyncio.run(burst()), ["srv.a"] * 3)
+            self.assertEqual(asyncio.run(burst()), ["srv.a"] * 3)
 
 
 if __name__ == "__main__":

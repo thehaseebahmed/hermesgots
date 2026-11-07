@@ -3203,6 +3203,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 reads=app_queries,
                 may_call=functools.partial(apps.may_call, store_path()),
                 profile=_request_profile(),
+                locks=app_act_locks,
             )
         except page_calls.CallRefused as error:
             return _error(web, str(error), error.status)
@@ -3210,6 +3211,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "gots.app.query", "shape": sent.get("shape"), "value": value}
         )
 
+    app_act_locks: Dict[str, asyncio.Lock] = {}
     app_queries = {
         "usage": query_usage,
         "routines": query_routines,
