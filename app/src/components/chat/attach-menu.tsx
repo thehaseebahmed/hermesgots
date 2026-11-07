@@ -70,9 +70,9 @@ export function AttachMenu({
   const offers = (id: Source) =>
     pickRoad({ picture: id !== "files", readsImages: imagesAvailable, route: filesFeature })
       .road !== "none"
-  // Said only where every source is shut: while something can still reach the agent, a sheet that
-  // explains Files' refusal would put the reason above sources that are offered.
-  const because = SOURCES.some(({ id }) => offers(id)) ? null : filesReason(filesFeature)
+  // Said whenever Files is shut — it names Files, and a disabled source with no reason is what this
+  // sheet exists to stop — and the same sentence covers the state where every source is shut.
+  const because = filesReason(filesFeature)
 
   return (
     <>
@@ -125,11 +125,6 @@ export function AttachMenu({
           <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
-          {because && (
-            <div className="px-4 pb-4 sm:px-6">
-              <Banner>{because}</Banner>
-            </div>
-          )}
           <div
             className={cn(
               "grid grid-cols-3 gap-4 px-4 sm:gap-5 sm:px-6",
@@ -150,6 +145,11 @@ export function AttachMenu({
               </Button>
             ))}
           </div>
+          {because && (
+            <div className="px-4 pt-3 pb-1 sm:px-6">
+              <Banner>{because}</Banner>
+            </div>
+          )}
           {session && (
             <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
               <h3 className="px-1 text-sm text-muted-foreground">Mode</h3>

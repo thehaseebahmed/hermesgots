@@ -69,8 +69,8 @@ test("a host that advertises no attachments refuses Files at the menu, and offer
       "a picture the model reads rides inline, so the camera is still offered",
     )
     assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
-    // The sentence belongs to a sheet where nothing can reach, so it is not said over these.
-    assert.doesNotMatch(text(), /File uploads need/, "and nothing is explained above them")
+    // Files is refused, so its reason is said — under the sources, where it names that one.
+    assert.match(text(), /File uploads need a newer Gots plugin\./, "and Files' reason is said")
   })
 })
 
@@ -134,10 +134,10 @@ test("a host that advertises attachments offers Files as it always has", async (
   })
 })
 
-test("a host that hasn't answered offers Camera and Photos, and explains nothing above them", async () => {
+test("a host that hasn't answered offers Camera and Photos, and says why Files waits", async () => {
   // The model reads no images, so a photo waits on the host's route; the answer is still owed, which
-  // is not a no. Files is refused — it needs that route confirmed — but something can still reach,
-  // so the sheet explains nothing: the reason belongs to a sheet where no source is offered.
+  // is not a no, so the two photo sources are offered. Files needs that route confirmed, so it is
+  // refused — and the sheet says so, because a refused source with no reason is a dead button.
   await seed("attach-menu-owed", { imageInput: false })
   host("away", "attach-menu-owed", [])
   await mount(chatScreen(CHAT), async () => {
@@ -145,11 +145,7 @@ test("a host that hasn't answered offers Camera and Photos, and explains nothing
     assert.equal(source("Camera")?.hasAttribute("disabled"), false, "the camera is offered")
     assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
     assert.equal(source("Files")?.hasAttribute("disabled"), true, "while Files waits on the answer")
-    assert.doesNotMatch(
-      text(),
-      /File uploads need/,
-      "and nothing is explained over sources that are offered",
-    )
+    assert.match(text(), /File uploads need the Gots plugin\./, "and Files' reason is said")
   })
 })
 
