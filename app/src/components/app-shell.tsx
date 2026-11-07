@@ -60,7 +60,6 @@ interface ListPane {
   item?: ReactNode
   /** The item open beside the list: when it changes, the item left fades out over the next. */
   itemKey?: string
-  /** How the list takes its share of the row, and how an item arrives beside it. */
   layout: PaneLayout
 }
 

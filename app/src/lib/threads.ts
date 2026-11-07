@@ -408,7 +408,6 @@ export async function lastOpened(profileId: string): Promise<LastOpened> {
   return { last, stored, threads }
 }
 
-/** The lane's answer for one bot: what `lastOpened` says, naming the bot it ran for. */
 type LaneAnswer = LastOpened & { profileId: string }
 
 /** What a chat's row says about who owns it: its bot, and whether it is a project session. */
@@ -526,7 +525,6 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const fresh = kept && kept.profileId === profileId ? kept : undefined
   if (fresh && fresh !== answered) setAnswered(fresh)
   const answer = fresh ?? (answered?.profileId === profileId ? answered : undefined)
-  // The one answer the shell draws from: which bot, and what its lane is and holds.
   const lane = laneOf(thread, answer)
   const shown = lane.state === "thread" ? lane.thread : undefined
   // The thread this bot's lane closed on this visit, for `reopen`: one bot's at a time, so leaving
