@@ -63,7 +63,6 @@ from . import (
     sessions,
     tasks,
     usage,
-    workflows,
 )
 from .profile_scope import profile_scope
 from .store import connect, db_path, get_setting, get_settings, put_setting
@@ -220,7 +219,7 @@ def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
     """Everything the app's sheet shows: the switch and its reason, the tasks held, the last
-    refusal, the workflow this project's work runs under, and the Prompt its runs are told.
+    refusal, and the Prompt its runs are told.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
@@ -236,9 +235,6 @@ def read(
         "holds": [],
         "task": None,
         "refusal": None,
-        "build_skill": None,
-        "critique_skills": [],
-        "workflow_id": None,
         "prompt": None,
         "pick_count": None,
         "prompt_id": None,
@@ -259,7 +255,6 @@ def read(
         "pick_count": _pick_count(found),
         "prompt_id": found["prompt_id"],
         "refusal": found["refusal"],
-        "workflow": _workflow(hermes_home, project_id, found),
         # Empty and unset are the same thing — the bot's default method — so the app is handed the
         # words a run would read rather than a blank field.
         "prompt": found["prompt"] or prompt_builder.DEFAULT_PROMPT,
@@ -377,39 +372,6 @@ def bot_read(hermes_home: Path) -> Dict[str, Any]:
     }
 
 
-def _legacy(found: Dict[str, Any]) -> bool:
-    """Whether a project's row predates the picker and names its work by its old skill columns."""
-    return found.get("workflow_id") is None and bool(
-        found.get("build_skill") or found.get("critique_skills")
-    )
-
-
-def _chosen(
-    hermes_home: Path, project_id: str, found: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """The workflow this project has picked, or ``None`` where it has none to run.
-
-    Read from the row the caller already holds, so answering a project costs one store open. A row
-    that predates the picker is migrated to the workflow its build and critique skill columns
-    described, and names it, so what the project does can't change shape under the user on upgrade.
-    A pick the library no longer holds is no pick: its delete was refused where a project still named
-    it, so only a hand edit strands one.
-    """
-    if _legacy(found):
-        return workflows.migrate(
-            hermes_home,
-            project_id,
-            found.get("build_skill"),
-            found.get("critique_skills") or [],
-        )
-    return workflows.get(hermes_home, found.get("workflow_id"))
-
-
-def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
-    """The workflow this project's AFK work reads as: its pick, or One run where it has none."""
-    return _chosen(hermes_home, project_id, found) or workflows.one_run()
-
-
 def write_from(body: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """What a write names and the arguments that write takes — or ValueError.
 
@@ -423,26 +385,21 @@ def write_from(body: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """
     if "prompt_id" in body and "prompt" not in body:
         raise ValueError("prompt_id needs a prompt beside it.")
-    named = [key for key in ("on", "workflow_id", "prompt", "pick_count") if key in body]
+    named = [key for key in ("on", "prompt", "pick_count") if key in body]
     if len(named) > 1:
-        raise ValueError("A write names one of on, workflow_id, prompt or pick_count.")
+        raise ValueError("A write names one of on, prompt or pick_count.")
     if "on" in body:
         on = body["on"]
         if not isinstance(on, bool):
             raise ValueError("on must be true or false.")
         return "on", {"on": on}
-    if "workflow_id" in body:
-        workflow_id = body["workflow_id"]
-        if not isinstance(workflow_id, str) or not workflow_id.strip():
-            raise ValueError("workflow_id must be a workflow's id.")
-        return "workflow", {"workflow_id": workflow_id.strip()}
     if "prompt" in body:
         text = prompt_text(body["prompt"])
         source = prompt_source(body["prompt_id"]) if "prompt_id" in body else None
         return "prompt", {"prompt": text, "prompt_id": source}
     if "pick_count" in body:
         return "pick_count", {"count": pick_count_of(body["pick_count"])}
-    raise ValueError("on, workflow_id, prompt or pick_count is needed.")
+    raise ValueError("on, prompt or pick_count is needed.")
 
 
 def pick_count_of(value: Any) -> int:
@@ -486,47 +443,18 @@ def set_prompt(
     prompt: Optional[str],
     prompt_id: Optional[str] = None,
 ) -> None:
-    """Writes the project's Prompt and the library entry it was copied from, clearing any workflow
-    pick in the same write.
-
-    A project is never both: a Prompt is the method its runs are told and a pick is the library's,
-    and a row holding both would show words no run reads. The skill columns a row from before the
-    picker carries go with the pick: they are what ``_workflow`` migrates a project with no pick
-    from, so leaving them would put the old workflow back as soon as the Prompt was cleared, and
-    empty has to mean the default.
+    """Writes the project's Prompt and the library entry it was copied from.
 
     ``prompt_id`` rides the same write as the words: a pick writes both, and a plain write (the id
     left None) clears it, so a Prompt typed by hand never reads as a stale copy of an entry the user
-    didn't choose (ADR 0043).
+    didn't choose (ADR 0043). Empty is the bot's default method, so a blank Prompt clears the words
+    rather than storing a field a run would read as the user's.
     """
     _upsert(
         hermes_home,
         project_id,
         prompt=prompt,
         prompt_id=prompt_id,
-        workflow_id=None,
-        build_skill=None,
-        critique_skills=None,
-        at=int(time.time()),
-    )
-
-
-def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
-    """Points this project's AFK work at a workflow in its bot's library, clearing any Prompt it held.
-
-    The id has to be one the library holds: a project naming nothing would silently run the default
-    preset, and the user would have picked a workflow that isn't what works. A Prompt and a pick are
-    one choice between them, so picking one drops the Prompt in the same write: a project holding both
-    would show words no run reads. The Prompt's library source goes with the words it describes.
-    """
-    if workflows.get(hermes_home, workflow_id) is None:
-        raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
-    _upsert(
-        hermes_home,
-        project_id,
-        workflow_id=workflow_id,
-        prompt=None,
-        prompt_id=None,
         at=int(time.time()),
     )
 
@@ -1605,7 +1533,7 @@ def _forget_refusal(hermes_home: Path, project_id: str, found: Dict[str, Any]) -
 
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """The project's AFK row, read once: its switch, what it works with, and the tasks it holds.
+    """The project's AFK row, read once: its switch, its Prompt, and the tasks it holds.
 
     ``task`` is the oldest hold's — the one the sheet's single Working row draws — and ``holds`` the
     whole list, oldest first; a project holding nothing answers None and an empty list.
@@ -1613,8 +1541,7 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     conn = connect(db_path(hermes_home))
     try:
         row = conn.execute(
-            """SELECT enabled, refusal, build_skill, critique_skills, workflow_id, prompt,
-                      pick_count, prompt_id
+            """SELECT enabled, refusal, prompt, pick_count, prompt_id
                FROM project_afk WHERE project_id = ?""",
             (project_id,),
         ).fetchone()
@@ -1628,14 +1555,9 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "holds": holds,
         "task": holds[0].task if holds else None,
         "refusal": row[1] if isinstance(row[1], str) and row[1] else None,
-        # The two skill columns are only read to migrate a row written before the workflow picker;
-        # nothing answers them.
-        "build_skill": _text(row[2]),
-        "critique_skills": _names(_column(row[3], list)),
-        "workflow_id": row[4] if isinstance(row[4], str) and row[4] else None,
-        "prompt": _text(row[5]),
-        "pick_count": row[6],
-        "prompt_id": row[7] if isinstance(row[7], str) and row[7] else None,
+        "prompt": _text(row[2]),
+        "pick_count": row[3],
+        "prompt_id": row[4] if isinstance(row[4], str) and row[4] else None,
     }
 
 
@@ -1656,25 +1578,6 @@ def _text(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
     return value.strip() or None
-
-
-def _names(value: Any) -> List[str]:
-    """The names a stored list holds, each once, in its own order.
-
-    A bare string is no list — read one character at a time it would name eleven skills — and
-    neither is a value that isn't a sequence at all.
-    """
-    if isinstance(value, (str, bytes)):
-        return []
-    try:
-        found = list(value)
-    except TypeError:
-        return []
-    return list(dict.fromkeys(name for name in (_text(one) for one in found) if name))
-
-
-def _list(value: Any) -> List[Any]:
-    return _column(value, list) or []
 
 
 class Hold(NamedTuple):
@@ -1766,7 +1669,7 @@ def _upsert(hermes_home: Path, project_id: str, **fields: Any) -> None:
     """Writes the named columns of the project's row, making the row where the project has none.
 
     One statement for every writer, so a column is never added to an insert and forgotten in an
-    update. Nothing a caller doesn't name is touched, so the switch and the skills leave each other
+    update. Nothing a caller doesn't name is touched, so the switch and the Prompt leave each other
     alone; a fresh row starts switched off.
     """
     row = {"enabled": 0, **fields}

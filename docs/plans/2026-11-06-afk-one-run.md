@@ -175,6 +175,8 @@ flows and their audit rows; no message of either remains, so there is nothing to
      plugin advertises neither `afk_workflows` nor `afk_skills`"; `BotRouteTests` holds the
      `/workflows` routes gone.
 
+   Done.
+
 3. **The store forgets what only the library and the stages read.** Goals: G5. After: 2.
    Layers: Data access, sessions.
    - One schema step, v58, in the existing `_migrate` and its one `BEGIN IMMEDIATE`, so a failure

@@ -19,7 +19,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List, Optional
-from unittest.mock import ANY, patch
+from unittest.mock import patch
 
 from plugin import (
     afk,
@@ -30,8 +30,8 @@ from plugin import (
     prompt_builder,
     sessions,
     usage,
-    workflows,
 )
+
 from plugin.afk import (
     ARCHIVED,
     NO_GITHUB,
@@ -44,7 +44,6 @@ from plugin.afk import (
     set_pick_count,
     set_prompt,
     set_usage_threshold,
-    set_workflow,
     sweep,
     sweep_all,
     write_from,
@@ -61,21 +60,6 @@ from plugin.tests._helpers import (
 def folder(path: str) -> SimpleNamespace:
     """A project folder as the plugin reads one: only where it is."""
     return SimpleNamespace(path=path)
-
-
-def lose_pick(hermes_home: Path, project_id: str = "p1") -> None:
-    """Points a project at a workflow the library no longer holds, as a hand edit could.
-
-    The route refuses an id the library doesn't hold, so this is written straight to the row to
-    stand in for a store somebody edited behind the plugin's back.
-    """
-    conn = connect(db_path(hermes_home))
-    try:
-        conn.execute(
-            "UPDATE project_afk SET workflow_id = 'wf-gone' WHERE project_id = ?", (project_id,)
-        )
-    finally:
-        conn.close()
 
 
 class ProjectsStub(ModuleType):
@@ -336,11 +320,6 @@ class SwitchTests(unittest.TestCase):
         self.assertEqual(afk._holds(self.home, "p1"), [])
 
 
-def default_workflow() -> Dict[str, Any]:
-    """The default preset as the AFK read answers it: what a project that picked nothing runs."""
-    return {**workflows.one_run(), "at": ANY}
-
-
 def hold_update(
     home: Path, task: Optional[Dict[str, Any]] = None, project_id: str = "p1", **fields: Any
 ) -> None:
@@ -368,16 +347,17 @@ def held_task(home: Path, project_id: str = "p1") -> afk.Hold:
     return afk._holds(home, project_id)[0]
 
 
-def set_skill_columns(
-    home: Path, project_id: str, build: Optional[str], critique: List[str]
-) -> None:
-    """A project's row as a build before the workflow picker wrote it: the two skill columns only."""
+def point_at_a_workflow(home: Path, project_id: str = "p1") -> None:
+    """A row naming a workflow, as a store written before the library went holds one.
+
+    Nothing reads the column any more — it is what the next migration drops — so a row like this is
+    exactly what a project that had picked a workflow upgrades from.
+    """
     conn = connect(db_path(home))
     try:
         conn.execute(
-            """INSERT INTO project_afk (project_id, enabled, at, build_skill, critique_skills)
-               VALUES (?, 0, ?, ?, ?)""",
-            (project_id, int(time.time()), build, json.dumps(critique)),
+            "UPDATE project_afk SET workflow_id = 'preset:staged' WHERE project_id = ?",
+            (project_id,),
         )
     finally:
         conn.close()
@@ -388,7 +368,6 @@ def afk_row(
     reason: Optional[str] = None,
     task: Any = None,
     refusal: Optional[str] = None,
-    workflow: Any = None,
     prompt: Any = None,
     holds: Any = None,
     pick_count: int = 1,
@@ -397,7 +376,7 @@ def afk_row(
     holds_held: int = 0,
     usage_threshold: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """The answer `read` gives for a project holding nothing and having picked nothing.
+    """The answer `read` gives for a project holding nothing and having written nothing.
 
     Spelled once so a column added to the row is one edit here rather than one per test.
     """
@@ -409,7 +388,6 @@ def afk_row(
         "pick_count": pick_count,
         "prompt_id": prompt_id,
         "refusal": refusal,
-        "workflow": default_workflow() if workflow is None else workflow,
         "prompt": prompt_builder.DEFAULT_PROMPT if prompt is None else prompt,
         "pick_budget": pick_budget,
         "holds_held": holds_held,
@@ -435,120 +413,6 @@ class AfkHome(unittest.TestCase):
 
     def folders(self) -> List[Any]:
         return [folder(str(self.checkout))]
-
-    def choose(self, name: str = "Mine", build: Optional[str] = None, steps=()) -> Dict[str, Any]:
-        """A workflow of this bot's own, and the project naming it."""
-        entry = workflows.create(
-            self.home,
-            {"name": name, "stages": workflows.from_skills(build, steps)},
-        )
-        set_workflow(self.home, "p1", entry["id"])
-        return entry
-
-
-class WorkflowChoiceTests(AfkHome):
-    """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
-
-    def test_a_project_that_picked_nothing_reads_one_run(self) -> None:
-        found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID)
-        self.assertEqual(found["workflow"]["name"], "One run", "the shape a prompt run has")
-        self.assertEqual([stage["name"] for stage in found["workflow"]["stages"]], ["Build"])
-
-    def test_a_pick_the_library_lost_reads_one_run(self) -> None:
-        self.choose()
-        lose_pick(self.home)
-        found = read(self.home, "p1", self.folders())
-        self.assertEqual(
-            found["workflow"]["id"],
-            workflows.DEFAULT_ID,
-            "a workflow the library doesn't hold is no workflow to run",
-        )
-
-    def test_the_pick_is_read_back_from_the_host(self) -> None:
-        entry = self.choose(build="plan", steps=["code-review"])
-        found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["workflow"]["id"], entry["id"])
-        self.assertEqual(found["workflow"]["name"], "Mine")
-        self.assertEqual(found["workflow"]["stages"][0]["steps"], ["plan"])
-        self.assertEqual(found["workflow"]["stages"][2]["steps"], ["code-review"])
-
-    def test_the_pick_is_in_the_store_not_in_memory(self) -> None:
-        entry = self.choose()
-        conn = sqlite3.connect(db_path(self.home))
-        try:
-            row = conn.execute(
-                "SELECT workflow_id FROM project_afk WHERE project_id = ?", ("p1",)
-            ).fetchone()
-        finally:
-            conn.close()
-        self.assertEqual(row, (entry["id"],))
-
-    def test_one_projects_pick_leaves_anothers_alone(self) -> None:
-        mine = self.choose(name="Mine")
-        theirs = workflows.create(self.home, {"name": "Theirs", "stages": workflows.from_skills(None, [])})
-        set_workflow(self.home, "p2", theirs["id"])
-        self.assertEqual(read(self.home, "p1", self.folders())["workflow"]["id"], mine["id"])
-        self.assertEqual(read(self.home, "p2", self.folders())["workflow"]["id"], theirs["id"])
-
-    def test_the_switch_leaves_the_pick_alone(self) -> None:
-        entry = self.choose()
-        set_on(self.home, "p1", self.folders(), True)
-        set_on(self.home, "p1", self.folders(), False)
-        found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["workflow"]["id"], entry["id"])
-
-    def test_picking_leaves_a_project_never_turned_on_with_its_switch_off(self) -> None:
-        # The row sits under the switch, so choosing a workflow is no reason to start working.
-        self.choose()
-        self.assertFalse(read(self.home, "p1", self.folders())["on"])
-
-    def test_a_pick_the_library_does_not_hold_is_refused(self) -> None:
-        with self.assertRaises(ValueError):
-            set_workflow(self.home, "p1", "wf-nowhere")
-        self.assertEqual(
-            read(self.home, "p1", self.folders())["workflow"]["id"],
-            workflows.DEFAULT_ID,
-            "nothing was written, so the project still runs the default preset",
-        )
-
-    def test_a_write_names_the_switch_or_a_workflow(self) -> None:
-        self.assertEqual(write_from({"on": True}), ("on", {"on": True}))
-        self.assertEqual(write_from({"on": False}), ("on", {"on": False}))
-        self.assertEqual(write_from({"workflow_id": "wf-1"}), ("workflow", {"workflow_id": "wf-1"}))
-        self.assertEqual(
-            write_from({"workflow_id": "  wf-1  "}),
-            ("workflow", {"workflow_id": "wf-1"}),
-            "the id is trimmed",
-        )
-
-    def test_a_write_names_one_shape_at_a_time(self) -> None:
-        for body in (
-            {},
-            {"on": True, "workflow_id": "wf-1"},
-            {"on": "yes"},
-            {"workflow_id": ""},
-            {"workflow_id": 3},
-        ):
-            with self.subTest(body=body):
-                with self.assertRaises(ValueError):
-                    write_from(body)
-
-    def test_a_project_whose_old_skill_columns_hold_something_is_migrated_once(self) -> None:
-        set_skill_columns(self.home, "p1", "plan", ["code-review"])
-        found = read(self.home, "p1", self.folders())
-        self.assertNotEqual(found["workflow"]["id"], workflows.DEFAULT_ID, "its own workflow")
-        self.assertEqual(
-            [stage["name"] for stage in found["workflow"]["stages"]],
-            ["Build", "Test", "Review"],
-            "the three stages those columns described",
-        )
-        self.assertEqual(found["workflow"]["stages"][0]["steps"], ["plan"])
-        self.assertEqual(found["workflow"]["stages"][2]["steps"], ["code-review"])
-        again = read(self.home, "p1", self.folders())
-        self.assertEqual(again["workflow"], found["workflow"], "written once, then read back")
-        self.assertEqual(len(workflows.library(self.home)), 4, "three presets and the migration")
-
 
 class StartHarness(AfkHome):
     """A home that can start a claimed task: its session made, its run posted, both recorded.
@@ -661,53 +525,6 @@ class PromptTests(StartHarness):
             afk._row(self.home, "p1")["prompt"], "a blank Prompt stores nothing to read back"
         )
 
-    def test_writing_a_prompt_clears_the_workflow_pick(self) -> None:
-        self.choose()
-        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
-        self.assertIsNone(afk._row(self.home, "p1")["workflow_id"], "a project is never both")
-        self.assertEqual(
-            read(self.home, "p1", self.folders())["workflow"]["id"],
-            workflows.DEFAULT_ID,
-            "it runs no picked workflow any more",
-        )
-
-    def test_a_blank_prompt_clears_the_pick_too(self) -> None:
-        self.choose()
-        set_prompt(self.home, "p1", "")
-        self.assertIsNone(afk._row(self.home, "p1")["workflow_id"])
-
-    def test_a_prompt_keeps_a_migration_from_putting_a_pick_back(self) -> None:
-        # A row from before the picker: reading it would migrate the project onto the workflow those
-        # columns describe, and that pick would be what works the next task instead of the Prompt.
-        set_skill_columns(self.home, "p1", "plan", ["code-review"])
-        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
-        self.assertEqual(
-            read(self.home, "p1", self.folders())["workflow"]["id"],
-            workflows.DEFAULT_ID,
-            "the old columns are not a pick this project still holds",
-        )
-
-    def test_clearing_a_prompt_does_not_bring_the_old_skills_back(self) -> None:
-        set_skill_columns(self.home, "p1", "plan", ["code-review"])
-        migrated = read(self.home, "p1", self.folders())["workflow"]["id"]
-        self.assertNotEqual(migrated, workflows.DEFAULT_ID, "migrated on its first read")
-        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
-        set_prompt(self.home, "p1", "")
-        found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["prompt"], prompt_builder.DEFAULT_PROMPT, "empty is the default")
-        self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID, "and no pick comes back")
-        self.assertIsNone(afk._row(self.home, "p1")["workflow_id"])
-
-    def test_picking_a_workflow_clears_the_prompt_too(self) -> None:
-        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
-        self.choose()
-        self.assertIsNone(afk._row(self.home, "p1")["prompt"], "a project is never both")
-        self.assertEqual(
-            self.prompt(),
-            prompt_builder.DEFAULT_PROMPT,
-            "the sheet shows the method its next run will read",
-        )
-
     def test_one_projects_prompt_leaves_anothers_alone(self) -> None:
         set_prompt(self.home, "p2", "Theirs.")
         self.assertEqual(self.prompt(), prompt_builder.DEFAULT_PROMPT)
@@ -762,13 +579,6 @@ class PromptTests(StartHarness):
         self.assertIsNone(afk._row(self.home, "p1")["prompt_id"], "the source goes with the words")
         self.assertIsNone(read(self.home, "p1", self.folders())["prompt_id"])
 
-    def test_a_workflow_pick_clears_the_prompt_and_its_source(self) -> None:
-        set_prompt(self.home, "p1", "Mine.", "e-one")
-        self.choose()
-        found = afk._row(self.home, "p1")
-        self.assertIsNone(found["prompt"], "a project is never both")
-        self.assertIsNone(found["prompt_id"], "and a copy describes words it no longer holds")
-
     def test_a_source_without_a_prompt_is_refused(self) -> None:
         for body in (
             {"prompt_id": "e-one"},
@@ -795,7 +605,7 @@ class PromptTests(StartHarness):
     def test_a_prompt_is_never_written_beside_another_shape(self) -> None:
         for body in (
             {"prompt": "Mine.", "on": True},
-            {"prompt": "Mine.", "workflow_id": "wf-1"},
+            {"prompt": "Mine.", "pick_count": 2},
             {"prompt": 3},
         ):
             with self.subTest(body=body):
@@ -822,8 +632,8 @@ class PromptTests(StartHarness):
         Before the stage machine went, this project snapshotted its workflow onto the session and
         was briefed for the build stage instead of being told its Prompt.
         """
-        self.choose()
         set_on(self.home, "p1", self.folders(), True)
+        point_at_a_workflow(self.home)
         afk._hold(self.home, "p1", self.task)
         self.start()
         self.assertEqual(len(self.posted), 1, "one run is the task's whole work")
@@ -867,10 +677,23 @@ class WriteShapeTests(unittest.TestCase):
 
     BODIES = (
         {"on": True},
-        {"workflow_id": "wf-1"},
         {"prompt": "Mine.", "prompt_id": "e-one"},
         {"pick_count": 2},
     )
+
+    SHAPES = "on, prompt or pick_count"
+
+    def test_a_workflow_id_is_no_longer_a_write_this_host_takes(self) -> None:
+        """The library is gone, so a pick names no writer: the 400 an unknown shape always got."""
+        with self.assertRaises(ValueError) as refused:
+            write_from({"workflow_id": "wf-1"})
+        self.assertEqual(str(refused.exception), f"{self.SHAPES} is needed.")
+
+    def test_a_build_skill_body_is_not_one_either(self) -> None:
+        """The skills columns are neither read nor written now, so a body naming one is refused."""
+        with self.assertRaises(ValueError) as refused:
+            write_from({"build_skill": "plan"})
+        self.assertEqual(str(refused.exception), f"{self.SHAPES} is needed.")
 
     def test_every_shape_a_write_names_has_a_writer_that_takes_its_arguments(self) -> None:
         import inspect
@@ -1236,7 +1059,7 @@ class PickCountTests(ClaimStubTests):
         with self.assertRaises(ValueError) as raised:
             write_from({"pick_count": 2, "on": True})
         self.assertEqual(
-            str(raised.exception), "A write names one of on, workflow_id, prompt or pick_count."
+            str(raised.exception), "A write names one of on, prompt or pick_count."
         )
 
     def test_lowering_the_count_abandons_nothing(self) -> None:
@@ -1831,32 +1654,6 @@ class UsageThresholdTests(PickBudgetTests):
         self.ready()
         self.assertEqual(len(self.pass_()), 1)
         self.assertEqual(self.asks, [], "off means off: a bot with no limit reads nothing")
-
-    def test_a_prompt_project_and_a_workflow_project_are_judged_the_same_way(self) -> None:
-        """The check sits in the pass's shared planning step, not in the branch that reads skills.
-
-        p2 works a workflow and p1 runs one prompt, which names no skill at all: a check written
-        inside the lost-skill branch would never run for p1 (ADR 0026).
-        """
-        entry = workflows.create(
-            self.home, {"name": "Mine", "stages": workflows.from_skills("plan", ["code-review"])}
-        )
-        set_workflow(self.home, "p2", entry["id"])
-        self.turn_on("p1", 1)
-        self.turn_on("p2", 1)
-        self.over(80)
-        self.ready()
-        self.assertEqual(self.pass_(), [])
-        self.assertEqual(
-            self.shown("p1")["refusal"],
-            afk.USAGE_HELD.format(window="Weekly", percent="92", threshold=80),
-            "the project that runs one prompt is judged too",
-        )
-        self.assertEqual(
-            self.shown("p2")["refusal"],
-            afk.USAGE_HELD.format(window="Weekly", percent="92", threshold=80),
-        )
-        self.assertEqual(self.asks, ["anthropic"], "one account, read once")
 
     def test_a_full_budget_is_stated_ahead_of_the_account_without_reading_it(self) -> None:
         set_pick_budget(self.home, 1)
@@ -2951,7 +2748,6 @@ class MigrationTests(unittest.TestCase):
         shown = afk.read(self.home, "p1", [])
         self.assertTrue(shown["on"], "the switch is still the row's")
         self.assertEqual(shown["prompt"], "Work in checkpoints.")
-        self.assertEqual(shown["workflow"]["id"], "preset:one-run")
         self.assertEqual(shown["task"], self.HELD, "and the sheet still draws its Working row")
         self.assertEqual([hold["number"] for hold in shown["holds"]], [265])
 
@@ -2985,11 +2781,19 @@ class MigrationTests(unittest.TestCase):
 class FeatureTests(unittest.TestCase):
     """What this plugin tells an app it can do."""
 
+    def source(self) -> str:
+        return (Path(afk.__file__).parent / "__init__.py").read_text()
+
     def test_the_plugin_advertises_afk_picks(self) -> None:
         """The one flag every pick control gates on: an app behind it draws today's sheet, so the
         name has to be in the features array a real host answers."""
-        source = (Path(afk.__file__).parent / "__init__.py").read_text()
-        self.assertRegex(source, r'\n\s+"afk_picks",\n')
+        self.assertRegex(self.source(), r'\n\s+"afk_picks",\n')
+
+    def test_the_plugin_advertises_neither_afk_workflows_nor_afk_skills(self) -> None:
+        """The library and the legacy pickers are gone, so no app gates a control on either."""
+        source = self.source()
+        self.assertFalse("afk_workflows" in source, "afk_workflows is still advertised")
+        self.assertFalse("afk_skills" in source, "afk_skills is still advertised")
 
 
 class BotRouteTests(unittest.TestCase):
@@ -3018,6 +2822,10 @@ class BotRouteTests(unittest.TestCase):
         for call in ("afk.bot_read", "afk.bot_writes", "afk.write_bot"):
             with self.subTest(call=call):
                 self.assertIn(call, self.source)
+
+    def test_the_librarys_five_routes_are_gone(self) -> None:
+        """The library went with its routes, so nothing registers or answers a /workflows path."""
+        self.assertFalse("/workflows" in self.source, "a /workflows route is still registered")
 
 
 if __name__ == "__main__":
