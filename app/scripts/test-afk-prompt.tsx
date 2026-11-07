@@ -62,7 +62,7 @@ const WITH_SKILLS = ["afk", "afk_switch", "afk_skills", "afk_workflows", "afk_pr
 const withSkills = connection("with-skills")
 
 test("a host that still advertises the library and the pickers draws neither", async () => {
-  await seedSettings({ developer: true, afkWorkflows: true })
+  await seedSettings({ developer: true })
   globalThis.fetch = afkHost({ features: WITH_SKILLS }).fetch as unknown as typeof fetch
   await mountAfk(withSkills, project, async () => {
     // Booleans, not nodes: a failing assertion must not print a whole DOM tree.
