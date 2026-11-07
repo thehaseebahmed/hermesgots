@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { ChevronsLeftIcon } from "lucide-react"
 import { matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
@@ -153,7 +154,6 @@ import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { reportUnreadThread } from "@/lib/sentry"
 import { isUnsent } from "@/chat-next/unsent"
 import { BackButton } from "@/components/back-button"
-import { CloseThreadButton } from "@/components/close-thread-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
 import { announceMove } from "@/lib/triage"
 import { useMainFlow } from "@/components/chat/main-flow"
@@ -498,7 +498,14 @@ function NextChat({
                 // thread is a screen of its own and leads back; a session leads back to Code,
                 // unless it is drawn beside Code's list.
                 besideMain ? (
-                  closeThread && <CloseThreadButton onClick={closeThread} />
+                  closeThread && (
+                    <BackButton
+                      label="Close thread"
+                      onClick={closeThread}
+                      floating
+                      icon={<ChevronsLeftIcon />}
+                    />
+                  )
                 ) : mainPath ? (
                   <BackButton
                     label={`Back to ${bot.name || "bot"}`}
@@ -1533,7 +1540,14 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
           besideMain ? (
             // The bot is on screen with the thread, so the way out is the one that puts this pane
             // away, in the slot a phone's Back takes.
-            closeThread && <CloseThreadButton onClick={closeThread} />
+            closeThread && (
+              <BackButton
+                label="Close thread"
+                onClick={closeThread}
+                floating
+                icon={<ChevronsLeftIcon />}
+              />
+            )
           ) : mainPath ? (
             // Below `xl` the thread is a screen over Main, and leads back to it.
             <BackButton

@@ -17,7 +17,7 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform)
  * closed, and Alt+1 to Alt+9 starting a new chat with the bot in that place, while that switch is
  * on. A move is handed down only where the lane can make it, so a key with nothing behind it is no
  * key at all. A key something else has already answered, or one a composition is building, is that
- * surface's, not the shell's.
+ * surface's, not the shell's — and that is read once, before any of the three is tried.
  */
 export function KeyboardShortcuts({
   closeThread,
@@ -32,31 +32,18 @@ export function KeyboardShortcuts({
     [],
   )
   useEffect(() => {
-    if (!closeThread) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return
-      if (!closesThread(event)) return
-      event.preventDefault()
-      closeThread()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [closeThread])
-  useEffect(() => {
-    if (!reopenThread) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return
-      if (!reopensThread(event, MAC)) return
-      event.preventDefault()
-      reopenThread()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [reopenThread])
-  useEffect(() => {
-    if (!on) return
     const onKey = async (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return
+      /** Whether the press was the move's: claimed before the next one is tried, so nothing stands in. */
+      const take = (move: (() => void) | undefined, matches: () => boolean) => {
+        if (!move || !matches()) return false
+        event.preventDefault()
+        move()
+        return true
+      }
+      if (take(closeThread, () => closesThread(event))) return
+      if (take(reopenThread, () => reopensThread(event, MAC))) return
+      if (!on) return
       const index = botShortcut(event)
       if (index === null) return
       event.preventDefault()
@@ -67,6 +54,6 @@ export function KeyboardShortcuts({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [on, root])
+  }, [closeThread, reopenThread, on, root])
   return null
 }

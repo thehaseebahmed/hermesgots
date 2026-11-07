@@ -7,6 +7,7 @@ import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
 import { sendMessage } from "@/lib/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { SPLIT_KEY } from "@/lib/split"
 import { handOver, lastThreadKey, rememberThread, takeHandover } from "@/lib/threads"
 import {
   atWidth,
@@ -22,6 +23,7 @@ import {
   seedSettings,
   settle,
   spyAnimate,
+  SwitchTo,
   text,
   until,
 } from "./component-kit.tsx"
@@ -80,9 +82,12 @@ const screen = (entry: string) => (
     <Link to={`/c/${mainThreadId(other.id)}`} data-to-other>
       Other
     </Link>
+    {/* The way to a feature's own lane, which slides where a bot's rearranges. */}
+    <SwitchTo to="/code" replace />
     <Routes>
       <Route element={<AppShell />}>
         <Route path="c/:id" element={<ChatPage slot="route" />} />
+        <Route path="code" element={null} />
       </Route>
     </Routes>
   </MemoryRouter>
@@ -168,9 +173,6 @@ const listLane = () => {
   assert.ok(lane, "the shell draws the list's lane")
   return [...lane.classList]
 }
-
-/** The key a dragged split is kept under, on this device alone and for every bot: no profile in it. */
-const SPLIT_KEY = "gots:split-share"
 
 /**
  * The share the list's lane draws, read off the width the shell writes on it: a DOM without layout
@@ -717,7 +719,9 @@ test(
     await ensureMainThread(other.id)
     await mount(screen(`/c/${MAIN}`), async () => {
       // Of the two threads, the older one is opened: the chord has to bring back the thread it
-      // closed, which is not the newest one a "reopen the newest" would pick.
+      // closed, which is not the newest one a "reopen the newest" would pick. The card is drawn
+      // once the bot's threads have answered, so the press waits for it rather than racing it.
+      await until(async () => Boolean(cardLink("t-a")), "the card that opens the older thread")
       await click(cardLink("t-a"))
       await until(async () => titles().join("|") === "Mainly|Thread t-a", "the older thread")
       await click(find('[aria-label="Close thread"]'))
@@ -905,6 +909,47 @@ test(
       await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread again")
       await escape()
       await until(async () => titles().join("|") === "Mainly", "Escape's close")
+    })
+  }),
+)
+
+test(
+  "a bot's lane open plays no slide when the policy beside it slides",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    remembers("t-a")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      await settle()
+      const animator = spyAnimate()
+      try {
+        // Code's lane slides its item in where a bot's rearranges. The lane never closed — Main and
+        // its thread were open before and the list's lane is open after — so the entrance is no
+        // pane's to replay: it belongs to an opening, not to the policy that followed it (ADR 0110).
+        await click(find("[data-switch]"))
+        await until(async () => path() === "/code", "Code's own screen")
+        await until(async () => Boolean(find('[data-slot="list-lane"]')), "Code's own lane")
+        await settle()
+        const slides = animator.asked
+          .filter((one) =>
+            one.keyframes.some((frame) => String(frame.transform ?? "").includes("translateX")),
+          )
+          .map(
+            (one) => `${one.element} ${one.keyframes.map((frame) => frame.transform).join(" → ")}`,
+          )
+        assert.deepEqual(
+          slides,
+          [],
+          `a lane that stayed open slides nothing in (saw ${slides.join("; ")})`,
+        )
+        assert.ok(
+          listLane().includes("w-103"),
+          `and Code's lane is the 412px one it was designed around (it took ${listLane().join(" ")})`,
+        )
+      } finally {
+        animator.restore()
+      }
     })
   }),
 )

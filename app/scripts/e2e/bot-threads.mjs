@@ -5,12 +5,14 @@ import {
   cardOf,
   centred,
   centreOf,
+  dragBy,
   flow,
   mockAuth,
   pass,
   readHeader,
   settled,
 } from "./lib.mjs"
+import { SPLIT_KEY } from "../../src/lib/split.ts"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
@@ -1070,13 +1072,10 @@ await flow(
     /** One mouse drag of the edge, to `dx` px from where it stands. */
     const dragEdge = async (dx) => {
       const at = await centreOf(page, '[data-slot="split-handle"]')
-      await page.mouse.move(at.x, at.y)
-      await page.mouse.down()
-      await page.mouse.move(Math.max(2, at.x + dx), at.y, { steps: 10 })
-      await page.mouse.up()
-      await settled(page)
+      // A drag can't leave the page, so a move past its left edge stops at the edge.
+      await dragBy(page, at, Math.max(2 - at.x, dx), 0)
     }
-    const keptShare = () => page.evaluate(() => localStorage.getItem("gots:split-share"))
+    const keptShare = () => page.evaluate((key) => localStorage.getItem(key), SPLIT_KEY)
 
     // A drag sets the share the two chats are drawn at, and letting go keeps it on this device.
     await dragEdge(100)
