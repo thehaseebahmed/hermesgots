@@ -42,6 +42,18 @@ export const isPhoto = (type: string) => PHOTO_TYPES.test(type)
 export type RouteAnswer = "unknown" | "yes" | "no"
 
 /**
+ * The two facts an intake surface has before it reads a file: whether this chat's model takes image
+ * input, and what the host answered about the plugin's upload route. With the file's own kind they
+ * are all `pickRoad` asks.
+ */
+export interface RoadFacts {
+  /** Whether the chosen model takes image input. */
+  readsImages: boolean
+  /** What the host answered about the plugin's upload route. */
+  route: RouteAnswer
+}
+
+/**
  * Why Files isn't offered on a host that answered `answer` about the plugin's file route, or null
  * where it is. Every surface that takes a file says it in these words — the menu, and a paste or a
  * drop that arrives while the menu's Files is off.
@@ -66,17 +78,22 @@ export function pickRoad({
   picture,
   readsImages,
   route,
-}: {
+}: RoadFacts & {
   /** Whether the pick is a picture this app would send as an image (`isPhoto`). */
   picture: boolean
-  /** Whether the chosen model takes image input. */
-  readsImages: boolean
-  /** What the host answered about the plugin's upload route. */
-  route: RouteAnswer
 }): PickRoad {
   if (picture && readsImages) return { road: "inline" }
   const because = filesReason(route)
   return because ? { road: "none", message: because } : { road: "file" }
+}
+
+/**
+ * Whether one file rides inline — the road rule, asked of that file. The intake exempts a file from
+ * the per-file cap on this answer, and the read that prepares it hands the same answer to
+ * `prepareAttachment`, so both follow the road rather than one flag for the batch.
+ */
+export function ridesInline(file: CappedFile, facts: RoadFacts): boolean {
+  return pickRoad({ ...facts, picture: isPhoto(file.type) }).road === "inline"
 }
 
 export function formatBytes(bytes: number) {
@@ -109,23 +126,20 @@ export const unreadableRefusal = (name: string): Refusal => ({
 export const fitsInline = (size: number, used: number) => used + size <= MAX_INLINE_BYTES
 
 /**
- * What a pick of `files` becomes on a message already holding `held` attachments. A photo that
- * goes inline is taken however big it arrived, since scaling is what makes it fit; anything else
- * is measured against the per-file cap before it is read.
+ * What a pick of `files` becomes on a message already holding `held` attachments. A file that rides
+ * inline is taken however big it arrived, since scaling is what makes it fit; anything else — a
+ * document, a clip, or a photo on the host's file road — is measured against the per-file cap before
+ * it is read. The road is asked once per file, so a batch can hold files that take different roads.
  */
-export function intake<T extends CappedFile>(
-  files: T[],
-  held = 0,
-  { inline = true }: { inline?: boolean } = {},
-): Intake<T> {
+export function intake<T extends CappedFile>(files: T[], held = 0, facts: RoadFacts): Intake<T> {
   const room = Math.max(0, MAX_ATTACHMENTS - held)
   const chosen = files.slice(0, room)
   const left = files.length - chosen.length
   const refusals = left > 0 ? [countRefusal(left)] : []
   const take: T[] = []
   for (const file of chosen) {
-    const scales = inline && isPhoto(file.type)
-    if (!scales && file.size > MAX_FILE_BYTES) refusals.push(sizeRefusal(file.name))
+    if (!ridesInline(file, facts) && file.size > MAX_FILE_BYTES)
+      refusals.push(sizeRefusal(file.name))
     else take.push(file)
   }
   return { take, refusals }

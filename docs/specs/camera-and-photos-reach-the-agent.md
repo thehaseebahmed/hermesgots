@@ -145,7 +145,7 @@ sequenceDiagram
    attachments model, the send/upload path, composer/menu UI. Check: `test-attachment-caps.mjs`,
    `test-composer-intake.tsx`, `test-share-caps.tsx`, `test-main-triage.tsx` and `test-steer-files.tsx` green
    before and after; the pure test's calls move onto the new arguments and every asserted take and refusal
-   stays word for word.
+   stays word for word. **Done.**
 4. **A Camera or Photos pick lands as a picture on the file road.** With the model reading no images, a pick
    is prepared as a picture with no inline part — the file's own bytes — and the upload becomes the only
    copy: an upload that fails stops the send, naming the file and the reason, where a document does the same

@@ -403,7 +403,8 @@ export function Composer({
     const { attachments: prepared, refusals } = await prepareIntake(taken, {
       held: attachments,
       reserved: preparing.length,
-      inline: imagesAvailable,
+      readsImages: imagesAvailable,
+      route: filesFeature,
       onTake: (take) => {
         placeholders = take.map((file) => ({
           id: randomId(),

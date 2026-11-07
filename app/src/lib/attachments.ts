@@ -8,8 +8,11 @@ import {
   isPhoto,
   keptImage,
   MAX_FILE_BYTES,
+  ridesInline,
   sizeRefusal,
   type Refusal,
+  type RoadFacts,
+  type RouteAnswer,
 } from "@/lib/attachment-caps"
 import { attachmentParts } from "@/lib/attachment-text"
 import type { Attachment } from "@/lib/db"
@@ -64,8 +67,8 @@ function jpegName(name: string) {
  * model, while the copy kept — the bytes the host stores and this device caches — stays the file
  * the user chose, unless it is too big to send, when the scaled copy stands in for it. A photo that
  * goes inline always carries the bytes the model is sent: the file itself where nothing was scaled,
- * else the scaled copy. With `inline: false` (a model that takes no images) an image goes as the
- * file it is.
+ * else the scaled copy. With `inline: false` — a file `ridesInline` sends as a file — an image goes
+ * as the file it is.
  */
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
@@ -112,33 +115,39 @@ export interface PreparedIntake {
 
 /**
  * What `files` becomes on a message already holding `held` attachments — the one intake a pick, a
- * paste, a drop and a share land through. `onTake` is how a surface holds the place of the files it
- * is now reading.
+ * paste, a drop and a share land through. The two facts a surface has (whether this chat's model
+ * reads pictures, and what the host answered about its upload route) are asked of every file, so
+ * each one is capped and read by the road it takes. `onTake` is how a surface holds the place of
+ * the files it is now reading.
  */
 export async function prepareIntake(
   files: File[],
   {
     held = [],
     reserved = 0,
-    inline = true,
+    readsImages,
+    route,
     onTake,
   }: {
     /** The attachments the message already carries, whose count and inline room these share. */
     held?: Attachment[]
     /** Files already being read for this message, which hold a place in the count. */
     reserved?: number
-    /** Whether the model takes images; with none, an image goes as the file it is. */
-    inline?: boolean
+    /** Whether the chosen model takes image input: `pickRoad`'s first fact. */
+    readsImages: boolean
+    /** What the host answered about the plugin's upload route: `pickRoad`'s second fact. */
+    route: RouteAnswer
     /** Called with the files that passed the caps, before any of them is read. */
     onTake?: (take: File[]) => void
-  } = {},
+  },
 ): Promise<PreparedIntake> {
-  const { take, refusals } = intake(files, held.length + reserved, { inline })
+  const facts: RoadFacts = { readsImages, route }
+  const { take, refusals } = intake(files, held.length + reserved, facts)
   onTake?.(take)
   const answers = await Promise.all(
     take.map(async (file): Promise<{ attachment?: Attachment; error?: Error }> => {
       try {
-        return { attachment: await prepareAttachment(file, inline) }
+        return { attachment: await prepareAttachment(file, ridesInline(file, facts)) }
       } catch (error) {
         return {
           error: error instanceof Error ? error : new Error(`Couldn't attach ${file.name}.`),
