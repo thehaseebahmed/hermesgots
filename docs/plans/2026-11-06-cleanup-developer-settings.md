@@ -183,7 +183,7 @@ sequenceDiagram
 - **Migrated to chat-next:** `test-attach-menu.tsx`, `test-slash-menu.tsx`.
 - **Kept keyless on the current screen, the still-real uncallable-bot path:** `test-live-cluster`, `test-live-span`, `test-thinking-line`, `test-thread-rendering`, `test-main-cards`, `test-cheatsheet-sheet`, `test-main-thread`, `test-bot-chrome`, `test-bot-pane`, `test-main-navigation`, `test-switch-hold`, `test-switch-scroll`, `test-page-fade`, `test-openui`, `test-openui-switch`, `test-media-gallery`, `test-media-cache`, `test-media-reply`, `test-previewer-zoom`, `test-attachment-row`, `test-composer-steer`, `test-pending-card`, `test-card-undo`, `test-session-close`, `test-subagent-result`, `test-routine-run`, `test-thread-command`, `test-progress-reminder-row`, `test-archive-thread`.
 - **Retired with named chat-next coverage:** `test-compaction-thread` (chat-next mount dividers and the compaction matrix), `test-compaction-live`'s divider case, `test-todos-live` (the finished turn's todo pill), `test-model-pin` (the composer's model pill and pin), `test-wake-follow` and `test-wake-question` (the chat-next delegate wake turn).
-- **Retired as unreachable:** `test-chat-history-missing`. Chat-next's away header and failed-turn Retry cover the situation; its Copy details support dump has no chat-next equivalent and is left as a follow-up.
+- **Retired, with its still-reachable state tested elsewhere:** `test-chat-history-missing`. The notice is still reachable on an uncallable bot with a synced chat, so the current screen keeps it; `test-thread-missing.tsx` covers that state, its Try again and its Copy details.
 
 ## Decisions
 
