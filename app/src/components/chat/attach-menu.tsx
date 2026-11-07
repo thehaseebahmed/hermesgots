@@ -1,13 +1,13 @@
 import { useRef, useState, type ChangeEvent } from "react"
 import { CameraIcon, FileUpIcon, ImageIcon, PlusIcon, type LucideIcon } from "lucide-react"
 
-import { Banner } from "@/components/banner"
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
-import { filesReason, pickRoad } from "@/lib/attachment-caps"
+import { pickRoad } from "@/lib/attachment-caps"
 import type { SessionMode } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
@@ -43,7 +43,15 @@ export function AttachMenu({
     files: null,
   })
 
+  /** Which road one source's pick takes: the bytes the model reads, the host's file, or nowhere. */
+  const roadOf = (source: Source) =>
+    pickRoad({ picture: source !== "files", readsImages: imagesAvailable, route: filesFeature })
+
   const pick = (source: Source) => {
+    const road = roadOf(source)
+    // A source nothing can carry stays tappable and says why, so the sheet never leaves a dead
+    // button to guess at; the sheet is left open with its sentence said.
+    if (road.road === "none") return tell.error(road.message)
     setOpen(false)
     inputs.current[source]?.click()
   }
@@ -63,10 +71,6 @@ export function AttachMenu({
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
-  const offers = (id: Source) =>
-    pickRoad({ picture: id !== "files", readsImages: imagesAvailable, route: filesFeature })
-      .road !== "none"
-  const because = filesReason(filesFeature)
 
   return (
     <>
@@ -115,7 +119,7 @@ export function AttachMenu({
         onChange={picked}
       />
       <Popup open={open} onOpenChange={setOpen} anchor={button}>
-        <PopupContent>
+        <PopupContent toastAbove>
           <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
@@ -125,25 +129,27 @@ export function AttachMenu({
               session ? "pb-2" : "pb-24 md:pb-2",
             )}
           >
-            {SOURCES.map(({ id, label, icon: Icon }) => (
-              <Button
-                key={id}
-                type="button"
-                variant="outline"
-                className="h-auto min-h-24 flex-col gap-2 rounded-2xl py-5 text-[15px] font-normal"
-                disabled={!offers(id)}
-                onClick={() => pick(id)}
-              >
-                <Icon className="size-6!" />
-                {label}
-              </Button>
-            ))}
+            {SOURCES.map(({ id, label, icon: Icon }) => {
+              // A refused source stays pressable — `disabled` would eat the tap that says why.
+              const shut = roadOf(id).road === "none"
+              return (
+                <Button
+                  key={id}
+                  type="button"
+                  variant="outline"
+                  aria-disabled={shut || undefined}
+                  className={cn(
+                    "h-auto min-h-24 flex-col gap-2 rounded-2xl py-5 text-[15px] font-normal",
+                    shut && "border-dashed text-muted-foreground",
+                  )}
+                  onClick={() => pick(id)}
+                >
+                  <Icon className="size-6!" />
+                  {label}
+                </Button>
+              )
+            })}
           </div>
-          {because && (
-            <div className="px-4 pt-3 pb-1 sm:px-6">
-              <Banner>{because}</Banner>
-            </div>
-          )}
           {session && (
             <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
               <h3 className="px-1 text-sm text-muted-foreground">Mode</h3>

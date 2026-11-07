@@ -4,7 +4,8 @@ Today the `+` sheet disables Camera and Photos whenever the bot's model takes no
 the same photo picked through Files reaches the agent as a path on the host. This change makes the sheet
 answer for each source out of what can actually be delivered: a photo rides inline when the model reads
 images, and otherwise it takes the host path Files already uses. The one state where neither road exists —
-the host has answered that it has no upload route — refuses the sources out loud, with the reason.
+the host has answered that it has no upload route — leaves every source tappable and says why when one is
+tapped, in a sentence no longer printed under the buttons.
 
 ## Goals
 - **G1** Camera, Photos and Files are each offered whenever what they pick can reach the agent by some route.
@@ -31,6 +32,7 @@ the host has answered that it has no upload route — refuses the sources out lo
 | the send/upload path (`lib/send-turn.ts`) | changed | G2 | a message sent to a faked host, reading the run body and the uploads (`test-main-triage.tsx`, `test-steer-files.tsx`) |
 | the stored rows (a device's messages, in `lib/db.ts`'s Dexie schema) | changed | G2 | a stored photo's row replayed through the send path (`test-main-triage.tsx`) |
 | composer/menu UI (`components/chat/composer.tsx`, `components/chat/attach-menu.tsx`) | changed | G1, G2, G3 | the `+` sheet off a mounted chat (`test-attach-menu.tsx`); the composer's pickers (`test-composer-intake.tsx`) |
+| the toast the sheet speaks through (`lib/tell.ts`, `android/…/ToastPlugin.java`) | added | G3 | the sheet's refusal reaching the toaster (`test-attach-menu.tsx`); the plugin is Android's own and unbuilt here |
 | the attachment tile (`components/chat/attachments.tsx`) | changed | G2 | a staged photo's tile (`test-attachment-row.tsx`) |
 | the plugin's attachment route (`plugin/attachments.py`) | affected | G2 | unchanged: it already takes an image and answers with a path |
 | the share screen (`routes/share.tsx`) | affected | — | a shared photo for a bot whose model takes no images (`test-share-caps.tsx`) |
@@ -96,17 +98,23 @@ sequenceDiagram
   end
 ```
 
-### F4: the host has no upload route and the model takes no images (changed). Test: "a host with no upload route refuses all three, with its reason"
+### F4: the host has no upload route and the model takes no images (changed). Test: "a host with no upload route refuses all three, and each says why when it is tapped"
 ```mermaid
 sequenceDiagram
   actor User
   participant Sheet as composer/menu UI
   participant Rule as the pure intake rule
+  participant Toast as the toast (the phone's own in the app, the page's toaster on the web)
   User->>Sheet: taps +
   rect rgb(255, 245, 200)
   Sheet->>Rule: is Camera offered here, and a file?
   Rule-->>Sheet: neither — no images and no route
-  Sheet-->>User: all three off, with the one sentence under them
+  Sheet-->>User: all three muted and marked unavailable, the sheet still open
+  end
+  User->>Sheet: taps Camera
+  rect rgb(255, 245, 200)
+  Sheet->>Toast: the rule's one sentence, in `filesReason`'s words
+  Toast-->>User: why it can't, said over the sheet
   end
 ```
 
@@ -163,16 +171,20 @@ sequenceDiagram
    attachments model. Check: "a photo over the file cap is taken on the file road too"
    (`test-attachment-caps.mjs`) and "a photo over nine megabytes is scaled to fit on the file road"
    (`test-composer-intake.tsx`) — red first. **Done.**
-6. **The sheet offers what can reach, and says why Files is shut.** The sheet asks the rule for each
-   source: Files follows today's gate (the route must be confirmed), Camera and Photos follow a picture's
-   road — offered when the model reads images or the host hasn't refused, refused only where the host
-   answered `no` and the model takes no images. The one sentence sits under the sources and names Files,
-   so it stands whenever Files is refused — a shut source with no reason is the thing this sheet exists
-   to stop — and it is also the only sentence in the state where nothing can reach. Goals: G1, G3.
-   After: 2, 3. Layers: composer/menu UI, the pure intake rule. Check:
-   `test-attach-menu.tsx` — "a model that takes no pictures still offers Camera and Photos" goes from
-   disabled to offered, and "a host with no upload route refuses all three, with its reason" replaces
-   "Camera is untouched" — red first. **Done.**
+6. **The sheet offers what can reach, and a source it refuses says why when tapped.** The sheet asks the
+   rule for each source: Files follows today's gate (the route must be confirmed), Camera and Photos follow
+   a picture's road — offered when the model reads images or the host hasn't refused, refused only where
+   the host answered `no` and the model takes no images. A refused source is neither a dead button nor a
+   sentence under the buttons: it stays tappable, is drawn muted and marked `aria-disabled="true"` for
+   assistive tech (never the `disabled` attribute, which would eat the tap), and a tap says why in a toast
+   — the one sentence `pickRoad` already returns, in `filesReason`'s words — leaving the sheet open. The
+   toast is the phone's own inside the Android app and the page's toaster everywhere else (`lib/tell.ts`
+   over the `Toast` plugin, which falls back to the toaster on an APK built before it); on the web the
+   sheet is marked `data-toast-above`, so the toast rises over it rather than behind it. The `Banner`
+   under the sources goes. Goals: G1, G3. After: 2, 3. Layers: composer/menu UI, the pure intake rule,
+   the toast. Check: `test-attach-menu.tsx` — "a model that takes no pictures still offers Camera and
+   Photos" goes from disabled to offered, and "a host with no upload route refuses all three, and each
+   says why when it is tapped" replaces "Camera is untouched" — red first. **Done.**
 
 ## Decisions
 - **A photo that travels as a file and is over the 9 MB cap is scaled to fit, not refused.** Made by the user
@@ -189,9 +201,14 @@ sequenceDiagram
   photo relies on the flag today: leaving the fold to a later change would replay existing photos as files.
 - **Files keeps its `yes`-only gate while Camera and Photos are offered at `unknown`.** Made by the agent,
   because Q2 names the two photo sources, and moving a document's gate was not asked for.
-- **Under `no`, all three sources are refused with the one sentence under them rather than left pressable.**
-  Made by the agent, because a sentence on screen is what keeps a refusal from being a dead button — and it
-  stands wherever Files is shut, the two states where the photo sources are still offered included.
+- **Under `no`, all three sources stay tappable — muted and marked unavailable — and a tap says the
+  sentence in a toast.** Made by the user, because a sentence printed under the buttons read as a notice
+  about the sheet rather than an answer about the tap, and a refusal spoken where it was asked for leaves
+  the other two sources in reach with the sheet still open.
+- **A toast is the phone's own in the Android app and the page's toaster everywhere else.** Made by the
+  user, because a notice drawn over the WebView sits behind a sheet the app has open and under the
+  system's own bars; one module (`lib/tell.ts`) is where the app asks for one, so the other 43 sonner
+  calls stay where they are until moving them is decided on its own.
 - **A refused photo reuses the sentence Files already gives.** Made by the agent, because it is the same
   missing capability and the words a refusal uses are written once.
 
@@ -210,6 +227,9 @@ sequenceDiagram
   bargain, and the refusal names the file and the plugin.
 - A photo on the file road costs an upload the inline road never needed, and on a host that advertises the
   route but refuses the file the whole message is refused where an inline photo would have gone.
+- In the Android app a toast is Android's own, so it carries no action, no colour and no place above the
+  composer: the sheet's refusal is only ever the one sentence, and an APK built before the `Toast` plugin
+  says it through the page's toaster instead.
 
 ## Not now
 - Narrowing the gallery's picker so a clip is offered only where the file road is confirmed: a source would
@@ -219,4 +239,6 @@ sequenceDiagram
 - Renaming `imagesAvailable`, now that it decides only whether a picture can go inline.
 - A mark on the tile saying which road a photo took, so the user can tell an inline photo from a stored one.
 - Scaling a file-road photo that fits, to help the agent's own vision tool read it.
+- Moving the app's other toasts onto `lib/tell`: the sheet's refusal is the only one that has to reach a
+  phone's own toast here, and the rest are a decision of their own.
 - Bounding the file road's total: ten photos are ten uploads, each its own request under the plugin's cap.

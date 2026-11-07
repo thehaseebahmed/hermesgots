@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { toast } from "sonner"
 
 import {
   botProfile,
@@ -39,25 +40,50 @@ const addContext = () => document.querySelector('[aria-label="Add context"]')
 const source = (label: string) =>
   findAll("button").find((button) => button.textContent?.trim() === label) ?? null
 
+/** `disabled` would eat the tap, so a source nothing can carry is marked unavailable and stays live. */
+const shut = (label: string) => source(label)?.getAttribute("aria-disabled") === "true"
+
+/** Taps a source and answers what it said: the refusal is a toast, and the sheet is left open. */
+async function tapped(label: string) {
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await click(source(label))
+  } finally {
+    toast.error = original
+  }
+  return said
+}
+
 async function openMenu() {
   await until(async () => Boolean(addContext()), "the + button")
   await click(addContext())
   await until(async () => Boolean(source("Files")), "the menu's sources")
 }
 
-test("a host that advertises no attachments refuses Files at the menu, and offers the camera", async () => {
+test("a host that advertises no attachments refuses Files, and says why when it is tapped", async () => {
   await seed("attach-menu-old")
   host(["media"], "attach-menu-old", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(source("Files")?.hasAttribute("disabled"), true, "Files is refused")
+    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files stays tappable")
+    assert.equal(shut("Files"), true, "and reads as unavailable")
     assert.equal(
-      source("Camera")?.hasAttribute("disabled"),
+      shut("Camera"),
       false,
       "a picture the model reads rides inline, so the camera is still offered",
     )
-    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
-    assert.match(text(), /File uploads need a newer Gots plugin\./, "and Files' reason is said")
+    assert.equal(shut("Photos"), false, "and the gallery with it")
+    assert.doesNotMatch(text(), /File uploads need/, "nothing is explained before it is asked")
+    assert.deepEqual(
+      await tapped("Files"),
+      ["File uploads need a newer Gots plugin."],
+      "a tap says why, in the rule's own sentence",
+    )
+    assert.ok(source("Files"), "and the sheet is still open")
   })
 })
 
@@ -66,13 +92,9 @@ test("a model that takes no pictures still offers Camera and Photos", async () =
   host(["attachments", "media"], "attach-menu-no-images", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(
-      source("Camera")?.hasAttribute("disabled"),
-      false,
-      "a picture travels as a file where the model can't read it",
-    )
-    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files keeps its own road")
+    assert.equal(shut("Camera"), false, "a picture travels as a file where the model can't read it")
+    assert.equal(shut("Photos"), false, "and the gallery with it")
+    assert.equal(shut("Files"), false, "Files keeps its own road")
     assert.doesNotMatch(
       text(),
       /File uploads need/,
@@ -81,29 +103,30 @@ test("a model that takes no pictures still offers Camera and Photos", async () =
   })
 })
 
-test("a host with no upload route refuses all three, with its reason", async () => {
+test("a host with no upload route refuses all three, and each says why when it is tapped", async () => {
   await seed("attach-menu-none", { imageInput: false })
   host("away", "attach-menu-none", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(
-      source("Camera")?.hasAttribute("disabled"),
-      false,
-      "a route not answered yet refuses no photo",
-    )
-    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "nor the gallery")
-    assert.equal(source("Files")?.hasAttribute("disabled"), true, "while Files waits on the answer")
+    assert.equal(shut("Camera"), false, "a route not answered yet refuses no photo")
+    assert.equal(shut("Photos"), false, "nor the gallery")
+    assert.equal(shut("Files"), true, "while Files waits on the answer")
   })
   host(["media"], "attach-menu-none", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
+    for (const label of ["Camera", "Photos", "Files"]) {
+      assert.equal(source(label)?.hasAttribute("disabled"), false, `${label} stays tappable`)
+      assert.equal(shut(label), true, `${label} is refused`)
+    }
     for (const label of ["Camera", "Photos", "Files"])
-      assert.equal(source(label)?.hasAttribute("disabled"), true, `${label} is refused`)
-    assert.match(
-      text(),
-      /File uploads need a newer Gots plugin\./,
-      "in the one sentence under the sources, naming Files",
-    )
+      assert.deepEqual(
+        await tapped(label),
+        ["File uploads need a newer Gots plugin."],
+        `${label} says why it can't, in the rule's own sentence`,
+      )
+    assert.ok(source("Camera"), "and the sheet stays open")
+    assert.doesNotMatch(text(), /File uploads need/, "nothing is explained on the sheet itself")
   })
 })
 
@@ -112,20 +135,24 @@ test("a host that advertises attachments offers Files as it always has", async (
   host(["attachments", "media"], "attach-menu-new", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files is offered")
+    assert.equal(shut("Files"), false, "Files is offered")
     assert.doesNotMatch(text(), /File uploads need/, "and there is nothing to explain")
   })
 })
 
-test("a host that hasn't answered offers Camera and Photos, and says why Files waits", async () => {
+test("a host that hasn't answered offers Camera and Photos, and Files says why it waits", async () => {
   await seed("attach-menu-owed", { imageInput: false })
   host("away", "attach-menu-owed", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "the camera is offered")
-    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
-    assert.equal(source("Files")?.hasAttribute("disabled"), true, "while Files waits on the answer")
-    assert.match(text(), /File uploads need the Gots plugin\./, "and Files' reason is said")
+    assert.equal(shut("Camera"), false, "the camera is offered")
+    assert.equal(shut("Photos"), false, "and the gallery with it")
+    assert.equal(shut("Files"), true, "while Files waits on the answer")
+    assert.deepEqual(
+      await tapped("Files"),
+      ["File uploads need the Gots plugin."],
+      "and a tap says why it waits",
+    )
   })
 })
 
@@ -135,12 +162,8 @@ test("a host that was away is asked again, not remembered as a no", async () => 
   host("away", "attach-menu-away", asked)
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(
-      source("Files")?.hasAttribute("disabled"),
-      true,
-      "no answer, so nothing is offered",
-    )
-    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "a photo is still tried")
+    assert.equal(shut("Files"), true, "no answer, so nothing is offered")
+    assert.equal(shut("Camera"), false, "a photo is still tried")
   })
   const askedWhileAway = infoReads(asked)
   assert.ok(askedWhileAway > 0, "the host was asked")
@@ -148,7 +171,7 @@ test("a host that was away is asked again, not remembered as a no", async () => 
   await mount(chatScreen(CHAT), async () => {
     await until(async () => infoReads(asked) > askedWhileAway, "a second ask")
     await openMenu()
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "the real answer fills it")
+    assert.equal(shut("Files"), false, "the real answer fills it")
   })
 })
 

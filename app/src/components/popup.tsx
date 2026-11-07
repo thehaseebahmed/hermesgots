@@ -189,6 +189,7 @@ export function PopupContent({
   className,
   fixedHeight,
   size = "lg",
+  toastAbove,
   children,
   initialFocus,
   dataSlot,
@@ -200,6 +201,10 @@ export function PopupContent({
   fixedHeight?: string
   /** The sheet's or menu's width; a drawer is a third of the viewport whatever this is. */
   size?: PopupSize
+  /** Raise the page's toasts above this sheet, for a toast that says something about the sheet
+   * itself (`data-toast-above` in `src/lib/toast.ts`). A drawer needs it not: it leaves the foot of
+   * the screen alone. */
+  toastAbove?: boolean
   children: ReactNode
   /** `false` focuses the pop-up itself, so a search field doesn't take focus (and the keyboard) on open. */
   initialFocus?: boolean
@@ -316,6 +321,7 @@ export function PopupContent({
           <Drawer.Popup
             ref={popup}
             data-popup-form={form}
+            data-toast-above={toastAbove || undefined}
             initialFocus={focus}
             className={cn(
               "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",

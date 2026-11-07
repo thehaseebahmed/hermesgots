@@ -1,8 +1,8 @@
 /**
  * Every toast sits at the bottom, a standard margin above the screen's edge. A screen marks what a
  * toast mustn't cover with `data-toast-above` (a chat's composer, the Code screen's New project
- * button) and the toast rises to clear the highest of them. `--toast-bottom` is what the toaster's
- * offset reads.
+ * button, a sheet saying why it refused a source) and the toast rises to clear the highest of them.
+ * `--toast-bottom` is what the toaster's offset reads.
  */
 const GAP = 8
 const STANDARD = "max(1rem, env(safe-area-inset-bottom))"

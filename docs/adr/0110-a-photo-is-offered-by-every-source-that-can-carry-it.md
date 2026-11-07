@@ -9,10 +9,13 @@ A photo now has two roads, and a source is offered when either is open: the mode
 ride inline, or the plugin's route saves the file, so the bytes ride as a path the agent's own tools open. A
 photo the browser can decode is scaled to fit the 9 MB per-file cap rather than refused, because a camera
 photo is routinely past it and a vision tool reads a 1600px copy as well as the original. Where the host has
-answered that it has no route and the model reads no images, no road exists, and the sheet says so in one
-sentence under the sources, naming Files: a shut source with no reason is the thing this change exists to
-remove, so the sentence stands wherever Files is refused, and where nothing can reach it is the only sentence
-there. While the answer is unknown, the sources are offered and the send is where a failure is spoken.
+answered that it has no route and the model reads no images, no road exists, and the sheet refuses the
+source where it was asked for: every source stays tappable, drawn muted and marked unavailable to assistive
+tech, and a tap says why in one sentence — `filesReason`'s, the words the composer already refuses Files
+in — while the sheet stays open, so the sources another road still carries are one tap away. Nothing is
+printed under the buttons: a notice beside all three read as a remark about the sheet rather than an answer
+about the tap. The sentence is a toast, the phone's own inside the Android app and the page's toaster on
+the web. While the answer is unknown, the sources are offered and the send is where a failure is spoken.
 
 ## Considered options
 
@@ -24,11 +27,18 @@ there. While the answer is unknown, the sources are offered and the send is wher
   failing exactly where this change promised it would not, and the scaled copy already exists.
 - **Refusing the sources while the host's answer is unknown.** Rejected: an answer not read yet is not a no,
   and a failure at send names the file and the reason.
+- **Saying the refusal in a sentence under the sources.** Replaced: it explained all three at once while the
+  user was asking about one, and it read as a notice about the sheet; the tap says the same sentence about
+  the source that was tapped, and leaves the sheet open.
 
 ## Consequences
 
 - The sheet's promise and the composer's intake ask one rule, so they cannot disagree about the same photo.
 - `Attachment.image` means the file is a picture; whether the model is sent its bytes is the presence of the
   inline part, and stored rows are folded to match.
+- A refused source is tappable, so a status is carried on `aria-disabled` and not `disabled`: a disabled
+  button has nothing to say when it is pressed.
+- Toasts are the phone's own in the Android app (`src/lib/tell.ts` over the `Toast` plugin) and the page's
+  toaster on the web, which is why a sheet that answers a tap is marked `data-toast-above`.
 - A photo on the file road costs an upload, and a host that advertises the route and then refuses the file
   refuses the whole message where an inline photo would have gone.

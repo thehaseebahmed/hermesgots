@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ShareTargetPlugin.class);
         registerPlugin(OpenImagePlugin.class);
         registerPlugin(NotificationSettingsPlugin.class);
+        registerPlugin(ToastPlugin.class);
         registerPlugin(BubblePlugin.class);
         super.onCreate(savedInstanceState);
     }
