@@ -69,10 +69,12 @@ export function filesReason(answer: RouteAnswer): string | null {
 export type PickRoad = { road: "inline" } | { road: "file" } | { road: "none"; message: string }
 
 /**
- * Which road a pick takes. A picture the model reads rides inline and needs no upload route; any
- * other pick — a document, a clip, or a photo the model can't read — travels as the file it is,
- * where the host has that route. A host that hasn't confirmed one carries neither, so the pick is
- * refused in the sentence Files already gives, since it is the same missing capability.
+ * Which road a pick takes. A picture the model reads rides inline and needs no upload route. A
+ * picture the model can't read travels as the file it is, on the host's route — and while the host
+ * hasn't answered about that route it is tried all the same, since an answer not read yet is not a
+ * no and the send is where a host that won't take it says why (Q2 of the spec). Any other pick — a
+ * document, a clip — needs the route confirmed: a host that hasn't answered one carries it nowhere,
+ * so it is refused in the sentence Files already gives, since it is the same missing capability.
  */
 export function pickRoad({
   picture,
@@ -83,6 +85,7 @@ export function pickRoad({
   picture: boolean
 }): PickRoad {
   if (picture && readsImages) return { road: "inline" }
+  if (picture && route !== "no") return { road: "file" }
   const because = filesReason(route)
   return because ? { road: "none", message: because } : { road: "file" }
 }

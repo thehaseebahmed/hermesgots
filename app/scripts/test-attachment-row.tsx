@@ -10,6 +10,7 @@ import test from "node:test"
 import { toast } from "sonner"
 
 import type { Attachment, Message } from "@/lib/db"
+import { AttachmentTile } from "@/components/chat/attachments"
 import {
   botProfile,
   chatScreen,
@@ -132,6 +133,50 @@ test("a file the host never took is drawn, and a tap says there is no copy of it
     })
   } finally {
     toast.error = original
+  }
+})
+
+test("a photo the browser can't draw is still drawn as a picture", async () => {
+  // A HEIC on the file road: the bytes this device holds are the picture itself, and a browser renders
+  // nothing from them, so the tile names it — with the picture's own icon — rather than showing a
+  // broken frame. A photo the browser can decode is still drawn from its bytes.
+  const heic: Attachment = {
+    id: "heic-1",
+    name: "IMG_0001.heic",
+    type: "image/heic",
+    size: 4096,
+    image: true,
+    blob: new Blob(["heic"], { type: "image/heic" }),
+  }
+  const png: Attachment = {
+    id: "png-1",
+    name: "cat.png",
+    type: "image/png",
+    size: 512,
+    image: true,
+    blob: new Blob(["png"], { type: "image/png" }),
+  }
+  const browser = stubBrowser()
+  try {
+    await mount(
+      <>
+        <AttachmentTile attachment={heic} />
+        <AttachmentTile attachment={png} />
+      </>,
+      async () => {
+        assert.deepEqual(
+          findAll("img").map((image) => image.getAttribute("alt")),
+          ["cat.png"],
+          "only the bytes this device can decode are drawn",
+        )
+        assert.match(text(), /IMG_0001\.heic/, "the HEIC is named")
+        assert.match(text(), /4 KB/, "with its size")
+        assert.equal(findAll("svg.lucide-image").length, 1, "as the picture it is")
+        assert.equal(findAll("svg.lucide-file").length, 0, "never as a plain file")
+      },
+    )
+  } finally {
+    browser.restore()
   }
 })
 

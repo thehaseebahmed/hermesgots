@@ -153,14 +153,25 @@ test("a photo for a model that takes no images is refused where the host has no 
     road: "none",
     message: "File uploads need a newer Gots plugin.",
   })
-  assert.deepEqual(pickRoad({ picture: true, readsImages: false, route: "unknown" }), {
-    road: "none",
-    message: "File uploads need the Gots plugin.",
-  })
   assert.equal(
-    pickRoad({ picture: true, readsImages: false, route: "unknown" }).message,
-    filesReason("unknown"),
+    pickRoad({ picture: true, readsImages: false, route: "no" }).message,
+    filesReason("no"),
     "a refused photo is refused in the words Files gives",
+  )
+})
+
+test("a photo picked before the host answered is tried on its file road", () => {
+  // An answer not read yet is not a no (Q2): the photo is offered and tried, and the send is where a
+  // host that won't take it says so. A document still needs the route confirmed.
+  assert.deepEqual(
+    pickRoad({ picture: true, readsImages: false, route: "unknown" }),
+    { road: "file" },
+    "a picture takes the file road while the host's answer is owed",
+  )
+  assert.deepEqual(
+    pickRoad({ picture: false, readsImages: false, route: "unknown" }),
+    { road: "none", message: filesReason("unknown") },
+    "a document keeps needing a confirmed route",
   )
 })
 

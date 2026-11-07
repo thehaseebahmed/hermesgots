@@ -155,7 +155,7 @@ sequenceDiagram
    takes no pictures lands as a file, and its send names the path" (`test-composer-intake.tsx`), "a photo
    that travels as a file says why it never reached the agent when the host won't take it"
    (`test-main-triage.tsx`), and "a photo the browser can't draw is still drawn as a picture"
-   (`test-attachment-row.tsx`) — red first.
+   (`test-attachment-row.tsx`) — red first. **Done.**
 5. **A photo the file road carries is taken at any size.** The intake stops measuring a picture against the
    per-file cap on either road; a photo over 9 MB is scaled to the 1600px JPEG the app already makes for the
    inline road, kept under its own `.jpg` name, and only a photo the browser cannot decode at all is refused

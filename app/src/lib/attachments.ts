@@ -67,12 +67,25 @@ function jpegName(name: string) {
  * model, while the copy kept — the bytes the host stores and this device caches — stays the file
  * the user chose, unless it is too big to send, when the scaled copy stands in for it. A photo that
  * goes inline always carries the bytes the model is sent: the file itself where nothing was scaled,
- * else the scaled copy. With `inline: false` — a file `ridesInline` sends as a file — an image goes
- * as the file it is.
+ * else the scaled copy. With `inline: false` — a file `ridesInline` sends as a file — a picture
+ * keeps being the picture it is and carries no part: its own bytes are what the host is handed, and
+ * that upload is the only copy the model's message can point at.
  */
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
-  if (inline && isPhoto(file.type)) {
+  const picture = isPhoto(file.type)
+  if (picture && !inline) {
+    if (file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
+    return {
+      id: randomId(),
+      name,
+      type: file.type,
+      size: file.size,
+      image: true,
+      blob: file,
+    }
+  }
+  if (picture) {
     const photo = await scaled(file)
     if (photo) {
       const { kept, inline: part } = keptImage<Blob>(file, photo.blob)

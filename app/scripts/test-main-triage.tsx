@@ -21,6 +21,7 @@ import {
   stopMessage,
 } from "@/lib/chat"
 import { db, MESSAGE_STORES, mainThreadId, type Message, type Profile } from "@/lib/db"
+import { prepareIntake } from "@/lib/attachments"
 import type { Move } from "@/lib/hermes"
 import { moveMarks } from "@/lib/move-marks"
 import { refreshMoves, undoMove } from "@/lib/moves"
@@ -36,6 +37,8 @@ type Answer = "stay" | "thread" | "new" | "fail" | "hang"
 const uploads: string[] = []
 /** Hosts whose runs never answer, so a reply started on them stays running. */
 const hangingRuns = new Set<string>()
+/** Hosts that answer an upload with the 404 a plugin without the route gives. */
+const noUploadRoute = new Set<string>()
 const hung = new Set<() => void>()
 
 /** Ends every run a host left hanging, so the reply that waited on it settles. */
@@ -74,6 +77,7 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
       )
     }
     if (url.pathname.endsWith("/attachments") && init?.method === "POST") {
+      if (noUploadRoute.has(name)) return json({ error: { message: "no such route" } }, 404)
       uploads.push(url.searchParams.get("name") ?? "")
       return json({
         name: url.searchParams.get("name"),
@@ -403,6 +407,33 @@ test("a stored photo with no part still goes inline when its message is sent aga
   const photo = parts.find((part) => part.type === "image_url")
   assert.ok(photo, "the photo rides in the message, as the build before this one sent it")
   assert.match(photo.image_url?.url ?? "", /^data:image\/png;base64,/, "with its own bytes")
+})
+
+test("a photo that travels as a file says why it never reached the agent when the host won't take it", async () => {
+  // F3: a photo picked while the host hasn't answered about its upload route is tried, and the file
+  // road's upload is its only copy — so a host that won't take it stops the send, in the host's own
+  // reason, rather than handing the model a picture it never got.
+  await seed("route-photo-refused")
+  uploads.length = 0
+  noUploadRoute.add("route-photo-refused")
+  const seen = host("route-photo-refused", "stay")
+  try {
+    const picked = await prepareIntake(
+      [new File(["heic"], "IMG_0001.heic", { type: "image/heic", lastModified: 9 })],
+      { readsImages: false, route: "unknown" },
+    )
+    assert.equal(picked.attachments.length, 1, "the photo the pick hands the send")
+    assert.equal(picked.attachments[0].image, true, "is the picture it is")
+    assert.equal(picked.attachments[0].inline, undefined, "with its bytes left for the host to keep")
+
+    await assert.rejects(
+      () => sendFromMain(MAIN, "look at this", picked.attachments),
+      /Couldn't attach IMG_0001\.heic\. Check that Hermes is reachable and its Gots plugin is up to date\./,
+    )
+    assert.deepEqual(runsFor(seen, MAIN_SESSION), [], "nothing reached the agent")
+  } finally {
+    noUploadRoute.delete("route-photo-refused")
+  }
 })
 
 test("a move is read back from the host and leaves a marker, a stay leaves none", async () => {
