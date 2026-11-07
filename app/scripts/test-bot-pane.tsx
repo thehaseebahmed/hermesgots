@@ -722,6 +722,55 @@ test(
 )
 
 test(
+  "the lane opens by rearranging, not by sliding",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    await mount(screen(`/c/${MAIN}`), async () => {
+      // A bot with a thread and none remembered: Main alone, at the lane's whole width.
+      await until(async () => Boolean(cardLink("t-a")), "the card that opens the thread")
+      await settle()
+      assert.deepEqual(titles(), ["Mainly"], "Main alone before the thread opens")
+      assert.ok(
+        listLane().includes("w-full"),
+        `and the lane's whole width (the lane took ${listLane().join(" ")})`,
+      )
+      const animator = spyAnimate()
+      try {
+        await click(cardLink("t-a"))
+        await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+        await settle()
+        assert.ok(
+          listLane().includes("w-1/2"),
+          `the edge landed half way (the lane took ${listLane().join(" ")})`,
+        )
+        const slides = animator.asked
+          .filter((one) =>
+            one.keyframes.some((frame) =>
+              String(frame.transform ?? "").includes("translateX"),
+            ),
+          )
+          .map((one) => `${one.element} ${one.keyframes.map((frame) => frame.transform).join(" → ")}`)
+        assert.deepEqual(
+          slides,
+          [],
+          `the lane opens by the edge moving, and nothing slides (saw ${slides.join("; ")})`,
+        )
+      } finally {
+        animator.restore()
+      }
+      // And both ways of putting it away still close it: the chevron, then the key.
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Mainly", "the chevron's close")
+      await click(cardLink("t-a"))
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread again")
+      await escape()
+      await until(async () => titles().join("|") === "Mainly", "Escape's close")
+    })
+  }),
+)
+
+test(
   "a card whose thread is already the screen says so and goes nowhere",
   laptop(async () => {
     localStorage.clear()
