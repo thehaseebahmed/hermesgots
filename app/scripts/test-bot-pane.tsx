@@ -1095,6 +1095,80 @@ test(
 )
 
 test(
+  "a callable bot's Main is chat-next's, and the lane beside it is the same split",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    // The bot whose Main chat-next draws: a server to call and a key to call it with.
+    await db.conversations.put({
+      id: "t-o",
+      profileId: other.id,
+      title: "Thread t-o",
+      titleEdited: true,
+      hermesSessionId: "gots-t-o",
+      createdAt: 20,
+      updatedAt: 20,
+      changedAt: 20,
+    })
+    await db.messages.put({
+      id: "t-o-open",
+      conversationId: "t-o",
+      role: "user",
+      content: "Opened t-o",
+      status: "done",
+      createdAt: 21,
+    })
+    rememberThread(other.id, "t-o")
+    await mount(screen(`/c/${mainThreadId(other.id)}`), async () => {
+      await until(
+        async () => titles().join("|") === "Otherly|Thread t-o",
+        "the remembered thread beside chat-next's Main",
+      )
+      await until(async () => text().includes("1 thread"), "Main's own count of its threads")
+      assert.ok(
+        find('[data-pane="main"][data-chat-next]'),
+        "the bot's Main is the screen chat-next draws",
+      )
+      assert.ok(
+        find('[data-pane="thread"][data-chat-next]'),
+        "and so is the thread beside it",
+      )
+      assert.equal(listShare(), 50, "the two share the row in half")
+      assert.equal(splitEdge()?.getAttribute("aria-valuenow"), "50", "with the handle between them")
+
+      const [main, thread] = findAll('[data-slot="header-row"]')
+      assert.ok(main?.querySelector('[role="img"]'), "Main keeps the bot's picture beside its name")
+      assert.equal(main?.querySelector('[aria-label="Close thread"]'), null, "and no close cross")
+      assert.ok(
+        thread?.querySelector('[aria-label="Close thread"]'),
+        "the thread beside it carries the cross",
+      )
+      assert.equal(
+        thread?.querySelector('[aria-label^="Back to"]'),
+        null,
+        "and no way back, which it doesn't need where its bot is on screen",
+      )
+      assert.equal(openCards()[0]?.getAttribute("href"), "/c/t-o", "Main marks the thread it holds")
+
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Otherly", "Main alone")
+      assert.ok(
+        listLane().includes("w-full"),
+        `and chat-next's Main takes the row's whole width (the lane took ${listLane().join(" ")})`,
+      )
+      assert.equal(remembered(other.id), null, "the thread it closed is forgotten")
+
+      await reopen()
+      await until(async () => titles().join("|") === "Otherly|Thread t-o", "the thread, back")
+      assert.equal(remembered(other.id), "t-o", "and the lane holds it again")
+
+      await escape()
+      await until(async () => titles().join("|") === "Otherly", "Escape's close, on chat-next's Main")
+    })
+  }),
+)
+
+test(
   "a card whose thread is already the screen says so and goes nowhere",
   laptop(async () => {
     localStorage.clear()
