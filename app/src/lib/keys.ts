@@ -48,6 +48,15 @@ export function isSendChord(press: Press) {
 }
 
 /**
+ * Whether one press puts the thread beside Main away: it is the collapse chevron's twin, so it is
+ * the bare Escape and never a chord, which is some other command's key.
+ */
+export function closesThread(press: Press) {
+  if (press.ctrlKey || press.altKey || press.shiftKey || press.metaKey) return false
+  return press.key === "Escape"
+}
+
+/**
  * Whether one Enter in the composer sends the message. The switch is this device's own
  * (`sendOnEnter`, Settings > Appearance, off by default), so out of the box Enter is a line break —
  * what a multiline field does everywhere — and the chord sends. Shift never sends, so a line is

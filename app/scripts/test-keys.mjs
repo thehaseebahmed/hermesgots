@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   botShortcut,
+  closesThread,
   enterSends,
   isDoubleEscape,
   isInterrupt,
@@ -68,4 +69,15 @@ test("Shift never sends, so a new line is always one key away", () => {
       "Shift outranks the chord",
     )
   }
+})
+
+test("Escape puts the thread beside Main away, and no chord does", () => {
+  assert.equal(closesThread(press({ key: "Escape", code: "Escape" })), true, "the bare key")
+  for (const chord of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }])
+    assert.equal(
+      closesThread(press({ key: "Escape", ...chord })),
+      false,
+      "a chord is another key's",
+    )
+  assert.equal(closesThread(press({ key: "Enter", code: "Enter" })), false)
 })

@@ -75,8 +75,8 @@ export function ChatHeader({
               <MenuIcon />
             </Button>
             {/* The centred arrangement holds the row's centre by both flanks sharing it, so where
-                nothing leads the row — a thread beside its bot — the leading track still takes a
-                box. Below `md` the drawer above is that box. */}
+                nothing leads the row — a coding session drawn beside Code's list — the leading
+                track still takes a box. Below `md` the drawer above is that box. */}
             {centered && <div aria-hidden className="hidden size-11 md:block" />}
           </>
         )}

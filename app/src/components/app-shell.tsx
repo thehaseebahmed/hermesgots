@@ -259,8 +259,11 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Half the row while a thread stands beside Main, the list lane while there is none, and the
   // answer before it while this bot's thread list is still out.
   const botLayout = useBotLaneLayout(lane)
+  // A lane that holds a thread the address doesn't name can be put away from its own header; where
+  // the address names the thread, the control belongs to the address instead (a later step).
+  const closeThread = bot?.canClose ? bot.close : undefined
   const botItem = shown ? (
-    <ChatPage key={shown} chatId={shown} slot="thread" />
+    <ChatPage key={shown} chatId={shown} slot="thread" closeThread={closeThread} />
   ) : bot ? (
     <ThreadLane lane={bot.lane} />
   ) : undefined
@@ -325,7 +328,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
 
   return (
     <BreakReminderProvider>
-      <KeyboardShortcuts />
+      <KeyboardShortcuts closeThread={closeThread} />
       <DrawerContext.Provider value={() => setOpen(true)}>
         <div className="flex h-dvh overflow-hidden bg-background">
           {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}

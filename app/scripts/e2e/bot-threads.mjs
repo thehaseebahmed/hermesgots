@@ -908,6 +908,15 @@ await flow(
       true,
       "and the pane the thread was in is the pane it is still in: nothing was drawn anew",
     )
+    // Back on Main with its thread still beside it, which is where the pane's own control lives: a
+    // thread the address names is that address's to leave, and gets its control a step later.
+    await page.goBack()
+    await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
+    await until(
+      async () => (await count(page, '[data-pane="thread"] [data-slot="header-title"]')) === 1,
+      15_000,
+      "the thread still beside Main, the address back on Main",
+    )
     const heads = await page.evaluate(() =>
       [...document.querySelectorAll('[data-slot="header-row"]')].map((row) => ({
         title: row.querySelector('[data-slot="header-title"]')?.textContent ?? "",
@@ -922,9 +931,14 @@ await flow(
     assert.notEqual(heads[1].title, "", "the thread beside it reads with its own title")
     assert.notEqual(heads[1].title, "Test bot", "which is the thread's, not the bot's")
     assert.equal(
-      heads[1].controls.some((label) => label.startsWith("Back to") || label === "Close thread"),
-      false,
-      "the thread beside its bot carries no control of its own",
+      heads[1].controls.includes("Close thread"),
+      true,
+      `the thread beside its bot carries the control that puts it away (saw ${heads[1].controls.join(", ")})`,
+    )
+    assert.deepEqual(
+      heads[1].controls.filter((label) => label.startsWith("Back to")),
+      [],
+      "and no way back, which it doesn't need where its bot is on screen",
     )
     assert.deepEqual(
       heads.map((head) => head.pictures),
@@ -936,7 +950,7 @@ await flow(
     await ready(page, "the laptop in light mode", "main")
     await shot("laptop")
     pass(
-      "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",
+      "on a laptop the thread beside Main carries the chevron that puts it away, and naming it changes nothing",
     )
 
     // Once the bot's thread list has answered and a thread stands beside Main, the two chats share
@@ -962,6 +976,49 @@ await flow(
       `and both are wider than the lane Main alone keeps (Main ${Math.round(lanes.main)}, thread ${Math.round(lanes.thread)})`,
     )
     pass("the thread beside Main shares the lane evenly")
+
+    // Closing it is one press on that chevron: Main takes the row's whole width, the width it has
+    // when no thread was ever opened (G2). Nothing else about the address moves here.
+    await page.locator('[data-pane="thread"] [aria-label="Close thread"]').click()
+    await until(
+      async () => (await count(page, '[data-pane="thread"]')) === 0,
+      15_000,
+      "Main alone after closing its thread",
+    )
+    await settled(page)
+    assert.equal(
+      await count(page, '[data-slot="header-row"]'),
+      1,
+      "one header is left: the bot's own",
+    )
+    const closed = await page.evaluate(() => {
+      const row = document.querySelector("main")
+      const chat = document.querySelector('[data-pane="main"]')
+      return {
+        lane: row ? row.getBoundingClientRect().width : null,
+        main: chat ? chat.getBoundingClientRect().width : null,
+      }
+    })
+    assert.ok(
+      closed.lane && closed.main,
+      `Main is drawn after the close (the lane ${closed.lane}, Main ${closed.main})`,
+    )
+    assert.ok(
+      Math.abs(closed.main - closed.lane) <= 2,
+      `Main takes the lane's whole width (Main ${Math.round(closed.main)} against the lane ${Math.round(closed.lane)})`,
+    )
+    pass("closing the thread gives Main the whole lane")
+
+    // And only opening one again brings it back: the card in Main is that door, and the lane splits
+    // once more, which is the state the rest of this laptop section reads.
+    await viewLink(cardOf(page, threadId)).click()
+    await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
+    await until(
+      async () => (await count(page, '[data-slot="header-row"]')) === 2,
+      15_000,
+      "a thread beside Main again",
+    )
+    pass("opening the thread again stands it beside Main")
 
     const secondBot = await addBot(page, { name: SECOND_BOT, messages: SECOND_MESSAGES })
     const secondMain = `/c/main-${secondBot}`
