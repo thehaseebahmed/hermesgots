@@ -36,8 +36,8 @@ const MAIN = mainThreadId(bot.id)
 /** What a run writes into a thread whose pane the reader closed mid-reply. */
 const LANDED = "Landed while the pane was away."
 
-async function seed(threads: string[] = [], patch: { botThreads?: boolean } = {}) {
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id, ...patch })
+async function seed(threads: string[] = [], patch: { legacyChat?: boolean } = {}) {
+  await seedSettings({ developer: true, activeProfileId: bot.id, ...patch })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot, other])
   await db.messages.clear()
@@ -531,10 +531,10 @@ test(
 )
 
 test(
-  "with the switch off a bot is one screen, as it was",
+  "with the legacy layout a bot is one screen, as it was",
   laptop(async () => {
     localStorage.clear()
-    await seed(["t-a", "t-b"], { botThreads: false })
+    await seed(["t-a", "t-b"], { legacyChat: true })
     localStorage.setItem(lastThreadKey(bot.id), "t-b")
     await mount(screen("/c/t-a"), async () => {
       await until(async () => titles().length === 1, "one screen")

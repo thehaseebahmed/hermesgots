@@ -48,7 +48,7 @@ const conversation = (): Conversation =>
 async function seed() {
   // A case is a device of its own: the marks a report is told against live here, not on the host.
   localStorage.clear()
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id })
+  await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()

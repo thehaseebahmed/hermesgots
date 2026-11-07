@@ -64,6 +64,7 @@ export interface DiagDevice {
   /** The Dexie schema version this device is on. */
   schema: number
   developer: boolean
+  /** Whether the bot-first layout is the one this device draws: false under the legacy switch. */
   botThreads: boolean
   /** Which chat screen this device draws (ADR 0065). */
   chatNext: boolean

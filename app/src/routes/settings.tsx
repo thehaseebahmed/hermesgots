@@ -641,13 +641,12 @@ export function DeveloperSettings() {
     <>
       <Group>
         <SwitchRow
-          id="bot-threads"
+          id="legacy-chat"
           icon={MessagesSquareIcon}
-          title="Bot threads"
-          experimental
-          subtitle="Bots in the sidebar, chats as threads"
-          checked={Boolean(settings?.botThreads)}
-          onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
+          title="Enable legacy chat UX"
+          subtitle="Recents in the sidebar, chats in one list"
+          checked={Boolean(settings?.legacyChat)}
+          onCheckedChange={(checked) => saveSettings({ legacyChat: checked })}
         />
         <SwitchRow
           id="show-progress-reminders"

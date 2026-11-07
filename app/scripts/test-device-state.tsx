@@ -9,8 +9,8 @@ import { botProfile, json, mount, seedSettings, until } from "./component-kit.ts
 
 const bot = botProfile("device-state", { id: "bot-1", name: "Mainly" })
 
-async function seed() {
-  await seedSettings({ developer: true, botThreads: true })
+async function seed(patch: { legacyChat?: boolean } = {}) {
+  await seedSettings({ developer: true, ...patch })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
@@ -62,7 +62,7 @@ test("the device state names a bot's Main, its threads and its host's answers, w
   await seed()
   globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage", "moves"] })
   const device = await readDeviceDiagnostics()
-  assert.equal(device.botThreads, true)
+  assert.equal(device.botThreads, true, "nothing stored means the bot-first layout")
   assert.equal(device.developer, true)
   const found = device.bots.find((one) => one.id === bot.id)
   assert.ok(found, "the bot is in the dump")
@@ -78,6 +78,14 @@ test("the device state names a bot's Main, its threads and its host's answers, w
   assert.equal(found.lastStored, "t1", "and so does what storage holds")
   assert.equal(found.plugin, "0.99.0", "the host's plugin version was read")
   assert.deepEqual(found.features, ["triage", "moves"], "the host's features were read")
+})
+
+test("the dump reports the layout the device is on, not the switch's stored key", async () => {
+  await seed({ legacyChat: true })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  const device = await readDeviceDiagnostics()
+  assert.equal(device.botThreads, false, "the legacy layout is reported as bot threads off")
+  assert.equal("legacyChat" in device, false, "and the switch itself never rides along")
 })
 
 test("the sheet shows the state as a copy block, with no message text or key in it", async () => {
