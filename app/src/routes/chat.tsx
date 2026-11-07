@@ -52,6 +52,7 @@ import {
 } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
+import type { ModeSettings } from "@/components/chat/mode-menu"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -82,6 +83,7 @@ import {
   type Conversation,
   type Message,
   type ModelChoice,
+  type Profile,
   createConversation,
   db,
   ensureMainThread,
@@ -502,7 +504,272 @@ function NextChat({
       ) : (
         <PendingChat />
       )}
-    </div>
+      <TodosSheet
+        open={todosOpen}
+        onOpenChange={setTodosOpen}
+        items={todos}
+        progress={progress}
+        live={live}
+      />
+      {session && (
+        <OutputsDrawer
+          open={outputsOpen}
+          onOpenChange={setOutputsOpen}
+          session={session}
+          config={serverConfig(bot)}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * A chat's composer, drawn from its record: a project session's own cards take the composer's place
+ * in the order the current screen draws them — closed, blocked, then a plan waiting to be approved —
+ * and a chat this device holds nothing of draws none of it.
+ */
+function NextComposerBody({
+  controls,
+  chatId,
+  botId,
+  main,
+  home,
+  notice,
+}: {
+  controls: ComposerControls
+  chatId: string
+  botId: string
+  /** A bot's Main: `/thread` starts a thread of it. */
+  main: boolean
+  /** Where `/new` goes: a thread's Main, else home. */
+  home?: string
+  /** The account's warning, which the composer draws above its text while it holds. */
+  notice?: ReactNode
+}) {
+  const navigate = useNavigate()
+  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
+  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
+  const session = chat?.projectId ? chat : null
+  // What the dictation hears best with: the chat's title, its project and the repos it works in.
+  const projects = useProjects(
+    session && bot ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey } : undefined,
+  )
+  const project = projects?.find((one) => one.id === session?.projectId)
+  const repos = session?.worktree?.repos.length
+    ? session.worktree.repos
+    : project
+      ? projectRepos(project)
+      : []
+  // `/thread` from Main: a thread of its own, with Main's pick, opened on the message the reader
+  // typed with it. The thread's own screen sends that message, so the turn is drawn there as it
+  // arrives and Main's card has the opener to show (ADR 0096).
+  const startThread = async (text: string, attachments: Attachment[]) => {
+    try {
+      const from = await db.conversations.get(chatId)
+      const thread = await beginThread(botId, {
+        modelChoice: chosenOf(from?.modelChoice),
+        text,
+        attachments,
+      })
+      navigate(`/c/${thread.id}`, { state: { bot: botId } })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
+      throw error
+    }
+  }
+  if (!bot || !chat) return null
+  const kept = chat.modelChoice
+  // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
+  const tracked = Boolean(bot.apiKey && !bot.disabled)
+  // Where the chat's model goes when the plan-ready card's pill picks another.
+  const chooseModel = (choice: ModelChoice | undefined) => {
+    const stored = storedPick(choice)
+    // Re-picking the model the chat already holds would wake every query over its row for nothing.
+    if (!samePick(kept, stored)) void updateConversation(chatId, { modelChoice: stored })
+  }
+  const said =
+    (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
+    async (text: string, attachments: Attachment[]) => {
+      try {
+        await go(text, attachments)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error))
+        throw error
+      }
+    }
+  if (session?.discardedAt) return <DiscardedCard />
+  if (session?.resolvedAt)
+    return (
+      <ResolvedCard onReopen={() => updateConversation(session.id, { resolvedAt: undefined })} />
+    )
+  if (session?.blocked && !controls.busy) return <BlockedCard reason={session.blocked} />
+  if (session?.planPending && session.mode === "plan" && !controls.busy)
+    return (
+      <PlanReadyCard
+        autoAvailable={tracked}
+        model={
+          tracked && (
+            <ModelMenu
+              profile={bot}
+              choice={chosenOf(kept)}
+              onChoose={chooseModel}
+              display="block"
+            />
+          )
+        }
+        onApprove={async (mode) => {
+          await setSessionMode(session.id, mode)
+          await controls.send(planApprovalMessage(session.planFile), [])
+        }}
+        onKeepPlanning={() => setSessionMode(session.id, "plan")}
+      />
+    )
+  return (
+    <ChatComposer
+      bot={bot}
+      draftKey={draftKey(chatId)}
+      modelChoice={kept}
+      onChooseModel={chooseModel}
+      dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
+      session={
+        session
+          ? {
+              mode:
+                session.mode === "auto" && !tracked
+                  ? "accept_edits"
+                  : (session.mode ?? "accept_edits"),
+              autoAvailable: tracked,
+              onMode: (mode) =>
+                setSessionMode(session.id, mode).catch((error) =>
+                  toast.error(error instanceof Error ? error.message : "Couldn't change the mode."),
+                ),
+            }
+          : undefined
+      }
+      notice={notice}
+      main={main}
+      home={home}
+      busy={controls.busy}
+      canSteer={controls.canSteer}
+      subagents={controls.subagents}
+      runId={controls.runId}
+      onSend={controls.send}
+      onQueue={said(controls.queue)}
+      onSteer={said(controls.steer)}
+      onStop={controls.stop}
+      onThread={(message) => startThread(message.text, message.attachments)}
+    />
+  )
+}
+
+/**
+ * The chat's composer, from what a send needs rather than a chat's row: the bot, the model it runs
+ * on, its draft key and the handlers. A chat-next surface with no record yet mounts this same
+ * composer, so a chat that has nothing written for it is still drawn by the one composer.
+ */
+function ChatComposer({
+  bot,
+  draftKey,
+  modelChoice,
+  onChooseModel,
+  dictationHint,
+  session,
+  notice,
+  main = false,
+  home,
+  busy,
+  canSteer,
+  subagents,
+  runId,
+  onSend,
+  onQueue,
+  onSteer,
+  onStop,
+  onThread,
+}: {
+  bot: Profile
+  /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
+  draftKey?: string
+  /** The model the chat runs on: what its pill names, and what a send runs with. */
+  modelChoice?: ModelChoice
+  /** Where a pick from the pill goes. */
+  onChooseModel: (choice: ModelChoice | undefined) => void
+  /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
+  dictationHint?: string
+  /** A project session: its permission mode, picked in the `+` menu. */
+  session?: ModeSettings
+  /** The account's warning, which the composer draws above its text while it holds. */
+  notice?: ReactNode
+  /** A bot's Main: `/thread` starts a thread of it. */
+  main?: boolean
+  /** Where `/new` goes: a thread's Main, else home. */
+  home?: string
+  busy: boolean
+  canSteer: boolean
+  /** How many of the session's subagents are still at work, which keep Stop rather than Send. */
+  subagents: number
+  /** The run Stop is for, so its acknowledgement ends when another run takes the button. */
+  runId?: string
+  onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
+  onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
+  onSteer: (text: string, attachments: Attachment[]) => Promise<void> | void
+  onStop: () => boolean | void | Promise<boolean>
+  /** `/thread` in Main: a thread of the bot, opened on the message sent with it. */
+  onThread?: (message: { text: string; attachments: Attachment[] }) => Promise<void> | void
+}) {
+  const { root } = useNav()
+  const filesFeature = usePluginFeature(bot, "attachments")
+  const sheet = useCheatsheet()
+  const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
+  const sendOnEnter = useLiveQuery(async () => (await getSettings()).sendOnEnter, [])
+  // Without a key nothing on the host answers for Auto, so a session runs as Accept edits.
+  const tracked = Boolean(bot.apiKey && !bot.disabled)
+  return (
+    <>
+      <Composer
+        busy={busy}
+        notice={notice}
+        connection={serverConfig(bot)}
+        botName={bot.name}
+        dictationWords={bot.vocabulary}
+        dictationHint={dictationHint}
+        draftKey={draftKey}
+        filesFeature={filesFeature}
+        imagesAvailable={bot.imageInput !== false}
+        onSend={onSend}
+        onQueue={onQueue}
+        onSteer={onSteer}
+        canSteer={canSteer}
+        model={
+          tracked && (
+            <ModelMenu
+              profile={bot}
+              choice={chosenOf(modelChoice)}
+              onChoose={onChooseModel}
+              disabled={busy}
+            />
+          )
+        }
+        steerByDefault={Boolean(steerByDefault)}
+        sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
+        subagentsRunning={subagents}
+        onStop={onStop}
+        runId={runId}
+        session={session}
+        main={main}
+        onCommand={async (command, message) => {
+          if (command === "thread")
+            return onThread?.({
+              text: message?.text ?? "",
+              attachments: message?.attachments ?? [],
+            })
+          if (command === "new") return root(home ?? "/")
+          if (command === "settings") return root("/settings")
+          if (command === "cheatsheet") return void sheet.show()
+        }}
+      />
+      <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
+    </>
   )
 }
 
