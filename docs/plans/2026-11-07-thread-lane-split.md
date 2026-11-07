@@ -205,5 +205,5 @@ sequenceDiagram
 - Cross-tab agreement: another tab's close does not redraw this one until the address moves.
 - A "keep this thread open on launch" switch, which Q2 decides the opposite of.
 
-Recorded in [ADR 0110](../adr/0110-a-bots-main-and-its-thread-share-the-pane.md), which this plan is
+Recorded in [ADR 0113](../adr/0113-a-bots-main-and-its-thread-share-the-pane.md), which this plan is
 the evidence for.

@@ -89,7 +89,7 @@ const LIST_LANE: PaneLayout = { list: "w-103", slide: true }
  * A bot's thread beside Main: the two chats share the room the sidebar leaves, and the reader drags
  * the edge between them. A fraction of the row rather than a width, because the sidebar may be open
  * or a rail and half is right in both, and each chat floored at 412px by a CSS clamp, so shrinking
- * the window can never crush Main and nothing has to listen for a resize (ADR 0110). The row
+ * the window can never crush Main and nothing has to listen for a resize (ADR 0113). The row
  * rearranges rather than sliding — the edge between the chats is the one thing that moves — and a
  * thread closing keeps its share until Main has covered it.
  */
@@ -495,7 +495,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const lane = bot?.lane
   const shown = lane?.state === "thread" ? lane.thread : undefined
   // The state the lane last answered with, which an unanswered list keeps: a closed lane stays
-  // closed and a split lane stays split until the bot it is showing has answered (ADR 0110).
+  // closed and a split lane stays split until the bot it is showing has answered (ADR 0113).
   const policy = useLanePolicy(lane)
   const botLayout = policy === "thread" ? SPLIT_LANE : LIST_LANE
   // A lane that holds a thread can be put away from its own header, the way an open one can be

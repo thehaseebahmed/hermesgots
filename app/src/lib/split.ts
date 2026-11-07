@@ -1,5 +1,5 @@
 /**
- * The split a reader drags between Main and its bot's thread (ADR 0110): the share of the lane Main
+ * The split a reader drags between Main and its bot's thread (ADR 0113): the share of the lane Main
  * keeps, a fraction of the row rather than a width — the sidebar may be open or a rail, and half is
  * right in both — kept on this device for every bot rather than one per bot, and floored at 412px a
  * side, the width the app already asks its text to read in. The floor is written as a CSS `clamp`,

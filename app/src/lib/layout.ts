@@ -3,7 +3,7 @@
  * the pane, so text lands on the same pixels at every width and a chat reads at the measure the
  * app's list screens read at (`max-w-2xl`, 672px with their own 16px gutters inside it).
  * A card the app draws inside a chat takes COLUMN_BOX instead — it fills its container up to that
- * box and never past it (ADR 0047, superseding ADR 0041; the measure itself ADR 0111).
+ * box and never past it (ADR 0047, superseding ADR 0041; the measure itself ADR 0114).
  */
 export const COLUMN = "mx-auto w-full max-w-[640px]"
 

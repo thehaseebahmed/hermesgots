@@ -1,6 +1,6 @@
 # A card stops at the chat's reading column, not its pane
 
-**Amended in its numbers by [ADR 0111](0111-a-chat-reads-at-the-width-the-list-screens-read-at.md)** (2026-11-07): the reading column is 640px of text in a 672px box, a chat reading at the measure the list screens use. The rule below — a card fills its container and stops at the box — stands.
+**Amended in its numbers by [ADR 0114](0114-a-chat-reads-at-the-width-the-list-screens-read-at.md)** (2026-11-07): the reading column is 640px of text in a 672px box, a chat reading at the measure the list screens use. The rule below — a card fills its container and stops at the box — stands.
 
 Gots draws a chat's text in a centred 768px reading column, and ADR 0041 made every card the app
 draws inside a chat fill the chat's pane with its 16px gutter while the text kept that column — and
