@@ -109,8 +109,7 @@ export function AfkPopup({
   // Read once — two reads of one feature is two answers that can disagree for a frame.
   const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   // The Prompt is how a project's work is carried out, so its row is drawn wherever the host holds
-  // one. A host that still advertises a workflow library or the skill pickers gets neither: they have
-  // no words to say that a Prompt's own do not.
+  // one.
   const promptOffered = withPrompt === "yes"
   // The account's own prompt library: the host has to advertise the change, and the account has to
   // be signed in with its vault open here — the library lives in that store, not on a host.

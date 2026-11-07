@@ -3607,8 +3607,8 @@ export interface BotAfk {
 /**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
- * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
- * follows, 0.58 for the stage a staged task is in and 0.60 for the Prompt its runs are told.
+ * plugin 0.50, 0.51 for the task it holds and the last refusal, and 0.60 for the Prompt its runs
+ * are told.
  */
 export interface ProjectAfk extends BotAfk {
   on: boolean
@@ -3618,8 +3618,8 @@ export interface ProjectAfk extends BotAfk {
   task: ProjectIssue | null
   /**
    * Every task the project's switch holds, oldest first — one session each, up to its pick count,
-   * with the stage that session is in. Null for a host from before picks, which holds at most the
-   * one `task` above; the sheet draws a single Working row from it then.
+   * with why nothing is working it. Null for a host from before picks, which holds at most the one
+   * `task` above; the sheet draws a single Working row from it then.
    */
   holds: AfkHold[] | null
   /** How many tasks it may hold at once, 1–5; null where the host answers no pick count. */
@@ -3670,8 +3670,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   if (!body || typeof body.on !== "boolean") {
     throw new HermesError("Hermes answered without AFK's setting.")
   }
-  // A plugin from before the sweep answers neither the task nor the refusal, and one from before the
-  // pickers answers no skills: that's nothing chosen, not a failure to read the switch.
+  // A plugin from before the sweep answers neither the task nor the refusal: nothing chosen, not a
+  // failure to read the switch.
   return {
     on: body.on,
     reason: str(body.reason) || null,

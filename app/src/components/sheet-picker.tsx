@@ -33,7 +33,7 @@ export function SheetPickerRow({
 }: {
   /** The record's id, which the row's own `data-` attribute carries for a test or a flow to read. */
   id: string
-  /** The attribute naming the kind of record, `data-workflow` or `data-prompt`. */
+  /** The attribute naming the kind of record, `data-prompt`. */
   attribute: `data-${string}`
   /** The record's name, which is what its pencil is called: `Edit <name>`. */
   name: string
@@ -93,7 +93,7 @@ export function SheetPickerList<T>({
   error?: string
   /** The list's accessible name — what these records are. */
   label: string
-  /** What the list reads while it waits for the first answer, "Reading workflows…". */
+  /** What the list reads while it waits for the first answer, "Reading prompts…". */
   reading: string
   /** What a list with nothing in it says. */
   empty: string

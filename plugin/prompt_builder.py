@@ -16,8 +16,8 @@ from . import tasks
 # --- The base prompt ---------------------------------------------------------------------
 # Told to every session that has a worktree, in this order: an overview of what the bot is, the
 # guidelines it works by (Do, then Don't), and the tools it may reach for with the use each is for.
-# Everything else a run is told — its mode, its workflow, the facts of this session — comes after, so
-# the top of the prompt reads the same in every run.
+# Everything else a run is told — its mode, the project's Prompt, the facts of this session — comes
+# after, so the top of the prompt reads the same in every run.
 
 _GOTS = "# You are Gots!"
 
@@ -134,7 +134,7 @@ _AFK_RULES = """The rules:
 # checkpoint at a time, each one checked three ways before it is committed, the whole change reviewed
 # by two skills once the issue is done, and a last reply in four headings a person can read.
 
-_WORKFLOW = "## The Project's Prompt"
+_PROJECT_PROMPT = "## The Project's Prompt"
 
 DEFAULT_PROMPT = """Work in checkpoints: small slices of the issue, one at a time; none is done until it has passed its checks.
 
@@ -256,7 +256,7 @@ def afk_prompt(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[st
         _base(record),
         _plan_mode(record),
         _section(_AFK, _AFK_OPENING, _AFK_RULES),
-        _section(_WORKFLOW, prompt or DEFAULT_PROMPT),
+        _section(_PROJECT_PROMPT, prompt or DEFAULT_PROMPT),
         _session(record, _handed_line(task)),
     )
 

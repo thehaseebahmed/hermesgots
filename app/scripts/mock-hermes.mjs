@@ -5995,9 +5995,8 @@ http
       return json(res, 200, pendingView(pendingOf(session)))
     }
     // Dev only: POST { project_id, reason } makes the project's claimed task stalled — its session
-    // waiting with that reason, the way a failed run or a restart leaves it — { pipeline, pr } moves
-    // the record the session's pill reads, and { reset: true } clears every project's, which a flow
-    // that repeats needs since the mock keeps its state.
+    // waiting with that reason, the way a failed run or a restart leaves it — and { reset: true }
+    // clears every project's, which a flow that repeats needs since the mock keeps its state.
     if (url.pathname === "/__mock/afk" && req.method === "POST") {
       const { project_id: projectId, reason, reset = false } = await readBody(req)
       if (reset) {

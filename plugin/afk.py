@@ -30,7 +30,7 @@ run after that, so changing the Default model never moves a session already unde
 
 A task is worked in one run. `prompt_builder.afk_prompt` is its instructions — AFK's fixed points,
 then the project's Prompt — and the issue itself is its input, so the whole of the task's work is
-that one run: nothing about a workflow is written onto the session, and nothing follows the run. When
+that one run: the session's record carries no plan of its own, and nothing follows the run. When
 it ends, a finished one frees its hold (the work is in review on GitHub) and any other outcome
 records why nothing is working the task, which is where the app shows a stall.
 
