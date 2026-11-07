@@ -176,3 +176,48 @@ test("a keyless bot keeps the current screen and writes nothing", async () => {
     assert.equal(await db.conversations.count(), 0, "no record for a bot that cannot be called")
   })
 })
+
+test("a model picked on the blank surface is the one the chat is made with", async () => {
+  const sonnet = { provider: "anthropic", model: "claude-sonnet-4.5" }
+  // An address of its own: the model read is remembered per connection.
+  const modelBot = { ...botProfile("model-pick"), modelChoice: sonnet }
+  await seedChats([], { bots: [modelBot], legacyChat: true })
+  anySession()
+  const appFetch = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/api/model/options"))
+      return json({
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+        providers: [
+          {
+            slug: "anthropic",
+            name: "Anthropic",
+            is_current: true,
+            authenticated: true,
+            models: ["claude-sonnet-4.5", "claude-opus-5"],
+          },
+        ],
+      })
+    return appFetch(input, init)
+  }) as typeof fetch
+  await mount(blankScreen, async () => {
+    await until(() => Boolean(find('button[aria-label^="Model:"]')), "the model pill")
+    await click(find('button[aria-label^="Model:"]'))
+    const picked = findAll("button").find((one) =>
+      (one.textContent ?? "").includes("claude-opus-5"),
+    )
+    assert.ok(picked, "the model list with the other model on it")
+    await click(picked)
+    await type(composerField(), "Pick this one")
+    await click(find('button[aria-label="Send"]'))
+    await until(async () => (await db.conversations.count()) === 1, "the chat the send made")
+    const [chat] = await db.conversations.toArray()
+    assert.deepEqual(
+      chat.modelChoice,
+      { provider: "anthropic", model: "claude-opus-5" },
+      "the pick rides into the record the first send makes",
+    )
+  })
+})
