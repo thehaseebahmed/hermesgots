@@ -114,3 +114,28 @@ test("Hide developer settings writes developer and netLog alone", async () => {
   assert.equal(stored?.netLog, false, "and the network log with it")
   assert.equal(stored?.legacyChat, true, "the layout survives it")
 })
+
+test("the hide button takes Remove server's shape, and Device state sits with Sync server", async () => {
+  await seedSettings({ developer: true })
+  await mount(developerPage, async () => {
+    const hide = findText("button", "Hide developer settings")
+    assert.ok(hide, "the hide control is on the page")
+    assert.ok(hide.classList.contains("h-11"), "a full-height button")
+    assert.ok(hide.classList.contains("rounded-full"), "in the app's pill")
+    assert.equal(
+      hide.classList.contains("text-destructive"),
+      false,
+      "not destructive: hiding a section removes nothing",
+    )
+    assert.ok(
+      hide.querySelector('svg[data-icon="inline-start"]'),
+      "with its icon at the inline start",
+    )
+    const groupOf = (label: string) =>
+      findAll("[data-settings-group]").find((group) => (group.textContent ?? "").includes(label))
+    const sync = groupOf("Sync server")
+    const device = groupOf("Device state")
+    assert.ok(sync && device, "both rows are drawn")
+    assert.equal(sync, device, "and one group holds them")
+  })
+})
