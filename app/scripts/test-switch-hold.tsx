@@ -28,7 +28,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("switch-hold", { id: "bot-1", name: "Switcher" })
+const bot = botProfile("switch-hold", { id: "bot-1", name: "Switcher", apiKey: undefined })
 const other = botProfile("switch-hold-other", { id: "bot-2", name: "Otherly" })
 const MAIN = mainThreadId(bot.id)
 

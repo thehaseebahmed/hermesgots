@@ -21,7 +21,7 @@ import {
 } from "./component-kit.tsx"
 
 const CHAT = "cheat-1"
-const bot = botProfile("cheatsheet", { id: "bot-1", name: "Cheatsy" })
+const bot = botProfile("cheatsheet", { id: "bot-1", name: "Cheatsy", apiKey: undefined })
 const OFF = ["Composer", "Slash menu", "Chat", "While something's open"]
 const ON = ["Composer", "Slash menu", "Chat", "Navigation", "While something's open"]
 

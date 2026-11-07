@@ -25,7 +25,9 @@ import {
   withReducedMotion,
 } from "./component-kit.tsx"
 
-const bot = botProfile("thinking", { name: "Thinking" })
+/** A bot with no key keeps the current screen, the one whose thread is this device's own rows —
+ * which is what every reply here is drawn from. */
+const bot = botProfile("thinking", { name: "Thinking", apiKey: undefined })
 
 const ASK = "Where does the parser read a reply?"
 const REASONING = "Read `parse.ts` first, then its blocks."

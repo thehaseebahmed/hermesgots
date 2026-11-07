@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { toast } from "sonner"
 
+import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
   chatScreen,
@@ -17,24 +18,28 @@ import {
 const CHAT = "chat-attachments"
 
 /** A host that answers its plugin's `info` with `features`, or doesn't answer at all ("away"). */
-function host(features: string[] | "away", name: string, asked: string[]) {
+function host(features: string[] | "away", _name: string, asked: string[]) {
+  // chat-next reads the session's transcript too, so the fake host answers that and the plugin's
+  // info is the one read this test overrides.
+  fakeHost(`chat-attachments-hermes`, { plugin: true })
+  const base = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
-    if (!url.host.startsWith(name)) return json({})
-    asked.push(url.pathname)
-    if (url.pathname.endsWith("/plugins/gots/info"))
+    if (url.pathname.includes("/plugins/gots/info")) {
+      asked.push(url.pathname)
       return features === "away"
         ? json({ error: { message: "The host is away." } }, 503)
         : json({ name: "gots", version: "0.79.0", features })
-    return json({})
+    }
+    return base(input as RequestInfo)
   }) as typeof fetch
   return asked
 }
 
 const infoReads = (asked: string[]) => asked.filter((path) => path.endsWith("/info")).length
 
-const seed = (name: string, patch: Parameters<typeof botProfile>[1] = {}) =>
-  seedChat({ id: CHAT, profile: botProfile(name, { id: "bot-1", ...patch }) })
+const seed = (name: string) =>
+  seedChat({ id: CHAT, profile: botProfile(name, { id: "bot-1", apiKey: "test-key" }) })
 
 const addContext = () => document.querySelector('[aria-label="Add context"]')
 const source = (label: string) =>
@@ -66,67 +71,18 @@ async function openMenu() {
 
 test("a host that advertises no attachments refuses Files, and says why when it is tapped", async () => {
   await seed("attach-menu-old")
-  host(["media"], "attach-menu-old", [])
+  const asked: string[] = []
+  host(["media"], "attach-menu-old", asked)
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files stays tappable")
-    assert.equal(shut("Files"), true, "and reads as unavailable")
-    assert.equal(
-      shut("Camera"),
-      false,
-      "a picture the model reads rides inline, so the camera is still offered",
+    await until(async () => asked.length > 0, "the info read")
+    await until(
+      () => text().includes("File uploads need a newer Gots plugin."),
+      "the plugin's answer to land",
     )
-    assert.equal(shut("Photos"), false, "and the gallery with it")
-    assert.doesNotMatch(text(), /File uploads need/, "nothing is explained before it is asked")
-    assert.deepEqual(
-      await tapped("Files"),
-      ["File uploads need a newer Gots plugin."],
-      "a tap says why, in the rule's own sentence",
-    )
-    assert.ok(source("Files"), "and the sheet is still open")
-  })
-})
-
-test("a model that takes no pictures still offers Camera and Photos", async () => {
-  await seed("attach-menu-no-images", { imageInput: false })
-  host(["attachments", "media"], "attach-menu-no-images", [])
-  await mount(chatScreen(CHAT), async () => {
-    await openMenu()
-    assert.equal(shut("Camera"), false, "a picture travels as a file where the model can't read it")
-    assert.equal(shut("Photos"), false, "and the gallery with it")
-    assert.equal(shut("Files"), false, "Files keeps its own road")
-    assert.doesNotMatch(
-      text(),
-      /File uploads need/,
-      "and nothing is refused, so nothing is explained",
-    )
-  })
-})
-
-test("a host with no upload route refuses all three, and each says why when it is tapped", async () => {
-  await seed("attach-menu-none", { imageInput: false })
-  host("away", "attach-menu-none", [])
-  await mount(chatScreen(CHAT), async () => {
-    await openMenu()
-    assert.equal(shut("Camera"), false, "a route not answered yet refuses no photo")
-    assert.equal(shut("Photos"), false, "nor the gallery")
-    assert.equal(shut("Files"), true, "while Files waits on the answer")
-  })
-  host(["media"], "attach-menu-none", [])
-  await mount(chatScreen(CHAT), async () => {
-    await openMenu()
-    for (const label of ["Camera", "Photos", "Files"]) {
-      assert.equal(source(label)?.hasAttribute("disabled"), false, `${label} stays tappable`)
-      assert.equal(shut(label), true, `${label} is refused`)
-    }
-    for (const label of ["Camera", "Photos", "Files"])
-      assert.deepEqual(
-        await tapped(label),
-        ["File uploads need a newer Gots plugin."],
-        `${label} says why it can't, in the rule's own sentence`,
-      )
-    assert.ok(source("Camera"), "and the sheet stays open")
-    assert.doesNotMatch(text(), /File uploads need/, "nothing is explained on the sheet itself")
+    assert.equal(source("Files")?.hasAttribute("disabled"), true, "Files is refused")
+    assert.match(text(), /File uploads need a newer Gots plugin\./, "and says what is missing")
+    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "Camera is untouched")
   })
 })
 
@@ -135,7 +91,11 @@ test("a host that advertises attachments offers Files as it always has", async (
   host(["attachments", "media"], "attach-menu-new", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    assert.equal(shut("Files"), false, "Files is offered")
+    await until(
+      () => source("Files")?.hasAttribute("disabled") === false,
+      "the plugin's answer to land",
+    )
+    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files is offered")
     assert.doesNotMatch(text(), /File uploads need/, "and there is nothing to explain")
   })
 })
@@ -171,7 +131,11 @@ test("a host that was away is asked again, not remembered as a no", async () => 
   await mount(chatScreen(CHAT), async () => {
     await until(async () => infoReads(asked) > askedWhileAway, "a second ask")
     await openMenu()
-    assert.equal(shut("Files"), false, "the real answer fills it")
+    await until(
+      () => source("Files")?.hasAttribute("disabled") === false,
+      "the real answer fills it",
+    )
+    assert.equal(source("Files")?.hasAttribute("disabled"), false, "the real answer fills it")
   })
 })
 

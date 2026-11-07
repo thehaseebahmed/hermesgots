@@ -23,8 +23,8 @@ import {
   withReducedMotion,
 } from "./component-kit.tsx"
 
-const bot = botProfile("fade", { id: "bot-1", name: "Fader" })
-const other = botProfile("fade-other", { id: "bot-2", name: "Otherly" })
+const bot = botProfile("fade", { id: "bot-1", name: "Fader", apiKey: undefined })
+const other = botProfile("fade-other", { id: "bot-2", name: "Otherly", apiKey: undefined })
 const MAIN = mainThreadId(bot.id)
 const MAIN_OTHER = mainThreadId(other.id)
 

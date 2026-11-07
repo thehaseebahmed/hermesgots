@@ -214,7 +214,6 @@ test("a page that fails while the chat is held back does not stop the newest pag
 test("the app's rows keep their ids while older turns are added above, which is what holds the reader's place", async () => {
   await seedChats([{ id: "c-older", title: "Long chat" }], {
     bots: [{ ...botProfile("hermes"), baseUrl: "http://c-older.test/v1" }],
-    settings: { chatNext: true },
   })
   const host = fakeHost("gots-c-older")
   host.seed(LONG)

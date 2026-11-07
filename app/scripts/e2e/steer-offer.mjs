@@ -16,7 +16,6 @@ await flow(
       await db.settings.update("settings", {
         steerByDefault: true,
         developer: true,
-        chatNext: true,
       })
     })
     await page.addInitScript(() => {

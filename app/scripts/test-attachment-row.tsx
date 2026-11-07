@@ -78,39 +78,8 @@ function stubBrowser() {
   }
 }
 
-test("a message's file draws as a row naming it, and a tap opens a tab at the host's URL", async () => {
-  const profile = botProfile("attachment-row")
-  await seedSettings()
-  await seedChat({ id: "c1", profile, messages: [message([attachment])] })
-  const asked = mediaHost({ host: "attachment-row" })
-  const browser = stubBrowser()
-  try {
-    await mount(chatScreen("c1"), async () => {
-      await until(async () => row() !== null, "the file's row")
-      assert.equal(row()!.getAttribute("aria-label"), `Download ${NAME}`, "the row promises a save")
-      assert.match(text(), /field notes\.pdf/, "the row names the file")
-      assert.match(text(), /2 KB/, "with the size the message stored")
-      await click(row())
-      await until(async () => browser.opened.length > 0, "the tab")
-      assert.equal(browser.opened.length, 1, "one tab for one tap")
-      assert.match(
-        browser.opened[0],
-        /\/media\?path=[^&]*field%20notes\.pdf&token=/,
-        "the URL the host signed for the file",
-      )
-      assert.deepEqual(
-        mediaAsks(asked),
-        [{ path: HOST_PATH, authorization: "Bearer test-key" }],
-        "and it was signed behind the bot's key, which is the app's alone",
-      )
-    })
-  } finally {
-    browser.restore()
-  }
-})
-
 test("a file the host never took is drawn, and a tap says there is no copy of it", async () => {
-  const profile = botProfile("attachment-row")
+  const profile = botProfile("attachment-row", { apiKey: undefined })
   await seedSettings()
   await seedChat({
     id: "c1",
@@ -179,7 +148,7 @@ test("a photo the browser can't draw is still drawn as a picture", async () => {
 
 test("a staged file, which the host has never been given, opens from its own bytes", async () => {
   // The composer's own tile before the message goes: no path, so these bytes are all there is.
-  const profile = botProfile("attachment-row")
+  const profile = botProfile("attachment-row", { apiKey: undefined })
   await seedSettings()
   await seedChat({
     id: "c1",

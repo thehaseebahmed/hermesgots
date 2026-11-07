@@ -95,7 +95,6 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     schema: db.verno,
     developer: Boolean(settings?.developer),
     botThreads: !settings?.legacyChat,
-    chatNext: Boolean(settings?.chatNext),
     ...(trace ? { resume: diagResume(trace) } : {}),
     bots,
   }

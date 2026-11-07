@@ -43,7 +43,7 @@ await flow(
     await seed([{ id: chatId, title: "Older pages" }])
     await page.evaluate(async () => {
       const { db } = await import("/src/lib/db.ts")
-      await db.settings.update("settings", { developer: true, chatNext: true })
+      await db.settings.update("settings", { developer: true })
     })
     const session = await page.evaluate(
       async (id) =>

@@ -165,7 +165,7 @@ async function thread(enabled: boolean, hold = false) {
       ask("How did the quarter go?"),
       reply("reply", `Here are the numbers.\n\n${block(SALES)}`),
     ],
-    profile: botProfile(`gate-${enabled ? "on" : "off"}`),
+    profile: botProfile(`gate-${enabled ? "on" : "off"}`, { apiKey: undefined }),
   })
   await warm()
   return fake

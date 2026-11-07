@@ -240,20 +240,17 @@ interface ChatPageProps {
 }
 
 /**
- * The chat on screen, on chat-next where its Developer switch takes it (ADR 0065) and on the current
- * screen otherwise. The choice is one string, so a write to the chat that changes nothing about it
- * draws nothing again; with the switch off only the settings row is read.
+ * The chat on screen, on chat-next when its bot can be called (ADR 0065) and on the current screen
+ * otherwise — a chat whose bot has no address or no key, and a new chat with no record yet. The
+ * choice is one string, so a write to the chat that changes nothing about it draws nothing again.
  */
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = props.chatId ?? params.id
   const verdict = useLiveQuery(async () => {
-    const settings = await getSettings()
-    const on = Boolean(settings.developer && settings.chatNext)
-    if (!on || !id) return `current\n${id}`
-    const chat = await db.conversations.get(id)
+    const chat = id ? await db.conversations.get(id) : undefined
     const bot = chat ? await db.profiles.get(chat.profileId) : undefined
-    const next = opensOnChatNext(on, chat, bot)
+    const next = opensOnChatNext(chat, bot)
     // The chunk loads while the verdict settles, not after the screen is chosen.
     if (next) void loadChatNext()
     return `${next ? "next" : "current"}\n${id}`

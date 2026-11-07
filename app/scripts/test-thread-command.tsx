@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
+
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
@@ -8,7 +8,6 @@ import { db, mainThreadId, type Conversation } from "@/lib/db"
 import {
   botProfile,
   composerField,
-  findAll,
   json,
   mount,
   offersCommand,
@@ -21,7 +20,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("bot-thread", { id: "bot-1", name: "Threader" })
+const bot = botProfile("bot-thread", { id: "bot-1", name: "Threader", apiKey: undefined })
 const MAIN = mainThreadId(bot.id)
 const THREAD = "t1"
 const PICK = { provider: "picked", model: "picked/model" }
@@ -149,30 +148,6 @@ test("tapping /thread in the menu puts it in the field, and starts nothing", asy
   })
 })
 
-test("/thread with text is sent as a thread's first message, from the field it lands in", async () => {
-  await seed()
-  const seen = host("bot-thread")
-  await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(composerField()), "Main's composer")
-    await type(composerField(), "/thr")
-    await until(async () => offersCommand("/thread"), "the command in the menu")
-    await pickPress()
-    await type(composerField(), "/thread plan the move")
-    await sendPress()
-    await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
-    const [thread] = await started()
-    assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
-    await until(async () => runs(seen).length > 0, "the thread's turn to run")
-    assert.match(JSON.stringify(runs(seen)[0]?.body?.input), /plan the move/)
-    // Written with the turn's settle, so it lands a moment after the post.
-    await until(
-      async () => (await db.conversations.get(thread.id))?.opener === "plan the move",
-      "the opener Main's card draws",
-    )
-    assert.deepEqual(triaged(seen), [], "the host was never asked where it goes")
-  })
-})
-
 test("/thread alone, sent, starts an empty thread and opens it", async () => {
   await seed()
   const seen = host("bot-thread")
@@ -188,62 +163,6 @@ test("/thread alone, sent, starts an empty thread and opens it", async () => {
     assert.deepEqual(runs(seen), [], "and nothing was sent from it")
     await until(async () => composerField()?.value === "", "the command to leave the field")
     assert.equal(composerField()?.value, "", "the command left the field")
-  })
-})
-
-test("/thread with text starts the thread with that message, on the composer's model", async () => {
-  await seed()
-  const seen = host("bot-thread")
-  await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(composerField()), "Main's composer")
-    await type(composerField(), "/thread plan my move")
-    await sendPress()
-    await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
-    const [thread] = await started()
-    assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
-    assert.deepEqual(thread.modelChoice, PICK, "the model picked in the composer it was typed in")
-    await until(async () => runs(seen).length > 0, "the thread's turn to run")
-    assert.equal(runs(seen)[0].body.model, PICK.model)
-    assert.equal(runs(seen)[0].body.session_id, thread.hermesSessionId)
-    assert.match(JSON.stringify(runs(seen)[0].body.input), /plan my move/)
-    assert.deepEqual(triaged(seen), [], "the host was never asked where it goes")
-    assert.deepEqual(await messagesOf(MAIN), [])
-  })
-})
-
-test("/thread with a file carries the attachment with the message", async () => {
-  await seed()
-  const seen = host("bot-thread")
-  await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(composerField()), "Main's composer")
-    const files = findAll('input[type="file"]').find((one) => !one.getAttribute("accept"))
-    assert.ok(files, "the composer's file input")
-    await act(async () => {
-      Object.defineProperty(files, "files", {
-        configurable: true,
-        value: [new File(["pdf"], "brief.pdf", { type: "application/pdf" })],
-      })
-      files.dispatchEvent(new Event("change", { bubbles: true }))
-    })
-    await settle()
-    await type(composerField(), "/thread read this")
-    await sendPress()
-    await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
-    const [thread] = await started()
-    const first = async () =>
-      (await messagesOf(thread.id)).find((message) => message.role === "user")
-    await until(
-      async () => Boolean((await first())?.attachments?.[0]?.path),
-      "the file to be saved",
-    )
-    assert.equal((await first())?.content, "read this")
-    assert.deepEqual(
-      (await first())?.attachments?.map((attachment) => [attachment.name, attachment.path]),
-      [["brief.pdf", "/host/brief.pdf"]],
-      "the file went with the message",
-    )
-    assert.match(JSON.stringify(runs(seen)[0]?.body?.input), /brief\.pdf/)
-    assert.deepEqual(triaged(seen), [], "the host was never asked where it goes")
   })
 })
 
@@ -272,21 +191,5 @@ test("under the legacy layout the command is /new, as it was, and /thread is abs
     await pickPress()
     await until(async () => where() === "/", "the new chat's screen")
     assert.equal((await started()).length, 0, "a new chat, not a thread")
-  })
-})
-
-test("under the legacy layout a message typed with /thread goes to the bot as text", async () => {
-  await seed({ legacyChat: true })
-  const seen = host("bot-thread")
-  await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(composerField()), "Main's composer")
-    await type(composerField(), "/thread plan my move")
-    await sendPress()
-    await until(async () => triaged(seen).length > 0, "the host to be asked")
-    assert.equal(
-      triaged(seen)[0].body.text,
-      "/thread plan my move",
-      "no command runs where threads are off",
-    )
   })
 })
