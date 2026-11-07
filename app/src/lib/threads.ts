@@ -17,6 +17,7 @@ import {
   type Unsent,
 } from "@/lib/db"
 import { useXLarge } from "@/lib/media"
+import { createStore } from "@/lib/store"
 import { byName } from "@/lib/compare"
 import { oneLine } from "@/lib/words"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
@@ -333,6 +334,59 @@ export function useBotSummaries(): BotSummary[] | undefined {
 export const lastThreadKey = (profileId: string) => `gots:last-thread:${profileId}`
 
 /**
+ * The thread each bot's third pane remembers — its lane memory, under `gots:last-thread:<bot>` on
+ * this device alone — as a store a reader can subscribe to: a row is loaded from storage the first
+ * time a reader asks for that bot, and every write tells each reader, which is what a close needs.
+ * Storage stays the truth a read is answered from, so a row seeded before the app mounted is found.
+ */
+const remembered = createStore<Record<string, string | null>>({})
+
+/** Puts a bot's row in the store, telling the readers only when it really moved. */
+const adopt = (profileId: string, thread: string | null) => {
+  const all = remembered.get()
+  if (profileId in all && all[profileId] === thread) return
+  remembered.set({ ...all, [profileId]: thread })
+}
+
+/** What storage holds for a bot, or the row this page has where storage is blocked. */
+function rememberedThread(profileId: string): string | null {
+  try {
+    return localStorage.getItem(lastThreadKey(profileId))
+  } catch {
+    // Storage blocked: the row this page holds still answers for as long as the page lives.
+    return remembered.get()[profileId] ?? null
+  }
+}
+
+/**
+ * This device remembers `thread` for a bot from now on — `null` forgets it, which is what closing a
+ * thread leaves — written through to storage and told to every reader.
+ */
+export function rememberThread(profileId: string, thread: string | null) {
+  adopt(profileId, thread)
+  try {
+    if (thread === null) localStorage.removeItem(lastThreadKey(profileId))
+    else localStorage.setItem(lastThreadKey(profileId), thread)
+  } catch {
+    // As above: the row this page holds still answers for as long as the page lives.
+  }
+}
+
+/**
+ * The thread a bot's lane remembers, subscribing whatever draws it, and the one load of that bot's
+ * row: the first ask takes storage's answer into the store, so a write on a close has the row it
+ * changed to compare against.
+ */
+export function useRememberedThread(profileId: string | undefined): string | null {
+  const all = remembered.use()
+  const loaded = profileId ? profileId in all : true
+  useEffect(() => {
+    if (profileId && !loaded) adopt(profileId, rememberedThread(profileId))
+  }, [profileId, loaded])
+  return profileId ? (all[profileId] ?? null) : null
+}
+
+/**
  * What a bot's third pane holds while the address is Main: the thread this device opened last for
  * that bot, the thread storage holds even where the pane refuses it, and how many threads the bot
  * has at all. A remembered thread that is gone, or is one of another bot's, is no thread of this
@@ -344,15 +398,10 @@ export async function lastOpened(profileId: string) {
     .between([profileId, -Infinity], [profileId, Infinity])
     .filter((chat) => !chat.projectId && !chat.main)
     .count()
-  let stored: string | null = null
-  let last: string | undefined
-  try {
-    stored = localStorage.getItem(lastThreadKey(profileId))
-    const found = stored ? await db.conversations.get(stored) : undefined
-    if (found && found.profileId === profileId && !found.projectId && !found.main) last = found.id
-  } catch {
-    // Storage can be blocked; the pane then has Main alone.
-  }
+  const stored = rememberedThread(profileId)
+  const found = stored ? await db.conversations.get(stored) : undefined
+  const last =
+    found && found.profileId === profileId && !found.projectId && !found.main ? found.id : undefined
   return { last, stored, threads }
 }
 
@@ -416,24 +465,22 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     thread = chat
   }
   // Only a wide screen with the switch on has a third pane to fill, so only it pays for the count.
-  // The address is a dependency so the read follows the thread this page just opened — the storage
-  // it comes from isn't reactive — and Dexie keeps the answer it has until the new one lands, so
-  // the pane never empties between the two.
+  // The address is a dependency so the read follows the thread this page just opened, and the
+  // remembered row is one so a write that forgets a thread redraws the lane: the store tells every
+  // reader, which the row in storage never did. Dexie keeps the answer it has until the new one
+  // lands, so the pane never empties between the two.
+  const rememberedId = useRememberedThread(profileId)
   const kept = useLiveQuery(
     async () =>
       large && enabled && profileId ? { profileId, ...(await lastOpened(profileId)) } : undefined,
-    [large, enabled, profileId, thread],
+    [large, enabled, profileId, thread, rememberedId],
   )
   // The answer names the bot it ran for, so one bot's answer can never pass for another's.
   const answer = kept && kept.profileId === profileId ? kept : undefined
   // Remembers the thread the address is, so the pane reopens it the next time the bot opens on Main.
   useEffect(() => {
     if (!profileId || !thread) return
-    try {
-      localStorage.setItem(lastThreadKey(profileId), thread)
-    } catch {
-      // As above: the pane opens on Main alone.
-    }
+    rememberThread(profileId, thread)
   }, [profileId, thread])
 
   if (!large || !enabled || !profileId) return undefined
