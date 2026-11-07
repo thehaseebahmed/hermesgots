@@ -4,18 +4,18 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { cheatsheetGroups, type CheatsheetSwitches } from "@/lib/cheatsheet"
 import { DEFAULT_SETTINGS, getSettings } from "@/lib/db"
 import { quietly } from "@/lib/report"
+import { botThreadsOn } from "@/lib/threads"
 
 const SHIPPED: CheatsheetSwitches = {
   navShortcuts: DEFAULT_SETTINGS.navShortcuts,
   sendOnEnter: DEFAULT_SETTINGS.sendOnEnter,
-  botThreads: Boolean(DEFAULT_SETTINGS.developer && DEFAULT_SETTINGS.botThreads),
+  botThreads: botThreadsOn(DEFAULT_SETTINGS),
 }
 
 /**
  * The sheet's state and the switches it was opened under. Read once as it opens and held, never a
  * live binding (ADR 0042), so a switch flipped while the sheet is up shows on the next opening. The
- * bot's thread keys follow the same pair the lane itself does: the Developer switch and the bot's
- * threads together.
+ * bot's thread keys follow the one layout switch: `legacyChat` off means bot threads.
  */
 export function useCheatsheet() {
   const [switches, setSwitches] = useState<CheatsheetSwitches>(SHIPPED)
@@ -25,10 +25,7 @@ export function useCheatsheet() {
     setSwitches({
       navShortcuts: read?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts,
       sendOnEnter: read?.sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter,
-      botThreads: Boolean(
-        (read?.developer ?? DEFAULT_SETTINGS.developer) &&
-          (read?.botThreads ?? DEFAULT_SETTINGS.botThreads),
-      ),
+      botThreads: botThreadsOn(read ?? DEFAULT_SETTINGS),
     })
     setOpen(true)
   }
