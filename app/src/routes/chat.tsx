@@ -592,8 +592,8 @@ function NextComposer(props: {
 
 /**
  * What the plugin holds for a chat on chat-next, as the current screen shows it above the composer:
- * a staged task's pipeline, the todo list, the session's pull requests and its filed outputs, each
- * opening its sheet. The reads that fill them are the chat's follow-up reads (`onSettled`).
+ * the todo list, the session's pull requests and its filed outputs, each opening its sheet. The reads
+ * that fill them are the chat's follow-up reads (`onSettled`).
  */
 function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; busy: boolean }) {
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
