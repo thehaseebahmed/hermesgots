@@ -84,6 +84,22 @@ const screen = (entry: string) => (
 )
 
 /**
+ * Code's screen with its list, which the shell keeps beside it: the second lane a test reads, so a
+ * bot's split can be told apart from every feature's own. The route matches so the shell mounts —
+ * what it opens beside the list is the app's, and this test only asks what the list's lane is.
+ */
+const codeScreen = (
+  <MemoryRouter initialEntries={["/code"]}>
+    <Path />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="code" element={null} />
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+/**
  * A pane fades its predecessor out over it (`PaneTransition` marks the copy `inert` and
  * `aria-hidden`), and the copy leaves with a timer; a query that counts both panes' chrome counts a
  * header the user no longer sees.
@@ -99,6 +115,15 @@ const openCards = () =>
   findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
+/**
+ * The classes the shell gives the list's column, since the harness has no layout to measure. The
+ * lane's share is one of them, so a lane that kept `w-103` and one split in half read apart.
+ */
+const listLane = () => {
+  const lane = find('[data-slot="list-lane"]')
+  assert.ok(lane, "the shell draws the list's lane")
+  return [...lane.classList]
+}
 
 /**
  * Holds the thread count a bot's pane reads, so a test can look at the lane between a switch and the
@@ -259,6 +284,10 @@ test(
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => Boolean(find('[data-slot="bot-pane-empty"]')), "the pane's own line")
       assert.equal(find('[data-slot="bot-pane-empty"]')?.textContent, "No threads yet")
+      assert.ok(
+        listLane().includes("w-103"),
+        `a bot with no threads keeps the 412px rail that says so (the lane took ${listLane().join(" ")})`,
+      )
       assert.ok(find('[data-slot="header-row"]'), "Main is still the pane it stands beside")
     })
   }),
@@ -315,6 +344,10 @@ test(
           find('[data-pane="thread"]')?.hasAttribute("inert"),
           false,
           "and no live chat stands in it while the new bot's thread answers",
+        )
+        assert.ok(
+          listLane().includes("w-1/2"),
+          `the lane keeps the share it had while the list is unanswered (the lane took ${listLane().join(" ")})`,
         )
         count.release()
 
@@ -403,6 +436,33 @@ test(
         findAll('[data-slot="header-row"]')[1]?.isSameNode(pane),
         true,
         "the same pane is still on screen: naming the thread it already held drew it again",
+      )
+    })
+  }),
+)
+
+test(
+  "a bot's lane splits the row in half, and a feature's list keeps its 412px lane",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    localStorage.setItem(lastThreadKey(bot.id), "t-a")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
+      await settle()
+      assert.ok(
+        listLane().includes("w-1/2"),
+        `Main and its thread take half the row each (the lane took ${listLane().join(" ")})`,
+      )
+    })
+    // The policy is the bot's lane's alone: Code's list is the lane it was designed around, so a
+    // split for bots costs every other feature nothing (ADR 0110).
+    await mount(codeScreen, async () => {
+      await until(async () => Boolean(find('[data-slot="list-lane"]')), "Code's own list lane")
+      await settle()
+      assert.ok(
+        listLane().includes("w-103"),
+        `Code's list keeps the 412px lane (it took ${listLane().join(" ")})`,
       )
     })
   }),

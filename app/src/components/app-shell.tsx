@@ -65,6 +65,28 @@ interface PaneLayout {
 const LIST_LANE: PaneLayout = { list: "w-103", slide: true }
 
 /**
+ * A bot's thread beside Main: the two chats take half of the room the sidebar leaves each. A
+ * percentage of the row rather than a width, because the sidebar may be open or a rail and half is
+ * right in both (ADR 0110).
+ */
+const SPLIT_LANE: PaneLayout = { list: "w-1/2", slide: true }
+
+/**
+ * The policy a bot's lane takes: split while its thread list has answered with a thread beside
+ * Main, and the list lane for a bot with no thread, which keeps the rail that says so. A list still
+ * to answer keeps the policy the answer before it gave the lane — unknown is not closed — so a
+ * switch from one bot to the next never flashes Main wide and back.
+ */
+function useBotLaneLayout(lane: BotLane | undefined) {
+  const [split, setSplit] = useState(false)
+  const answered = lane && lane.state !== "unknown" ? lane.state === "thread" : undefined
+  // Adjusted during render rather than in an effect, so a switch never draws the lane the bot it
+  // left had, not even for a frame.
+  if (answered !== undefined && answered !== split) setSplit(answered)
+  return split ? SPLIT_LANE : LIST_LANE
+}
+
+/**
  * From `lg` Settings' sections open beside its menu, and a list and what it opened beside it, so
  * each counts as one screen.
  */
@@ -193,6 +215,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
     <div className="flex min-h-0 flex-1">
       {pane && (
         <div
+          data-slot="list-lane"
           className={cn(
             `flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
             open ? cn(pane.layout.list, "border-r") : "w-full",
@@ -233,6 +256,9 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // thread the lane answers with, else nothing at all.
   const lane = bot?.lane
   const shown = lane?.state === "thread" ? lane.thread : undefined
+  // Half the row while a thread stands beside Main, the list lane while there is none, and the
+  // answer before it while this bot's thread list is still out.
+  const botLayout = useBotLaneLayout(lane)
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} slot="thread" />
   ) : bot ? (
@@ -254,7 +280,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
         ),
         item: botItem,
         itemKey: shown,
-        layout: LIST_LANE,
+        layout: botLayout,
       }
     : code
       ? {
