@@ -177,6 +177,24 @@ test("a keyless bot keeps the current screen and writes nothing", async () => {
   })
 })
 
+test("a bot with an address and no key keeps setup, not a dead composer", async () => {
+  await seedChats([], {
+    bots: [{ ...bot, baseUrl: "http://keyless.test/v1", apiKey: undefined }],
+    legacyChat: true,
+  })
+  globalThis.fetch = async () => json({})
+  await mount(blankScreen, async () => {
+    await until(
+      () => (document.body.textContent ?? "").includes(SETUP_COPY),
+      "the setup copy for a bot with no key",
+    )
+    assert.equal(find("[data-blank]"), null, "no blank surface")
+    const send = find('button[aria-label="Send"]') as HTMLButtonElement | null
+    assert.ok(send, "the composer is drawn")
+    assert.equal(send.disabled, true, "and it cannot send without a key")
+  })
+})
+
 test("a model picked on the blank surface is the one the chat is made with", async () => {
   const sonnet = { provider: "anthropic", model: "claude-sonnet-4.5" }
   // An address of its own: the model read is remembered per connection.

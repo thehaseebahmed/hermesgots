@@ -4,6 +4,7 @@ import { BugIcon, LightbulbIcon, type LucideIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { listEnabledProfiles } from "@/lib/db"
+import { hasServer } from "@/lib/connection.ts"
 import { getPluginVersion } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
 import { REPO_URL } from "@/lib/repo"
@@ -34,7 +35,7 @@ function device() {
 
 /** The plugin versions on the bots that are turned on, without naming the bots or their hosts. */
 async function pluginVersions() {
-  const bots = (await listEnabledProfiles()).filter((bot) => bot.apiKey && bot.baseUrl.trim())
+  const bots = (await listEnabledProfiles()).filter(hasServer)
   const versions = await Promise.all(bots.map((bot) => getPluginVersion(bot)))
   const found = [...new Set(versions.filter((v): v is string => Boolean(v)))]
   const missing = versions.filter((v) => !v).length
