@@ -427,6 +427,12 @@ export type BotLane =
 export interface BotPane {
   profileId: string
   lane: BotLane
+  /**
+   * Whether a control may close the lane where it stands: the lane holds a thread the address
+   * doesn't name. A thread the address does name is that address's to leave, so a close there would
+   * be a control that does nothing.
+   */
+  canClose: boolean
   /** Puts the lane away and forgets this bot's thread, so the next visit opens Main alone. */
   close: () => void
   /** Puts back the thread this bot closed on this visit, where the lane is not already holding one. */
@@ -532,5 +538,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   }, [profileId, thread])
 
   if (!large || !enabled || !profileId) return undefined
-  return { profileId, lane, close, reopen }
+  // A control may put the lane away only where it holds a thread the address doesn't name: closing
+  // a thread the address names would leave the lane holding that same thread.
+  return { profileId, lane, canClose: lane.state === "thread" && !thread, close, reopen }
 }

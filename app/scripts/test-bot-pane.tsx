@@ -1,12 +1,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 import { Link, MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
-import { handOver, lastThreadKey, takeHandover } from "@/lib/threads"
+import { handOver, lastThreadKey, rememberThread, takeHandover } from "@/lib/threads"
 import {
+  atWidth,
   botProfile,
   click,
   find,
@@ -58,7 +60,6 @@ async function seed(threads: string[] = [], patch: { botThreads?: boolean } = {}
   await ensureMainThread(bot.id)
   globalThis.fetch = async () => json({})
 }
-
 
 const screen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -115,6 +116,24 @@ const openCards = () =>
   findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
+/**
+ * A thread this device remembers, written the way the app writes it. Storage on its own leaves the
+ * lane's store holding the row it loaded earlier, so a close would move nothing and tell nobody —
+ * which is a state no visit can produce.
+ */
+const remembers = (thread: string) => rememberThread(bot.id, thread)
+/**
+ * One Escape, as a reader's key arrives at the page: it bubbles and it can be claimed, which is what
+ * a sheet or a menu answering the key does before the lane ever hears it.
+ */
+async function escape() {
+  await act(async () => {
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    )
+  })
+  await settle()
+}
 /**
  * The classes the shell gives the list's column, since the harness has no layout to measure. The
  * lane's share is one of them, so a lane that kept `w-103` and one split in half read apart.
@@ -381,11 +400,12 @@ test(
 )
 
 test(
-  "a thread beside Main carries no control of its own and no picture",
+  "a thread beside Main carries the collapse chevron and no picture",
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a"])
-    await mount(screen("/c/t-a"), async () => {
+    remembers("t-a")
+    await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
       await until(
         async () => Boolean(findAll('[data-slot="header-row"]')[0]?.querySelector('[role="img"]')),
@@ -394,10 +414,9 @@ test(
       const [main, thread] = findAll('[data-slot="header-row"]')
       assert.ok(main?.querySelector('[role="img"]'), "Main keeps the bot's picture beside its name")
       assert.equal(thread?.querySelector('[role="img"]'), null, "the thread beside it carries none")
-      assert.equal(
+      assert.ok(
         thread?.querySelector('[aria-label="Close thread"]'),
-        null,
-        "and no close control: the bot is beside it either way",
+        "and the collapse chevron, where a phone's Back sits",
       )
       assert.equal(
         thread?.querySelector('[aria-label^="Back to"]'),
@@ -408,6 +427,68 @@ test(
     })
   }),
 )
+
+test(
+  "the chevron by the thread's title closes it, and Main takes the lane",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    remembers("t-a")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      assert.ok(
+        listLane().includes("w-1/2"),
+        `the thread stands beside Main (the lane took ${listLane().join(" ")})`,
+      )
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Mainly", "Main alone")
+      assert.deepEqual(titles(), ["Mainly"], "the bot's own header is the only one left")
+      assert.ok(
+        listLane().includes("w-full"),
+        `and Main takes the row's whole width (the lane took ${listLane().join(" ")})`,
+      )
+      assert.equal(remembered(bot.id), null, "the thread it closed is forgotten")
+    })
+  }),
+)
+
+test("Escape closes the lane, and only where the thread is a lane", async () => {
+  localStorage.clear()
+  await seed(["t-a"])
+  remembers("t-a")
+  // A laptop, where the thread is the lane beside Main, then a phone, where it is a screen of its
+  // own with a Back: the key is the chevron's twin on the one and nothing at all on the other.
+  const beside = laptop(async () => {
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      // A sheet or a menu that answers Escape itself keeps the key: the lane stands down.
+      const claim = (event: KeyboardEvent) => event.preventDefault()
+      window.addEventListener("keydown", claim, true)
+      await escape()
+      window.removeEventListener("keydown", claim, true)
+      assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "a claimed Escape closes nothing")
+      assert.equal(remembered(bot.id), "t-a", "and the thread stays remembered")
+
+      await escape()
+      await until(async () => titles().join("|") === "Mainly", "Main alone")
+      assert.deepEqual(titles(), ["Mainly"], "Escape closes the lane the chevron would")
+      assert.equal(remembered(bot.id), null, "and the closed thread is forgotten")
+    })
+  })
+  // A visit of its own to a phone, remembering the thread it opens.
+  remembers("t-a")
+  const alone = atWidth(390, async () => {
+    await mount(screen("/c/t-a"), async () => {
+      await until(async () => titles().join("|") === "Thread t-a", "the thread's own screen")
+      assert.ok(find('[aria-label^="Back to"]'), "the thread is a screen, with a way back")
+      await escape()
+      assert.deepEqual(titles(), ["Thread t-a"], "Escape leaves a screen that is not a lane")
+      assert.equal(remembered(bot.id), "t-a", "and the thread it names stays remembered")
+    })
+  })
+  await beside()
+  await alone()
+})
 
 test(
   "the thread beside Main is the card Main marks open, and naming it keeps the pane it is in",
