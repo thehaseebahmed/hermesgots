@@ -617,15 +617,6 @@ export const expanded = (line: Element) => line.getAttribute("aria-expanded")
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
-export const workflowStage = (name: string, extra: Record<string, unknown> = {}) => ({
-  name,
-  steps: [],
-  check: null,
-  loop: null,
-  ships: false,
-  ...extra,
-})
-
 export const DEFAULT_AFK_PROMPT =
   "# Work in checkpoints\n\nSmall slices of the issue, one at a time."
 
@@ -811,7 +802,8 @@ export const mediaAsks = (asked: HostAsk[]) =>
 /** The paths a faked host was asked to sign a URL for, in the order it was asked. */
 export const mediaReads = (asked: HostAsk[]) => mediaAsks(asked).map((one) => one.path)
 
-/** One hold as a test gives it: number and title, and the stage its session is in. */
+/** One hold as a test gives it: its number and title, and a stall where it has one. A host from
+ * before this one still answers `stage`/`stage_name` on a hold; nothing reads them. */
 export type HoldRow = {
   number: number
   repo?: string
@@ -844,10 +836,7 @@ export async function seedPrompts(
 
 export function afkHost({
   projectId = "project-1",
-  features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt"],
-  workflow = "preset:staged",
-  stage = "build",
-  stageName = "Build",
+  features = ["afk", "afk_switch", "afk_prompt"],
   prompt = DEFAULT_AFK_PROMPT,
   promptId = null,
   promptRefusal = null,
@@ -866,9 +855,6 @@ export function afkHost({
 }: {
   projectId?: string
   features?: string[]
-  workflow?: string
-  stage?: string | null
-  stageName?: string | null
   prompt?: string
   /** The library entry the host says the Prompt was copied from; null is words typed here. */
   promptId?: string | null
@@ -902,29 +888,7 @@ export function afkHost({
   /** The window the host judged deciding, or null where none does — a balance with room is capacity. */
   deciding?: { label: string; usedPercent: number } | null
 } = {}) {
-  const library: Record<string, unknown>[] = [
-    {
-      id: "preset:one-run",
-      name: "One run",
-      preset: true,
-      at: 1,
-      stages: [workflowStage("Work", { ships: true })],
-    },
-    {
-      id: "preset:staged",
-      name: "Build · Test · Review · Summary",
-      preset: true,
-      at: 2,
-      stages: [
-        workflowStage("Build"),
-        workflowStage("Test", { check: "gate" }),
-        workflowStage("Review", { ships: true }),
-        workflowStage("Summary"),
-      ],
-    },
-  ]
   const calls: Call[] = []
-  let chosen: string | null = workflow
   let words = prompt
   // The entry the Prompt was copied from: a pick names one, a hand edit names none.
   let source = promptId
@@ -938,6 +902,8 @@ export function afkHost({
           title: hold.title ?? `Task ${hold.number}`,
           url: `https://x/${hold.number}`,
           created_at: "2026-10-01T00:00:00Z",
+          // A host from before this change still answers these on a hold; the app reads neither,
+          // which is what `test-afk-picks` proves with a host that sends them.
           stage: hold.stage ?? null,
           stage_name: hold.stage_name ?? null,
           stalled: hold.stalled ?? null,
@@ -970,11 +936,6 @@ export function afkHost({
     usage_threshold: threshold,
     ...(holdsHeld === null ? {} : { holds_held: holdsHeld }),
     refusal: null,
-    build_skill: null,
-    critique_skills: [],
-    stage: held === null ? stage : (held[0]?.stage ?? null),
-    stage_name: held === null ? stageName : (held[0]?.stage_name ?? null),
-    workflow: library.find((entry) => entry.id === chosen),
     prompt: words,
     // Null where the words are the project's own: a host from before the library answers none.
     prompt_id: source,
@@ -1036,27 +997,12 @@ export function afkHost({
           { name: "plan", description: "Write a plan first.", category: null },
         ],
       })
-    if (url.pathname.endsWith("/plugins/gots/workflows") && method === "GET")
-      return json({ object: "gots.workflows", workflows: library })
-    if (url.pathname.endsWith("/plugins/gots/workflows") && method === "POST") {
-      library.push({
-        id: `wf-${library.length}`,
-        name: body?.name,
-        preset: false,
-        at: 9,
-        stages: body?.stages,
-      })
-      return json({ object: "gots.workflows", workflows: library })
-    }
     if (url.pathname.endsWith(`/projects/${projectId}/afk`) && method === "GET")
       return json(answer())
     if (url.pathname.endsWith(`/projects/${projectId}/afk`) && method === "POST") {
-      if (typeof body?.workflow_id === "string") chosen = body.workflow_id
       if (typeof body?.prompt === "string") {
         if (promptRefusal) return json({ error: { message: promptRefusal } }, 400)
-        // A Prompt and a pick are one choice between them, as the plugin writes them.
         words = body.prompt.trim() || DEFAULT_AFK_PROMPT
-        chosen = null
         // The source rides the words: a pick names the entry it copied, and a plain write clears it.
         source = typeof body.prompt_id === "string" ? body.prompt_id : null
       }
@@ -1072,11 +1018,11 @@ export function afkHost({
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
   }
   /**
-   * What the host holds now: the workflow a Prompt's write cleared, the words it answered, and the
-   * entry those words were copied from (null for the project's own).
+   * What the host holds now: the words it answered and the entry those words were copied from (null
+   * for the project's own).
    */
-  const state = () => ({ chosen, words, source })
-  return { calls, fetch, library, state }
+  const state = () => ({ words, source })
+  return { calls, fetch, state }
 }
 
 export async function warmMarkdown() {

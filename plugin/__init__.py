@@ -36,7 +36,6 @@ from . import (
     cleanup,
     clones,
     closes,
-    commands,
     community,
     compactions,
     context,
@@ -46,8 +45,6 @@ from . import (
     dictations,
     meetings,
     events,
-    findings,
-    gate,
     general,
     github,
     host_model,
@@ -62,7 +59,6 @@ from . import (
     openui,
     outbox,
     pending,
-    pipeline,
     platform_gots,
     projects,
     progress,
@@ -81,7 +77,6 @@ from . import (
     tasks,
     todos,
     usage,
-    workflows,
 )
 from .store import current_path
 
@@ -132,7 +127,6 @@ MAX_PER_JOB = 200
 # route adds — it is the one write that has to ask whether the project can be left to work at all.
 AFK_WRITES = {
     "on": afk.set_on,
-    "workflow": afk.set_workflow,
     "prompt": afk.set_prompt,
     "pick_count": afk.set_pick_count,
 }
@@ -392,10 +386,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     todo_tool = todos.wire(adapter)
     # The agent ships its own work; see ship.py.
     ship.wire(adapter)
-    # And it runs its build's gate on the host, not its own word for it; see gate.py.
-    gate.wire(adapter)
-    # A review reports what its skills found, so the sheet can count it; see findings.py.
-    findings.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
@@ -566,9 +556,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # setting on the host (afk.py). Advertised apart from the read, so a plugin that
                     # can list a project's tasks but never switch AFK on offers no switch at all.
                     "afk_switch",
-                    # An app that predates this one has no picker at all rather than pickers that
-                    # could only write a shape the host no longer takes.
-                    "afk_workflows",
                     # The project's own Prompt, written on its AFK row and told to every run it
                     # starts: an app that predates it draws the sheet it has rather than a field the
                     # host would refuse (afk.py, prompt_builder.py).
@@ -578,11 +565,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # only where a host says it holds more than one, so a host that predates picks
                     # shows the screen it always did (afk.py, ADR 0025).
                     "afk_picks",
-                    # Still advertised while the app draws a staged session's pipeline, which this
-                    # host answers from the task's workflow snapshot (`pipeline.for_app`): the pill
-                    # is drawn only where a host claims it, so dropping it here would take the
-                    # pipeline out of every app until #338 redraws it by workflow.
-                    "afk_pipeline",
                     "clarify",
                     "todo_tool",
                     "agents",
@@ -1583,85 +1565,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         found = await asyncio.to_thread(afk.bot_read, hermes_home())
         return web.json_response({"object": "gots.afk.bot", **found})
 
-    async def workflows_response() -> "web.Response":
-        """The library as it stands: what every write to it answers."""
-        found = await asyncio.to_thread(workflows.library, hermes_home())
-        return web.json_response({"object": "gots.workflows", "workflows": found})
-
-    async def list_workflows(request: "web.Request") -> "web.Response":
-        """A bot's workflows: presets first, read-only, each naming its stages."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        return await workflows_response()
-
-    async def read_workflow(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        found = await asyncio.to_thread(
-            workflows.get, hermes_home(), request.match_info["workflow_id"]
-        )
-        if found is None:
-            return _error(web, "No such workflow.", 404)
-        return web.json_response({"object": "gots.workflow", **found})
-
-    async def create_workflow(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        try:
-            await asyncio.to_thread(workflows.create, hermes_home(), body)
-        except ValueError as why:
-            return _error(web, str(why), 400)
-        return await workflows_response()
-
-    async def update_workflow(request: "web.Request") -> "web.Response":
-        """Rewrites a workflow, or forks a preset into a copy: a preset is never written."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        try:
-            found = await asyncio.to_thread(
-                workflows.update, hermes_home(), request.match_info["workflow_id"], body
-            )
-        except ValueError as why:
-            return _error(web, str(why), 400)
-        if found is None:
-            return _error(web, "No such workflow.", 404)
-        return await workflows_response()
-
-    async def remove_workflow(request: "web.Request") -> "web.Response":
-        """Deletes a workflow, refusing one a project works under and naming those projects."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            removed = await asyncio.to_thread(
-                workflows.delete, hermes_home(), request.match_info["workflow_id"]
-            )
-        except workflows.Refused as why:
-            return _error(web, str(why), 409)
-        if not removed:
-            return _error(web, "No such workflow.", 404)
-        return await workflows_response()
-
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
 
     async def workspace_response(record: Dict[str, Any] | None):
-        if record is not None:
-            # The pill reads a session's pipeline the way it always has — the step the task is in,
-            # the skills each run was told, the gate's answer — whatever shape the task's own
-            # snapshot holds (``pipeline.for_app``, ADR 0018).
-            record = {**record, "pipeline": pipeline.for_app(record.get("pipeline"))}
         return web.json_response(
             {
                 "object": "gots.workspace",
@@ -2069,11 +1977,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     # the rest (ADR 0042).
     app.router.add_get(f"{PREFIX}/afk", bot_afk)
     app.router.add_post(f"{PREFIX}/afk", post_bot_afk)
-    app.router.add_get(f"{PREFIX}/workflows", list_workflows)
-    app.router.add_post(f"{PREFIX}/workflows", create_workflow)
-    app.router.add_get(f"{PREFIX}/workflows/{{workflow_id}}", read_workflow)
-    app.router.add_post(f"{PREFIX}/workflows/{{workflow_id}}", update_workflow)
-    app.router.add_delete(f"{PREFIX}/workflows/{{workflow_id}}", remove_workflow)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
@@ -3522,8 +3425,6 @@ def register(ctx) -> None:
         register_hook("post_api_request", progress.after_model_call)
         register_hook("pre_llm_call", progress.turn_started)
         register_hook("pre_tool_call", sessions.before_tool)
-        # What each run executed, kept on its stage for the details sheet; see commands.py.
-        register_hook("pre_tool_call", commands.before_tool)
         register_hook("pre_tool_call", research.before_tool)
         # A routine created in this chat names where it delivers, unless the model said so itself;
         # see platform_gots.py.
@@ -3569,8 +3470,6 @@ def register(ctx) -> None:
             description="hermes gots link <code> --site <url>, unlink or status",
         )
     ship.register(ctx)
-    gate.register(ctx)
-    findings.register(ctx)
     library.register(ctx)
     research.register(ctx)
     meetings.register(ctx)

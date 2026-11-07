@@ -280,11 +280,6 @@ export const FLOWS = {
     about:
       "Developer's network log records this device's own requests to a bot's host, draws them per bot and all together, and empties on Clear",
   },
-  "afk-skills": {
-    script: "e2e/afk-skills.mjs",
-    about:
-      "AFK's pop-up picks one skill to build by and any number to critique from the bot's own list, kept on the host apart from another project's, with no pickers on an older plugin",
-  },
   "afk-switch-reasons": {
     script: "e2e/afk-switch-reasons.mjs",
     about:
@@ -305,20 +300,10 @@ export const FLOWS = {
     about:
       "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting for You, with the host's reason under it",
   },
-  "afk-stage": {
-    script: "e2e/afk-stage.mjs",
-    about:
-      "AFK's pop-up names the stage its held task is in, by the stage's own name from the task's snapshot, prefixed to the task's title, and keeps naming it once the pickers change under it",
-  },
   "afk-prompt": {
     script: "e2e/afk-prompt.mjs",
     about:
       "AFK's Prompt row reads the words its runs are told and opens one writing sheet for them — the bottom sheet, or the drawer from a laptop's width — with Done writing them back to the host; the account's library saves those words by name, picks them into another project, and pulls a rewritten entry in when the row says it changed",
-  },
-  "pipeline-pill": {
-    script: "e2e/pipeline-pill.mjs",
-    about:
-      "A staged session's pipeline is the first pill above the composer — three bars, green where a step is done and red where it failed, with the stage in words — and its sheet counts the stage out of three and names what each step ran, still there once the task is done",
   },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",

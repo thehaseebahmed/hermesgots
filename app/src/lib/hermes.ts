@@ -21,14 +21,6 @@ import type { Doc } from "@/lib/merge"
 import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import type { PendingInput, PendingQueue } from "@/lib/pending"
-import { parsePipeline, parseStage, type AfkStage, type SessionPipeline } from "@/lib/pipeline"
-import {
-  parseWorkflowEntry,
-  parseWorkflowLibrary,
-  skillNames,
-  type Workflow,
-  type WorkflowEntry,
-} from "@/lib/workflow"
 import { isNative } from "@/lib/native"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
@@ -2767,8 +2759,6 @@ export interface SessionWorkspace {
   instructions: string
   /** Why the session can't take another turn: a repo it works in left the project, or it's archived. */
   blocked: string | null
-  /** The stages a staged AFK task ran in, on the session's own record; null when it isn't staged. */
-  pipeline: SessionPipeline | null
 }
 
 const MODES = new Set<string>(["accept_edits", "auto", "plan"])
@@ -2802,8 +2792,6 @@ function parseWorkspace(raw: unknown, sessionId: string): SessionWorkspace | nul
     planFile: typeof record.plan_file === "string" && record.plan_file ? record.plan_file : null,
     instructions: typeof body?.instructions === "string" ? body.instructions : "",
     blocked: typeof body?.blocked === "string" && body.blocked ? body.blocked : null,
-    // A plugin from before the stages answers none: that session is one run, which is what it is.
-    pipeline: parsePipeline(record.pipeline),
   }
 }
 
@@ -3583,15 +3571,11 @@ export async function getProjectTasks(
 }
 
 /**
- * A task AFK holds: the issue, the stage the session working it is in, and why nothing is working
- * it. One session a hold, so a project up to its pick count holds several (ADR 0025). Needs plugin
- * 0.80, which made the project's read answer a list.
+ * A task AFK holds: the issue, and why nothing is working it. One session a hold, so a project up to
+ * its pick count holds several (ADR 0025). Needs plugin 0.80, which made the project's read answer a
+ * list.
  */
 export interface AfkHold extends ProjectIssue {
-  /** The stage that hold's session is in; null for a task running one run, or past its last stage. */
-  stage: AfkStage | null
-  /** That stage's own name in the workflow's words; null once past the last one. */
-  stageName: string | null
   /** Why nothing is working it, when something stopped; null while its session runs. */
   stalled: string | null
 }
@@ -3623,8 +3607,8 @@ export interface BotAfk {
 /**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
- * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
- * follows, 0.58 for the stage a staged task is in and 0.60 for the Prompt its runs are told.
+ * plugin 0.50, 0.51 for the task it holds and the last refusal, and 0.60 for the Prompt its runs
+ * are told.
  */
 export interface ProjectAfk extends BotAfk {
   on: boolean
@@ -3634,23 +3618,14 @@ export interface ProjectAfk extends BotAfk {
   task: ProjectIssue | null
   /**
    * Every task the project's switch holds, oldest first — one session each, up to its pick count,
-   * with the stage that session is in. Null for a host from before picks, which holds at most the
-   * one `task` above; the sheet draws a single Working row from it then.
+   * with why nothing is working it. Null for a host from before picks, which holds at most the one
+   * `task` above; the sheet draws a single Working row from it then.
    */
   holds: AfkHold[] | null
   /** How many tasks it may hold at once, 1–5; null where the host answers no pick count. */
   pickCount: number | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
-  /** The bot's skill the project picked to build by, when it picked one. */
-  buildSkill: string | null
-  /** The bot's skills the project picked for its critique, in the order it picked them. */
-  critiqueSkills: string[]
-  /** The stage the task it holds is in, while it is a staged one; null for one run, or none held. */
-  stage: AfkStage | null
-  /** That stage's own name in the workflow's words ("Migrate", "Verify"); null once past the last. */
-  stageName: string | null
-  workflow: WorkflowEntry | null
   /**
    * How the project's work is carried out, told to every run it starts: the project's own words,
    * or the bot's default method where it has written none. Empty is that default again, which is
@@ -3672,9 +3647,6 @@ function parseHold(value: unknown): AfkHold | null {
   const found = (value ?? {}) as Record<string, unknown>
   return {
     ...issue,
-    // A host answers each hold's stage the way it answers the one task's: null is one run.
-    stage: parseStage(found.stage),
-    stageName: str(found.stage_name) || null,
     stalled: str(found.stalled) || null,
   }
 }
@@ -3698,8 +3670,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   if (!body || typeof body.on !== "boolean") {
     throw new HermesError("Hermes answered without AFK's setting.")
   }
-  // A plugin from before the sweep answers neither the task nor the refusal, and one from before the
-  // pickers answers no skills: that's nothing chosen, not a failure to read the switch.
+  // A plugin from before the sweep answers neither the task nor the refusal: nothing chosen, not a
+  // failure to read the switch.
   return {
     on: body.on,
     reason: str(body.reason) || null,
@@ -3710,13 +3682,6 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     // two fields the bot-level route carries, parsed once (`parseBotAfk`).
     ...parseBotAfk(body),
     refusal: str(body.refusal) || null,
-    buildSkill: str(body.build_skill) || null,
-    critiqueSkills: skillNames(body.critique_skills),
-    // A plugin from before the stages answers none: that task is one run, which is what it does.
-    stage: parseStage(body.stage),
-    stageName: str(body.stage_name) || null,
-    // And one from before the workflows answers none: the project runs what it always ran.
-    workflow: parseWorkflowEntry(body.workflow),
     // A plugin from before the Prompt answers none, which is only read where the host advertises it.
     prompt: str(body.prompt),
     // And one from before the library answers no source: the words stand as the user's own.
@@ -3762,35 +3727,6 @@ export function setProjectAfk(
   on: boolean,
 ): Promise<ProjectAfk> {
   return writeAfk(config, projectId, { on })
-}
-
-/**
- * Keeps the skills a project's AFK work follows — one to build by and the ones to critique — on its
- * host, answering the setting it now holds. The two are written together: a write naming one would
- * leave the other's meaning to a guess.
- */
-export function setProjectAfkSkills(
-  config: HermesConfig,
-  projectId: string,
-  buildSkill: string | null,
-  critiqueSkills: string[],
-): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, {
-    build_skill: buildSkill,
-    critique_skills: critiqueSkills,
-  })
-}
-
-/**
- * Puts a project's AFK work under a workflow from the library, answering the setting it now holds.
- * A workflow id the host has no row for is refused there, and the answer is the setting it kept.
- */
-export function setProjectAfkWorkflow(
-  config: HermesConfig,
-  projectId: string,
-  workflowId: string | null,
-): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, { workflow_id: workflowId })
 }
 
 /**
@@ -3893,56 +3829,6 @@ async function writeBotAfk(config: HermesConfig, body: Record<string, unknown>):
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return parseBotAfk((await response.json()) as Record<string, unknown> | null)
-}
-
-function workflowPath(config: HermesConfig, rest = ""): string {
-  return `${pluginRoot(config.baseUrl)}/workflows${rest}`
-}
-
-export async function listWorkflows(
-  config: HermesConfig,
-  signal?: AbortSignal,
-): Promise<WorkflowEntry[]> {
-  const response = await request(workflowPath(config), { headers: headers(config), signal })
-  const body = (await response.json()) as Record<string, unknown> | null
-  return parseWorkflowLibrary(body?.workflows)
-}
-
-/**
- * Writes a workflow to the library, answering the library as it now stands: a create adds a row, an
- * update forks a preset into a copy and rewrites one of the account's own, and a delete takes one
- * away. Writes answer the whole list, so the screen that asked draws what the host holds.
- */
-async function writeWorkflow(
-  config: HermesConfig,
-  method: "POST" | "DELETE",
-  rest: string,
-  body?: Record<string, unknown>,
-): Promise<WorkflowEntry[]> {
-  const response = await request(workflowPath(config, rest), {
-    method,
-    headers: headers(config),
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
-  })
-  const answer = (await response.json()) as Record<string, unknown> | null
-  return parseWorkflowLibrary(answer?.workflows)
-}
-
-export function createWorkflow(config: HermesConfig, workflow: Workflow): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "POST", "", { ...workflow })
-}
-
-export function updateWorkflow(
-  config: HermesConfig,
-  id: string,
-  workflow: Workflow,
-): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "POST", `/${encodeURIComponent(id)}`, { ...workflow })
-}
-
-export function deleteWorkflow(config: HermesConfig, id: string): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "DELETE", `/${encodeURIComponent(id)}`)
 }
 
 export type LiveRunStatus = "running" | "waiting_for_approval"

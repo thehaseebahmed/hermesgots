@@ -22,7 +22,7 @@ import {
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
-const FEATURES = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt", "afk_picks"]
+const FEATURES = ["afk", "afk_switch", "afk_prompt", "afk_picks"]
 
 /** Three tasks held at once, the first two with a stage their own session is in. */
 const THREE: HoldRow[] = [
@@ -56,17 +56,11 @@ test("the Working block lists every task it holds, over the count against its pi
     )
     assert.match(
       rows[0].textContent ?? "",
-      /#265\s*Migrate: Read the frontier/,
-      "a row names the task's number, title and stage",
+      /#265\s*Read the frontier/,
+      "a row names the task's number and its title",
     )
-    assert.equal(rows[0].getAttribute("data-stage"), "build", "and the stage it reads as")
-    assert.match(
-      rows[1].textContent ?? "",
-      /Critiquing: Mark the claim/,
-      "a stage with no name of its own",
-    )
-    assert.match(rows[2].textContent ?? "", /#267\s*Ship the change/, "a task that isn't staged")
-    assert.equal(rows[2].getAttribute("data-stage"), null, "and nothing named for it")
+    assert.match(rows[1].textContent ?? "", /#266\s*Mark the claim/, "and the next its own")
+    assert.match(rows[2].textContent ?? "", /#267\s*Ship the change/, "and the last its own")
     assert.equal(
       find("[data-holds]")?.textContent,
       "3 of 3 held",
@@ -80,15 +74,24 @@ test("the Working block lists every task it holds, over the count against its pi
   })
 })
 
-test("each row's stage is its own, not the oldest hold's", async () => {
-  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 3 })
-    .fetch as unknown as typeof fetch
+test("a Working row names no stage, even from a host that still sends one", async () => {
+  globalThis.fetch = afkHost({
+    features: ["afk", "afk_switch", "afk_pipeline", "afk_picks"],
+    holds: THREE,
+    pickCount: 3,
+  }).fetch as unknown as typeof fetch
   await picksOn(async () => {
-    assert.equal(find("[data-working]")?.getAttribute("data-stage"), "build", "the oldest hold's")
-    assert.deepEqual(
-      findAll("[data-hold]").map((row) => row.getAttribute("data-stage")),
-      ["build", "critique", null],
-      "every hold's own stage, in the order the host lists them",
+    const rows = findAll("[data-hold]")
+    assert.match(
+      rows[0].textContent ?? "",
+      /^#265\s*Read the frontier/,
+      "the task's number and its title, with nothing between them",
+    )
+    assert.equal(rows[0].getAttribute("data-stage"), null, "no stage on the row")
+    assert.equal(
+      find("[data-working]")?.getAttribute("data-stage"),
+      null,
+      "and none on the block either",
     )
   })
 })
@@ -187,8 +190,6 @@ test("a plugin without afk_picks draws the sheet it always drew", async () => {
         reason: null,
         task: { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" },
         refusal: null,
-        stage: "build",
-        stage_name: "Build",
         prompt: "Work in checkpoints.",
       })
     if (url.pathname.endsWith("/tasks"))
@@ -203,7 +204,7 @@ test("a plugin without afk_picks draws the sheet it always drew", async () => {
     assert.equal(Boolean(find("[data-afk-picks]")), false, "no pick count")
     assert.match(
       find("[data-working]")?.textContent ?? "",
-      /Build: Pick a workflow/,
+      /#338\s*Pick a workflow/,
       "the one Working row it has always drawn, from the task the read names",
     )
   })
@@ -218,7 +219,7 @@ test("a host that holds no list keeps the one Working row from its task", async 
     assert.equal(Boolean(find("[data-holds]")), false, "no count row")
     assert.match(
       find("[data-working]")?.textContent ?? "",
-      /Build: Pick a workflow/,
+      /#338\s*Pick a workflow/,
       "the one Working row, drawn from the task",
     )
     assert.equal(chosen()?.textContent, "3", "the pick count is still there to set")

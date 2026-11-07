@@ -1,5 +1,8 @@
 # An AFK task runs its workflow's stages, and the workflow is data
 
+**Superseded by [ADR 0110](0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md):**
+the workflow library and the stage machine it drove are removed, and AFK works one prompt run.
+
 An AFK task's stages were fixed in code: `pipeline.STAGES` was Build, Gate, Critique, and a project
 turned the pipeline on only by picking a critique skill (ADR 0018). That shape was the whole machine —
 a project could not name a stage, could not give a stage more than one skill, could not add a stage

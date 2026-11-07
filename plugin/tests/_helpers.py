@@ -11,11 +11,11 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 from unittest.mock import MagicMock, patch
 
 import plugin
-from plugin import dictation_cleanup, pipeline, workflows
+from plugin import dictation_cleanup
 from plugin.tasks import READY_LABEL
 
 # Stands in for the host's own profile scope: `HERMES_HOME_OVERRIDE` and the secret scope are context
@@ -164,97 +164,6 @@ def route(app: Any, path: str, method: Optional[str] = None) -> Any:
         if registered == path and method in (None, registered_method):
             return handler
     raise AssertionError(f"the plugin registered no {path}")
-
-
-def staged(
-    kind: str = pipeline.BUILD,
-    *,
-    build: Optional[str] = "plan",
-    steps: Sequence[str] = ("code-review",),
-    gate: Optional[Dict[str, Any]] = None,
-    stop: Optional[str] = None,
-) -> Dict[str, Any]:
-    """A task's snapshot at one step of a staged workflow, as the tools and prompts read one.
-
-    The step is named the way the host judges it — ``build``, ``gate``, ``critique`` or ``done`` —
-    and the workflow is the shape a project's old skill columns described, so a test states the
-    skills it means and nothing else about the workflow.
-    """
-    record = pipeline.start(
-        {
-            "id": "wf-test",
-            "name": "Build · Test · Review · Summary",
-            "stages": workflows.from_skills(build, steps),
-        }
-    )
-    found = len(record["stages"])
-    for candidate in range(len(record["stages"]) + 1):
-        if pipeline.kind({**record, "stage": candidate}) == kind:
-            found = candidate
-            break
-    record["stage"] = found
-    for index, entry in enumerate(record["stages"]):
-        entry["state"] = (
-            pipeline.FINISHED
-            if index < found
-            else pipeline.CURRENT
-            if index == found
-            else pipeline.TODO
-        )
-        entry["rounds"] = [pipeline.new_round()] if index <= found else []
-    if found < len(record["stages"]):
-        current = record["stages"][found]["rounds"][-1]
-        if gate is not None:
-            current["gate"] = gate
-        if stop is not None:
-            current["stop"] = stop
-            record["stages"][found]["state"] = pipeline.FAILED
-    return record
-
-
-def preset(workflow_id: str = workflows.DEFAULT_ID) -> Dict[str, Any]:
-    """A preset as the library seeds it, in the shape ``pipeline.start`` snapshots.
-
-    Read from the plugin's own presets rather than copied into a test, so a preset whose body moves
-    is tested as it ships.
-    """
-    for found, name, stages in workflows.PRESETS:
-        if found == workflow_id:
-            return {"id": found, "name": name, "stages": stages}
-    raise KeyError(f"no preset {workflow_id}")
-
-
-def placed(
-    workflow: Dict[str, Any],
-    index: int = 0,
-    gate: Optional[Dict[str, Any]] = None,
-    stop: Optional[str] = None,
-) -> Dict[str, Any]:
-    """A task's snapshot of ``workflow``, in the stage at ``index``, as the engine leaves it.
-
-    Every stage before it has finished and it is the one in hand — what a task looks like once the
-    runs before this stage have ended, which is where a test of one stage's end starts. ``gate`` is
-    the answer the stage's round carries and ``stop`` why it stalled.
-    """
-    record = pipeline.start(workflow)
-    record["stage"] = index
-    for at, entry in enumerate(record["stages"]):
-        entry["state"] = (
-            pipeline.FINISHED
-            if at < index
-            else pipeline.CURRENT
-            if at == index
-            else pipeline.TODO
-        )
-        entry["rounds"] = [pipeline.new_round()] if at <= index else []
-    if index < len(record["stages"]):
-        current = record["stages"][index]["rounds"][-1]
-        if gate is not None:
-            current["gate"] = gate
-        if stop is not None:
-            current["stop"] = stop
-            record["stages"][index]["state"] = pipeline.FAILED
-    return record
 
 
 def make_fake_agent(lookup_fn, scope_already=None):

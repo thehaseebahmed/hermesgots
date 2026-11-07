@@ -18,7 +18,6 @@ import type {
   Skill,
   Tidied,
 } from "@/lib/hermes"
-import type { SessionPipeline } from "@/lib/pipeline"
 import type { PromptEntry } from "@/lib/prompt-library"
 import type { SpeechSettings } from "@/lib/speech"
 import type { ReasoningRun } from "@/lib/thinking"
@@ -70,8 +69,6 @@ export interface Settings {
    * wrote (`progress-reminder.ts`, ADR 0068). Developer, local, off by default.
    */
   showProgressReminders?: boolean
-  /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
-  afkWorkflows?: boolean
   /**
    * Records this device's own requests to each bot's host — how long each took, what it answered and
    * how it ended — for the Network log screen (`net-log.ts`, ADR 0086). Developer, local, off by
@@ -273,12 +270,8 @@ export interface Conversation {
    */
   worktree?: { branch: string; repos: { name: string; branch: string }[]; instructions: string }
   /**
-   * The stages a staged AFK task ran in — Build, Gate, Critique — as the plugin recorded them on the
-   * session itself, so the session still says how it got here once its task is finished. Local only;
-   * every device reads the same record.
+   * A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it.
    */
-  pipeline?: SessionPipeline | null
-  /** A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it. */
   planPending?: boolean
   /** The newest plan the plugin saved, `plans/<file>.md` under the project's folder. Local only. */
   planFile?: string

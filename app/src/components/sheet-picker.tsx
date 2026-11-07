@@ -1,9 +1,9 @@
 /**
  * The row a library sheet offers, and the list around it: one record's name and its own second
  * line, the pencil that opens it, and the reading and empty lines a list shows before it has rows.
- * Both sheets that pick something — the workflows a bot's account keeps and the account's Prompts —
- * are this row, so a record looks and behaves the same wherever it is offered, and a spinner or an
- * empty line is fixed once rather than once per sheet.
+ * One sheet picks something with it — the account's Prompts — so a record looks and behaves the
+ * same wherever it is offered, and a spinner or an empty line is fixed once rather than once per
+ * sheet.
  *
  * The caller owns the list and what a pick means: these draw a row, report the pointer, and say what
  * a list with nothing in it is called.
@@ -33,7 +33,7 @@ export function SheetPickerRow({
 }: {
   /** The record's id, which the row's own `data-` attribute carries for a test or a flow to read. */
   id: string
-  /** The attribute naming the kind of record, `data-workflow` or `data-prompt`. */
+  /** The attribute naming the kind of record, `data-prompt`. */
   attribute: `data-${string}`
   /** The record's name, which is what its pencil is called: `Edit <name>`. */
   name: string
@@ -93,7 +93,7 @@ export function SheetPickerList<T>({
   error?: string
   /** The list's accessible name — what these records are. */
   label: string
-  /** What the list reads while it waits for the first answer, "Reading workflows…". */
+  /** What the list reads while it waits for the first answer, "Reading prompts…". */
   reading: string
   /** What a list with nothing in it says. */
   empty: string

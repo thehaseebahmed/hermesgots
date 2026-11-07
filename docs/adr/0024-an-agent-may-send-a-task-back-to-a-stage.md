@@ -1,5 +1,8 @@
 # An agent may send a task back to a stage it has already run
 
+**Superseded by [ADR 0110](0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md):**
+there is no stage to send a task back to.
+
 Each of a task's runs is briefed for one stage: a review run is told to review the diff and open the
 draft, and it neither rebuilds the work nor expects to. The user, though, sees the review and
 remembers the build was wrong, and their message arrives in a run briefed for the wrong thing. Today

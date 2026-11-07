@@ -52,7 +52,6 @@ import { PreviewerProvider } from "@/components/chat/previewer"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
 import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
-import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
 import { OutputsDrawer } from "@/components/chat/outputs-drawer"
@@ -130,7 +129,6 @@ import { markRead } from "@/lib/read-marks"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
@@ -594,20 +592,17 @@ function NextComposer(props: {
 
 /**
  * What the plugin holds for a chat on chat-next, as the current screen shows it above the composer:
- * a staged task's pipeline, the todo list, the session's pull requests and its filed outputs, each
- * opening its sheet. The reads that fill them are the chat's follow-up reads (`onSettled`).
+ * the todo list, the session's pull requests and its filed outputs, each opening its sheet. The reads
+ * that fill them are the chat's follow-up reads (`onSettled`).
  */
 function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; busy: boolean }) {
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
   const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
   const [todosOpen, setTodosOpen] = useState(false)
-  const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const subagents = useLiveSubagents()
   const tracked = Boolean(bot?.apiKey && !bot.disabled)
   const session = chat?.projectId ? chat : undefined
-  const stagedPipeline = useStagedPipeline(bot, session?.pipeline)
-  if (!stagedPipeline && pipelineOpen) setPipelineOpen(false)
   const checksRunning = prChecksPending(session?.prs)
   useEffect(() => {
     if (!checksRunning) return
@@ -637,12 +632,9 @@ function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; bus
   })
   return (
     <>
-      {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
+      {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
         <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
           <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-            {stagedPipeline && (
-              <PipelinePill pipeline={stagedPipeline} onClick={() => setPipelineOpen(true)} />
-            )}
             {todos.length > 0 && (
               <TodosPill
                 items={todos}
@@ -660,14 +652,6 @@ function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; bus
             )}
           </div>
         </div>
-      )}
-      {stagedPipeline && (
-        <PipelineSheet
-          open={pipelineOpen}
-          onOpenChange={setPipelineOpen}
-          pipeline={stagedPipeline}
-          prLabel={firstPrLabel}
-        />
       )}
       <TodosSheet
         open={todosOpen}
@@ -878,7 +862,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
   const sheet = useCheatsheet()
-  const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   // The window's edge as one value the reach watches: the oldest row this device holds, and which
@@ -1076,12 +1059,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   // Every pull request the session has, the ones it already finished included, as the drawer lists.
   const prs = session?.prs ?? []
   const firstPrLabel = prs.length ? prLabel(prs[0], prs) : undefined
-  // The pipeline a staged task ran in, as its session recorded it. Where the bot's Host stages tasks
-  // and this session holds a record the pill marks them; a chat with no record asks it nothing.
-  const pipeline = session?.pipeline
-  const stagedPipeline = useStagedPipeline(profile, pipeline)
-  // A sheet put away because the pipeline went (the switch turned off) stays closed when it returns.
-  if (!stagedPipeline && pipelineOpen) setPipelineOpen(false)
   // While a pull request's checks run, read them again every few seconds so the pill turns
   // green (or orange) as soon as they do. Forced, so the freshness gate doesn't skip a tick that
   // lands just inside its window.
@@ -1642,13 +1619,10 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         data-toast-above
         className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
       >
-        {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
+        {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-              {stagedPipeline && (
-                <PipelinePill pipeline={stagedPipeline} onClick={() => setPipelineOpen(true)} />
-              )}
               {todos.length > 0 && (
                 <TodosPill
                   items={todos}
@@ -1786,14 +1760,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         )}
       </div>
 
-      {stagedPipeline && (
-        <PipelineSheet
-          open={pipelineOpen}
-          onOpenChange={setPipelineOpen}
-          pipeline={stagedPipeline}
-          prLabel={firstPrLabel}
-        />
-      )}
       <TodosSheet
         open={todosOpen}
         onOpenChange={setTodosOpen}

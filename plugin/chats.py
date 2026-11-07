@@ -189,11 +189,11 @@ def pin(path: Path, session_id: str) -> Optional[Dict[str, str]]:
     """The model a session keeps: the pick its own chat record carries, or None.
 
     Every run after a session's first asks this, so the model it started on is the one it keeps
-    however the profile's Default model moves under it — AFK's stages, and the run a finished
-    subagent wakes. A session published before records carried a pick, or one whose store can't be
-    read, answers None: its run names no model and the host's own answer decides, which is what
-    every run did before the pin existed. A pick is never worth losing a run over, so a store this
-    can't read is no pin rather than an exception.
+    however the profile's Default model moves under it — the turns a person sends, and the run a
+    finished subagent wakes. A session published before records carried a pick, or one whose store
+    can't be read, answers None: its run names no model and the host's own answer decides, which is
+    what every run did before the pin existed. A pick is never worth losing a run over, so a store
+    this can't read is no pin rather than an exception.
     """
     try:
         return choice(by_session(path, session_id))

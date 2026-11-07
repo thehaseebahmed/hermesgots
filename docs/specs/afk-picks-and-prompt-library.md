@@ -27,8 +27,9 @@ words for Done to write.
 - **Not ADR 0026's usage threshold.** It stays its own decision, landing later on this same tab,
   route and flag.
 - **Not a bot-level prompt.** Prompts stay per project; the library is what is shared.
-- **Not a change to the workflow library.** It stays behind its Developer setting; deprecating or
-  moving it is a separate change, and a prompt pick clears a picked workflow exactly as today.
+- **Not a change to the workflow library.** It stayed behind its Developer setting, and a prompt pick
+  cleared a picked workflow exactly as before; the library and its pick were removed later by
+  [ADR 0110](../adr/0110-afk-works-one-prompt-run-and-the-workflow-machine-is-removed.md).
 - **Not presets.** The library starts empty; the host's default prompt stays the host's default
   rather than an entry that drifts with plugin versions.
 - **Not automatic propagation.** Editing an entry does not push into projects that picked it; the

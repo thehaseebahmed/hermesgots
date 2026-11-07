@@ -8,7 +8,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { SettingsPage } from "@/routes/settings"
-import { Path, mount, path, seedSettings, settle, text } from "./component-kit.tsx"
+import { Path, find, mount, path, seedSettings, settle, text } from "./component-kit.tsx"
 
 const at = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -27,6 +27,15 @@ for (const section of ["developer", "network"])
       assert.equal(path(), "/settings", "the address falls back to the menu")
     })
   })
+
+test("the Developer screen offers no AFK Workflows row", async () => {
+  await seedSettings({ developer: true })
+  await mount(at("/settings/developer"), async () => {
+    await settle()
+    // A boolean, not a node: a failing assertion must not print a whole DOM tree.
+    assert.equal(Boolean(find("#afk-workflows-label")), false, "the switch is gone with the library")
+  })
+})
 
 test("/settings/developer with the switch on draws it", async () => {
   await seedSettings({ developer: true })

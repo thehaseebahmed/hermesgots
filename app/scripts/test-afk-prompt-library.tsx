@@ -73,7 +73,7 @@ async function editor(host: Host, body: () => Promise<void>, library = true) {
 }
 
 /** A host that mirrors the plugin this change belongs to: the Prompt, and afk_picks beside it. */
-const PICKS_FEATURES = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt", "afk_picks"]
+const PICKS_FEATURES = ["afk", "afk_switch", "afk_prompt", "afk_picks"]
 
 test("the list draws what the account saved, and ships no presets", async () => {
   await seedPrompts([
@@ -140,8 +140,6 @@ test("picking copies the entry's words in and writes them with their source", as
   await seedPrompts([{ id: "e-one", name: "Review first", tags: ["review"], body }])
   const host = afkHost({ features: PICKS_FEATURES })
   await editor(host, async () => {
-    assert.equal(host.state().chosen, "preset:staged", "the project runs a workflow before the pick")
-
     await click(findText("button", "Choose from library"))
     await click(find('button[aria-label="Use Review first"]'))
 
@@ -149,11 +147,6 @@ test("picking copies the entry's words in and writes them with their source", as
       writes(host).map((call) => call.body),
       [{ prompt: body, prompt_id: "e-one" }],
       "one write, of the entry's own words and the entry they came from, through the route Done writes",
-    )
-    assert.equal(
-      host.state().chosen,
-      null,
-      "a Prompt clears a picked workflow on the host, and a pick is a Prompt",
     )
     assert.equal(host.state().source, "e-one", "and the copy remembers the entry it came from")
     assert.equal(fieldValue(), body, "and the words are in the field, where they were copied")

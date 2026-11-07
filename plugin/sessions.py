@@ -51,7 +51,6 @@ FIELDS = (
     "plan_file",
     "files_dir",
     "task",
-    "pipeline",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -138,7 +137,6 @@ def _record(row: Any) -> Dict[str, Any]:
         {field: repo.get(field) for field in REPO_FIELDS} for repo in repos if isinstance(repo, dict)
     ]
     record["task"] = _json(record["task"], None)
-    record["pipeline"] = _json(record["pipeline"], None)
     # A row from before repos were kept: the one tree it has.
     if not record["repos"] and record["path"]:
         record["repos"] = [
@@ -175,33 +173,6 @@ def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
 def set_task(path: Path, session_id: str, task: Dict[str, Any]) -> None:
     """Records the issue AFK started this session for, so its pull request closes it."""
     _set_json(path, session_id, "task", task)
-
-
-def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]) -> None:
-    """Records the stage a staged task is in, so the pop-up can name it and a finished task can
-    still say how it got there (``pipeline.py``). ``None`` clears it."""
-    _set_json(path, session_id, "pipeline", pipeline)
-
-
-def pipelines_of(path: Path, session_ids: Iterable[str]) -> Dict[str, Any]:
-    """Every named session's pipeline column in one read, for a sheet asking about all its holds.
-
-    One connection for every hold rather than one per hold: a project may hold several tasks, and
-    its pop-up is polled every few seconds.
-    """
-    wanted = list(dict.fromkeys(one for one in session_ids if one))
-    if not wanted or not path.exists():
-        return {}
-    conn = connect(path)
-    try:
-        marks = ", ".join("?" for _ in wanted)
-        rows = conn.execute(
-            f"SELECT session_id, pipeline FROM project_sessions WHERE session_id IN ({marks})",
-            wanted,
-        ).fetchall()
-    finally:
-        conn.close()
-    return {str(row[0]): _json(row[1], None) for row in rows}
 
 
 def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:

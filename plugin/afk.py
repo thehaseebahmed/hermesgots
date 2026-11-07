@@ -28,12 +28,11 @@ is pinned to: `_starting_pin` reads the profile's main model for a session that 
 the one its record is then published with — and `chats.pin` reads its own record's pick for every
 run after that, so changing the Default model never moves a session already under way.
 
-A project that named no workflow works its task in one run: nothing is snapshotted, so the session
-records no pipeline and its run is the task's whole work. One that named a workflow runs its stages
-instead, under the snapshot of it written as the task starts (`_snapshot`, ADR 0027). A stage's run
-can leave subagents still writing the worktree its gate reads, so a stage moves on only once its run
-has ended and every subagent that run started has ended too — the gate's end is held from the store's
-own reading and looked at again while it waits (`_held_for_subagents`, `settle_held`, ADR 0038).
+A task is worked in one run. `prompt_builder.afk_prompt` is its instructions — AFK's fixed points,
+then the project's Prompt — and the issue itself is its input, so the whole of the task's work is
+that one run: the session's record carries no plan of its own, and nothing follows the run. When
+it ends, a finished one frees its hold (the work is in review on GitHub) and any other outcome
+records why nothing is working the task, which is where the app shows a stall.
 
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
@@ -57,17 +56,13 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from . import (
     chats,
-    delegation,
     events,
     github,
     host_model,
-    pipeline,
     prompt_builder,
     sessions,
-    ship,
     tasks,
     usage,
-    workflows,
 )
 from .profile_scope import profile_scope
 from .store import connect, db_path, get_setting, get_settings, put_setting
@@ -78,14 +73,6 @@ NO_REPOSITORY = "This project has no repository."
 NO_GITHUB = "No GitHub account on the server."
 # The same words the plugin already refuses an archived project a turn with (sessions._blocked).
 ARCHIVED = "This project is archived."
-# A skill the project picked that its bot no longer has: the sweep records it and claims nothing.
-MISSING_SKILL = (
-    'The skill "{name}" isn\'t one this bot has any more, so no task is claimed. '
-    "Pick another in the project's AFK pop-up."
-)
-NO_PULL_REQUEST = "The stage that opens the pull request ended without one."
-# A stage of the workflow couldn't be started: nothing is working the task from here.
-STAGE_FAILED = 'The "{name}" stage couldn\'t start.'
 
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
@@ -137,23 +124,10 @@ STALL_SECONDS = 300
 DEFAULT_STALL = "AFK stopped before the task was finished."
 FAILED_RUN = "The run failed."
 INTERRUPTED_RUN = "The run was interrupted."
-# How long the sweep waits while a stage is held for the subagents its run started. The hold is
-# settled from the plugin's own store, not GitHub, so it is looked at on a shorter clock than a
-# sweep: a gate must move on as soon as the tree it reads has stopped being written.
-HOLD_SECONDS = 5.0
-
-
-class StageHold(NamedTuple):
-    """A stage whose run ended while the subagents it started still work: its home, and its outcome."""
-
-    home: Path
-    outcome: sessions.Outcome
 
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _event: Optional["asyncio.Event"] = None
-# In memory, like ``_loop``: a restart leaves the task where the stall clock finds it.
-_held: Dict[str, StageHold] = {}
 
 
 class Refused(Exception):
@@ -245,7 +219,7 @@ def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
     """Everything the app's sheet shows: the switch and its reason, the tasks held, the last
-    refusal, the workflow this project's work runs under, and the Prompt its runs are told.
+    refusal, and the Prompt its runs are told.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
@@ -261,9 +235,6 @@ def read(
         "holds": [],
         "task": None,
         "refusal": None,
-        "build_skill": None,
-        "critique_skills": [],
-        "workflow_id": None,
         "prompt": None,
         "pick_count": None,
         "prompt_id": None,
@@ -273,10 +244,7 @@ def read(
     if on and why == ARCHIVED:
         turn_off(hermes_home, project_id)
         on = False
-    holds = _hold_answers(hermes_home, found["holds"])
-    # The oldest hold is the one the sheet's single Working row has always drawn, and an app that
-    # knows nothing of picks keeps drawing exactly that.
-    oldest = holds[0] if holds else {"stage": None, "stage_name": None}
+    holds = _hold_answers(found["holds"])
     return {
         "on": on,
         "reason": why,
@@ -287,7 +255,6 @@ def read(
         "pick_count": _pick_count(found),
         "prompt_id": found["prompt_id"],
         "refusal": found["refusal"],
-        "workflow": _workflow(hermes_home, project_id, found),
         # Empty and unset are the same thing — the bot's default method — so the app is handed the
         # words a run would read rather than a blank field.
         "prompt": found["prompt"] or prompt_builder.DEFAULT_PROMPT,
@@ -298,57 +265,15 @@ def read(
         "pick_budget": bot["pick_budget"],
         "holds_held": bot["holds_held"],
         "usage_threshold": bot["usage_threshold"],
-        # The stage the oldest task it holds is in, for the sheet's own Working row (ADR 0018):
-        # None for a project holding nothing, and for a task that isn't staged. Its own name comes
-        # beside it, so a workflow's own words — "Migrate", "Verify" — are what the row says.
-        "stage": oldest["stage"],
-        "stage_name": oldest["stage_name"],
     }
 
 
-def _hold_answers(hermes_home: Path, holds: Iterable["Hold"]) -> List[Dict[str, Any]]:
-    """Every hold as the sheet reads it: the task, the stage its session is in, and why it stalled.
-
-    The stage is read once for the whole list — a project may hold several tasks and the sheet is
-    polled every few seconds — and the rule for one hold is unchanged: only a held task's stage is
-    named, and it comes off its session's own record, which outlives the hold (the strip that reads
-    a finished task is its own change, #319).
-    """
-    held = list(holds)
-    stages = _stages(hermes_home, held)
-    answers: List[Dict[str, Any]] = []
-    for hold in held:
-        staged = stages.get(hold.session_id) if hold.task and hold.session_id else None
-        answers.append(
-            {
-                **{key: hold.task.get(key) for key in HELD},
-                "stage": staged.step if staged is not None else None,
-                "stage_name": staged.name if staged is not None else None,
-                "stalled": hold.stalled,
-            }
-        )
-    return answers
-
-
-def _stages(hermes_home: Path, holds: Iterable["Hold"]) -> Dict[str, HeldStage]:
-    """Each hold's stage, by session id, in one look at the session store rather than one per hold.
-
-    A store that can't be read answers no stage at all: the sheet is worth more than the stage
-    beside it, and a poll that failed to read would otherwise fail whole.
-    """
-    wanted = [hold.session_id for hold in holds if hold.task and hold.session_id]
-    if not wanted:
-        return {}
-    try:
-        stored = sessions.pipelines_of(db_path(hermes_home), wanted)
-    except Exception:
-        logger.debug("gots: couldn't read the stage of %s", wanted, exc_info=True)
-        return {}
-    stages: Dict[str, HeldStage] = {}
-    for session_id, value in stored.items():
-        record = pipeline.read(value)
-        stages[session_id] = HeldStage(pipeline.stage(record), pipeline.stage_name(record))
-    return stages
+def _hold_answers(holds: Iterable["Hold"]) -> List[Dict[str, Any]]:
+    """Every hold as the sheet reads it: the task it works, and why it stalled."""
+    return [
+        {**{key: hold.task.get(key) for key in HELD}, "stalled": hold.stalled}
+        for hold in holds
+    ]
 
 
 def _whole(value: Any) -> bool:
@@ -447,59 +372,6 @@ def bot_read(hermes_home: Path) -> Dict[str, Any]:
     }
 
 
-def _legacy(found: Dict[str, Any]) -> bool:
-    """Whether a project's row predates the picker and names its work by its old skill columns."""
-    return found.get("workflow_id") is None and bool(
-        found.get("build_skill") or found.get("critique_skills")
-    )
-
-
-def _chosen(
-    hermes_home: Path, project_id: str, found: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """The workflow this project has picked, or ``None`` where it has none to run.
-
-    Read from the row the caller already holds, so answering a project costs one store open. A row
-    that predates the picker is migrated to the workflow its build and critique skill columns
-    described, and names it, so what the project does can't change shape under the user on upgrade.
-    A pick the library no longer holds is no pick: its delete was refused where a project still named
-    it, so only a hand edit strands one.
-    """
-    if _legacy(found):
-        return workflows.migrate(
-            hermes_home,
-            project_id,
-            found.get("build_skill"),
-            found.get("critique_skills") or [],
-        )
-    return workflows.get(hermes_home, found.get("workflow_id"))
-
-
-def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
-    """The workflow this project's AFK work reads as: its pick, or One run where it has none."""
-    return _chosen(hermes_home, project_id, found) or workflows.one_run()
-
-
-def _snapshot(
-    hermes_home: Path, project_id: str, found: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """The pipeline snapshot a task starting now begins under, or ``None`` for one prompt run.
-
-    Only a project on a workflow is staged. A project that named none works one run told its Prompt,
-    and nothing is written: its session records no pipeline, so the app draws no stage and no sheet
-    (ADR 0027).
-    """
-    chosen = _chosen(hermes_home, project_id, found)
-    return pipeline.start(chosen) if chosen is not None else None
-
-
-class HeldStage(NamedTuple):
-    """The step a held task is in, and the stage's own name: what a sheet's Working row says."""
-
-    step: Optional[str]
-    name: Optional[str]
-
-
 def write_from(body: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """What a write names and the arguments that write takes — or ValueError.
 
@@ -513,26 +385,21 @@ def write_from(body: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """
     if "prompt_id" in body and "prompt" not in body:
         raise ValueError("prompt_id needs a prompt beside it.")
-    named = [key for key in ("on", "workflow_id", "prompt", "pick_count") if key in body]
+    named = [key for key in ("on", "prompt", "pick_count") if key in body]
     if len(named) > 1:
-        raise ValueError("A write names one of on, workflow_id, prompt or pick_count.")
+        raise ValueError("A write names one of on, prompt or pick_count.")
     if "on" in body:
         on = body["on"]
         if not isinstance(on, bool):
             raise ValueError("on must be true or false.")
         return "on", {"on": on}
-    if "workflow_id" in body:
-        workflow_id = body["workflow_id"]
-        if not isinstance(workflow_id, str) or not workflow_id.strip():
-            raise ValueError("workflow_id must be a workflow's id.")
-        return "workflow", {"workflow_id": workflow_id.strip()}
     if "prompt" in body:
         text = prompt_text(body["prompt"])
         source = prompt_source(body["prompt_id"]) if "prompt_id" in body else None
         return "prompt", {"prompt": text, "prompt_id": source}
     if "pick_count" in body:
         return "pick_count", {"count": pick_count_of(body["pick_count"])}
-    raise ValueError("on, workflow_id, prompt or pick_count is needed.")
+    raise ValueError("on, prompt or pick_count is needed.")
 
 
 def pick_count_of(value: Any) -> int:
@@ -554,7 +421,7 @@ def prompt_text(value: Any) -> Optional[str]:
     """
     if value is not None and not isinstance(value, str):
         raise ValueError("prompt must be text.")
-    return pipeline.text(value)
+    return _text(value)
 
 
 def prompt_source(value: Any) -> str:
@@ -576,46 +443,18 @@ def set_prompt(
     prompt: Optional[str],
     prompt_id: Optional[str] = None,
 ) -> None:
-    """Writes the project's Prompt and the library entry it was copied from, clearing any workflow
-    pick in the same write.
-
-    A project is never both: a Prompt is one run's method and a workflow is the stages its work runs
-    through. The skill columns a row from before the picker carries go with the pick: they are what
-    ``_workflow`` migrates a project with no pick from, so leaving them would put the old workflow
-    back as soon as the Prompt was cleared, and empty has to mean the default.
+    """Writes the project's Prompt and the library entry it was copied from.
 
     ``prompt_id`` rides the same write as the words: a pick writes both, and a plain write (the id
     left None) clears it, so a Prompt typed by hand never reads as a stale copy of an entry the user
-    didn't choose (ADR 0043).
+    didn't choose (ADR 0043). Empty is the bot's default method, so a blank Prompt clears the words
+    rather than storing a field a run would read as the user's.
     """
     _upsert(
         hermes_home,
         project_id,
         prompt=prompt,
         prompt_id=prompt_id,
-        workflow_id=None,
-        build_skill=None,
-        critique_skills=None,
-        at=int(time.time()),
-    )
-
-
-def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
-    """Points this project's AFK work at a workflow in its bot's library, clearing any Prompt it held.
-
-    The id has to be one the library holds: a project naming nothing would silently run the default
-    preset, and the user would have picked a workflow that isn't what works. A Prompt and a pick are
-    one choice between them, so picking one drops the Prompt in the same write: a project holding both
-    would show words no run reads. The Prompt's library source goes with the words it describes.
-    """
-    if workflows.get(hermes_home, workflow_id) is None:
-        raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
-    _upsert(
-        hermes_home,
-        project_id,
-        workflow_id=workflow_id,
-        prompt=None,
-        prompt_id=None,
         at=int(time.time()),
     )
 
@@ -789,32 +628,6 @@ def holding_project(hermes_home: Path, session_id: str) -> Optional[str]:
     return hold.project_id if hold is not None else None
 
 
-def staged_session(hermes_home: Path, session_id: str) -> Optional[bool]:
-    """Whether this session is working a stage of a task's workflow, so nothing may wake it.
-
-    A stage keeps its one run: the stage it moves to is posted on the same session by the gate that
-    judged the run before it, so a turn posted by a subagent's completion would be a second run on
-    that session, racing the work it is meant to be reading (#469). AFK's own reading is what says
-    so — the session's record, found the way a hook finds it (a compressed session walks up to the
-    one that has the record), carrying a workflow snapshot (`pipeline.read`, the same read
-    ``after_run`` decides a stage by). A task with no workflow snapshots none and is an ordinary
-    conversation here.
-
-    A store this can't read answers None — neither a stage nor an ordinary conversation. The caller
-    is the wake, which must decide a child's fate from a reading that really landed: a failure is
-    not a stage, and dropping every wake of a look on one storage blip is not a bound but a bug.
-    """
-    path = db_path(hermes_home)
-    if not session_id or not path.exists():
-        return False
-    try:
-        record = sessions.record_for(path, hermes_home, session_id)
-    except (sqlite3.Error, OSError):
-        logger.warning("gots: couldn't read %s's workflow", session_id, exc_info=True)
-        return None
-    return pipeline.read((record or {}).get("pipeline")) is not None
-
-
 def stalled(
     hermes_home: Path, live: Optional[Dict[str, str]] = None
 ) -> Dict[str, Dict[str, Any]]:
@@ -823,18 +636,14 @@ def stalled(
     A hold whose session has no run in flight is one the user has to look at: its run failed, or the
     host restarted while it worked and the session was adopted rather than restarted or doubled.
     Either way it is where waiting sessions appear, naming the project like the rest, and never
-    beside a live run — a run in flight is what working it looks like — nor while a stage waits for
-    the subagents its run started, since those are working it and the stage's own gate moves on
-    without the user (``_held_for_subagents``). Each hold is judged on its own clock, so the one
-    claimed a moment ago isn't reported because the one beside it is old.
+    beside a live run — a run in flight is what working it looks like. Each hold is judged on its
+    own clock, so the one claimed a moment ago isn't reported because the one beside it is old.
     """
     found: Dict[str, Dict[str, Any]] = {}
     now = time.time()
     waiting: List[Hold] = []
     for hold in _holds(hermes_home):
         if not hold.session_id or (live and hold.session_id in live):
-            continue
-        if hold.session_id in _held:
             continue
         if (
             not hold.stalled
@@ -969,8 +778,6 @@ def sweep(
     project_id: str,
     folders: Iterable[Any],
     archived: bool = False,
-    *,
-    skills: Optional[Iterable[str]],
 ) -> List[Dict[str, Any]]:
     """Claims tasks for a project left to work, filling every free place, oldest first.
 
@@ -995,12 +802,6 @@ def sweep(
     The bot's usage threshold, where it has one, is asked before the frontier is read: an account at
     or over it claims nothing and records the window that decided, so a bot left alone stops before it
     spends the last of an account it cannot finish a task on (ADR 0026).
-
-    ``skills`` is the names the profile can run, read once for a whole sweep; a project whose chosen
-    build or critique skill isn't among them claims nothing and records why, with its switch still
-    on, so a choice the user forgot about is visible instead of silently working around it (ADR
-    0018). It is the caller's to pass, and not defaulted: a sweep that judges no choice has to say
-    so, since a forgotten argument would quietly turn the check off.
     """
     budget = _Budget(hermes_home)
     plan = _plan(
@@ -1008,7 +809,6 @@ def sweep(
         project_id,
         folders,
         archived,
-        skills=skills,
         budget=budget,
         account=_Account(hermes_home),
         promised=set(),
@@ -1022,7 +822,6 @@ def _plan(
     folders: Iterable[Any],
     archived: bool,
     *,
-    skills: Optional[Iterable[str]],
     budget: _Budget,
     account: _Account,
     promised: Set[Tuple[Any, Any]],
@@ -1031,14 +830,14 @@ def _plan(
 
     Everything a claim needs is decided here but nothing is claimed: the holds this project's closed
     sessions gave back, the reason its switch can't claim, the places its pick count and the bot's
-    budget leave it, the skill the bot has lost, the account the pickup would spend, and the frontier
-    read that fills them — one GitHub read per project per pass, and none at all for a project with no
-    free place or one the bot's budget, a lost skill or a spent account already holds back. A refusal
-    recorded here is the project's own answer for this pass: GitHub's, a skill the bot has lost, the
-    bot's budget being full, or its account being at the bot's usage threshold.
+    budget leave it, the account the pickup would spend, and the frontier read that fills them — one
+    GitHub read per project per pass, and none at all for a project with no free place or one the
+    bot's budget or a spent account already holds back. A refusal recorded here is the project's own
+    answer for this pass: GitHub's, the bot's budget being full, or its account being at the bot's
+    usage threshold.
 
-    The account is asked only here, after the bot's own numbers and its skill, so the read is spent on
-    a project that would otherwise claim.
+    The account is asked only here, after the bot's own numbers, so the read is spent on a project
+    that would otherwise claim.
 
     ``promised`` is the tasks an earlier project of this pass has already planned (or claimed): two
     projects can point at one repository, so their frontiers are the same list, and a task planned
@@ -1073,13 +872,6 @@ def _plan(
         # the budget never asks GitHub how full it is (ADR 0042).
         _refuse(hermes_home, project_id, _budget_full(budget))
         return Plan(project_id, [])
-    if skills is not None:
-        missing = _missing_skill(hermes_home, project_id, found, skills)
-        if missing is not None:
-            _refuse(hermes_home, project_id, MISSING_SKILL.format(name=missing))
-            return Plan(project_id, [])
-    # Beside the lost-skill branch rather than inside it: a project that runs one prompt names no
-    # skill, so a check written there would never run for it (ADR 0026).
     spent = account.refusal()
     if spent is not None:
         _refuse(hermes_home, project_id, spent)
@@ -1201,27 +993,6 @@ def run_body(
     )
 
 
-def stage_body(
-    record: Dict[str, Any], task: Dict[str, Any], pinned: Optional[Dict[str, str]] = None
-) -> Dict[str, Any]:
-    """The next run's request: the same session, briefed for the stage the task is in now.
-
-    Every stage is one run of that session — the transcript is the work's own account of itself —
-    and the brief names the stage, its skills in order and, for a loop's next round, the command the
-    round before failed on. Only the shipping stage is told the base branch, because only its run
-    opens the pull request; the review hands it to whatever reads the diff.
-    """
-    staged = pipeline.read(record.get("pipeline"))
-    return _request(
-        record,
-        prompt_builder.stage_prompt(
-            record, task, base_branch(record) if pipeline.ships(staged) else None
-        ),
-        prompt_builder.stage_input(task, pipeline.stage_name(staged)),
-        pinned,
-    )
-
-
 def _request(
     record: Dict[str, Any],
     instructions: str,
@@ -1259,46 +1030,24 @@ def _starting_pin(hermes_home: Path) -> Optional[Dict[str, str]]:
         return None
 
 
-def base_branch(record: Dict[str, Any]) -> Optional[str]:
-    """The branch this session's work is against: its primary worktree's base."""
-    from . import projects
-
-    primary = next((repo.get("path") for repo in record.get("repos") or []), None)
-    return projects._base_branch(primary) if primary else None
-
-
 class Start(NamedTuple):
-    """What a start takes off the project's row: the task's workflow snapshot — none for a project
-    that works one prompt run — its Prompt, and the model its first run goes out on."""
+    """What a start takes off the project's row: its Prompt, and the model its run goes out on."""
 
-    snapshot: Optional[Dict[str, Any]]
     prompt: Optional[str]
     pinned: Optional[Dict[str, str]]
 
 
-def _begin(
-    hermes_home: Path, path: Path, project_id: str, session_id: str
-) -> Start:
-    """Writes the snapshot a staged task starts with, and answers the Prompt and the pin beside it.
+def _begin(hermes_home: Path, project_id: str) -> Start:
+    """Answers the Prompt a task's run is told and the model it goes out on.
 
-    The project's workflow as it stands now, copied onto the task: editing or deleting the library
-    entry afterwards cannot rewrite what this task ran. Written before the run is posted, so the
-    build's own instructions already know where they end. The Prompt comes off the same read of the
-    row — the sweep works a task with the app closed, so the Prompt written last night is the one the
-    run reads, with nothing the app sent in between. The pin is the model the session's first run
-    goes out on and the pick its record is then published with (``_starting_pin``), read here so
-    that the two can never disagree and ``start`` holds no local it has to carry past a block that
-    can give the claim back.
-
-    A project that named no workflow snapshots nothing (ADR 0027). A task already holding its work
-    keeps the snapshot it started under, since the snapshot it runs by lives on its own session's
-    record and not here.
+    The Prompt comes off the project's row — the sweep works a task with the app closed, so the
+    Prompt written last night is the one the run reads, with nothing the app sent in between. The pin
+    is the model the session's first run goes out on and the pick its record is then published with
+    (``_starting_pin``), read here so that the two can never disagree and ``start`` holds no local it
+    has to carry past a block that can give the claim back.
     """
     found = _row(hermes_home, project_id) or {}
-    staged = _snapshot(hermes_home, project_id, found)
-    if staged is not None:
-        sessions.set_pipeline(path, session_id, staged)
-    return Start(staged, found.get("prompt"), _starting_pin(hermes_home))
+    return Start(found.get("prompt"), _starting_pin(hermes_home))
 
 
 def publish(
@@ -1318,8 +1067,8 @@ def publish(
     and the app would otherwise replace the task's own name with that.
 
     ``pinned`` is the model the session's first run went out on, when the host named one, written as
-    the record's ``modelChoice`` so every later run of that session — its stages, its subagents'
-    wakes — runs it too, and a change to the profile's Default model leaves it alone.
+    the record's ``modelChoice`` so every later run of that session — a subagent's wake, a turn the
+    user sends — runs it too, and a change to the profile's Default model leaves it alone.
     """
     sessions.set_task(db_path(hermes_home), session_id, _held_fields(task))
     now = int(time.time() * 1000)
@@ -1374,10 +1123,7 @@ async def start(
     try:
         await asyncio.to_thread(_adopt, hermes_home, project_id, session_id, task)
         sessions.apply_cwd(session_id, record["path"])
-        began = await asyncio.to_thread(
-            _begin, hermes_home, db_path(hermes_home), project_id, session_id
-        )
-        record = {**record, "pipeline": began.snapshot}
+        began = await asyncio.to_thread(_begin, hermes_home, project_id)
         started = await _post(
             adapter, hermes_home, run_body(record, task, began.prompt, began.pinned)
         )
@@ -1452,10 +1198,6 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     budget = _Budget(hermes_home)
     # One read of the project list, not one per project: a sweep only needs their folders.
     projects = sessions.projects(hermes_home / "projects.db")
-    # And one of the skills this bot can run, for every project's choice: a skill the profile no
-    # longer has stops that project's sweep (ADR 0018), and a host that can't list its skills
-    # judges nothing. Read only when a project has picked one to judge.
-    skills = _profile_skills(hermes_home) if workflows.any_steps(hermes_home) else None
     # And one look at the bot's account, for every project of the pass: the threshold is the bot's,
     # so its account is too, and the read is made only when a project reaches the point of claiming
     # what it has left (ADR 0026).
@@ -1476,7 +1218,6 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
                     project_id,
                     project.folders,
                     bool(getattr(project, "archived", False)),
-                    skills=skills,
                     budget=budget,
                     account=account,
                     promised=promised,
@@ -1517,23 +1258,14 @@ async def run(adapter: Any) -> None:
     global _loop, _event
     _loop = asyncio.get_running_loop()
     _event = asyncio.Event()
-    swept = 0.0
 
     while True:
-        now = time.monotonic()
-        if _held:
-            try:
-                await settle_held(adapter)
-            except Exception:
-                logger.warning("gots: AFK couldn't settle a held stage", exc_info=True)
-        if not _held or now - swept >= SWEEP_SECONDS:
-            swept = now
-            try:
-                await sweep_homes(adapter)
-            except Exception:
-                logger.warning("gots: AFK's sweep failed", exc_info=True)
         try:
-            await asyncio.wait_for(_event.wait(), HOLD_SECONDS if _held else SWEEP_SECONDS)
+            await sweep_homes(adapter)
+        except Exception:
+            logger.warning("gots: AFK's sweep failed", exc_info=True)
+        try:
+            await asyncio.wait_for(_event.wait(), SWEEP_SECONDS)
         except asyncio.TimeoutError:
             pass
         _event.clear()
@@ -1561,10 +1293,6 @@ def after_run(
     holding is its own: every other project session just wakes the sweep, and a chat's turn says
     nothing about any work. The project's other holds are never touched: a run's end is its own
     task's business (ADR 0025).
-
-    A staged task's run end is its stage's business instead (ADR 0018, ADR 0020): the stage's
-    checkpoint and the worktree decide whether it moves on, repeats a loop or stalls, and the stage
-    it moves to is posted on the same session as its own run.
     """
     try:
         path, home = sessions._paths()
@@ -1575,12 +1303,8 @@ def after_run(
             completed=completed, failed=failed, interrupted=interrupted
         )
         project_id = holding_project(home, str(record.get("session_id") or ""))
-        staged = pipeline.read(record.get("pipeline"))
         session_id = record.get("session_id")
         if project_id is not None:
-            if staged is not None:
-                _stage_end(home, path, project_id, record, staged, stopped)
-                return
             if not stopped.finished:
                 _stall(home, project_id, record.get("task"), _stopped(stopped), session_id)
                 return
@@ -1588,258 +1312,6 @@ def after_run(
         wake()
     except Exception:
         logger.debug("gots: couldn't wake AFK's sweep", exc_info=True)
-
-
-def _stage_end(
-    hermes_home: Path,
-    path: Path,
-    project_id: str,
-    record: Dict[str, Any],
-    staged: Dict[str, Any],
-    stopped: sessions.Outcome,
-) -> None:
-    """Settles a staged task whose run just ended: its gate's verdict, then the stage that follows.
-
-    A run of a stage that posts nothing never reaches here — a checkpoint is judged by the host from
-    the run before it, and an inert stage by nothing at all. The worktree is measured only for a
-    stage whose gate already passed: a gate that failed stalls the task in the stage it stopped in,
-    and nothing about the tree can change that. The stage is written before anything is started, so
-    a run that can't be posted leaves a record that says where the task stands.
-
-    A run is only half of what a stage waits for: one that dispatched a subagent leaves it writing
-    the tree the gate reads, so the end is held until every one of them has ended too (#469).
-    """
-    if _held_for_subagents(hermes_home, record, stopped):
-        return
-    worktree: Iterable[Dict[str, Any]] = ()
-    in_gate = stopped.finished and pipeline.measured(staged)
-    if in_gate and pipeline.gate_verdict(staged) is None:
-        worktree = ship.status(record)
-    step = pipeline.advance(
-        staged, stopped=None if stopped.finished else _stopped(stopped), worktree=worktree
-    )
-    moved = pipeline.moved(staged, step)
-    sessions.set_pipeline(path, record["session_id"], moved)
-    session_id = record.get("session_id")
-    if step.stall:
-        _stall(hermes_home, project_id, record.get("task"), step.stall, session_id)
-        return
-    if pipeline.ships(staged):
-        # The stage that just ended is the one that opens the pull request, so the draft is what
-        # says it did: a review that ended without one reviewed nothing the user can see.
-        unshipped = _unshipped(hermes_home, record)
-        if unshipped is not None:
-            sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, unshipped))
-            _stall(hermes_home, project_id, record.get("task"), unshipped, session_id)
-            return
-    if not pipeline.posts_now(moved):
-        # Nothing is left to run: the task's work is in review, so its hold goes and the sweep looks
-        # for the project's next task.
-        _free(hermes_home, project_id, record.get("task"), session_id)
-        wake()
-        return
-    # The next stage is the same session's next run: the hold keeps the task, and the stall clock
-    # starts again so the moment between two runs isn't read as nothing working it.
-    _adopt(hermes_home, project_id, record["session_id"], record.get("task"))
-    # The record as the task stands now, not as the run that ended left it: the next brief reads the
-    # stage off it, and handing it the stage behind would brief the run for work already done.
-    _start_stage(hermes_home, {**record, "pipeline": moved})
-
-
-def _held_for_subagents(
-    hermes_home: Path, record: Dict[str, Any], stopped: sessions.Outcome
-) -> bool:
-    """Whether the stage's run left subagents at work, holding its gate until they end.
-
-    A subagent counts as at work while the session that dispatched it has a run in flight — the rule
-    ``delegation.children`` reads every card by — so a row a host left open with no run behind it
-    (the host died with the child) reads stopped, and stopped is ended: it can't hold a stage for
-    ever. What the hold keeps is the session, its home and how its run ended, because that run is
-    what is over: the look that finds the last subagent ended (``settle_held``) takes the stage on
-    with the outcome its own run had, rather than with a later reading of it.
-    """
-    session_id = str(record.get("session_id") or "")
-    if not session_id:
-        return False
-    try:
-        live = sessions.live_runs(getattr(sessions, "adapter", None), None, hermes_home)[0]
-        working = any(
-            child["status"] == "running"
-            for child in delegation.children(hermes_home, session_id, set(live))
-        )
-    except Exception:
-        logger.debug("gots: couldn't read %s's subagents", session_id, exc_info=True)
-        return False
-    if not working:
-        _held.pop(session_id, None)
-        return False
-    _held[session_id] = StageHold(home=Path(hermes_home), outcome=stopped)
-    return True
-
-
-async def settle_held(adapter: Any) -> List[str]:
-    """Moves on every held stage whose subagents have all ended, on each home this process serves.
-
-    A stage's run ends before the subagents it started do, so its gate is settled here instead of by
-    a hook: from the store's own reading, on the loop's short clock while a hold is pending
-    (``HOLD_SECONDS``) — never at a sweep's pace, because a sweep reads GitHub. Answers the sessions
-    it moved on.
-    """
-    from . import link
-
-    moved: List[str] = []
-    for home in link.served_homes(adapter):
-        try:
-            moved += await asyncio.to_thread(_settle_home, home)
-        except Exception:
-            logger.warning("gots: AFK couldn't settle a held stage at %s", home, exc_info=True)
-    return moved
-
-
-def _settle_home(hermes_home: Path) -> List[str]:
-    """Looks again at each stage this home holds for its subagents; names the ones that moved on."""
-    moved: List[str] = []
-    path = db_path(hermes_home)
-    for session_id in list(_held):
-        held = _held[session_id]
-        if Path(held.home) != Path(hermes_home):
-            continue
-        record = sessions.record_for(path, hermes_home, session_id)
-        project_id = holding_project(hermes_home, session_id)
-        staged = pipeline.read((record or {}).get("pipeline"))
-        if not record or project_id is None or staged is None:
-            # The task moved on, or its session is gone: nothing is waiting on this stage.
-            _held.pop(session_id, None)
-            continue
-        _stage_end(hermes_home, path, project_id, record, staged, held.outcome)
-        if session_id not in _held:
-            moved.append(session_id)
-    return moved
-
-
-def _start_stage(hermes_home: Path, record: Dict[str, Any]) -> None:
-    """Starts the run for the stage a task has moved to, on the loop that owns the runs.
-
-    The hook runs in Hermes's own thread, so the run is posted there rather than awaited here. A run
-    that can't be started stalls the task instead: nothing is working its next stage, and the claim
-    is what the user finds it by. The task is the one this session holds, not the project's oldest:
-    another task of the same project may be further along.
-    """
-    project_id = str(record.get("project_id") or "")
-    task = (
-        _held_task(hermes_home, project_id, session_id=record["session_id"])
-        if project_id
-        else None
-    )
-    loop = _loop
-    name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
-    if not isinstance(task, dict) or loop is None:
-        logger.warning(
-            "gots: AFK can't start the \"%s\" stage of %s (no task held or no loop)",
-            name,
-            record.get("session_id"),
-        )
-        if project_id:
-            _stall(hermes_home, project_id, task, STAGE_FAILED.format(name=name))
-        return
-    asyncio.run_coroutine_threadsafe(
-        work_stage(sessions.adapter, hermes_home, record, task), loop
-    )
-
-
-async def work_stage(
-    adapter: Any, hermes_home: Path, record: Dict[str, Any], task: Dict[str, Any]
-) -> None:
-    """Posts one stage's run on the session, briefed for the stage the task is in.
-
-    The run carries the model the session is pinned to (`chats.pin`), read back off its chat record,
-    so a session that pinned one keeps it however the profile's Default model moves. A record that
-    pins none — one published before records carried a pick, and every session that started before
-    this change — names no model, and the host runs its current main model, exactly as every run did
-    before the pin existed.
-    """
-    issue = f"{task.get('repo')}#{task.get('number')}"
-    name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
-    try:
-        pinned = await asyncio.to_thread(chats.pin, db_path(hermes_home), record["session_id"])
-        started = await _post(adapter, hermes_home, stage_body(record, task, pinned))
-    except Exception as error:
-        logger.warning(
-            "gots: AFK couldn't start %s's \"%s\" stage for %s: %s", issue, name, record["session_id"], error
-        )
-        project_id = str(record.get("project_id") or "")
-        if project_id and holding_project(hermes_home, record["session_id"]) == project_id:
-            _stall(
-                hermes_home,
-                project_id,
-                task,
-                STAGE_FAILED.format(name=name),
-                record["session_id"],
-            )
-        return
-    logger.info(
-        "gots: AFK is working %s's \"%s\" stage in %s (run %s)",
-        issue,
-        name,
-        record["session_id"],
-        started.get("run_id"),
-    )
-
-
-def _unshipped(hermes_home: Path, record: Dict[str, Any]) -> Optional[str]:
-    """Why a finished shipping stage left no pull request, or None when one of its repos has one.
-
-    A GitHub that can't be asked says nothing rather than stalling the task over a failed lookup.
-    """
-    from . import github
-
-    try:
-        for repo in record.get("repos") or []:
-            found = github.pull_request(
-                hermes_home, repo.get("repo_root") or "", repo.get("branch") or "", checks=False
-            )
-            if found:
-                return None
-    except Exception:
-        logger.debug(
-            "gots: couldn't ask GitHub whether %s shipped", record.get("session_id"), exc_info=True
-        )
-        return None
-    return NO_PULL_REQUEST
-
-
-def _missing_skill(
-    hermes_home: Path, project_id: str, found: Dict[str, Any], skills: Iterable[str]
-) -> Optional[str]:
-    """The first skill this project's next task would apply that its bot no longer has, if any.
-
-    A workflow naming a skill the profile has lost claims nothing until the user picks otherwise
-    (ADR 0018). The steps judged are the ones the task's own snapshot names (``_snapshot``), so a
-    project working one prompt run names none and this and the task can't disagree.
-    """
-    staged = _snapshot(hermes_home, project_id, found)
-    known = set(skills)
-    return next((name for name in pipeline.steps_of(staged) if name not in known), None)
-
-
-def _profile_skills(hermes_home: Path) -> Optional[set]:
-    """The skill names this home's profile can run, or None when its host can't say.
-
-    Read the way the composer's ``/`` menu reads them (`skill_catalog`, the enabled and loadable
-    set), because only what the bot can actually run is worth refusing over. A Hermes whose skills
-    module moved answers None instead of stopping every sweep: a host that can't list its skills
-    isn't a host to judge a choice by.
-    """
-    from . import link, skill_catalog
-
-    try:
-        return {
-            str(skill.get("name") or "")
-            for skill in skill_catalog.read(link.profile_name(hermes_home))
-        }
-    except Exception:
-        logger.debug("gots: couldn't read this bot's skills", exc_info=True)
-        return None
 
 
 def _stopped(outcome: sessions.Outcome) -> str:
@@ -2061,7 +1533,7 @@ def _forget_refusal(hermes_home: Path, project_id: str, found: Dict[str, Any]) -
 
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """The project's AFK row, read once: its switch, what it works with, and the tasks it holds.
+    """The project's AFK row, read once: its switch, its Prompt, and the tasks it holds.
 
     ``task`` is the oldest hold's — the one the sheet's single Working row draws — and ``holds`` the
     whole list, oldest first; a project holding nothing answers None and an empty list.
@@ -2069,8 +1541,7 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     conn = connect(db_path(hermes_home))
     try:
         row = conn.execute(
-            """SELECT enabled, refusal, build_skill, critique_skills, workflow_id, prompt,
-                      pick_count, prompt_id
+            """SELECT enabled, refusal, prompt, pick_count, prompt_id
                FROM project_afk WHERE project_id = ?""",
             (project_id,),
         ).fetchone()
@@ -2084,14 +1555,9 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "holds": holds,
         "task": holds[0].task if holds else None,
         "refusal": row[1] if isinstance(row[1], str) and row[1] else None,
-        # The two skill columns are only read to migrate a row written before the workflow picker;
-        # nothing answers them.
-        "build_skill": pipeline.text(row[2]),
-        "critique_skills": pipeline.names(_column(row[3], list)),
-        "workflow_id": row[4] if isinstance(row[4], str) and row[4] else None,
-        "prompt": pipeline.text(row[5]),
-        "pick_count": row[6],
-        "prompt_id": row[7] if isinstance(row[7], str) and row[7] else None,
+        "prompt": _text(row[2]),
+        "pick_count": row[3],
+        "prompt_id": row[4] if isinstance(row[4], str) and row[4] else None,
     }
 
 
@@ -2107,8 +1573,11 @@ def _column(value: Any, kind: type) -> Any:
     return found if isinstance(found, kind) else None
 
 
-def _list(value: Any) -> List[Any]:
-    return _column(value, list) or []
+def _text(value: Any) -> Optional[str]:
+    """One stored value as a row holds it: trimmed, and nothing for what isn't text."""
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
 
 
 class Hold(NamedTuple):
@@ -2200,7 +1669,7 @@ def _upsert(hermes_home: Path, project_id: str, **fields: Any) -> None:
     """Writes the named columns of the project's row, making the row where the project has none.
 
     One statement for every writer, so a column is never added to an insert and forgotten in an
-    update. Nothing a caller doesn't name is touched, so the switch and the skills leave each other
+    update. Nothing a caller doesn't name is touched, so the switch and the Prompt leave each other
     alone; a fresh row starts switched off.
     """
     row = {"enabled": 0, **fields}

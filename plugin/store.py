@@ -38,8 +38,9 @@ logger = logging.getLogger(__name__)
 # has to move. 56 gives an app the columns a built-in one lives by (`apps.py`, #865): its bundle key,
 # the bundle version it was seeded at, whether a person has edited it and whether it is hidden.
 # 57 keeps the tools an app was agreed to call (`app_tools.py`, ADR 0102), filled from the pages each
-# app already has so none loses a tool it was drawing.
-SCHEMA_VERSION = 57
+# app already has so none loses a tool it was drawing. 58 drops the workflow library and the stage
+# record (ADR 0110): two tables rebuilt without the columns only they read, and one table gone.
+SCHEMA_VERSION = 58
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -213,8 +214,11 @@ CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    # Read again under the lock: another connection may have migrated while this one waited.
-    if _version(conn) < SCHEMA_VERSION:
+    # Read again under the lock: another connection may have migrated while this one waited. The
+    # version is kept too, because the steps below have to know how old the store is, not only how
+    # old it isn't: a step that reads a column finds the same one on a much newer store.
+    version = _version(conn)
+    if version < SCHEMA_VERSION:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS chats (
                    id TEXT PRIMARY KEY,
@@ -439,9 +443,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # session's Theseus settings, kept so old rows and this schema agree (nothing reads it since
         # Theseus became Auto). v15: the folder its generated files go to. v25: the task AFK
         # started it for, kept with the session so its pull request still names it after the claim.
-        # v28: the stage a staged task is in, and the gate its build was checked by (pipeline.py).
+        # v28's stage record went with the stage machine in v58, below.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
-        for column in ("repos", "plan_file", "theseus", "files_dir", "task", "pipeline"):
+        for column in ("repos", "plan_file", "theseus", "files_dir", "task"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE project_sessions ADD COLUMN {column} TEXT")
         # v20: token counts per UTC day, model and mode, for the community leaderboard.
@@ -491,8 +495,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # app's sheet shows (afk.py). A task is one JSON row: repo, number, title, url, created_at.
         # v26: the session working that task — the one a restart adopts and the app is told about
         # when nothing is running it — and why nothing is (afk.py).
-        # v27: the skills the project's AFK work follows — one to build by and the ones to critique,
-        # as names from the profile's live list (afk.py).
         afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
         for column, kind in (
             ("task", "TEXT"),
@@ -502,12 +504,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
             ("session_id", "TEXT"),
             ("stalled", "TEXT"),
             ("stalled_at", "INTEGER"),
-            ("build_skill", "TEXT"),
-            ("critique_skills", "TEXT"),
-            # v29: the workflow the project's AFK work runs under, and nothing for a project that
-            # picked none, which works one prompt run instead (afk.py, ADR 0027). The two skill
-            # columns above are read once, to migrate such a project into the workflow they described.
-            ("workflow_id", "TEXT"),
             # v30: the Prompt the project's AFK work is told — how it is carried out, in the user's
             # own words, beside AFK's fixed brief. Empty is the bot's default method, so nothing has
             # to be stored for a project nobody has edited (prompt_builder.py).
@@ -515,20 +511,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ):
             if column not in afk_columns:
                 conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")
-        # v29: the bot's workflow library — the workflow as JSON, whether it is a preset, the plugin
-        # version that seeded a preset's body, and whether the user deleted it (workflows.py). A
-        # deleted preset keeps its row so seeding doesn't bring back what was taken away.
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS workflows (
-                   id TEXT PRIMARY KEY,
-                   name TEXT NOT NULL,
-                   body TEXT NOT NULL,
-                   preset INTEGER NOT NULL DEFAULT 0,
-                   version TEXT,
-                   deleted INTEGER NOT NULL DEFAULT 0,
-                   at INTEGER NOT NULL
-               )"""
-        )
+        # v29's workflow pick, v27's two skill columns and v29's library table went with the stage
+        # machine in v58, below: nothing reads them, and a store upgraded from below never grows
+        # them on the way there.
         # v31: a comparison's options and criteria, the model that judges it, and the option and
         # criterion each claim was read for (research.py).
         mission_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_missions)")}
@@ -658,10 +643,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if column not in afk_columns:
                 conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")
         # The one hold a project could have before this becomes its first row, with the session
-        # working it and the clock it was claimed on. The old columns stay, as v29's and v30's do,
-        # and are left as they are: nothing reads them now, and a copy is what a store older than
-        # this is upgraded from — with its own version already past 40, it is never copied twice.
-        if "task" in afk_columns:
+        # working it and the clock it was claimed on. Only a store younger than v40 held its task in
+        # columns: a newer one keeps its holds as rows, and the dead `task` column still describes
+        # work it may have given back years of upgrades ago. So the column is read once, on the
+        # upgrade that made holds rows, and never again — a later version's migration finds the
+        # column still there and must not turn a freed task into a hold.
+        if version < 40 and "task" in afk_columns:
             for row in conn.execute(
                 """SELECT project_id, task, session_id, claimed_at, stalled, stalled_at
                    FROM project_afk WHERE task IS NOT NULL"""
@@ -924,4 +911,71 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "UPDATE apps SET consent = ? WHERE id = ?", (dump(tools_of(sources)), app_id)
             )
+        # v58: the stage machine and the workflow library it ran are gone (ADR 0110), so the column
+        # the stage record lived in and the three the library's pick and skills lived in go with
+        # them. SQLite cannot drop a column, so both tables are rebuilt and every other column is
+        # carried over — the shape v45's dictations set. The column lists below are the tables as
+        # this version leaves them, spelled out rather than reused from the DDL above: that one is
+        # the table before every later step's columns, and a rebuild from it would drop them all.
+        # The one hold a project kept in columns before v40 is a row of its own by here (above), so
+        # nothing is left to carry; a store that runs this twice finds nothing left to rebuild.
+        afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
+        if afk_columns & {"workflow_id", "build_skill", "critique_skills"}:
+            conn.execute("ALTER TABLE project_afk RENAME TO project_afk_v57")
+            conn.execute(
+                """CREATE TABLE project_afk (
+                       project_id TEXT PRIMARY KEY,
+                       enabled INTEGER NOT NULL,
+                       at INTEGER NOT NULL,
+                       task TEXT,
+                       claimed_at INTEGER,
+                       refusal TEXT,
+                       refused_at INTEGER,
+                       session_id TEXT,
+                       stalled TEXT,
+                       stalled_at INTEGER,
+                       prompt TEXT,
+                       pick_count INTEGER,
+                       prompt_id TEXT
+                   )"""
+            )
+            conn.execute(
+                """INSERT OR IGNORE INTO project_afk
+                       (project_id, enabled, at, task, claimed_at, refusal, refused_at, session_id,
+                        stalled, stalled_at, prompt, pick_count, prompt_id)
+                   SELECT project_id, enabled, at, task, claimed_at, refusal, refused_at, session_id,
+                          stalled, stalled_at, prompt, pick_count, prompt_id
+                   FROM project_afk_v57"""
+            )
+            conn.execute("DROP TABLE project_afk_v57")
+        session_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
+        if "pipeline" in session_columns:
+            conn.execute("ALTER TABLE project_sessions RENAME TO project_sessions_v57")
+            conn.execute(
+                """CREATE TABLE project_sessions (
+                       session_id TEXT PRIMARY KEY,
+                       project_id TEXT NOT NULL,
+                       repo_root TEXT NOT NULL,
+                       path TEXT,
+                       branch TEXT,
+                       mode TEXT NOT NULL DEFAULT 'accept_edits',
+                       plan_pending INTEGER NOT NULL DEFAULT 0,
+                       created_at INTEGER NOT NULL,
+                       repos TEXT,
+                       plan_file TEXT,
+                       files_dir TEXT,
+                       task TEXT,
+                       theseus TEXT
+                   )"""
+            )
+            conn.execute(
+                """INSERT OR IGNORE INTO project_sessions
+                       (session_id, project_id, repo_root, path, branch, mode, plan_pending,
+                        created_at, repos, plan_file, files_dir, task, theseus)
+                   SELECT session_id, project_id, repo_root, path, branch, mode, plan_pending,
+                          created_at, repos, plan_file, files_dir, task, theseus
+                   FROM project_sessions_v57"""
+            )
+            conn.execute("DROP TABLE project_sessions_v57")
+        conn.execute("DROP TABLE IF EXISTS workflows")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
