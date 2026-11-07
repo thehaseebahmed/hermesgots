@@ -252,7 +252,11 @@ export function ChatPage(props: ChatPageProps) {
   const id = props.chatId ?? params.id
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
-    const bot = chat ? await db.profiles.get(chat.profileId) : await getActiveProfile()
+    const bot = chat
+      ? await db.profiles.get(chat.profileId)
+      : id
+        ? undefined
+        : await getActiveProfile()
     // A chat with no record yet, whose bot can be called: chat-next's blank surface, named by the
     // bot it would go to, since a pick of another bot draws another one.
     if (bot && opensOnBlank(id, bot)) {
