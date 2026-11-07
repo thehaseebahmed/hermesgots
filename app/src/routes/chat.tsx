@@ -66,6 +66,7 @@ import {
 } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
+import type { ModeSettings } from "@/components/chat/mode-menu"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -97,6 +98,7 @@ import {
   type Conversation,
   type Message,
   type ModelChoice,
+  type Profile,
   createConversation,
   db,
   ensureMainThread,
@@ -564,10 +566,9 @@ const LimitContext = createContext<{
 } | null>(null)
 
 /**
- * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
- * plugin's queue, or steers the reply where the user asked to; one that can't go is said so and
- * handed back to the field. A project session's own cards take its place in the order the current
- * screen draws them: closed, blocked, then a plan waiting to be approved.
+ * The app's composer driving a chat-next thread, with the pills the plugin's record fills above it.
+ * A message sent while a reply runs goes to the plugin's queue, or steers the reply where the user
+ * asked to; one that can't go is said so and handed back to the field.
  */
 function NextComposer(props: {
   controls: ComposerControls
@@ -688,6 +689,11 @@ function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; bus
   )
 }
 
+/**
+ * A chat's composer, drawn from its record: a project session's own cards take the composer's place
+ * in the order the current screen draws them — closed, blocked, then a plan waiting to be approved —
+ * and a chat this device holds nothing of draws none of it.
+ */
 function NextComposerBody({
   controls,
   chatId,
@@ -706,12 +712,10 @@ function NextComposerBody({
   /** The account's warning, which the composer draws above its text while it holds. */
   notice?: ReactNode
 }) {
-  const { root } = useNav()
   const navigate = useNavigate()
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
   const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
   const session = chat?.projectId ? chat : null
-  const kept = chat?.modelChoice
   // What the dictation hears best with: the chat's title, its project and the repos it works in.
   const projects = useProjects(
     session && bot ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey } : undefined,
@@ -739,21 +743,16 @@ function NextComposerBody({
       throw error
     }
   }
-  const filesFeature = usePluginFeature(bot, "attachments")
-  const sheet = useCheatsheet()
-  const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
-  const sendOnEnter = useLiveQuery(async () => (await getSettings()).sendOnEnter, [])
   if (!bot || !chat) return null
+  const kept = chat.modelChoice
   // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
   const tracked = Boolean(bot.apiKey && !bot.disabled)
-  // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
+  // Where the chat's model goes when the plan-ready card's pill picks another.
   const chooseModel = (choice: ModelChoice | undefined) => {
     const stored = storedPick(choice)
     // Re-picking the model the chat already holds would wake every query over its row for nothing.
     if (!samePick(kept, stored)) void updateConversation(chatId, { modelChoice: stored })
   }
-  const modelPill = (extra: { display?: "pill" | "block"; disabled?: boolean }) =>
-    tracked && <ModelMenu profile={bot} choice={chosenOf(kept)} onChoose={chooseModel} {...extra} />
   const said =
     (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
     async (text: string, attachments: Attachment[]) => {
@@ -774,7 +773,16 @@ function NextComposerBody({
     return (
       <PlanReadyCard
         autoAvailable={tracked}
-        model={modelPill({ display: "block" })}
+        model={
+          tracked && (
+            <ModelMenu
+              profile={bot}
+              choice={chosenOf(kept)}
+              onChoose={chooseModel}
+              display="block"
+            />
+          )
+        }
         onApprove={async (mode) => {
           await setSessionMode(session.id, mode)
           await controls.send(planApprovalMessage(session.planFile), [])
@@ -783,48 +791,144 @@ function NextComposerBody({
       />
     )
   return (
+    <ChatComposer
+      bot={bot}
+      draftKey={draftKey(chatId)}
+      modelChoice={kept}
+      onChooseModel={chooseModel}
+      dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
+      session={
+        session
+          ? {
+              mode:
+                session.mode === "auto" && !tracked
+                  ? "accept_edits"
+                  : (session.mode ?? "accept_edits"),
+              autoAvailable: tracked,
+              onMode: (mode) =>
+                setSessionMode(session.id, mode).catch((error) =>
+                  toast.error(error instanceof Error ? error.message : "Couldn't change the mode."),
+                ),
+            }
+          : undefined
+      }
+      notice={notice}
+      main={main}
+      home={home}
+      busy={controls.busy}
+      canSteer={controls.canSteer}
+      subagents={controls.subagents}
+      runId={controls.runId}
+      onSend={controls.send}
+      onQueue={said(controls.queue)}
+      onSteer={said(controls.steer)}
+      onStop={controls.stop}
+      onThread={(message) => startThread(message.text, message.attachments)}
+    />
+  )
+}
+
+/**
+ * The chat's composer, from what a send needs rather than a chat's row: the bot, the model it runs
+ * on, its draft key and the handlers. A chat-next surface with no record yet mounts this same
+ * composer, so a chat that has nothing written for it is still drawn by the one composer.
+ */
+function ChatComposer({
+  bot,
+  draftKey,
+  modelChoice,
+  onChooseModel,
+  dictationHint,
+  session,
+  notice,
+  main = false,
+  home,
+  busy,
+  canSteer,
+  subagents,
+  runId,
+  onSend,
+  onQueue,
+  onSteer,
+  onStop,
+  onThread,
+}: {
+  bot: Profile
+  /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
+  draftKey?: string
+  /** The model the chat runs on: what its pill names, and what a send runs with. */
+  modelChoice?: ModelChoice
+  /** Where a pick from the pill goes. */
+  onChooseModel: (choice: ModelChoice | undefined) => void
+  /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
+  dictationHint?: string
+  /** A project session: its permission mode, picked in the `+` menu. */
+  session?: ModeSettings
+  /** The account's warning, which the composer draws above its text while it holds. */
+  notice?: ReactNode
+  /** A bot's Main: `/thread` starts a thread of it. */
+  main?: boolean
+  /** Where `/new` goes: a thread's Main, else home. */
+  home?: string
+  busy: boolean
+  canSteer: boolean
+  /** How many of the session's subagents are still at work, which keep Stop rather than Send. */
+  subagents: number
+  /** The run Stop is for, so its acknowledgement ends when another run takes the button. */
+  runId?: string
+  onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
+  onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
+  onSteer: (text: string, attachments: Attachment[]) => Promise<void> | void
+  onStop: () => boolean | void | Promise<boolean>
+  /** `/thread` in Main: a thread of the bot, opened on the message sent with it. */
+  onThread?: (message: { text: string; attachments: Attachment[] }) => Promise<void> | void
+}) {
+  const { root } = useNav()
+  const filesFeature = usePluginFeature(bot, "attachments")
+  const sheet = useCheatsheet()
+  const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
+  const sendOnEnter = useLiveQuery(async () => (await getSettings()).sendOnEnter, [])
+  // Without a key nothing on the host answers for Auto, so a session runs as Accept edits.
+  const tracked = Boolean(bot.apiKey && !bot.disabled)
+  return (
     <>
       <Composer
-        busy={controls.busy}
+        busy={busy}
         notice={notice}
         connection={serverConfig(bot)}
         botName={bot.name}
         dictationWords={bot.vocabulary}
-        dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
-        draftKey={draftKey(chatId)}
+        dictationHint={dictationHint}
+        draftKey={draftKey}
         filesFeature={filesFeature}
         imagesAvailable={bot.imageInput !== false}
-        onSend={controls.send}
-        onQueue={said(controls.queue)}
-        onSteer={said(controls.steer)}
-        canSteer={controls.canSteer}
-        model={modelPill({ disabled: controls.busy })}
+        onSend={onSend}
+        onQueue={onQueue}
+        onSteer={onSteer}
+        canSteer={canSteer}
+        model={
+          tracked && (
+            <ModelMenu
+              profile={bot}
+              choice={chosenOf(modelChoice)}
+              onChoose={onChooseModel}
+              disabled={busy}
+            />
+          )
+        }
         steerByDefault={Boolean(steerByDefault)}
         sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
-        subagentsRunning={controls.subagents}
-        onStop={controls.stop}
-        runId={controls.runId}
-        session={
-          session
-            ? {
-                mode:
-                  session.mode === "auto" && !tracked
-                    ? "accept_edits"
-                    : (session.mode ?? "accept_edits"),
-                autoAvailable: tracked,
-                onMode: (mode) =>
-                  setSessionMode(session.id, mode).catch((error) =>
-                    toast.error(
-                      error instanceof Error ? error.message : "Couldn't change the mode.",
-                    ),
-                  ),
-              }
-            : undefined
-        }
+        subagentsRunning={subagents}
+        onStop={onStop}
+        runId={runId}
+        session={session}
         main={main}
         onCommand={async (command, message) => {
           if (command === "thread")
-            return startThread(message?.text ?? "", message?.attachments ?? [])
+            return onThread?.({
+              text: message?.text ?? "",
+              attachments: message?.attachments ?? [],
+            })
           if (command === "new") return root(home ?? "/")
           if (command === "settings") return root("/settings")
           if (command === "cheatsheet") return void sheet.show()
