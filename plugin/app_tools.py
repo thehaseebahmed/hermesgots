@@ -8,12 +8,11 @@ import json
 import re
 from typing import Dict, Iterable, List
 
+from .page_calls import HOST_SHAPES
+
 GROUPS = ("reads", "acts")
 Tools = Dict[str, List[str]]
 NONE: Tools = {"reads": [], "acts": []}
-
-# The host's own reads (ADR 0102): never a tool, so never in the list.
-HOST_SHAPES = ("usage", "routines", "projects", "sessions")
 
 _TOOL = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 _CALL = re.compile(r"\b(Query|Mutation)\(\s*\"([^\"\\]+)\"")

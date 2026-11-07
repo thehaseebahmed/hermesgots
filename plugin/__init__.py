@@ -51,13 +51,13 @@ from . import (
     library,
     link,
     mcp,
-    mcp_call,
     media,
     model_changes,
     merges,
     moves,
     openui,
     outbox,
+    page_calls,
     pending,
     platform_gots,
     projects,
@@ -3189,53 +3189,26 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def query_sessions(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"sessions": await asyncio.to_thread(chats.read, store_path())}
 
-    act_locks: Dict[str, asyncio.Lock] = {}
-
     async def query_app(request: "web.Request") -> "web.Response":
-        """A page's `Query` answered from the host's own reads (ADR 0102), which carry no consent.
-        Any other name is refused unless the calling app was agreed to read or write it, and an agreed
-        `<server>.<tool>` is answered by the plugin's own MCP client (`mcp_call.py`)."""
+        """A page's `Query` answered by `page_calls`, with the apps' consent (ADR 0102)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
         sent = await json_body(request)
         if sent is None:
             return _error(web, "Body must be a JSON object", 400)
-        shape = sent.get("shape")
-        write = sent.get("write") is True
-        read = app_queries.get(shape) if isinstance(shape, str) else None
-        if read is not None and write:
-            return _error(web, f"{shape!r} is a read of the bot's own; it has no write.", 400)
-        if read is None:
-            allowed = await asyncio.to_thread(
-                apps.may_call, store_path(), sent.get("app"), shape, write
-            )
-            if not allowed:
-                return _error(
-                    web,
-                    f"This app was never agreed to {'write with' if write else 'read'} {shape!r}."
-                    " Its pages name it, so the app asks to agree to it first.",
-                    403,
-                )
-            if "." not in shape:
-                return _error(
-                    web, f"This Hermes version cannot call {shape!r} for an app yet.", 501
-                )
-            read = functools.partial(mcp_call.call_async, _request_profile(), shape)
-        args = sent.get("args")
         try:
-            if write:
-                async with act_locks.setdefault(shape.split(".")[0], asyncio.Lock()):
-                    value = await read(args if isinstance(args, dict) else {})
-            else:
-                value = await read(args if isinstance(args, dict) else {})
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        except mcp.McpError as error:
+            value = await page_calls.answer(
+                sent,
+                reads=app_queries,
+                may_call=functools.partial(apps.may_call, store_path()),
+                profile=_request_profile(),
+            )
+        except page_calls.CallRefused as error:
             return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, f"This Hermes version cannot answer {shape}.", 501)
-        return web.json_response({"object": "gots.app.query", "shape": shape, "value": value})
+        return web.json_response(
+            {"object": "gots.app.query", "shape": sent.get("shape"), "value": value}
+        )
 
     app_queries = {
         "usage": query_usage,
