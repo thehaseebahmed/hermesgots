@@ -1,8 +1,7 @@
 /**
  * The chat body (`chat-next/chat-body.tsx`): one chat's thread, composer, pills and limit context in
- * whatever flex column holds it, with no route param, pane slot or header. This pins what a canvas's
- * sheet will rely on: mounted by itself over a seeded chat and its faked host, a send runs a turn and
- * its reply lands in the thread.
+ * whatever flex column holds it, with no route param, pane slot or header. Mounted by itself over a
+ * seeded chat and its faked host, a send runs a turn and its reply lands in the thread.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

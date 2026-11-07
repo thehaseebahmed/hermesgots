@@ -71,7 +71,6 @@ const ChatNextThread = lazy(() =>
 export interface ChatBodyProps {
   chat: Conversation
   bot: Profile
-  /** The compaction summaries' rows the chat's record names. */
   summaries: ComponentProps<typeof ChatNextThread>["summaries"]
   /** A project session not started yet: said in the thread's place. */
   blank?: BlankView
@@ -82,15 +81,13 @@ export interface ChatBodyProps {
   onAway: (away: boolean) => void
   /** Where `/new` goes from the composer: a thread's Main, else home. */
   home?: string
-  /** The account's limits and how to open the usage sheet, for the composer's notice. */
   limit: LimitValue
 }
 
 /**
  * One chat as a container holds it: the thread with the composer, its pills and the account's limit
  * notice under it. It needs no route, pane slot or header, and fills the flex column it is given,
- * scrolling the thread inside it; the chat pane draws it under its header, and a canvas draws it in
- * a sheet.
+ * scrolling the thread inside it; the chat pane draws it under its header.
  */
 export function ChatBody({
   chat,
