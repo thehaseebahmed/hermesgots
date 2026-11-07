@@ -116,8 +116,7 @@ const titles = () =>
     .filter(live)
     .map((node) => node.textContent)
 /** The card of the thread the pane is showing: the only one that says it is here. */
-const openCards = () =>
-  findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
+const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 /** The thread's own card in Main, wherever it was placed in the flow. */
 const threadCard = (id: string) => `[data-slot="thread-card"][data-thread="${id}"]`
@@ -148,6 +147,35 @@ const listLane = () => {
   const lane = find('[data-slot="list-lane"]')
   assert.ok(lane, "the shell draws the list's lane")
   return [...lane.classList]
+}
+
+/** The key a dragged split is kept under, on this device alone and for every bot: no profile in it. */
+const SPLIT_KEY = "gots:split-share"
+
+/**
+ * The share the list's lane draws, read off the width the shell writes on it: a DOM without layout
+ * can measure no box, and the clamp a split draws narrows and widens with the row, so the number it
+ * holds is the share and not the px.
+ */
+const listShare = () => {
+  const style = find('[data-slot="list-lane"]')?.getAttribute("style") ?? ""
+  const found = /clamp\(412px, ([\d.]+)%/.exec(style)
+  return found ? Number(found[1]) : null
+}
+
+/** The split's edge, as the reader reaches it: a separator between the two chats. */
+const splitEdge = () => find('[data-slot="split-handle"]')
+
+/** A key, as it arrives at the handle the reader has focused. */
+async function key(name: string, init: KeyboardEventInit = {}) {
+  const edge = splitEdge()
+  assert.ok(edge, "the split's handle is on screen")
+  await act(async () => {
+    edge.dispatchEvent(
+      new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...init }),
+    )
+  })
+  await settle()
 }
 
 /**
@@ -370,9 +398,10 @@ test(
           false,
           "and no live chat stands in it while the new bot's thread answers",
         )
-        assert.ok(
-          listLane().includes("w-1/2"),
-          `the lane keeps the share it had while the list is unanswered (the lane took ${listLane().join(" ")})`,
+        assert.equal(
+          listShare(),
+          50,
+          "the lane keeps the share it had while the list is unanswered",
         )
         count.release()
 
@@ -442,10 +471,7 @@ test(
     remembers("t-a")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
-      assert.ok(
-        listLane().includes("w-1/2"),
-        `the thread stands beside Main (the lane took ${listLane().join(" ")})`,
-      )
+      assert.equal(listShare(), 50, "the thread stands beside Main in half the row")
       await click(find('[aria-label="Close thread"]'))
       await until(async () => titles().join("|") === "Mainly", "Main alone")
       assert.deepEqual(titles(), ["Mainly"], "the bot's own header is the only one left")
@@ -703,10 +729,7 @@ test(
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
       await settle()
-      assert.ok(
-        listLane().includes("w-1/2"),
-        `Main and its thread take half the row each (the lane took ${listLane().join(" ")})`,
-      )
+      assert.equal(listShare(), 50, "Main and its thread take half the row each")
     })
     // The policy is the bot's lane's alone: Code's list is the lane it was designed around, so a
     // split for bots costs every other feature nothing (ADR 0110).
@@ -717,6 +740,46 @@ test(
         listLane().includes("w-103"),
         `Code's list keeps the 412px lane (it took ${listLane().join(" ")})`,
       )
+    })
+  }),
+)
+
+test(
+  "the split's arrow keys move the edge, and Enter puts it back to half",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    remembers("t-a")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      assert.equal(
+        splitEdge()?.getAttribute("role"),
+        "separator",
+        "the edge between the chats is a separator of its own",
+      )
+      assert.equal(splitEdge()?.getAttribute("aria-orientation"), "vertical")
+      assert.equal(splitEdge()?.getAttribute("tabindex"), "0", "and a reader's keys reach it")
+      assert.equal(splitEdge()?.getAttribute("aria-valuenow"), "50", "it reads the share it holds")
+      assert.equal(listShare(), 50, "which is the share the lane draws")
+
+      await key("ArrowRight")
+      assert.equal(
+        splitEdge()?.getAttribute("aria-valuenow"),
+        "54",
+        "the right arrow gives Main more",
+      )
+      assert.equal(listShare(), 54, "and the lane follows the handle")
+      assert.equal(localStorage.getItem(SPLIT_KEY), "0.54", "the move is kept on this device")
+      await key("ArrowLeft", { shiftKey: true })
+      assert.equal(
+        splitEdge()?.getAttribute("aria-valuenow"),
+        "38",
+        "Shift moves it four times as far",
+      )
+      await key("Enter")
+      assert.equal(splitEdge()?.getAttribute("aria-valuenow"), "50", "Enter puts it back to half")
+      assert.equal(listShare(), 50, "the lane with it")
+      assert.equal(localStorage.getItem(SPLIT_KEY), "0.5", "and half is what the device keeps")
     })
   }),
 )
@@ -738,19 +801,19 @@ test(
       const animator = spyAnimate()
       try {
         await click(cardLink("t-a"))
-        await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
-        await settle()
-        assert.ok(
-          listLane().includes("w-1/2"),
-          `the edge landed half way (the lane took ${listLane().join(" ")})`,
+        await until(
+          async () => titles().join("|") === "Mainly|Thread t-a",
+          "the thread beside Main",
         )
+        await settle()
+        assert.equal(listShare(), 50, "the edge landed half way")
         const slides = animator.asked
           .filter((one) =>
-            one.keyframes.some((frame) =>
-              String(frame.transform ?? "").includes("translateX"),
-            ),
+            one.keyframes.some((frame) => String(frame.transform ?? "").includes("translateX")),
           )
-          .map((one) => `${one.element} ${one.keyframes.map((frame) => frame.transform).join(" → ")}`)
+          .map(
+            (one) => `${one.element} ${one.keyframes.map((frame) => frame.transform).join(" → ")}`,
+          )
         assert.deepEqual(
           slides,
           [],
