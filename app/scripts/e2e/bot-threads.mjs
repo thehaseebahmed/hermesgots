@@ -281,6 +281,7 @@ function watchLane(page) {
       const main = document.querySelector('[data-pane="main"]')
       const thread = document.querySelector('[data-pane="thread"]')
       const column = thread?.querySelector('[data-slot="message-scroller-content"]')
+      const lane = document.querySelector('[data-slot="list-lane"]')
       return {
         main: box(main),
         lane: box(document.querySelector('[data-slot="list-lane"]')?.parentElement),
@@ -288,6 +289,9 @@ function watchLane(page) {
         column: box(column),
         // What each pane is drawing: a frame that draws neither chat is one the reader never saw.
         drawn: rows(main) + rows(thread),
+        // The list lane's own paint: a lane that is transparent lets the thread it is covering be
+        // read in the same pixels as Main's words.
+        paint: lane ? getComputedStyle(lane).backgroundColor : "",
       }
     }
     window.__lane = []
@@ -1220,6 +1224,17 @@ await flow(
       frames.filter((frame) => !frame.drawn).map((frame) => frame.main),
       [],
       "and no frame draws neither chat",
+    )
+    // The lane Main grows into is painted, so the thread it is clipping out is never drawn in the
+    // same pixels as Main's own words: "Main covers it" has to be literally true.
+    assert.deepEqual(
+      [...new Set(frames.map((frame) => frame.paint))].filter(
+        (paint) => !paint || paint === "transparent" || paint === "rgba(0, 0, 0, 0)",
+      ),
+      [],
+      `the list lane paints its own background all the way through the close (saw ${[
+        ...new Set(frames.map((frame) => frame.paint)),
+      ].join(", ")})`,
     )
     assert.equal(
       closing.some((frame) => !frame.thread),

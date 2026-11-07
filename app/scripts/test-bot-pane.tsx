@@ -28,6 +28,7 @@ import {
   type,
   until,
 } from "./component-kit.tsx"
+import { FakeRecorder, dictationHost, installFakeMedia } from "./fake-dictation.ts"
 
 const bot = botProfile("bot-pane", { id: "bot-1", name: "Mainly" })
 const other = botProfile("bot-other", { id: "bot-2", name: "Otherly" })
@@ -460,6 +461,76 @@ test(
 )
 
 test(
+  "a switch out of a closed lane never flashes the 412px rail",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    // The bot the reader switches to: its own thread is the one this device remembers, and its
+    // thread count is what the lane waits on.
+    await ensureMainThread(other.id)
+    await db.conversations.put({
+      id: "t-o",
+      profileId: other.id,
+      title: "Thread t-o",
+      titleEdited: true,
+      hermesSessionId: "gots-t-o",
+      createdAt: 20,
+      updatedAt: 20,
+      changedAt: 20,
+    })
+    await db.messages.put({
+      id: "t-o-open",
+      conversationId: "t-o",
+      role: "user",
+      content: "Opened t-o",
+      status: "done",
+      createdAt: 21,
+    })
+    localStorage.setItem(lastThreadKey(other.id), "t-o")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => text().includes("2 threads"), "this bot's threads to load")
+      await settle()
+      assert.ok(
+        listLane().includes("w-full"),
+        `this bot's lane stands closed (the lane took ${listLane().join(" ")})`,
+      )
+      const count = holdThreadCount()
+      const frames: string[] = []
+      const look = () => frames.push(find('[data-slot="list-lane"]')?.className ?? "")
+      const observer = new MutationObserver(look)
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      })
+      look()
+      try {
+        // The switch, while the other bot's thread list is still on its way: unknown is not
+        // closed, so the lane keeps the state and the width it had (ADR 0110).
+        await click(find("[data-to-other]"))
+        await settle()
+        count.release()
+        await until(
+          async () => titles().join("|") === "Otherly|Thread t-o",
+          "the new bot's thread beside its Main",
+        )
+      } finally {
+        observer.disconnect()
+        count.restore()
+      }
+      const railed = frames.filter((frame) => /\bw-103\b/.test(frame))
+      assert.deepEqual(
+        railed,
+        [],
+        `no frame between the two bots draws the 412px rail (${railed.length} did, of ${frames.length})`,
+      )
+      assert.deepEqual(titles(), ["Otherly", "Thread t-o"], "both panes are the new bot's")
+    })
+  }),
+)
+
+test(
   "with the switch off a bot is one screen, as it was",
   laptop(async () => {
     localStorage.clear()
@@ -763,6 +834,53 @@ test(
       if (command) Object.defineProperty(document, "execCommand", command)
       else delete (document as { execCommand?: unknown }).execCommand
     }
+  }),
+)
+
+test(
+  "Escape while dictating in the thread cancels the take and leaves the thread where it was",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    remembers("t-a")
+    installFakeMedia()
+    // A connection of this case's own: what a host answered about dictation is remembered for the
+    // page, and every other case's bot has answered without it.
+    const talking = botProfile("bot-pane-dictation", { id: bot.id, name: "Mainly" })
+    await db.profiles.put(talking)
+    // The bot hears a take; everything the real host answers that this case doesn't care about is
+    // the empty answer the other cases fake.
+    const hosted = dictationHost({ heard: "hello there" })
+    const dictation = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await dictation(input, init)
+      return answer.status === 404 ? json({}) : answer
+    }) as typeof fetch
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      const mic = find('[data-pane="thread"] [aria-label="Voice"]')
+      await click(mic)
+      await until(
+        async () => Boolean(find('[role="group"][aria-label="Speech-to-text take"]')),
+        "the take's bar",
+      )
+      await until(async () => FakeRecorder.slices > 0, "the take's first slice")
+
+      // The take owns this Escape — the cheatsheet sells it as Cancel the recording — so it claims
+      // the key where it takes it, and the lane beside it never hears one.
+      await escape()
+      await until(
+        async () => Boolean(find('[data-pane="thread"] [aria-label="Voice"]')),
+        "the bar back to the microphone",
+      )
+      assert.equal(hosted.cancels().length, 1, "the take was cancelled, not left running")
+      assert.deepEqual(
+        titles(),
+        ["Mainly", "Thread t-a"],
+        "both chats are still on screen: the lane did not also put the thread away",
+      )
+      assert.equal(remembered(bot.id), "t-a", "and the lane still remembers the thread it holds")
+    })
   }),
 )
 

@@ -45,12 +45,17 @@ export function VoiceBar({
   onSend: () => void
   onRetry: () => void
 }) {
+  // The take owns Escape while it runs — the cheatsheet sells it as Cancel the recording — so the
+  // bar claims the key where it takes it. Read in the capture phase, before the shell's own
+  // listener, which stands down on a press something else has already answered.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel()
+      if (event.key !== "Escape") return
+      event.preventDefault()
+      onCancel()
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
   }, [onCancel])
 
   const transcribing = status === "transcribing"
