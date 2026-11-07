@@ -13,7 +13,7 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform)
 
 /**
  * The keys the shell answers wherever the reader is: Escape putting the thread beside Main away —
- * the collapse chevron's twin — ⌘\ (Ctrl+\ elsewhere) asking for the thread this bot's lane just
+ * the close cross's twin — ⌘\ (Ctrl+\ elsewhere) asking for the thread this bot's lane just
  * closed, and Alt+1 to Alt+9 starting a new chat with the bot in that place, while that switch is
  * on. A move is handed down only where the lane can make it, so a key with nothing behind it is no
  * key at all. A key something else has already answered, or one a composition is building, is that

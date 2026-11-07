@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
  * anywhere sensible (`lib/nav.ts`). A press is for a pushed screen, whose way back is the step its
  * own `up()` names. `floating` is a header's, for one that covers what it scrolls over. `icon` is
  * what the control leads with, for a slot whose move is a different one: a thread put away leads
- * with a chevron, in the place a phone's Back sits.
+ * with a cross, in the place a phone's Back sits.
  */
 export function BackButton({
   label,

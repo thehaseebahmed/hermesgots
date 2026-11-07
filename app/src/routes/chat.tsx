@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ChevronsLeftIcon } from "lucide-react"
+import { XIcon } from "lucide-react"
 import { matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
@@ -251,7 +251,7 @@ interface ChatPageProps {
   slot: HoldSlot
   /**
    * Puts the thread beside Main away, wherever the lane holds one: the thread's header draws it as
-   * the collapse chevron, and where the address names that thread it comes back to Main instead.
+   * the close cross, and where the address names that thread it comes back to Main instead.
    * Absent where closing can't take effect.
    */
   closeThread?: () => void
@@ -501,7 +501,7 @@ function NextChat({
                       label="Close thread"
                       onClick={closeThread}
                       floating
-                      icon={<ChevronsLeftIcon />}
+                      icon={<XIcon />}
                     />
                   )
                 ) : mainPath ? (
@@ -1525,7 +1525,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
                 label="Close thread"
                 onClick={closeThread}
                 floating
-                icon={<ChevronsLeftIcon />}
+                icon={<XIcon />}
               />
             )
           ) : mainPath ? (

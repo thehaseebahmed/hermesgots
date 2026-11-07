@@ -48,7 +48,7 @@ export function isSendChord(press: Press) {
 }
 
 /**
- * Whether one press puts the thread beside Main away: it is the collapse chevron's twin, so it is
+ * Whether one press puts the thread beside Main away: it is the close cross's twin, so it is
  * the bare Escape and never a chord, which is some other command's key.
  */
 export function closesThread(press: Press) {

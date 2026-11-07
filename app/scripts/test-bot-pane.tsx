@@ -545,7 +545,7 @@ test(
 )
 
 test(
-  "a thread beside Main carries the collapse chevron and no picture",
+  "a thread beside Main carries the close cross and no picture",
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a"])
@@ -561,7 +561,7 @@ test(
       assert.equal(thread?.querySelector('[role="img"]'), null, "the thread beside it carries none")
       assert.ok(
         thread?.querySelector('[aria-label="Close thread"]'),
-        "and the collapse chevron, where a phone's Back sits",
+        "and the close cross, where a phone's Back sits",
       )
       assert.equal(
         thread?.querySelector('[aria-label^="Back to"]'),
@@ -574,7 +574,7 @@ test(
 )
 
 test(
-  "the chevron by the thread's title closes it, and Main takes the lane",
+  "the close cross by the thread's title closes it, and Main takes the lane",
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a", "t-b"])
@@ -765,7 +765,7 @@ test("Escape closes the lane, and only where the thread is a lane", async () => 
   await seed(["t-a"])
   remembers("t-a")
   // A laptop, where the thread is the lane beside Main, then a phone, where it is a screen of its
-  // own with a Back: the key is the chevron's twin on the one and nothing at all on the other.
+  // own with a Back: the key is the close cross's twin on the one and nothing at all on the other.
   const beside = laptop(async () => {
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
@@ -779,7 +779,7 @@ test("Escape closes the lane, and only where the thread is a lane", async () => 
 
       await escape()
       await until(async () => titles().join("|") === "Mainly", "Main alone")
-      assert.deepEqual(titles(), ["Mainly"], "Escape closes the lane the chevron would")
+      assert.deepEqual(titles(), ["Mainly"], "Escape closes the lane the close cross would")
       assert.equal(remembered(bot.id), null, "and the closed thread is forgotten")
     })
   })
@@ -1076,9 +1076,9 @@ test(
       } finally {
         animator.restore()
       }
-      // And both ways of putting it away still close it: the chevron, then the key.
+      // And both ways of putting it away still close it: the cross, then the key.
       await click(find('[aria-label="Close thread"]'))
-      await until(async () => titles().join("|") === "Mainly", "the chevron's close")
+      await until(async () => titles().join("|") === "Mainly", "the close cross's close")
       await click(cardLink("t-a"))
       await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread again")
       await escape()

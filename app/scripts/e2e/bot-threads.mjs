@@ -974,7 +974,7 @@ await flow(
       "and the pane the thread was in is the pane it is still in: nothing was drawn anew",
     )
     // The thread beside Main is the thread the address names, and the control that puts it away
-    // stands on it either way: a thread's address is not a reason to take the chevron off it (G4).
+    // stands on it either way: a thread's address is not a reason to take the close cross off it (G4).
     const heads = await page.evaluate(() =>
       [...document.querySelectorAll('[data-slot="header-row"]')].map((row) => ({
         title: row.querySelector('[data-slot="header-title"]')?.textContent ?? "",
@@ -1008,7 +1008,7 @@ await flow(
     await ready(page, "the laptop in light mode", "main")
     await shot("laptop")
     pass(
-      "on a laptop the thread beside Main carries the chevron that puts it away, and naming it changes nothing",
+      "on a laptop the thread beside Main carries the close cross that puts it away, and naming it changes nothing",
     )
 
     // Once the bot's thread list has answered and a thread stands beside Main, the two chats share
@@ -1320,14 +1320,14 @@ await flow(
     )
     await settled(page)
 
-    // Closing it is one press on that chevron, straight from the thread's own address: the entry
+    // Closing it is one press on that cross, straight from the thread's own address: the entry
     // the thread took is replaced by this bot's Main, so no page slide plays and the address comes
     // back to where it was before the thread was opened (G4). Main takes the row's whole width, the
     // width it has when no thread was ever opened (G2).
     await until(
       async () => (await count(page, '[data-pane="thread"] [aria-label="Close thread"]')) === 1,
       15_000,
-      "the chevron on the thread the address names",
+      "the close cross on the thread the address names",
     )
     await page.locator('[data-pane="thread"] [aria-label="Close thread"]').click()
     await until(

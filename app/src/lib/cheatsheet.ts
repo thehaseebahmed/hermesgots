@@ -64,7 +64,7 @@ export function cheatsheetGroups({
     name: "Chat",
     rows: [{ keys: ["Ctrl+C"], description: "Stop the reply and its subagents" }],
   }
-  // The thread beside Main (ADR 0110): the chevron's twin, and the chord that puts back what a
+  // The thread beside Main (ADR 0110): the close cross's twin, and the chord that puts back what a
   // close took away. Both belong to a lane a bot only has with its threads on.
   const threads: CheatsheetGroup = {
     name: "Bot threads",
