@@ -1,7 +1,12 @@
-// A new chat: type a message, send it, get the whole reply, and find the chat in Recents.
+// A new chat in the legacy layout: type a message, send it, get the whole reply, and find the chat
+// in Recents. Bot threads is the default, so `/` is the bot's Main unless the legacy switch is on.
 import { assert, app, flow, pass } from "./lib.mjs"
 
 await flow("chat-message", async ({ page, send, lastReply, until, shot }) => {
+  await page.evaluate(async () => {
+    const { saveSettings } = await import("/src/lib/db.ts")
+    await saveSettings({ legacyChat: true })
+  })
   await page.goto(app)
   const composer = page.getByLabel("Message", { exact: true })
   await composer.fill("a first line")
