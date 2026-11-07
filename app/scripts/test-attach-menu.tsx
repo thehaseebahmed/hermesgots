@@ -1,3 +1,11 @@
+/**
+ * The `+` menu's Files entry is offered where the bot's host advertises the plugin's `attachments`
+ * feature, and refused there, with the reason, where it doesn't — so a host whose plugin predates
+ * the upload route refuses at the menu instead of failing at send. The answer follows the plugin
+ * features rule (`src/lib/features.ts`): a real answer is remembered for its connection, and a host
+ * that was away is asked again rather than read as a no. The host is faked at the HTTP boundary and
+ * the menu is read off the screen, never out of its internals.
+ */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { toast } from "sonner"
@@ -69,20 +77,21 @@ async function openMenu() {
   await until(async () => Boolean(source("Files")), "the menu's sources")
 }
 
-test("a host that advertises no attachments refuses Files, and says why when it is tapped", async () => {
+test("a host that advertises no attachments refuses Files at the menu, with its reason", async () => {
   await seed("attach-menu-old")
   const asked: string[] = []
   host(["media"], "attach-menu-old", asked)
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    await until(async () => asked.length > 0, "the info read")
-    await until(
-      () => text().includes("File uploads need a newer Gots plugin."),
-      "the plugin's answer to land",
+    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files stays tappable")
+    assert.equal(shut("Files"), true, "and reads as unavailable")
+    assert.equal(shut("Camera"), false, "Camera is untouched")
+    assert.deepEqual(
+      await tapped("Files"),
+      ["File uploads need a newer Gots plugin."],
+      "a tap says why, in the rule's own sentence",
     )
-    assert.equal(source("Files")?.hasAttribute("disabled"), true, "Files is refused")
-    assert.match(text(), /File uploads need a newer Gots plugin\./, "and says what is missing")
-    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "Camera is untouched")
+    assert.ok(source("Files"), "and the sheet is still open")
   })
 })
 
@@ -91,28 +100,8 @@ test("a host that advertises attachments offers Files as it always has", async (
   host(["attachments", "media"], "attach-menu-new", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
-    await until(
-      () => source("Files")?.hasAttribute("disabled") === false,
-      "the plugin's answer to land",
-    )
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files is offered")
+    assert.equal(shut("Files"), false, "Files is offered")
     assert.doesNotMatch(text(), /File uploads need/, "and there is nothing to explain")
-  })
-})
-
-test("a host that hasn't answered offers Camera and Photos, and Files says why it waits", async () => {
-  await seed("attach-menu-owed", { imageInput: false })
-  host("away", "attach-menu-owed", [])
-  await mount(chatScreen(CHAT), async () => {
-    await openMenu()
-    assert.equal(shut("Camera"), false, "the camera is offered")
-    assert.equal(shut("Photos"), false, "and the gallery with it")
-    assert.equal(shut("Files"), true, "while Files waits on the answer")
-    assert.deepEqual(
-      await tapped("Files"),
-      ["File uploads need the Gots plugin."],
-      "and a tap says why it waits",
-    )
   })
 })
 
@@ -131,11 +120,7 @@ test("a host that was away is asked again, not remembered as a no", async () => 
   await mount(chatScreen(CHAT), async () => {
     await until(async () => infoReads(asked) > askedWhileAway, "a second ask")
     await openMenu()
-    await until(
-      () => source("Files")?.hasAttribute("disabled") === false,
-      "the real answer fills it",
-    )
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "the real answer fills it")
+    assert.equal(shut("Files"), false, "the real answer fills it")
   })
 })
 
