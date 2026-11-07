@@ -2,7 +2,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { callable, opensOnChatNext } from "../src/chat-next/route.ts"
+import { callable, opensOnBlank, opensOnChatNext } from "../src/chat-next/route.ts"
 
 const bot = { baseUrl: "https://hermes.test/v1", apiKey: "k" }
 const chat = {}
@@ -31,10 +31,18 @@ test("callable is one address and one key: a server to call, and a key to call i
   assert.equal(callable(undefined), false)
 })
 
-test("a new chat with no record yet, or one whose bot can't be called, stays", () => {
+test("a new chat with no record yet stays on the current screen until a bot can be called", () => {
   assert.equal(opensOnChatNext(null, bot), false)
   assert.equal(opensOnChatNext(undefined, bot), false)
   assert.equal(opensOnChatNext(chat, { ...bot, apiKey: "" }), false)
   assert.equal(opensOnChatNext(chat, { ...bot, baseUrl: "  " }), false)
   assert.equal(opensOnChatNext(chat, undefined), false)
+})
+
+test("the blank surface is a new chat whose bot can be called", () => {
+  assert.equal(opensOnBlank(undefined, bot), true, "no id in the address, and a bot to call")
+  assert.equal(opensOnBlank("c1", bot), false, "a chat with a record is that chat's own screen")
+  assert.equal(opensOnBlank(undefined, { ...bot, apiKey: "" }), false, "a bot with no key")
+  assert.equal(opensOnBlank(undefined, { ...bot, baseUrl: "  " }), false, "a bot with no address")
+  assert.equal(opensOnBlank(undefined, undefined), false)
 })

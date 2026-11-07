@@ -17,7 +17,9 @@ import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
 import { COLUMN_BOX } from "@/lib/layout"
-import { opensOnChatNext } from "@/chat-next/route"
+import type { ComposerControls } from "@/chat-next/page"
+import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
+import { prepareTurn, queueTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
@@ -26,6 +28,7 @@ import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
+import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
@@ -52,7 +55,6 @@ import {
 } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
-import type { ModeSettings } from "@/components/chat/mode-menu"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -83,13 +85,10 @@ import {
   type Conversation,
   type Message,
   type ModelChoice,
-  type Profile,
-  createConversation,
   db,
   ensureMainThread,
   getActiveProfile,
   getMessages,
-  getSettings,
   mainThreadId,
   mainThreadProfile,
   setActiveProfile,
@@ -226,6 +225,9 @@ function LoadOlderWindow({
 }
 
 const loadChatNext = () => import("@/chat-next/app-view")
+const ChatNextThread = lazy(() => loadChatNext().then((m) => ({ default: m.AppChatNextThread })))
+const loadBlankChat = () => import("@/chat-next/blank")
+const ChatNextBlank = lazy(() => loadBlankChat().then((m) => ({ default: m.ChatNextBlank })))
 
 interface ChatPageProps {
   chatId?: string
@@ -241,15 +243,23 @@ interface ChatPageProps {
 
 /**
  * The chat on screen, on chat-next when its bot can be called (ADR 0065) and on the current screen
- * otherwise — a chat whose bot has no address or no key, and a new chat with no record yet. The
- * choice is one string, so a write to the chat that changes nothing about it draws nothing again.
+ * otherwise — a chat whose bot has no address or no key. A new chat with a bot it can call opens on
+ * chat-next's blank surface, which makes the record on its first send. The choice is one string, so
+ * a write to the chat that changes nothing about it draws nothing again.
  */
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = props.chatId ?? params.id
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
-    const bot = chat ? await db.profiles.get(chat.profileId) : undefined
+    const bot = chat ? await db.profiles.get(chat.profileId) : await getActiveProfile()
+    // A chat with no record yet, whose bot can be called: chat-next's blank surface, named by the
+    // bot it would go to, since a pick of another bot draws another one.
+    if (bot && opensOnBlank(id, bot)) {
+      // The chunk loads while the verdict settles, not after the screen is chosen.
+      void loadBlankChat()
+      return `blank\n${bot.id}`
+    }
     const next = opensOnChatNext(chat, bot)
     // The chunk loads while the verdict settles, not after the screen is chosen.
     if (next) void loadChatNext()
@@ -257,11 +267,16 @@ export function ChatPage(props: ChatPageProps) {
   }, [id])
   // While the verdict for a chat just switched to is still out, the screen that drew the last one
   // keeps drawing: the current screen holds the chat it left until the new one is ready.
-  const kind = verdict?.split("\n")[0]
+  const [kind, subject] = verdict?.split("\n") ?? []
   // The screen this chat opens on, wrapped once: the one Previewer a screen mounts is the same
   // instance whichever screen drew the thread.
   const screen =
-    kind === "next" && verdict === `next\n${id}` && id ? (
+    kind === "blank" && subject ? (
+      // Keyed by the bot it draws: another bot's new chat is a fresh surface, with its own pick.
+      <Suspense fallback={null}>
+        <ChatNextBlank key={subject} botId={subject} slot={props.slot} />
+      </Suspense>
+    ) : kind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat
         // Keyed by the chat it draws: a thread opened from Main is a fresh instance, which is what
         // lets it take the handover meant for its own id (ADR 0096).
@@ -659,117 +674,6 @@ function NextComposerBody({
   )
 }
 
-/**
- * The chat's composer, from what a send needs rather than a chat's row: the bot, the model it runs
- * on, its draft key and the handlers. A chat-next surface with no record yet mounts this same
- * composer, so a chat that has nothing written for it is still drawn by the one composer.
- */
-function ChatComposer({
-  bot,
-  draftKey,
-  modelChoice,
-  onChooseModel,
-  dictationHint,
-  session,
-  notice,
-  main = false,
-  home,
-  busy,
-  canSteer,
-  subagents,
-  runId,
-  onSend,
-  onQueue,
-  onSteer,
-  onStop,
-  onThread,
-}: {
-  bot: Profile
-  /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
-  draftKey?: string
-  /** The model the chat runs on: what its pill names, and what a send runs with. */
-  modelChoice?: ModelChoice
-  /** Where a pick from the pill goes. */
-  onChooseModel: (choice: ModelChoice | undefined) => void
-  /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
-  dictationHint?: string
-  /** A project session: its permission mode, picked in the `+` menu. */
-  session?: ModeSettings
-  /** The account's warning, which the composer draws above its text while it holds. */
-  notice?: ReactNode
-  /** A bot's Main: `/thread` starts a thread of it. */
-  main?: boolean
-  /** Where `/new` goes: a thread's Main, else home. */
-  home?: string
-  busy: boolean
-  canSteer: boolean
-  /** How many of the session's subagents are still at work, which keep Stop rather than Send. */
-  subagents: number
-  /** The run Stop is for, so its acknowledgement ends when another run takes the button. */
-  runId?: string
-  onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
-  onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
-  onSteer: (text: string, attachments: Attachment[]) => Promise<void> | void
-  onStop: () => boolean | void | Promise<boolean>
-  /** `/thread` in Main: a thread of the bot, opened on the message sent with it. */
-  onThread?: (message: { text: string; attachments: Attachment[] }) => Promise<void> | void
-}) {
-  const { root } = useNav()
-  const filesFeature = usePluginFeature(bot, "attachments")
-  const sheet = useCheatsheet()
-  const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
-  const sendOnEnter = useLiveQuery(async () => (await getSettings()).sendOnEnter, [])
-  // Without a key nothing on the host answers for Auto, so a session runs as Accept edits.
-  const tracked = Boolean(bot.apiKey && !bot.disabled)
-  return (
-    <>
-      <Composer
-        busy={busy}
-        notice={notice}
-        connection={serverConfig(bot)}
-        botName={bot.name}
-        dictationWords={bot.vocabulary}
-        dictationHint={dictationHint}
-        draftKey={draftKey}
-        filesFeature={filesFeature}
-        imagesAvailable={bot.imageInput !== false}
-        onSend={onSend}
-        onQueue={onQueue}
-        onSteer={onSteer}
-        canSteer={canSteer}
-        model={
-          tracked && (
-            <ModelMenu
-              profile={bot}
-              choice={chosenOf(modelChoice)}
-              onChoose={onChooseModel}
-              disabled={busy}
-            />
-          )
-        }
-        steerByDefault={Boolean(steerByDefault)}
-        sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
-        subagentsRunning={subagents}
-        onStop={onStop}
-        runId={runId}
-        session={session}
-        main={main}
-        onCommand={async (command, message) => {
-          if (command === "thread")
-            return onThread?.({
-              text: message?.text ?? "",
-              attachments: message?.attachments ?? [],
-            })
-          if (command === "new") return root(home ?? "/")
-          if (command === "settings") return root("/settings")
-          if (command === "cheatsheet") return void sheet.show()
-        }}
-      />
-      <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
-    </>
-  )
-}
-
 function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProps) {
   const params = useParams()
   const { pathname, state: address } = useLocation()
@@ -809,8 +713,6 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
   const threads = useLiveQuery(async () => ({ id, rows: id ? await getMessages(id) : [] }), [id])
   const messages = threads && threads.id === id ? threads.rows : undefined
   const [usageOpen, setUsageOpen] = useState(false)
-  // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
-  const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
   const sheet = useCheatsheet()
   const [outputsOpen, setOutputsOpen] = useState(false)
@@ -1023,24 +925,22 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
     const timer = window.setInterval(read, PR_PENDING_MS)
     return () => window.clearInterval(timer)
   }, [id, checksRunning])
-  // The pick the chat's row holds, Default included, for the chat a send creates.
-  const keptModel = conversation
-    ? conversation.modelChoice
-    : pendingModel?.profileId === profile?.id
-      ? pendingModel?.choice
-      : undefined
+  // The pick the chat's row holds, Default included.
+  const keptModel = conversation?.modelChoice
   // As the menu reads a pick: the Default row's marker is no pick at all.
   const modelChoice = chosenOf(keptModel)
   const chooseModel = (choice: ModelChoice | undefined) => {
+    if (!conversation) return
     const stored = storedPick(choice)
-    if (!conversation) return setPendingModel({ profileId: profile?.id, choice: stored })
     // Re-picking the model the chat already holds would wake every query over its row for nothing.
     if (samePick(conversation.modelChoice, stored)) return
     void updateConversation(conversation.id, { modelChoice: stored })
   }
-  // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
+  // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it. A
+  // chat with no record has no pick to write, so it has no pill.
   const modelPill = (extra: { display?: "pill" | "block"; disabled?: boolean }) =>
-    configured && (
+    configured &&
+    conversation && (
       <ModelMenu profile={profile} choice={modelChoice} onChoose={chooseModel} {...extra} />
     )
   // What this chat runs next: its own pick, the bot's default, else what the host last reported.
@@ -1329,22 +1229,15 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
       })
 
   const send = async (text: string, attachments: Attachment[] = [], at?: number) => {
+    if (!id) return
     try {
-      let conversationId = id
-      if (conversationId) {
-        // So a reply that builds on another device's latest turn shows after it, not before; a chat
-        // that caught up a moment ago doesn't wait again.
-        if (!caughtUpWithin(conversationId, SEND_CAUGHT_UP_MS))
-          await Promise.race([reconcileHistory(conversationId).catch(() => undefined), wait(1500)])
-      } else {
-        if (!profile) return
-        conversationId = (await createConversation(profile.id, { modelChoice: keptModel })).id
-        navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
-      }
-      // Main's messages are triaged by the host first; a thread and a new chat never are.
-      if (conversation?.main)
-        await announceMove(await sendFromMain(conversationId, text, attachments))
-      else await sendMessage(conversationId, text, { attachments, at })
+      // So a reply that builds on another device's latest turn shows after it, not before; a chat
+      // that caught up a moment ago doesn't wait again.
+      if (!caughtUpWithin(id, SEND_CAUGHT_UP_MS))
+        await Promise.race([reconcileHistory(id).catch(() => undefined), wait(1500)])
+      // Main's messages are triaged by the host first; a thread never is.
+      if (conversation?.main) await announceMove(await sendFromMain(id, text, attachments))
+      else await sendMessage(id, text, { attachments, at })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
@@ -1651,7 +1544,9 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
                 onView={() => setUsageOpen(true)}
               />
             }
-            disabled={!configured}
+            // A chat with no record is not a chat the current screen can make: nothing can be sent
+            // from here, and the blank surface is where a new chat is drawn.
+            disabled={!configured || !id}
             draftKey={draftKey(id)}
             onSend={send}
             onQueue={(text, attachments) => {
