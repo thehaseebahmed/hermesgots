@@ -344,6 +344,9 @@ function NextChat({
   const botThreads = useBotThreads()
   const { pathname, state: address } = useLocation()
   const { root, up } = useNav()
+  // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
+  const upRef = useRef(up)
+  upRef.current = up
   // A thread Main opened with `/thread` is handed the message it was opened for, by its own id: taken
   // once, here, so the screen that draws this thread is the one that sends it (ADR 0096).
   const [start] = useState(() => takeHandover(id))
@@ -364,10 +367,10 @@ function NextChat({
   useEffect(() => {
     if (!mainPath) return
     return setBackGuard(() => {
-      up(mainPath)
+      upRef.current(mainPath)
       return true
     })
-  }, [mainPath, up])
+  }, [mainPath])
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
   // and a session nothing was sent in isn't kept.
   const session = chat?.projectId ? chat : undefined
@@ -412,7 +415,7 @@ function NextChat({
   }, [mainOf])
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
-  })
+  }, [ready, slot, id])
   const { usage, providerUsage, notice, provider, noticeDismissed } = useChatUsage(
     chat,
     bot,
