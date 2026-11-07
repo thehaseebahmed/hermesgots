@@ -289,7 +289,29 @@ test("the screen is behind the setup gate every other screen passes through", as
   )
 })
 
-test("Settings offers the reference, and its row opens it", async () => {
+test("Developer offers the reference, and its back link goes to Developer", async () => {
+  globalThis.fetch = (async () => json({ error: { message: "no route" } }, 404)) as typeof fetch
+  await seedSettings({ developer: true })
+  await mount(
+    <MemoryRouter initialEntries={["/settings/developer"]}>
+      <Path />
+      <Routes>
+        <Route path="/settings/:section?" element={<SettingsPage />} />
+        <Route path="docs/open-ui" element={<OpenUIReferencePage />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await settle()
+      await click(find('a[href="/docs/open-ui"]'))
+      assert.equal(path(), "/docs/open-ui", "the row opens the reference")
+      assert.ok(find("[data-reference-playground]"), "and the screen draws")
+      await click(find('a[aria-label="Back to Developer"]'))
+      assert.equal(path(), "/settings/developer", "and Back returns to Developer")
+    },
+  )
+})
+
+test("Settings no longer offers the reference", async () => {
   globalThis.fetch = (async () => json({ error: { message: "no route" } }, 404)) as typeof fetch
   await seedSettings()
   await mount(
@@ -297,13 +319,11 @@ test("Settings offers the reference, and its row opens it", async () => {
       <Path />
       <Routes>
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="docs/open-ui" element={<OpenUIReferencePage />} />
       </Routes>
     </MemoryRouter>,
     async () => {
-      await click(find('a[href="/docs/open-ui"]'))
-      assert.equal(path(), "/docs/open-ui", "the row opens the reference")
-      assert.ok(find("[data-reference-playground]"), "and the screen draws")
+      await settle()
+      assert.equal(find('a[href="/docs/open-ui"]'), null, "the menu row is gone")
     },
   )
 })

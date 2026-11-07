@@ -142,7 +142,7 @@ function Playground() {
 export function OpenUIReferencePage() {
   const entries = referenceEntries()
   return (
-    <DocPage title="Component reference" backTo="/settings" backLabel="Back to Settings">
+    <DocPage title="Component reference" backTo="/settings/developer" backLabel="Back to Developer">
       <ul data-reference-block-rules className="list-disc space-y-1 pl-5 text-sm">
         {blockRules().map((rule) => (
           <li key={rule}>{rule}</li>
