@@ -331,8 +331,8 @@ export const lastThreadKey = (profileId: string) => `gots:last-thread:${profileI
  */
 const remembered = createStore<Record<string, string | null>>({})
 
-/** Puts a bot's row in the store, telling the readers only when it really moved. */
-const adopt = (profileId: string, thread: string | null) => {
+/** Writes a bot's row into the store, telling the readers only when it really moved. */
+const writeRow = (profileId: string, thread: string | null) => {
   const all = remembered.get()
   if (profileId in all && all[profileId] === thread) return
   remembered.set({ ...all, [profileId]: thread })
@@ -353,7 +353,7 @@ function rememberedThread(profileId: string): string | null {
  * thread leaves — written through to storage and told to every reader.
  */
 export function rememberThread(profileId: string, thread: string | null) {
-  adopt(profileId, thread)
+  writeRow(profileId, thread)
   try {
     if (thread === null) localStorage.removeItem(lastThreadKey(profileId))
     else localStorage.setItem(lastThreadKey(profileId), thread)
@@ -371,7 +371,7 @@ export function useRememberedThread(profileId: string | undefined): string | nul
   const all = remembered.use()
   const loaded = profileId ? profileId in all : true
   useEffect(() => {
-    if (profileId && !loaded) adopt(profileId, rememberedThread(profileId))
+    if (profileId && !loaded) writeRow(profileId, rememberedThread(profileId))
   }, [profileId, loaded])
   return profileId ? (all[profileId] ?? null) : null
 }

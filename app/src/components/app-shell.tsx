@@ -100,18 +100,23 @@ const SPLIT_LANE: PaneLayout = {
 }
 
 /**
- * The policy a bot's lane takes: split while its thread list has answered with a thread beside
- * Main, and the list lane for a bot with no thread, which keeps the rail that says so. A list still
- * to answer keeps the policy the answer before it gave the lane — unknown is not closed — so a
- * switch from one bot to the next never flashes Main wide and back.
+ * How the shell draws a bot's lane, as the lane's own states: a thread beside Main (the split), no
+ * threads at all (the rail that says so), or Main alone at the row's whole width.
  */
-function useBotLaneLayout(lane: BotLane | undefined) {
-  const [split, setSplit] = useState(false)
-  const answered = lane && lane.state !== "unknown" ? lane.state === "thread" : undefined
+type LanePolicy = "thread" | "empty" | "closed"
+
+/**
+ * The state a bot's thread list last answered with, kept through the next bot's unanswered list —
+ * the whole policy, not just which layout, because a closed lane that fell back to "open" would
+ * flash the 412px rail on its way to Main's whole width. Only a real answer moves it, so a switch
+ * from one bot to the next draws the state and the width the lane had until the answer lands.
+ */
+function useLanePolicy(lane: BotLane | undefined): LanePolicy {
+  const [answered, setAnswered] = useState<LanePolicy>("empty")
   // Adjusted during render rather than in an effect, so a switch never draws the lane the bot it
   // left had, not even for a frame.
-  if (answered !== undefined && answered !== split) setSplit(answered)
-  return split ? SPLIT_LANE : LIST_LANE
+  if (lane && lane.state !== "unknown" && lane.state !== answered) setAnswered(lane.state)
+  return lane && lane.state !== "unknown" ? lane.state : answered
 }
 
 /**
@@ -251,8 +256,9 @@ function exitBox(share: number): CSSProperties {
  * The edge between the two chats, as a control: a separator a reader drags, nudges with the arrow
  * keys and puts back to half with Enter, Home or a double-click. A drag captures the pointer, follows
  * it with no transition — 300ms on every frame is a lag — and keeps the share on this device when the
- * pointer lifts; a key moves it and keeps it at once. Its name comes from the lane that owns the two
- * chats, since this one knows neither.
+ * pointer lifts; a key moves it and keeps it at once. Every way of moving the edge asks the same
+ * rule, the row it is drawn in, so the share reported, stored and drawn is one number. Its name
+ * comes from the lane that owns the two chats, since this one knows neither.
  */
 function SplitHandle({
   label,
@@ -271,9 +277,9 @@ function SplitHandle({
   onShare: (share: number) => void
   onKeep: (share: number) => void
 }) {
-  const under = (edge: Element) => edge.parentElement?.getBoundingClientRect()
+  const rowOf = (edge: Element) => edge.parentElement?.getBoundingClientRect()
   const moveTo = (edge: HTMLElement, x: number) => {
-    const row = under(edge)
+    const row = rowOf(edge)
     if (row?.width) onShare(shareAt(x, row))
   }
   return (
@@ -309,15 +315,16 @@ function SplitHandle({
       onPointerUp={(event: Pointer<HTMLDivElement>) => {
         if (!dragging) return
         event.currentTarget.releasePointerCapture?.(event.pointerId)
-        const row = under(event.currentTarget)
+        const row = rowOf(event.currentTarget)
         onDrag(false)
         onKeep(row?.width ? shareAt(event.clientX, row) : share)
       }}
       onPointerCancel={() => onDrag(false)}
       onKeyDown={(event: KeyEvent<HTMLDivElement>) => {
         const step = event.shiftKey ? SPLIT_STEP_FAST : SPLIT_STEP
-        if (event.key === "ArrowLeft") onKeep(shareKept(share - step))
-        else if (event.key === "ArrowRight") onKeep(shareKept(share + step))
+        const row = rowOf(event.currentTarget)
+        if (event.key === "ArrowLeft") onKeep(shareKept(share - step, row?.width))
+        else if (event.key === "ArrowRight") onKeep(shareKept(share + step, row?.width))
         else if (event.key === "Enter" || event.key === "Home") onKeep(SPLIT_HALF)
         else return
         event.preventDefault()
@@ -404,11 +411,11 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
   }, [open])
 
   // Where a key, a double-click or a drag's release leaves the edge: drawn at once, and kept on this
-  // device so a reload, a close and a launch all find the same share.
+  // device so a reload, a close and a launch all find the same share. The handle has already kept
+  // the share to what the row can draw.
   const keep = (next: number) => {
-    const moved = shareKept(next)
-    setShare(moved)
-    writeSplit(moved)
+    setShare(next)
+    writeSplit(next)
   }
 
   return (
@@ -423,8 +430,10 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
             transitionDuration: `${EXIT_MS}ms`,
           }}
           className={cn(
-            // Over the item it is taking back, so the edge moving is the thread being clipped out.
-            "relative z-10 flex min-h-0 flex-none flex-col",
+            // Over the item it is taking back, so the edge moving is the thread being clipped out —
+            // and painted, so the thread it is covering is never drawn in the same pixels as Main's
+            // own words. The page's own colour, so nothing moves when it lands.
+            "relative z-10 flex min-h-0 flex-none flex-col bg-background",
             // The transition is the lane's own, and a pointer drag has none: it would trail by 300ms.
             !dragging && `transition-[width] ${EASE_CLASS} motion-reduce:transition-none`,
             open ? cn(pane.layout.list, "border-r") : "w-full",
@@ -486,9 +495,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // thread the lane answers with, else nothing at all.
   const lane = bot?.lane
   const shown = lane?.state === "thread" ? lane.thread : undefined
-  // Half the row while a thread stands beside Main, the list lane while there is none, and the
-  // answer before it while this bot's thread list is still out.
-  const botLayout = useBotLaneLayout(lane)
+  // The state the lane last answered with, which an unanswered list keeps: a closed lane stays
+  // closed and a split lane stays split until the bot it is showing has answered (ADR 0110).
+  const policy = useLanePolicy(lane)
+  const botLayout = policy === "thread" ? SPLIT_LANE : LIST_LANE
   // A lane that holds a thread can be put away from its own header, the way an open one can be
   // asked for by the chord: the move is the pane's, since it is the one that knows where its bot's
   // Main is, and it is handed down only where the lane really holds a thread.
@@ -506,8 +516,9 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const pane: ListPane | undefined = bot
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
-        // The lane says: open unless it is closed, so a switch never closes and reopens Main.
-        open: bot.lane.state !== "closed",
+        // Main's whole width while the lane is closed — including while the bot it is switching to
+        // has yet to answer, so a closed lane never reopens itself on the way.
+        open: policy !== "closed",
         // Main is told what the third pane holds, so its own flow can mark that thread open.
         node: (
           <ChatPage

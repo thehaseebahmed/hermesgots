@@ -148,6 +148,24 @@ test("with navigation shortcuts on, the sheet opened afterwards names Alt+1…9"
   })
 })
 
+test("with bot threads on, the sheet names the two keys of the thread beside Main", async () => {
+  await seed({ developer: true, botThreads: true })
+  host()
+  await mount(chatScreen(CHAT), async () => {
+    await until(async () => Boolean(composerField()), "the composer")
+    await openSheet()
+    assert.ok(groups().includes("Bot threads"), "the group the lane's two keys live in")
+    assert.deepEqual(
+      drawn().find((one) => one.name === "Bot threads")?.rows,
+      [
+        { keys: ["Escape"], description: "Close the thread beside Main" },
+        { keys: ["Ctrl+\\"], description: "Reopen the thread just closed" },
+      ],
+      "the chevron's twin, and the chord that brings the thread back",
+    )
+  })
+})
+
 test("with Send on Enter on, the sheet gives Enter back to the send", async () => {
   await seed({ sendOnEnter: true })
   host()

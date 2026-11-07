@@ -30,19 +30,33 @@ export function splitWidth(share: number): string {
 /** Where a pointer puts the edge, as the share of the row it is over. */
 export function shareAt(x: number, row: { left: number; width: number }): number {
   if (!row.width) return SPLIT_HALF
-  return shareKept((x - row.left) / row.width)
+  return shareKept((x - row.left) / row.width, row.width)
 }
 
-/** A share kept to the row it is a share of, so a drag past either end stops at the end. */
-export function shareKept(share: number): number {
-  return Math.min(1, Math.max(0, Math.round(share * 10_000) / 10_000))
+/**
+ * The narrowest either chat is drawn, as a share of the row the two share: 412px a side, and half
+ * where the row cannot hold two of them. The width's own `clamp` holds the same floor, so the share
+ * this rule reports and the width the lane draws are one number.
+ */
+export function shareFloor(row: number): number {
+  return row > 0 ? Math.min(SPLIT_HALF, SPLIT_FLOOR / row) : 0
+}
+
+/**
+ * A share kept to the row it is a share of: floored at 412px a side, so four ArrowLefts stop where
+ * the lane stops moving, and rounded to the ten thousandth this device keeps and the width draws.
+ */
+export function shareKept(share: number, row = 0): number {
+  const floor = shareFloor(row)
+  return Math.round(Math.min(1 - floor, Math.max(floor, share)) * 10_000) / 10_000
 }
 
 /** The share this device last moved to, or half where nothing was kept or it can't be read. */
 export function readSplit(): number {
   try {
     const kept = localStorage.getItem(SPLIT_KEY)
-    const share = kept === null ? NaN : Number(kept)
+    // A blank is nothing kept: `Number("")` is a whole row given to Main, not a share at all.
+    const share = kept?.trim() ? Number(kept) : NaN
     return Number.isFinite(share) && share >= 0 && share <= 1 ? share : SPLIT_HALF
   } catch {
     return SPLIT_HALF
