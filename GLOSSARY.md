@@ -431,6 +431,31 @@ _Avoid_: footer, signature, attribution block, branding, co-author line, byline
 The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
+## Rooms
+
+**Room**:
+A chat on one Host shared by several of its bots: what the user says reaches every member, and their
+answers stand in one transcript. Its roster is fixed when the room is made, and its rounds are the
+Host's to drive.
+_Avoid_: group chat, group, channel, room chat
+
+**Member**:
+One of the bots a room holds. It answers in the room as itself, with its own name and picture.
+_Avoid_: participant, teammate, occupant, seat
+
+**Roster**:
+The members a room holds, fixed when the room is made. Changing them means a new room.
+_Avoid_: member list, participants, seats
+
+**Room log**:
+Everything that has happened in a room, in the Host's order, each event numbered in the room's own
+sequence. The thread is what the screen draws of it.
+_Avoid_: transcript, history, event log, room history
+
+**Needs you**:
+A room waiting on the user: a member's approval, its question, or a member addressing the user.
+_Avoid_: waiting, attention, unread, needs attention
+
 ## Media
 
 **Attachment**:
