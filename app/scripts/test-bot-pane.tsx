@@ -140,6 +140,26 @@ async function escape() {
   await settle()
 }
 /**
+ * The reopen chord, as the reader's keyboard sends it: a Mac passes Cmd where every other one passes
+ * Ctrl, and the physical key is `Backslash` either way, which is what the lane reads.
+ */
+async function reopen() {
+  const mac = /Mac/.test(navigator.platform)
+  await act(async () => {
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "\\",
+        code: "Backslash",
+        metaKey: mac,
+        ctrlKey: !mac,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+  })
+  await settle()
+}
+/**
  * The classes the shell gives the list's column, since the harness has no layout to measure. The
  * lane's share is one of them, so a lane that kept `w-103` and one split in half read apart.
  */
@@ -687,6 +707,62 @@ test("Escape closes the lane, and only where the thread is a lane", async () => 
   await beside()
   await alone()
 })
+
+test(
+  "⌘\\ reopens the thread just closed, and nothing after leaving the bot",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    // The bot to switch to: its Main is a place, whether or not it has a thread of its own.
+    await ensureMainThread(other.id)
+    await mount(screen(`/c/${MAIN}`), async () => {
+      // Of the two threads, the older one is opened: the chord has to bring back the thread it
+      // closed, which is not the newest one a "reopen the newest" would pick.
+      await click(cardLink("t-a"))
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the older thread")
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Mainly", "Main alone")
+      assert.equal(remembered(bot.id), null, "a close forgets the thread, whatever comes after it")
+      // The lane really is closed — Main at the row's whole width — so the key below is one the
+      // shell hears rather than one it is still standing down from.
+      await until(async () => listLane().includes("w-full"), "the lane closed")
+
+      await reopen()
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread, back")
+      assert.deepEqual(
+        titles(),
+        ["Mainly", "Thread t-a"],
+        "the thread this bot closed, and not the newest thread",
+      )
+      assert.equal(remembered(bot.id), "t-a", "and the lane holds it again")
+
+      // A chord on an open lane is no key at all: it never closes one.
+      await reopen()
+      assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "the key leaves an open lane alone")
+      assert.equal(remembered(bot.id), "t-a", "and its thread remembered")
+
+      // The close belongs to this visit and this bot: another bot's Main is another place, and the
+      // visit that comes back finds nothing to put back.
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Mainly", "Main alone again")
+      await click(find("[data-to-other]"))
+      await until(async () => path() === `/c/${mainThreadId(other.id)}`, "the other bot's Main")
+      await click(find("[data-to-main]"))
+      await until(async () => path() === `/c/${MAIN}`, "this bot's Main again")
+      // The bot's list has answered, so the lane is closed rather than still on its way: the key
+      // below is one the shell really hears, and it opens nothing.
+      await until(async () => text().includes("2 threads"), "this bot's threads to load")
+      await settle()
+      assert.ok(
+        listLane().includes("w-full"),
+        `the lane stands closed (it took ${listLane().join(" ")})`,
+      )
+      await reopen()
+      assert.deepEqual(titles(), ["Mainly"], "nothing comes back: leaving the bot forgot the close")
+      assert.equal(remembered(bot.id), null, "so the lane stands closed, and nothing remembered")
+    })
+  }),
+)
 
 test(
   "the thread beside Main is the card Main marks open, and naming it keeps the pane it is in",
