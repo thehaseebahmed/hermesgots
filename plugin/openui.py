@@ -58,18 +58,13 @@ VERSION = _version(TEXT)
 _refusal_reason: Optional[str] = "The openui section isn't registered."
 
 
-def _session_field(session: Optional[Mapping[str, Any]], name: str) -> Optional[str]:
-    """A string off the session mapping, or None where it doesn't say (or isn't a mapping)."""
+def _profile(session: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """The profile a session runs as, as Hermes hands it to a section: None when it doesn't say."""
     try:
-        value = (session or {}).get(name)
+        value = (session or {}).get("profile_name")
     except AttributeError:
         return None
     return value if isinstance(value, str) and value else None
-
-
-def _profile(session: Optional[Mapping[str, Any]]) -> Optional[str]:
-    """The profile a session runs as, as Hermes hands it to a section: None when it doesn't say."""
-    return _session_field(session, "profile_name")
 
 
 def path_for(profile_name: Optional[str] = None) -> Optional[Path]:

@@ -164,7 +164,6 @@ export function render() {
 }
 
 function write() {
-  const artifact = ARTIFACT
   const text = render()
   if (text.length > MAX_CHARS) {
     console.error(
@@ -176,16 +175,16 @@ function write() {
   }
   let previous = null
   try {
-    previous = readFileSync(artifact, "utf8").length
+    previous = readFileSync(ARTIFACT, "utf8").length
   } catch (error) {
     if (error?.code !== "ENOENT") throw error
   }
   const grown = previous === null ? null : text.length - previous
   const delta = grown === null ? "first write" : `${grown >= 0 ? "+" : ""}${grown} characters`
-  mkdirSync(dirname(artifact), { recursive: true })
-  writeFileSync(artifact, text, "utf8")
+  mkdirSync(dirname(ARTIFACT), { recursive: true })
+  writeFileSync(ARTIFACT, text, "utf8")
   console.log(
-    `openui prompt: wrote ${artifact} — ${text.length} characters, ` +
+    `openui prompt: wrote ${ARTIFACT} — ${text.length} characters, ` +
       `${MAX_CHARS - text.length} headroom of ${MAX_CHARS}, ${delta} against the checked-in artifact`,
   )
 }
