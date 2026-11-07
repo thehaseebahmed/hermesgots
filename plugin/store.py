@@ -923,9 +923,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
             conn.execute("DROP TABLE project_sessions_v57")
         conn.execute("DROP TABLE IF EXISTS workflows")
-        # v59: the apps a bot kept and their pages are gone (ADR 0113). Their tables were made by
-        # steps no store builds any more, so a store from below never makes them and one that has
-        # them drops them here, without a copy; the unique index goes with its table.
         conn.execute("DROP TABLE IF EXISTS app_pages")
         conn.execute("DROP TABLE IF EXISTS apps")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

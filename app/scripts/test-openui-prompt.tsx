@@ -175,7 +175,6 @@ test("a data answer draws and a question asks through clarify", () => {
 })
 
 test("the section does not advertise Link", () => {
-  // A reply has nowhere to move to.
   assert.ok(!checkedIn.includes("Link"), "the chat's section names a Link")
 })
 

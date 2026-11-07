@@ -26,7 +26,6 @@ def tables(path: Path) -> set:
 class AppsAreGone(unittest.TestCase):
     def test_a_v58_store_migrates_with_no_apps_tables(self) -> None:
         path = db_path(temp_hermes_home(self))
-        # A store as v58 left it: the Apps tables, one app with a page, and a chat beside them.
         old = connect(path)
         old.execute(
             "CREATE TABLE IF NOT EXISTS apps (id TEXT PRIMARY KEY, title TEXT NOT NULL,"

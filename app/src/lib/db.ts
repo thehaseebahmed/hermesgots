@@ -1328,7 +1328,6 @@ db.version(35).upgrade(async (tx) => {
   await Promise.all([photos(), unsent()])
 })
 
-// v36: the apps a bot's host listed are gone (ADR 0113), and so is the device's copy of them.
 db.version(36).stores({ appCache: null })
 
 db.on("populate", (tx) => seedProfile(tx))
