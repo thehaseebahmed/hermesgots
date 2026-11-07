@@ -1,8 +1,10 @@
-type MainMarked = { chat: { main?: boolean } }
+import { listsAsThread } from "./lists-as-chat.ts"
+
+type MainMarked = { chat: { projectId?: string; main?: boolean } }
 
 /** How many threads a bot has, with Main left out. */
 export function threadCount(threads: readonly MainMarked[] | undefined): number {
-  return threads?.filter((thread) => !thread.chat.main).length ?? 0
+  return threads?.filter((thread) => listsAsThread(thread.chat)).length ?? 0
 }
 
 /** The line under Main's title: how many threads the bot has. */

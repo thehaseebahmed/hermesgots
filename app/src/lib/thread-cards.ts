@@ -1,5 +1,6 @@
 import type { Message } from "@/lib/db"
 import type { Move } from "@/lib/hermes"
+import { listsAsThread } from "./lists-as-chat.ts"
 import { byTimeThenId, place, type Placed } from "./placement.ts"
 import type { Thread } from "@/lib/threads"
 
@@ -31,7 +32,7 @@ export function threadCards(
   threads: readonly Thread[] | undefined,
 ): ThreadCards {
   const started = (threads ?? [])
-    .filter((thread) => !thread.chat.main)
+    .filter((thread) => listsAsThread(thread.chat))
     .sort(byTimeThenId(cardAt, (thread) => thread.chat.id))
   return place(messages, started, cardAt)
 }
