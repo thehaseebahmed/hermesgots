@@ -8,6 +8,7 @@ import {
   isDoubleEscape,
   isInterrupt,
   isSendChord,
+  reopensThread,
 } from "../src/lib/keys.ts"
 
 const press = (over) => ({
@@ -80,4 +81,40 @@ test("Escape puts the thread beside Main away, and no chord does", () => {
       "a chord is another key's",
     )
   assert.equal(closesThread(press({ key: "Enter", code: "Enter" })), false)
+})
+
+test("⌘\\ asks for the thread just closed: Cmd on a Mac, Ctrl elsewhere, and nothing else", () => {
+  const slash = { key: "\\", code: "Backslash" }
+  assert.equal(reopensThread(press({ ...slash, metaKey: true }), true), true, "⌘\\ on a Mac")
+  assert.equal(reopensThread(press({ ...slash, ctrlKey: true }), false), true, "Ctrl+\\ elsewhere")
+  // The other platform's modifier is some other command's key on this one.
+  assert.equal(
+    reopensThread(press({ ...slash, ctrlKey: true }), true),
+    false,
+    "Ctrl+\\ is not the Mac's chord",
+  )
+  assert.equal(
+    reopensThread(press({ ...slash, metaKey: true }), false),
+    false,
+    "⌘\\ is not a PC's chord",
+  )
+  // Option turns the key into another character on a Mac, so the physical key is what is read —
+  // and the modifier still stands the chord down.
+  assert.equal(
+    reopensThread(press({ key: "«", code: "Backslash", altKey: true, metaKey: true }), true),
+    false,
+    "Option+\\ is not the chord",
+  )
+  assert.equal(
+    reopensThread(press({ key: "|", code: "Backslash", shiftKey: true, ctrlKey: true }), false),
+    false,
+    "Shift+\\ types a pipe",
+  )
+  assert.equal(
+    reopensThread(press({ key: "/", code: "Slash", metaKey: true }), true),
+    false,
+    "another key",
+  )
+  assert.equal(reopensThread(press(slash), true), false, "a bare \\ is typing")
+  assert.equal(reopensThread(press(slash), false), false)
 })

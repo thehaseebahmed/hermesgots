@@ -463,6 +463,11 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // A lane that holds a thread can be put away from its own header, whether the address names that
   // thread or not: the move is the pane's, since it is the one that knows where its bot's Main is.
   const closeThread = bot?.canClose ? bot.close : undefined
+  // The chord puts back what a close took away, so it is handed down only where that is the lane's
+  // state: closed on this bot's Main, with a thread this visit closed. An open lane, a bot with no
+  // thread to put back, or another bot's Main stands the key down, and the pane forgets a close the
+  // moment the address leaves the bot it was made on.
+  const reopenThread = bot?.lane.state === "closed" ? bot.reopen : undefined
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} slot="thread" closeThread={closeThread} />
   ) : bot ? (
@@ -529,7 +534,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
 
   return (
     <BreakReminderProvider>
-      <KeyboardShortcuts closeThread={closeThread} />
+      <KeyboardShortcuts closeThread={closeThread} reopenThread={reopenThread} />
       <DrawerContext.Provider value={() => setOpen(true)}>
         <div className="flex h-dvh overflow-hidden bg-background">
           {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}
