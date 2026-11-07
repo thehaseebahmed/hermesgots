@@ -347,22 +347,6 @@ def held_task(home: Path, project_id: str = "p1") -> afk.Hold:
     return afk._holds(home, project_id)[0]
 
 
-def point_at_a_workflow(home: Path, project_id: str = "p1") -> None:
-    """A row naming a workflow, as a store written before the library went holds one.
-
-    Nothing reads the column any more — it is what the next migration drops — so a row like this is
-    exactly what a project that had picked a workflow upgrades from.
-    """
-    conn = connect(db_path(home))
-    try:
-        conn.execute(
-            "UPDATE project_afk SET workflow_id = 'preset:staged' WHERE project_id = ?",
-            (project_id,),
-        )
-    finally:
-        conn.close()
-
-
 def afk_row(
     on: bool = False,
     reason: Optional[str] = None,
@@ -626,19 +610,19 @@ class PromptTests(StartHarness):
             "the project's own words stand in for the default",
         )
 
-    def test_a_project_that_picked_a_workflow_works_one_run_told_its_prompt(self) -> None:
-        """A pick stages nothing: the task's whole work is one run told the project's Prompt.
+    def test_a_claimed_task_is_worked_in_one_run_told_its_prompt(self) -> None:
+        """A task's whole work is one run told the project's Prompt.
 
-        Before the stage machine went, this project snapshotted its workflow onto the session and
-        was briefed for the build stage instead of being told its Prompt.
+        Before the stage machine went, a project that had picked a workflow snapshotted it onto the
+        session and was briefed for the build stage instead; v58 drops that pick, so what is left to
+        prove is that the run is one run and that it is told the Prompt.
         """
         set_on(self.home, "p1", self.folders(), True)
-        point_at_a_workflow(self.home)
         afk._hold(self.home, "p1", self.task)
         self.start()
         self.assertEqual(len(self.posted), 1, "one run is the task's whole work")
         record = sessions.read(db_path(self.home), self.ensured[0][0])
-        self.assertIsNone(record["pipeline"], "nothing is staged, so no snapshot is written")
+        self.assertNotIn("pipeline", record, "nothing is staged, so no snapshot is written")
         instructions = self.posted[0]["body"]["instructions"]
         self.assertIn("## The Project's Prompt", instructions, "the method is told in its own section")
         self.assertIn(prompt_builder.DEFAULT_PROMPT, instructions, "the Prompt it works by")
@@ -2776,6 +2760,161 @@ class MigrationTests(unittest.TestCase):
         holds = afk._holds(self.home, "p1")
         self.assertEqual(len(holds), 1, "a hold is copied once, whatever the store's version says")
         self.assertEqual(holds[0].session_id, "gots-afk-265")
+
+
+    OLD_SESSIONS = """CREATE TABLE project_sessions (
+        session_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        repo_root TEXT NOT NULL,
+        path TEXT,
+        branch TEXT,
+        mode TEXT NOT NULL DEFAULT 'accept_edits',
+        plan_pending INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        repos TEXT,
+        plan_file TEXT,
+        files_dir TEXT,
+        task TEXT,
+        theseus TEXT,
+        pipeline TEXT
+    )"""
+
+    OLD_WORKFLOWS = """CREATE TABLE workflows (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        body TEXT NOT NULL,
+        preset INTEGER NOT NULL DEFAULT 0,
+        version TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        at INTEGER NOT NULL
+    )"""
+
+    def v57(self) -> None:
+        """A store as v57 left it: a project on a workflow, a held task, a staged session."""
+        path = db_path(self.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(self.OLD_AFK)
+            for column in ("pick_count", "prompt_id"):
+                conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column}")
+            conn.execute(
+                """INSERT INTO project_afk
+                       (project_id, enabled, at, task, claimed_at, refusal, refused_at, session_id,
+                        stalled, stalled_at, build_skill, critique_skills, workflow_id, prompt,
+                        pick_count, prompt_id)
+                   VALUES ('p1', 1, 1700000000, ?, 1700000100, 'GitHub said no.', 1700000200,
+                           'gots-afk-265', 'The run failed.', 1700000300, 'planning', '["review"]',
+                           'wf-1', 'Work in checkpoints.', 3, 'lib-1')""",
+                (json.dumps(self.HELD),),
+            )
+            conn.execute(self.OLD_SESSIONS)
+            conn.execute(
+                """INSERT INTO project_sessions
+                       (session_id, project_id, repo_root, path, branch, mode, plan_pending,
+                        created_at, repos, plan_file, files_dir, task, theseus, pipeline)
+                   VALUES ('gots-afk-265', 'p1', '/repos/gots', '/worktrees/265', 'hermes/265', 'auto',
+                           1, 1700000400, ?, 'PLAN.md', '/files/265', ?, 'theseus-on',
+                           '{"stage": 1, "round": 1, "stages": []}')""",
+                (
+                    json.dumps([{"name": "gots", "repo_root": "/repos/gots", "path": "/worktrees/265", "branch": "hermes/265"}]),
+                    json.dumps(self.HELD),
+                ),
+            )
+            conn.execute(self.OLD_WORKFLOWS)
+            conn.execute(
+                """INSERT INTO workflows (id, name, body, preset, version, deleted, at)
+                   VALUES ('wf-1', 'Mine', '{"stages": []}', 0, NULL, 0, 1700000000)"""
+            )
+            conn.execute("PRAGMA user_version = 57")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_a_v57_store_loses_the_library_and_the_staged_columns(self) -> None:
+        self.v57()
+        # Reading through the plugin is what opens the store, and so what migrates it.
+        self.assertTrue(afk.read(self.home, "p1", [])["on"])
+        conn = sqlite3.connect(db_path(self.home))
+        try:
+            afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
+            session_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            kept_afk = conn.execute("SELECT * FROM project_afk WHERE project_id = 'p1'").fetchone()
+            kept_session = conn.execute(
+                "SELECT * FROM project_sessions WHERE session_id = 'gots-afk-265'"
+            ).fetchone()
+            afk_names = [row[1] for row in conn.execute("PRAGMA table_info(project_afk)")]
+            session_names = [row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")]
+        finally:
+            conn.close()
+        self.assertEqual(
+            session_columns & {"pipeline"}, set(), "the stage record's column is gone"
+        )
+        self.assertEqual(
+            afk_columns & {"workflow_id", "build_skill", "critique_skills"},
+            set(),
+            "the library's pick and the two skill columns are gone",
+        )
+        self.assertNotIn("workflows", tables, "the library's table is gone")
+        # What AFK still works by is carried over value for value: this table is every session's
+        # row and every project's switch, and a rebuild that lost one would lose a worktree.
+        self.assertEqual(
+            dict(zip(afk_names, kept_afk)),
+            {
+                "project_id": "p1",
+                "enabled": 1,
+                "at": 1_700_000_000,
+                "task": json.dumps(self.HELD),
+                "claimed_at": 1_700_000_100,
+                "refusal": "GitHub said no.",
+                "refused_at": 1_700_000_200,
+                "session_id": "gots-afk-265",
+                "stalled": "The run failed.",
+                "stalled_at": 1_700_000_300,
+                "prompt": "Work in checkpoints.",
+                "pick_count": 3,
+                "prompt_id": "lib-1",
+            },
+        )
+        self.assertEqual(
+            dict(zip(session_names, kept_session)),
+            {
+                "session_id": "gots-afk-265",
+                "project_id": "p1",
+                "repo_root": "/repos/gots",
+                "path": "/worktrees/265",
+                "branch": "hermes/265",
+                "mode": "auto",
+                "plan_pending": 1,
+                "created_at": 1_700_000_400,
+                "repos": json.dumps(
+                    [
+                        {
+                            "name": "gots",
+                            "repo_root": "/repos/gots",
+                            "path": "/worktrees/265",
+                            "branch": "hermes/265",
+                        }
+                    ]
+                ),
+                "plan_file": "PLAN.md",
+                "files_dir": "/files/265",
+                "task": json.dumps(self.HELD),
+                "theseus": "theseus-on",
+            },
+        )
+
+    def test_a_v57_session_reads_back_without_a_pipeline(self) -> None:
+        self.v57()
+        record = sessions.read(db_path(self.home), "gots-afk-265")
+        self.assertIsNotNone(record)
+        self.assertNotIn("pipeline", record, "nothing names a stage any more")
+        self.assertEqual(record["task"], self.HELD, "and the task it was started for is still there")
+        held = afk.read(self.home, "p1", [])
+        self.assertEqual(held["prompt"], "Work in checkpoints.")
+        self.assertEqual(held["pick_count"], 3)
+        self.assertEqual([hold["number"] for hold in held["holds"]], [265], "its hold came along")
 
 
 class FeatureTests(unittest.TestCase):

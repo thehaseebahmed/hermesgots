@@ -51,7 +51,6 @@ FIELDS = (
     "plan_file",
     "files_dir",
     "task",
-    "pipeline",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -138,7 +137,6 @@ def _record(row: Any) -> Dict[str, Any]:
         {field: repo.get(field) for field in REPO_FIELDS} for repo in repos if isinstance(repo, dict)
     ]
     record["task"] = _json(record["task"], None)
-    record["pipeline"] = _json(record["pipeline"], None)
     # A row from before repos were kept: the one tree it has.
     if not record["repos"] and record["path"]:
         record["repos"] = [

@@ -196,6 +196,8 @@ flows and their audit rows; no message of either remains, so there is nothing to
      change); `sessions.read` still answers the session; the existing v38 case stays green, which is
      what says the rebuild still runs over a store older than the columns it drops.
 
+   Done.
+
 4. **The app draws no stage.** Goals: G3. After: 1. Layers: App stage UI (deleted), AFK screen,
    host API, device data, test host, flows.
    - `src/lib/pipeline.ts`, `src/components/chat/pipeline.tsx`, `src/lib/afk-workflows.ts`, the pill
