@@ -214,8 +214,11 @@ CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    # Read again under the lock: another connection may have migrated while this one waited.
-    if _version(conn) < SCHEMA_VERSION:
+    # Read again under the lock: another connection may have migrated while this one waited. The
+    # version is kept too, because the steps below have to know how old the store is, not only how
+    # old it isn't: a step that reads a column finds the same one on a much newer store.
+    version = _version(conn)
+    if version < SCHEMA_VERSION:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS chats (
                    id TEXT PRIMARY KEY,
@@ -640,10 +643,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if column not in afk_columns:
                 conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")
         # The one hold a project could have before this becomes its first row, with the session
-        # working it and the clock it was claimed on. The old columns stay, as v29's and v30's do,
-        # and are left as they are: nothing reads them now, and a copy is what a store older than
-        # this is upgraded from — with its own version already past 40, it is never copied twice.
-        if "task" in afk_columns:
+        # working it and the clock it was claimed on. Only a store younger than v40 held its task in
+        # columns: a newer one keeps its holds as rows, and the dead `task` column still describes
+        # work it may have given back years of upgrades ago. So the column is read once, on the
+        # upgrade that made holds rows, and never again — a later version's migration finds the
+        # column still there and must not turn a freed task into a hold.
+        if version < 40 and "task" in afk_columns:
             for row in conn.execute(
                 """SELECT project_id, task, session_id, claimed_at, stalled, stalled_at
                    FROM project_afk WHERE task IS NOT NULL"""

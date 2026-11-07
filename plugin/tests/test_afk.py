@@ -2823,6 +2823,29 @@ class MigrationTests(unittest.TestCase):
             )
             conn.execute(self.OLD_WORKFLOWS)
             conn.execute(
+                """CREATE TABLE holds (
+                       project_id TEXT NOT NULL,
+                       task TEXT NOT NULL,
+                       repo TEXT NOT NULL,
+                       number INTEGER NOT NULL,
+                       created_at TEXT,
+                       claimed_at INTEGER,
+                       session_id TEXT,
+                       stalled TEXT,
+                       stalled_at INTEGER,
+                       PRIMARY KEY (project_id, repo, number)
+                   )"""
+            )
+            # The hold is a row, as v40 made it: the `task` column the row above still carries is
+            # the dead one, and the upgrade must read the table rather than the column.
+            conn.execute(
+                """INSERT INTO holds
+                       (project_id, task, repo, number, created_at, claimed_at, session_id)
+                   VALUES ('p1', ?, 'mock-user/gots', 265, '2026-10-01T00:00:00Z', 1700000100,
+                           'gots-afk-265')""",
+                (json.dumps(self.HELD),),
+            )
+            conn.execute(
                 """INSERT INTO workflows (id, name, body, preset, version, deleted, at)
                    VALUES ('wf-1', 'Mine', '{"stages": []}', 0, NULL, 0, 1700000000)"""
             )
@@ -2915,6 +2938,49 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(held["prompt"], "Work in checkpoints.")
         self.assertEqual(held["pick_count"], 3)
         self.assertEqual([hold["number"] for hold in held["holds"]], [265], "its hold came along")
+
+
+    def test_a_store_past_v40_does_not_carry_its_dead_task_again(self) -> None:
+        """A task the project freed after v40 must not come back when the store moves past 57.
+
+        `project_afk.task` has been dead since v40 and nothing clears it, so a store already past
+        40 keeps its holds in `holds`, not in the column. Reading the column again on a later
+        upgrade invents a hold nobody is working — a Working row the app draws, a place taken from
+        the pick count, and a stall reported for a session that ended long ago.
+        """
+        path = db_path(self.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(self.OLD_AFK)
+            for column in ("pick_count", "prompt_id"):
+                conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column}")
+            conn.execute(
+                """INSERT INTO project_afk
+                       (project_id, enabled, at, task, claimed_at, session_id, prompt)
+                   VALUES ('p1', 1, 1700000000, ?, 1700000100, 'gots-afk-265', 'Work.')""",
+                (json.dumps(self.HELD),),
+            )
+            conn.execute(
+                """CREATE TABLE holds (
+                       project_id TEXT NOT NULL,
+                       task TEXT NOT NULL,
+                       repo TEXT NOT NULL,
+                       number INTEGER NOT NULL,
+                       created_at TEXT,
+                       claimed_at INTEGER,
+                       session_id TEXT,
+                       stalled TEXT,
+                       stalled_at INTEGER,
+                       PRIMARY KEY (project_id, repo, number)
+                   )"""
+            )
+            conn.execute("PRAGMA user_version = 57")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertEqual(afk._holds(self.home, "p1"), [], "a freed task is not a hold")
 
 
 class FeatureTests(unittest.TestCase):
