@@ -157,6 +157,8 @@ sequenceDiagram
 
 7. **The browser flows and the audit speak the new vocabulary.** e2e seeds drop `botThreads` and `chatNext`; `wake-window`'s flip asserts `legacyChat`; `chat-message` is seeded to the legacy layout, or its row is rewritten to prove the blank surface; `bot-threads`, `sidebar-collapse`, `steer-offer`, archive, older and compaction seeds follow; the audit's `bot-threads` and `chat-message` rows say what the flows now do. No flow is added or retired, so the registry's counts stand. Goals: G1, G2. After: 2, 3, 4, 5, 6. Layer: e2e harness and flow audit. Check: `test-e2e-registry.mjs` green both sides, then `pnpm e2e chat-message bot-threads wake-window` green.
 
+   Done. The registry is green; Playwright is not installed in this sandbox, so the three browser flows were not executed here.
+
 ## Coverage: every old read and test
 
 | Read or test | Disposition |
