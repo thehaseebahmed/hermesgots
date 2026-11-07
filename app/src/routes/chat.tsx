@@ -250,8 +250,9 @@ interface ChatPageProps {
   paneThread?: string
   slot: HoldSlot
   /**
-   * Puts the thread beside Main away, where the lane holds one the address doesn't name: the
-   * thread's header draws it as the collapse chevron. Absent where closing can't take effect.
+   * Puts the thread beside Main away, wherever the lane holds one: the thread's header draws it as
+   * the collapse chevron, and where the address names that thread it comes back to Main instead.
+   * Absent where closing can't take effect.
    */
   closeThread?: () => void
 }

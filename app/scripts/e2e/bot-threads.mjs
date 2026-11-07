@@ -908,15 +908,8 @@ await flow(
       true,
       "and the pane the thread was in is the pane it is still in: nothing was drawn anew",
     )
-    // Back on Main with its thread still beside it, which is where the pane's own control lives: a
-    // thread the address names is that address's to leave, and gets its control a step later.
-    await page.goBack()
-    await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
-    await until(
-      async () => (await count(page, '[data-pane="thread"] [data-slot="header-title"]')) === 1,
-      15_000,
-      "the thread still beside Main, the address back on Main",
-    )
+    // The thread beside Main is the thread the address names, and the control that puts it away
+    // stands on it either way: a thread's address is not a reason to take the chevron off it (G4).
     const heads = await page.evaluate(() =>
       [...document.querySelectorAll('[data-slot="header-row"]')].map((row) => ({
         title: row.querySelector('[data-slot="header-title"]')?.textContent ?? "",
@@ -977,9 +970,21 @@ await flow(
     )
     pass("the thread beside Main shares the lane evenly")
 
-    // Closing it is one press on that chevron: Main takes the row's whole width, the width it has
-    // when no thread was ever opened (G2). Nothing else about the address moves here.
+    // Closing it is one press on that chevron, straight from the thread's own address: the entry
+    // the thread took is replaced by this bot's Main, so no page slide plays and the address comes
+    // back to where it was before the thread was opened (G4). Main takes the row's whole width, the
+    // width it has when no thread was ever opened (G2).
+    await until(
+      async () => (await count(page, '[data-pane="thread"] [aria-label="Close thread"]')) === 1,
+      15_000,
+      "the chevron on the thread the address names",
+    )
     await page.locator('[data-pane="thread"] [aria-label="Close thread"]').click()
+    await until(
+      async () => new URL(page.url()).pathname === mainPath,
+      15_000,
+      "the address back on the bot's Main after closing the thread it named",
+    )
     await until(
       async () => (await count(page, '[data-pane="thread"]')) === 0,
       15_000,
@@ -1008,6 +1013,22 @@ await flow(
       `Main takes the lane's whole width (Main ${Math.round(closed.main)} against the lane ${Math.round(closed.lane)})`,
     )
     pass("closing the thread gives Main the whole lane")
+
+    // Back is left with the page before the thread: the entry the close replaced holds Main, so the
+    // step back is Main again and never the thread that was just put away.
+    await page.goBack()
+    await settled(page)
+    assert.equal(
+      new URL(page.url()).pathname,
+      mainPath,
+      "Back lands the page before the thread, not the thread it dismissed",
+    )
+    assert.equal(
+      await count(page, '[data-pane="thread"]'),
+      0,
+      "and the thread it dismissed is not drawn beside Main again",
+    )
+    pass("a close from a thread's address leaves nothing for Back to return to")
 
     // And forgotten is what "closed" means: the next launch opens Main alone, so a reload of this
     // address keeps the one chat it names and brings none beside it (G5).

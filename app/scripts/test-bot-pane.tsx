@@ -21,6 +21,7 @@ import {
   path,
   seedSettings,
   settle,
+  spyAnimate,
   text,
   until,
 } from "./component-kit.tsx"
@@ -453,6 +454,35 @@ test(
         `and Main takes the row's whole width (the lane took ${listLane().join(" ")})`,
       )
       assert.equal(remembered(bot.id), null, "the thread it closed is forgotten")
+    })
+  }),
+)
+
+test(
+  "closing the thread the address names lands Main with no slide",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    await mount(screen("/c/t-a"), async () => {
+      // The lane answers with the address's thread first, so this is the thread beside Main.
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      const animator = spyAnimate()
+      try {
+        await click(find('[aria-label="Close thread"]'))
+        // The entry the thread took is replaced by this bot's Main, so the address comes back with
+        // nothing pushed and nothing left to walk back into.
+        await until(async () => path() === `/c/${MAIN}`, "the address back on the bot's Main")
+        await until(async () => titles().join("|") === "Mainly", "Main alone")
+        assert.deepEqual(titles(), ["Mainly"], "the thread's pane is not beside Main any more")
+        assert.equal(remembered(bot.id), null, "the thread it closed is forgotten, not reopened")
+        assert.deepEqual(
+          animator.onScreen(),
+          [],
+          "and no page slide played for the Main that took its place",
+        )
+      } finally {
+        animator.restore()
+      }
     })
   }),
 )
