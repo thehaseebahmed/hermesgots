@@ -17,3 +17,5 @@ export const events = <T = { event: string }>(name: string): T[] =>
     .split("\n")
     .filter((line) => line.startsWith("data:"))
     .map((line) => JSON.parse(line.slice(5)) as T)
+
+export const kinds = (turn: { parts: { kind: string }[] }) => turn.parts.map((part) => part.kind)

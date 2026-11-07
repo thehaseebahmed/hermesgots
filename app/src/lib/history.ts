@@ -27,6 +27,7 @@ import { isCountedPreview, labelComparable } from "@/lib/tool-preview"
 import { clip, describeCall, parseArgs, writeStats } from "@/lib/tool-calls"
 import { progressReminderNotes, progressRemindersShown } from "@/lib/progress-reminder"
 import { isRoutineRow } from "@/lib/routine-message"
+import { isRetryRow } from "@/lib/retry-message"
 import { equal } from "@/lib/equal"
 
 export { MAX_TEXT_CHARS, patchStats } from "@/lib/tool-calls"
@@ -235,6 +236,7 @@ export function turnsFromRows(rows: SessionMessage[], summaries?: SummaryRows): 
   return groups.map((group) => ({
     rows: group,
     request: isTurnStart(group[0], summaries) && !isWakePrompt(group[0]) ? group[0] : undefined,
+    retry: isRetryRow(group[0]),
     runs: runsOf(group),
     summaryAt: group.findLastIndex((row) => isSummaryRow(row, summaries)),
   }))
@@ -341,8 +343,9 @@ function foldRows(
       if (dropsFromThread(row, summaries)) continue
       reply = undefined
       // The wake run's input is the model's own, never the user's: it draws no message of its own,
-      // and the reply it closes is what makes the wake turn's answer a message of its own.
-      if (isWakePrompt(row)) continue
+      // and the reply it closes is what makes the wake turn's answer a message of its own. A retry
+      // is the same shape (ADR 0112): the request it re-asks is already drawn above it.
+      if (isWakePrompt(row) || isRetryRow(row)) continue
       const { text, attachments } = splitAttachments(seamDrawnContent(row))
       messages.push({
         id,
@@ -874,12 +877,12 @@ function turnsOf(
     const reply = messages.find((m) => m.role === "assistant")
     // A catch-up keeps one reply per turn. The turn a wake run opened has no user message at all, and
     // its reply is still the thread's next message; a routine's turn is the same, its reply being the
-    // bot's own message.
+    // bot's own message, and a retry's is the answer to the request the turn above it already draws.
     return {
       user,
       reply,
-      wake: isWakePrompt(group[0]),
-      routine: isRoutineRow(group[0]),
+      /** The turn opened on no request of the user's: a wake prompt, a routine's row, a retry's. */
+      noRequest: isWakePrompt(group[0]) || isRoutineRow(group[0]) || isRetryRow(group[0]),
       // A compaction's carried rows have lower ids than the request they now follow, so a turn's
       // parts are its own rows, not the id range they happen to span.
       rows: new Set(group.map((row) => row.id)),
@@ -1018,12 +1021,13 @@ async function reconcile(conversationId: string) {
       writes.push(message)
       floor = message.createdAt + 1
     }
-    for (const { user, reply, wake, routine, rows: ids } of turns) {
+    for (const { user, reply, noRequest, rows: ids } of turns) {
       if (!user) {
         // The turn a wake run opened: the prompt draws nothing, and the answer it brought is the
         // thread's next message — a reply of its own, after the turn it closed. A routine's message
-        // is the same shape: no request of the user's, and the bot's own words to write.
-        if ((wake || routine) && reply) {
+        // and a retry's answer are the same shape: no request of the user's drawn here, and the
+        // bot's own words to write.
+        if (noRequest && reply) {
           parts.push(...partsOf(current, sessionId, ids, reply.id))
           put(reply)
           continue

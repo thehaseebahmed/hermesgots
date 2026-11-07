@@ -13,8 +13,10 @@ import { NOT_SENT } from "../lib/words.ts"
 import { clip, describeCall, parseArgs, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
 import { actionOfPreview, settleTool } from "../lib/tools.ts"
+import { requestIn } from "../lib/retry-message.ts"
+import { splitAttachments } from "../lib/attachment-text.ts"
 
-import type { ToolCall, Turn } from "./fold.ts"
+import { drawsRequest, type ToolCall, type Turn } from "./fold.ts"
 
 /**
  * A thread's turns as the rows the app's message components draw (ADR 0065): the user's request,
@@ -58,6 +60,9 @@ export const turnId = (chat: string, index: number) => `${chat}-${index}`
 /** The id of the reply row a turn draws, which is where its failure and Retry are drawn. */
 export const replyId = (chat: string, index: number) => `${turnId(chat, index)}-a`
 
+/** A not-sent row's words alone: a bubble draws no retry marker and no attachment marker. */
+export const heldWords = (row: Unsent) => splitAttachments(requestIn(row.text)).text
+
 /**
  * A message a send could not get to the host, as the app's own rows draw it: the words and the
  * files the user left in the thread, in the shape the current screen writes for one that didn't go
@@ -69,7 +74,7 @@ export function heldMessage(chat: string, row: Unsent): Message {
     id: row.id,
     conversationId: chat,
     role: "user",
-    content: row.text,
+    content: heldWords(row),
     ...(row.attachments.length ? { attachments: row.attachments } : {}),
     status: "error",
     statusText: NOT_SENT,
@@ -88,8 +93,7 @@ function rowsOf(
 ): Message[] {
   const createdAt = turn.at ?? 0
   const rows: Message[] = []
-  // A wake turn answers no message of the user's, and a carried one's request went with the archive.
-  if (!turn.wake && !turn.carried && (turn.user || turn.files?.length))
+  if (drawsRequest(turn))
     rows.push({
       id: `${id}-u`,
       conversationId: chat,

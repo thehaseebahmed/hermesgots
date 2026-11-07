@@ -2,6 +2,7 @@
  * One chat, several devices: every device that looks at it must draw all of it, whichever way it
  * came to hold the chat. What each must show is what the host authored (`chat-next-host.ts`).
  */
+import assert from "node:assert/strict"
 import test from "node:test"
 
 import { fakeHost } from "./chat-next-host.ts"
@@ -49,4 +50,21 @@ test("3: a chat continued on another device is whole again when the first device
     await laptop.close()
     await phone.close()
   }
+})
+
+test("4: a chat where a turn was retried draws its request once, on every device", async () => {
+  const host = fakeHost("gots-four")
+  host.seed([
+    { user: "Look around", reply: "", failed: "Your request was not processed." },
+    { reply: "Looking.", retry: "Look around" },
+  ])
+  await withDevice(openDevice(host), async (laptop) => {
+    await showsEverything(
+      laptop,
+      host,
+      "the request once, the failure, and the answer to the retry",
+    )
+    const users = laptop.turns().map((one) => one.user)
+    assert.deepEqual(users, ["Look around", ""], `the retry draws no request of its own: ${users}`)
+  })
 })

@@ -2,9 +2,11 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { foldTurns } from "../src/chat-next/fold.ts"
+import { messagesOf } from "../src/chat-next/messages.ts"
 import { attachmentsText, marker } from "../src/lib/attachment-text.ts"
+import { retryText } from "../src/lib/retry-message.ts"
 import { durableUserRow } from "./host-row.mjs"
-import { recorded } from "./chat-next-fixtures.ts"
+import { kinds, recorded } from "./chat-next-fixtures.ts"
 
 const fixture = recorded("sky-blue.transcript.json")
 
@@ -13,6 +15,8 @@ const PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg=="
 
 const row = (id, role, content, extra = {}) => ({ id, role, content, ...extra })
+const said = (turn) =>
+  turn.parts.flatMap((part) => (part.kind === "text" ? [part.text] : [])).join("\n\n")
 
 test("one request and the fourteen rows the host wrote for it fold into a single turn", () => {
   const turns = foldTurns(fixture.data)
@@ -196,7 +200,14 @@ test("a steer goes on the reply it steered, without the marker Hermes wraps it i
 })
 
 test("a steer's file is not its words", () => {
-  const file = { id: "f", name: "notes.md", type: "text/markdown", size: 40, image: false, path: "/h/notes.md" }
+  const file = {
+    id: "f",
+    name: "notes.md",
+    type: "text/markdown",
+    size: 40,
+    image: false,
+    path: "/h/notes.md",
+  }
   const turns = foldTurns([
     row(1, "user", "Write a poem"),
     row(2, "assistant", "Here it comes.", { finish_reason: "stop" }),
@@ -222,7 +233,51 @@ test("a failed turn's row ends the turn and keeps the host's words, not as a rep
   )
 })
 
-test("a failed turn the next turn asks again is behind the user, whatever the chain", () => {
+test("a retry row opens its own turn and draws no bubble for it", () => {
+  const turns = foldTurns([
+    row(1, "user", "Connect my office", { timestamp: 100 }),
+    row(2, "assistant", "Your request was not processed.", {
+      timestamp: 101,
+      display_kind: "failed_turn",
+    }),
+    row(3, "user", retryText("Connect my office"), { timestamp: 102 }),
+    row(4, "assistant", "Here is how.", { timestamp: 103, finish_reason: "stop" }),
+  ])
+  assert.equal(turns.length, 2, "the turn that failed, then the answer to the retry")
+  const [failed, answered] = turns
+  assert.equal(failed.user, "Connect my office", "the failed turn keeps the request it ran")
+  assert.equal(failed.failed?.text, "Your request was not processed.")
+  assert.equal(answered.retry, true, "the turn says it is a retry")
+  assert.equal(
+    answered.user,
+    "Connect my office",
+    "and keeps the request it re-asks, which a second failure asks again with",
+  )
+  assert.deepEqual(kinds(answered), ["text"], "its answer is the turn's own words")
+  assert.equal(said(answered), "Here is how.")
+  assert.equal(
+    JSON.stringify(turns).includes("RETRY"),
+    false,
+    "the markers reach no word of the thread",
+  )
+})
+
+test("a retry draws no request row, so a thread of one reads as its answer alone", () => {
+  const drawn = messagesOf(
+    "chat",
+    foldTurns([
+      row(3, "user", retryText("Connect my office"), { timestamp: 102 }),
+      row(4, "assistant", "Here is how.", { timestamp: 103, finish_reason: "stop" }),
+    ]),
+  )
+  assert.deepEqual(
+    drawn.map((one) => [one.role, one.content]),
+    [["assistant", "Here is how."]],
+    "no empty bubble, and no header",
+  )
+})
+
+test("a failed turn the next turn asks again stays, with everything it did", () => {
   const failed = (id) => row(id, "assistant", "no", { display_kind: "failed_turn" })
   const turns = foldTurns([
     row(1, "user", "Connect my office"),
@@ -232,7 +287,13 @@ test("a failed turn the next turn asks again is behind the user, whatever the ch
     row(5, "user", "Connect my office"),
     row(6, "assistant", "Here is how.", { finish_reason: "stop" }),
   ])
-  assert.equal(turns.length, 1)
-  assert.equal(turns[0].failed, undefined)
-  assert.equal(turns[0].parts[0].text, "Here is how.")
+  assert.deepEqual(
+    turns.map((turn) => [turn.user, turn.failed?.text]),
+    [
+      ["Connect my office", "no"],
+      ["Connect my office", "no"],
+      ["Connect my office", undefined],
+    ],
+  )
+  assert.equal(turns[2].parts[0].text, "Here is how.")
 })

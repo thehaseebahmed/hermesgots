@@ -50,6 +50,7 @@ import { describeActivity } from "@/lib/format"
 import { COLUMN_BOX, REPLY_EDGE } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
+import { retryText } from "@/lib/retry-message"
 import type { RepoRef } from "@/lib/workspace"
 import { carriesCount, replyFacts, threadLineOf } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
@@ -128,9 +129,6 @@ export function AppThreadView({
     latestSend.current = send
   })
   const ask = useCallback((text: string) => latestSend.current(text, []), [])
-  // Retry only sends the request again: the half that failed may hold work the next turn needs —
-  // calls that ran, files they wrote — so none of it comes out of the host's transcript, and only
-  // the drawing drops it once its request is asked again.
   const [retrying, setRetrying] = useState(false)
   // A turn whose request is in a page not read yet has nothing to send again, and neither has a
   // wake turn the host gave up on: it answers no message of the user's, so Retry would send nothing.
@@ -150,7 +148,9 @@ export function AppThreadView({
         id: file.path ?? file.name,
         image: false,
       }))
-      await latestSend.current(attachmentsText(failedTurn.user, files), [])
+      await latestSend.current(retryText(attachmentsText(failedTurn.user, files)), [], {
+        retry: true,
+      })
     } finally {
       setRetrying(false)
     }

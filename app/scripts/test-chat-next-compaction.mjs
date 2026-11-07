@@ -7,14 +7,13 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { foldTurns, withArchive, withCarried } from "../src/chat-next/fold.ts"
-import { recorded } from "./chat-next-fixtures.ts"
+import { kinds, recorded } from "./chat-next-fixtures.ts"
 
 const live = recorded("compaction.live.json").data
 const archive = recorded("compaction.archive.json").data
 
 const row = (id, role, content, extra = {}) => ({ id, role, content, ...extra })
 const hidden = (id, role = "user") => row(id, role, "", { display_kind: "hidden" })
-const kinds = (turn) => turn.parts.map((part) => part.kind)
 
 test("the host's read opens on the compaction's hidden row: a turn whose request was archived, with no bubble of its own", () => {
   const [first] = foldTurns(live)

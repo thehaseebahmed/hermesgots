@@ -21,6 +21,7 @@
  * test compares a device with what the host authored, never with the code under test.
  */
 
+import { retryText } from "../src/lib/retry-message.ts"
 import { durableUserRow } from "./host-row.mjs"
 
 interface Row {
@@ -116,6 +117,8 @@ export interface Run {
   say(delta: string): void
   /** The reply ends: its row is written and `run.completed` closes the stream. */
   finish(output: string): void
+  /** The host gives up on the turn, as Hermes does when a provider errors mid-turn. */
+  fail(reason: string): void
 }
 
 /** One open event stream: what it is sent, and the two ways it can end. */
@@ -164,6 +167,9 @@ function durable(input: unknown): string | null {
   if (!Array.isArray(content)) return ""
   return durableUserRow(content)
 }
+
+/** The row Hermes writes when it gives up on a turn: no finish reason, and `failed_turn`. */
+const FAILED_TURN = { finish_reason: null, display_kind: "failed_turn" } as const
 
 /**
  * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
@@ -300,11 +306,15 @@ export function fakeHost(
       state.events.push(sent)
       state.streams.forEach((stream) => stream.send(sent))
     }
+    /** The run is over, whichever way it ended. */
+    const end = () => {
+      state.done = true
+      for (const stream of [...state.streams]) stream.close()
+    }
     state.cancel = () => {
       if (state.done) return
       push("run.cancelled", {})
-      state.done = true
-      for (const stream of [...state.streams]) stream.close()
+      end()
     }
     if (input !== null) write("user", input)
     expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [], seams: 0 })
@@ -492,8 +502,12 @@ export function fakeHost(
         write("assistant", output, { ...reasoning(), finish_reason: "stop" })
         turn.texts.push(output)
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
-        state.done = true
-        for (const stream of [...state.streams]) stream.close()
+        end()
+      },
+      fail(reason) {
+        write("assistant", reason, { ...reasoning(), ...FAILED_TURN })
+        push("run.failed", { error: reason })
+        end()
       },
     }
     return { id, run }
@@ -890,7 +904,7 @@ export function fakeHost(
   /** Turns already on the host before any device looks: finished, with their calls and reply. */
   function seed(
     turns: {
-      user: string
+      user?: string
       tools?: number
       reply: string
       thoughts?: string[]
@@ -898,10 +912,13 @@ export function fakeHost(
       unmarked?: boolean
       /** The host gave up on the turn and wrote its own words for it, as a `failed_turn` row. */
       failed?: string
+      /** The turn is the app's own retry of the one above it (ADR 0112): its row is `retryText`. */
+      retry?: string
     }[],
   ) {
     for (const turn of turns) {
-      const { run } = start(turn.user)
+      const { run } = start(turn.retry === undefined ? (turn.user ?? "") : retryText(turn.retry))
+      if (turn.retry !== undefined) expected.at(-1)!.user = ""
       const thoughts = [...(turn.thoughts ?? [])]
       for (let at = 0; at < (turn.tools ?? 0); at++) {
         if (thoughts.length > 1) run.think(thoughts.shift()!)
@@ -910,12 +927,10 @@ export function fakeHost(
       if (thoughts.length) run.think(thoughts[0])
       run.finish(turn.reply)
       if (turn.unmarked) rows.at(-1)!.finish_reason = null
-      if (turn.failed !== undefined)
-        Object.assign(rows.at(-1)!, {
-          finish_reason: null,
-          display_kind: "failed_turn",
-          content: turn.failed,
-        })
+      if (turn.failed !== undefined) {
+        Object.assign(rows.at(-1)!, { ...FAILED_TURN, content: turn.failed })
+        expected.at(-1)!.texts = []
+      }
     }
   }
 

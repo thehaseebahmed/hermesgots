@@ -15,7 +15,6 @@ import {
   withArchive,
   withCarried,
   withSteer,
-  withoutRepeatedFailures,
   type FoldOptions,
   type Part,
   type Row,
@@ -129,6 +128,8 @@ export type ThreadEvent =
       at?: number
       /** The not-sent row this send is: a retried message leaves the thread as the turn draws it. */
       replaces?: string
+      /** The send is the app's own retry (ADR 0112). */
+      retry?: boolean
     }
   /**
    * A send that did not reach the host: the message stays in the thread, marked not sent, and the
@@ -388,8 +389,8 @@ function drawn(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
   // the thread would lose the one line it draws while the run waits.
   const copy = folded.at(-1)
   if (waiting && copyIsAhead(copy, live)) return folded
-  if (!live.replaces || !copy) return withoutRepeatedFailures([...folded, live.turn])
-  return withoutRepeatedFailures([...folded.slice(0, -1), withCarried(live.turn, copy)])
+  if (!live.replaces || !copy) return [...folded, live.turn]
+  return [...folded.slice(0, -1), withCarried(live.turn, copy)]
 }
 
 /**
@@ -724,6 +725,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         live: {
           turn: {
             user: event.user,
+            ...(event.retry ? { retry: true } : {}),
             ...(event.at !== undefined ? { at: event.at, timing: { startedAt: event.at } } : {}),
             ...(event.files?.length ? { files: event.files } : {}),
             parts: [],

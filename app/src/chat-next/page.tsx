@@ -65,7 +65,17 @@ import {
 import { clarifyRead, questionAt } from "@/lib/clarify"
 import { WAITING_ON_ANSWER } from "@/lib/format"
 import { PROMPT_RETRY_MS } from "@/lib/freshness"
-import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
+import { heldWords } from "./messages"
+import {
+  askedByUser,
+  drawsRequest,
+  foldTurns,
+  requestOf,
+  sentFileOf,
+  type Row,
+  type ToolCall,
+  type Turn,
+} from "./fold"
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import {
   foldedOf,
@@ -180,7 +190,7 @@ const TurnView = memo(
               : "a subagent"}
             {turn.done ? " finished" : " just finished"}
           </p>
-        ) : turn.carried || turn.cut ? null : (
+        ) : drawsRequest(turn) ? (
           <div className="ml-auto w-fit max-w-[85%] space-y-1">
             {turn.files?.length ? (
               <ul
@@ -200,7 +210,7 @@ const TurnView = memo(
               </div>
             ) : null}
           </div>
-        )}
+        ) : null}
         {turn.parts.map((part, at) => {
           if (part.kind === "compaction")
             return (
@@ -424,7 +434,19 @@ export interface ThreadViewProps {
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
   /** Sends a turn as the composer does, for what the view offers to send itself. */
-  send: (text: string, attachments: Attachment[]) => Promise<void>
+  send: (text: string, attachments: Attachment[], how?: SendHow) => Promise<void>
+}
+
+/**
+ * A send the caller knows more about than its text: the app's own retry of a failed turn (ADR 0112).
+ */
+export interface SendHow {
+  retry?: boolean
+}
+
+interface SendOptions extends SendHow {
+  resend?: Unsent
+  at?: number
 }
 
 function HeldRow({
@@ -528,7 +550,7 @@ function PlainView({
         <HeldRow
           key={row.id}
           marker="unsent"
-          text={row.text}
+          text={heldWords(row)}
           files={row.attachments.map((file) => file.name)}
         >
           <span data-unsent-state>{NOT_SENT}</span>
@@ -931,7 +953,8 @@ export function ChatNextThread({
       // While older pages are unread the turns drawn are only the newest: "at least this many".
       turns: store.get().partial
         ? Infinity
-        : threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
+        : threadTurns(store.get()).filter(askedByUser)
+            .length,
     }),
     [store],
   )
@@ -1355,43 +1378,42 @@ export function ChatNextThread({
 
   /**
    * Sends a message as a turn. A send that does not reach the host keeps the message in the thread,
-   * in the app's not-sent shape, with the files it was sent with — `retrying` is the row it is, sent
+   * in the app's not-sent shape, with the files it was sent with — `resend` is the row it is, sent
    * again — so the words never go back to the field and nothing has to be typed twice (ADR 0071).
+   * A retry (ADR 0112) is not triaged: it re-asks where that request was made.
    */
   async function sendTurn(
     text: string,
     attachments: Attachment[] = [],
-    retrying?: Unsent,
-    sentAt?: number,
+    { resend, at: sentAt, retry = false }: SendOptions = {},
   ) {
     const words = text.trim()
     if ((!words && !attachments.length) || !server || !key || !session) return
-    const at = retrying?.at ?? sentAt ?? Date.now()
+    const asked = retry ? requestOf(words) : undefined
+    const at = resend?.at ?? sentAt ?? Date.now()
     // The message's own id is the run's idempotency key too, so a send that timed out but reached
     // the host is answered by the run it started rather than run a second time.
-    const id = retrying?.id ?? randomId()
+    const id = resend?.id ?? randomId()
     reads.current++
     streaming.current = true
     const drawn = {
       type: "sent" as const,
-      user: words,
+      user: asked?.user ?? words,
+      ...(retry ? { retry: true } : {}),
       at,
-      files: attachments.map(({ name, type, size, image }) => ({
-        name,
-        type,
-        size,
-        image: Boolean(image),
-      })),
+      files: attachments.length ? attachments.map(sentFileOf) : (asked?.files ?? []),
     }
     // A fresh send is drawn in the flow the moment it goes, as the thread has always drawn it; a
     // message sent again from its row keeps the row until the host takes it, so a retry that fails
     // again leaves it exactly where it was (ADR 0071).
-    if (!retrying) dispatch(drawn)
+    if (!resend) dispatch(drawn)
     let prepared: PreparedTurn | undefined
     let run: string
     try {
-      // A message the host sends to a thread leaves this one, as any message the user sent would.
-      const kept = triageTurn ? await triageTurn(words, attachments, { steer: false }) : attachments
+      // A message the host sends to a thread leaves this one, as any message the user sent would. A
+      // retry is not asked again: it re-asks the request where that request was made.
+      const kept =
+        triageTurn && !retry ? await triageTurn(words, attachments, { steer: false }) : attachments
       if (!kept) {
         streaming.current = false
         return dispatch({ type: "moved" })
@@ -1440,7 +1462,7 @@ export function ChatNextThread({
     }
     // The host has taken it: only now does the row leave, and the turn the thread follows draws the
     // message in its place.
-    if (retrying) dispatch({ ...drawn, replaces: retrying.id })
+    if (resend) dispatch({ ...drawn, replaces: resend.id })
     prepared?.settled(true)
     void follow(run)
   }
@@ -1460,12 +1482,12 @@ export function ChatNextThread({
     const first = pendingStart.current
     if (!first || !ready || !server || !key || !session) return
     pendingStart.current = undefined
-    void sendTurn(first.text, first.attachments, undefined, first.at)
+    void sendTurn(first.text, first.attachments, { at: first.at })
   }, [ready, server, key, session])
 
   function retryUnsent(id: string) {
     const row = store.get().unsent?.find((one) => one.id === id)
-    if (row) void sendTurn(row.text, row.attachments, row)
+    if (row) void sendTurn(row.text, row.attachments, { resend: row })
   }
 
   const latestHeld = useRef(retryUnsent)

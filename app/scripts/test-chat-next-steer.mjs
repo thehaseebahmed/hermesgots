@@ -7,13 +7,13 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { withCarried, withSteer } from "../src/chat-next/fold.ts"
+import { kinds } from "./chat-next-fixtures.ts"
 
 const steer = (text) => ({ kind: "steer", text })
 const words = (text) => ({ kind: "text", text })
 const call = (id) => ({ kind: "tools", calls: [{ id, name: "terminal" }] })
 
 const reply = (parts) => ({ user: "go", done: false, delivered: [], parts })
-const kinds = (turn) => turn.parts.map((part) => part.kind)
 const said = (turn) => turn.parts.filter((part) => part.kind === "steer").map((part) => part.text)
 
 test("a steer the transcript folded is drawn in the reply the stream is drawing", () => {

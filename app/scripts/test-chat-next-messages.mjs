@@ -2,8 +2,10 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { foldTurns } from "../src/chat-next/fold.ts"
-import { messagesOf } from "../src/chat-next/messages.ts"
+import { heldMessage, messagesOf } from "../src/chat-next/messages.ts"
+import { retryText } from "../src/lib/retry-message.ts"
 import { attachmentsText } from "../src/lib/attachment-text.ts"
+import { NOT_SENT } from "../src/lib/words.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
 const fixture = recorded("sky-blue.transcript.json")
@@ -206,4 +208,13 @@ test("a live turn's unplaced thinking draws as the run still to come", () => {
   const turn = { user: "go", parts: [], done: false, delivered: [], pendingThought: "Hmm." }
   const [, reply] = messagesOf("chat", [turn], { streaming: true })
   assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
+})
+
+test("a not-sent retry draws its words alone: no retry marker, no attachment marker", () => {
+  const file = { name: "sky.jpg", type: "image/jpeg", size: 2048, image: true, path: "/h/sky.jpg" }
+  const text = retryText(attachmentsText("Look around", [file]))
+  const held = heldMessage("chat", { id: "u1", text, attachments: [file], at: 1 })
+  assert.equal(held.content, "Look around", "the words, and neither set of markers")
+  assert.equal(held.statusText, NOT_SENT)
+  assert.equal(held.attachments.length, 1, "the file is still the message's own")
 })

@@ -5,9 +5,10 @@ import {
   seamDrawnContent,
   type SummaryRows,
 } from "../lib/compaction-seam.ts"
-import type { MessageStats } from "../lib/db.ts"
+import type { Attachment, MessageStats } from "../lib/db.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
+import { requestIn } from "../lib/retry-message.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
 
@@ -92,11 +93,47 @@ export interface Turn {
   failed?: { text: string }
   /** A reply the host started when a subagent finished: it answers no message of the user's. */
   wake?: boolean
+  /** The app re-asked a failed turn's request here (ADR 0112): it draws no request of its own. */
+  retry?: boolean
   /** A routine's message: the bot said it while working, a turn of its own (ADR 0081). */
   routine?: boolean
   /** The children whose results this wake turn carries, as the host names them. */
   delivered: string[]
 }
+
+/**
+ * A user row's request as the thread keeps it, read once for the fold and for the turn this device
+ * streams — so both copies of a turn carry the same words, files and retry flag (ADR 0112).
+ */
+export function requestOf(content: string): Pick<Turn, "user" | "files" | "retry"> {
+  const request = requestIn(content)
+  const { text, attachments } = splitAttachments(request)
+  return {
+    user: text,
+    ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
+    ...(request === content ? {} : { retry: true as const }),
+  }
+}
+
+export const sentFileOf = ({ name, type, size, image, path, host }: Attachment): SentFile => ({
+  name,
+  type,
+  size,
+  image: Boolean(image),
+  ...(path ? { path } : {}),
+  ...(host ? { host } : {}),
+})
+
+/** Whether the user asked this turn: not a wake run's, not the app's own retry, not carried. */
+export const askedByUser = (turn: Turn) => !turn.wake && !turn.retry && !turn.carried
+
+/**
+ * Whether a turn draws a request bubble: everything the user asked draws one, bar a cut turn, whose
+ * request is in a page the thread has not read yet. One rule, since the two views and the markup the
+ * tests read each asked it for themselves (ADR 0112).
+ */
+export const drawsRequest = (turn: Turn) =>
+  askedByUser(turn) && !turn.cut && Boolean(turn.user || turn.files?.length)
 
 /**
  * A transcript with the rows a compaction archived put back above it. The archive read holds the
@@ -278,23 +315,7 @@ export function foldTurns(
         if (child) wake.delivered.push(child)
         continue
       }
-      const { text, attachments } = splitAttachments(content)
-      openTurn(row, {
-        row: row.id,
-        user: text,
-        ...(attachments.length
-          ? {
-              files: attachments.map(({ name, type, size, image, path, host }) => ({
-                name,
-                type,
-                size,
-                image: Boolean(image),
-                ...(path ? { path } : {}),
-                ...(host ? { host } : {}),
-              })),
-            }
-          : {}),
-      })
+      openTurn(row, { row: row.id, ...requestOf(content) })
       continue
     }
     // A routine's answer is the bot's own message, not the reply above it carrying on: it opens a
@@ -382,7 +403,7 @@ export function foldTurns(
   // Only the last turn can still be running. A copy Hermes carried across a compaction has lost the
   // reason its reply stopped, so an earlier turn is finished by what follows it.
   for (const turn of turns.slice(0, -1)) turn.done = true
-  return withoutRepeatedFailures(turns)
+  return turns
 }
 
 /** Where in a reply a part the stream never carries stood: the calls drawn above it and its words. */
@@ -483,27 +504,6 @@ export function withCarried(live: Turn, copy: Turn): Turn {
 export function withSteer(live: Turn, text: string): Turn {
   const said = text.trim()
   return said ? { ...live, parts: [...live.parts, { kind: "steer", text: said }] } : live
-}
-
-const sameRequest = (a: Turn, b: Turn) =>
-  a.user === b.user &&
-  (a.files ?? []).map((f) => f.name).join() === (b.files ?? []).map((f) => f.name).join()
-
-/**
- * The turns without a failed one the next turn asks again: the user sent the message once more, so
- * the failure is behind them and the thread reads as if only the second send happened. Only the
- * drawing drops it — the host keeps the failed turn and whatever work it did — and a failed turn
- * nothing repeats stays, with the host's words.
- */
-export function withoutRepeatedFailures(turns: Turn[]): Turn[] {
-  const next = (at: number) => turns[at + 1]
-  return turns.some(
-    (turn, at) => turn.failed && next(at) && !next(at).wake && sameRequest(turn, next(at)),
-  )
-    ? turns.filter(
-        (turn, at) => !(turn.failed && next(at) && !next(at).wake && sameRequest(turn, next(at))),
-      )
-    : turns
 }
 
 /** Whether a reply already drawn ended on these very words. */
