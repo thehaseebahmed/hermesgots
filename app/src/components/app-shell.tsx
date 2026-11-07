@@ -259,8 +259,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Half the row while a thread stands beside Main, the list lane while there is none, and the
   // answer before it while this bot's thread list is still out.
   const botLayout = useBotLaneLayout(lane)
-  // A lane that holds a thread the address doesn't name can be put away from its own header; where
-  // the address names the thread, the control belongs to the address instead (a later step).
+  // A lane that holds a thread can be put away from its own header, whether the address names that
+  // thread or not: the move is the pane's, since it is the one that knows where its bot's Main is.
   const closeThread = bot?.canClose ? bot.close : undefined
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} slot="thread" closeThread={closeThread} />

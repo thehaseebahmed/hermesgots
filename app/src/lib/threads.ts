@@ -1,7 +1,7 @@
 import Dexie from "dexie"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { matchPath, useLocation } from "react-router"
+import { matchPath, useLocation, useNavigate } from "react-router"
 
 import {
   createConversation,
@@ -428,12 +428,16 @@ export interface BotPane {
   profileId: string
   lane: BotLane
   /**
-   * Whether a control may close the lane where it stands: the lane holds a thread the address
-   * doesn't name. A thread the address does name is that address's to leave, so a close there would
-   * be a control that does nothing.
+   * Whether a control may close the lane where it stands: the lane holds a thread, whichever way it
+   * came to hold it. A thread the address names is closed by moving the address back to this bot's
+   * Main in the same act, so the control puts the thread away there too.
    */
   canClose: boolean
-  /** Puts the lane away and forgets this bot's thread, so the next visit opens Main alone. */
+  /**
+   * Puts the lane away and forgets this bot's thread, so the next visit opens Main alone. Where the
+   * address names that thread, its entry is replaced by this bot's Main as well — in the same act,
+   * since a lane reading an address that still named the thread would hold it again.
+   */
   close: () => void
   /** Puts back the thread this bot closed on this visit, where the lane is not already holding one. */
   reopen: () => void
@@ -466,10 +470,11 @@ function laneOf(thread: string | undefined, answer: LastOpened | undefined): Bot
  * One answer for the shell, rather than a thread and an open flag it assembles again at every draw:
  * `lane` says which of the four the pane is, and what it holds, and `close` and `reopen` are the
  * moves a control makes without knowing the rule — a close forgets the thread, as the lane memory
- * and the next visit both need.
+ * and the next visit both need, and takes the address back to this bot's Main where it named it.
  */
 export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const large = useXLarge()
+  const navigate = useNavigate()
   const { pathname, state } = useLocation()
   const chat = matchPath("/c/:id", pathname)?.params.id
   const main = chat ? mainThreadProfile(chat) : undefined
@@ -525,7 +530,13 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     if (!profileId || !shown) return
     closed.current = { profileId, thread: shown }
     rememberThread(profileId, null)
-  }, [profileId, shown])
+    // The address moves in this same act, not on a later render: the lane reads the address's
+    // thread before anything else, so forgetting one it still named would hold it again. Replacing
+    // the entry it took — the way a sidebar row opens Main — keeps Back on the page before the
+    // thread, and `quiet` is the state the shell skips its page slide for.
+    if (thread === shown)
+      navigate(`/c/${mainThreadId(profileId)}`, { replace: true, state: { quiet: true } })
+  }, [profileId, shown, thread, navigate])
   const reopen = useCallback(() => {
     if (!profileId || lane.state === "thread") return
     const back = closed.current
@@ -538,7 +549,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   }, [profileId, thread])
 
   if (!large || !enabled || !profileId) return undefined
-  // A control may put the lane away only where it holds a thread the address doesn't name: closing
-  // a thread the address names would leave the lane holding that same thread.
-  return { profileId, lane, canClose: lane.state === "thread" && !thread, close, reopen }
+  // A control may put the lane away wherever it holds a thread: on Main that is the lane's own
+  // close, and on the thread's address the close takes the address back to Main in the same act.
+  return { profileId, lane, canClose: lane.state === "thread", close, reopen }
 }
