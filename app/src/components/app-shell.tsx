@@ -5,6 +5,9 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
+  type KeyboardEvent as KeyEvent,
+  type PointerEvent as Pointer,
   type ReactNode,
   type RefObject,
 } from "react"
@@ -28,6 +31,16 @@ import {
   useResearchPane,
 } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
+import {
+  readSplit,
+  shareAt,
+  shareKept,
+  SPLIT_HALF,
+  SPLIT_STEP,
+  SPLIT_STEP_FAST,
+  splitWidth,
+  writeSplit,
+} from "@/lib/split"
 import { useBotPane, useBotThreads, type BotLane } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
@@ -53,32 +66,33 @@ interface ListPane {
 
 /**
  * How a list and the item beside it share the row: the width the list keeps while an item is open,
- * whether an arriving item slides in from the right or the row rearranges instead, and where an item
- * that closes is held while the list takes the whole row.
+ * whether the reader drags the edge between them, and whether an arriving item slides in from the
+ * right or the row rearranges instead.
  */
 interface PaneLayout {
   /** The list's width class while an item is open. Closed, it takes the whole row. */
-  list: string
+  list?: string
+  /**
+   * Whether the share of the row is the reader's to drag — floored at `SPLIT_FLOOR` a side, and
+   * written as the width itself rather than a class, since no class can hold a dragged share.
+   */
+  split?: boolean
   /** Whether an arriving item slides in 48px from the right, fading, as the list narrows. */
   slide: boolean
-  /**
-   * Where a closing item is held for the row's transition — its place and the share it had, the
-   * complement of the list's — so it is clipped out by the list growing rather than squeezed or
-   * dropped in the first frame. Nothing where an item leaves with its lane.
-   */
-  exit?: string
 }
 
 /** A list lane: Material 3's 412px, as in Settings, and the item sliding in beside it. */
 const LIST_LANE: PaneLayout = { list: "w-103", slide: true }
 
 /**
- * A bot's thread beside Main: the two chats take half of the room the sidebar leaves each. A
- * percentage of the row rather than a width, because the sidebar may be open or a rail and half is
- * right in both (ADR 0110). The row rearranges rather than sliding — the edge between the chats is
- * the one thing that moves — and a thread closing keeps its half until Main has covered it.
+ * A bot's thread beside Main: the two chats share the room the sidebar leaves, and the reader drags
+ * the edge between them. A fraction of the row rather than a width, because the sidebar may be open
+ * or a rail and half is right in both, and each chat floored at 412px by a CSS clamp, so shrinking
+ * the window can never crush Main and nothing has to listen for a resize (ADR 0110). The row
+ * rearranges rather than sliding — the edge between the chats is the one thing that moves — and a
+ * thread closing keeps its share until Main has covered it.
  */
-const SPLIT_LANE: PaneLayout = { list: "w-1/2", slide: false, exit: "left-1/2 w-1/2" }
+const SPLIT_LANE: PaneLayout = { split: true, slide: false }
 
 /**
  * The policy a bot's lane takes: split while its thread list has answered with a thread beside
@@ -209,11 +223,100 @@ interface HeldItem {
   screen: string
   node: ReactNode
   key: string
-  exit?: string
+  /** Whether the lane it was held in is the split, whose place is the share the reader left it at. */
+  split?: boolean
+  /** The box it keeps while the list covers it: its share of the row, set at the close. */
+  exit?: CSSProperties
 }
 
 /** The window a closing item is held for: the 300ms the lane's width transition runs on. */
 const EXIT_MS = 300
+
+/**
+ * The box a closing item keeps in a split lane: the share its list has, the exact complement of the
+ * list's width, so the thread is clipped out by Main growing rather than squeezed or dropped.
+ */
+function exitBox(share: number): CSSProperties {
+  const width = splitWidth(share)
+  return { left: width, width: `calc(100% - ${width})` }
+}
+
+/**
+ * The edge between the two chats, as a control: a separator a reader drags, nudges with the arrow
+ * keys and puts back to half with Enter, Home or a double-click. A drag captures the pointer, follows
+ * it with no transition — 300ms on every frame is a lag — and keeps the share on this device when the
+ * pointer lifts; a key moves it and keeps it at once.
+ */
+function SplitHandle({
+  share,
+  width,
+  dragging,
+  onDrag,
+  onShare,
+  onKeep,
+}: {
+  share: number
+  width: string
+  dragging: boolean
+  onDrag: (dragging: boolean) => void
+  onShare: (share: number) => void
+  onKeep: (share: number) => void
+}) {
+  const under = (edge: Element) => edge.parentElement?.getBoundingClientRect()
+  const moveTo = (edge: HTMLElement, x: number) => {
+    const row = under(edge)
+    if (row?.width) onShare(shareAt(x, row))
+  }
+  return (
+    <div
+      data-slot="split-handle"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize Main and the thread"
+      aria-valuenow={Math.round(share * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      tabIndex={0}
+      style={{ left: width }}
+      className={cn(
+        "absolute inset-y-0 z-20 w-3 -translate-x-1/2 cursor-col-resize touch-none outline-none",
+        "hover:bg-ring/20 focus-visible:bg-ring/30",
+        dragging && "bg-ring/30",
+      )}
+      onPointerDown={(event: Pointer<HTMLDivElement>) => {
+        if (event.button !== 0) return
+        // The pointer is the drag's for the whole gesture, however far past the edge it goes.
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+        event.currentTarget.focus()
+        onDrag(true)
+        moveTo(event.currentTarget, event.clientX)
+      }}
+      // Eats the gesture's default so no transcript is selected and no native drag starts under it.
+      onMouseDown={(event) => event.preventDefault()}
+      onDragStart={(event) => event.preventDefault()}
+      onPointerMove={(event: Pointer<HTMLDivElement>) => {
+        if (dragging) moveTo(event.currentTarget, event.clientX)
+      }}
+      onPointerUp={(event: Pointer<HTMLDivElement>) => {
+        if (!dragging) return
+        event.currentTarget.releasePointerCapture?.(event.pointerId)
+        const row = under(event.currentTarget)
+        onDrag(false)
+        onKeep(row?.width ? shareAt(event.clientX, row) : share)
+      }}
+      onPointerCancel={() => onDrag(false)}
+      onKeyDown={(event: KeyEvent<HTMLDivElement>) => {
+        const step = event.shiftKey ? SPLIT_STEP_FAST : SPLIT_STEP
+        if (event.key === "ArrowLeft") onKeep(shareKept(share - step))
+        else if (event.key === "ArrowRight") onKeep(shareKept(share + step))
+        else if (event.key === "Enter" || event.key === "Home") onKeep(SPLIT_HALF)
+        else return
+        event.preventDefault()
+      }}
+      onDoubleClick={() => onKeep(SPLIT_HALF)}
+    />
+  )
+}
 
 /**
  * A list and the item open beside it: the list narrows to its lane and the item arrives at its
@@ -225,6 +328,14 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
   const session = useRef<HTMLDivElement>(null)
   const open = Boolean(pane?.open)
   const layout = pane?.layout
+  const split = Boolean(layout?.split)
+  // The share of the row the list keeps while a reader has dragged it: this device's, read the way
+  // a launch reads it, and the one number the lane's width, the handle and the closing item's box
+  // all stand on.
+  const [share, setShare] = useState(readSplit)
+  // A pointer drag follows the pointer with no transition at all: 300ms on every frame is a lag.
+  const [dragging, setDragging] = useState(false)
+  const width = split ? splitWidth(share) : undefined
   // The item the lane holds, remembered while it is open: by the frame the lane closes, the item and
   // the policy are already the closed lane's. State rather than a ref, adjusted during render, so
   // the value the close reads is the one this render committed.
@@ -235,7 +346,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
         screen: pane.screen,
         node: pane.item,
         key: pane.itemKey,
-        exit: layout?.exit,
+        split,
       })
   }
   // A closing item keeps the place it had until the list has taken the row — clipped, inert and out
@@ -245,10 +356,11 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
   const [wasOpen, setWasOpen] = useState(open)
   if (wasOpen !== open) {
     setWasOpen(open)
+    const box = held?.split ? exitBox(share) : undefined
     setExit(
-      open || !pane || held?.screen !== pane.screen || !held?.exit || prefersReducedMotion()
+      open || !pane || held?.screen !== pane.screen || !box || prefersReducedMotion()
         ? undefined
-        : held,
+        : { ...held, exit: box },
     )
   }
   useEffect(() => {
@@ -267,29 +379,51 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
     )
   }, [open, layout?.slide])
 
+  // Where a key, a double-click or a drag's release leaves the edge: drawn at once, and kept on this
+  // device so a reload, a close and a launch all find the same share.
+  const keep = (next: number) => {
+    const moved = shareKept(next)
+    setShare(moved)
+    writeSplit(moved)
+  }
+
   return (
     <div className="relative flex min-h-0 flex-1">
       {pane && (
         <div
           data-slot="list-lane"
+          style={open && width ? { width } : undefined}
           className={cn(
             // Over the item it is taking back, so the edge moving is the thread being clipped out.
-            `relative z-10 flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
+            "relative z-10 flex min-h-0 flex-none flex-col",
+            // The transition is the lane's own, and a pointer drag has none: it would trail by 300ms.
+            !dragging &&
+              `transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
             open ? cn(pane.layout.list, "border-r") : "w-full",
           )}
         >
           <Suspense fallback={null}>{pane.node}</Suspense>
         </div>
       )}
+      {split && open && width && (
+        <SplitHandle
+          share={share}
+          width={width}
+          dragging={dragging}
+          onDrag={setDragging}
+          onShare={setShare}
+          onKeep={keep}
+        />
+      )}
       <div
         ref={session}
         data-slot="item-lane"
         inert={exit ? true : undefined}
         aria-hidden={exit ? true : undefined}
+        style={exit?.exit}
         className={cn(
           "flex min-w-0 flex-1 flex-col",
           exit && "pointer-events-none absolute inset-y-0 overflow-hidden",
-          exit?.exit,
         )}
       >
         {/* A list's own route has nothing to add beside it. */}

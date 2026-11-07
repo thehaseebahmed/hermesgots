@@ -4,6 +4,7 @@ import {
   assert,
   cardOf,
   centred,
+  centreOf,
   flow,
   mockAuth,
   pass,
@@ -48,25 +49,22 @@ const viewLink = (card, title) =>
   card.getByRole("link", { name: title ? `View ${title}` : /^View / })
 
 function sequence(page) {
-  return page.evaluate(
-    (messages) => {
-      const content = document.querySelector('[data-slot="message-scroller-content"]')
-      if (!content) return []
-      return [...content.children]
-        .filter((child) => child.hasAttribute("data-slot"))
-        .flatMap((child) => {
-          const slot = child.getAttribute("data-slot")
-          const said = child.textContent?.trim() ?? ""
-          if (slot === "day-heading" || slot === "other") return []
-          // By the thread the card draws: the words on it are not a stable key.
-          if (slot === "thread-card") return [`card:${child.getAttribute("data-thread")}`]
-          if (slot === "message-scroller-item")
-            return [`message:${messages.find((message) => said.includes(message)) ?? said}`]
-          return []
-        })
-    },
-    MESSAGES,
-  )
+  return page.evaluate((messages) => {
+    const content = document.querySelector('[data-slot="message-scroller-content"]')
+    if (!content) return []
+    return [...content.children]
+      .filter((child) => child.hasAttribute("data-slot"))
+      .flatMap((child) => {
+        const slot = child.getAttribute("data-slot")
+        const said = child.textContent?.trim() ?? ""
+        if (slot === "day-heading" || slot === "other") return []
+        // By the thread the card draws: the words on it are not a stable key.
+        if (slot === "thread-card") return [`card:${child.getAttribute("data-thread")}`]
+        if (slot === "message-scroller-item")
+          return [`message:${messages.find((message) => said.includes(message)) ?? said}`]
+        return []
+      })
+  }, MESSAGES)
 }
 
 function seed(
@@ -782,7 +780,10 @@ await flow(
       if (!body || !undo) return null
       return Math.round(undo.getBoundingClientRect().left - body.getBoundingClientRect().right)
     })
-    assert.ok(gap !== null && gap >= 0 && gap <= 8, `Undo stands at the card's edge (${gap}px away)`)
+    assert.ok(
+      gap !== null && gap >= 0 && gap <= 8,
+      `Undo stands at the card's edge (${gap}px away)`,
+    )
     assert.equal(
       new Set(widths).size,
       1,
@@ -1028,6 +1029,144 @@ await flow(
     )
     pass("the thread beside Main shares the lane evenly")
 
+    // The edge between the chats is the reader's: a drag sets the share, this device keeps it, and
+    // neither chat is drawn narrower than the 412px the app asks its text to read in — a CSS clamp,
+    // so shrinking the window can crush neither (G6).
+    assert.equal(
+      await count(page, '[data-slot="split-handle"]'),
+      1,
+      "the edge between the chats is a control of its own",
+    )
+    const edge = await page.evaluate(() => {
+      const handle = document.querySelector('[data-slot="split-handle"]')
+      return {
+        role: handle.getAttribute("role"),
+        orientation: handle.getAttribute("aria-orientation"),
+        label: handle.getAttribute("aria-label"),
+        share: handle.getAttribute("aria-valuenow"),
+        tab: handle.getAttribute("tabindex"),
+      }
+    })
+    assert.equal(edge.role, "separator", "a separator, as the edge between two panes is")
+    assert.equal(edge.orientation, "vertical")
+    assert.ok(edge.label, "with a name that says what it does")
+    assert.equal(edge.share, "50", "it reads the share it holds, half to begin with")
+    assert.equal(edge.tab, "0", "and a reader's keys can reach it")
+
+    /** The row the sidebar leaves, and the two chats in it, in the page's own px. */
+    const rowBoxes = () =>
+      page.evaluate(() => {
+        const box = (selector) => {
+          const node = document.querySelector(selector)
+          if (!node) return null
+          const rect = node.getBoundingClientRect()
+          return { left: rect.left, width: rect.width }
+        }
+        const row = box("main")
+        const list = box('[data-slot="list-lane"]')
+        const thread = box('[data-pane="thread"]')
+        return row && list && thread ? { row, list, thread } : null
+      })
+    /** One mouse drag of the edge, to `dx` px from where it stands. */
+    const dragEdge = async (dx) => {
+      const at = await centreOf(page, '[data-slot="split-handle"]')
+      await page.mouse.move(at.x, at.y)
+      await page.mouse.down()
+      await page.mouse.move(Math.max(2, at.x + dx), at.y, { steps: 10 })
+      await page.mouse.up()
+      await settled(page)
+    }
+    const keptShare = () => page.evaluate(() => localStorage.getItem("gots:split-share"))
+
+    // A drag sets the share the two chats are drawn at, and letting go keeps it on this device.
+    await dragEdge(100)
+    const moved = await rowBoxes()
+    assert.ok(moved, "both chats and the row they share are drawn after the drag")
+    assert.ok(
+      moved.list.width > moved.thread.width + 60,
+      `the drag moved the edge toward Main (Main ${Math.round(moved.list.width)}, thread ${Math.round(moved.thread.width)})`,
+    )
+    assert.ok(
+      Math.abs(moved.list.left - moved.row.left) <= 1 &&
+        Math.abs(moved.list.width + moved.thread.width - moved.row.width) <= 1,
+      "the two chats still fill the row the sidebar leaves",
+    )
+    const share = moved.list.width / moved.row.width
+    assert.ok(
+      Math.abs(Number(await keptShare()) - share) <= 0.01,
+      `letting go kept the share this device dragged to (${await keptShare()} against ${share.toFixed(3)})`,
+    )
+
+    // The same share after a reload: it belongs to the device, not to a visit.
+    await page.reload()
+    await until(
+      () =>
+        page.evaluate(() => {
+          const main = document.querySelector('[data-pane="main"]')
+          const title = main?.querySelector('[data-slot="header-title"]')?.textContent?.trim() ?? ""
+          return (
+            Boolean(title) && document.querySelectorAll('[data-slot="header-row"]').length === 2
+          )
+        }),
+      20_000,
+      "Main and its thread, side by side after a reload",
+    )
+    await settled(page)
+    const reloaded = await rowBoxes()
+    assert.ok(reloaded, "both chats are drawn after the reload")
+    assert.ok(
+      Math.abs(reloaded.list.width - moved.list.width) <= 2,
+      `and the share a reader dragged to is the one the reload finds (Main ${Math.round(reloaded.list.width)} against ${Math.round(moved.list.width)})`,
+    )
+
+    // Dragged to the stop, Main stops at the width the app asks its text to read in.
+    await dragEdge(-1000)
+    const stopped = await rowBoxes()
+    assert.ok(stopped, "both chats are drawn at the stop")
+    assert.ok(
+      Math.abs(stopped.list.width - 412) <= 1,
+      `Main is floored at 412px rather than crushed (${stopped.list.width})`,
+    )
+    assert.ok(
+      stopped.thread.width > 412,
+      `and the thread takes the rest of the row (${Math.round(stopped.thread.width)})`,
+    )
+
+    // A close and a reopen leave the share where it was: the device keeps it, not the thread.
+    await page.locator('[data-pane="thread"] [aria-label="Close thread"]').click()
+    await until(
+      async () => (await count(page, '[data-pane="thread"]')) === 0,
+      5_000,
+      "the thread put away from the dragged edge",
+    )
+    await settled(page)
+    await viewLink(cardOf(page, threadId)).click()
+    await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
+    await until(
+      async () => (await count(page, '[data-slot="header-row"]')) === 2,
+      15_000,
+      "the thread back beside Main",
+    )
+    await settled(page)
+    const again = await rowBoxes()
+    assert.ok(again, "both chats are drawn again")
+    assert.ok(
+      Math.abs(again.list.width - 412) <= 1,
+      `and Main takes the share this device keeps (${again.list.width})`,
+    )
+
+    // A double-click puts the edge back to half, where it opened.
+    const middle = await centreOf(page, '[data-slot="split-handle"]')
+    await page.mouse.dblclick(middle.x, middle.y)
+    await settled(page)
+    const halves = await rowBoxes()
+    assert.ok(halves, "both chats are drawn after the double-click")
+    assert.ok(
+      Math.abs(halves.list.width - halves.thread.width) <= 2,
+      `a double-click gives the two chats half the row each (Main ${Math.round(halves.list.width)}, thread ${Math.round(halves.thread.width)})`,
+    )
+    pass("a drag keeps its share across a reload, a close and a reopen")
+
     // Closing is one surface rearranging, not a pane dropped in a frame: the share the lane gives
     // back is the one number that moves, the thread keeps the width it had and is clipped out
     // rather than squeezed, and no frame draws neither chat (G3).
@@ -1050,7 +1189,10 @@ await flow(
     // The frame the share starts to move is the frame the close begins: a thread that keeps the
     // width it had is still drawn there, and one that was squeezed or dropped is not.
     const grown = frames.findIndex((frame) => frame.main > frames[0].main + 1)
-    assert.ok(grown > 0, `the lane's share moves across the close (frame ${grown} of ${frames.length})`)
+    assert.ok(
+      grown > 0,
+      `the lane's share moves across the close (frame ${grown} of ${frames.length})`,
+    )
     const closing = frames.slice(grown)
     assert.equal(
       closing[0].thread,
@@ -1135,7 +1277,10 @@ await flow(
       return window.__laneAnimated ?? []
     })
     const shut = quick.findIndex((frame) => !frame.thread)
-    assert.ok(shut > 0, `the lane is sampled holding its thread before the press (${quick.length} frames)`)
+    assert.ok(
+      shut > 0,
+      `the lane is sampled holding its thread before the press (${quick.length} frames)`,
+    )
     assert.ok(
       Math.abs(quick[shut].main - quick[shut].lane) <= 2,
       `the first frame that shows the close shows Main holding the lane (${quick[shut].main} of ${quick[shut].lane})`,
