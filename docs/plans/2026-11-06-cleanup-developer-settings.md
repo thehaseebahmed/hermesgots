@@ -1,5 +1,7 @@
 # Bot threads by default, every chat on chat-next, and a Developer page that carries its own links
 
+**Revised 2026-11-07, after Step 3 blocked.** The user approved the test-disposition rule recorded in "Decisions"; the Step 3 dispositions list is that rule applied, not a later widening of the scope. The original step named only `test-session-leave.tsx`, which was wrong about how many current-screen tests the switch removal would strand.
+
 ## Goals
 
 - **G1** Bot threads — bots in the sidebar, each chat a thread in its bot — are the layout on every device, with no Developer gate. The Developer switch "Bot threads" becomes **Enable legacy chat UX**: on means the old `Recents` sidebar, off or unset means bot threads.
@@ -157,7 +159,7 @@ sequenceDiagram
 
 7. **The browser flows and the audit speak the new vocabulary.** e2e seeds drop `botThreads` and `chatNext`; `wake-window`'s flip asserts `legacyChat`; `chat-message` is seeded to the legacy layout, or its row is rewritten to prove the blank surface; `bot-threads`, `sidebar-collapse`, `steer-offer`, archive, older and compaction seeds follow; the audit's `bot-threads` and `chat-message` rows say what the flows now do. No flow is added or retired, so the registry's counts stand. Goals: G1, G2. After: 2, 3, 4, 5, 6. Layer: e2e harness and flow audit. Check: `test-e2e-registry.mjs` green both sides, then `pnpm e2e chat-message bot-threads wake-window` green.
 
-   Done. The registry is green; Playwright is not installed in this sandbox, so the three browser flows were not executed here.
+   Done, with one flow red. The registry is green; Playwright is at `/usr/local/lib/node_modules/playwright/index.mjs` with browsers at `/opt/ms-playwright`, and `chat-message` and `wake-window` pass. `bot-threads` is red: its seed writes `db.messages`, which chat-next no longer reads, so Main draws its cards but none of the seeded messages; porting that seed to chat-next's store is a follow-up, not done in this step.
 
 ## Coverage: every old read and test
 

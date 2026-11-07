@@ -102,7 +102,9 @@ const screen = () => chatScreen("chat-1")
  * where the label a measured run carries is read. The turn itself was written first, by the live
  * client, as every turn is; the key is taken away only once it has landed.
  */
-const reopenKeyless = () => db.profiles.toCollection().modify({ apiKey: undefined })
+// A key can be removed after a turn has synced: that is the state this mounts, not a seam built to
+// keep the current screen reachable.
+const reopenKeyless = () => db.profiles.toCollection().modify({ apiKey: "" })
 
 const assistant = async () =>
   (await db.messages.toArray()).filter((message) => message.role === "assistant").at(-1)
