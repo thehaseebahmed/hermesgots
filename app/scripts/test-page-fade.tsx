@@ -96,7 +96,7 @@ test(
           messages: ["beta one"],
         },
       ],
-      { bots: [bot, other], active: bot.id, botThreads: true },
+      { bots: [bot, other], active: bot.id },
     )
     await mount(phone(`/c/${MAIN}`, `/c/${MAIN_OTHER}`), async () => {
       await until(async () => text().includes("alpha one"), "the bot on screen")
@@ -135,7 +135,7 @@ test(
         { id: "t-a", profileId: bot.id, title: "Thread t-a", messages: ["alpha one"] },
         { id: "t-b", profileId: bot.id, title: "Thread t-b", messages: ["beta one"] },
       ],
-      { bots: [bot, other], active: bot.id, botThreads: true },
+      { bots: [bot, other], active: bot.id },
     )
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(phone(`/c/${MAIN}`, "/c/t-b"), async () => {
@@ -223,7 +223,6 @@ test(
       {
         bots: [bot, other],
         active: bot.id,
-        botThreads: true,
       },
     )
     await mount(phone(`/c/${MAIN}`, "/settings", { routes: settings }), async () => {
