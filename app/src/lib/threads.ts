@@ -16,6 +16,7 @@ import {
   type Profile,
   type Unsent,
 } from "@/lib/db"
+import { listsAsChat, listsAsThread } from "@/lib/lists-as-chat"
 import { useXLarge } from "@/lib/media"
 import { createStore } from "@/lib/store"
 import { byName } from "@/lib/compare"
@@ -140,7 +141,7 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
       .where("[profileId+updatedAt]")
       .between([profileId, -Infinity], [profileId, Infinity])
       .reverse()
-      .filter((c) => !c.projectId)
+      .filter(listsAsChat)
       .limit(THREADS)
       .toArray()
     // Each thread reads only what its card shows: its opener, its newest replies and how many.
@@ -279,7 +280,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
           .where("[profileId+updatedAt]")
           .between([bot.id, -Infinity], [bot.id, Infinity])
           .reverse()
-          .filter((c) => !c.projectId)
+          .filter(listsAsChat)
           .limit(THREADS)
           .toArray()
         // Only a chat's newest reply can wait on the user, so only that one is read.
@@ -409,12 +410,12 @@ export async function lastOpened(profileId: string): Promise<LastOpened> {
     db.conversations
       .where("[profileId+updatedAt]")
       .between([profileId, -Infinity], [profileId, Infinity])
-      .filter((chat) => !chat.projectId && !chat.main)
+      .filter((chat) => listsAsThread(chat))
       .count(),
     stored ? db.conversations.get(stored) : Promise.resolve(undefined),
   ])
   const last =
-    found && found.profileId === profileId && !found.projectId && !found.main ? found.id : undefined
+    found && found.profileId === profileId && listsAsThread(found) ? found.id : undefined
   return { last, stored, threads }
 }
 
@@ -506,7 +507,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   let thread: string | undefined
   if (main) {
     profileId = main
-  } else if (found && !found.projectId) {
+  } else if (found && listsAsChat(found)) {
     profileId = found.profileId
     thread = chat
   } else if (found === undefined && hint) {

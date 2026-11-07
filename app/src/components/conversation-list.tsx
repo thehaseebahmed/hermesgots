@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { presence } from "@/lib/registry"
 import type { Message } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
@@ -101,7 +102,7 @@ function Recents({
     const chats = await db.conversations
       .orderBy("updatedAt")
       .reverse()
-      .filter((c) => !c.projectId && !bots.get(c.profileId)?.disabled)
+      .filter((c) => listsAsChat(c) && !bots.get(c.profileId)?.disabled)
       .limit(RECENTS)
       .toArray()
     // This device's own unanswered approval or question, which a keyless bot or one without the
@@ -201,7 +202,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
   const owner = useLiveQuery(async () => {
     if (!chat) return undefined
     const found = await db.conversations.get(chat)
-    return found && !found.projectId ? found.profileId : undefined
+    return found && listsAsChat(found) ? found.profileId : undefined
   }, [chat])
   const now = useNow()
 

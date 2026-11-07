@@ -4,6 +4,7 @@ import { CopyBlock } from "@/components/copy-block"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
 import { hasServer, serverConfig } from "@/lib/connection"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import {
   diagBot,
   diagChat,
@@ -57,11 +58,7 @@ async function botState(profile: Profile): Promise<DiagBot> {
   const configured = hasServer(profile)
   const [rows, pane, mainRow, info] = await Promise.all([
     // Main is read by its own id; a stray main-flagged chat still rides in the window.
-    conversationsOf(profile.id)
-      .reverse()
-      .filter((chat) => !chat.projectId)
-      .limit(CHATS)
-      .toArray(),
+    conversationsOf(profile.id).reverse().filter(listsAsChat).limit(CHATS).toArray(),
     lastOpened(profile.id),
     db.conversations.get(mainThreadId(profile.id)),
     configured ? getPluginInfo(serverConfig(profile)).catch(() => null) : null,

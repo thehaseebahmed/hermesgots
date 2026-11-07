@@ -114,6 +114,17 @@ def _rows(
     return found
 
 
+def is_plain_thread(value: Dict[str, Any]) -> bool:
+    """A chat record a message could continue, whatever bot it is: the twin of the app's
+    ``listsAsThread`` (never Main, never a project session) that is also still open and has a
+    Hermes session to continue."""
+    if value.get("main") or value.get("projectId"):
+        return False
+    if not isinstance(value.get("hermesSessionId"), str):
+        return False
+    return not (value.get("discardedAt") or value.get("resolvedAt"))
+
+
 def candidates(records: Dict[str, Dict[str, Any]], main_id: str, home: Path) -> List[Dict[str, Any]]:
     """The threads a message could continue, the most recently active first."""
     main = (records.get(main_id) or {}).get("value") or {}
@@ -123,11 +134,9 @@ def candidates(records: Dict[str, Dict[str, Any]], main_id: str, home: Path) -> 
         value = record.get("value")
         if chat_id == main_id or record.get("deleted") or not isinstance(value, dict):
             continue
-        session_id = value.get("hermesSessionId")
-        if value.get("main") or value.get("projectId") or not isinstance(session_id, str):
+        if not is_plain_thread(value):
             continue
-        if value.get("discardedAt") or value.get("resolvedAt"):
-            continue
+        session_id = value["hermesSessionId"]
         if value.get("profileId") != profile:
             continue
         active = value.get("updatedAt")

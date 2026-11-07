@@ -204,6 +204,19 @@ class CandidateTests(unittest.TestCase):
         )
         self.assertEqual([c["id"] for c in found], ["ok"])
 
+    def test_a_project_session_and_main_are_not_plain_threads(self):
+        table = [
+            ("a plain thread", chat(hermesSessionId="a"), True),
+            ("a project session", chat(hermesSessionId="a", projectId="p"), False),
+            ("Main", chat(hermesSessionId="a", main=True), False),
+            ("discarded", chat(hermesSessionId="a", discardedAt=3), False),
+            ("resolved", chat(hermesSessionId="a", resolvedAt=3), False),
+            ("no session yet", chat(), False),
+        ]
+        for name, value, expected in table:
+            with self.subTest(name):
+                self.assertEqual(triage.is_plain_thread(value["value"]), expected)
+
     def test_capped_at_fifteen_most_recent(self):
         records = {MAIN: chat(main=True, hermesSessionId="m")}
         for n in range(20):

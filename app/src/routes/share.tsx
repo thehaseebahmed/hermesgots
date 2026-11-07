@@ -11,6 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { isPhoto } from "@/lib/attachment-caps"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
@@ -160,7 +161,7 @@ export function SharePage() {
       .where("[profileId+updatedAt]")
       .between([profile.id, -Infinity], [profile.id, Infinity])
       .reverse()
-      .filter((c) => !c.projectId && !c.discardedAt)
+      .filter((c) => listsAsChat(c) && !c.discardedAt)
       .limit(MORE)
       .toArray()
   }, [profile?.id])

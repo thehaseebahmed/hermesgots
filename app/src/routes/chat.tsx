@@ -26,6 +26,7 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { equal } from "@/lib/equal"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
 import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
@@ -352,7 +353,7 @@ function NextChat({
   const routeThread =
     pinned && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
   const mainPath =
-    botThreads && chat && !chat.projectId && !isMain
+    botThreads && chat && listsAsChat(chat) && !isMain
       ? `/c/${mainThreadId(chat.profileId)}`
       : undefined
   const xl = useXLarge()
