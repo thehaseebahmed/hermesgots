@@ -223,6 +223,10 @@ _Avoid_: sidebar, third pane, detail pane, right pane
 The separator between a bot's Main and its Thread lane: dragged, it sets the share the two read at, and a double-click or Enter returns it to half. Not a **Divider**, which is a thing that happened between two turns.
 _Avoid_: divider, gutter, grip, drag bar
 
+**Blank chat**:
+A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat; under bot threads a chat starts at its bot's Main instead.
+_Avoid_: new chat screen, draft chat, empty chat
+
 **Triage**:
 The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays.
 _Avoid_: routing, sorting, dispatch
@@ -590,6 +594,10 @@ _Avoid_: heard on the host, local mode, offline mode, on-device
 **Gots setting**:
 A setting that is Gots's own — the app, the device or the Gots plugin's own host values — rather than a knob on the bot's Hermes. Settings are grouped by this split.
 _Avoid_: app setting, local setting, device setting
+
+**Legacy chat UX**:
+The Developer setting that restores the old chat-list sidebar, drawing Recents instead of the bots (ADR 0110). Bot threads is the layout otherwise, on every device.
+_Avoid_: old layout, classic mode, bot threads off
 
 **Hermes setting**:
 A setting of the bot's Hermes itself: the same knob the Hermes Dashboard shows, named as Hermes names it. The General page is the Dashboard's own Config > General tab mirrored, so its rows are whatever that host's schema holds and its cards are the sections the host files them under — a key Hermes adds later is a row without an app release.
