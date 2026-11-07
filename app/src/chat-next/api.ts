@@ -113,8 +113,10 @@ export async function readPage(
     if (code === "session_not_found") return []
   }
   ensure(response)
-  const { data } = (await response.json()) as { data: Row[] }
-  return data
+  // An answer with no page in it is no rows, never a page the read must ask for again: a body that
+  // carries no `data` array would otherwise keep `readNewest` reading for ever.
+  const { data } = (await response.json()) as { data?: Row[] }
+  return Array.isArray(data) ? data : []
 }
 
 /**

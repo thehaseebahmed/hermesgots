@@ -2,7 +2,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { readNewest, readRun, readTranscript } from "../src/chat-next/api.ts"
+import { readNewest, readPage, readRun, readTranscript } from "../src/chat-next/api.ts"
 import { overlay } from "../src/chat-next/pages.ts"
 import { promptFrom } from "../src/lib/run-prompt.ts"
 import { recorded } from "./chat-next-fixtures.ts"
@@ -67,6 +67,31 @@ test("a transcript whose newest rows are not the held ones is read on to the sta
   assert.equal(rows.length, 120)
   assert.equal(rows[0].id, 1)
   assert.deepEqual(asked, [0, 50, 100])
+})
+
+/**
+ * A host that answers the transcript with a body carrying no page at all, as a proxy, an error
+ * envelope or an older route does. It counts the pages asked for and refuses a sixth, so a read that
+ * never ends fails the test rather than running the process out of memory.
+ */
+function pageLessHost() {
+  const asked = []
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    asked.push(Number(url.searchParams.get("offset")))
+    if (asked.length > 5) throw new Error(`the read asked for page ${asked.length} of five`)
+    return new Response(JSON.stringify({ object: "list" }), { status: 200 })
+  }
+  return asked
+}
+
+test("an answer with no page is no rows, and the read ends on it", async () => {
+  const asked = pageLessHost()
+  assert.deepEqual(await readPage(connection, "s", 0), [], "a page the host cannot give is no rows")
+  const read = await readNewest(connection, "s", undefined, [row(1)])
+  assert.deepEqual(read.rows, [], "and the read that asked for it holds no rows")
+  assert.equal(read.more, false, "with nothing older left to read")
+  assert.deepEqual(asked, [0, 0], "one page each, never a second offset asked for")
 })
 
 /** A host answering one run's status with the body given, as `GET /v1/runs/{id}` does. */
