@@ -2,12 +2,14 @@ import { useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
 import {
+  carriesPart,
   fitsInline,
   inlineRefusal,
   intake,
   isPhoto,
   keptImage,
   MAX_FILE_BYTES,
+  pickRoad,
   ridesInline,
   sizeRefusal,
   type Refusal,
@@ -63,74 +65,73 @@ function jpegName(name: string) {
 }
 
 /**
- * Reads a picked file into an attachment. An image the browser can decode is scaled down for the
- * model, while the copy kept — the bytes the host stores and this device caches — stays the file
- * the user chose, unless it is too big to send, when the scaled copy stands in for it. A photo that
- * goes inline always carries the bytes the model is sent: the file itself where nothing was scaled,
- * else the scaled copy. With `inline: false` — a file `ridesInline` sends as a file — a picture
- * keeps being the picture it is and carries no part: its own bytes are what the host is handed, and
- * that upload is the only copy the model's message can point at. A picture past the per-file cap is
- * scaled to fit on either road, so the file road takes one at any size: the JPEG `scaled` makes is
- * the copy the host is handed, under its own `.jpg` name, and only a picture the browser can't
- * decode is refused, by its size, since no scaled copy can be made of it.
+ * One attachment, from what a read decided: the bytes kept, whether the file is a picture, and the
+ * part the model is sent where one rides. The type and size are the kept bytes' own, so a scaled
+ * copy can never be described as the photo it stands in for.
  */
-export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
-  const name = file.name || "file"
-  const picture = isPhoto(file.type)
-  const over = file.size > MAX_FILE_BYTES
-  if (picture && !inline) {
-    if (!over)
-      return {
-        id: randomId(),
-        name,
-        type: file.type,
-        size: file.size,
-        image: true,
-        blob: file,
-      }
-    const photo = await scaled(file)
-    if (!photo) throw new Error(sizeRefusal(name).message)
-    return {
-      id: randomId(),
-      name: jpegName(name),
-      type: "image/jpeg",
-      size: photo.blob.size,
-      image: true,
-      blob: photo.blob,
-      width: photo.width,
-      height: photo.height,
-    }
-  }
-  if (picture) {
-    const photo = await scaled(file)
-    if (photo) {
-      const { kept, inline: part } = keptImage<Blob>(file, photo.blob)
-      return {
-        id: randomId(),
-        name: kept === file ? name : jpegName(name),
-        type: kept.type || file.type,
-        size: kept.size,
-        image: true,
-        blob: kept,
-        inline: part,
-        width: photo.width,
-        height: photo.height,
-      }
-    }
-  }
-  if (over) throw new Error(sizeRefusal(name).message)
+function attachmentOf({
+  name,
+  blob,
+  picture,
+  part,
+  width,
+  height,
+}: {
+  name: string
+  blob: Blob
+  picture: boolean
+  part?: Blob
+  width?: number
+  height?: number
+}): Attachment {
   return {
     id: randomId(),
     name,
-    type: file.type || "application/octet-stream",
-    size: file.size,
-    image: false,
-    blob: file,
+    type: blob.type || "application/octet-stream",
+    size: blob.size,
+    image: picture,
+    blob,
+    ...(part ? { inline: part } : {}),
+    ...(width === undefined ? {} : { width, height }),
   }
 }
 
+/**
+ * Reads a picked file into an attachment. A picture is the picture it is on either road — `image`
+ * says what the file is, never where its bytes go — and the browser's own decode decides what of it
+ * can be scaled: on the inline road the model is sent the scaled copy (or the file itself where
+ * nothing needed scaling), and a picture this device can't decode is one with no part at all. On
+ * the file road the file is handed over as it is, scaled only where its size is past the cap, so
+ * the JPEG `scaled` makes is the copy kept under its own `.jpg` name. Only a picture past that cap
+ * that can't be scaled is refused, by its size. Anything else is a plain file, measured against the
+ * cap before it is read.
+ *
+ * `inline` is `ridesInline`'s answer for this file: whether the model is sent its bytes in the
+ * message. Nothing defaults it — the road is a fact the surface has, never this read's guess.
+ */
+export async function prepareAttachment(file: File, inline: boolean): Promise<Attachment> {
+  const name = file.name || "file"
+  if (!isPhoto(file.type)) {
+    if (file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
+    return attachmentOf({ name, blob: file, picture: false })
+  }
+  // The decode is what either scales the bytes or says they can't be scaled.
+  const photo = inline || file.size > MAX_FILE_BYTES ? await scaled(file) : null
+  if (!photo && file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
+  const { kept, inline: part } = keptImage<Blob>(file, photo?.blob ?? null)
+  return attachmentOf({
+    name: kept === file ? name : jpegName(name),
+    blob: kept,
+    picture: true,
+    part: inline && photo ? part : undefined,
+    width: photo?.width,
+    height: photo?.height,
+  })
+}
+
 /** What an attachment adds to a request inline: the bytes it carries for the model, and nothing else. */
-export const inlineSize = (attachment: Attachment) => attachment.inline?.size ?? 0
+export const inlineSize = (attachment: Attachment) =>
+  carriesPart(attachment) ? attachment.inline.size : 0
 
 /** The bytes a message's inline parts add to its request. */
 export const inlineBytes = (attachments: Attachment[]) =>
@@ -145,10 +146,9 @@ export interface PreparedIntake {
 /**
  * What `files` becomes on a message already holding `held` attachments — the one intake a pick, a
  * paste, a drop and a share land through. The two facts a surface has (whether this chat's model
- * reads pictures, and what the host answered about its upload route) are asked of every file, so
- * each one is read by the road it takes — while the caps ask neither, since a picture is taken at
- * any size and scaled for whichever road carries it. `onTake` is how a surface holds the place of
- * the files it is now reading.
+ * reads pictures, and what the host answered about its upload route) are asked of every file: one
+ * with no road is dropped and said so, and the rest is read by the road it takes and held to the
+ * caps. `onTake` is how a surface holds the place of the files it is now reading.
  */
 export async function prepareIntake(
   files: File[],
@@ -172,7 +172,15 @@ export async function prepareIntake(
   },
 ): Promise<PreparedIntake> {
   const facts: RoadFacts = { readsImages, route }
-  const { take, refusals } = intake(files, held.length + reserved)
+  // Said once for the batch, in the words the menu gives for the same missing route.
+  let because: string | null = null
+  const onRoad = files.filter((file) => {
+    const road = pickRoad({ ...facts, picture: isPhoto(file.type) })
+    if (road.road === "none") because ??= road.message
+    return road.road !== "none"
+  })
+  const { take, refusals: capped } = intake(onRoad, held.length + reserved)
+  const refusals: Refusal[] = because ? [{ limit: "route", message: because }, ...capped] : capped
   onTake?.(take)
   const answers = await Promise.all(
     take.map(async (file): Promise<{ attachment?: Attachment; error?: Error }> => {
@@ -289,21 +297,19 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
-/** The message's content for Hermes: the text with a marker per attachment, and each part inline. */
+/**
+ * The message's content for Hermes: the text with a marker per attachment, and each part inline. The
+ * model reads the bytes a part carries — the scaled copy where scaling made one — and never a file
+ * the message names alone. Every part is read at once, so a message of photos costs one wait.
+ */
 export async function wireContent(
   text: string,
   attachments: Attachment[] = [],
 ): Promise<string | ContentPart[]> {
   if (!attachments.length) return text
   const parts = attachmentParts(text, attachments)
-  // The model reads the bytes a part carries — the scaled copy where scaling made one — and never a
-  // file the message names alone.
-  for (const attachment of attachments) {
-    if (attachment.inline)
-      parts.push({
-        type: "image_url",
-        image_url: { url: await blobToDataUrl(attachment.inline) },
-      })
-  }
+  const carried = attachments.filter(carriesPart)
+  const urls = await Promise.all(carried.map((attachment) => blobToDataUrl(attachment.inline)))
+  for (const url of urls) parts.push({ type: "image_url", image_url: { url } })
   return parts
 }

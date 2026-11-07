@@ -57,19 +57,20 @@ async function openMenu() {
   await until(async () => Boolean(source("Files")), "the menu's sources")
 }
 
-test("a host that advertises no attachments refuses Files at the menu, with its reason", async () => {
+test("a host that advertises no attachments refuses Files at the menu, and offers the camera", async () => {
   await seed("attach-menu-old")
   host(["media"], "attach-menu-old", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
     assert.equal(source("Files")?.hasAttribute("disabled"), true, "Files is refused")
-    assert.match(text(), /File uploads need a newer Gots plugin\./, "and says what is missing")
     assert.equal(
       source("Camera")?.hasAttribute("disabled"),
       false,
       "a picture the model reads rides inline, so the camera is still offered",
     )
     assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
+    // The sentence belongs to a sheet where nothing can reach, so it is not said over these.
+    assert.doesNotMatch(text(), /File uploads need/, "and nothing is explained above them")
   })
 })
 
@@ -133,6 +134,25 @@ test("a host that advertises attachments offers Files as it always has", async (
   })
 })
 
+test("a host that hasn't answered offers Camera and Photos, and explains nothing above them", async () => {
+  // The model reads no images, so a photo waits on the host's route; the answer is still owed, which
+  // is not a no. Files is refused — it needs that route confirmed — but something can still reach,
+  // so the sheet explains nothing: the reason belongs to a sheet where no source is offered.
+  await seed("attach-menu-owed", { imageInput: false })
+  host("away", "attach-menu-owed", [])
+  await mount(chatScreen(CHAT), async () => {
+    await openMenu()
+    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "the camera is offered")
+    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
+    assert.equal(source("Files")?.hasAttribute("disabled"), true, "while Files waits on the answer")
+    assert.doesNotMatch(
+      text(),
+      /File uploads need/,
+      "and nothing is explained over sources that are offered",
+    )
+  })
+})
+
 test("a host that was away is asked again, not remembered as a no", async () => {
   await seed("attach-menu-away")
   const asked: string[] = []
@@ -144,7 +164,7 @@ test("a host that was away is asked again, not remembered as a no", async () => 
       true,
       "no answer, so nothing is offered",
     )
-    assert.match(text(), /File uploads need the Gots plugin\./, "and the menu says what it needs")
+    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "a photo is still tried")
   })
   const askedWhileAway = infoReads(asked)
   assert.ok(askedWhileAway > 0, "the host was asked")

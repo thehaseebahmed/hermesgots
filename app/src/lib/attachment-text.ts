@@ -2,10 +2,12 @@
  * What a message tells the model about the files it carries, and how the thread reads them back:
  * one `<attachment>` marker line per file — its name, its type, its size and where the plugin saved
  * it — then, once, the sentence that the content itself is not included. Import-free but for types,
- * `media-kind.ts` and `steer.ts` (both pure), so `scripts/test-attachments.mjs` runs it as a rule.
+ * `attachment-caps.ts`, `media-kind.ts` and `steer.ts` (all pure), so `scripts/test-attachments.mjs`
+ * runs it as a rule.
  */
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
+import { carriesPart } from "./attachment-caps.ts"
 import { fileNameOf } from "./media-kind.ts"
 import { steerText } from "./steer.ts"
 
@@ -63,14 +65,14 @@ export function marker(attachment: Attachment) {
  * Whether the message has to say its files aren't inlined: the bytes of a photo the model is sent
  * ride along as an image part, so only an attachment carrying no part needs telling.
  */
-const needsInstruction = (attachments: Attachment[]) => attachments.some((a) => !a.inline)
+const needsInstruction = (attachments: Attachment[]) => attachments.some((a) => !carriesPart(a))
 
 /** The message as Hermes's transcript keeps it: the text, then a line per attachment. */
 export function attachmentsText(text: string, attachments: Attachment[] = []) {
   const sent = attachments.filter((attachment) => !attachment.host)
   return [
     text,
-    ...sent.map((a) => (a.inline ? `${marker(a)}\n${IMAGE_PLACEHOLDER}` : marker(a))),
+    ...sent.map((a) => (carriesPart(a) ? `${marker(a)}\n${IMAGE_PLACEHOLDER}` : marker(a))),
     ...(needsInstruction(sent) ? [NOT_INLINED] : []),
   ]
     .filter(Boolean)

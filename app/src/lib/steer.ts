@@ -2,8 +2,10 @@
  * How a message sent while a reply runs goes: a steer when the send asks to and the message can be
  * one. A steer is text, so a message carrying only files can steer — its files reach the model as
  * marker lines — while one carrying a photo's bytes cannot, since those ride in the message itself
- * for the model to read. Import-free, so `scripts/test-steer.mjs` runs it as a pure rule.
+ * for the model to read. Import-free but for `attachment-caps.ts`, so `scripts/test-steer.mjs` runs
+ * it as a pure rule.
  */
+import { carriesPart } from "./attachment-caps.ts"
 
 /** What an attachment does to a steer, which is all this rule needs of it. */
 export interface Carried {
@@ -18,7 +20,7 @@ export type MidReply = "steer" | "queue"
  * which is text, and a photo's bytes ride beside it in the message, which a steer cannot carry.
  */
 export function canSteer(attachments: Carried[] = []) {
-  return !attachments.some((attachment) => attachment.inline)
+  return !attachments.some(carriesPart)
 }
 
 /**

@@ -1,8 +1,10 @@
 /**
  * What every intake surface takes, and what it says when a file won't fit: the composer's pick,
- * paste and drop, and the share screen. A pure rule with nothing imported, so
- * `scripts/test-attachment-caps.mjs` runs it, and the words a refusal uses are written once.
+ * paste and drop, and the share screen. A pure rule with nothing imported but the type of the answer
+ * a host gives, so `scripts/test-attachment-caps.mjs` runs it, and the words a refusal uses are
+ * written once.
  */
+import type { PluginFeatureAnswer } from "@/lib/features"
 
 /** Under the API server's 10 MB request cap, which the plugin's upload shares. */
 export const MAX_FILE_BYTES = 9 * 1024 * 1024
@@ -24,7 +26,7 @@ export interface CappedFile {
 
 /** A limit a surface broke, and the line that names it. */
 export interface Refusal {
-  limit: "count" | "file" | "inline" | "read"
+  limit: "count" | "file" | "inline" | "read" | "route"
   message: string
 }
 
@@ -38,8 +40,8 @@ export interface Intake<T extends CappedFile = CappedFile> {
 /** Whether a photo is read and scaled, rather than sent as the file it is. */
 export const isPhoto = (type: string) => PHOTO_TYPES.test(type)
 
-/** What a host answered about the plugin's upload route. */
-export type RouteAnswer = "unknown" | "yes" | "no"
+/** A host's answer about a plugin feature its manifest either has or hasn't (see `features.ts`). */
+export type RouteAnswer = PluginFeatureAnswer
 
 /**
  * The two facts an intake surface has before it reads a file: whether this chat's model takes image
@@ -55,8 +57,8 @@ export interface RoadFacts {
 
 /**
  * Why Files isn't offered on a host that answered `answer` about the plugin's file route, or null
- * where it is. Every surface that takes a file says it in these words — the menu, and a paste or a
- * drop that arrives while the menu's Files is off.
+ * where it is. Every surface that takes a file says it in these words — a sheet where no source can
+ * reach the agent, and a paste or a drop of a file with no road.
  */
 export function filesReason(answer: RouteAnswer): string | null {
   if (answer === "yes") return null
@@ -72,9 +74,9 @@ export type PickRoad = { road: "inline" } | { road: "file" } | { road: "none"; m
  * Which road a pick takes. A picture the model reads rides inline and needs no upload route. A
  * picture the model can't read travels as the file it is, on the host's route — and while the host
  * hasn't answered about that route it is tried all the same, since an answer not read yet is not a
- * no and the send is where a host that won't take it says why (Q2 of the spec). Any other pick — a
- * document, a clip — needs the route confirmed: a host that hasn't answered one carries it nowhere,
- * so it is refused in the sentence Files already gives, since it is the same missing capability.
+ * no and the send is where a host that won't take it says why. Any other pick — a document, a clip —
+ * needs the route confirmed: a host that hasn't answered one carries it nowhere, so it is refused in
+ * the sentence Files already gives, since it is the same missing capability.
  */
 export function pickRoad({
   picture,
@@ -91,9 +93,8 @@ export function pickRoad({
 }
 
 /**
- * Whether one file rides inline — the road rule, asked of that file. The read that prepares it hands
- * this answer to `prepareAttachment`, so each file in a batch is read by the road it takes; the caps
- * no longer ask it, since a picture is taken at any size on either road.
+ * Whether one file rides inline — `pickRoad` asked of that file, which is what the read that
+ * prepares it hands to `prepareAttachment`, so each file in a batch is read by its own road.
  */
 export function ridesInline(file: CappedFile, facts: RoadFacts): boolean {
   return pickRoad({ ...facts, picture: isPhoto(file.type) }).road === "inline"
@@ -129,11 +130,20 @@ export const unreadableRefusal = (name: string): Refusal => ({
 export const fitsInline = (size: number, used: number) => used + size <= MAX_INLINE_BYTES
 
 /**
- * What a pick of `files` becomes on a message already holding `held` attachments. A picture is taken
- * however big it arrives: scaling is what makes it fit, inline for the model or on the host's file
- * road where the copy the host is handed is scaled the same way, so a photo the browser can't decode
- * at all is refused by its size where it is read, not here. Anything else — a document, a clip — is
- * measured against the per-file cap before it is read.
+ * Whether an attachment carries the bytes the model is sent in the message itself: the one fact that
+ * makes it a part. `inline` is that fact, never `image`, which says only what the file is — so every
+ * reader of "does this ride inline" asks here rather than testing the field itself.
+ */
+export function carriesPart<T extends { inline?: unknown }>(
+  attachment: T,
+): attachment is T & { inline: NonNullable<T["inline"]> } {
+  return Boolean(attachment.inline)
+}
+
+/**
+ * What a pick of `files` becomes on a message already holding `held` attachments. A picture is never
+ * measured here: its read scales it, or — where this device can't decode it — refuses it by its size.
+ * Anything else — a document, a clip — is measured against the per-file cap before it is read.
  */
 export function intake<T extends CappedFile>(files: T[], held = 0): Intake<T> {
   const room = Math.max(0, MAX_ATTACHMENTS - held)
@@ -142,8 +152,6 @@ export function intake<T extends CappedFile>(files: T[], held = 0): Intake<T> {
   const refusals = left > 0 ? [countRefusal(left)] : []
   const take: T[] = []
   for (const file of chosen) {
-    // A picture is never measured here: scaling makes it fit on either road, and the read that
-    // cannot scale one refuses it by its size.
     if (!isPhoto(file.type) && file.size > MAX_FILE_BYTES) refusals.push(sizeRefusal(file.name))
     else take.push(file)
   }
@@ -160,9 +168,8 @@ export type KeptImage<B> = { kept: B; inline: B }
  * stands in for both.
  */
 export function keptImage<B extends { size: number }>(file: B, scaled: B | null): KeptImage<B> {
-  if (!scaled || scaled === file) return { kept: file, inline: file }
-  if (file.size <= MAX_FILE_BYTES) return { kept: file, inline: scaled }
-  return { kept: scaled, inline: scaled }
+  if (scaled && file.size > MAX_FILE_BYTES) return { kept: scaled, inline: scaled }
+  return { kept: file, inline: scaled ?? file }
 }
 
 /**

@@ -70,7 +70,9 @@ export function AttachMenu({
   const offers = (id: Source) =>
     pickRoad({ picture: id !== "files", readsImages: imagesAvailable, route: filesFeature })
       .road !== "none"
-  const because = filesReason(filesFeature)
+  // Said only where every source is shut: while something can still reach the agent, a sheet that
+  // explains Files' refusal would put the reason above sources that are offered.
+  const because = SOURCES.some(({ id }) => offers(id)) ? null : filesReason(filesFeature)
 
   return (
     <>

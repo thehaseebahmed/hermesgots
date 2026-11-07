@@ -23,7 +23,7 @@ test("a pick stops at ten attachments and says how many were left out", () => {
   const many = Array.from({ length: 12 }, (_, index) =>
     file(`photo-${index}.jpg`, 1000, "image/jpeg"),
   )
-  const picked = intake(many, 0)
+  const picked = intake(many)
   assert.equal(picked.take.length, MAX_ATTACHMENTS)
   assert.deepEqual(
     picked.refusals.map((refusal) => refusal.message),
@@ -40,7 +40,7 @@ test("a pick stops at ten attachments and says how many were left out", () => {
 })
 
 test("a file over nine megabytes is refused in its own name", () => {
-  const picked = intake([file("clip.mov", MAX_FILE_BYTES + 1, "video/quicktime")], 0)
+  const picked = intake([file("clip.mov", MAX_FILE_BYTES + 1, "video/quicktime")])
   assert.deepEqual(picked.take, [], "it never lands")
   assert.deepEqual(
     picked.refusals.map((refusal) => refusal.message),
@@ -49,16 +49,16 @@ test("a file over nine megabytes is refused in its own name", () => {
   assert.equal(picked.refusals[0].limit, "file")
 
   assert.equal(
-    intake([file("clip.mov", MAX_FILE_BYTES, "video/quicktime")], 0).take.length,
+    intake([file("clip.mov", MAX_FILE_BYTES, "video/quicktime")]).take.length,
     1,
   )
 })
 
 test("a photo that will be scaled is taken however big it arrives", () => {
   const shot = file("shot.heic", 12 * 1024 * 1024, "image/heic")
-  assert.equal(intake([shot], 0).take.length, 1, "scaling it is what makes it fit the request")
+  assert.equal(intake([shot]).take.length, 1, "scaling it is what makes it fit the request")
   assert.deepEqual(
-    intake([file("draw.svg", 10 * 1024 * 1024, "image/svg+xml")], 0).take,
+    intake([file("draw.svg", 10 * 1024 * 1024, "image/svg+xml")]).take,
     [],
     "SVG goes as a file",
   )
@@ -219,11 +219,11 @@ test("a photo over the file cap is taken on the file road too", () => {
     { road: "file" },
     "a model that reads no images sends the photo down the host's file road",
   )
-  const picked = intake([camera], 0)
+  const picked = intake([camera])
   assert.deepEqual(picked.take, [camera], "the file road takes the photo at any size")
   assert.deepEqual(picked.refusals, [], "and says nothing about its size")
   assert.deepEqual(
-    intake([file("notes.bin", MAX_FILE_BYTES + 1)], 0).take,
+    intake([file("notes.bin", MAX_FILE_BYTES + 1)]).take,
     [],
     "a file that isn't a picture is still measured against the cap",
   )

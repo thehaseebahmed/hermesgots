@@ -2,11 +2,10 @@ import { DownloadIcon, FileIcon, ImageIcon, XIcon } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { attachmentUrl, drawingBlob } from "@/lib/attachment-url"
+import { attachmentUrl, drawable } from "@/lib/attachment-url"
 import { formatBytes } from "@/lib/attachment-caps"
 import { useUploading } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
-import { renderableImage } from "@/lib/media-kind"
 import { cn } from "@/lib/utils"
 
 /** A file's name over its size: a staged tile, a thread's row that saves it, and a recording's row. */
@@ -54,17 +53,6 @@ export function FileRow({
 }
 
 /**
- * The bytes a tile draws a photo from: only those this device can decode. A HEIC on the file road is
- * still the picture it is, but a browser paints nothing from it, so the tile names it with a
- * picture's icon instead of a broken frame — and a photo the model was sent draws from the scaled
- * JPEG in its part, which is the only form of it a browser renders.
- */
-function drawnUrl(attachment: Attachment) {
-  const blob = attachment.image ? drawingBlob(attachment) : undefined
-  return blob && renderableImage(blob.type) ? attachmentUrl(attachment) : undefined
-}
-
-/**
  * A photo as a thumbnail, or a file as its name and size. With `onRemove`, a button takes it off the
  * message; with `onOpen`, a tap opens it, or saves it where `action` says a tap saves.
  */
@@ -85,7 +73,8 @@ export function AttachmentTile({
   className?: string
 }) {
   const uploading = useUploading(attachment.id)
-  const url = drawnUrl(attachment)
+  // A photo's bytes are drawn only where this device can decode them; a file's own row draws none.
+  const url = drawable(attachment) ? attachmentUrl(attachment) : undefined
   const Icon = attachment.image ? ImageIcon : action === "download" ? DownloadIcon : FileIcon
   const busy = preparing || uploading
   const tile = url ? (

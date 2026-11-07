@@ -28,10 +28,10 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { fresh, isPhoto, MAX_ATTACHMENTS, pickRoad } from "@/lib/attachment-caps"
+import { fresh, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { openAttachment, prepareIntake } from "@/lib/attachments"
-import { attachmentUrl } from "@/lib/attachment-url"
+import { attachmentUrl, drawable } from "@/lib/attachment-url"
 import { drawnCell, mediaKind } from "@/lib/media-kind"
 import { previewItem } from "@/lib/media-items"
 import type { Attachment } from "@/lib/db"
@@ -384,23 +384,8 @@ export function Composer({
     // A paste and the drop the browser can also fire carry the same file, which lands once.
     const added = fresh(files, recent.current, Date.now(), { repeat: !picked })
     if (!added.length) return
-    // Each arrival takes the road its own kind and this chat's model allow, and the pick says one
-    // route refusal for the batch rather than one per file, as the count refusal is one line.
-    const taken: File[] = []
-    let because: string | null = null
-    for (const file of added) {
-      const road = pickRoad({
-        picture: isPhoto(file.type),
-        readsImages: imagesAvailable,
-        route: filesFeature,
-      })
-      if (road.road === "none") because ??= road.message
-      else taken.push(file)
-    }
-    if (because) toast.error(because)
-    if (!taken.length) return
     let placeholders: { id: string; name: string; image: boolean }[] = []
-    const { attachments: prepared, refusals } = await prepareIntake(taken, {
+    const { attachments: prepared, refusals } = await prepareIntake(added, {
       held: attachments,
       reserved: preparing.length,
       readsImages: imagesAvailable,
@@ -465,7 +450,8 @@ export function Composer({
         name: attachment.name,
         type: attachment.type,
         size: attachment.size,
-        src: attachmentUrl(attachment),
+        // A photo this device can't decode has nothing to show; a clip or a file opens from its URL.
+        src: attachment.image && !drawable(attachment) ? undefined : attachmentUrl(attachment),
         state: "ready",
       },
       { width: attachment.width, height: attachment.height },
@@ -474,9 +460,13 @@ export function Composer({
     (attachment) => drawnCell(attachment.type, attachment.name) !== "file",
   )
   // A tap that means "look at this" opens the screen's own Previewer, here as in the thread; a file
-  // the Previewer can't draw is handed to the platform instead.
+  // the Previewer can't draw is handed to the platform instead, and so is a photo whose bytes this
+  // device can't decode — the Previewer would open on nothing and sit on a Retry that never works.
   const open = (attachment: Attachment) => {
-    if (drawnCell(attachment.type, attachment.name) === "file") {
+    const previews =
+      drawnCell(attachment.type, attachment.name) !== "file" &&
+      (!attachment.image || drawable(attachment))
+    if (!previews) {
       void openAttachment(null, attachment)
       return
     }

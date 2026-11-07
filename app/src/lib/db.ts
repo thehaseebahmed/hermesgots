@@ -4,6 +4,7 @@ import type { Agent } from "@/chat-next/agents"
 import type { Queued } from "@/chat-next/api"
 import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
+import { carriesPart } from "@/lib/attachment-caps"
 import { connectionKey, hasServer } from "@/lib/connection"
 import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
@@ -1316,43 +1317,57 @@ db.version(33).upgrade((tx) =>
 db.version(34).stores({ appCache: "key, connection" })
 
 /**
- * Whether an attachment is a photo a row written before v35 holds with no inline part: `image` was
- * then the only record that its bytes went inline, so a picture holding a blob and no part is one
- * whose bytes the model was sent.
+ * Whether an attachment is one a row written *before* v35 holds with no inline part: `image` was
+ * then the only record that a photo's bytes went inline, so a picture holding a blob and no part is
+ * one whose bytes the model was sent. A row written *after* v35 with that shape means the opposite
+ * — a picture this device could not decode, which carries no part — so this rule is only ever read
+ * as what a pre-v35 row meant, by the fold that gives those rows their part back.
  */
-const isStoredPhoto = (attachment: Attachment) =>
-  Boolean(attachment.image && !attachment.inline && attachment.blob)
+const rodeInlineBeforeV35 = (attachment: Attachment) =>
+  Boolean(attachment.image && !carriesPart(attachment) && attachment.blob)
 
 /** That photo, given the part it rode with: an attachment already carrying one, or holding no
  * bytes, is left as it is. */
 const withInlinePart = (attachment: Attachment): Attachment =>
-  isStoredPhoto(attachment) ? { ...attachment, inline: attachment.blob } : attachment
+  rodeInlineBeforeV35(attachment) ? { ...attachment, inline: attachment.blob } : attachment
 
 // v35: an attachment's `image` says only that the file is a picture, and the presence of its inline
 // part says the model is sent the bytes. Every row a build before this one wrote used the flag for
 // both, so the photos it stored are given the part they rode with — a message sent again from such a
 // row would otherwise reach the model as a marker alone. Only the rows the upgrade can change are
-// rewritten; Dexie puts back every row it visits otherwise.
-db.version(35)
-  .upgrade(async (tx) => {
-    await tx
-      .table<Message>("messages")
-      .toCollection()
-      .filter((message) => Boolean(message.attachments?.some(isStoredPhoto)))
-      .modify((message) => {
-        message.attachments = message.attachments?.map(withInlinePart)
-      })
-    await tx
+// rewritten; Dexie puts back every row it visits otherwise. Both tables are read at once, inside the
+// one transaction the upgrade already runs in.
+db.version(35).upgrade(async (tx) => {
+  // Only a message the user wrote carries an attachment, so each chat's own user rows are the ones
+  // to read — through the compound index, and never a reply's, whose calls and thinking are the
+  // bulk of a transcript.
+  const photos = async () => {
+    const messages = tx.table<Message>("messages")
+    const chats = await tx.table<Conversation>("conversations").toCollection().primaryKeys()
+    for (const chat of chats)
+      await messages
+        .where("[conversationId+role]")
+        .equals([chat, "user"])
+        .filter((message) => Boolean(message.attachments?.some(rodeInlineBeforeV35)))
+        .modify((message) => {
+          message.attachments = message.attachments?.map(withInlinePart)
+        })
+  }
+  const unsent = async () =>
+    tx
       .table<SessionState>("sessionStates")
       .toCollection()
-      .filter((state) => Boolean(state.unsent?.some((row) => row.attachments.some(isStoredPhoto))))
+      .filter((state) =>
+        Boolean(state.unsent?.some((row) => row.attachments?.some(rodeInlineBeforeV35))),
+      )
       .modify((state) => {
         state.unsent = state.unsent?.map((row) => ({
           ...row,
-          attachments: row.attachments.map(withInlinePart),
+          attachments: row.attachments?.map(withInlinePart),
         }))
       })
-  })
+  await Promise.all([photos(), unsent()])
+})
 
 db.on("populate", (tx) => seedProfile(tx))
 

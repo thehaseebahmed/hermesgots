@@ -12,6 +12,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { setUploading } from "@/lib/attachments"
+import { carriesPart } from "@/lib/attachment-caps"
 import { HermesError, uploadAttachment, type HermesConfig } from "@/lib/hermes"
 import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
 import { pinOf, samePick, storedPick, wantsPin } from "@/lib/model-pick"
@@ -21,14 +22,6 @@ import { OPENER_CHARS, oneLine } from "@/lib/words"
 export class AttachmentError extends HermesError {}
 
 const UPLOADS_AT_ONCE = 3
-
-/**
- * Whether the model is sent this attachment's bytes in the message itself. Such a copy on the host
- * is one the agent can open later, never the only way the bytes arrive: it may be skipped where the
- * plugin is away, and its failure is never fatal. A file with no part has no other way to get
- * there, so both questions come out the other way.
- */
-const carriesPart = (attachment: Attachment) => Boolean(attachment.inline)
 
 /**
  * Saves each attachment on the Hermes host through the plugin, a few at a time, so the agent can

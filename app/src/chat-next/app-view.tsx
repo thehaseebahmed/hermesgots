@@ -146,7 +146,6 @@ export function AppThreadView({
       const files = (failedTurn.files ?? []).map(({ host: _host, ...file }) => ({
         ...file,
         id: file.path ?? file.name,
-        image: false,
       }))
       await latestSend.current(retryText(attachmentsText(failedTurn.user, files)), [], {
         retry: true,

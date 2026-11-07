@@ -12,6 +12,7 @@ import { Composer } from "@/components/chat/composer"
 import { MAX_FILE_BYTES } from "@/lib/attachment-caps"
 import { wireContent } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
+import type { PluginFeatureAnswer } from "@/lib/features"
 import { uploadAttachments } from "@/lib/send-turn"
 
 import { PreviewerProvider } from "@/components/chat/previewer"
@@ -38,7 +39,7 @@ function host(name: string) {
 
 function composer(
   sent: { text: string; attachments: Attachment[] }[],
-  filesFeature: "unknown" | "yes" | "no" = "yes",
+  filesFeature: PluginFeatureAnswer = "yes",
   imagesAvailable = true,
   send?: (text: string, attachments: Attachment[]) => Promise<void> | void,
 ) {
@@ -415,6 +416,38 @@ test("a photo over nine megabytes the browser can't decode is still refused by i
   }
 })
 
+test("a photo the browser can't decode is still the picture it is, and carries no part", async () => {
+  // A HEIC picked for a model that reads images, on a device that decodes none of it: the inline
+  // road has no bytes it can give the model, so the photo is read as the picture it is and no part
+  // rides — the same answer the file road gives it, since `image` says what the file is.
+  const saved = host("composer-intake")
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const send = async (text: string, attachments: Attachment[]) => {
+    sent.push({ text, attachments: await uploadAttachments(bot, "session-1", attachments, true) })
+  }
+  await mount(composer(sent, "yes", true, send), async () => {
+    await pick("photos", [
+      new File(["heic"], "IMG_0004.heic", { type: "image/heic", lastModified: 13 }),
+    ])
+    assert.deepEqual(tileNames(), ["IMG_0004.heic"], "the pick lands")
+    await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Send"))
+    await until(async () => sent.length > 0, "the send")
+
+    assert.deepEqual(saved, [{ name: "IMG_0004.heic", type: "image/heic" }], "the host keeps it")
+    const [photo] = sent[0].attachments
+    assert.equal(photo.image, true, "it is the picture it is, on either road")
+    assert.equal(photo.inline, undefined, "and no undecodable bytes ride in the message")
+
+    const parts = await wireContent(sent[0].text, sent[0].attachments)
+    const said =
+      typeof parts === "string"
+        ? parts
+        : parts.map((part) => (part.type === "text" ? part.text : `[${part.type}]`)).join("\n")
+    assert.doesNotMatch(said, /\[screenshot\]/, "no image part is promised")
+    assert.match(said, /is not included in this message/, "and the message says where it is")
+  })
+})
+
 test("a photo picked before the host answered is tried, not refused", async () => {
   // Q2: an answer not read yet is not a no, so the pick lands on the file road; the send is where a
   // host that won't take it says why (`test-main-triage.tsx`).
@@ -473,6 +506,41 @@ test("a staged photo and clip open the screen's Previewer, and Remove takes one 
   } finally {
     URL.createObjectURL = real.create
     URL.revokeObjectURL = real.revoke
+  }
+})
+
+test("a staged photo this device can't draw is handed to the platform, not the Previewer", async () => {
+  // A HEIC the browser paints nothing from: the Previewer would open on nothing and sit on a Retry
+  // that can never work, so the tap goes where a file's does — the platform's own app.
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const real = {
+    create: URL.createObjectURL,
+    revoke: URL.revokeObjectURL,
+    open: window.open,
+  }
+  const opened: string[] = []
+  URL.createObjectURL = (blob: Blob | MediaSource) => `blob:${(blob as Blob).type || "bytes"}`
+  URL.revokeObjectURL = () => {}
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
+  try {
+    await mount(<PreviewerProvider>{composer(sent)}</PreviewerProvider>, async () => {
+      await pick("photos", [
+        new File(["heic"], "IMG_0005.heic", { type: "image/heic", lastModified: 14 }),
+      ])
+      await click(
+        findAll("button").find((one) => one.getAttribute("aria-label") === "Open IMG_0005.heic"),
+      )
+      await until(async () => opened.length > 0, "the platform's hand-off")
+      assert.match(opened[0], /^blob:/, "the bytes this device holds, under its own name")
+      assert.equal(document.querySelector('[role="dialog"]'), null, "and no Previewer opens")
+    })
+  } finally {
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+    window.open = real.open
   }
 })
 

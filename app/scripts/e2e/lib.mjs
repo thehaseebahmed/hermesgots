@@ -531,6 +531,7 @@ function helpers(page) {
             const blob = await new Promise((done) => canvas.toBlob(done, "image/png"))
             const photo = await prepareAttachment(
               new File([blob], "photo.png", { type: "image/png" }),
+              true,
             )
             void sendMessage(id, text, { attachments: [photo] })
           },
