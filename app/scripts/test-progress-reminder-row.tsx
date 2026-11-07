@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { MemoryRouter } from "react-router"
 
 import { streamHandlers, type Turn } from "@/lib/chat"
 import { db, type Message } from "@/lib/db"
@@ -89,18 +90,27 @@ test("the Developer switch is off until it is turned on, keeps the pick, and ask
   }) as typeof fetch
   // The switch root sits inside Base UI's label: the bare id belongs to a clipped hidden input.
   const row = () => find("#show-progress-reminders-label [data-slot='switch']")
-  await mount(<DeveloperSettings />, async () => {
-    assert.equal(checkedOf(row()), false, "off until it is turned on")
-    await click(row())
-    assert.equal(checkedOf(row()), true, "and on once it is")
-  })
+  await mount(
+    <MemoryRouter>
+      <DeveloperSettings />
+    </MemoryRouter>,
+    async () => {
+      assert.equal(checkedOf(row()), false, "off until it is turned on")
+      await click(row())
+      assert.equal(checkedOf(row()), true, "and on once it is")
+    },
+  )
   assert.deepEqual(asked, [], "the switch is the device's: nothing was asked of a host")
   assert.equal(
     (await db.settings.get("settings"))?.showProgressReminders,
     true,
     "the device kept it",
   )
-  await mount(<DeveloperSettings />, async () => {
+  await mount(
+    <MemoryRouter>
+      <DeveloperSettings />
+    </MemoryRouter>,
+    async () => {
     assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
   })
 })
