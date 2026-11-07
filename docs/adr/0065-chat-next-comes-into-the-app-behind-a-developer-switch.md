@@ -1,5 +1,7 @@
 # chat-next comes into the app behind a Developer switch
 
+**Superseded by ADR 0110**: bot threads are the layout on every device, and the Developer switch this ADR introduced is deleted.
+
 **Amended 2026-11-02**: the session record also keeps the results the page wrote onto calls the
 host's own stream carries none for — a clarify's answer, by the id of the call. That is not what the
 page is *doing*: it is what the page already told the host, drawn only on a call the stream left
