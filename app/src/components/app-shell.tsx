@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -52,13 +53,20 @@ interface ListPane {
 
 /**
  * How a list and the item beside it share the row: the width the list keeps while an item is open,
- * and whether an arriving item slides in from the right or the row rearranges instead.
+ * whether an arriving item slides in from the right or the row rearranges instead, and where an item
+ * that closes is held while the list takes the whole row.
  */
 interface PaneLayout {
   /** The list's width class while an item is open. Closed, it takes the whole row. */
   list: string
   /** Whether an arriving item slides in 48px from the right, fading, as the list narrows. */
   slide: boolean
+  /**
+   * Where a closing item is held for the row's transition — its place and the share it had, the
+   * complement of the list's — so it is clipped out by the list growing rather than squeezed or
+   * dropped in the first frame. Nothing where an item leaves with its lane.
+   */
+  exit?: string
 }
 
 /** A list lane: Material 3's 412px, as in Settings, and the item sliding in beside it. */
@@ -67,9 +75,10 @@ const LIST_LANE: PaneLayout = { list: "w-103", slide: true }
 /**
  * A bot's thread beside Main: the two chats take half of the room the sidebar leaves each. A
  * percentage of the row rather than a width, because the sidebar may be open or a rail and half is
- * right in both (ADR 0110).
+ * right in both (ADR 0110). The row rearranges rather than sliding — the edge between the chats is
+ * the one thing that moves — and a thread closing keeps its half until Main has covered it.
  */
-const SPLIT_LANE: PaneLayout = { list: "w-1/2", slide: true }
+const SPLIT_LANE: PaneLayout = { list: "w-1/2", slide: false, exit: "left-1/2 w-1/2" }
 
 /**
  * The policy a bot's lane takes: split while its thread list has answered with a thread beside
@@ -192,14 +201,61 @@ function ThreadLane({ lane }: { lane: BotLane }) {
 }
 
 /**
+ * The item a lane holds, kept with the key it is drawn by and the place its own lane holds it in
+ * while the list takes the row. The screen is the pane's, so an item can never be held over a lane
+ * that is not the one it was in.
+ */
+interface HeldItem {
+  screen: string
+  node: ReactNode
+  key: string
+  exit?: string
+}
+
+/** The window a closing item is held for: the 300ms the lane's width transition runs on. */
+const EXIT_MS = 300
+
+/**
  * A list and the item open beside it: the list narrows to its lane and the item arrives at its
  * right — sliding in unless the pane's layout says the row rearranges instead. Both stay mounted
- * while items are swapped.
+ * while items are swapped, and an item whose lane clips it out is held at the share it had for that
+ * window rather than vanishing with the close: the one number that animates is the lane's.
  */
 function Panes({ pane, children }: { pane: ListPane | undefined; children: ReactNode }) {
   const session = useRef<HTMLDivElement>(null)
   const open = Boolean(pane?.open)
   const layout = pane?.layout
+  // The item the lane holds, remembered while it is open: by the frame the lane closes, the item and
+  // the policy are already the closed lane's. State rather than a ref, adjusted during render, so
+  // the value the close reads is the one this render committed.
+  const [held, setHeld] = useState<HeldItem | undefined>(undefined)
+  if (open && pane && pane.itemKey && pane.item !== undefined) {
+    if (held?.key !== pane.itemKey || held?.screen !== pane.screen)
+      setHeld({
+        screen: pane.screen,
+        node: pane.item,
+        key: pane.itemKey,
+        exit: layout?.exit,
+      })
+  }
+  // A closing item keeps the place it had until the list has taken the row — clipped, inert and out
+  // of reach rather than squeezed or dropped in the first frame. Reduced motion gets both states in
+  // one frame: nothing is held, and the lane's transition is off in CSS.
+  const [exit, setExit] = useState<HeldItem | undefined>(undefined)
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    setExit(
+      open || !pane || held?.screen !== pane.screen || !held?.exit || prefersReducedMotion()
+        ? undefined
+        : held,
+    )
+  }
+  useEffect(() => {
+    if (!exit) return
+    const timer = window.setTimeout(() => setExit(undefined), EXIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [exit])
   useLayoutEffect(() => {
     if (!open || !layout?.slide || prefersReducedMotion()) return
     session.current?.animate(
@@ -212,25 +268,36 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
   }, [open, layout?.slide])
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 flex-1">
       {pane && (
         <div
           data-slot="list-lane"
           className={cn(
-            `flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
+            // Over the item it is taking back, so the edge moving is the thread being clipped out.
+            `relative z-10 flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
             open ? cn(pane.layout.list, "border-r") : "w-full",
           )}
         >
           <Suspense fallback={null}>{pane.node}</Suspense>
         </div>
       )}
-      <div ref={session} className="flex min-w-0 flex-1 flex-col">
-        {/* A list's own route has nothing to add beside it. */}
-        {pane && !open ? null : (
-          <PaneTransition item={pane?.itemKey}>
-            <Suspense fallback={null}>{pane?.item ?? children}</Suspense>
-          </PaneTransition>
+      <div
+        ref={session}
+        data-slot="item-lane"
+        inert={exit ? true : undefined}
+        aria-hidden={exit ? true : undefined}
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          exit && "pointer-events-none absolute inset-y-0 overflow-hidden",
+          exit?.exit,
         )}
+      >
+        {/* A list's own route has nothing to add beside it. */}
+        {exit || !pane || open ? (
+          <PaneTransition item={exit ? exit.key : pane?.itemKey}>
+            <Suspense fallback={null}>{exit ? exit.node : (pane?.item ?? children)}</Suspense>
+          </PaneTransition>
+        ) : null}
       </div>
     </div>
   )

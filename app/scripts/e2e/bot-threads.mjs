@@ -267,6 +267,64 @@ function stopFrames(page) {
   )
 }
 
+/**
+ * Samples the lane frame by frame across a close: Main's box, whether the thread is still drawn, and
+ * the width of the column its transcript is laid out in. The loop starts before the press, so the
+ * first frame is the lane as it was; `laneFrames` ends it and answers what was drawn.
+ */
+function watchLane(page) {
+  return page.evaluate(() => {
+    const box = (node) => (node ? Math.round(node.getBoundingClientRect().width) : 0)
+    const rows = (node) =>
+      node ? node.querySelectorAll('[data-slot="message-scroller-item"]').length : 0
+    const sample = () => {
+      const main = document.querySelector('[data-pane="main"]')
+      const thread = document.querySelector('[data-pane="thread"]')
+      const column = thread?.querySelector('[data-slot="message-scroller-content"]')
+      return {
+        main: box(main),
+        lane: box(document.querySelector('[data-slot="list-lane"]')?.parentElement),
+        thread: Boolean(thread),
+        column: box(column),
+        // What each pane is drawing: a frame that draws neither chat is one the reader never saw.
+        drawn: rows(main) + rows(thread),
+      }
+    }
+    window.__lane = []
+    window.__laneOn = true
+    const tick = () => {
+      if (!window.__laneOn) return
+      window.__lane.push(sample())
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+}
+
+async function laneFrames(page) {
+  const frames = await page.evaluate(() => {
+    window.__laneOn = false
+    return window.__lane ?? []
+  })
+  await page.evaluate(() => {
+    delete window.__lane
+  })
+  return frames
+}
+
+/** The column a chat's transcript is laid out in, as the pane draws it now. */
+function columnWidth(page, pane = "thread") {
+  return page.evaluate(
+    (pane) =>
+      Math.round(
+        document
+          .querySelector(`[data-pane="${pane}"] [data-slot="message-scroller-content"]`)
+          ?.getBoundingClientRect().width ?? 0,
+      ),
+    pane,
+  )
+}
+
 async function ready(page, what, pane = "route") {
   const seen = await page.evaluate(async (pane) => {
     const { SETUP_COPY } = await import("/src/routes/chat.tsx")
@@ -969,6 +1027,139 @@ await flow(
       `and both are wider than the lane Main alone keeps (Main ${Math.round(lanes.main)}, thread ${Math.round(lanes.thread)})`,
     )
     pass("the thread beside Main shares the lane evenly")
+
+    // Closing is one surface rearranging, not a pane dropped in a frame: the share the lane gives
+    // back is the one number that moves, the thread keeps the width it had and is clipped out
+    // rather than squeezed, and no frame draws neither chat (G3).
+    const before = await columnWidth(page)
+    assert.ok(before > 0, `the thread's column is drawn before the close (${before}px)`)
+    await watchLane(page)
+    await page.locator('[data-pane="thread"] [aria-label="Close thread"]').click()
+    await until(
+      async () => (await count(page, '[data-pane="thread"]')) === 0,
+      5_000,
+      "the thread clipped out of the lane",
+    )
+    await settled(page)
+    await page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    )
+    const frames = await laneFrames(page)
+    assert.ok(frames.length > 4, `the close was sampled frame by frame (${frames.length} frames)`)
+    assert.equal(frames[0].thread, true, "the lane is sampled holding its thread before the press")
+    // The frame the share starts to move is the frame the close begins: a thread that keeps the
+    // width it had is still drawn there, and one that was squeezed or dropped is not.
+    const grown = frames.findIndex((frame) => frame.main > frames[0].main + 1)
+    assert.ok(grown > 0, `the lane's share moves across the close (frame ${grown} of ${frames.length})`)
+    const closing = frames.slice(grown)
+    assert.equal(
+      closing[0].thread,
+      true,
+      "on the frame the share starts to move the thread is still drawn",
+    )
+    assert.deepEqual(
+      closing
+        .filter((frame) => frame.thread && Math.abs(frame.column - before) > 1)
+        .map((frame) => frame.column),
+      [],
+      `and its transcript is never re-wrapped narrower while it is clipped out (${closing
+        .filter((frame) => frame.thread)
+        .map((frame) => frame.column)
+        .join(" → ")} against ${before}px)`,
+    )
+    assert.deepEqual(
+      closing
+        .slice(1)
+        .filter((frame, index) => frame.main < closing[index].main - 1)
+        .map((frame) => frame.main),
+      [],
+      `Main's box only ever grows across the close (${closing.map((frame) => frame.main).join(" → ")})`,
+    )
+    assert.deepEqual(
+      frames.filter((frame) => !frame.drawn).map((frame) => frame.main),
+      [],
+      "and no frame draws neither chat",
+    )
+    assert.equal(
+      closing.some((frame) => !frame.thread),
+      true,
+      "and the thread is gone once the share reaches zero",
+    )
+    assert.ok(
+      Math.abs(frames.at(-1).main - frames.at(-1).lane) <= 2,
+      `Main is the lane's whole width at the end (${frames.at(-1).main} of ${frames.at(-1).lane})`,
+    )
+    pass("the lane closes as one surface")
+
+    // The same close for a reader who asked for no motion: the first frame that shows the close
+    // shows it whole, with nothing held over and nothing asked of the lane to animate.
+    await viewLink(cardOf(page, threadId)).click()
+    await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
+    await until(
+      async () => (await count(page, '[data-pane="thread"] [aria-label="Close thread"]')) === 1,
+      15_000,
+      "the thread beside Main again",
+    )
+    await settled(page)
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await page.evaluate(() => {
+      const animate = Element.prototype.animate
+      window.__laneAnimated = []
+      window.__laneAnimateRestore = () => {
+        Element.prototype.animate = animate
+      }
+      // Only the lane's own parts: what a chat does inside a pane is not the lane moving.
+      Element.prototype.animate = function (...args) {
+        if (
+          this.matches?.('[data-slot="list-lane"], [data-slot="item-lane"]') ||
+          this.closest?.('[data-slot="item-lane"]')
+        )
+          window.__laneAnimated.push(this.tagName.toLowerCase())
+        return animate.apply(this, args)
+      }
+    })
+    await watchLane(page)
+    await page.locator('[data-pane="thread"] [aria-label="Close thread"]').click()
+    await until(
+      async () => (await count(page, '[data-pane="thread"]')) === 0,
+      5_000,
+      "the thread gone under reduced motion",
+    )
+    await settled(page)
+    await page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    )
+    const quick = await laneFrames(page)
+    const animated = await page.evaluate(() => {
+      window.__laneAnimateRestore()
+      return window.__laneAnimated ?? []
+    })
+    const shut = quick.findIndex((frame) => !frame.thread)
+    assert.ok(shut > 0, `the lane is sampled holding its thread before the press (${quick.length} frames)`)
+    assert.ok(
+      Math.abs(quick[shut].main - quick[shut].lane) <= 2,
+      `the first frame that shows the close shows Main holding the lane (${quick[shut].main} of ${quick[shut].lane})`,
+    )
+    assert.deepEqual(
+      quick
+        .filter((frame) => frame.thread && frame.main > quick[0].main + 1)
+        .map((frame) => frame.main),
+      [],
+      "and no frame draws the held thread while Main grows: nothing was held over",
+    )
+    assert.deepEqual(animated, [], "and nothing was asked of the lane to animate")
+    await page.emulateMedia({ reducedMotion: null })
+    pass("a close under reduced motion draws both states in one frame")
+
+    // The thread back beside Main, which is the state the close below reads.
+    await viewLink(cardOf(page, threadId)).click()
+    await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
+    await until(
+      async () => (await count(page, '[data-slot="header-row"]')) === 2,
+      15_000,
+      "the thread beside Main, for the close that follows",
+    )
+    await settled(page)
 
     // Closing it is one press on that chevron, straight from the thread's own address: the entry
     // the thread took is replaced by this bot's Main, so no page slide plays and the address comes
