@@ -1,5 +1,7 @@
 # An app is the bot's record, and the device keeps a copy
 
+**Superseded by [ADR 0113](0113-a-canvas-is-its-bots-record-edited-only-through-its-own-session.md)** (2026-11-07): Apps are replaced by canvases (#920).
+
 An app is kept on the bot's host, the way a chat is, so a new phone has the apps its bot knows. The
 device keeps its own copy of every page it has opened, so a saved app draws with the host away.
 

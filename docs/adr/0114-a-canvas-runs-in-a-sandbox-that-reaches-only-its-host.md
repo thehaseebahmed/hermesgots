@@ -1,0 +1,34 @@
+# A canvas runs in a sandbox that reaches only its host, and declares the tools it calls
+
+**Supersedes [ADR 0102](0102-an-app-may-call-tools-and-its-consent-is-read-off-its-own-source.md)**
+(2026-11-07, #920).
+
+A canvas is JavaScript a model wrote. A static scan can't contain that code, because `eval`, `atob`
+and a URL built from pieces all defeat one. So the box the page runs in is the boundary, and the
+host is the only door out of it:
+- **The frame:** `<iframe sandbox="allow-scripts" srcdoc>` without `allow-same-origin`. The page gets
+  an opaque origin, so it can't read the app's storage, cookies or keys.
+- **The frame's CSP:** injected as the first element in its head. It allows no connections, no frames
+  and no form posts. `RTCPeerConnection` is removed before the page's own scripts run.
+- **The parent's CSP:** the app's own page carries `frame-src 'self'`. Without it, a sandboxed frame
+  can still leak its data by navigating itself to an outside URL. Checked in Chromium on 2026-11-07:
+  the leak happened with no parent policy and was blocked with this one, and the `srcdoc` page still
+  ran. Safari is unchecked.
+- **Libraries:** a vetted set (a chart library, a date library, icons and Tailwind) ships in the app
+  bundle and is inlined at render, so the page needs no CDN. This also keeps minified third-party code
+  out of `plugin/`, which Hermes's install scanner reads file by file.
+- **The bridge:** the page reaches anything only through a `postMessage` bridge. The parent answers
+  only its own frame and passes calls to one host route, which enforces the rules below.
+
+**Consent is declared, not derived.** ADR 0102 read an app's tools off its source, which openui-lang
+allowed and JavaScript doesn't: the parser reported every call, so an app could not call something it
+never wrote. A canvas's bot declares its tools as an argument when it writes a version, and the host
+stores the list with that version. A call outside the list is refused. The first call of a declared
+tool asks the user in an Android-style dialog, one tool at a time, Allow or Don't allow. The answer is
+kept on the host for every device, and the user can change it later in the canvas's options. The
+rejected alternative was a list inside the HTML, which any find-and-replace edit could change without
+anyone noticing.
+
+**The four host shapes stay free.** A canvas reads usage, routines, projects and sessions without
+declaring or asking, as ADR 0102 had them; the user chose this. The consequence is that any canvas can
+read the user's chat titles, and one granted an outbound tool could pass them on.

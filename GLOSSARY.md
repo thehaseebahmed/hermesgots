@@ -630,37 +630,43 @@ _Avoid_: fence, code block, snippet
 A block that names an earlier interface's id and redraws that interface in its place; it draws nothing of its own.
 _Avoid_: update, diff, override
 
-**App**:
-A saved surface of its own, made of pages, that a bot generated and its host keeps. It opens on its root page and is changed on its own surface, never from a chat.
-_Avoid_: widget, dashboard, mini-app, generated UI
-
-**Page**:
-One document of an app: its own interface source, its own id, and one of the pages the app can show.
-_Avoid_: screen, view, tab, sheet
-
-**Page cap**:
-The most characters one page's source may hold. A write past it is refused whole, never cut to fit, and the refusal names the cap.
-_Avoid_: page limit, size limit, truncation
-
-**Agreed tools**:
-The reads and acts an app's own pages name — `Query` names are reads, `Mutation` names are acts — shown when the app is saved, stored with it and enforced where the app calls the host. A page that later names a tool the app was never agreed to asks again, showing only the new ones. `consent` in code and in ADR 0102; unrelated to an **Approval**, which a bot asks for mid-run.
-_Avoid_: permission
-
-**Host shape**:
-One of the four reads a page's query may name — usage, routines, projects or sessions — answered by the plugin's query route from the routes it already serves. The route needs no consent for these; it refuses any other name unless the calling app was agreed to it.
-_Avoid_: data source, tool, endpoint
-
-**Root page**:
-The page an app opens on.
-_Avoid_: home page, first page, index
-
-**Built-in app**:
-An app Gots ships and the plugin seeds rather than one the user generated. It can be hidden but not deleted, and it is replaced only while nobody has edited it.
-_Avoid_: default app, sample app, template
-
 **Component reference**:
 The page that shows every component the library offers — a live drawing, its source and its props. A reader's document, not the model's.
 _Avoid_: gallery, component gallery, library page, showcase
+
+## Canvases
+
+**Canvas**:
+A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. It has data of its own and is changed only by talking to its bot in its canvas session.
+_Avoid_: app, space, studio, gadget, widget, mini-app, artifact
+
+**Canvas session**:
+The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a thread, never a card in Main and never triaged, and it carries the canvas's name as its title.
+_Avoid_: canvas chat, build session, edit thread
+
+**Version**:
+One saved state of a canvas's HTML, made by every write its bot does. Undo steps back to the one before; a canvas's data is not part of a version.
+_Avoid_: revision, snapshot, draft
+
+**Canvas data**:
+What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
+_Avoid_: state, storage, store, database
+
+**Point**:
+Tapping an element of a canvas while editing it, so the message you send names that element.
+_Avoid_: select, pick, inspect, element picker
+
+**Pinned canvas**:
+A canvas that has its own row in the sidebar, on every device.
+_Avoid_: favourite, starred, shortcut
+
+**Declared tools**:
+The tools a version of a canvas says it may call, named by its bot when it writes that version and enforced where the canvas calls the host. A declared tool is asked about the first time the canvas calls it, and only an allowed one is called. Unrelated to an **Approval**, which a bot asks for mid-run.
+_Avoid_: permissions, agreed tools, scopes
+
+**Host shape**:
+One of the four reads a canvas may make of its own bot — usage, routines, projects or sessions — answered from the routes the plugin already serves, without being declared or asked about.
+_Avoid_: data source, tool, endpoint
 
 ## Notifications
 

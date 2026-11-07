@@ -1,5 +1,7 @@
 # An app may call tools, and its consent is read off its own source
 
+**Superseded by [ADR 0114](0114-a-canvas-runs-in-a-sandbox-that-reaches-only-its-host.md)** (2026-11-07): Apps are replaced by canvases (#920).
+
 An app's page may fetch live data and may write — a tap that switches something. That is model-written
 code calling into a real house, and the design's centre is that the user agrees to it once, before the
 app is ever opened, and that the agreement is derived rather than declared.

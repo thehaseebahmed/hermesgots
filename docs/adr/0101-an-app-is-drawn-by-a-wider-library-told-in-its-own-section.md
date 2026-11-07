@@ -1,5 +1,7 @@
 # An app is drawn by a wider library, told in its own section
 
+**Superseded by [ADR 0113](0113-a-canvas-is-its-bots-record-edited-only-through-its-own-session.md)** (2026-11-07): Apps are replaced by canvases (#920).
+
 An app draws more than a reply: it links between its pages, it reads live data, and some of its
 controls write. That vocabulary is not the chat's, and the two must not share one prompt section.
 

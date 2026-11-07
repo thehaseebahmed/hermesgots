@@ -1,5 +1,7 @@
 # An app is a record of pages, and a page's source is replaced whole
 
+**Superseded by [ADR 0113](0113-a-canvas-is-its-bots-record-edited-only-through-its-own-session.md)** (2026-11-07): Apps are replaced by canvases (#920).
+
 An app is not one document. A Home Assistant dashboard is a home page, a room, an energy trend; a
 GTD app is what is due, what is next. One `openui-lang` document per app would either grow past what
 a model can rewrite reliably or force every change through a small patch syntax the language does not
