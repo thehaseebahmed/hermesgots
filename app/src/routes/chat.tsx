@@ -1,16 +1,4 @@
-import {
-  createContext,
-  lazy,
-  Suspense,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { XIcon } from "lucide-react"
 import { matchPath, useLocation, useNavigate, useParams } from "react-router"
@@ -28,11 +16,8 @@ import {
 import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
-import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
-import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
-import { prepareTurn, queueTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
@@ -89,7 +74,6 @@ import {
   sendMessage,
   steerText,
   stopMessage,
-  readAfterTurn,
 } from "@/lib/chat"
 import { windowKey } from "@/lib/history-window"
 import {
@@ -115,12 +99,7 @@ import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type DelegatedAgent, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
-import {
-  caughtUpWithin,
-  loadEarlierHistory,
-  reconcileHistory,
-  refreshChatDetails,
-} from "@/lib/history"
+import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { useLive, watchChat } from "@/lib/live"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
@@ -151,6 +130,7 @@ import { EmptyState, MainEmptyState, MissingThread } from "@/components/chat/emp
 import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { reportUnreadThread } from "@/lib/sentry"
+import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
 import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
@@ -244,7 +224,6 @@ function LoadOlderWindow({
 }
 
 const loadChatNext = () => import("@/chat-next/app-view")
-const ChatNextThread = lazy(() => loadChatNext().then((m) => ({ default: m.AppChatNextThread })))
 
 interface ChatPageProps {
   chatId?: string
@@ -408,26 +387,6 @@ function NextChat({
   useEffect(() => {
     if (mainOf) void setActiveProfile(mainOf)
   }, [mainOf])
-  // One component per chat and bot, so the composer keeps its text across the thread's renders:
-  // a write to the bot's row hands back a new object, which mustn't remount it.
-  const botKey = bot?.id
-  const composer = useMemo(
-    () =>
-      botKey
-        ? function ChatNextComposer({ controls }: { controls: ComposerControls }) {
-            return (
-              <NextComposer
-                controls={controls}
-                chatId={id}
-                botId={botKey}
-                main={mainOn}
-                home={mainPath}
-              />
-            )
-          }
-        : undefined,
-    [id, botKey, mainOn, mainPath],
-  )
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   })
@@ -458,386 +417,92 @@ function NextChat({
     />
   )
   return (
-    <LimitContext.Provider value={limit}>
-      <div
-        data-slot="chat-pane"
-        data-pane={slot}
-        data-chat-next
-        data-code-session={chat?.projectId ? "" : undefined}
-        className="relative flex min-h-0 flex-1 flex-col"
-        inert={!ready}
-      >
-        {chat && bot && ready ? (
-          <>
-            <ChatHeader
-              // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
-              // A session not started has no title yet, and its bot is the big one in the middle.
-              title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
-              // The header never follows the reply: what the thread is doing is drawn in the thread.
-              subtitle={
-                awayLine(away, online) ??
-                (mainOn && threadList
-                  ? threadsLine(threadCount(threadList))
-                  : session && !unstarted
-                    ? sessionSubtitle({
-                        botName: bot.name,
-                        names: sessionRepos.map((repo) => repo.name),
-                        cap: repoCap({ wide, xlarge: xl }),
-                      })
-                    : undefined)
-              }
-              botId={bot.botId}
-              muted={Boolean(chat.muted || bot.muted)}
-              centered={Boolean(session) || besideMain}
-              showBot={!session && !besideMain}
-              actions={actions}
-              leading={
-                // Beside Main the bot is already on screen with the thread, so the way out is the
-                // one that puts this pane away, in the slot a phone's Back takes. Below `xl` the
-                // thread is a screen of its own and leads back; a session leads back to Code,
-                // unless it is drawn beside Code's list.
-                besideMain ? (
-                  closeThread && (
-                    <BackButton
-                      label="Close thread"
-                      onClick={closeThread}
-                      floating
-                      icon={<XIcon />}
-                    />
-                  )
-                ) : mainPath ? (
+    <div
+      data-slot="chat-pane"
+      data-pane={slot}
+      data-chat-next
+      data-code-session={chat?.projectId ? "" : undefined}
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert={!ready}
+    >
+      {chat && bot && ready ? (
+        <>
+          <ChatHeader
+            // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
+            // A session not started has no title yet, and its bot is the big one in the middle.
+            title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+            // The header never follows the reply: what the thread is doing is drawn in the thread.
+            subtitle={
+              awayLine(away, online) ??
+              (mainOn && threadList
+                ? threadsLine(threadCount(threadList))
+                : session && !unstarted
+                  ? sessionSubtitle({
+                      botName: bot.name,
+                      names: sessionRepos.map((repo) => repo.name),
+                      cap: repoCap({ wide, xlarge: xl }),
+                    })
+                  : undefined)
+            }
+            botId={bot.botId}
+            muted={Boolean(chat.muted || bot.muted)}
+            centered={Boolean(session) || besideMain}
+            showBot={!session && !besideMain}
+            actions={actions}
+            leading={
+              // Beside Main the bot is already on screen with the thread, so the way out is the
+              // one that puts this pane away, in the slot a phone's Back takes. Below `xl` the
+              // thread is a screen of its own and leads back; a session leads back to Code,
+              // unless it is drawn beside Code's list.
+              besideMain ? (
+                closeThread && (
                   <BackButton
-                    label={`Back to ${bot.name || "bot"}`}
-                    onClick={() => up(mainPath)}
+                    label="Close thread"
+                    onClick={closeThread}
                     floating
+                    icon={<XIcon />}
                   />
-                ) : (
-                  underCode && (
-                    <BackButton label="Back to Code" onClick={() => void leave()} floating />
-                  )
                 )
-              }
-            />
-            <Suspense fallback={null}>
-              <ChatNextThread
-                key={chat.hermesSessionId}
-                chatId={id}
-                code={Boolean(chat.projectId)}
-                compacted={mayHoldArchive(chat.compactions)}
-                summaries={summaries}
-                blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
-                main={
-                  mainOn
-                    ? {
-                        profileId: chat.profileId,
-                        botId: bot.botId,
-                        openThread: routeThread ?? paneThread,
-                        beside: Boolean(routeThread),
-                        routeChat,
-                      }
-                    : undefined
-                }
-                server={bot.baseUrl}
-                apiKey={bot.apiKey}
-                session={chat.hermesSessionId}
-                start={start}
-                prepareTurn={(text, attachments, at) => prepareTurn(id, text, attachments, at)}
-                queueTurn={async (text, attachments) =>
-                  void (await queueTurn(id, text, attachments))
-                }
-                steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-                // Only Main's messages are triaged; a thread and a project session never are.
-                triageTurn={
-                  mainOn
-                    ? (text, attachments, options) => triageTurn(id, text, attachments, options)
-                    : undefined
-                }
-                // What the plugin holds beside the transcript — the title, the context, the todos, a
-                // session's workspace, pull requests and library — read as every chat reads it.
-                onSettled={(reason, thread) =>
-                  reason === "turn"
-                    ? void readAfterTurn(id, { turn: thread.turns })
-                    : refreshChatDetails(id)
-                }
-                onAway={setAway}
-                Composer={composer}
-              />
-            </Suspense>
-            {leaveDialog}
-          </>
-        ) : (
-          <PendingChat />
-        )}
-      </div>
-    </LimitContext.Provider>
-  )
-}
-
-/**
- * What the pane knows of the account's limits and how to open the usage sheet, for the composer to
- * warn with: the composer is one component for the chat's life, so it reads this rather than being
- * handed it, and a change in the limits never remounts it.
- */
-const LimitContext = createContext<{
-  usage: Pick<ReturnType<typeof useChatUsage>, "notice" | "provider" | "noticeDismissed">
-  onView: () => void
-} | null>(null)
-
-/**
- * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
- * plugin's queue, or steers the reply where the user asked to; one that can't go is said so and
- * handed back to the field. A project session's own cards take its place in the order the current
- * screen draws them: closed, blocked, then a plan waiting to be approved.
- */
-function NextComposer(props: {
-  controls: ComposerControls
-  chatId: string
-  botId: string
-  main: boolean
-  home?: string
-}) {
-  const limit = useContext(LimitContext)
-  return (
-    <>
-      <NextPills chatId={props.chatId} botId={props.botId} busy={props.controls.busy} />
-      <NextComposerBody
-        {...props}
-        notice={
-          limit ? (
-            <LimitNotice usage={limit.usage} profileId={props.botId} onView={limit.onView} />
-          ) : null
-        }
-      />
-    </>
-  )
-}
-
-/**
- * What the plugin holds for a chat on chat-next, as the current screen shows it above the composer:
- * the todo list, the session's pull requests and its filed outputs, each opening its sheet. The reads
- * that fill them are the chat's follow-up reads (`onSettled`).
- */
-function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; busy: boolean }) {
-  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
-  const [todosOpen, setTodosOpen] = useState(false)
-  const [outputsOpen, setOutputsOpen] = useState(false)
-  const subagents = useLiveSubagents()
-  const tracked = Boolean(bot?.apiKey && !bot.disabled)
-  const session = chat?.projectId ? chat : undefined
-  const checksRunning = prChecksPending(session?.prs)
-  useEffect(() => {
-    if (!checksRunning) return
-    const read = () => {
-      if (document.visibilityState === "visible") void refreshPrs(chatId, { force: true })
-    }
-    read()
-    const timer = window.setInterval(read, PR_PENDING_MS)
-    return () => window.clearInterval(timer)
-  }, [chatId, checksRunning])
-  // The session's read mark rides the activity it has seen, as on the current screen.
-  const threadId = session?.id
-  const activity = session ? lastActivityAt(session) : 0
-  useEffect(() => {
-    if (threadId) markRead(threadId, activity)
-  }, [threadId, activity])
-  if (!chat || !bot) return null
-  const todos = (tracked && chat.todos?.items) || []
-  const progress = tracked ? chat.todos?.progress : undefined
-  const outputs = session?.library?.count ?? 0
-  const prs = session?.prs ?? []
-  const firstPrLabel = prs.length ? prLabel(prs[0], prs) : undefined
-  const live = !runFinished({
-    live: undefined,
-    local: { streaming: busy },
-    subagents: subagents[chat.hermesSessionId],
-  })
-  return (
-    <>
-      {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
-        <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
-          <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-            {todos.length > 0 && (
-              <TodosPill
-                items={todos}
-                progress={progress}
-                live={live}
-                onClick={() => setTodosOpen(true)}
-              />
-            )}
-            {outputs === 0 && prs.length === 1 && firstPrLabel ? (
-              <PrPill pr={prs[0]} label={firstPrLabel} />
-            ) : (
-              (outputs > 0 || prs.length > 1) && (
-                <LibraryPill count={outputs + prs.length} onClick={() => setOutputsOpen(true)} />
+              ) : mainPath ? (
+                <BackButton
+                  label={`Back to ${bot.name || "bot"}`}
+                  onClick={() => up(mainPath)}
+                  floating
+                />
+              ) : (
+                underCode && (
+                  <BackButton label="Back to Code" onClick={() => void leave()} floating />
+                )
               )
-            )}
-          </div>
-        </div>
+            }
+          />
+          <ChatBody
+            chat={chat}
+            bot={bot}
+            summaries={summaries}
+            blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
+            main={
+              mainOn
+                ? {
+                    profileId: chat.profileId,
+                    botId: bot.botId,
+                    openThread: routeThread ?? paneThread,
+                    beside: Boolean(routeThread),
+                    routeChat,
+                  }
+                : undefined
+            }
+            start={start}
+            onAway={setAway}
+            home={mainPath}
+            limit={limit}
+          />
+          {leaveDialog}
+        </>
+      ) : (
+        <PendingChat />
       )}
-      <TodosSheet
-        open={todosOpen}
-        onOpenChange={setTodosOpen}
-        items={todos}
-        progress={progress}
-        live={live}
-      />
-      {session && (
-        <OutputsDrawer
-          open={outputsOpen}
-          onOpenChange={setOutputsOpen}
-          session={session}
-          config={serverConfig(bot)}
-        />
-      )}
-    </>
-  )
-}
-
-function NextComposerBody({
-  controls,
-  chatId,
-  botId,
-  main,
-  home,
-  notice,
-}: {
-  controls: ComposerControls
-  chatId: string
-  botId: string
-  /** A bot's Main: `/thread` starts a thread of it. */
-  main: boolean
-  /** Where `/new` goes: a thread's Main, else home. */
-  home?: string
-  /** The account's warning, which the composer draws above its text while it holds. */
-  notice?: ReactNode
-}) {
-  const { root } = useNav()
-  const navigate = useNavigate()
-  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
-  const session = chat?.projectId ? chat : null
-  const kept = chat?.modelChoice
-  // What the dictation hears best with: the chat's title, its project and the repos it works in.
-  const projects = useProjects(
-    session && bot ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey } : undefined,
-  )
-  const project = projects?.find((one) => one.id === session?.projectId)
-  const repos = session?.worktree?.repos.length
-    ? session.worktree.repos
-    : project
-      ? projectRepos(project)
-      : []
-  // `/thread` from Main: a thread of its own, with Main's pick, opened on the message the reader
-  // typed with it. The thread's own screen sends that message, so the turn is drawn there as it
-  // arrives and Main's card has the opener to show (ADR 0096).
-  const startThread = async (text: string, attachments: Attachment[]) => {
-    try {
-      const from = await db.conversations.get(chatId)
-      const thread = await beginThread(botId, {
-        modelChoice: chosenOf(from?.modelChoice),
-        text,
-        attachments,
-      })
-      navigate(`/c/${thread.id}`, { state: { bot: botId } })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
-      throw error
-    }
-  }
-  const filesFeature = usePluginFeature(bot, "attachments")
-  const sheet = useCheatsheet()
-  const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
-  const sendOnEnter = useLiveQuery(async () => (await getSettings()).sendOnEnter, [])
-  if (!bot || !chat) return null
-  // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
-  const tracked = Boolean(bot.apiKey && !bot.disabled)
-  // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
-  const chooseModel = (choice: ModelChoice | undefined) => {
-    const stored = storedPick(choice)
-    // Re-picking the model the chat already holds would wake every query over its row for nothing.
-    if (!samePick(kept, stored)) void updateConversation(chatId, { modelChoice: stored })
-  }
-  const modelPill = (extra: { display?: "pill" | "block"; disabled?: boolean }) =>
-    tracked && <ModelMenu profile={bot} choice={chosenOf(kept)} onChoose={chooseModel} {...extra} />
-  const said =
-    (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
-    async (text: string, attachments: Attachment[]) => {
-      try {
-        await go(text, attachments)
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : String(error))
-        throw error
-      }
-    }
-  if (session?.discardedAt) return <DiscardedCard />
-  if (session?.resolvedAt)
-    return (
-      <ResolvedCard onReopen={() => updateConversation(session.id, { resolvedAt: undefined })} />
-    )
-  if (session?.blocked && !controls.busy) return <BlockedCard reason={session.blocked} />
-  if (session?.planPending && session.mode === "plan" && !controls.busy)
-    return (
-      <PlanReadyCard
-        autoAvailable={tracked}
-        model={modelPill({ display: "block" })}
-        onApprove={async (mode) => {
-          await setSessionMode(session.id, mode)
-          await controls.send(planApprovalMessage(session.planFile), [])
-        }}
-        onKeepPlanning={() => setSessionMode(session.id, "plan")}
-      />
-    )
-  return (
-    <>
-      <Composer
-        busy={controls.busy}
-        notice={notice}
-        connection={serverConfig(bot)}
-        botName={bot.name}
-        dictationWords={bot.vocabulary}
-        dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
-        draftKey={draftKey(chatId)}
-        filesFeature={filesFeature}
-        imagesAvailable={bot.imageInput !== false}
-        onSend={controls.send}
-        onQueue={said(controls.queue)}
-        onSteer={said(controls.steer)}
-        canSteer={controls.canSteer}
-        model={modelPill({ disabled: controls.busy })}
-        steerByDefault={Boolean(steerByDefault)}
-        sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
-        subagentsRunning={controls.subagents}
-        onStop={controls.stop}
-        runId={controls.runId}
-        session={
-          session
-            ? {
-                mode:
-                  session.mode === "auto" && !tracked
-                    ? "accept_edits"
-                    : (session.mode ?? "accept_edits"),
-                autoAvailable: tracked,
-                onMode: (mode) =>
-                  setSessionMode(session.id, mode).catch((error) =>
-                    toast.error(
-                      error instanceof Error ? error.message : "Couldn't change the mode.",
-                    ),
-                  ),
-              }
-            : undefined
-        }
-        main={main}
-        onCommand={async (command, message) => {
-          if (command === "thread")
-            return startThread(message?.text ?? "", message?.attachments ?? [])
-          if (command === "new") return root(home ?? "/")
-          if (command === "settings") return root("/settings")
-          if (command === "cheatsheet") return void sheet.show()
-        }}
-      />
-      <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
-    </>
+    </div>
   )
 }
 
