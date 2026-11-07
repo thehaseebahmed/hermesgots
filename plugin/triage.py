@@ -115,9 +115,6 @@ def _rows(
 
 
 def is_plain_thread(value: Dict[str, Any]) -> bool:
-    """A chat record a message could continue, whatever bot it is: the twin of the app's
-    ``listsAsThread`` (never Main, never a project session) that is also still open and has a
-    Hermes session to continue."""
     if value.get("main") or value.get("projectId"):
         return False
     if not isinstance(value.get("hermesSessionId"), str):
