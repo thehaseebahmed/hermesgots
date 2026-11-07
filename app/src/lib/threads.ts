@@ -403,17 +403,23 @@ export interface LastOpened {
  * pane's — Main alone is better than the wrong chat.
  */
 export async function lastOpened(profileId: string): Promise<LastOpened> {
-  const threads = await db.conversations
-    .where("[profileId+updatedAt]")
-    .between([profileId, -Infinity], [profileId, Infinity])
-    .filter((chat) => !chat.projectId && !chat.main)
-    .count()
   const stored = rememberedThread(profileId)
-  const found = stored ? await db.conversations.get(stored) : undefined
+  // The count and the remembered id are independent reads, so the pane waits for the slower alone.
+  const [threads, found] = await Promise.all([
+    db.conversations
+      .where("[profileId+updatedAt]")
+      .between([profileId, -Infinity], [profileId, Infinity])
+      .filter((chat) => !chat.projectId && !chat.main)
+      .count(),
+    stored ? db.conversations.get(stored) : Promise.resolve(undefined),
+  ])
   const last =
     found && found.profileId === profileId && !found.projectId && !found.main ? found.id : undefined
   return { last, stored, threads }
 }
+
+/** The lane's answer for one bot: what `lastOpened` says, naming the bot it ran for. */
+type LaneAnswer = LastOpened & { profileId: string }
 
 /** What a chat's row says about who owns it: its bot, and whether it is a project session. */
 type ChatOwner = Pick<Conversation, "profileId" | "projectId">
@@ -438,15 +444,10 @@ export interface BotPane {
   profileId: string
   lane: BotLane
   /**
-   * Whether a control may close the lane where it stands: the lane holds a thread, whichever way it
-   * came to hold it. A thread the address names is closed by moving the address back to this bot's
-   * Main in the same act, so the control puts the thread away there too.
-   */
-  canClose: boolean
-  /**
    * Puts the lane away and forgets this bot's thread, so the next visit opens Main alone. Where the
    * address names that thread, its entry is replaced by this bot's Main as well — in the same act,
-   * since a lane reading an address that still named the thread would hold it again.
+   * since a lane reading an address that still named the thread would hold it again. Whether there
+   * is a thread to put away is the lane's own answer, so the caller reads `lane.state`.
    */
   close: () => void
   /** Puts back the thread this bot closed on this visit, where the lane is not already holding one. */
@@ -515,18 +516,26 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     thread = chat
   }
   // Only a wide screen with the switch on has a third pane to fill, so only it pays for the count.
-  // The address is a dependency so the read follows the thread this page just opened, and the
-  // remembered row is one so a write that forgets a thread redraws the lane: the store tells every
-  // reader, which the row in storage never did. Dexie keeps the answer it has until the new one
-  // lands, so the pane never empties between the two.
+  // The address's own thread is the lane's answer already, so nothing is read while it names one:
+  // the dep on `thread` is what asks for the count and the remembered id the moment the address is
+  // Main again. The remembered row is a dep too, so a write that forgets a thread redraws the lane:
+  // the store tells every reader, which the row in storage never did.
   const rememberedId = useRememberedThread(profileId)
   const kept = useLiveQuery(
-    async () =>
-      large && enabled && profileId ? { profileId, ...(await lastOpened(profileId)) } : undefined,
+    async (): Promise<LaneAnswer | undefined> =>
+      !thread && large && enabled && profileId
+        ? { profileId, ...(await lastOpened(profileId)) }
+        : undefined,
     [large, enabled, profileId, thread, rememberedId],
   )
+  // The answer this bot was last given, kept while an address naming a thread makes the read
+  // needless: the lane must not fall back to `unknown` the moment the address leaves that thread,
+  // or Main alone would be drawn before the bot is known to have a thread at all.
+  const [answered, setAnswered] = useState<LaneAnswer | undefined>(undefined)
   // The answer names the bot it ran for, so one bot's answer can never pass for another's.
-  const answer = kept && kept.profileId === profileId ? kept : undefined
+  const fresh = kept && kept.profileId === profileId ? kept : undefined
+  if (fresh && fresh !== answered) setAnswered(fresh)
+  const answer = fresh ?? (answered?.profileId === profileId ? answered : undefined)
   // The one answer the shell draws from: which bot, and what its lane is and holds.
   const lane = laneOf(thread, answer)
   const shown = lane.state === "thread" ? lane.thread : undefined
@@ -559,7 +568,5 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   }, [profileId, thread])
 
   if (!large || !enabled || !profileId) return undefined
-  // A control may put the lane away wherever it holds a thread: on Main that is the lane's own
-  // close, and on the thread's address the close takes the address back to Main in the same act.
-  return { profileId, lane, canClose: lane.state === "thread", close, reopen }
+  return { profileId, lane, close, reopen }
 }

@@ -66,17 +66,19 @@ interface ListPane {
 
 /**
  * How a list and the item beside it share the row: the width the list keeps while an item is open,
- * whether the reader drags the edge between them, and whether an arriving item slides in from the
- * right or the row rearranges instead.
+ * whether the reader drags the edge between them and what that edge is called, and whether an
+ * arriving item slides in from the right or the row rearranges instead.
  */
 interface PaneLayout {
   /** The list's width class while an item is open. Closed, it takes the whole row. */
   list?: string
   /**
-   * Whether the share of the row is the reader's to drag — floored at `SPLIT_FLOOR` a side, and
-   * written as the width itself rather than a class, since no class can hold a dragged share.
+   * The share of the row is the reader's to drag — floored at `SPLIT_FLOOR` a side, and written as
+   * the width itself rather than a class, since no class can hold a dragged share — with the name
+   * the separator carries. The words belong to the lane that owns the two chats: `Panes` is generic
+   * and knows neither of them, so a later lane can never inherit another's name.
    */
-  split?: boolean
+  split?: { handle: string }
   /** Whether an arriving item slides in 48px from the right, fading, as the list narrows. */
   slide: boolean
 }
@@ -92,7 +94,10 @@ const LIST_LANE: PaneLayout = { list: "w-103", slide: true }
  * rearranges rather than sliding — the edge between the chats is the one thing that moves — and a
  * thread closing keeps its share until Main has covered it.
  */
-const SPLIT_LANE: PaneLayout = { split: true, slide: false }
+const SPLIT_LANE: PaneLayout = {
+  split: { handle: "Resize Main and the thread" },
+  slide: false,
+}
 
 /**
  * The policy a bot's lane takes: split while its thread list has answered with a thread beside
@@ -229,7 +234,8 @@ interface HeldItem {
   exit?: CSSProperties
 }
 
-/** The window a closing item is held for: the 300ms the lane's width transition runs on. */
+/** The window a closing item is held for: the lane's own width transition, one number, so the held
+ * chat can neither be dropped early nor linger after the lane has stopped moving. */
 const EXIT_MS = 300
 
 /**
@@ -245,9 +251,11 @@ function exitBox(share: number): CSSProperties {
  * The edge between the two chats, as a control: a separator a reader drags, nudges with the arrow
  * keys and puts back to half with Enter, Home or a double-click. A drag captures the pointer, follows
  * it with no transition — 300ms on every frame is a lag — and keeps the share on this device when the
- * pointer lifts; a key moves it and keeps it at once.
+ * pointer lifts; a key moves it and keeps it at once. Its name comes from the lane that owns the two
+ * chats, since this one knows neither.
  */
 function SplitHandle({
+  label,
   share,
   width,
   dragging,
@@ -255,6 +263,7 @@ function SplitHandle({
   onShare,
   onKeep,
 }: {
+  label: string
   share: number
   width: string
   dragging: boolean
@@ -272,7 +281,7 @@ function SplitHandle({
       data-slot="split-handle"
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize Main and the thread"
+      aria-label={label}
       aria-valuenow={Math.round(share * 100)}
       aria-valuemin={0}
       aria-valuemax={100}
@@ -328,7 +337,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
   const session = useRef<HTMLDivElement>(null)
   const open = Boolean(pane?.open)
   const layout = pane?.layout
-  const split = Boolean(layout?.split)
+  const split = layout?.split
   // The share of the row the list keeps while a reader has dragged it: this device's, read the way
   // a launch reads it, and the one number the lane's width, the handle and the closing item's box
   // all stand on.
@@ -346,7 +355,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
         screen: pane.screen,
         node: pane.item,
         key: pane.itemKey,
-        split,
+        split: Boolean(split),
       })
   }
   // A closing item keeps the place it had until the list has taken the row — clipped, inert and out
@@ -368,6 +377,20 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
     const timer = window.setTimeout(() => setExit(undefined), EXIT_MS)
     return () => window.clearTimeout(timer)
   }, [exit])
+  // A drag lives on the handle: a gesture whose handle goes away mid-drag — Escape putting the lane
+  // away, or the lane stopping being a split — never gets its pointerup, and a drag left standing
+  // would hold the lane's width transition off for the rest of the session. Put down with the
+  // handle, adjusted during render, so the frame that draws the lane without one draws it without
+  // the drag too.
+  const handleShown = split !== undefined && open
+  const [wasHandle, setWasHandle] = useState(handleShown)
+  if (wasHandle !== handleShown) {
+    setWasHandle(handleShown)
+    if (!handleShown) setDragging(false)
+  }
+  // The entrance is the lane's opening, and only that: a lane that opened without a slide — a bot's
+  // thread beside Main — must not replay one later because the policy beside it slides, so the
+  // policy is read here rather than watched, and `open` alone is the dependency.
   useLayoutEffect(() => {
     if (!open || !layout?.slide || prefersReducedMotion()) return
     session.current?.animate(
@@ -377,7 +400,8 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       ],
       { duration: 300, easing: EASE },
     )
-  }, [open, layout?.slide])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `open` alone, as above
+  }, [open])
 
   // Where a key, a double-click or a drag's release leaves the edge: drawn at once, and kept on this
   // device so a reload, a close and a launch all find the same share.
@@ -392,21 +416,26 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       {pane && (
         <div
           data-slot="list-lane"
-          style={open && width ? { width } : undefined}
+          // The lane's width transition is the same window the closing item is held for: one number,
+          // so the chat held can't be dropped early or outlive the lane it was in.
+          style={{
+            ...(open && width ? { width } : undefined),
+            transitionDuration: `${EXIT_MS}ms`,
+          }}
           className={cn(
             // Over the item it is taking back, so the edge moving is the thread being clipped out.
             "relative z-10 flex min-h-0 flex-none flex-col",
             // The transition is the lane's own, and a pointer drag has none: it would trail by 300ms.
-            !dragging &&
-              `transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
+            !dragging && `transition-[width] ${EASE_CLASS} motion-reduce:transition-none`,
             open ? cn(pane.layout.list, "border-r") : "w-full",
           )}
         >
           <Suspense fallback={null}>{pane.node}</Suspense>
         </div>
       )}
-      {split && open && width && (
+      {handleShown && width && (
         <SplitHandle
+          label={split.handle}
           share={share}
           width={width}
           dragging={dragging}
@@ -460,14 +489,15 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Half the row while a thread stands beside Main, the list lane while there is none, and the
   // answer before it while this bot's thread list is still out.
   const botLayout = useBotLaneLayout(lane)
-  // A lane that holds a thread can be put away from its own header, whether the address names that
-  // thread or not: the move is the pane's, since it is the one that knows where its bot's Main is.
-  const closeThread = bot?.canClose ? bot.close : undefined
+  // A lane that holds a thread can be put away from its own header, the way an open one can be
+  // asked for by the chord: the move is the pane's, since it is the one that knows where its bot's
+  // Main is, and it is handed down only where the lane really holds a thread.
+  const closeThread = lane?.state === "thread" ? bot?.close : undefined
   // The chord puts back what a close took away, so it is handed down only where that is the lane's
   // state: closed on this bot's Main, with a thread this visit closed. An open lane, a bot with no
   // thread to put back, or another bot's Main stands the key down, and the pane forgets a close the
   // moment the address leaves the bot it was made on.
-  const reopenThread = bot?.lane.state === "closed" ? bot.reopen : undefined
+  const reopenThread = lane?.state === "closed" ? bot?.reopen : undefined
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} slot="thread" closeThread={closeThread} />
   ) : bot ? (
