@@ -25,6 +25,7 @@ import {
   spyAnimate,
   SwitchTo,
   text,
+  type,
   until,
 } from "./component-kit.tsx"
 
@@ -144,6 +145,22 @@ async function escape() {
   })
   await settle()
 }
+/**
+ * The same Escape, pressed where the reader is typing: it goes to the field first — the composer
+ * answers it, or leaves it — and then bubbles to the shell, which is the order the page has.
+ */
+async function escapeIn(field: Element | null) {
+  assert.ok(field, "the field the key is pressed in")
+  await act(async () => {
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    )
+  })
+  await settle()
+}
+/** The thread's own composer, beside Main. */
+const threadComposer = () =>
+  find('[data-pane="thread"] textarea[aria-label="Message"]') as HTMLTextAreaElement | null
 /**
  * The reopen chord, as the reader's keyboard sends it: a Mac passes Cmd where every other one passes
  * Ctrl, and the physical key is `Backslash` either way, which is what the lane reads.
@@ -709,6 +726,45 @@ test("Escape closes the lane, and only where the thread is a lane", async () => 
   await beside()
   await alone()
 })
+
+test(
+  "Escape in the thread's composer clears its text before it closes the lane",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    remembers("t-a")
+    // The harness has no editing commands, and the composer clears through the field where it can:
+    // a command it doesn't have answers false, which is the signal its own fallback waits for.
+    const command = Object.getOwnPropertyDescriptor(document, "execCommand")
+    Object.defineProperty(document, "execCommand", { configurable: true, value: () => false })
+    try {
+      await mount(screen(`/c/${MAIN}`), async () => {
+        await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+        const field = threadComposer()
+        await type(field, "Half a thought")
+        assert.equal(field?.value, "Half a thought", "the thread's field holds what was typed")
+
+        // The field's own pair, "Escape, Escape — Clear the message": the first press is half of
+        // it, so it is the field's and not the lane's.
+        await escapeIn(field)
+        assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "the first Escape leaves the lane up")
+        assert.equal(field?.value, "Half a thought", "and the text where the reader left it")
+
+        await escapeIn(field)
+        assert.equal(field?.value, "", "the second clears it")
+        assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "and the lane is still up")
+
+        // An empty field has nothing to clear, so the Escape is the lane's and closes it.
+        await escapeIn(field)
+        await until(async () => titles().join("|") === "Mainly", "the lane closed on the empty field")
+        assert.equal(remembered(bot.id), null, "and the thread it put away is forgotten")
+      })
+    } finally {
+      if (command) Object.defineProperty(document, "execCommand", command)
+      else delete (document as { execCommand?: unknown }).execCommand
+    }
+  }),
+)
 
 test(
   "⌘\\ reopens the thread just closed, and nothing after leaving the bot",
