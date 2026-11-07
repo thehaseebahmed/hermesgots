@@ -457,6 +457,33 @@ test(
   }),
 )
 
+test(
+  "a thread closed here is not reopened on the next visit",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    remembers("t-a")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Mainly", "Main alone")
+    })
+    // The next visit: the same bot, from its Main, with this page's store as the visit before left
+    // it and storage as a launch would read it.
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => text().includes("2 threads"), "Main's own threads to load")
+      await settle()
+      assert.deepEqual(titles(), ["Mainly"], "the bot's own header is the only one left")
+      assert.equal(remembered(bot.id), null, "and nothing is remembered for it")
+      assert.equal(
+        find('[data-slot="bot-pane-empty"]'),
+        null,
+        "a bot with threads is not the empty one",
+      )
+    })
+  }),
+)
+
 /**
  * A run in flight over a thread a reader closes: the host's answer to the send, its live-runs ledger,
  * and one event stream the test pushes into, so what lands while the pane is away is the host's own
