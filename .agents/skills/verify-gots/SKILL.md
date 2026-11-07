@@ -66,8 +66,13 @@ Read-only. It answers, in order: the app and each mock respond (the CLI's own pr
 500); the mock and Vite processes are up and which working directory owns each pid (so a stale
 server from another tree is visible); the thread budget this cgroup has left (a lane wants ~150 per
 concurrent browser); Playwright resolves (as the CLI finds it — `app/node_modules`, `npm root -g`,
-then `PLAYWRIGHT_MODULE`); and it prints the build being driven (git head, app version), the
-artifact directory, and the fact that the mock's fixed key leaves no credential to validate. Exit 0 is "worth driving", 1 is not. **Run it first whenever anything looks off** — a
+then `PLAYWRIGHT_MODULE`), and it prints the build being driven (git head, app version), the
+artifact directory, and the fact that the mock's fixed key leaves no credential to validate. This
+sandbox already has Playwright installed: the module is
+`/usr/local/lib/node_modules/playwright/index.mjs` and its browsers are under `/opt/ms-playwright`
+(`PLAYWRIGHT_BROWSERS_PATH`). `pnpm e2e` finds the module through `npm root -g`; a shell that cannot
+run `npm` should set `PLAYWRIGHT_MODULE=/usr/local/lib/node_modules/playwright/index.mjs` and
+`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright` rather than install anything. Exit 0 is "worth driving", 1 is not. **Run it first whenever anything looks off** — a
 flow failing with a missing control is often a stale server, not a regression.
 
 ## Drive
