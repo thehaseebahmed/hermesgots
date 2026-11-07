@@ -29,7 +29,9 @@ test("the archived turns and the live ones draw as one thread, the divider where
   const at = (n: number) => 1_700_000_000_000 + n * 60 * SECOND
   await seedChat({
     id: CHAT,
-    profile: botProfile("archive"),
+    // A bot with no key keeps the current screen, the one whose transcript comes off this device's
+    // rows — which is what the archived ones are read out of here.
+    profile: botProfile("archive", { apiKey: "" }),
     messages: [
       row(10, "user", "the first question", at(1)),
       row(11, "assistant", "the first answer", at(2)),

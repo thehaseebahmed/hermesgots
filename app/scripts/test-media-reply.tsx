@@ -104,7 +104,7 @@ const download = (name: string) => labelled("button", `Download ${name}`)
 const filled = (name: string) => (cell(name) ?? row(name))?.hasAttribute("aria-busy") === false
 
 test("a thread's sent media and a reply's tags draw through the same cells", async () => {
-  const profile = botProfile("media-reply")
+  const profile = botProfile("media-reply", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: thread() })
   // Every file is read from a URL the host signs; one it has no copy of draws nothing at all.
   const asked = mediaHost({ fail: ["missing.png"] })
@@ -219,7 +219,7 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
 test("a tag the host couldn't serve keeps its cell, and is asked again when the reply carries more", async () => {
   // A host that was out isn't a route that has no such file: the cell keeps its place with a retry
   // rather than turning the file into text, and the next read of the reply's media asks again.
-  const profile = botProfile("media-retry")
+  const profile = botProfile("media-retry", { apiKey: undefined })
   await seedChat({
     id: "c1",
     profile,

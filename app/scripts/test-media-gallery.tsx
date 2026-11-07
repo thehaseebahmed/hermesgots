@@ -83,7 +83,7 @@ const download = (name: string) => labelled("button", `Download ${name}`)
 const filled = (button: Element | null) => Boolean(button) && !button!.hasAttribute("aria-busy")
 
 test("a message's photo and clip draw in one Gallery, its recording in a row, its note as a file", async () => {
-  const profile = botProfile("media-gallery")
+  const profile = botProfile("media-gallery", { apiKey: undefined })
   await seedChat({
     id: "c1",
     profile,
@@ -140,7 +140,7 @@ test("a message's photo and clip draw in one Gallery, its recording in a row, it
 })
 
 test("a photo whose URL never answers keeps its cell, never a download row", async () => {
-  const profile = botProfile("media-missing")
+  const profile = botProfile("media-missing", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
   // A host that can't be asked: nothing settles this file, and the cell says so.
   mediaHost({ fail: ["cat.png"], failure: 503 })
@@ -152,7 +152,7 @@ test("a photo whose URL never answers keeps its cell, never a download row", asy
 })
 
 test("a photo whose read failed offers a retry that asks again and draws", async () => {
-  const profile = botProfile("media-retry-cell")
+  const profile = botProfile("media-retry-cell", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
   const asked = mediaHost({ fail: ["cat.png"], failure: 503 })
   await mount(chatScreen("c1"), async () => {
@@ -183,7 +183,7 @@ test("a photo whose read failed offers a retry that asks again and draws", async
 
 test("a photo the browser couldn't decode keeps its place and asks again", async () => {
   // jsdom decodes nothing, so a picture that fails is the browser's own error event arriving.
-  const profile = botProfile("media-broken-photo")
+  const profile = botProfile("media-broken-photo", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
   const asked = mediaHost({ host: "media-broken-photo" })
   await mount(chatScreen("c1"), async () => {
@@ -209,7 +209,7 @@ test("a photo the browser couldn't decode keeps its place and asks again", async
 })
 
 test("a photo whose bytes the host refuses is a cell that says why, not a row", async () => {
-  const profile = botProfile("media-refused")
+  const profile = botProfile("media-refused", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
   // The route's refusal: the file is there, over the cap its kind is held to.
   mediaHost({
@@ -230,7 +230,7 @@ test("a photo whose bytes the host refuses is a cell that says why, not a row", 
 })
 
 test("Escape closes the Previewer, and the cell it was opened from is where the reader left it", async () => {
-  const profile = botProfile("media-escape")
+  const profile = botProfile("media-escape", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo, clip])] })
   mediaHost({ host: "media-escape" })
   await mount(chatScreen("c1"), async () => {
@@ -253,7 +253,7 @@ test("Escape closes the Previewer, and the cell it was opened from is where the 
 })
 
 test("a photo of any image type is drawn as the picture it is, SVG included", async () => {
-  const profile = botProfile("media-svg")
+  const profile = botProfile("media-svg", { apiKey: undefined })
   const diagram: Attachment = {
     id: "diagram",
     name: "diagram.svg",
@@ -275,7 +275,7 @@ test("a photo of any image type is drawn as the picture it is, SVG included", as
 })
 
 test("a cell whose picture the browser couldn't decode says so, and keeps its place", async () => {
-  const profile = botProfile("media-cell-broken")
+  const profile = botProfile("media-cell-broken", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
   mediaHost({ host: "media-cell-broken" })
   await mount(chatScreen("c1"), async () => {

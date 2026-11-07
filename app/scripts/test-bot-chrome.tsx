@@ -22,7 +22,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("bot-chrome", { id: "bot-1", name: "Chrome" })
+const bot = botProfile("bot-chrome", { id: "bot-1", name: "Chrome", apiKey: undefined })
 const other = botProfile("bot-other", { id: "bot-2", name: "Other" })
 const MAIN = mainThreadId(bot.id)
 const HOUR = 3_600_000

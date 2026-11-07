@@ -15,7 +15,7 @@ await flow(
     // The new chat screen, which is where a seam inside a reply is drawn from the record.
     await page.evaluate(async () => {
       const { saveSettings } = await import("/src/lib/db.ts")
-      await saveSettings({ developer: true, chatNext: true })
+      await saveSettings({ developer: true })
     })
     const chatId = `e2e-seam-${runId()}`
     await seed([{ id: chatId, title: "Seam" }])

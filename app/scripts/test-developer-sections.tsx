@@ -79,6 +79,11 @@ test("/settings/developer with the switch on draws it", async () => {
       "and is no longer marked experimental: the layout is the app's own",
     )
     assert.equal(findText("label", "Bot threads"), null, "the old switch is gone")
+    assert.equal(
+      findText("label", "New chat screen"),
+      null,
+      "and the chat screen's, which every chat a bot can be called for opens on",
+    )
   })
 })
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { db } from "@/lib/db"
+import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
   chatScreen,
@@ -40,14 +41,18 @@ const SKILLS = [
 ]
 
 function host() {
+  // chat-next reads the chat's transcript too; the fake host answers that, and the skills reads
+  // this test is about are the ones overridden.
+  fakeHost("gots-c1", { plugin: true })
+  const base = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input))
+    const url = new URL(String(input instanceof Request ? input.url : input))
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
     if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["skills"] })
     if (url.pathname.endsWith("/plugins/gots/skills"))
       return json({ object: "list", data: SKILLS })
-    return json({})
+    return base(input as RequestInfo)
   }) as typeof fetch
 }
 

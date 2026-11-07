@@ -7,8 +7,7 @@ import { ConversationList } from "@/components/conversation-list"
 import { BotThreadsPage } from "@/routes/bot-threads"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
-import { SUGGESTIONS } from "@/lib/suggestions"
-import { BOTS, DEFAULT_BOT_ID } from "@/components/bots"
+
 import {
   botProfile,
   click,
@@ -18,14 +17,11 @@ import {
   json,
   mount,
   seedSettings,
-  text,
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly" })
+const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly", apiKey: undefined })
 const MAIN = mainThreadId(bot.id)
-const defaultBot = BOTS.find((one) => one.id === DEFAULT_BOT_ID)!
-
 async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
   await seedSettings({
     activeProfileId: bot.id,
@@ -35,25 +31,6 @@ async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
   await db.profiles.put(bot)
   await db.messages.clear()
   await db.conversations.clear()
-}
-
-function host(name: string) {
-  const seen: { path: string; body: any }[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (!url.host.startsWith(name)) return json({})
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
-    seen.push({ path: url.pathname, body })
-    if (url.pathname.endsWith("/capabilities"))
-      return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/gots/info"))
-      return json({ features: ["queue", "triage", "moves"] })
-    if (url.pathname.endsWith("/triage")) return json({ decision: "main" })
-    if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
-      return json({ error: { message: "stopped here" } }, 500)
-    return json({})
-  }) as typeof fetch
-  return seen
 }
 
 const Where = () => <p data-path>{useLocation().pathname}</p>
@@ -244,42 +221,6 @@ test("the Chats list's bot row opens the bot's Main thread", async () => {
         !findAll("a").some((row) => row.getAttribute("href") === "/b/bot-1"),
         "no row points at the old screen",
       )
-    },
-  )
-})
-
-test("Main's empty state sends a suggestion into Main, triaged, without a thread", async () => {
-  await seed()
-  const seen = host("bot-main")
-  await mount(
-    <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
-      <Routes>
-        <Route path="c/:id" element={<ChatPage slot="route" />} />
-      </Routes>
-    </MemoryRouter>,
-    async () => {
-      await until(
-        async () => defaultBot.lines.some((line) => text().includes(line)),
-        "the bot's own line",
-      )
-      assert.equal(text().includes("Hey, I'm"), false, "no introduction")
-      assert.equal(
-        text().includes("Ask me anything"),
-        false,
-        "and no explanatory copy about how the app works",
-      )
-      const chip = findText("button", SUGGESTIONS[0])
-      assert.ok(chip, "a suggestion chip")
-      await click(chip)
-      await until(
-        async () => (await db.messages.where("conversationId").equals(MAIN).count()) > 0,
-        "the message in Main",
-      )
-      assert.ok(
-        seen.some((request) => request.path.endsWith("/triage")),
-        "the chip's message is triaged",
-      )
-      assert.equal(await db.conversations.count(), 1, "nothing minted a thread")
     },
   )
 })

@@ -20,7 +20,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("main-cards", { id: "bot-1", name: "Cards" })
+const bot = botProfile("main-cards", { id: "bot-1", name: "Cards", apiKey: undefined })
 const HOUR = 3_600_000
 const DAY = 86_400_000
 const MIDNIGHT = new Date().setHours(0, 0, 0, 0)

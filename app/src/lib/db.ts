@@ -55,8 +55,6 @@ export interface Settings {
    * the layout a device gets; on is the opt-out, read by `useBotThreads` in `threads.ts`.
    */
   legacyChat?: boolean
-  /** A chat opens on chat-next instead of the current screen (ADR 0065). Developer, local. */
-  chatNext?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
   meetings?: boolean
   /**
@@ -1197,8 +1195,10 @@ db.version(22).stores({ prompts: "id" })
  * again — a save re-puts the row it reads, so without that a dead key would outlive its screen.
  * `botThreads` is the layout's old switch: bot threads became the default and the switch now stores
  * `legacyChat`, so a row that still says `botThreads` says nothing and is shed the same way.
+ * `chatNext` is the chat screen's old switch: a chat now opens on chat-next whenever its bot can be
+ * called, so a row that still says `chatNext` decides nothing.
  */
-const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault", "botThreads"] as const
+const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault", "botThreads", "chatNext"] as const
 
 // v23: "Fold thinking by default" is retired — a reply's thinking opens in a sheet now, so nothing
 // opens on its own and there is nothing left to fold. The key goes from every device's settings

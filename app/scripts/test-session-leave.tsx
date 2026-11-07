@@ -8,7 +8,7 @@ import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { db, type Settings } from "@/lib/db"
+import { db } from "@/lib/db"
 import { draftKey, saveDraft } from "@/lib/drafts"
 import { ChatPage } from "@/routes/chat"
 import { fakeHost } from "./chat-next-host.ts"
@@ -33,17 +33,18 @@ const screen = (id: string) => (
   </MemoryRouter>
 )
 
-/** A session of a project on chat-next; `sent` says whether anything was sent in it. */
+/** A session of a project on chat-next; `sent` says whether anything was sent in it, and `next`
+ * whether its bot can be called — a keyless bot is the one way the current screen still draws one. */
 async function seedSession(
   name: string,
   { sent = false, next = true }: { sent?: boolean; next?: boolean } = {},
 ) {
-  const bot = botProfile(name, { baseUrl: `http://${name}.test/v1` })
-  const id = `${name}-s1`
-  await seedChats([{ id, title: "Draft session", at: 5 }], {
-    bots: [bot],
-    settings: { chatNext: next } satisfies Partial<Settings>,
+  const bot = botProfile(name, {
+    baseUrl: `http://${name}.test/v1`,
+    ...(next ? {} : { apiKey: "" }),
   })
+  const id = `${name}-s1`
+  await seedChats([{ id, title: "Draft session", at: 5 }], { bots: [bot] })
   await db.conversations.update(id, {
     projectId: "p1",
     worktree: {
@@ -60,7 +61,8 @@ async function seedSession(
 
 const backToCode = () => find('[aria-label="Back to Code"]')
 
-/** Both screens treat a project session the same, so each test runs on both. */
+/** Both screens treat a project session the same, so each test runs on both: a callable bot opens
+ * chat-next, and a keyless one is the only bot the current screen still draws it for. */
 const screens = [
   ["chat-next", true],
   ["the current screen", false],

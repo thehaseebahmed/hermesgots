@@ -35,7 +35,8 @@ const bot: Profile = {
   id: "bot-1",
   name: "Threads",
   baseUrl: server.baseUrl,
-  apiKey: server.apiKey,
+  // No key: the current screen is the one that draws a bot it cannot call, off this device's rows.
+  apiKey: undefined,
   model: "test/model",
   botId: "bot-1",
   createdAt: 1,

@@ -50,7 +50,7 @@ await flow(
     await seed([{ id: chatId, title: "Compacted, no seam" }])
     await page.evaluate(async () => {
       const { db } = await import("/src/lib/db.ts")
-      await db.settings.update("settings", { developer: true, chatNext: true })
+      await db.settings.update("settings", { developer: true })
     })
     const sessionId = await page.evaluate(
       async (id) =>

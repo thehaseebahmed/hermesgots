@@ -92,7 +92,7 @@ async function keep(name: string, path: string, blob: Blob, type: string, copy =
 }
 
 test("a photo this device has painted is kept, and asking again never mints another URL", async () => {
-  const profile = botProfile("media-kept")
+  const profile = botProfile("media-kept", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo])] })
   const asked = mediaHost({ host: "media-kept" })
   await mount(chatScreen(CHAT), async () => {
@@ -111,7 +111,7 @@ test("a photo this device has painted is kept, and asking again never mints anot
 })
 
 test("a photo nobody has scrolled to is not fetched, and one that is, is", async () => {
-  const profile = botProfile("media-painted")
+  const profile = botProfile("media-painted", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo, other])] })
   mediaHost({ host: "media-painted" })
   await mount(chatScreen(CHAT), async () => {
@@ -127,7 +127,7 @@ test("a photo nobody has scrolled to is not fetched, and one that is, is", async
 })
 
 test("a photo this device kept draws with the host away, and the host is not asked", async () => {
-  const profile = botProfile("media-offline")
+  const profile = botProfile("media-offline", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo])] })
   await keep(
     "media-offline",
@@ -147,7 +147,7 @@ test("a photo this device kept draws with the host away, and the host is not ask
 })
 
 test("a clip's first frame is kept, so the next look at it needs no clip at all", async () => {
-  const profile = botProfile("media-frame")
+  const profile = botProfile("media-frame", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([clip])] })
   await rememberFrame(
     connection("media-frame").baseUrl,
@@ -170,7 +170,7 @@ test("a clip's first frame is kept, so the next look at it needs no clip at all"
 })
 
 test("a cell whose photo failed after its URL ran out draws the copy this device kept", async () => {
-  const profile = botProfile("media-cell-stale")
+  const profile = botProfile("media-cell-stale", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo])] })
   // A URL with a minute of life, which is a URL this app never draws from: the skew spends it first.
   const asked = mediaHost({ host: "media-cell-stale", life: 30 })
@@ -194,7 +194,7 @@ test("a cell whose photo failed after its URL ran out draws the copy this device
 })
 
 test("a page come back to asks again for a URL that has run out", async () => {
-  const profile = botProfile("media-wake")
+  const profile = botProfile("media-wake", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo])] })
   const asked = mediaHost({ host: "media-wake", life: 30 })
   await mount(chatScreen(CHAT), async () => {
@@ -212,7 +212,7 @@ test("a page come back to asks again for a URL that has run out", async () => {
 })
 
 test("clearing what this device holds takes the media it kept with it", async () => {
-  const profile = botProfile("media-cleared")
+  const profile = botProfile("media-cleared", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo])] })
   mediaHost({ host: "media-cleared" })
   await mount(chatScreen(CHAT), async () => {
@@ -225,7 +225,7 @@ test("clearing what this device holds takes the media it kept with it", async ()
 })
 
 test("a host that names no lifetime repairs a failed load itself", async () => {
-  const profile = botProfile("media-no-life")
+  const profile = botProfile("media-no-life", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([photo])] })
   // An older plugin's mint names no expiry, so no clock can say the URL has died: the load that
   // failed is the only sign of it, and asking again is what that sign is for.
@@ -251,7 +251,7 @@ test("a host that names no lifetime repairs a failed load itself", async () => {
 })
 
 test("a bot deleted from the app lets go of the URLs its copies were drawn by", async () => {
-  const profile = botProfile("media-forgotten")
+  const profile = botProfile("media-forgotten", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([clip])] })
   await keep(
     "media-forgotten",
@@ -287,7 +287,7 @@ test("a bot deleted from the app lets go of the URLs its copies were drawn by", 
 })
 
 test("a clip's kept frame is drawn even where the clip's own URL never came", async () => {
-  const profile = botProfile("media-clip-away")
+  const profile = botProfile("media-clip-away", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([clip])] })
   await keep(
     "media-clip-away",
@@ -312,7 +312,7 @@ test("a clip's kept frame is drawn even where the clip's own URL never came", as
 })
 
 test("a clip whose URL has run out asks the host again, once", async () => {
-  const profile = botProfile("media-clip-stale")
+  const profile = botProfile("media-clip-stale", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([clip])] })
   // A clip has no picture of its own to fail, so the frame coming to nothing is the only signal:
   // jsdom plays nothing, which is a paint that came to nothing, and the URL is spent every time.
@@ -334,7 +334,7 @@ test("a clip whose URL has run out asks the host again, once", async () => {
 })
 
 test("a clip's first paint is kept, so its cell has a frame to draw next time", async () => {
-  const profile = botProfile("media-clip-paint")
+  const profile = botProfile("media-clip-paint", { apiKey: undefined })
   await seedChat({ id: CHAT, profile, messages: [message([clip])] })
   mediaHost({ host: "media-clip-paint" })
   // jsdom neither plays a clip nor paints a canvas: these two stand in for the browser at the one

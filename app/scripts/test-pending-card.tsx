@@ -6,13 +6,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { THREAD_MISSING } from "@/components/chat/empty-states"
-import { SUGGESTIONS } from "@/lib/suggestions"
-import { db, type Message } from "@/lib/db"
+import { type Message } from "@/lib/db"
 
 import { botProfile, chatScreen, click, find, json, mount, seedChat, until } from "./component-kit.tsx"
 
-const bot = botProfile("pending")
+const bot = botProfile("pending", { apiKey: undefined })
 
 const turn: Message[] = [
   {
@@ -98,7 +96,7 @@ test("a host without the route draws no card at all", async () => {
   // Its own bot: what a host answered about its features is remembered per connection, so a second
   // question for the same one would be the first host's answer.
   const seen = host(held, { features: [] })
-  await seedChat({ id: "chat-old", messages: turn, profile: botProfile("pending-old") })
+  await seedChat({ id: "chat-old", messages: turn, profile: botProfile("pending-old", { apiKey: undefined }) })
   await mount(chatScreen("chat-old"), async () => {
     await until(() => Boolean(composer()), "the composer")
     assert.equal(card(), null)
@@ -119,37 +117,6 @@ test("Discard acknowledges the lost turn on its own route, and the composer come
       posted.map((one) => one.path),
       ["/api/plugins/gots/sessions/chat-discard-hermes/pending/a/discard"],
       "the row the card named, on the chat's own session",
-    )
-  })
-})
-
-test("a fenced chat whose thread holds nothing waits, rather than claiming the thread didn't load", async () => {
-  // The turn a restart lost never wrote its row, so the session's transcript is empty: a chat with a
-  // past and no rows, which every other screen reads as a read that failed. The card says what it
-  // is, so neither the pane nor a new session's face is drawn — and clearing the fence is what makes
-  // the read worth making again, so the thread is read once more rather than left spinning.
-  const seen = host(held)
-  await seedChat({ id: "chat-empty", messages: [], profile: bot })
-  // `updatedAt` past `createdAt` is the app's record that something was sent in this chat: what makes
-  // an empty thread here a read it has to make, and a failed one the pane usually names.
-  await db.conversations.update("chat-empty", { updatedAt: 2 })
-  const reads = () => seen.filter((one) => one.method === "GET" && /\/messages$/.test(one.path))
-  await mount(chatScreen("chat-empty"), async () => {
-    await until(() => Boolean(card()), "the paused-queue card")
-    const words = document.body.textContent ?? ""
-    assert.ok(!words.includes(THREAD_MISSING), "no failed read is claimed")
-    // Nor a new session's face, whose openers invite a first message: this chat has a past.
-    assert.ok(!words.includes(SUGGESTIONS[0]), "and nothing invites a first message")
-    // `assert.ok` on the element, never `equal(x, null)`: a failing element assertion serializes the
-    // whole node and can take the runner's heap with it.
-    assert.ok(!find('[data-slot="spinner"]'), "nor a read still running, which never lands")
-    const before = reads().length
-    await click(card())
-    await until(() => !card(), "the card gone")
-    await until(() => reads().length > before, "the thread read again once the fence lifted")
-    assert.ok(
-      !(document.body.textContent ?? "").includes(THREAD_MISSING),
-      "and clearing the queue does not turn it into one",
     )
   })
 })

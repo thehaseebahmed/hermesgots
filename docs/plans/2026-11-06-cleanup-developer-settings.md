@@ -30,7 +30,7 @@
 | Blank new-chat surface (chat-next) | new | G2 | `test-chat-next-new-chat.tsx` |
 | chat-next thread mount and first turn | affected | G2 | `test-chat-next-new-chat.tsx` |
 | Local data (conversations, the handover) | affected | G2 | `test-chat-next-new-chat.tsx` |
-| Current chat screen | affected | G2 | `test-session-leave.tsx` |
+| Current chat screen | affected | G2 | `test-session-leave.tsx` and the migrated current-screen tests |
 | Developer page (switch, groups, hide action, docs group) | changed | G1, G3, G4, G6 | `test-developer-sections.tsx` |
 | Settings menu | changed | G5 | `test-openui-reference.tsx` |
 | Docs page (`/docs/open-ui`) | changed | G6 | `test-openui-reference.tsx` |
@@ -139,7 +139,9 @@ sequenceDiagram
 
    Done.
 
-3. **Callability alone chooses the screen.** `chatNext` leaves the settings type, the Developer page, device state and diagnostics, and joins the retired keys; `opensOnChatNext` loses its switch argument and keeps the record requirement; `callable(bot)` is the one address-and-key test; the verdict consults no switch. `test-session-leave.tsx`'s second arm becomes a keyless bot — the one way the current screen still draws a session. Goals: G2. After: 2. Layers: Settings store, Chat screen decision, Current chat screen, Diagnostics and device state. Check: `test-chat-next-route.mjs` and `test-chat-next-mount.tsx`: a callable bot's chat is chat-next with no switch stored; a keyless or addressless bot's chat is the current screen; the suite no longer seeds `chatNext`.
+3. **Callability alone chooses the screen.** `chatNext` leaves the settings type, the Developer page, device state and diagnostics, and joins the retired keys; `opensOnChatNext` loses its switch argument and keeps the record requirement; `callable(bot)` is the one address-and-key test; the verdict consults no switch. `test-session-leave.tsx`'s second arm becomes a keyless bot — the one way the current screen still draws a session. The current screen's other tests follow one rule: a test of behaviour chat-next also draws moves to chat-next, or is retired where a chat-next test already covers it; a test of a path the product still produces on the current screen keeps a keyless bot; a test of a path the current screen no longer draws is deleted. Every component file is run to take the inventory, and each disposition is named in the step's report. Goals: G2. After: 2. Layers: Settings store, Chat screen decision, Current chat screen, Diagnostics and device state. Check: `test-chat-next-route.mjs` and `test-chat-next-mount.tsx`: a callable bot's chat is chat-next with no switch stored; a keyless or addressless bot's chat is the current screen; the suite no longer seeds `chatNext`; and every component file runs green in batches, including each migrated or retired current-screen test.
+
+   Done.
 
 4. **A chat with no record opens on chat-next.** The verdict gains a third answer, `blank`, for an address with no id whose active bot is callable. The blank surface draws the bot's face, an empty thread, the composer from step 1, and the `BotPicker` only in the legacy layout. No record is written on mount. Its send calls `beginThread` with the pending model pick and the typed text, then replaces the address; the thread takes the handover and sends it as its first turn. The picker writes `activeProfileId` and the verdict re-runs. An uncallable bot never reaches the surface. Prune `CurrentChatPage`'s now-dead no-id create branch and its pending pick, keeping the picker and the uncallable path. Goals: G2. After: 1, 3. Layers: Chat screen decision, App composer, Blank new-chat surface, chat-next thread mount, Local data, Current chat screen, e2e harness. Check: new `test-chat-next-new-chat.tsx`: no row before the send, one conversation and one run after it, the message drawn as the thread's first turn, no record for an uncallable bot, and the draft survives the replace.
 
@@ -161,11 +163,19 @@ sequenceDiagram
 | 14 files seeding `botThreads` | Step 2. |
 | 5 files seeding `chatNext` | Step 3. |
 | `test-session-leave.tsx` | Step 3: the second arm becomes a keyless bot. |
+| Current-screen tests that mount a configured bot (inventory: every component file; 14 failed before the migration) | Step 3: each moves to chat-next, keeps a keyless bot where the product still draws that path, or is retired where a chat-next test already covers it; the step's report names each disposition. |
 | New `test-chat-next-new-chat.tsx` | Step 4. |
 | `test-developer-sections.tsx` | Steps 2 and 5. |
 | `test-openui-reference.tsx` | Step 6. |
 | `e2e/lib.mjs`, `chat-message`, `bot-threads`, `wake-window` and the rest | Step 7. |
 | `docs/e2e-flow-audit.md` | Step 7. |
+
+### Step 3 test dispositions
+
+- **Migrated to chat-next:** `test-attach-menu.tsx`, `test-slash-menu.tsx`.
+- **Kept keyless on the current screen, the still-real uncallable-bot path:** `test-live-cluster`, `test-live-span`, `test-thinking-line`, `test-thread-rendering`, `test-main-cards`, `test-cheatsheet-sheet`, `test-main-thread`, `test-bot-chrome`, `test-bot-pane`, `test-main-navigation`, `test-switch-hold`, `test-switch-scroll`, `test-page-fade`, `test-openui`, `test-openui-switch`, `test-media-gallery`, `test-media-cache`, `test-media-reply`, `test-previewer-zoom`, `test-attachment-row`, `test-composer-steer`, `test-pending-card`, `test-card-undo`, `test-session-close`, `test-subagent-result`, `test-routine-run`, `test-thread-command`, `test-progress-reminder-row`, `test-archive-thread`.
+- **Retired with named chat-next coverage:** `test-compaction-thread` (chat-next mount dividers and the compaction matrix), `test-compaction-live`'s divider case, `test-todos-live` (the finished turn's todo pill), `test-model-pin` (the composer's model pill and pin), `test-wake-follow` and `test-wake-question` (the chat-next delegate wake turn).
+- **Retired as unreachable:** `test-chat-history-missing`. Chat-next's away header and failed-turn Retry cover the situation; its Copy details support dump has no chat-next equivalent and is left as a follow-up.
 
 ## Decisions
 
@@ -179,11 +189,13 @@ sequenceDiagram
 - **The docs Group is a literal list in the Developer page; the OpenUI page's back link goes to Developer.** Made by the agent, because one route exists and a registry with one consumer is an abstraction with no job.
 - **Hide is ghost, `h-11`, `rounded-full`, with an inline-start icon and no destructive colour; it writes `developer` and `netLog` only.** Made by the agent, from the Remove server precedent and G3.
 - **`CurrentChatPage`'s dead no-id create branch and pending pick are pruned; its picker and uncallable path stay.** Made by the agent, because the blank surface now owns a new chat with a callable bot.
+- **The current screen's configured-bot tests are migrated to chat-next, kept keyless only where the product still draws that path, or retired where a chat-next test already covers the behaviour — never kept reachable through a test-only seam.** Made by the user, approving the rule after step 3 showed the plan had scoped only `test-session-leave.tsx` for the current screen's test fallout.
 
 ## Risks
 
 - The blank surface could become a second composer; step 1 exists to close that. Its test must assert the draft survives the replace.
 - About 30 test files seed the old flags. `typecheck` finds the seeds, not an assertion that now passes for the wrong reason.
+- The current screen's configured-bot tests cannot reach it once the switch goes. Step 3 includes their migration, and a missed file is a red suite, not a silent pass; the full component suite must be run file by file because one invocation OOMs this sandbox.
 - A bot can lose its key between drawing the blank and sending, leaving an empty record and a stale handover.
 - The current screen's `configured` (address alone) and the verdict's `callable` (address plus key) still disagree for a bot with an address and no key; that bot keeps a composer that looks ready and fails on send. This is existing behaviour, not worsened.
 - The reference page becomes reachable only after five taps, because its menu row goes and the docs Group lives in Developer.

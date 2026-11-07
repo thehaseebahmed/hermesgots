@@ -35,7 +35,7 @@ import {
   warm,
 } from "./openui-kit.tsx"
 
-const bot = botProfile("openui")
+const bot = botProfile("openui", { apiKey: undefined })
 
 function host(transcript: unknown[] = []) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
