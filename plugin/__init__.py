@@ -36,7 +36,6 @@ from . import (
     cleanup,
     clones,
     closes,
-    commands,
     community,
     compactions,
     context,
@@ -46,8 +45,6 @@ from . import (
     dictations,
     meetings,
     events,
-    findings,
-    gate,
     general,
     github,
     host_model,
@@ -62,7 +59,6 @@ from . import (
     openui,
     outbox,
     pending,
-    pipeline,
     platform_gots,
     projects,
     progress,
@@ -392,10 +388,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     todo_tool = todos.wire(adapter)
     # The agent ships its own work; see ship.py.
     ship.wire(adapter)
-    # And it runs its build's gate on the host, not its own word for it; see gate.py.
-    gate.wire(adapter)
-    # A review reports what its skills found, so the sheet can count it; see findings.py.
-    findings.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
@@ -578,11 +570,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # only where a host says it holds more than one, so a host that predates picks
                     # shows the screen it always did (afk.py, ADR 0025).
                     "afk_picks",
-                    # Still advertised while the app draws a staged session's pipeline, which this
-                    # host answers from the task's workflow snapshot (`pipeline.for_app`): the pill
-                    # is drawn only where a host claims it, so dropping it here would take the
-                    # pipeline out of every app until #338 redraws it by workflow.
-                    "afk_pipeline",
                     "clarify",
                     "todo_tool",
                     "agents",
@@ -1657,11 +1644,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return await open_db() if callable(open_db) else None
 
     async def workspace_response(record: Dict[str, Any] | None):
-        if record is not None:
-            # The pill reads a session's pipeline the way it always has — the step the task is in,
-            # the skills each run was told, the gate's answer — whatever shape the task's own
-            # snapshot holds (``pipeline.for_app``, ADR 0018).
-            record = {**record, "pipeline": pipeline.for_app(record.get("pipeline"))}
         return web.json_response(
             {
                 "object": "gots.workspace",
@@ -3522,8 +3504,6 @@ def register(ctx) -> None:
         register_hook("post_api_request", progress.after_model_call)
         register_hook("pre_llm_call", progress.turn_started)
         register_hook("pre_tool_call", sessions.before_tool)
-        # What each run executed, kept on its stage for the details sheet; see commands.py.
-        register_hook("pre_tool_call", commands.before_tool)
         register_hook("pre_tool_call", research.before_tool)
         # A routine created in this chat names where it delivers, unless the model said so itself;
         # see platform_gots.py.
@@ -3569,8 +3549,6 @@ def register(ctx) -> None:
             description="hermes gots link <code> --site <url>, unlink or status",
         )
     ship.register(ctx)
-    gate.register(ctx)
-    findings.register(ctx)
     library.register(ctx)
     research.register(ctx)
     meetings.register(ctx)

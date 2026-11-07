@@ -7,9 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from plugin import pipeline, ship
+from plugin import ship
 from plugin.store import db_path
-from plugin.tests._helpers import preset, staged as staged_record
 
 
 def _record(tmp):
@@ -493,49 +492,8 @@ class RefusalTests(_Base):
         self.assertIn("ship", data["error"])
 
 
-class StageTests(_Base):
-    """Only the workflow's shipping stage may open the pull request, in either direction from it."""
-
-    def staged(self, stage: str) -> dict:
-        return {**_record(self.tmp), "pipeline": staged_record(stage)}
-
-    def test_a_build_cannot_ship(self) -> None:
-        answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.BUILD))
-        self.assertIn('"Build"', answer["error"], "the refusal names the stage it is in")
-        self.assertIn('"Review"', answer["error"], "and the one that ships")
-        self.assertIn("afk_gate", answer["error"])
-
-    def test_a_task_at_its_gate_cannot_ship_either(self) -> None:
-        answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.GATE))
-        self.assertIn('"Test"', answer["error"])
-
-    def test_a_stage_after_the_shipping_one_cannot_ship_either(self) -> None:
-        with patch("plugin.ship.ship", return_value=[]) as shipped:
-            answer = self._call({"action": "ship", "commit_message": "m"}, record=self.summary_record())
-        shipped.assert_not_called()
-        self.assertIn('"Summary"', answer["error"], "the stage it is in is named")
-        self.assertIn('"Review"', answer["error"], "and the one that already opened the draft")
-        self.assertIn("nothing left", answer["error"])
-
-    def summary_record(self) -> dict:
-        """A task in the stage after the one that ships, with a skill so that stage exists."""
-        record = pipeline.start(preset("preset:staged"))
-        record["stage"] = 3
-        record["stages"][3]["steps"] = ["weekly-review"]
-        record["stages"][3]["rounds"] = [pipeline.new_round()]
-        return {**_record(self.tmp), "pipeline": pipeline.read(record)}
-
-    def test_a_finished_task_cannot_ship(self) -> None:
-        answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.DONE))
-        self.assertIn("workflow has finished", answer["error"])
-
-    def test_the_shipping_stage_ships(self) -> None:
-        with patch("plugin.ship.ship", return_value=[]) as shipped:
-            answer = self._call(
-                {"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.CRITIQUE)
-            )
-        shipped.assert_called_once()
-        self.assertNotIn("error", answer)
+class ShipTests(_Base):
+    """A session that isn't AFK's ships as it always did, with no stage to answer to."""
 
     def test_a_session_that_is_not_staged_ships_as_it_always_did(self) -> None:
         with patch("plugin.ship.ship", return_value=[]) as shipped:
@@ -544,8 +502,8 @@ class StageTests(_Base):
 
     def test_the_build_can_still_ask_what_it_has(self) -> None:
         with patch("plugin.ship.status", return_value=[]):
-            answer = self._call({"action": "status"}, record=self.staged(pipeline.BUILD))
-        self.assertNotIn("error", answer, "status writes nothing, so a build may look")
+            answer = self._call({"action": "status"})
+        self.assertNotIn("error", answer, "status writes nothing, so a session may look")
 
 
 if __name__ == "__main__":

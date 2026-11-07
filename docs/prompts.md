@@ -13,9 +13,9 @@ Every prompt is told in the same parts, in the same order. `# You are Gots!` ope
 with an overview of what the bot is, then `## Do` and `## Don't` — the guidelines it works by, a line
 each — then `## Tools`, where every tool the run may use gets a line saying the use it is for
 (`library_add` for the files it makes, `pull_request` for shipping the work). Then comes the mode:
-`## Plan mode` for a planning session, `## Away From Keyboard` for an AFK run, with `## User's
-Workflow` beneath it. Last is `## Current Session`, with everything only this session knows: the
-issue or stage it works, its worktrees, its repos' pull request templates and the directory
+`## Plan mode` for a planning session, `## Away From Keyboard` for an AFK run, with `## The
+Project's Prompt` beneath it. Last is `## Current Session`, with everything only this session knows:
+the issue it works, its worktrees, its repos' pull request templates and the directory
 throwaway work goes in. The fixed sections come first so two runs share their opening (ADR 0028).
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for
@@ -212,7 +212,7 @@ For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/hermes/spry-thi
 
 ## An AFK run on the default Prompt
 
-A project that wrote no Prompt of its own: the base prompt, `## Away From Keyboard` with AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method every untouched project works by (ADR 0027).
+A project that wrote no Prompt of its own: the base prompt, `## Away From Keyboard` with AFK's fixed brief, then `## The Project's Prompt` holding ``DEFAULT_PROMPT`` — the method every untouched project works by (ADR 0027).
 
 ```text
 # You are Gots!
@@ -263,7 +263,7 @@ The rules:
 - Don't write a `Closes` line yourself: merging closes the issue, and merging is the user's.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request if you opened one, else in your reply.
 
-## User's Workflow
+## The Project's Prompt
 
 Work in checkpoints: small slices of the issue, one at a time; none is done until it has passed its checks.
 
@@ -319,7 +319,7 @@ For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/hermes/afk-265"
 
 ## An AFK run on a project's own Prompt
 
-The same run with the project's words under `## User's Workflow` where the default was, which is the one part of the method it can change.
+The same run with the project's words under `## The Project's Prompt` where the default was, which is the one part of the method it can change.
 
 ```text
 # You are Gots!
@@ -370,7 +370,7 @@ The rules:
 - Don't write a `Closes` line yourself: merging closes the issue, and merging is the user's.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request if you opened one, else in your reply.
 
-## User's Workflow
+## The Project's Prompt
 
 How we work here:
 

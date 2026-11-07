@@ -1,8 +1,7 @@
 """Generates docs/prompts.md: the prompts the plugin tells, so the words a run is injected with are
 readable without starting a session. Two families live in it — the ones a session is told, and the
-ones dictation sends to a model, to tidy what was heard and to spell what it will hear. The staged
-task's own briefs are left out: they are briefed for a workflow's stage and named under
-`## User's Workflow`. Run it from the repo root:
+ones dictation sends to a model, to tidy what was heard and to spell what it will hear. Run it from
+the repo root:
 
     python3 plugin/scripts/generate_prompts_doc.py
 
@@ -111,14 +110,14 @@ AFK_VARIANTS = [
     (
         "An AFK run on the default Prompt",
         "A project that wrote no Prompt of its own: the base prompt, `## Away From Keyboard` with "
-        "AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method "
+        "AFK's fixed brief, then `## The Project's Prompt` holding ``DEFAULT_PROMPT`` — the method "
         "every untouched project works by (ADR 0027).",
         prompt_builder.afk_prompt(AFK, TASK),
     ),
     (
         "An AFK run on a project's own Prompt",
-        "The same run with the project's words under `## User's Workflow` where the default was, "
-        "which is the one part of the method it can change.",
+        "The same run with the project's words under `## The Project's Prompt` where the default "
+        "was, which is the one part of the method it can change.",
         prompt_builder.afk_prompt(AFK, TASK, PROJECT_PROMPT),
     ),
 ]
@@ -232,9 +231,9 @@ Every prompt is told in the same parts, in the same order. `# You are Gots!` ope
 with an overview of what the bot is, then `## Do` and `## Don't` — the guidelines it works by, a line
 each — then `## Tools`, where every tool the run may use gets a line saying the use it is for
 (`library_add` for the files it makes, `pull_request` for shipping the work). Then comes the mode:
-`## Plan mode` for a planning session, `## Away From Keyboard` for an AFK run, with `## User's
-Workflow` beneath it. Last is `## Current Session`, with everything only this session knows: the
-issue or stage it works, its worktrees, its repos' pull request templates and the directory
+`## Plan mode` for a planning session, `## Away From Keyboard` for an AFK run, with `## The
+Project's Prompt` beneath it. Last is `## Current Session`, with everything only this session knows:
+the issue it works, its worktrees, its repos' pull request templates and the directory
 throwaway work goes in. The fixed sections come first so two runs share their opening (ADR 0028).
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for

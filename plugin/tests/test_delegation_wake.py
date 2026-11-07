@@ -265,24 +265,6 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(len(self.posted), 1)
 
-    def test_a_waiting_stages_children_are_dropped_not_held(self) -> None:
-        """A stage keeps its one run however its own session waits: the stage check runs before
-        the gate, so a stage parked on a question or an approval settles its children with why
-        instead of holding them every look forever."""
-        self.chat("stage")
-        self.adapter.run(
-            "run-1", "stage", "waiting_for_approval",
-            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
-        )
-        self.child("c1", "stage", said="a stage's subagent")
-        stages = mock.patch.object(delegation, "_stage", lambda home, session_id: True)
-        stages.start()
-        self.addCleanup(stages.stop)
-        self.assertEqual(self.sweep(), 0)
-        self.assertEqual(self.posted, [])
-        self.assertEqual(self.mark("c1")["status"], "dropped")
-        self.assertEqual(self.mark("c1")["reason"], "stage")
-
     def test_a_hold_keeps_the_parent_the_wake_hangs_off(self) -> None:
         """A mark's parent names the child's session; a hold on an already-marked member records
         the wait without renaming what it hangs off."""
@@ -293,18 +275,6 @@ class WakeTest(unittest.TestCase):
         (row,) = self.sql("SELECT parent_id, status FROM subagent_wakes WHERE subagent_id = 'c1'")
         self.assertEqual(row, ("s", "held"), "the hold must not rewrite the parent")
         self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
-
-    def test_a_stage_check_that_cannot_be_answered_settles_nothing(self) -> None:
-        """A stage reading that fails is not a stage: the child keeps its mark and the next look
-        judges it, so one storage blip can never drop every wake it holds."""
-        self.chat("s")
-        self.child("c1", "s", said="done")
-        with mock.patch.object(delegation, "_stage", return_value=None):
-            self.assertEqual(self.sweep(), 0)
-        self.assertEqual(self.posted, [])
-        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), set())
-        self.assertEqual(self.sweep(), 1, "the next look wakes it once the check answers")
-        self.assertEqual(self.posted[0]["key"], "wake_c1")
 
     def test_a_batches_text_froze_at_its_intent(self) -> None:
         """The retry re-posts the batch byte-for-byte under its own key, even after a member's row
@@ -461,28 +431,6 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 1)
         self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
         self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
-
-    def test_a_dropped_wake_does_not_occupy_a_page(self) -> None:
-        """A stage's child is dropped the moment it is read, so a page of them costs the walk
-        nothing and can never crowd out a child whose post failed."""
-        self.chat("s")
-        self.chat("stage")
-        self.child("c1", "s", said="the post for this one failed")
-        for i in range(delegation.WAKE_LIMIT):
-            self.child(f"staged-{i}", "stage", said="a stage's subagent")
-        stages = mock.patch.object(delegation, "_stage", lambda home, session_id: session_id == "stage")
-        stages.start()
-        self.addCleanup(stages.stop)
-        self.assertEqual(self.sweep(), 1)
-        self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
-        # Dropped once, with why: the next sweep reads them as settled and never re-reads them.
-        staged_ids = [f"staged-{i}" for i in range(delegation.WAKE_LIMIT)]
-        marks = self.marks(staged_ids)
-        self.assertEqual(len(marks), len(staged_ids))
-        self.assertEqual({one["status"] for one in marks.values()}, {"dropped"})
-        self.assertEqual({one["reason"] for one in marks.values()}, {delegation.DROP_STAGE})
-        self.assertEqual(self.sweep(), 0)
-        self.assertEqual(len(self.posted), 1)
 
     def test_no_wake_while_the_user_is_being_asked(self) -> None:
         self.chat("s")

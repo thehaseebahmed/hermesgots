@@ -19,14 +19,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List, Optional
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, patch
 
 from plugin import (
     afk,
     chats,
     github,
     outbox,
-    pipeline,
     projects,
     prompt_builder,
     sessions,
@@ -54,9 +53,6 @@ from plugin.store import connect, db_path, get_setting, put_setting
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
 from plugin.tests._helpers import (
     issue_row,
-    placed,
-    preset,
-    staged as staged_record,
     stub_projects_db,
     usage_window,
 )
@@ -394,8 +390,6 @@ def afk_row(
     refusal: Optional[str] = None,
     workflow: Any = None,
     prompt: Any = None,
-    stage: Optional[str] = None,
-    stage_name: Optional[str] = None,
     holds: Any = None,
     pick_count: int = 1,
     prompt_id: Optional[str] = None,
@@ -420,8 +414,6 @@ def afk_row(
         "pick_budget": pick_budget,
         "holds_held": holds_held,
         "usage_threshold": usage_threshold,
-        "stage": stage,
-        "stage_name": stage_name,
     }
 
 
@@ -462,8 +454,6 @@ class WorkflowChoiceTests(AfkHome):
         self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID)
         self.assertEqual(found["workflow"]["name"], "One run", "the shape a prompt run has")
         self.assertEqual([stage["name"] for stage in found["workflow"]["stages"]], ["Build"])
-        self.assertIsNone(found["stage"], "a prompt run is in no stage")
-        self.assertIsNone(found["stage_name"])
 
     def test_a_pick_the_library_lost_reads_one_run(self) -> None:
         self.choose()
@@ -560,7 +550,81 @@ class WorkflowChoiceTests(AfkHome):
         self.assertEqual(len(workflows.library(self.home)), 4, "three presets and the migration")
 
 
-class PromptTests(AfkHome):
+class StartHarness(AfkHome):
+    """A home that can start a claimed task: its session made, its run posted, both recorded.
+
+    The task, the record a start hands back and the seams a start crosses live here once, so a
+    class testing what a run is told shares them with the class testing what it settles.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.home.joinpath("projects.db").write_text("")
+        self.task = {
+            "repo": "mock-user/gots",
+            "number": 265,
+            "title": "The frontier is read from GitHub and listed",
+            "url": "https://github.com/mock-user/gots/issues/265",
+            "created_at": "2026-10-01T00:00:00Z",
+            "body": "Read the frontier first.\n\n- oldest first",
+        }
+        self.ensured: List[tuple] = []
+        self.posted: List[dict] = []
+        self.writes: List[tuple] = []
+        self.record = {
+            "session_id": "",
+            "project_id": "p1",
+            "mode": "auto",
+            "path": "/trees/quiet-marmot",
+            "branch": "hermes/quiet-marmot",
+            "repo_root": "/checkout",
+            "files_dir": "/checkout/files/quiet-marmot",
+            "plan_pending": False,
+            "repos": [
+                {
+                    "name": "mock-user/gots",
+                    "repo_root": "/checkout",
+                    "path": "/trees/quiet-marmot",
+                    "branch": "hermes/quiet-marmot",
+                }
+            ],
+        }
+        for one in (
+            patch.object(github, "login", return_value="gots-bot"),
+            patch.object(github, "_request", self.request),
+            patch("plugin.sessions.ensure", side_effect=self.ensure),
+            patch("plugin.sessions.apply_cwd"),
+            patch("plugin.outbox.post", side_effect=self.post),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def request(self, path: str, auth: Any, method: str = "GET", data: Any = None) -> Any:
+        self.writes.append((method, path, data))
+        return {}
+
+    def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
+        self.ensured.append((session_id, project_id, task, mode))
+        sessions._upsert(
+            path, session_id, str(project_id), self.record["repos"], mode, self.record["files_dir"]
+        )
+        return {**self.record, "session_id": session_id, "project_id": project_id, "mode": mode}
+
+    async def post(self, adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
+        self.posted.append({"profile": profile, "path": path, "body": body, **kwargs})
+        return {"run_id": "run-1"}
+
+    def adapter(self) -> SimpleNamespace:
+        return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
+
+    def start(self) -> None:
+        asyncio.run(afk.start(self.adapter(), self.home, "p1", self.task))
+
+    def chats(self) -> Dict[str, Any]:
+        return chats.read(db_path(self.home))
+
+
+class PromptTests(StartHarness):
     """The project's Prompt: how its AFK work is carried out, kept on the host with the project.
 
     It is told to a run beside AFK's fixed brief, so it is read off the project's row when the run is
@@ -741,7 +805,7 @@ class PromptTests(AfkHome):
     def test_a_stored_prompt_is_what_the_run_is_told(self) -> None:
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
         body = afk.run_body(
-            self.record(),
+            self.session_record(),
             {"repo": "mock-user/gots", "number": 265},
             "Squash every checkpoint into one commit.",
         )
@@ -752,7 +816,31 @@ class PromptTests(AfkHome):
             "the project's own words stand in for the default",
         )
 
-    def record(self) -> Dict[str, Any]:
+    def test_a_project_that_picked_a_workflow_works_one_run_told_its_prompt(self) -> None:
+        """A pick stages nothing: the task's whole work is one run told the project's Prompt.
+
+        Before the stage machine went, this project snapshotted its workflow onto the session and
+        was briefed for the build stage instead of being told its Prompt.
+        """
+        self.choose()
+        set_on(self.home, "p1", self.folders(), True)
+        afk._hold(self.home, "p1", self.task)
+        self.start()
+        self.assertEqual(len(self.posted), 1, "one run is the task's whole work")
+        record = sessions.read(db_path(self.home), self.ensured[0][0])
+        self.assertIsNone(record["pipeline"], "nothing is staged, so no snapshot is written")
+        instructions = self.posted[0]["body"]["instructions"]
+        self.assertIn("## The Project's Prompt", instructions, "the method is told in its own section")
+        self.assertIn(prompt_builder.DEFAULT_PROMPT, instructions, "the Prompt it works by")
+        self.assertNotIn("## User's Workflow", instructions, "no workflow word reaches a run")
+        self.assertLess(
+            instructions.index("the pull request ships last"),
+            instructions.index("## The Project's Prompt"),
+            "AFK's fixed points come first",
+        )
+        self.assertNotIn("This task is worked in", instructions, "no stage is briefed")
+
+    def session_record(self) -> Dict[str, Any]:
         """A session's record as the run's request reads it."""
         return {
             "session_id": "gots-afk-s1",
@@ -767,45 +855,6 @@ class PromptTests(AfkHome):
                 }
             ],
         }
-
-    def test_a_staged_tasks_first_run_opens_with_the_issue_too(self) -> None:
-        task = {
-            "repo": "mock-user/gots",
-            "number": 265,
-            "title": "It",
-            "url": "https://github.com/mock-user/gots/issues/265",
-            "body": "Read the frontier first.\n",
-        }
-        body = afk.run_body({**self.record(), "pipeline": staged_record(pipeline.BUILD)}, task, None)
-        self.assertEqual(
-            body["input"][0]["content"],
-            prompt_builder.afk_input(task),
-            "a staged task's first run is handed the issue like any other",
-        )
-        self.assertIn(
-            "in the message this session opened with",
-            body["instructions"],
-            "and told so, rather than sent to fetch what it was handed",
-        )
-
-    def test_a_later_stage_run_keeps_its_one_line_input(self) -> None:
-        task = {
-            "repo": "mock-user/gots",
-            "number": 265,
-            "title": "It",
-            "url": "https://github.com/mock-user/gots/issues/265",
-            "body": "Read the frontier first.\n",
-        }
-        body = afk.stage_body({**self.record(), "pipeline": staged_record(pipeline.CRITIQUE)}, task)
-        self.assertNotIn("Description:", body["input"][0]["content"])
-        self.assertNotIn(task["body"], body["input"][0]["content"])
-        self.assertTrue(
-            body["input"][0]["content"].endswith(f"({task['url']})"),
-            "one line naming the stage and the issue, as it always was",
-        )
-        self.assertIn(
-            "isn't repeated here", body["instructions"], "a later run has to read the issue itself"
-        )
 
 
 class WriteShapeTests(unittest.TestCase):
@@ -877,8 +926,8 @@ class ClaimStubTests(unittest.TestCase):
     def on(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
 
-    def sweep(self, skills: Any = None) -> None:
-        sweep(self.home, "p1", self.folders(), skills=skills)
+    def sweep(self) -> None:
+        sweep(self.home, "p1", self.folders())
 
     def shown(self) -> dict:
         """What the sheet reads after a sweep: the switch, the task held and the last refusal."""
@@ -938,7 +987,7 @@ class ClaimTests(ClaimStubTests):
         body = "## What to build\n\nOldest first.\n\n- one\n- two"
         self.on()
         self.issues = [issue_row(265, body=body)]
-        claimed = sweep(self.home, "p1", self.folders(), skills=None)
+        claimed = sweep(self.home, "p1", self.folders())
         self.assertEqual(
             claimed[0]["body"], body, "each task the sweep answers carries the issue's text"
         )
@@ -1154,11 +1203,9 @@ class PickCountTests(ClaimStubTests):
                 "title": "Task 265",
                 "url": "https://github.com/mock-user/gots/issues/265",
                 "created_at": "2026-10-01T00:00:00Z",
-                "stage": None,
-                "stage_name": None,
                 "stalled": None,
             },
-            "a hold is its task, the stage it is in, and why it stalled — all null before a start",
+            "a hold is its task and why it stalled — all null before a start",
         )
         self.assertEqual(
             shown["task"]["number"],
@@ -1204,45 +1251,6 @@ class PickCountTests(ClaimStubTests):
         self.assertEqual(self.shown()["pick_count"], 1)
         self.sweep()
         self.assertEqual(len(self.hold()), 3, "the next pass fills to the new count, not under it")
-
-    def test_the_read_asks_for_every_holds_stage_in_one_look(self) -> None:
-        """Three holds, one read of the session store, and each Working row draws its own stage."""
-        self.fill(3, [265, 266, 267])
-        repos = [
-            {
-                "name": "mock-user/gots",
-                "repo_root": str(self.checkout),
-                "path": f"/trees/afk-{number}",
-                "branch": f"hermes/afk-{number}",
-            }
-            for number in (265, 266)
-        ]
-        for number, kind in ((265, pipeline.BUILD), (266, pipeline.GATE_CHECK)):
-            session_id = f"gots-afk-{number}"
-            sessions._upsert(db_path(self.home), session_id, "p1", repos, "auto", None)
-            sessions.set_pipeline(db_path(self.home), session_id, staged_record(kind))
-        with patch.object(
-            sessions, "pipelines_of", wraps=sessions.pipelines_of
-        ) as pipelines_of:
-            shown = self.shown()
-        self.assertEqual(
-            pipelines_of.call_count, 1, "a project's holds are one read, not one connection each"
-        )
-        self.assertEqual(
-            sorted(pipelines_of.call_args.args[1]),
-            ["gots-afk-265", "gots-afk-266", "gots-afk-267"],
-            "one ask names every session holding a task",
-        )
-        self.assertEqual(
-            [(hold["stage"], hold["stage_name"]) for hold in shown["holds"]],
-            [
-                (pipeline.BUILD, "Build"),
-                (pipeline.GATE_CHECK, "Test"),
-                (None, None),
-            ],
-            "each hold answers its own session's stage, and a session with no stage answers none",
-        )
-        self.assertEqual(shown["stage"], pipeline.BUILD, "`stage` is still the oldest hold's")
 
     def test_a_stalled_hold_keeps_its_place_and_its_own_clock(self) -> None:
         self.fill(2, [265, 266])
@@ -1871,22 +1879,6 @@ class UsageThresholdTests(PickBudgetTests):
         )
         self.assertEqual(self.asks, [], "the account is not spent to say what the budget already says")
 
-    def test_a_skill_the_bot_has_lost_is_stated_ahead_of_the_account(self) -> None:
-        entry = workflows.create(
-            self.home, {"name": "Mine", "stages": workflows.from_skills(None, ["code-review"])}
-        )
-        set_workflow(self.home, "p1", entry["id"])
-        self.turn_on("p1", 1)
-        self.over(80)
-        self.ready()
-        self.assertEqual(sweep(self.home, "p1", self.folders("p1"), skills={"log-triage"}), [])
-        self.assertEqual(
-            self.shown("p1")["refusal"],
-            afk.MISSING_SKILL.format(name="code-review"),
-            "a broken pick is not hidden behind a temporary hold",
-        )
-        self.assertEqual(self.asks, [], "and the account read isn't spent to say it")
-
     def test_one_pass_over_two_projects_asks_the_account_once(self) -> None:
         self.turn_on("p1", 1)
         self.turn_on("p2", 1)
@@ -2396,7 +2388,12 @@ class StallTests(AfkSessionTests):
             "a session's worktrees come first, so a fresh claim hasn't stalled",
         )
 
-    def test_a_run_that_ended_is_reported_at_once(self) -> None:
+    def test_a_one_run_task_that_stopped_stalls(self) -> None:
+        """A one-run task's whole work is its run, so a run that stopped is what leaves it stalled.
+
+        This is the only way a task's run end is settled now: there is no stage to move on to, so a
+        stopped run records why nothing is working the task and a finished one frees the hold.
+        """
         self.aged(1)
         with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
             afk.after_run(session_id=self.SESSION, completed=False, failed=True)
@@ -2408,79 +2405,11 @@ class StallTests(AfkSessionTests):
         self.assertEqual(afk.stalled(self.home), {})
 
 
-class SessionTests(unittest.TestCase):
+class SessionTests(StartHarness):
     def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name)
-        self.home.joinpath("projects.db").write_text("")
-        (self.home / "checkout" / ".git").mkdir(parents=True)
-        self.task = {
-            "repo": "mock-user/gots",
-            "number": 265,
-            "title": "The frontier is read from GitHub and listed",
-            "url": "https://github.com/mock-user/gots/issues/265",
-            "created_at": "2026-10-01T00:00:00Z",
-            "body": "Read the frontier first.\n\n- oldest first",
-        }
-        self.ensured: List[tuple] = []
-        self.posted: List[dict] = []
-        self.writes: List[tuple] = []
-        self.record = {
-            "session_id": "",
-            "project_id": "p1",
-            "mode": "auto",
-            "path": "/trees/quiet-marmot",
-            "branch": "hermes/quiet-marmot",
-            "repo_root": "/checkout",
-            "files_dir": "/checkout/files/quiet-marmot",
-            "plan_pending": False,
-            "repos": [
-                {
-                    "name": "mock-user/gots",
-                    "repo_root": "/checkout",
-                    "path": "/trees/quiet-marmot",
-                    "branch": "hermes/quiet-marmot",
-                }
-            ],
-        }
-        for one in (
-            patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/gots"),
-            patch.object(github, "login", return_value="gots-bot"),
-            patch.object(github, "_request", self.request),
-            patch("plugin.sessions.ensure", side_effect=self.ensure),
-            patch("plugin.sessions.apply_cwd"),
-            patch("plugin.outbox.post", side_effect=self.post),
-        ):
-            one.start()
-            self.addCleanup(one.stop)
-        set_on(self.home, "p1", [folder(str(self.home / "checkout"))], True)
+        super().setUp()
+        set_on(self.home, "p1", self.folders(), True)
         afk._hold(self.home, "p1", self.task)
-
-    def request(self, path: str, auth: Any, method: str = "GET", data: Any = None) -> Any:
-        self.writes.append((method, path, data))
-        return {}
-
-    def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
-        self.ensured.append((session_id, project_id, task, mode))
-        sessions._upsert(
-            path, session_id, str(project_id), self.record["repos"], mode, self.record["files_dir"]
-        )
-        return {**self.record, "session_id": session_id, "project_id": project_id, "mode": mode}
-
-    async def post(self, adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
-        self.posted.append({"profile": profile, "path": path, "body": body, **kwargs})
-        return {"run_id": "run-1"}
-
-    def adapter(self) -> SimpleNamespace:
-        return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
-
-    def start(self) -> None:
-        asyncio.run(afk.start(self.adapter(), self.home, "p1", self.task))
-
-    def chats(self) -> Dict[str, Any]:
-        return chats.read(db_path(self.home))
 
     def test_the_session_is_made_with_a_worktree_of_its_own_in_auto(self) -> None:
         self.start()
@@ -2560,7 +2489,6 @@ class SessionTests(unittest.TestCase):
             "session_id": self.ensured[0][0],
             "project_id": "p1",
             "mode": "auto",
-            "pipeline": sessions.read(db_path(self.home), self.ensured[0][0])["pipeline"],
         }
         self.assertEqual(
             instructions,
@@ -2650,7 +2578,7 @@ class SessionTests(unittest.TestCase):
             "and its record keeps the pick its run went out on",
         )
 
-    def test_begin_hands_back_the_pin_beside_the_prompt_and_the_snapshot(self) -> None:
+    def test_begin_hands_back_the_pin_beside_the_prompt(self) -> None:
         """The pin comes out of ``_begin`` with the rest of what a start takes off the project.
 
         Held as a local in ``start`` — as it was — it had to survive two blocks that can give the
@@ -2661,12 +2589,11 @@ class SessionTests(unittest.TestCase):
             "read_main",
             return_value={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
         ):
-            began = afk._begin(self.home, db_path(self.home), "p1", "gots-afk-1")
+            began = afk._begin(self.home, "p1")
         self.assertEqual(
             began.pinned, {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}
         )
-        self.assertIn("snapshot", began._fields, "the snapshot's still here")
-        self.assertIn("prompt", began._fields, "and the Prompt")
+        self.assertEqual(began.prompt, None, "and the Prompt the project wrote, if any")
 
     def test_the_pin_is_read_once_for_the_run_and_the_record(self) -> None:
         """One read answers both, so the run and the record it publishes can never disagree."""
@@ -2756,69 +2683,13 @@ class SessionTests(unittest.TestCase):
                 patch.object(github, "_request", lambda *args, **kwargs: {}),
             ):
                 set_on(home, "p1", [folder(str(checkout))], True)
-                claimed = sweep(home, "p1", [folder(str(checkout))], skills=None)
+                claimed = sweep(home, "p1", [folder(str(checkout))])
                 self.assertEqual([task["number"] for task in claimed], [265])
                 self.assertEqual(
-                    sweep(home, "p1", [folder(str(checkout))], skills=None),
+                    sweep(home, "p1", [folder(str(checkout))]),
                     [],
                     "a project holding one is asked for nothing further",
                 )
-
-
-class StagedStartTests(SessionTests):
-    """A claimed task's session says which stage it starts in, written before its run is posted."""
-
-    def choose(self, name: str = "Mine", build: Optional[str] = None, steps=()) -> Dict[str, Any]:
-        """A workflow of this bot's own, and the project naming it."""
-        entry = workflows.create(
-            self.home, {"name": name, "stages": workflows.from_skills(build, steps)}
-        )
-        set_workflow(self.home, "p1", entry["id"])
-        return entry
-
-    def test_a_project_with_a_workflow_starts_a_staged_build(self) -> None:
-        self.choose(build="plan", steps=["code-review"])
-        self.start()
-        record = sessions.read(db_path(self.home), self.ensured[0][0])
-        staged = pipeline.read(record["pipeline"])
-        self.assertEqual(
-            pipeline.kind(staged), pipeline.BUILD, "the stage is recorded before the run"
-        )
-        self.assertEqual(pipeline.steps_of(staged), ["plan", "code-review"])
-        text = self.posted[0]["body"]["instructions"]
-        self.assertIn("Build stage", text, "and the build is told where it ends")
-        self.assertIn('skill_view(name="plan")', text, "and which skill governs it")
-
-    def test_a_project_that_picked_nothing_works_one_prompt_run(self) -> None:
-        self.start()
-        self.assertEqual(len(self.posted), 1, "one prompt run is the task's whole work")
-        record = sessions.read(db_path(self.home), self.ensured[0][0])
-        self.assertIsNone(
-            record["pipeline"], "a prompt run is no stage, so nothing is snapshotted"
-        )
-        text = self.posted[0]["body"]["instructions"]
-        self.assertIn("the pull request ships last", text, "the brief is AFK's, whatever a prompt says")
-        self.assertIn(
-            prompt_builder.DEFAULT_PROMPT, text, "the method is the Prompt the project works by"
-        )
-        self.assertNotIn("This task is worked in stages", text, "there is no stage to be told")
-        self.assertIn(
-            "**pull_request** — the only way work leaves this session",
-            text,
-            "the one run ships the draft itself",
-        )
-
-    def test_a_pick_the_library_lost_works_one_prompt_run(self) -> None:
-        self.choose()
-        lose_pick(self.home)
-        self.start()
-        record = sessions.read(db_path(self.home), self.ensured[0][0])
-        self.assertIsNone(record["pipeline"], "no workflow, so nothing is snapshotted")
-        self.assertIn(
-            prompt_builder.DEFAULT_PROMPT,
-            self.posted[0]["body"]["instructions"],
-            "and the run is told its Prompt instead",
-        )
 
 
 class SweepAllTests(unittest.TestCase):
@@ -2993,593 +2864,6 @@ class WakeTests(unittest.TestCase):
             afk.set_pick_count(home, "p1", 1)
             afk.set_pick_budget(home, 2)
         wake.assert_not_called()
-
-
-class StagedRunTests(AfkSessionTests):
-    """A staged task's run end: the gate's verdict, the stage it starts, and where it stalls."""
-
-    CLEAN = [{"name": "mock-user/gots", "changed": 0, "ahead": 2}]
-
-    def stage(self, kind: str = pipeline.BUILD, critique=("code-review",)) -> dict:
-        record = staged_record(kind, steps=tuple(critique))
-        sessions.set_pipeline(db_path(self.home), self.SESSION, record)
-        return record
-
-    def gated(self, *codes: int) -> dict:
-        record = self.stage()
-        staged = pipeline.gated(
-            record,
-            [{"command": f"step-{i}", "code": code} for i, code in enumerate(codes)],
-        )
-        sessions.set_pipeline(db_path(self.home), self.SESSION, staged)
-        return staged
-
-    def pipeline(self) -> Optional[dict]:
-        return pipeline.read(sessions.read(db_path(self.home), self.SESSION)["pipeline"])
-
-    SHIPPED = {"number": 265}
-
-    def ended(self, tree: Any = None, shipped: Any = SHIPPED, **kwargs: Any) -> Any:
-        """The run's end, with the worktree the host measured and GitHub's pull request answer."""
-        answer = (
-            patch("plugin.github.pull_request", side_effect=shipped)
-            if isinstance(shipped, Exception)
-            else patch("plugin.github.pull_request", return_value=shipped)
-        )
-        with patch.object(afk.ship, "status", return_value=self.CLEAN if tree is None else tree):
-            with patch.object(afk, "_start_stage") as started:
-                with answer:
-                    with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
-                        afk.after_run(session_id=self.SESSION, **kwargs)
-        return started
-
-    def test_one_run_gates_itself_and_is_let_go_when_it_has_shipped(self) -> None:
-        """One run's only stage is judged at its own end: it ships, and there is no stage after it."""
-        record = pipeline.start(preset("preset:one-run"))
-        sessions.set_pipeline(
-            db_path(self.home), self.SESSION, pipeline.gated(record, [{"command": "true", "code": 0}])
-        )
-        started = self.ended(completed=True)
-        started.assert_not_called()
-        self.assertIsNone(self.shown()["task"], "the workflow is over, so the hold goes")
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
-
-    def test_a_build_that_passed_its_gate_starts_its_next_stage_on_the_same_session(self) -> None:
-        self.gated(0, 0)
-        started = self.ended(completed=True)
-        started.assert_called_once()
-        home, record = started.call_args[0]
-        self.assertEqual(home, self.home)
-        self.assertEqual(record["session_id"], self.SESSION, "the same session, not another")
-        self.assertEqual(pipeline.kind(record["pipeline"]), pipeline.CRITIQUE)
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
-        self.assertEqual(self.shown()["task"], self.task, "the claim stays: the task isn't finished")
-        self.assertEqual(self.writes, [], "nothing is written to GitHub between the stages")
-
-    def test_a_gate_command_that_failed_stalls_the_task_with_the_command_named(self) -> None:
-        self.gated(0, 2)
-        started = self.ended(completed=True)
-        started.assert_not_called()
-        self.assertEqual(
-            afk.stalled(self.home)[self.SESSION]["reason"],
-            "The gate failed: step-1 exited 2.",
-            "the user is told what to run themselves",
-        )
-        self.assertEqual(self.shown()["task"], self.task, "the claim is kept for the user to look at")
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.GATE, "it is at the gate it failed")
-
-    def test_a_build_that_never_ran_the_gate_stalls(self) -> None:
-        self.stage()
-        started = self.ended(completed=True)
-        started.assert_not_called()
-        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.NO_GATE)
-
-    def test_a_tree_left_uncommitted_stalls(self) -> None:
-        self.gated(0)
-        started = self.ended(completed=True, tree=[{"changed": 2, "ahead": 0}])
-        started.assert_not_called()
-        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.UNCOMMITTED)
-
-    def test_a_build_that_left_no_commits_stalls(self) -> None:
-        self.gated(0)
-        # The session's worktree doesn't exist here, which is what no readable tree looks like too.
-        started = self.ended(completed=True, tree=[])
-        started.assert_not_called()
-        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.NO_COMMITS)
-
-    def test_a_review_that_finished_lets_go_of_the_task(self) -> None:
-        self.stage(pipeline.CRITIQUE)
-        with patch.object(afk, "wake") as wake:
-            self.ended(completed=True)
-        self.assertIsNone(self.shown()["task"], "the work is in review: the hold is what one task is")
-        self.assertEqual(self.writes, [], "its claim stays on GitHub")
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE, "and the record says how it ended")
-        wake.assert_called_once()
-
-    def test_a_workflow_whose_next_stage_is_a_build_starts_that_one(self) -> None:
-        record = pipeline.start(
-            {
-                "id": "wf-two-runs",
-                "name": "Build · Test · Polish · Review",
-                "stages": [
-                    {"name": "Build", "steps": ["plan"]},
-                    {"name": "Test", "steps": [], "check": workflows.GATE},
-                    {"name": "Polish", "steps": ["code-review"]},
-                    {"name": "Review", "steps": [], "ships": True},
-                ],
-            }
-        )
-        gated = pipeline.gated(record, [{"command": "true", "code": 0}])
-        sessions.set_pipeline(db_path(self.home), self.SESSION, gated)
-        started = self.ended(completed=True)
-        started.assert_called_once()
-        moved = started.call_args[0][1]["pipeline"]
-        self.assertEqual(pipeline.stage_name(moved), "Polish", "the workflow's own next stage")
-        self.assertEqual(self.shown()["task"], self.task, "the claim stays with it")
-
-    def test_a_review_that_ended_without_a_pull_request_stalls(self) -> None:
-        self.stage(pipeline.CRITIQUE)
-        with patch.object(afk, "wake"):
-            self.ended(completed=True, shipped=None)
-        self.assertEqual(
-            afk.stalled(self.home)[self.SESSION]["reason"],
-            afk.NO_PULL_REQUEST,
-            "a review that never opened one reviewed nothing the user can see",
-        )
-        self.assertEqual(self.shown()["task"], self.task, "so its claim is kept with it")
-        self.assertEqual(pipeline.reason(self.pipeline()), afk.NO_PULL_REQUEST)
-
-    def test_a_github_that_cannot_be_asked_does_not_stall_a_finished_review(self) -> None:
-        self.stage(pipeline.CRITIQUE)
-        with patch.object(afk, "wake"):
-            self.ended(completed=True, shipped=github.GitHubError("offline"))
-        self.assertIsNone(self.shown()["task"], "the run finished: nothing is stalled over a lookup")
-
-    def test_a_build_that_failed_keeps_its_stage_and_its_claim(self) -> None:
-        self.stage()
-        started = self.ended(completed=False, failed=True)
-        started.assert_not_called()
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.BUILD, "it stopped where it was building")
-        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.FAILED_RUN)
-        self.assertEqual(self.shown()["task"], self.task)
-
-    def test_a_review_that_failed_stalls_with_its_stage_kept(self) -> None:
-        self.stage(pipeline.CRITIQUE)
-        self.ended(completed=False, interrupted=True)
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
-        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.INTERRUPTED_RUN)
-
-    def test_a_prompt_run_is_the_whole_task_and_lets_go_of_it(self) -> None:
-        sessions.set_pipeline(db_path(self.home), self.SESSION, None)
-        started = self.ended(completed=True)
-        started.assert_not_called()
-        self.assertIsNone(self.shown()["task"], "one finished run is still the whole task")
-        self.assertIsNone(self.pipeline())
-
-    def test_a_held_task_keeps_the_snapshot_it_started_under(self) -> None:
-        """A project that picks nothing works one run from now on, but the task it already holds
-        keeps the stages it started under: the snapshot is on its own session's record."""
-        self.assertEqual(
-            self.shown()["workflow"]["id"],
-            workflows.DEFAULT_ID,
-            "the project reads as one run",
-        )
-        self.gated(0, 0)
-        started = self.ended(completed=True)
-        started.assert_called_once()
-        moved = started.call_args[0][1]["pipeline"]
-        self.assertEqual(pipeline.kind(moved), pipeline.CRITIQUE, "its next stage still runs")
-        self.assertEqual(len(pipeline.read(moved)["stages"]), 3, "the stages it started under")
-
-    def test_the_sheet_names_the_stage_the_task_is_in(self) -> None:
-        self.stage()
-        self.assertEqual(self.shown()["stage"], pipeline.BUILD)
-        self.stage(pipeline.GATE_CHECK)
-        self.assertEqual(self.shown()["stage"], pipeline.GATE_CHECK, "the gate stage is its own stage")
-
-    def test_the_sheet_names_no_stage_for_a_project_holding_nothing(self) -> None:
-        afk._free(self.home, "p1")
-        self.assertIsNone(self.shown()["stage"])
-
-    def test_the_stage_outlives_the_hold_on_the_session(self) -> None:
-        self.stage(pipeline.DONE)
-        afk._free(self.home, "p1")
-        self.assertEqual(
-            pipeline.kind(self.pipeline()),
-            pipeline.DONE,
-            "a finished task still says how it got there",
-        )
-
-
-class StagedFlowTests(AfkSessionTests):
-    """A task run through its workflow, one run's end at a time.
-
-    The runs are a fake API — each stage's request is kept and answered — and GitHub and the worktree
-    are fakes too, so what happens between the runs is the host's own record and nothing else.
-    """
-
-    CLEAN = [{"name": "mock-user/gots", "changed": 0, "ahead": 2}]
-    LOOP = preset("preset:loop")
-    BROKEN = [{"command": "pnpm test", "code": 1}]
-    PASSING = [{"command": "pnpm test", "code": 0}]
-    SHIPPED = {"number": 265}
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.posted: List[dict] = []
-
-    def start(self, workflow: Optional[dict] = None) -> dict:
-        record = pipeline.start(workflow or self.LOOP)
-        sessions.set_pipeline(db_path(self.home), self.SESSION, record)
-        return record
-
-    def gated(self, commands: List[dict]) -> dict:
-        """The stage's own run answering its gate, as the tool records it."""
-        record = pipeline.read(sessions.read(db_path(self.home), self.SESSION)["pipeline"])
-        staged = pipeline.gated(record, commands)
-        sessions.set_pipeline(db_path(self.home), self.SESSION, staged)
-        return staged
-
-    def ended(self, completed: bool = True, shipped: Any = SHIPPED) -> None:
-        """The run of the stage the task is in ending, and whatever it starts posted by the fake API."""
-
-        async def post(adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
-            self.posted.append(body)
-            return {"run_id": f"run-{len(self.posted)}"}
-
-        def schedule(coroutine: Any, loop: Any) -> None:
-            asyncio.run(coroutine)
-
-        with (
-            patch.object(afk.ship, "status", return_value=self.CLEAN),
-            patch("plugin.outbox.post", side_effect=post),
-            patch.object(afk.asyncio, "run_coroutine_threadsafe", side_effect=schedule),
-            patch.object(afk, "_loop", object()),
-            patch.object(afk, "base_branch", return_value="main"),
-            patch("plugin.github.pull_request", return_value=shipped),
-            patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)),
-        ):
-            afk.after_run(session_id=self.SESSION, completed=completed)
-
-    def pipeline(self) -> Optional[dict]:
-        return pipeline.read(sessions.read(db_path(self.home), self.SESSION)["pipeline"])
-
-    def test_a_failing_gate_repeats_the_build_told_what_failed_then_the_review_ships(self) -> None:
-        self.start()
-        self.gated(self.BROKEN)
-        self.ended()
-        self.assertEqual(len(self.posted), 1, "the loop posts its next round, and nothing else")
-        self.assertEqual(pipeline.stage_name(self.pipeline()), "Build")
-        self.assertEqual(self.pipeline()["round"], 2)
-        self.assertIn(
-            "pnpm test exited 1",
-            self.posted[0]["instructions"],
-            "round two is told the command that failed and its exit code",
-        )
-        self.gated(self.PASSING)
-        self.ended()
-        self.assertEqual(len(self.posted), 2, "the review is the next stage to run")
-        self.assertEqual(pipeline.stage_name(self.pipeline()), "Review")
-        self.assertEqual(
-            self.posted[1]["input"][0]["content"],
-            "Review #265 (https://github.com/mock-user/gots/issues/265)",
-        )
-        self.assertNotIn("The round before this one failed", self.posted[1]["instructions"])
-        self.ended()
-        self.assertIsNone(self.shown()["task"], "the task is in review: the hold goes")
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
-        self.assertEqual(len(self.posted), 2, "the checkpoint and the empty Summary posted nothing")
-
-    def test_the_flow_ends_in_a_summary_run_when_that_stage_names_a_skill(self) -> None:
-        """The chain's tail: the review ships the draft, then the wrap-up runs on the same session."""
-        workflow = preset("preset:loop")
-        workflow["stages"][3]["steps"] = ["weekly-review"]
-        self.start(workflow)
-        self.gated(self.PASSING)
-        self.ended()
-        self.assertEqual(pipeline.stage_name(self.pipeline()), "Review")
-        self.ended()
-        self.assertEqual(len(self.posted), 2, "the review posted nothing: its stage was already running")
-        self.assertEqual(pipeline.stage_name(self.pipeline()), "Summary")
-        self.assertEqual(
-            self.posted[1]["input"][0]["content"],
-            "Summary #265 (https://github.com/mock-user/gots/issues/265)",
-        )
-        self.assertIn("wrap-up", self.posted[1]["instructions"])
-        self.assertIn("weekly-review", self.posted[1]["instructions"], "the stage's own skill is named")
-        self.ended()
-        self.assertIsNone(self.shown()["task"])
-        self.assertEqual(len(self.posted), 2, "nothing runs after the last stage")
-
-    def test_a_checkpoint_posts_no_run_whatever_the_stage_before_it_did(self) -> None:
-        self.start()
-        self.gated(self.PASSING)
-        self.ended()
-        self.assertEqual(len(self.posted), 1)
-        self.assertEqual(
-            pipeline.stage_name(self.pipeline()),
-            "Review",
-            "the host answered the checkpoint from the build's own gate, and the next stage runs",
-        )
-
-    def test_a_loop_past_its_cap_stalls_naming_the_command_and_starts_nothing(self) -> None:
-        self.start()
-        for _ in range(3):
-            self.gated(self.BROKEN)
-            self.ended()
-        self.assertEqual(len(self.posted), 2, "three rounds ran, two of them posted here")
-        self.assertEqual(
-            afk.stalled(self.home)[self.SESSION]["reason"],
-            "The loop ran out of rounds (3) and the gate still failed: pnpm test exited 1.",
-        )
-        self.assertEqual(self.shown()["task"], self.task, "the claim is kept, as a failed gate keeps it")
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.GATE, "nothing after it starts")
-
-    def test_a_summary_with_a_skill_posts_a_run_and_an_empty_one_does_not(self) -> None:
-        for steps, expected in ((["weekly-review"], 1), ([], 0)):
-            with self.subTest(steps=steps):
-                record = placed(preset("preset:staged"), 2)
-                record["stages"][3]["steps"] = list(steps)
-                sessions.set_pipeline(db_path(self.home), self.SESSION, record)
-                self.posted.clear()
-                self.ended()
-                self.assertEqual(len(self.posted), expected)
-                if steps:
-                    self.assertEqual(
-                        self.posted[0]["input"][0]["content"],
-                        "Summary #265 (https://github.com/mock-user/gots/issues/265)",
-                    )
-                    self.assertIn("wrap-up", self.posted[0]["instructions"])
-
-    def test_a_summary_that_finished_ends_the_task(self) -> None:
-        record = placed(preset("preset:staged"), 3)
-        record["stages"][3]["steps"] = ["weekly-review"]
-        sessions.set_pipeline(db_path(self.home), self.SESSION, record)
-        with patch.object(afk, "wake") as wake:
-            self.ended()
-        self.assertIsNone(self.shown()["task"])
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
-        wake.assert_called_once()
-
-
-class StagedSweepTests(ClaimStubTests):
-    """A workflow naming a skill its bot no longer has: a refusal, no claim, the switch on."""
-
-    def choose(self, build: Optional[str] = None, steps=("code-review",)) -> Dict[str, Any]:
-        """A workflow naming those skills, and the project working under it."""
-        entry = workflows.create(
-            self.home, {"name": "Mine", "stages": workflows.from_skills(build, steps)}
-        )
-        set_workflow(self.home, "p1", entry["id"])
-        return entry
-
-    def test_a_missing_review_skill_claims_nothing_and_says_why(self) -> None:
-        self.on()
-        self.choose(steps=["code-review"])
-        self.issues = [issue_row(265)]
-        self.assertEqual(
-            sweep(self.home, "p1", self.folders(), skills={"log-triage"}),
-            [],
-            "nothing is claimed for a skill this bot can't run",
-        )
-        self.assertEqual(self.writes, [], "and nothing is touched on GitHub")
-        shown = self.shown()
-        self.assertEqual(shown["task"], None)
-        self.assertTrue(shown["on"], "the switch stays on, so the user sees what to fix")
-        self.assertEqual(shown["refusal"], afk.MISSING_SKILL.format(name="code-review"))
-
-    def test_a_missing_build_skill_is_the_same_refusal(self) -> None:
-        self.on()
-        self.choose(build="plan", steps=["code-review"])
-        self.issues = [issue_row(265)]
-        sweep(self.home, "p1", self.folders(), skills={"code-review"})
-        self.assertEqual(self.shown()["refusal"], afk.MISSING_SKILL.format(name="plan"))
-        self.assertIsNone(self.shown()["task"])
-
-    def test_a_workflow_the_bot_can_run_claims_as_usual(self) -> None:
-        self.on()
-        self.choose(build="plan", steps=["code-review"])
-        self.issues = [issue_row(265)]
-        claimed = sweep(self.home, "p1", self.folders(), skills={"plan", "code-review"})
-        self.assertEqual([task["number"] for task in claimed], [265])
-        self.assertIsNone(self.shown()["refusal"])
-
-    def test_a_workflow_naming_no_skill_claims_as_usual(self) -> None:
-        # The default preset names nothing, so no skill of the bot's can be missing from it.
-        self.on()
-        self.issues = [issue_row(265)]
-        claimed = sweep(self.home, "p1", self.folders(), skills={"code-review"})
-        self.assertEqual([task["number"] for task in claimed], [265])
-        self.assertIsNone(self.shown()["refusal"])
-
-    def test_a_project_whose_old_columns_named_a_skill_judges_that_skill(self) -> None:
-        # The sweep runs with the app closed, so a row from before the picker is migrated here too.
-        set_skill_columns(self.home, "p1", "plan", ["code-review"])
-        self.on()
-        self.issues = [issue_row(265)]
-        sweep(self.home, "p1", self.folders(), skills={"log-triage"})
-        self.assertEqual(self.shown()["refusal"], afk.MISSING_SKILL.format(name="plan"))
-        self.assertIsNone(self.shown()["task"])
-
-    def test_a_host_that_cannot_list_its_skills_judges_no_choice(self) -> None:
-        self.on()
-        self.choose(steps=["code-review"])
-        self.issues = [issue_row(265)]
-        claimed = sweep(self.home, "p1", self.folders(), skills=None)
-        self.assertEqual(
-            [task["number"] for task in claimed], [265], "a host that can't say isn't a host to refuse by"
-        )
-
-    def test_the_whole_sweep_reads_the_bots_skills_once(self) -> None:
-        self.on()
-        self.choose(steps=["code-review"])
-        self.issues = [issue_row(265)]
-        project = SimpleNamespace(folders=self.folders(), archived=False)
-        with patch.object(sessions, "projects", return_value={"p1": project}):
-            with patch.object(afk, "_profile_skills", return_value={"other"}) as read:
-                sweep_all(self.home)
-        read.assert_called_once()
-        self.assertEqual(self.shown()["refusal"], afk.MISSING_SKILL.format(name="code-review"))
-
-
-class StageRunTests(unittest.TestCase):
-    """A stage's run: the same session, briefed for the stage the task has moved to."""
-
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name)
-        self.task = {
-            "repo": "mock-user/gots",
-            "number": 265,
-            "title": "The frontier is read from GitHub and listed",
-            "url": "https://github.com/mock-user/gots/issues/265",
-        }
-        staged = staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage"))
-        self.record = {
-            "session_id": "gots-afk-review",
-            "project_id": "p1",
-            "mode": "auto",
-            "path": "/trees/afk-265",
-            "branch": "hermes/afk-265",
-            "repo_root": "/checkout",
-            "files_dir": "/checkout/files/afk-265",
-            "plan_pending": False,
-            "pipeline": staged,
-            "repos": [
-                {
-                    "name": "mock-user/gots",
-                    "repo_root": "/checkout",
-                    "path": "/trees/afk-265",
-                    "branch": "hermes/afk-265",
-                }
-            ],
-        }
-        self.posted: List[dict] = []
-        for one in (
-            patch("plugin.outbox.post", side_effect=self.post),
-            patch.object(afk, "base_branch", return_value="main"),
-        ):
-            one.start()
-            self.addCleanup(one.stop)
-
-    async def post(self, adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
-        self.posted.append({"profile": profile, "path": path, "body": body, **kwargs})
-        return {"run_id": "run-2"}
-
-    def adapter(self) -> SimpleNamespace:
-        return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
-
-    def hold(self) -> afk.Hold:
-        """The hold this stage's session works: its task, which the next run is briefed for."""
-        return afk.Hold("p1", self.task, self.record["session_id"], None, None, None)
-
-    def run_stage(self) -> dict:
-        asyncio.run(afk.work_stage(self.adapter(), self.home, self.record, self.task))
-        self.assertEqual(len(self.posted), 1, "one run per stage, not one per skill")
-        return self.posted[0]["body"]
-
-    def test_its_run_posts_while_the_bots_account_is_over_its_threshold(self) -> None:
-        """The stop is the pickup's: a task already claimed carries on through its stages (ADR 0026)."""
-        set_usage_threshold(self.home, 50)
-        # A count, not a raise: the account read swallows every exception into "no answer", so a fetch
-        # that only raised would leave a stage path free to consult the account and still post. The
-        # main model is named too, or the read would stop before the fetch and prove nothing.
-        asked = Mock(side_effect=AssertionError("a stage's run is no pickup: it never asks the account"))
-        for one in (
-            patch.object(afk.host_model, "read_main", return_value={"provider": "anthropic"}),
-            patch.object(afk.usage, "fetch", asked),
-        ):
-            one.start()
-            self.addCleanup(one.stop)
-        body = self.run_stage()
-        self.assertTrue(body["input"], "the stage's run is posted as it always was")
-        self.assertEqual(asked.call_count, 0, "and the account is never asked on the way")
-
-    def test_it_posts_the_stages_run_on_the_same_session(self) -> None:
-        # The session was published with the model it started on, and a stage is the same session:
-        # its run carries that pick, not whatever the profile's Default model is now.
-        chats.merge(
-            db_path(self.home),
-            {
-                self.record["session_id"]: {
-                    "at": 1,
-                    "value": {
-                        "hermesSessionId": self.record["session_id"],
-                        "modelChoice": {"provider": "deepseek", "model": "deepseek-v4-pro"},
-                    },
-                }
-            },
-        )
-        body = self.run_stage()
-        self.assertEqual(body["session_id"], self.record["session_id"])
-        self.assertEqual(self.posted[0]["path"], "/v1/runs")
-        self.assertEqual(
-            (body["provider"], body["model"]),
-            ("deepseek", "deepseek-v4-pro"),
-            "the stage keeps the model its session was pinned to",
-        )
-
-    def test_a_session_published_with_no_pick_posts_no_model(self) -> None:
-        self.assertNotIn("model", self.run_stage(), "a record that pins none leaves it to the host")
-
-    def test_its_input_is_one_line_naming_the_stage_and_the_issue(self) -> None:
-        body = self.run_stage()
-        self.assertEqual(
-            body["input"],
-            [{"role": "user", "content": "Review #265 (https://github.com/mock-user/gots/issues/265)"}],
-        )
-
-    def test_its_instructions_name_the_task_the_base_and_the_skills_in_order(self) -> None:
-        text = self.run_stage()["instructions"]
-        self.assertIn("mock-user/gots#265", text)
-        self.assertIn("base branch main", text, "the branch the pull request is against")
-        self.assertIn('"code-review", "log-triage"', text, "the stage's steps, in the order it applies them")
-        self.assertIn("Review stage", text)
-        self.assertIn("/trees/afk-265", text, "the worktree the review reads")
-        self.assertIn("action 'ship'", text, "the shipping stage opens the draft")
-        self.assertNotIn("delegate_task", text, "a stage's steps are lenses in one run, not delegates")
-
-    def test_a_stage_that_cannot_start_stalls_the_task(self) -> None:
-        outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
-        with (
-            patch.object(afk, "holding_project", return_value="p1"),
-            patch.object(afk, "_stall") as stall,
-        ):
-            asyncio.run(afk.work_stage(self.adapter(), self.home, self.record, self.task))
-        stall.assert_called_once_with(
-            self.home,
-            "p1",
-            self.task,
-            afk.STAGE_FAILED.format(name="Review"),
-            self.record["session_id"],
-        )
-
-    def test_the_hook_starts_it_on_the_loop_that_owns_the_runs(self) -> None:
-        loop = SimpleNamespace()
-        with (
-            patch.object(afk, "_hold_for_session", return_value=self.hold()),
-            patch.object(afk, "_loop", loop),
-            patch.object(afk.asyncio, "run_coroutine_threadsafe") as schedule,
-        ):
-            afk._start_stage(self.home, self.record)
-        schedule.assert_called_once()
-        coroutine, where = schedule.call_args[0]
-        self.assertIs(where, loop, "the loop that owns the runs is the one asked to post it")
-        self.assertEqual(coroutine.cr_code.co_name, "work_stage", "and it is the stage's run")
-        coroutine.close()  # the loop would await it; nothing here does
-
-    def test_a_host_with_no_loop_stalls_instead_of_dropping_the_task(self) -> None:
-        with (
-            patch.object(afk, "_hold_for_session", return_value=self.hold()),
-            patch.object(afk, "_loop", None),
-            patch.object(afk, "_stall") as stall,
-        ):
-            afk._start_stage(self.home, self.record)
-        self.assertEqual(self.posted, [], "nothing is posted off the loop")
-        stall.assert_called_once_with(
-            self.home, "p1", self.task, afk.STAGE_FAILED.format(name="Review")
-        )
 
 
 class MigrationTests(unittest.TestCase):

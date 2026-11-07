@@ -1,5 +1,5 @@
 """The workflow library: the presets every bot ships with, the rule over a whole workflow, forking a
-preset, refusing to delete one a project names, and the snapshot a task keeps of it.
+preset, and refusing to delete one a project names.
 
 A throwaway Hermes home, so the library is the store's: these read it back through the plugin's own
 calls, with no HTTP anywhere.
@@ -10,7 +10,6 @@ Run: python3 -m unittest plugin.tests.test_workflows -v
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 import unittest
 from pathlib import Path
@@ -19,7 +18,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import patch
 
-from plugin import pipeline, workflows
+from plugin import workflows
 from plugin.store import connect, db_path
 from plugin.tests._helpers import stub_projects_db
 
@@ -362,73 +361,6 @@ class MigrationTests(unittest.TestCase):
         found = workflows.migrate(self.home, "p1", None, ["code-review"])
         self.assertEqual(found["stages"][0]["steps"], [], "no build skill, and Build names nothing")
         self.assertEqual(found["stages"][2]["steps"], ["code-review"])
-
-
-class SnapshotTests(unittest.TestCase):
-    """A task keeps the workflow it started under, whatever the library does afterwards."""
-
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name)
-        self.home.joinpath("projects.db").write_text("")
-
-    def pick(self, project_id: str, workflow_id: str) -> None:
-        conn = connect(db_path(self.home))
-        try:
-            conn.execute(
-                """INSERT INTO project_afk (project_id, enabled, at, workflow_id) VALUES (?, 0, ?, ?)""",
-                (project_id, int(time.time()), workflow_id),
-            )
-        finally:
-            conn.close()
-
-    def test_the_snapshot_is_the_workflow_as_it_stood(self) -> None:
-        entry = workflows.create(
-            self.home, {"name": "Mine", "stages": workflows.from_skills("plan", ["code-review"])}
-        )
-        self.pick("p1", entry["id"])
-        snapshot = pipeline.start(workflows.pick(self.home, "p1"))
-        self.assertEqual(snapshot["workflow"]["name"], "Mine")
-        self.assertEqual(snapshot["stages"][0]["steps"], ["plan"])
-
-    def test_editing_the_entry_leaves_the_snapshot_alone(self) -> None:
-        entry = workflows.create(
-            self.home, {"name": "Mine", "stages": workflows.from_skills("plan", ["code-review"])}
-        )
-        self.pick("p1", entry["id"])
-        snapshot = pipeline.start(workflows.pick(self.home, "p1"))
-        workflows.update(
-            self.home,
-            entry["id"],
-            {"name": "Mine", "stages": [{"name": "Migrate", "steps": ["tdd"], "ships": True}]},
-        )
-        self.assertEqual(snapshot["stages"][0]["name"], "Build")
-        self.assertEqual(snapshot["stages"][0]["steps"], ["plan"])
-        self.assertEqual(len(snapshot["stages"]), 3)
-
-    def test_deleting_the_entry_leaves_the_snapshot_alone(self) -> None:
-        entry = workflows.create(
-            self.home, {"name": "Mine", "stages": workflows.from_skills("plan", ["code-review"])}
-        )
-        self.pick("p1", entry["id"])
-        snapshot = pipeline.start(workflows.pick(self.home, "p1"))
-        other = workflows.create(self.home, {"name": "Other", "stages": [{"name": "Only", "ships": True}]})
-        self.pick("p2", other["id"])
-        conn = connect(db_path(self.home))
-        try:
-            conn.execute("DELETE FROM project_afk WHERE project_id = 'p1'")
-        finally:
-            conn.close()
-        self.assertTrue(workflows.delete(self.home, entry["id"]))
-        self.assertEqual(snapshot["workflow"]["name"], "Mine")
-        self.assertEqual(snapshot["stages"][2]["steps"], ["code-review"])
-
-    def test_a_task_started_under_the_one_run_preset_keeps_its_shape(self) -> None:
-        snapshot = pipeline.start(workflows.pick(self.home, "p1"))
-        self.assertEqual(len(snapshot["stages"]), 1, "one run is one stage")
-        self.assertEqual(snapshot["workflow"]["id"], workflows.DEFAULT_ID)
-        self.assertTrue(snapshot["stages"][0]["ships"], "the only stage ships")
 
 
 if __name__ == "__main__":

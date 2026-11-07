@@ -160,6 +160,8 @@ flows and their audit rows; no message of either remains, so there is nothing to
      a stopped run so the stall path is pinned once `_stage_end` goes; then
      `python3 -m unittest discover -s plugin/tests -t .` and `test_prompts_doc` green.
 
+   Done.
+
 2. **The library is gone, and a project's row names no workflow.** Goals: G2 G4. After: 1.
    Layers: Plugin workflow library (deleted), AFK domain, HTTP API, sessions.
    - `workflows.py` and `test_workflows.py` go with the five `/workflows` routes and the

@@ -201,7 +201,7 @@ def authorization(home: Path) -> Optional[str]:
 
     Read from the home's own ``.env``, the same read ``record`` publishes a bot's key from, rather
     than through Hermes's credential helper: the plugin posts runs from the gateway's loop — a wake
-    or an AFK stage — where no request's profile scope is set, so the helper would answer the launch
+    or an AFK run — where no request's profile scope is set, so the helper would answer the launch
     profile's key for every home a multiplexed process serves.
     """
     key = env_value(home, "API_SERVER_KEY")

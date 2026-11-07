@@ -31,19 +31,12 @@ of a wake is a disposition in the plugin's own store, and each one is a bound:
   the post and again after it, since a wake is an ordinary run and may cross neither — or a post
   that failed, which costs one attempt and a wait that grows (``WAKE_BACKOFF_SECONDS``). Holding
   costs nothing: nothing was posted, so no attempt is spent.
-- dropped: never posted, and why. A workflow stage keeps its one run; the host refused permanently
-  (``gone``); the end is older than ``WAKE_MAX_AGE_MS`` (``stale``); it failed
-  ``WAKE_MAX_ATTEMPTS`` times (``exhausted``); or the child was stopped on purpose (``stopped``) —
-  the stop is the user's answer, and a wake turn behind it would start the chat again by itself
-  (ADR 0085). A drop is recorded once, at the drop, so a watcher that looks every 5 seconds never
-  says the same thing twice.
+- dropped: never posted, and why. The host refused permanently (``gone``); the end is older than
+  ``WAKE_MAX_AGE_MS`` (``stale``); it failed ``WAKE_MAX_ATTEMPTS`` times (``exhausted``); or the
+  child was stopped on purpose (``stopped``) — the stop is the user's answer, and a wake turn
+  behind it would start the chat again by itself (ADR 0085). A drop is recorded once, at the drop,
+  so a watcher that looks every 5 seconds never says the same thing twice.
 - sent: posted, and the gate after the post was still clear.
-
-A workflow stage is the exception: it keeps its one run, because the stage it moves to is posted on
-the same session by the gate that judged the run before it, so the posting path (``_wake_root``)
-itself settles a stage's subagent before any post — the stage's own gate waits for them instead
-(``afk.staged_session``). The drop lives at the one seam every wake goes through, so no second
-entry point can ever post a second run onto a stage.
 """
 
 from __future__ import annotations
@@ -87,7 +80,7 @@ WAKE_BATCH_MEMBERS = 50
 WAKE_MAX_ATTEMPTS = 8
 WAKE_BACKOFF_SECONDS = (5.0, 15.0, 45.0, 135.0, 405.0, 1215.0, 3645.0)
 WAKE_MAX_AGE_MS = 48 * 60 * 60 * 1000
-DROP_STAGE, DROP_GONE, DROP_STALE, DROP_EXHAUSTED = "stage", "gone", "stale", "exhausted"
+DROP_GONE, DROP_STALE, DROP_EXHAUSTED = "gone", "stale", "exhausted"
 DROP_STOPPED = "stopped"
 
 # Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
@@ -542,41 +535,16 @@ def waking_sessions(hermes_home: Path) -> Dict[str, int]:
     return found
 
 
-async def _wakeable(
-    home: Path, children: List[Dict[str, Any]]
-) -> Tuple[List[Dict[str, Any]], Dict[str, List[str]]]:
-    """The children that may wake their bot, grouped with the ones a stage owns its one run to.
-
-    A stage is asked once per conversation it hangs off — stage-ness is the parent's, not the
-    child's. A check that couldn't be answered settles nothing: the child keeps its mark for the
-    next look.
-    """
-    wakeable: List[Dict[str, Any]] = []
-    staged: Dict[str, List[str]] = {}
-    answers: Dict[str, Optional[bool]] = {}
-    for child in children:
-        parent = child["parent_id"]
-        if parent not in answers:
-            answers[parent] = await asyncio.to_thread(_stage, home, parent)
-        if answers[parent] is True:
-            staged.setdefault(parent, []).append(child["id"])
-        elif answers[parent] is None:
-            logger.debug("gots: %s's stage check couldn't be answered; it waits", child["id"])
-        else:
-            wakeable.append(child)
-    return wakeable, staged
-
-
 async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[str, Any]]) -> int:
     """Posts one run carrying every finished subagent of a conversation; 1 when it went.
 
     The only place a wake is posted, so every wake obeys the same rules however it arrives: the
-    gate before the post and again after it, a stage's one run, the batch's bounds. A wake is an
-    ordinary run of the conversation and may cross neither a confirmation gate nor a live turn.
+    gate before the post and again after it, the batch's bounds. A wake is an ordinary run of the
+    conversation and may cross neither a confirmation gate nor a live turn.
 
     The gate is asked before anything that costs more than ``gots.db`` — a conversation that
     waits on its user for hours holds its batch every look, and waiting must cost nothing beyond
-    the stage reads, which are store reads of their own and settle a stage's children outright.
+    one read of the store.
 
     A batch already stored for this conversation re-posts its own intent whole: the same key, the
     same text and the same model, so the host replays the run it may already have rather than
@@ -588,15 +556,7 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
     stored = await asyncio.to_thread(sessions.open_wake_batch, path, root)
     parent_id = children[0]["parent_id"] if children else root
     if not stored:
-        # Stage-ness before the gate: a stage keeps its one run however its own session waits —
-        # usually on the user — so its children settle with why here instead of holding every
-        # look forever. The check reads the store the gate reads; a batch already stored had
-        # every member judged a stage before its intent was written.
-        wakeable, staged = await _wakeable(home, children)
-        for stage_parent, ids in staged.items():
-            await asyncio.to_thread(sessions.drop_wakes, path, stage_parent, ids, DROP_STAGE)
-            logger.debug("gots: %s's completion doesn't wake it: a stage keeps its one run", root)
-        children = wakeable[:WAKE_BATCH_MEMBERS]
+        children = children[:WAKE_BATCH_MEMBERS]
         if not children:
             return 0
     held = await _deferred(adapter, home, root)
@@ -759,26 +719,6 @@ async def _deferred(adapter: Any, home: Path, root: str) -> Optional[str]:
     if runs:
         return "the conversation's turn is still running"
     return None
-
-
-def _stage(home: Path, session_id: str) -> Optional[bool]:
-    """Whether AFK is working a workflow stage on this session, so a completion must not wake it.
-
-    Asked of ``afk`` itself — the module that holds a stage and reads its snapshot — rather than
-    judged again here, so a stage is recognised by the same reading that decides whether it may move
-    on, and only one place has to know what a stage session is. Imported at the call, not at the
-    module's top, because ``afk`` reads this module's ``children``.
-
-    None is the third answer: neither stage nor ordinary conversation, because the read failed. The
-    caller leaves the child owed for the next look — one storage blip must never settle a wake.
-    """
-    from . import afk
-
-    try:
-        return afk.staged_session(home, session_id)
-    except Exception:
-        logger.debug("gots: couldn't tell whether %s is a stage", session_id, exc_info=True)
-        return None
 
 
 def _ending(

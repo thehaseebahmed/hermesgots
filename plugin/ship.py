@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import github, pipeline, projects, push, tools_common
+from . import github, projects, push, tools_common
 from .sessions import WorkspaceError, _git
 from .store import db_path
 
@@ -544,38 +544,6 @@ LEGACY_SCHEMA = {
 }
 
 
-def _staged_refusal(record: Dict[str, Any]) -> str:
-    """Why a run that isn't its workflow's shipping stage can't open the pull request.
-
-    Every other stage is named — the ones before the shipping stage and the ones after it — because
-    the rule is the workflow's, not the three stages AFK used to have: a build ends at the gate the
-    host runs, and a wrap-up runs when the draft is already open (ADR 0020).
-    """
-    name = pipeline.stage_name(record)
-    ship = pipeline.shipping_name(record) or ""
-    if name is None:
-        return (
-            "This task's workflow has finished, and its work is in the pull request it opened. "
-            "Don't call pull_request with 'ship' again."
-        )
-    if pipeline.kind(record) == pipeline.DONE:
-        return (
-            f'This session is in its "{name}" stage of a staged task, which runs after the stage '
-            f'that ships: "{ship}" has already opened the pull request, so there is nothing left '
-            f"for this stage to open. Change nothing and end this run, and don't call pull_request "
-            f"with 'ship' again."
-        )
-    gate = (
-        " Call afk_gate with the commands the work is checked by, then end this run."
-        if pipeline.gating(record)
-        else " End this run."
-    )
-    return (
-        f'This session is in its "{name}" stage of a staged task, so it can\'t ship: "{ship}" is '
-        f"the stage that opens the pull request.{gate} Don't call pull_request with 'ship' again."
-    )
-
-
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: ships the session the call belongs to (its task id is Gots's session id)."""
     from . import sessions
@@ -599,10 +567,6 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
         return json.dumps({"error": "This session has no worktree to ship."})
-    if action == "ship":
-        staged = pipeline.read(record.get("pipeline"))
-        if staged is not None and not pipeline.ships(staged):
-            return json.dumps({"error": _staged_refusal(staged)})
     try:
         if action == "status":
             return json.dumps({"results": status(record)})
