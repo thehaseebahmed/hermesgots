@@ -21,6 +21,7 @@ import {
   SlidersHorizontalIcon,
   TerminalIcon,
   DatabaseIcon,
+  EyeOffIcon,
   MenuIcon,
   MessagesSquareIcon,
   MessageSquareTextIcon,
@@ -669,6 +670,7 @@ export function DeveloperSettings() {
       {isNative && pushAvailable() && <TestPushRow />}
       <Group>
         <SyncServerRow />
+        <DeviceStateRow />
       </Group>
       <Group>
         <SwitchRow
@@ -693,10 +695,12 @@ export function DeveloperSettings() {
           <LiveRow key={bot.id} bot={bot} />
         ))}
       </Group>
-      <Group>
-        <DeviceStateRow />
-      </Group>
-      <Button variant="outline" onClick={() => saveSettings({ developer: false, netLog: false })}>
+      <Button
+        variant="ghost"
+        className="h-11 rounded-full"
+        onClick={() => saveSettings({ developer: false, netLog: false })}
+      >
+        <EyeOffIcon data-icon="inline-start" />
         Hide developer settings
       </Button>
     </>

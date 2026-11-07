@@ -149,6 +149,8 @@ sequenceDiagram
 
 5. **The Developer page's shape.** The hide control becomes ghost, `h-11`, `rounded-full`, with an `EyeOff` icon carrying `data-icon="inline-start"`, no destructive colour, same handler. Sync server and Device state become one Group, Sync server first. Goals: G3, G4. After: 2. Layer: Developer page. Check: `test-developer-sections.tsx` asserts the button's shape and that both rows share one group; Hide still writes only `developer` and `netLog`.
 
+   Done.
+
 6. **One docs Group in Developer.** `ReferenceRow` leaves the Settings menu. The Developer page renders a Group from a literal list of `/docs` entries — one today: Component reference, `/docs/open-ui`. The OpenUI page's back link goes to `/settings/developer`, labelled **Back to Developer**. Goals: G5, G6. After: 2. Layers: Developer page, Settings menu, Docs page. Check: `test-openui-reference.tsx`: `/settings` has no docs link, `/settings/developer` has one, it opens the page, and Back returns to Developer.
 
 7. **The browser flows and the audit speak the new vocabulary.** e2e seeds drop `botThreads` and `chatNext`; `wake-window`'s flip asserts `legacyChat`; `chat-message` is seeded to the legacy layout, or its row is rewritten to prove the blank surface; `bot-threads`, `sidebar-collapse`, `steer-offer`, archive, older and compaction seeds follow; the audit's `bot-threads` and `chat-message` rows say what the flows now do. No flow is added or retired, so the registry's counts stand. Goals: G1, G2. After: 2, 3, 4, 5, 6. Layer: e2e harness and flow audit. Check: `test-e2e-registry.mjs` green both sides, then `pnpm e2e chat-message bot-threads wake-window` green.
