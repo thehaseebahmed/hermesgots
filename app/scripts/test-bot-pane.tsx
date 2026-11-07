@@ -5,10 +5,9 @@ import { Link, MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
-import { sendMessage } from "@/lib/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { SPLIT_KEY } from "@/lib/split"
-import { handOver, lastThreadKey, rememberThread, takeHandover } from "@/lib/threads"
+import { lastThreadKey, rememberThread } from "@/lib/threads"
 import {
   atWidth,
   botProfile,
@@ -29,6 +28,7 @@ import {
   until,
 } from "./component-kit.tsx"
 import { FakeRecorder, dictationHost, installFakeMedia } from "./fake-dictation.ts"
+import { fakeHost } from "./chat-next-host.ts"
 
 const bot = botProfile("bot-pane", { id: "bot-1", name: "Mainly", apiKey: undefined })
 const other = botProfile("bot-other", { id: "bot-2", name: "Otherly" })
@@ -616,112 +616,60 @@ test(
   }),
 )
 
-/**
- * A run in flight over a thread a reader closes: the host's answer to the send, its live-runs ledger,
- * and one event stream the test pushes into, so what lands while the pane is away is the host's own
- * stream and not a row this test wrote into the store. Every request is recorded, which is what
- * "the close posted nothing to stop it" is read from — a silence proves nothing.
- */
-function liveRunInThread() {
-  const encoder = new TextEncoder()
-  const requests: { method: string; path: string }[] = []
-  let push = (_event: unknown) => {}
-  const events = new ReadableStream<Uint8Array>({
-    start(controller) {
-      push = (event) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
-    },
-  })
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    const method = (init?.method ?? "GET").toUpperCase()
-    requests.push({ method, path: url.pathname })
-    if (url.pathname.endsWith("/capabilities"))
-      return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: [] })
-    if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
-    // The host's own account of the run, which is what a card's spinner stands on: the pane being
-    // closed says nothing about it.
-    if (url.pathname.endsWith("/plugins/gots/runs/live"))
-      return json({ sessions: { "gots-t-a": "running" }, run_ids: { "gots-t-a": "run-1" } })
-    if (url.pathname.endsWith("/v1/runs/run-1/events"))
-      return new Response(events, { headers: { "content-type": "text/event-stream" } })
-    if (url.pathname.endsWith("/v1/runs/run-1"))
-      return json({ status: "running", created_at: 1, output: "", usage: {} })
-    if (url.pathname.endsWith("/v1/runs") && method === "POST") return json({ run_id: "run-1" })
-    return json({})
-  }) as typeof fetch
-  return { requests, push }
-}
-
-/**
- * The reply a run is writing in a thread: this device's own copy, which the screen being closed
- * neither finishes nor stops writing.
- */
-async function replyOf(thread: string) {
-  const rows = await db.messages.where("conversationId").equals(thread).toArray()
-  return rows.filter((row) => row.role === "assistant").at(-1)
-}
-
 test(
   "a thread closed while it streams keeps running, and its card in Main still spins",
   laptop(async () => {
     localStorage.clear()
-    await seed(["t-a"])
-    remembers("t-a")
-    const host = liveRunInThread()
-    await mount(screen(`/c/${MAIN}`), async () => {
-      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
-      // The send the thread's own composer makes, over a host that answers with a run.
-      void sendMessage("t-a", "Write the long answer").catch(() => undefined)
-      await until(
-        async () => host.requests.some((r) => r.method === "POST" && r.path.endsWith("/v1/runs")),
-        "the run's POST",
-      )
-      await until(
-        async () => host.requests.some((r) => r.path.endsWith("/v1/runs/run-1/events")),
-        "the run's events being followed",
-      )
-      await until(async () => (await replyOf("t-a"))?.status === "streaming", "the reply streaming")
+    await seed()
+    // The bot whose thread this is: a server to call and a key to call it with, so the thread is
+    // chat-next's and the run is the one its own screen starts and follows.
+    await db.conversations.put({
+      id: "t-s",
+      profileId: other.id,
+      title: "Thread t-s",
+      titleEdited: true,
+      hermesSessionId: "gots-t-s",
+      createdAt: 10,
+      updatedAt: 10,
+      changedAt: 10,
+    })
+    await db.messages.put({
+      id: "t-s-open",
+      conversationId: "t-s",
+      role: "user",
+      content: "Opened t-s",
+      status: "done",
+      createdAt: 11,
+    })
+    rememberThread(other.id, "t-s")
+    // The host the thread's send runs on: the run is its own, and its ledger is what a card's
+    // spinner stands on while nothing draws the thread.
+    const host = fakeHost("gots-t-s", { plugin: true })
+    await mount(screen(`/c/${mainThreadId(other.id)}`), async () => {
+      await until(async () => titles().join("|") === "Otherly|Thread t-s", "the thread beside Main")
+      await type(threadComposer(), "Write the long answer")
+      await click(find('[data-pane="thread"] button[aria-label="Send"]'))
+      await until(async () => host.asked.runs === 1, "the thread's turn posted")
+      host.latest.run.say("Thinking it over")
 
       // The reader puts the surface away mid-reply.
       await click(find('[aria-label="Close thread"]'))
-      await until(async () => titles().join("|") === "Mainly", "Main alone")
+      await until(async () => titles().join("|") === "Otherly", "Main alone")
 
-      assert.deepEqual(
-        host.requests.filter((r) => r.path.endsWith("/stop")),
-        [],
-        "nothing was posted to stop the run the reader put away",
-      )
-      assert.ok(
-        host.requests.some((r) => r.path.endsWith("/plugins/gots/runs/live")),
-        "the host still reports the run, which is what a card's spinner stands on",
-      )
-      assert.equal(
-        (await replyOf("t-a"))?.status,
-        "streaming",
-        "and this device's copy of the reply is still being written",
-      )
+      assert.equal(host.asked.stops, 0, "nothing was posted to stop the run the reader put away")
       await until(
-        async () => Boolean(find(`${threadCard("t-a")} [data-slot="spinner"]`)),
+        async () => Boolean(find(`${threadCard("t-s")} [data-slot="spinner"]`)),
         "the closed thread's card still spinning",
       )
 
-      // The run goes on at the host: a row lands while nothing draws the thread.
-      host.push({ event: "message.delta", delta: LANDED, seq: 1 })
-      await until(
-        async () => Boolean((await replyOf("t-a"))?.content.includes(LANDED)),
-        "the row to land in the thread's store",
-      )
+      // The run goes on at the host: its reply lands while nothing draws the thread.
+      host.latest.run.finish(LANDED)
 
-      // The thread again, from its card in Main.
-      await click(cardLink("t-a"))
-      await until(async () => path() === "/c/t-a", "the address to name the thread")
+      // The thread again, from its card in Main: the words the host wrote while it was away.
+      await click(cardLink("t-s"))
+      await until(async () => path() === "/c/t-s", "the address to name the thread")
       await until(async () => text().includes(LANDED), "the rows that landed while it was closed")
-      assert.deepEqual(
-        host.requests.filter((r) => r.path.endsWith("/stop")),
-        [],
-        "and opening it again posts no stop either",
-      )
+      assert.equal(host.asked.stops, 0, "and opening it again posts no stop either")
     })
   }),
 )
