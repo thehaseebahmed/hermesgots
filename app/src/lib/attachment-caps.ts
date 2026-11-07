@@ -38,16 +38,45 @@ export interface Intake<T extends CappedFile = CappedFile> {
 /** Whether a photo is read and scaled, rather than sent as the file it is. */
 export const isPhoto = (type: string) => PHOTO_TYPES.test(type)
 
+/** What a host answered about the plugin's upload route. */
+export type RouteAnswer = "unknown" | "yes" | "no"
+
 /**
  * Why Files isn't offered on a host that answered `answer` about the plugin's file route, or null
  * where it is. Every surface that takes a file says it in these words — the menu, and a paste or a
  * drop that arrives while the menu's Files is off.
  */
-export function filesReason(answer: "unknown" | "yes" | "no"): string | null {
+export function filesReason(answer: RouteAnswer): string | null {
   if (answer === "yes") return null
   return answer === "no"
     ? "File uploads need a newer Gots plugin."
     : "File uploads need the Gots plugin."
+}
+
+/** Where a pick travels: the bytes the model reads, the host's file route, or nowhere at all. */
+export type PickRoad = { road: "inline" } | { road: "file" } | { road: "none"; message: string }
+
+/**
+ * Which road a pick takes. A picture the model reads rides inline and needs no upload route; any
+ * other pick — a document, a clip, or a photo the model can't read — travels as the file it is,
+ * where the host has that route. A host that hasn't confirmed one carries neither, so the pick is
+ * refused in the sentence Files already gives, since it is the same missing capability.
+ */
+export function pickRoad({
+  picture,
+  readsImages,
+  route,
+}: {
+  /** Whether the pick is a picture this app would send as an image (`isPhoto`). */
+  picture: boolean
+  /** Whether the chosen model takes image input. */
+  readsImages: boolean
+  /** What the host answered about the plugin's upload route. */
+  route: RouteAnswer
+}): PickRoad {
+  if (picture && readsImages) return { road: "inline" }
+  const because = filesReason(route)
+  return because ? { road: "none", message: because } : { road: "file" }
 }
 
 export function formatBytes(bytes: number) {

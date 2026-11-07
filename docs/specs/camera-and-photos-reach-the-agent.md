@@ -135,7 +135,7 @@ sequenceDiagram
    step. Prepares: 3, 4, 6. After: none. Layers: the pure intake rule, composer/menu UI. Check:
    `test-attachment-caps.mjs` and `test-composer-intake.tsx` green before and after with every asserted
    outcome unchanged, plus one characterization case — "a pasted photo is refused where the host has no
-   upload route, in the same words" — pinning today's behaviour.
+   upload route, in the same words" — pinning today's behaviour. **Done.**
 3. **Preparatory refactor: the intake asks the road per file, and the upload path names its two questions.**
    `intake` and `prepareIntake` take the two facts (does the model read pictures, what the host answered) and
    ask the rule once per file, so the per-file cap exemption follows the road instead of a batch flag; the

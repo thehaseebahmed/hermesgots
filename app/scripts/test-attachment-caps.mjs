@@ -12,6 +12,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
   MAX_INLINE_BYTES,
+  pickRoad,
   sizeRefusal,
   unreadableRefusal,
 } from "../src/lib/attachment-caps.ts"
@@ -117,6 +118,53 @@ test("Files is refused in one sentence wherever a file can arrive", () => {
   assert.equal(filesReason("yes"), null, "a host that has the route explains nothing")
   assert.equal(filesReason("no"), "File uploads need a newer Gots plugin.")
   assert.equal(filesReason("unknown"), "File uploads need the Gots plugin.")
+})
+
+test("a photo the model reads rides inline, whatever the host says about its route", () => {
+  for (const route of ["yes", "unknown", "no"]) {
+    assert.deepEqual(
+      pickRoad({ picture: true, readsImages: true, route }),
+      { road: "inline" },
+      `the model's own bytes need no upload route (${route})`,
+    )
+  }
+})
+
+test("a photo for a model that takes no images takes the host's file route", () => {
+  assert.deepEqual(
+    pickRoad({ picture: true, readsImages: false, route: "yes" }),
+    { road: "file" },
+    "a picture the model can't read travels as the file Files already sends",
+  )
+})
+
+test("a photo for a model that takes no images is refused where the host has no route", () => {
+  assert.deepEqual(pickRoad({ picture: true, readsImages: false, route: "no" }), {
+    road: "none",
+    message: "File uploads need a newer Gots plugin.",
+  })
+  assert.deepEqual(pickRoad({ picture: true, readsImages: false, route: "unknown" }), {
+    road: "none",
+    message: "File uploads need the Gots plugin.",
+  })
+  assert.equal(
+    pickRoad({ picture: true, readsImages: false, route: "unknown" }).message,
+    filesReason("unknown"),
+    "a refused photo is refused in the words Files gives",
+  )
+})
+
+test("a pick that isn't a picture goes by the host's route, and nowhere without one", () => {
+  assert.deepEqual(pickRoad({ picture: false, readsImages: true, route: "yes" }), { road: "file" })
+  assert.deepEqual(pickRoad({ picture: false, readsImages: false, route: "yes" }), { road: "file" })
+  assert.deepEqual(pickRoad({ picture: false, readsImages: true, route: "no" }), {
+    road: "none",
+    message: "File uploads need a newer Gots plugin.",
+  })
+  assert.deepEqual(pickRoad({ picture: false, readsImages: true, route: "unknown" }), {
+    road: "none",
+    message: "File uploads need the Gots plugin.",
+  })
 })
 
 test("the host keeps the file the user chose, with the scaled copy as the model's part", () => {

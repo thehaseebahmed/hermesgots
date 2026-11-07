@@ -21,6 +21,7 @@ const bot = connection("composer-intake")
 function composer(
   sent: { text: string; attachments: Attachment[] }[],
   filesFeature: "unknown" | "yes" | "no" = "yes",
+  imagesAvailable = true,
 ) {
   return (
     <Composer
@@ -33,7 +34,7 @@ function composer(
       onCommand={() => {}}
       connection={bot}
       filesFeature={filesFeature}
-      imagesAvailable
+      imagesAvailable={imagesAvailable}
     />
   )
 }
@@ -157,6 +158,26 @@ test("a pasted file is refused where the menu's Files is off, in the menu's own 
       // A photo the model reads inline needs no upload route, so Photos stays allowed.
       await paste([new File(["png"], "cat.png", { type: "image/png", lastModified: 3 })])
       assert.deepEqual(tileNames(), ["cat.png"], "a photo still lands")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+test("a pasted photo is refused where the host has no upload route, in the same words", async () => {
+  const said: string[] = []
+  const original = toast.error
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    // A model that takes no images has no inline road, and this host has no file route either.
+    await mount(composer(sent, "no", false), async () => {
+      await paste([new File(["png"], "cat.png", { type: "image/png", lastModified: 6 })])
+      assert.deepEqual(said, ["File uploads need a newer Gots plugin."], "the route's own reason")
+      assert.deepEqual(tileNames(), [], "a picture nothing can carry never lands")
+      assert.deepEqual(sent, [])
     })
   } finally {
     toast.error = original
