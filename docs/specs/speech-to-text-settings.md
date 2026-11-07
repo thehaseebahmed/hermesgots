@@ -83,6 +83,11 @@ Where each setting sits, and why:
 - **Echo transcripts stays in General.** It echoes a gateway chat's voice note, so it is neither
   the local model's nor a cloud provider's.
 
+**Vocabulary** is a drill-in list of the bot's words: each row is the word over a button that
+removes it from the bot's record, and the header's **+** opens one sheet — a field and Add — which
+writes the word and closes, the way General's fallback providers are added. A bot holding no words
+reads as a line of muted text where the list would be, not a card with nothing inside it.
+
 **Providers** is a caption and a card on the page itself, not a screen: one row per provider the
 host declares except `local`, each the provider's name over the model it holds, marked *In use*
 where Hermes is using it and *Key not set* where the host holds no key for it. A row opens that

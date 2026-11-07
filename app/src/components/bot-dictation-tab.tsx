@@ -15,8 +15,10 @@ import {
   PickList,
   PickSurface,
   SwitchRow,
+  useHeaderAction,
   ValueRow,
 } from "@/components/settings-chrome"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -889,64 +891,127 @@ function LevelPick({
   )
 }
 
-/** The words this bot's speech leans towards: the list, with removing and adding in it. */
+/**
+ * The words this bot's speech leans towards: the list, each word removable where it sits, and the
+ * header's + to add one — the way General's fallbacks are added. A bot holding none reads as a line
+ * of text rather than a card with nothing in it.
+ */
 function VocabularyPage({ profile, words }: { profile: Profile; words: string[] }) {
-  const [draft, setDraft] = useState("")
+  const [adding, setAdding] = useState(false)
   const save = (next: string[]) => void updateProfile(profile.id, { vocabulary: next })
-  const ready = Boolean(cleanWord(draft))
+
+  // Adding is the screen's own action, in its header: a word is the page's content, not a setting
+  // among settings, so it isn't a row above the list.
+  useHeaderAction(
+    "add",
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label="Add a word"
+      title="Add a word"
+      data-vocabulary-add
+      onClick={() => setAdding(true)}
+    >
+      <PlusIcon />
+    </Button>,
+  )
 
   return (
     <div className="flex flex-col gap-4" data-vocabulary>
-      <Group>
-        {words.map((word) => (
-          <div key={word} className="flex items-center gap-1 bg-card">
-            <span className="min-w-0 flex-1 truncate px-5 py-3.5 text-base">{word}</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-lg"
-              className="mr-3 size-11 shrink-0"
-              aria-label={`Remove ${word}`}
-              onClick={() => save(removeWord(words, word))}
-            >
-              <XIcon />
-            </Button>
-          </div>
-        ))}
-        {!words.length && (
-          <p className="px-5 py-3.5 text-sm text-muted-foreground">No words yet.</p>
-        )}
-      </Group>
+      {words.length ? (
+        <Group>
+          {words.map((word) => (
+            <div key={word} className="flex items-center gap-1 bg-card">
+              <span className="min-w-0 flex-1 truncate px-5 py-3.5 text-base">{word}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                className="mr-3 size-11 shrink-0"
+                aria-label={`Remove ${word}`}
+                onClick={() => save(removeWord(words, word))}
+              >
+                <XIcon />
+              </Button>
+            </div>
+          ))}
+        </Group>
+      ) : (
+        <p className="px-5 py-8 text-center text-sm text-muted-foreground">No words yet.</p>
+      )}
 
-      {/* Adding is the one field here, and it lives on the screen itself, not inside a card. */}
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!ready) return
-          save(addWord(words, draft))
-          setDraft("")
-        }}
-      >
-        <Input
-          id="vocabulary-word"
-          className="h-11"
-          aria-label="Add a word"
-          autoComplete="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          enterKeyHint="done"
-          maxLength={MAX_WORD}
-          placeholder="A name or a word"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        <Button type="submit" variant="outline" className="h-11" disabled={!ready}>
-          <PlusIcon data-icon="inline-start" />
-          Add
-        </Button>
-      </form>
+      <AddWordSheet
+        open={adding}
+        onOpenChange={setAdding}
+        onAdd={(word) => save(addWord(words, word))}
+      />
     </div>
+  )
+}
+
+/**
+ * Adding a word, in the sheet the header's + opens: one field and Add, which writes the word into the
+ * bot's record and closes — as every other + in the settings does. Closing without writing adds
+ * nothing, and the sheet is blank again the next time it opens.
+ */
+function AddWordSheet({
+  open,
+  onOpenChange,
+  onAdd,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onAdd: (word: string) => void
+}) {
+  const [draft, setDraft] = useState("")
+  const ready = Boolean(cleanWord(draft))
+  return (
+    <Popup
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setDraft("")
+        onOpenChange(next)
+      }}
+    >
+      <PopupContent>
+        <PopupHeader>
+          <PopupTitle>Add a word</PopupTitle>
+        </PopupHeader>
+        <form
+          className="flex flex-col gap-4 px-4 pb-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!ready) return
+            onAdd(draft)
+            setDraft("")
+            onOpenChange(false)
+          }}
+        >
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="vocabulary-word" className={fieldLabelClass}>
+              Word
+            </Label>
+            <Input
+              id="vocabulary-word"
+              className={fieldInputClass}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              enterKeyHint="done"
+              maxLength={MAX_WORD}
+              placeholder="A name or a word"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </div>
+          <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
+            <PlusIcon data-icon="inline-start" />
+            Add
+          </Button>
+        </form>
+      </PopupContent>
+    </Popup>
   )
 }
 
