@@ -3,8 +3,8 @@
 import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
 const GUTTER = 16
-const COLUMN_PX = 736
-const BOX_PX = 768
+const COLUMN_PX = 640
+const BOX_PX = 672
 const TOLERANCE = 1
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
@@ -22,12 +22,22 @@ const facts = (page, selectors) =>
       const rect = el.getBoundingClientRect()
       return { width: Math.round(rect.width), left: Math.round(rect.left - origin) }
     }
+    // A reply's text, not the user's own bubble: a bubble is w-fit around its words, and this rule
+    // is about the reading column a reply stands on, which is the widest text block on the page.
+    const widest = (selector) => {
+      let best = null
+      for (const el of document.querySelectorAll(selector)) {
+        const rect = el.getBoundingClientRect()
+        if (!best || rect.width > best.width) best = { width: Math.round(rect.width), left: Math.round(rect.left - origin) }
+      }
+      return best
+    }
     return {
       pane: viewport.offsetWidth,
       thread: viewport.clientWidth,
       card: box(where.card),
       question: box(where.question),
-      text: box(where.text),
+      text: widest(where.text),
     }
   }, selectors)
 
