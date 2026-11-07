@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { listsAsChat, listsAsThread } from "../src/lib/lists-as-chat.ts"
@@ -37,5 +38,15 @@ test("a project session and Main are not listed as threads", () => {
 test("a thread is always a chat", () => {
   for (const { chat } of cases) {
     if (listsAsThread(chat)) assert.ok(listsAsChat(chat))
+  }
+})
+
+const shared = JSON.parse(
+  readFileSync(new URL("../../plugin/tests/thread-rule-cases.json", import.meta.url), "utf8"),
+)
+
+test("listsAsThread follows the table the plugin's is_plain_thread is held to", () => {
+  for (const { name, chat, app } of shared.cases) {
+    assert.equal(listsAsThread(chat), app, name)
   }
 })
