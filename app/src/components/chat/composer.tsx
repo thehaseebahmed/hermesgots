@@ -87,6 +87,15 @@ const STOP_ASKED_MS = 15_000
  */
 const STOP_SETTLED_MS = AGENT_WORK_MS
 
+/**
+ * Whether the Previewer is what a tap on a staged attachment opens: a file it can draw — a photo, a
+ * clip, a recording — whose bytes this device has, since a photo it can't decode is handed to the
+ * platform like a document is.
+ */
+const canPreview = (attachment: Attachment) =>
+  drawnCell(attachment.type, attachment.name) !== "file" &&
+  (!attachment.image || drawable(attachment))
+
 export function Composer({
   busy,
   subagentsRunning = 0,
@@ -450,7 +459,7 @@ export function Composer({
         name: attachment.name,
         type: attachment.type,
         size: attachment.size,
-        src: attachment.image && !drawable(attachment) ? undefined : attachmentUrl(attachment),
+        src: canPreview(attachment) ? attachmentUrl(attachment) : undefined,
         state: "ready",
       },
       { width: attachment.width, height: attachment.height },
@@ -461,10 +470,7 @@ export function Composer({
   // A tap that means "look at this" opens the screen's own Previewer, here as in the thread; a file
   // the Previewer can't draw is handed to the platform instead.
   const open = (attachment: Attachment) => {
-    const previews =
-      drawnCell(attachment.type, attachment.name) !== "file" &&
-      (!attachment.image || drawable(attachment))
-    if (!previews) {
+    if (!canPreview(attachment)) {
       void openAttachment(null, attachment)
       return
     }

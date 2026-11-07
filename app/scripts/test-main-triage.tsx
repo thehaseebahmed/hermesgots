@@ -6,11 +6,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { act } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
 import Dexie from "dexie"
 
 import { MovedMarker } from "@/components/chat/moved-marker"
+import { Composer } from "@/components/chat/composer"
 import {
   queueMessage,
   refreshQueue,
@@ -26,7 +28,18 @@ import type { Move } from "@/lib/hermes"
 import { moveMarks } from "@/lib/move-marks"
 import { refreshMoves, undoMove } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
-import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
+import {
+  botProfile,
+  click,
+  connection,
+  findAll,
+  json,
+  mount,
+  seedSettings,
+  settle,
+  type,
+  until,
+} from "./component-kit.tsx"
 
 const MAIN = mainThreadId("bot-1")
 const MAIN_SESSION = `gots-${MAIN}`
@@ -437,6 +450,69 @@ test("a photo that travels as a file says why it never reached the agent when th
   } finally {
     noUploadRoute.delete("route-photo-refused")
   }
+})
+
+/** The tiles the message carries, by name: each one's own Remove button. */
+const tileNames = () =>
+  findAll("[aria-label^='Remove ']").map((button) =>
+    button.getAttribute("aria-label")!.replace("Remove ", ""),
+  )
+
+/** A pick from the `+` menu's own Camera input, the way the browser hands one over. */
+async function pickCamera(file: File) {
+  const input = document.querySelector('input[name="camera"]')
+  assert.ok(input, "the menu's picker is on screen")
+  Object.defineProperty(input, "files", { value: [file], configurable: true })
+  await act(async () => {
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  await settle()
+}
+
+test("a photo picked for a model that reads no images reaches the agent as a path, never as bytes", async () => {
+  // The seam a pick crosses, end to end: the composer's `onSend`, the send to Main, the plugin's
+  // upload and the body the run is started with — where the composer's own test stops at the send.
+  await seed("route-blind-photo", { main: true, bot: { imageInput: false } })
+  uploads.length = 0
+  const seen = host("route-blind-photo", "stay")
+  const bot = (await db.profiles.get("bot-1"))!
+  await mount(
+    <Composer
+      busy={false}
+      connection={connection("route-blind-photo")}
+      filesFeature="yes"
+      imagesAvailable={bot.imageInput !== false}
+      onSend={(text, attachments) => sendFromMain(MAIN, text, attachments)}
+      onQueue={() => {}}
+      onStop={() => {}}
+      onCommand={() => {}}
+    />,
+    async () => {
+      await pickCamera(new File(["heic"], "IMG_0001.heic", { type: "image/heic", lastModified: 7 }))
+      assert.deepEqual(tileNames(), ["IMG_0001.heic"], "the pick lands on the message")
+      await type(document.querySelector("textarea"), "what is this?")
+      await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Send"))
+      await until(async () => runsFor(seen, MAIN_SESSION).length > 0, "the run to Main")
+
+      assert.deepEqual(uploads, ["IMG_0001.heic"], "the host was handed the photo itself")
+      assert.equal(triaged(seen).length, 1, "the confirmed route was the one the send asked")
+      const content = runsFor(seen, MAIN_SESSION)[0].body.input.at(-1).content
+      const parts = Array.isArray(content) ? content : [{ type: "text", text: content }]
+      assert.deepEqual(
+        parts.filter((part) => part.type !== "text"),
+        [],
+        "no image part for a model that can't read one",
+      )
+      const said = parts.map((part) => (part.type === "text" ? part.text : "")).join("\n")
+      assert.match(
+        said,
+        /<attachment name="IMG_0001\.heic" type="image\/heic" size="4" path="\/host\/IMG_0001\.heic" \/>/,
+        "the message names the copy the agent opens",
+      )
+      assert.match(said, /is not included in this message/, "and says the bytes stayed on the host")
+      assert.doesNotMatch(said, /\[screenshot\]/, "with no photo promised inline")
+    },
+  )
 })
 
 test("a move is read back from the host and leaves a marker, a stay leaves none", async () => {

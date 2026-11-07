@@ -9,8 +9,10 @@ A photo now has two roads, and a source is offered when either is open: the mode
 ride inline, or the plugin's route saves the file, so the bytes ride as a path the agent's own tools open. A
 photo the browser can decode is scaled to fit the 9 MB per-file cap rather than refused, because a camera
 photo is routinely past it and a vision tool reads a 1600px copy as well as the original. Where the host has
-answered that it has no route and the model reads no images, no road exists, and the sheet says so above the
-sources; while the answer is unknown, the sources are offered and the send is where a failure is spoken.
+answered that it has no route and the model reads no images, no road exists, and the sheet says so in one
+sentence under the sources, naming Files: a shut source with no reason is the thing this change exists to
+remove, so the sentence stands wherever Files is refused, and where nothing can reach it is the only sentence
+there. While the answer is unknown, the sources are offered and the send is where a failure is spoken.
 
 ## Considered options
 

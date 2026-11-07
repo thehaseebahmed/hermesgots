@@ -106,7 +106,7 @@ sequenceDiagram
   rect rgb(255, 245, 200)
   Sheet->>Rule: is Camera offered here, and a file?
   Rule-->>Sheet: neither — no images and no route
-  Sheet-->>User: all three off, with the one sentence above them
+  Sheet-->>User: all three off, with the one sentence under them
   end
 ```
 
@@ -163,11 +163,13 @@ sequenceDiagram
    attachments model. Check: "a photo over the file cap is taken on the file road too"
    (`test-attachment-caps.mjs`) and "a photo over nine megabytes is scaled to fit on the file road"
    (`test-composer-intake.tsx`) — red first. **Done.**
-6. **The sheet offers what can reach, and says why when nothing can.** The sheet asks the rule for each
+6. **The sheet offers what can reach, and says why Files is shut.** The sheet asks the rule for each
    source: Files follows today's gate (the route must be confirmed), Camera and Photos follow a picture's
    road — offered when the model reads images or the host hasn't refused, refused only where the host
-   answered `no` and the model takes no images — and the one sentence sits above them when nothing can
-   reach. Goals: G1, G3. After: 2, 3. Layers: composer/menu UI, the pure intake rule. Check:
+   answered `no` and the model takes no images. The one sentence sits under the sources and names Files,
+   so it stands whenever Files is refused — a shut source with no reason is the thing this sheet exists
+   to stop — and it is also the only sentence in the state where nothing can reach. Goals: G1, G3.
+   After: 2, 3. Layers: composer/menu UI, the pure intake rule. Check:
    `test-attach-menu.tsx` — "a model that takes no pictures still offers Camera and Photos" goes from
    disabled to offered, and "a host with no upload route refuses all three, with its reason" replaces
    "Camera is untouched" — red first. **Done.**
@@ -187,8 +189,9 @@ sequenceDiagram
   photo relies on the flag today: leaving the fold to a later change would replay existing photos as files.
 - **Files keeps its `yes`-only gate while Camera and Photos are offered at `unknown`.** Made by the agent,
   because Q2 names the two photo sources, and moving a document's gate was not asked for.
-- **Under `no`, all three sources are refused with the one sentence above them rather than left pressable.**
-  Made by the agent, because a sentence on screen is what keeps a refusal from being a dead button.
+- **Under `no`, all three sources are refused with the one sentence under them rather than left pressable.**
+  Made by the agent, because a sentence on screen is what keeps a refusal from being a dead button — and it
+  stands wherever Files is shut, the two states where the photo sources are still offered included.
 - **A refused photo reuses the sentence Files already gives.** Made by the agent, because it is the same
   missing capability and the words a refusal uses are written once.
 

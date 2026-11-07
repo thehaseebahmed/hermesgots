@@ -102,7 +102,7 @@ test("a host with no upload route refuses all three, with its reason", async () 
     assert.match(
       text(),
       /File uploads need a newer Gots plugin\./,
-      "in the one sentence above them",
+      "in the one sentence under the sources, naming Files",
     )
   })
 })

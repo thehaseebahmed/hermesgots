@@ -80,6 +80,17 @@ test("a photo sent beside a file still says the file's content is not inlined", 
   assert.ok(attachmentsText("", [photo(), file()]).endsWith(NOT_INLINED))
 })
 
+test("a picture carrying no part is named and its content not inlined, with no photo promised", () => {
+  // A blind model's photo on the file road: `image` says it is a picture, no part says the bytes
+  // stayed on the host — so the model is told what it is and where it lies, never that it can see it.
+  const onTheHost = photo({ inline: undefined })
+  assert.deepEqual(
+    attachmentsText("look at this", [onTheHost]).split("\n"),
+    ["look at this", marker(onTheHost), NOT_INLINED],
+    "its marker and the not-inlined sentence, and no [screenshot] line",
+  )
+})
+
 test("the wire carries a marker part per file, then the sentence", () => {
   const parts = attachmentParts("hi", [file()])
   assert.deepEqual(

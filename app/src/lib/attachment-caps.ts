@@ -68,8 +68,10 @@ export function pickRoad({
   readsImages,
   route,
 }: RoadFacts & { picture: boolean }): PickRoad {
+  // Only a host that answered `no` shuts the file road: an answer not read yet is not a no.
+  const answeredNo = route === "no"
   if (picture && readsImages) return { road: "inline" }
-  if (picture && route !== "no") return { road: "file" }
+  if (picture && !answeredNo) return { road: "file" }
   const because = filesReason(route)
   return because ? { road: "none", message: because } : { road: "file" }
 }
