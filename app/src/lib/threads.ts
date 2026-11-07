@@ -1,5 +1,5 @@
 import Dexie from "dexie"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
@@ -386,13 +386,23 @@ export function useRememberedThread(profileId: string | undefined): string | nul
   return profileId ? (all[profileId] ?? null) : null
 }
 
+/** What a bot's lane remembers and how many threads it has, read together for one answer. */
+export interface LastOpened {
+  /** The remembered thread, where it is still one of the bot's. */
+  last?: string
+  /** The id storage holds, whether or not the lane may reopen it. */
+  stored: string | null
+  /** How many threads the bot has at all. */
+  threads: number
+}
+
 /**
  * What a bot's third pane holds while the address is Main: the thread this device opened last for
  * that bot, the thread storage holds even where the pane refuses it, and how many threads the bot
  * has at all. A remembered thread that is gone, or is one of another bot's, is no thread of this
  * pane's — Main alone is better than the wrong chat.
  */
-export async function lastOpened(profileId: string) {
+export async function lastOpened(profileId: string): Promise<LastOpened> {
   const threads = await db.conversations
     .where("[profileId+updatedAt]")
     .between([profileId, -Infinity], [profileId, Infinity])
@@ -408,18 +418,42 @@ export async function lastOpened(profileId: string) {
 /** What a chat's row says about who owns it: its bot, and whether it is a project session. */
 type ChatOwner = Pick<Conversation, "profileId" | "projectId">
 
+/**
+ * What a bot's third pane is, as one answer: closed, so Main has the row's whole width; open at a
+ * thread; open for a bot with no thread yet, where it says so; or not answered, while the bot's
+ * thread list is still out — the lane then keeps the width and the content it had, so a switch
+ * from one bot to another never flashes Main wide and back.
+ */
+export type BotLane =
+  | { state: "closed" }
+  | { state: "thread"; thread: string }
+  | { state: "empty" }
+  | { state: "unknown" }
+
+/**
+ * Everything the shell draws a bot's lane from, asked once: which bot it is for, what the lane is
+ * and holds, and the two moves a later control makes without knowing the rule behind them.
+ */
 export interface BotPane {
   profileId: string
-  /** The thread the address itself is, when it is one of the bot's threads. */
-  thread?: string
-  /** The thread the third pane reopens while the address is Main: this bot's last one opened here. */
-  last?: string
-  /**
-   * Whether the bot has a thread at all, since a bot with none gets the pane's empty state. Absent
-   * while its thread list has not answered for this bot: an unanswered list is never read as no
-   * threads, so the pane holds what it had until the answer lands.
-   */
-  threads?: boolean
+  lane: BotLane
+  /** Puts the lane away and forgets this bot's thread, so the next visit opens Main alone. */
+  close: () => void
+  /** Puts back the thread this bot closed on this visit, where the lane is not already holding one. */
+  reopen: () => void
+}
+
+/**
+ * The lane from the thread the address is, this device's remembered one and the bot's count: the
+ * address's thread wins, a list still out is no answer at all rather than no threads, a remembered
+ * thread is the one the lane reopens, a bot with threads but none remembered is closed, and a bot
+ * with none keeps the lane to say so.
+ */
+function laneOf(thread: string | undefined, answer: LastOpened | undefined): BotLane {
+  if (thread) return { state: "thread", thread }
+  if (!answer) return { state: "unknown" }
+  if (answer.last) return { state: "thread", thread: answer.last }
+  return answer.threads > 0 ? { state: "closed" } : { state: "empty" }
 }
 
 /**
@@ -432,6 +466,11 @@ export interface BotPane {
  * What the pane holds beside Main is asked of the bot rather than of the address, so the address
  * moving between Main and a thread answers nothing again: the same chat stays drawn, and leaving a
  * thread leaves the one beside Main where it was.
+ *
+ * One answer for the shell, rather than a thread and an open flag it assembles again at every draw:
+ * `lane` says which of the four the pane is, and what it holds, and `close` and `reopen` are the
+ * moves a control makes without knowing the rule — a close forgets the thread, as the lane memory
+ * and the next visit both need.
  */
 export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const large = useXLarge()
@@ -477,6 +516,25 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   )
   // The answer names the bot it ran for, so one bot's answer can never pass for another's.
   const answer = kept && kept.profileId === profileId ? kept : undefined
+  // The one answer the shell draws from: which bot, and what its lane is and holds.
+  const lane = laneOf(thread, answer)
+  const shown = lane.state === "thread" ? lane.thread : undefined
+  // The thread this bot's lane closed on this visit, for `reopen`: one bot's at a time, so leaving
+  // the bot forgets it.
+  const closed = useRef<{ profileId: string; thread: string } | null>(null)
+  useEffect(() => {
+    if (closed.current && closed.current.profileId !== profileId) closed.current = null
+  }, [profileId])
+  const close = useCallback(() => {
+    if (!profileId || !shown) return
+    closed.current = { profileId, thread: shown }
+    rememberThread(profileId, null)
+  }, [profileId, shown])
+  const reopen = useCallback(() => {
+    if (!profileId || lane.state === "thread") return
+    const back = closed.current
+    if (back?.profileId === profileId) rememberThread(profileId, back.thread)
+  }, [profileId, lane.state])
   // Remembers the thread the address is, so the pane reopens it the next time the bot opens on Main.
   useEffect(() => {
     if (!profileId || !thread) return
@@ -484,8 +542,5 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   }, [profileId, thread])
 
   if (!large || !enabled || !profileId) return undefined
-  if (thread) return { profileId, thread, threads: true }
-  // Nothing remembered yet reads as no thread to show, never as a bot without threads; a list that
-  // has not answered is not a list of none.
-  return { profileId, last: answer?.last, threads: answer ? answer.threads > 0 : undefined }
+  return { profileId, lane, close, reopen }
 }

@@ -27,7 +27,7 @@ import {
   useResearchPane,
 } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
-import { useBotPane, useBotThreads } from "@/lib/threads"
+import { useBotPane, useBotThreads, type BotLane } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
 import { PaneTransition } from "@/components/pane-transition"
@@ -157,17 +157,16 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
  * once the bot's thread list has answered. Until then it draws nothing, never the previous bot's
  * thread.
  */
-function ThreadLane({ threads }: { threads?: boolean }) {
-  if (threads === false)
-    return (
-      <div
-        data-slot="bot-pane-empty"
-        className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
-      >
-        <p className="text-sm text-muted-foreground">No threads yet</p>
-      </div>
-    )
-  return null
+function ThreadLane({ lane }: { lane: BotLane }) {
+  if (lane.state !== "empty") return null
+  return (
+    <div
+      data-slot="bot-pane-empty"
+      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+    >
+      <p className="text-sm text-muted-foreground">No threads yet</p>
+    </div>
+  )
 }
 
 /**
@@ -231,19 +230,19 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Keyed by the conversation it shows, so the thread the address names and the one this device
   // remembers are one pane when they are one chat: naming it in the address, or leaving it for
   // Main again, doesn't remount it. Main is the pane and is never drawn twice, so this holds the
-  // address's thread, else the last opened, else nothing at all.
-  const shown = bot && (bot.thread ?? bot.last)
+  // thread the lane answers with, else nothing at all.
+  const lane = bot?.lane
+  const shown = lane?.state === "thread" ? lane.thread : undefined
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} slot="thread" />
   ) : bot ? (
-    <ThreadLane threads={bot.threads} />
+    <ThreadLane lane={bot.lane} />
   ) : undefined
   const pane: ListPane | undefined = bot
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
-        // Open while the bot has a thread to show, or while its thread list has yet to say it has
-        // none: a lane that closed and reopened would move Main twice for one switch.
-        open: Boolean(bot.thread || bot.last || bot.threads !== true),
+        // The lane says: open unless it is closed, so a switch never closes and reopens Main.
+        open: bot.lane.state !== "closed",
         // Main is told what the third pane holds, so its own flow can mark that thread open.
         node: (
           <ChatPage
