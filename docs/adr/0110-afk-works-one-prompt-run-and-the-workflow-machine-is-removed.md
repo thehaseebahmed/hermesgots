@@ -1,7 +1,7 @@
 # AFK works one prompt run, and the workflow machine is removed
 
-Status: accepted 2026-11-06. Lands with [the plan](../plans/2026-11-06-afk-one-run.md), which is the
-order the code goes in.
+Status: accepted 2026-11-06, and the code that lands with it is at
+[the plan](../plans/2026-11-06-afk-one-run.md).
 
 AFK Workflows grew a second machine beside AFK: a bot-held library of named workflows and presets, a
 picker behind a developer setting, a workflow's stages of steps, checkpoints and loops, a snapshot of

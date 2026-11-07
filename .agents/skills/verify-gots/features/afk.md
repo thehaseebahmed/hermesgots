@@ -14,19 +14,14 @@ with who has them, blocked ones naming their open blocker.
   setting back, not the device's (`afk-switch`).
 - `afk-switch-reasons` — where the switch can't be offered it shows off and disabled with the reason
   said once (no GitHub account; a plugin too old to switch) (`afk-switch-reasons`).
-- `afk-skills` — the pop-up picks one skill to build by and any number to critique, kept on the Host
-  apart from another project's (`afk-skills`).
 - `afk-prompt` — the Prompt row reads the words the runs are told and opens one writing sheet for
   them (`afk-prompt`).
 - `afk-claim` — turning a project on has the Host claim the oldest ready task: the pop-up names what
   AFK holds and the frontier no longer offers it (`afk-claim`).
-- `afk-stage` — the pop-up names the stage the held task is in, prefixed to its title (`afk-stage`).
 - `afk-session` — the claimed task is worked in a session of its own, marked AFK in Code
   (`afk-session`).
 - `afk-stalled` — a stalled session waits where the user finds it: the sidebar's `Waiting for input`
   and Code's `Waiting on you`, with the Host's reason under it (`afk-stalled`).
-- `pipeline-pill` — a staged session's pipeline is the first pill above the composer, with the sheet
-  naming what each stage ran (`pipeline-pill`).
 
 ## How to get to it (user POV)
 
@@ -42,8 +37,8 @@ Preconditions:
 - Baseline state (features/README.md). A project must be **cloned** before its screen offers the
   options menu: `makeProject(until, name)` creates one on the mock and waits for `status: "ready"`.
 - The mock answers `GET projects/{id}/tasks` with the frontier and `GET projects/{id}/afk` with the
-  switch and skills; `POST /__mock/afk` is the dev handle that stalls a held task at a stage and
-  writes a pipeline (`{ project_id, stage?, reason?, pipeline?, pr?, reset? }`).
+  switch and the holds; `POST /__mock/afk` is the dev handle that stalls a held task
+  (`{ project_id, reason?, reset? }`).
 
 - **Open the frontier.** From a cloned project's screen open `Project options`, then `AFK`. Run
   `pnpm e2e afk --shots "$GOTS_VERIFY_ARTIFACTS/<run-id>"` (from `app/`; `openAfk(page, screen)` is
@@ -57,18 +52,11 @@ Preconditions:
 - **Why not.** Run `pnpm e2e afk-switch-reasons`. A project with no GitHub account shows the switch
   off and disabled with the reason under it (said once, not repeated for the frontier); a plugin that
   lists tasks but never advertised `afk_switch` has no picker but still switches.
-- **Skills and Prompt.** Run `pnpm e2e afk-skills` and `pnpm e2e afk-prompt`. One build skill and
-  any number of critique skills come from the bot's own live list and survive a reload on the Host;
-  the Prompt row reads the words and `Done` writes them back (a Host that refuses leaves them as
-  typed).
+- **Prompt.** Run `pnpm e2e afk-prompt`. The Prompt row reads the words and `Done` writes them back
+  (a Host that refuses leaves them as typed).
 - **Claim.** Run `pnpm e2e afk-claim`. Turning the project on claims the oldest ready task — the
   pop-up names what AFK holds, the frontier no longer offers it, and a GitHub refusal leaves the
   switch on with its reason shown.
-- **Stage and pipeline.** Run `pnpm e2e afk-stage` and `pnpm e2e pipeline-pill`, driving the stage
-  with `POST /__mock/afk` (`say({ project_id, stage, ... })`). The pop-up prefixes the held task's
-  title with the stage's own name from its snapshot; the pipeline pill above the composer carries
-  three bars (green done, blue in, red failed, grey to come) and its sheet counts the stage out of
-  three and names what each step ran — still there after the task finishes.
 - **Session and stall.** Run `pnpm e2e afk-session` and `pnpm e2e afk-stalled`. The session opens
   from Code marked AFK with one line naming the task; a stalled one waits under `Waiting for input`
   and `Waiting on you` with the Host's reason under it.

@@ -22,7 +22,7 @@ import {
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
-const FEATURES = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt", "afk_picks"]
+const FEATURES = ["afk", "afk_switch", "afk_prompt", "afk_picks"]
 
 /** Three tasks held at once, the first two with a stage their own session is in. */
 const THREE: HoldRow[] = [

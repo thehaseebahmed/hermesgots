@@ -259,8 +259,11 @@ flows and their audit rows; no message of either remains, so there is nothing to
      loses its two rows for deleted flows; `docs/specs/afk-picks-and-prompt-library.md` gains one line
      saying the library it left alone was removed by ADR 0110.
    - Check: `git grep -nE 'afk_workflows|afk_pipeline|afk_skills|workflow_id|stage_name|afk_gate|afk_findings|PRESET_WORKFLOWS'`
-     answers nothing outside `docs/adr/` — red before, green after — and `test_prompts_doc` stays
+     answers nothing outside `docs/adr/`, `docs/plans/`, the store migration that drops the columns,
+     and the tests that pin their absence — red before, green after — and `test_prompts_doc` stays
      green.
+
+   Done.
 
 ## Decisions
 
