@@ -1,5 +1,7 @@
 # Generative apps: the built-ins
 
+**Superseded by [ADR 0113](../adr/0113-a-canvas-is-its-bots-record-edited-only-through-its-own-session.md)** (2026-11-07): Apps are replaced by canvases (#920), and the implementation this spec describes is gone.
+
 Status: settled by wayfinder map #810 — every decision below is one of its closed tickets, and this spec reopens none of them.
 
 ## Problem Statement
