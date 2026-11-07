@@ -54,24 +54,21 @@ async function settled(check: () => boolean, what: string) {
 }
 
 /**
- * A host that advertises the skill pickers too, so where they are drawn is the app's choice — on a
- * connection of its own, since what a connection answered is remembered for the page: on the shared
- * one, whichever test mounted first would decide whether the pickers were offered at all.
+ * A host that still advertises the library and the pickers — a plugin from before this one. Nothing
+ * it says brings either row back: the Prompt is how a project's work is carried out, and it is the
+ * one row drawn.
  */
 const WITH_SKILLS = ["afk", "afk_switch", "afk_skills", "afk_workflows", "afk_prompt"]
 const withSkills = connection("with-skills")
 
-test("the library on, no Prompt row", async () => {
+test("a host that still advertises the library and the pickers draws neither", async () => {
   await seedSettings({ developer: true, afkWorkflows: true })
   globalThis.fetch = afkHost({ features: WITH_SKILLS }).fetch as unknown as typeof fetch
   await mountAfk(withSkills, project, async () => {
-    assert.equal(row(), null, "a project running a workflow is told no Prompt")
-    assert.match(
-      find("[data-afk-workflow]")?.textContent ?? "",
-      /Build · Test · Review · Summary/,
-      "the Workflow row is the one it draws",
-    )
-    assert.ok(find("[data-afk-skills]"), "and the workflow's own skill pickers stay")
+    // Booleans, not nodes: a failing assertion must not print a whole DOM tree.
+    assert.equal(Boolean(find("[data-afk-workflow]")), false, "there is no Workflow row to draw")
+    assert.equal(Boolean(find("[data-afk-skills]")), false, "and no build or critique pickers")
+    assert.ok(row(), "the Prompt is the one row a project's method is told by")
   })
 })
 

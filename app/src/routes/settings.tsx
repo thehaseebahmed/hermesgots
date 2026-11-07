@@ -32,7 +32,6 @@ import {
   TelescopeIcon,
   TimerIcon,
   UserIcon,
-  WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -676,15 +675,6 @@ export function DeveloperSettings() {
           subtitle="Design only, with sample meetings"
           checked={Boolean(settings?.meetings)}
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}
-        />
-        <SwitchRow
-          id="afk-workflows"
-          icon={WorkflowIcon}
-          title="AFK Workflows"
-          experimental
-          subtitle="The workflow library in a project's AFK pop-up"
-          checked={Boolean(settings?.afkWorkflows)}
-          onCheckedChange={(checked) => saveSettings({ afkWorkflows: checked })}
         />
       </Group>
       {isNative && pushAvailable() && <TestPushRow />}

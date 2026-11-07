@@ -37,11 +37,11 @@
 // name like `fail` fails it) and POST …/repos/remove takes one out (2s); GET …/usage sums made-up
 // usage. GET projects/{id}/tasks answers the project's ready tasks (the frontier AFK works: ready
 // oldest first, claimed, blocked with the blocker) and 409s when the host has no GitHub account.
-// GET projects/{id}/afk answers AFK's switch and the skills its work follows (`build_skill`,
-// `critique_skills`), kept per project in this process the way the plugin keeps them in its store,
+// GET projects/{id}/afk answers AFK's switch, kept per project in this process the way the plugin
+// keeps it in its store,
 // and the Prompt its work is told (the project's own words, or the plugin's default method);
 // POST writes one of them — `{ on }` for the switch, the two skill names together for the pickers,
-// `{ workflow_id }` for a pick, `{ prompt }` for the Prompt, where a pick and a Prompt clear each
+// `{ prompt }` for the Prompt,
 // other.
 // While a repo is being added, a new session's workspace is refused, and a session whose repo
 // was removed is refused with the reason, which the workspace also reports as `blocked`.
@@ -138,14 +138,11 @@
 // notification as a turn of its own (#467, #471).
 // POST /api/plugins/gots/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
-// GET /api/plugins/gots/workflows lists the workflow library (presets first, read-only), POST
-// adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
-// one away; each answers the whole list. A project names the workflow its work runs under through
-// POST projects/{id}/afk { workflow_id }, and its answer carries that workflow; `{ prompt }` writes
-// the Prompt its runs are told instead, and `{ prompt, prompt_id }` writes it as a copy of a library
-// entry — the plain shape clears that source, as the entry a project picked goes when the user types
-// over it. `{ pick_count }` is how many tasks its AFK holds at once, and the answer names all of them
-// (oldest first) over the bot's own numbers: `pick_budget` and `holds_held`.
+// `{ prompt }` writes the Prompt a project's runs are told, and `{ prompt, prompt_id }` writes it as
+// a copy of a library entry — the plain shape clears that source, as the entry a project picked goes
+// when the user types over it. `{ pick_count }` is how many tasks its AFK holds at once, and the
+// answer names all of them (oldest first) over the bot's own numbers: `pick_budget` and
+// `holds_held`.
 // GET/POST /api/plugins/gots/afk is the bot's own row, naming no project: `{ pick_budget }` is
 // how many tasks its projects hold together, from one to ten.
 // POST /__mock/afk { project_id, reason?, reset? } is the dev handle on AFK's own records: it stalls
@@ -218,7 +215,6 @@ const transcripts = new Map()
 // again is taken at once (see "hold the start" at the top).
 const stalledStarts = new Set()
 let lastRowId = 0
-let lastWorkflowId = 0
 // Context compression rotates a chat to a child session (Hermes's sessions.parent_session_id): a
 // turn addressed to the old id runs on the live tip and is keyed there in runs/live, while a
 // transcript read of the old id still returns the whole lineage (resolve_resume_session_id +
@@ -245,10 +241,6 @@ const afkSwept = new Set()
 // The projects whose claimed task nothing is working any more: its run failed, or the host restarted
 // mid-run and adopted the session. A flow sets this to drive a stalled AFK session without a run.
 const afkStalled = new Map()
-// The skills each project's work follows, as the plugin's row keeps them and `afk.skills_from` reads
-// them: `build_skill` and `critique_skills`, written together.
-const afkSkills = new Map()
-const afkWorkflow = new Map()
 // The Prompt each project's work is told, as the plugin keeps it on the row (`afk.set_prompt`) and
 // serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
 // here: the app draws what it answers, in the row and in its editor).
@@ -266,58 +258,6 @@ let afkPickBudget = 5
 // The bot's usage threshold: the used share of its account at which AFK stops picking tasks up, 50
 // to 100, off (null) until it is set — one number for the bot, beside the budget (ADR 0026).
 let afkUsageThreshold = null
-// The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
-// read-only, and a write through the routes adds or rewrites one of the account's own rows.
-let workflowRows = []
-let seeded = false
-const PRESET_WORKFLOWS = [
-  {
-    id: "preset:one-run",
-    name: "One run",
-    preset: true,
-    at: 1,
-    stages: [{ name: "Build", steps: [], check: null, loop: null, ships: true }],
-  },
-  {
-    id: "preset:staged",
-    name: "Build · Test · Review · Summary",
-    preset: true,
-    at: 2,
-    stages: [
-      { name: "Build", steps: [], check: null, loop: null, ships: false },
-      { name: "Test", steps: [], check: "gate", loop: null, ships: false },
-      { name: "Review", steps: [], check: null, loop: null, ships: true },
-      { name: "Summary", steps: [], check: null, loop: null, ships: false },
-    ],
-  },
-  {
-    id: "preset:loop",
-    name: "Build ⇄ Test · Review · Summary",
-    preset: true,
-    at: 3,
-    stages: [
-      { name: "Build", steps: [], check: null, loop: null, ships: false },
-      { name: "Test", steps: [], check: "gate", loop: { from: "Build", cap: 3 }, ships: false },
-      { name: "Review", steps: [], check: null, loop: null, ships: true },
-      { name: "Summary", steps: [], check: null, loop: null, ships: false },
-    ],
-  },
-]
-const DEFAULT_WORKFLOW = "preset:staged"
-function workflows() {
-  if (!seeded) {
-    seeded = true
-    workflowRows = PRESET_WORKFLOWS.map((entry) => ({
-      ...entry,
-      stages: entry.stages.map((stage) => ({ ...stage })),
-    }))
-  }
-  return workflowRows
-}
-function workflowOf(projectId) {
-  const id = afkWorkflow.get(projectId) ?? DEFAULT_WORKFLOW
-  return workflows().find((entry) => entry.id === id) ?? workflows()[0]
-}
 const skillName = (value) => (typeof value === "string" && value.trim() ? value.trim() : null)
 const skillNames = (values) => [...new Set(values.map(skillName).filter(Boolean))]
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
@@ -1608,7 +1548,6 @@ function afkSweep(project) {
 /** AFK's answer for a project: its switch, the tasks it holds, and its last refusal (none mocked). */
 function afkAnswer(project, reason) {
   const on = afkProjects.has(project.id)
-  const skills = afkSkills.get(project.id) ?? { build_skill: null, critique_skills: [] }
   // Every task it holds, oldest first, with what the sheet reads off each: its stall belongs to the
   // session working that hold, and the mock keeps one session — the oldest hold's — so the ones
   // behind it have none.
@@ -1636,13 +1575,11 @@ function afkAnswer(project, reason) {
     pick_count: afkPickCount(project),
     prompt_id: afkPromptIds.get(project.id) ?? null,
     refusal: null,
-    workflow: workflowOf(project.id),
     prompt: afkPrompts.get(project.id) ?? MOCK_DEFAULT_PROMPT,
     // The bot's own two numbers, answered here so one read draws the sheet's budget line.
     pick_budget: afkPickBudget,
     holds_held: afkHeldCount(),
     usage_threshold: afkUsageThreshold,
-    ...skills,
   }
 }
 
@@ -4206,8 +4143,6 @@ http
           "stt_settings",
           "afk",
           "afk_switch",
-          "afk_skills",
-          "afk_workflows",
           "afk_prompt",
           "afk_picks",
           ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
@@ -4274,66 +4209,6 @@ http
       (await handleMeetings(req, res, url.pathname, { json, readBody, noteEvent }))
     )
       return
-    // The workflow library: presets first and read-only, the account's own rows rewritten in place.
-    // A write answers the whole list, which is what the sheet draws; an update of a preset forks it
-    // into a copy (`workflows.save`), since a preset's body belongs to the plugin's version.
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/workflows") {
-      if (req.method === "GET")
-        return json(res, 200, { object: "gots.workflows", workflows: workflows() })
-      if (req.method === "POST") {
-        const body = await readBody(req)
-        const name = skillName(body.name)
-        if (!name) return json(res, 400, { error: { message: "A workflow needs a name." } })
-        if (!Array.isArray(body.stages) || !body.stages.length)
-          return json(res, 400, { error: { message: "A workflow needs at least one stage." } })
-        const entry = {
-          id: `wf-${++lastWorkflowId}`,
-          name,
-          preset: false,
-          at: Date.now(),
-          stages: body.stages,
-        }
-        workflows().push(entry)
-        noteEvent("workflows")
-        return json(res, 200, { object: "gots.workflows", workflows: workflows() })
-      }
-      return json(res, 405, { error: { message: "That method isn't routed." } })
-    }
-    const workflowRoute = /^\/api\/plugins\/gots\/workflows\/([^/]+)$/.exec(url.pathname)
-    if (PLUGIN && !profile && workflowRoute) {
-      const id = decodeURIComponent(workflowRoute[1])
-      const found = workflows().find((entry) => entry.id === id)
-      if (!found) return json(res, 404, { error: { message: "No such workflow." } })
-      if (req.method === "POST") {
-        const body = await readBody(req)
-        const name = skillName(body.name)
-        if (!name) return json(res, 400, { error: { message: "A workflow needs a name." } })
-        const stages = Array.isArray(body.stages) ? body.stages : found.stages
-        // A preset is the plugin's own row: saving it makes a copy, and the copy is the account's.
-        if (found.preset) {
-          const copy = { id: `wf-${++lastWorkflowId}`, name, preset: false, at: Date.now(), stages }
-          workflows().push(copy)
-          for (const [projectId, chosen] of afkWorkflow)
-            if (chosen === found.id) afkWorkflow.set(projectId, copy.id)
-        } else {
-          found.name = name
-          found.stages = stages
-          found.at = Date.now()
-        }
-        noteEvent("workflows")
-        return json(res, 200, { object: "gots.workflows", workflows: workflows() })
-      }
-      if (req.method === "DELETE") {
-        if (found.preset)
-          return json(res, 400, { error: { message: "A preset can't be deleted." } })
-        workflowRows = workflows().filter((entry) => entry.id !== id)
-        for (const [projectId, chosen] of afkWorkflow)
-          if (chosen === id) afkWorkflow.delete(projectId)
-        noteEvent("workflows")
-        return json(res, 200, { object: "gots.workflows", workflows: workflows() })
-      }
-      return json(res, 405, { error: { message: "That method isn't routed." } })
-    }
     if (PLUGIN && SKILLS && !profile && url.pathname === "/api/plugins/gots/skills") {
       if (req.method === "GET") return json(res, 200, { object: "list", data: skillRows() })
       return json(res, 405, { error: { message: "That method isn't routed." } })
@@ -5094,26 +4969,24 @@ http
       if (req.method === "POST") {
         const body = await readBody(req)
         const switching = "on" in body
-        const choosing = "build_skill" in body || "critique_skills" in body
-        const picking = "workflow_id" in body
         const prompting = "prompt" in body
         const counting = "pick_count" in body
         // A source is no shape of its own: an id without words names nothing to write
         // (`afk.write_from`).
         if ("prompt_id" in body && !prompting)
           return json(res, 400, { error: { message: "prompt_id needs a prompt beside it." } })
-        if (!switching && !choosing && !picking && !prompting && !counting)
+        if (!switching && !prompting && !counting)
           return json(res, 400, {
             error: {
-              message: "on, workflow_id, prompt or pick_count is needed.",
+              message: "on, prompt or pick_count is needed.",
             },
           })
         // One write, one shape: the switch wakes the sweep, so a body naming two could write one and
         // be refused, leaving half of it written (`afk.write_from`).
-        if ([switching, choosing, picking, prompting, counting].filter(Boolean).length > 1)
+        if ([switching, prompting, counting].filter(Boolean).length > 1)
           return json(res, 400, {
             error: {
-              message: "A write names one of on, workflow_id, prompt or pick_count.",
+              message: "A write names one of on, prompt or pick_count.",
             },
           })
         if (switching && typeof body.on !== "boolean")
@@ -5127,27 +5000,6 @@ http
           // No hold is abandoned by a count going down (`afk.set_pick_count`); the next sweep fills
           // to whatever it now is, which is why this only writes the number.
           afkPickCounts.set(found.id, count)
-        }
-        if (choosing) {
-          if (!("build_skill" in body) || !("critique_skills" in body))
-            return json(res, 400, {
-              error: { message: "A skills write names build_skill and critique_skills." },
-            })
-          if (body.build_skill !== null && typeof body.build_skill !== "string")
-            return json(res, 400, {
-              error: { message: "build_skill must be a skill's name or null." },
-            })
-          if (
-            !Array.isArray(body.critique_skills) ||
-            !body.critique_skills.every((name) => typeof name === "string")
-          )
-            return json(res, 400, {
-              error: { message: "critique_skills must be a list of skill names." },
-            })
-          afkSkills.set(found.id, {
-            build_skill: skillName(body.build_skill),
-            critique_skills: skillNames(body.critique_skills),
-          })
         }
         if (prompting) {
           if (body.prompt !== null && typeof body.prompt !== "string")
@@ -5168,22 +5020,6 @@ http
           else afkPrompts.delete(found.id)
           if (text && source) afkPromptIds.set(found.id, source)
           else afkPromptIds.delete(found.id)
-          // A Prompt and a pick are one choice between them (`afk.set_prompt`).
-          afkWorkflow.delete(found.id)
-        }
-        if (picking) {
-          const id = skillName(body.workflow_id)
-          if (!id)
-            return json(res, 400, { error: { message: "workflow_id must be a workflow's id." } })
-          if (!workflows().some((entry) => entry.id === id))
-            return json(res, 400, {
-              error: { message: `There is no workflow "${id}" in this bot's library.` },
-            })
-          afkWorkflow.set(found.id, id)
-          // ...and the other way round, its source going with the words it describes
-          // (`afk.set_workflow`).
-          afkPrompts.delete(found.id)
-          afkPromptIds.delete(found.id)
         }
         if (switching) {
           if (body.on && reason) return json(res, 409, { error: { message: reason } })
@@ -5317,7 +5153,6 @@ http
           return json(res, 404, { error: { message: "No failed project to retry." } })
         // The retry makes the project again under a new id, so the old one's switch is forgotten.
         afkProjects.delete(found.id)
-        afkSkills.delete(found.id)
         afkSwept.delete(found.id)
         afkPrompts.delete(found.id)
         afkPromptIds.delete(found.id)
@@ -5332,9 +5167,8 @@ http
         clearTimeout(cloning.get(found.id))
         cloning.delete(found.id)
         // Deleting a project forgets its switch, as the plugin's `projects.remove` does — and the
-        // skills its work followed, its Prompt and its holds, since they live on the same row.
+        // Prompt and its holds, since they live on the same row.
         afkProjects.delete(found.id)
-        afkSkills.delete(found.id)
         afkSwept.delete(found.id)
         afkPrompts.delete(found.id)
         afkPromptIds.delete(found.id)

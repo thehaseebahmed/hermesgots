@@ -30,7 +30,7 @@ import {
 const server = connection("prompt-source")
 const project = "project-1"
 /** A host that holds the Prompt and the library beside it, as this change's plugin does. */
-const FEATURES = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt", "afk_picks"]
+const FEATURES = ["afk", "afk_switch", "afk_prompt", "afk_picks"]
 
 /** The words a project copied, and the words its entry holds now that it has been rewritten. */
 const COPY = "# Review\n\nRead the diff first."

@@ -238,6 +238,8 @@ flows and their audit rows; no message of either remains, so there is nothing to
      `test`, `build`; `pnpm e2e afk-prompt` and `pnpm e2e afk`, plus `afk-stalled`, `afk-session`
      and `afk-switch`, since step 1 changed what ends a run.
 
+   Done.
+
 6. **Docs, versions and decisions say what the code says.** Goals: G6. After: 3, 5. Layers: Docs,
    versions and decisions.
    - `docs/adr/0110-afk-works-in-one-run-and-the-workflow-machine-is-removed.md`: what went, why the

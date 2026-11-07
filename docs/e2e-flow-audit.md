@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **91 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 91 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **90 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 90 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
 | stay | 35 |
-| component | 52 |
+| component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **91** |
+| **total** | **90** |
 
-Of those 91, 85 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 84 distinct files) and 6 point at the older
+Of those 90, 84 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 83 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -187,12 +187,12 @@ then an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 91 rows, one per registry key
+grep -c '^| `' docs/e2e-flow-audit.md                           # 90 rows, one per registry key
 grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 35
-grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 52
+grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 91 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 90 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -355,7 +355,6 @@ decides.
 | -------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `afk` | component | A project's options menu carries an AFK row, and its pop-up lists the project's tasks as AFK reads them: ready oldest first, claimed marked with who has them, blocked naming the open task they wait on — with no row for a plugin that doesn't advertise `afk`, and GitHub's refusal shown instead of a list. | A list's derivation and a sheet's render. | A component test renders the pop-up over seeded tasks and asserts the frontier's order, the claim mark and the blocker line. |
 | `afk-switch` | component | The switch turns a project on and off on its host, and a reload reads that answer back — the setting is the project's, not the device's. | A write and a read-back, with the switch never flipping before the host answers. | A component test asserts no optimistic flip, the write, and the host's answer read back on a remount. |
-| `afk-skills` | component | The pop-up picks one skill to build by and any number to critique, from the bot's own skills and only what its host can run now, kept on the host apart from another project's, either clearing back to nothing, with no pickers on a plugin that predates them and its switch still working. | Two pickers over the profile's skills and two writes. | A component test asserts both pickers' options, the write, another project's own answer, the clears, and the pop-up without the feature. |
 | `afk-switch-reasons` | component | Where the switch can't be offered: a host with no GitHub account says why once rather than as both the switch's reason and the frontier's refusal; a plugin too old to switch it shows the switch off and out of reach, reading Turned off and saying nothing about the plugin; and a project already on keeps a live switch with the reason under it. | The same pop-up's refusal line; the drift is recorded below. | A component test asserts the one reason line, the disabled switch with no spinner under it, and the live switch on a project already on. |
 | `afk-stalled` | component | An AFK session nothing is working any more waits where the user finds it: Code's Waiting for You and, from 1280px, the sidebar's Waiting for input, each with the host's own reason under it. | Two renders from one plugin answer; the width is `useLarge`'s switch, not geometry. | A component test asserts both waiting lines and the reason under each at both widths, with a mocked media query. |
 | `afk-prompt` | component | With the workflow library off, the pop-up draws a Prompt row under the switch reading the words its runs are told — the host's default where the project wrote none — opening one writing sheet (a bottom sheet, or the drawer from 1024px) whose Done writes them back for the next read to answer. Then the account's library, which needs a signed-in account with the vault open on the device: those words saved to it by name and tags, picked in ANOTHER project as a copy that names the entry it came from, the entry rewritten on the library's side so the row wears an `Update available` label, and the editor offering the entry's newer words behind a line of its own — filling the writing surface, Done writing them with their source, the label gone, and a reload reading the copy back unlabelled. At 390, 768 and 1024px, light and dark. | The row's rule, the words and the write are a render over the host's answer; only the row's place in the list, the sheet's height and the drawer's edge are geometry. The library's rules are lower tiers' too — `test-prompt-library.mjs` for the pure ones, `test-afk-prompt-library.tsx` for the editor over a seeded database — so what this adds is that the account's own state (a signed-in session, an opened vault, the sync documents, Dexie's rows) holds together with the host's write, in a browser. | `app/scripts/test-afk-prompt.tsx` and `test-afk-prompt-library.tsx`, which landed with the flows and are green: the row only where the library is off and the host holds a Prompt, the words it reads, the one writing surface, a save answering the row, a refusal keeping the words, an emptied field reading the default, and no row on a plugin that predates it; the library's list, an entry's save and edit, a pick's write and the offer line's update. The account-and-vault seeding, the geometry and the real reload stay the flow's. |

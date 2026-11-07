@@ -69,8 +69,6 @@ export interface Settings {
    * wrote (`progress-reminder.ts`, ADR 0068). Developer, local, off by default.
    */
   showProgressReminders?: boolean
-  /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
-  afkWorkflows?: boolean
   /**
    * Records this device's own requests to each bot's host — how long each took, what it answered and
    * how it ended — for the Network log screen (`net-log.ts`, ADR 0086). Developer, local, off by

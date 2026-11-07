@@ -1,9 +1,9 @@
 /**
  * The row a library sheet offers, and the list around it: one record's name and its own second
  * line, the pencil that opens it, and the reading and empty lines a list shows before it has rows.
- * Both sheets that pick something — the workflows a bot's account keeps and the account's Prompts —
- * are this row, so a record looks and behaves the same wherever it is offered, and a spinner or an
- * empty line is fixed once rather than once per sheet.
+ * One sheet picks something with it — the account's Prompts — so a record looks and behaves the
+ * same wherever it is offered, and a spinner or an empty line is fixed once rather than once per
+ * sheet.
  *
  * The caller owns the list and what a pick means: these draw a row, report the pointer, and say what
  * a list with nothing in it is called.

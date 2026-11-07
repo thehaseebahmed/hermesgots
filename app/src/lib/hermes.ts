@@ -21,13 +21,6 @@ import type { Doc } from "@/lib/merge"
 import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import type { PendingInput, PendingQueue } from "@/lib/pending"
-import {
-  parseWorkflowEntry,
-  parseWorkflowLibrary,
-  skillNames,
-  type Workflow,
-  type WorkflowEntry,
-} from "@/lib/workflow"
 import { isNative } from "@/lib/native"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
@@ -3633,11 +3626,6 @@ export interface ProjectAfk extends BotAfk {
   pickCount: number | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
-  /** The bot's skill the project picked to build by, when it picked one. */
-  buildSkill: string | null
-  /** The bot's skills the project picked for its critique, in the order it picked them. */
-  critiqueSkills: string[]
-  workflow: WorkflowEntry | null
   /**
    * How the project's work is carried out, told to every run it starts: the project's own words,
    * or the bot's default method where it has written none. Empty is that default again, which is
@@ -3694,10 +3682,6 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     // two fields the bot-level route carries, parsed once (`parseBotAfk`).
     ...parseBotAfk(body),
     refusal: str(body.refusal) || null,
-    buildSkill: str(body.build_skill) || null,
-    critiqueSkills: skillNames(body.critique_skills),
-    // And one from before the workflows answers none: the project runs what it always ran.
-    workflow: parseWorkflowEntry(body.workflow),
     // A plugin from before the Prompt answers none, which is only read where the host advertises it.
     prompt: str(body.prompt),
     // And one from before the library answers no source: the words stand as the user's own.
@@ -3743,35 +3727,6 @@ export function setProjectAfk(
   on: boolean,
 ): Promise<ProjectAfk> {
   return writeAfk(config, projectId, { on })
-}
-
-/**
- * Keeps the skills a project's AFK work follows — one to build by and the ones to critique — on its
- * host, answering the setting it now holds. The two are written together: a write naming one would
- * leave the other's meaning to a guess.
- */
-export function setProjectAfkSkills(
-  config: HermesConfig,
-  projectId: string,
-  buildSkill: string | null,
-  critiqueSkills: string[],
-): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, {
-    build_skill: buildSkill,
-    critique_skills: critiqueSkills,
-  })
-}
-
-/**
- * Puts a project's AFK work under a workflow from the library, answering the setting it now holds.
- * A workflow id the host has no row for is refused there, and the answer is the setting it kept.
- */
-export function setProjectAfkWorkflow(
-  config: HermesConfig,
-  projectId: string,
-  workflowId: string | null,
-): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, { workflow_id: workflowId })
 }
 
 /**
@@ -3874,56 +3829,6 @@ async function writeBotAfk(config: HermesConfig, body: Record<string, unknown>):
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return parseBotAfk((await response.json()) as Record<string, unknown> | null)
-}
-
-function workflowPath(config: HermesConfig, rest = ""): string {
-  return `${pluginRoot(config.baseUrl)}/workflows${rest}`
-}
-
-export async function listWorkflows(
-  config: HermesConfig,
-  signal?: AbortSignal,
-): Promise<WorkflowEntry[]> {
-  const response = await request(workflowPath(config), { headers: headers(config), signal })
-  const body = (await response.json()) as Record<string, unknown> | null
-  return parseWorkflowLibrary(body?.workflows)
-}
-
-/**
- * Writes a workflow to the library, answering the library as it now stands: a create adds a row, an
- * update forks a preset into a copy and rewrites one of the account's own, and a delete takes one
- * away. Writes answer the whole list, so the screen that asked draws what the host holds.
- */
-async function writeWorkflow(
-  config: HermesConfig,
-  method: "POST" | "DELETE",
-  rest: string,
-  body?: Record<string, unknown>,
-): Promise<WorkflowEntry[]> {
-  const response = await request(workflowPath(config, rest), {
-    method,
-    headers: headers(config),
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
-  })
-  const answer = (await response.json()) as Record<string, unknown> | null
-  return parseWorkflowLibrary(answer?.workflows)
-}
-
-export function createWorkflow(config: HermesConfig, workflow: Workflow): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "POST", "", { ...workflow })
-}
-
-export function updateWorkflow(
-  config: HermesConfig,
-  id: string,
-  workflow: Workflow,
-): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "POST", `/${encodeURIComponent(id)}`, { ...workflow })
-}
-
-export function deleteWorkflow(config: HermesConfig, id: string): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "DELETE", `/${encodeURIComponent(id)}`)
 }
 
 export type LiveRunStatus = "running" | "waiting_for_approval"

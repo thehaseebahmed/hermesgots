@@ -280,11 +280,6 @@ export const FLOWS = {
     about:
       "Developer's network log records this device's own requests to a bot's host, draws them per bot and all together, and empties on Clear",
   },
-  "afk-skills": {
-    script: "e2e/afk-skills.mjs",
-    about:
-      "AFK's pop-up picks one skill to build by and any number to critique from the bot's own list, kept on the host apart from another project's, with no pickers on an older plugin",
-  },
   "afk-switch-reasons": {
     script: "e2e/afk-switch-reasons.mjs",
     about:
