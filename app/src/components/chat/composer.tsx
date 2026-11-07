@@ -638,6 +638,11 @@ export function Composer({
         return
       }
       lastEscape.current = now
+      // A field with text claims the pair: the first Escape is half of "Escape, Escape — Clear the
+      // message", so nothing else may take it, and an Escape the shell closes the thread beside Main
+      // with would end the pair before the reader could finish it. An empty field has nothing to
+      // clear and lets the key through, which is how Escape puts that thread away.
+      if (value) event.preventDefault()
     } else if (event.key !== "Shift" && event.key !== "Control" && event.key !== "Alt") {
       lastEscape.current = null
     }
