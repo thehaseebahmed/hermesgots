@@ -501,6 +501,10 @@ _Avoid_: claimed, in-progress, assigned, taken
 A file the user adds to a message so the agent can use it — a photo, a clip, a recording, or any document.
 _Avoid_: upload, document, attached file
 
+**Inline**:
+An attachment whose bytes ride in the message itself, which only a model that reads images can take. Everything else reaches the agent as a path on the host.
+_Avoid_: embedded, attached copy, base64 upload
+
 **Media**:
 An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a download.
 _Avoid_: image, file, rich media
