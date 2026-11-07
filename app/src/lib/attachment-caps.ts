@@ -102,17 +102,19 @@ export function intake<T extends CappedFile>(
   return { take, refusals }
 }
 
-/** What an image keeps: the file itself, and the scaled copy too where the model reads one. */
-export type KeptImage<B> = { kept: B; inline?: B }
+/** What an image keeps: the bytes it holds on this device, and the bytes the model is sent. */
+export type KeptImage<B> = { kept: B; inline: B }
 
 /**
  * The bytes an image attachment keeps — the file the user chose, which is what the host stores and
- * this device caches — and the scaled copy the model reads where scaling made one.
+ * this device caches — and the bytes the model is sent: the file itself where nothing was scaled,
+ * else the scaled copy. An original past the per-file cap can't be the copy kept, so the scaled copy
+ * stands in for both.
  */
 export function keptImage<B extends { size: number }>(file: B, scaled: B | null): KeptImage<B> {
-  if (!scaled || scaled === file) return { kept: file }
+  if (!scaled || scaled === file) return { kept: file, inline: file }
   if (file.size <= MAX_FILE_BYTES) return { kept: file, inline: scaled }
-  return { kept: scaled }
+  return { kept: scaled, inline: scaled }
 }
 
 /**

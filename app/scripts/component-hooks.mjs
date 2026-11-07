@@ -86,6 +86,35 @@ Object.defineProperty(dom.window, "innerWidth", { value: 390, writable: true, co
 Object.defineProperty(dom.window, "innerHeight", { value: 844, writable: true, configurable: true })
 
 /**
+ * jsdom's own reader takes only the Blobs jsdom made, and the bytes a module holds here are Node's
+ * (out of a file, or out of IndexedDB), so the send path's `readAsDataURL` gets the browser's own
+ * contract stood in for: encode the bytes, then hand the result to `onload`.
+ */
+class DataUrlReader {
+  result = null
+  error = null
+  onload = null
+  onerror = null
+  readAsDataURL(blob) {
+    void blob.arrayBuffer().then(
+      (bytes) => {
+        this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString("base64")}`
+        this.onload?.()
+      },
+      (error) => {
+        this.error = error
+        this.onerror?.()
+      },
+    )
+  }
+}
+Object.defineProperty(globalThis, "FileReader", {
+  value: DataUrlReader,
+  writable: true,
+  configurable: true,
+})
+
+/**
  * jsdom has no layout, so a box reports no size and a `ResizeObserver` is never called. The stub
  * records the observers a screen made, and `resized()` in the kit fires them, so a test can hand a
  * measuring component the sizes a browser would have reported.

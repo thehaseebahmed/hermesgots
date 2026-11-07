@@ -225,7 +225,7 @@ test("a photo shared to a model with no image input still reads as a photo", asy
   })
 })
 
-test("a photo lands as a photo for a model that takes images, and as its file for one that doesn't", async () => {
+test("a photo lands as a photo, and only a model that takes images is given its bytes", async () => {
   const thumbnail = () =>
     Boolean(document.querySelector("[aria-label^='Remove ']")?.parentElement?.querySelector("img"))
   const photo = () => new File(["png"], "cat.png", { type: "image/png", lastModified: 3 })
@@ -247,7 +247,7 @@ test("a photo lands as a photo for a model that takes images, and as its file fo
     receiveShare(toShare({ files: [photo()] }))
     await mount(screen(), async () => {
       await until(async () => tiles().length === 1, "the photo's tile")
-      assert.equal(thumbnail(), false, "and one that doesn't gets the file it is")
+      assert.equal(thumbnail(), false, "and one that takes none is given no bytes to draw")
     })
   })
 })

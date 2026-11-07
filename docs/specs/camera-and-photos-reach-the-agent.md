@@ -125,7 +125,7 @@ sequenceDiagram
    before and after; the two assertions that spell the retired meaning — `keptImage(photo, photo)`'s
    `{ kept: photo }` and the share screen's file icon for a photo — are rewritten in this step, and a new
    case "a stored photo with no part still goes inline when its message is sent again" (`test-main-triage.tsx`)
-   is green before and after too.
+   is green before and after too. **Done.**
 2. **Preparatory refactor: one rule answers which road a pick takes.** The reach stops being worked out
    inside `addFiles` (`because ? added.filter(f => imagesAvailable && isPhoto(f.type)) : added`) and becomes
    a pure rule beside the caps: from whether the pick is a picture, whether the model reads images, and what

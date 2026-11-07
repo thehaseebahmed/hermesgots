@@ -60,17 +60,17 @@ export function marker(attachment: Attachment) {
 }
 
 /**
- * Whether the message has to say its files aren't inlined: a photo rides along as an image part,
- * so only a message carrying a file needs telling.
+ * Whether the message has to say its files aren't inlined: the bytes of a photo the model is sent
+ * ride along as an image part, so only an attachment carrying no part needs telling.
  */
-const needsInstruction = (attachments: Attachment[]) => attachments.some((a) => !a.image)
+const needsInstruction = (attachments: Attachment[]) => attachments.some((a) => !a.inline)
 
 /** The message as Hermes's transcript keeps it: the text, then a line per attachment. */
 export function attachmentsText(text: string, attachments: Attachment[] = []) {
   const sent = attachments.filter((attachment) => !attachment.host)
   return [
     text,
-    ...sent.map((a) => (a.image ? `${marker(a)}\n${IMAGE_PLACEHOLDER}` : marker(a))),
+    ...sent.map((a) => (a.inline ? `${marker(a)}\n${IMAGE_PLACEHOLDER}` : marker(a))),
     ...(needsInstruction(sent) ? [NOT_INLINED] : []),
   ]
     .filter(Boolean)

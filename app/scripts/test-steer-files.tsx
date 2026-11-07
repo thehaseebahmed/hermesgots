@@ -125,6 +125,7 @@ const photo = (): Attachment => ({
   size: 64,
   image: true,
   blob: new Blob(["png"]),
+  inline: new Blob(["png"]),
 })
 
 /** Starts Main's reply and leaves it running, so the next message arrives mid-reply. */

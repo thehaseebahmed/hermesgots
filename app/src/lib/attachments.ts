@@ -62,8 +62,10 @@ function jpegName(name: string) {
 /**
  * Reads a picked file into an attachment. An image the browser can decode is scaled down for the
  * model, while the copy kept — the bytes the host stores and this device caches — stays the file
- * the user chose, unless it is too big to send, when the scaled copy stands in for it. With
- * `inline: false` (a model that takes no images) every image goes as the file it is.
+ * the user chose, unless it is too big to send, when the scaled copy stands in for it. A photo that
+ * goes inline always carries the bytes the model is sent: the file itself where nothing was scaled,
+ * else the scaled copy. With `inline: false` (a model that takes no images) an image goes as the
+ * file it is.
  */
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
@@ -78,7 +80,7 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
         size: kept.size,
         image: true,
         blob: kept,
-        ...(part ? { inline: part } : {}),
+        inline: part,
         width: photo.width,
         height: photo.height,
       }
@@ -95,11 +97,10 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
   }
 }
 
-/** What an attachment adds to a request inline: an image's scaled part, and nothing else. */
-export const inlineSize = (attachment: Attachment) =>
-  attachment.image ? ((attachment.inline ?? attachment.blob)?.size ?? 0) : 0
+/** What an attachment adds to a request inline: the bytes it carries for the model, and nothing else. */
+export const inlineSize = (attachment: Attachment) => attachment.inline?.size ?? 0
 
-/** The bytes a message's photos add to its request. */
+/** The bytes a message's inline parts add to its request. */
 export const inlineBytes = (attachments: Attachment[]) =>
   attachments.reduce((sum, attachment) => sum + inlineSize(attachment), 0)
 
@@ -249,18 +250,21 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
-/** The message's content for Hermes: the text with a marker per attachment, and each photo inline. */
+/** The message's content for Hermes: the text with a marker per attachment, and each part inline. */
 export async function wireContent(
   text: string,
   attachments: Attachment[] = [],
 ): Promise<string | ContentPart[]> {
   if (!attachments.length) return text
   const parts = attachmentParts(text, attachments)
-  // The model reads the scaled copy, never a file too big for the request to carry.
+  // The model reads the bytes a part carries — the scaled copy where scaling made one — and never a
+  // file the message names alone.
   for (const attachment of attachments) {
-    const part = attachment.inline ?? attachment.blob
-    if (attachment.image && part)
-      parts.push({ type: "image_url", image_url: { url: await blobToDataUrl(part) } })
+    if (attachment.inline)
+      parts.push({
+        type: "image_url",
+        image_url: { url: await blobToDataUrl(attachment.inline) },
+      })
   }
   return parts
 }

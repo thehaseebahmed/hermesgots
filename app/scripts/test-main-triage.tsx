@@ -8,6 +8,7 @@ import test from "node:test"
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
+import Dexie from "dexie"
 
 import { MovedMarker } from "@/components/chat/moved-marker"
 import {
@@ -15,10 +16,11 @@ import {
   refreshQueue,
   sendFromMain,
   sendMessage,
+  sendQueued,
   settleTriaging,
   stopMessage,
 } from "@/lib/chat"
-import { db, mainThreadId, type Message, type Profile } from "@/lib/db"
+import { db, MESSAGE_STORES, mainThreadId, type Message, type Profile } from "@/lib/db"
 import type { Move } from "@/lib/hermes"
 import { moveMarks } from "@/lib/move-marks"
 import { refreshMoves, undoMove } from "@/lib/moves"
@@ -97,13 +99,13 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
 
 async function seed(
   name: string,
-  extra: { main?: boolean; bot?: Partial<Profile> } = { main: true },
+  extra: { main?: boolean; bot?: Partial<Profile>; keepMessages?: boolean } = { main: true },
 ) {
   const bot = botProfile(name, extra.bot)
   await seedSettings({ developer: true, botThreads: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
-  await db.messages.clear()
+  if (!extra.keepMessages) await db.messages.clear()
   await db.conversations.clear()
   await db.conversations.bulkPut([
     {
@@ -359,6 +361,48 @@ test("a stay keeps the files already saved and saves nothing twice", async () =>
   assert.equal(await sendFromMain(MAIN, "read this", [attachment]), undefined)
   assert.deepEqual(uploads, ["brief.pdf"])
   assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
+})
+
+test("a stored photo with no part still goes inline when its message is sent again", async () => {
+  // A row the build before this one wrote: `image` was then the only record that a photo's bytes
+  // rode inline, so the row keeps no part of its own. This device's store gives it one as it opens,
+  // which is what a message sent again from that row has to carry.
+  const older = new Dexie("gots")
+  older.version(34).stores({ messages: MESSAGE_STORES })
+  await db.close()
+  await Dexie.delete("gots")
+  await older.open()
+  await older.table("messages").add({
+    id: "stored-photo",
+    conversationId: MAIN,
+    role: "user",
+    content: "look at this",
+    status: "error",
+    createdAt: 5,
+    attachments: [
+      {
+        id: "p1",
+        name: "cat.png",
+        type: "image/png",
+        size: 3,
+        image: true,
+        blob: new Blob(["png"], { type: "image/png" }),
+      },
+    ],
+  })
+  await older.close()
+  // Opening this device's store is what folds the row, as it is on the first open after an upgrade.
+  await db.open()
+  await seed("route-stored-photo", { keepMessages: true })
+  const seen = host("route-stored-photo", "stay")
+  await sendQueued((await db.messages.get("stored-photo"))!)
+  const parts = runsFor(seen, MAIN_SESSION)[0]?.body.input.at(-1).content as {
+    type: string
+    image_url?: { url: string }
+  }[]
+  const photo = parts.find((part) => part.type === "image_url")
+  assert.ok(photo, "the photo rides in the message, as the build before this one sent it")
+  assert.match(photo.image_url?.url ?? "", /^data:image\/png;base64,/, "with its own bytes")
 })
 
 test("a move is read back from the host and leaves a marker, a stay leaves none", async () => {

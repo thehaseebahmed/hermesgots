@@ -131,9 +131,9 @@ test("an original too big to keep is what the scaled copy stands in for", () => 
   const huge = { size: MAX_FILE_BYTES + 1, type: "image/heic" }
   const smaller = { size: 2 * 1024 * 1024, type: "image/jpeg" }
   const stand = keptImage(huge, smaller)
-  assert.deepEqual(stand, { kept: smaller })
+  assert.deepEqual(stand, { kept: smaller, inline: smaller })
   assert.equal(
-    stand.inline ?? stand.kept,
+    stand.inline,
     smaller,
     "and it is the part the model reads too, so a huge photo still rides inline",
   )
@@ -156,8 +156,8 @@ test("a photo over the file cap is exempt from it, since scaling is what makes i
   assert.equal(sizeRefusal("IMG_0001.heic").limit, "file", "the words are still a file's")
 })
 
-test("a photo that needed no scaling is one copy, not two", () => {
+test("a photo that needed no scaling is one copy, and it is the model's too", () => {
   const photo = { size: 400 * 1024, type: "image/png" }
-  assert.deepEqual(keptImage(photo, photo), { kept: photo })
-  assert.deepEqual(keptImage(photo, null), { kept: photo })
+  assert.deepEqual(keptImage(photo, photo), { kept: photo, inline: photo })
+  assert.deepEqual(keptImage(photo, null), { kept: photo, inline: photo })
 })
