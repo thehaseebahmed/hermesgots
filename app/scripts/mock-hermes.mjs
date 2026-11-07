@@ -27,7 +27,7 @@
 // chart it serves and one for a file that isn't there.
 // The Library tab reads a project's filed files from GET projects/{id}/library (every session's,
 // merged by folder) and a session's own from GET sessions/{id}/library (the outputs pill counts
-// them); tapping a file opens it from GET library/file?path=… (a .png or .md path).
+// them); tapping a file opens it from the URL the media route signs for it.
 // It lists Hermes Projects on GET /api/plugins/gots/projects. GET /api/plugins/gots/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
 // POST /api/plugins/gots/projects answers at once with a project that clones its repos in the
@@ -4805,20 +4805,6 @@ http
       }
       res.writeHead(200, headers)
       return res.end(body)
-    }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/library/file") {
-      // A filed file for opening it: an image as png bytes, markdown as text, anything else as
-      // an octet-stream the browser downloads.
-      const path = url.searchParams.get("path") ?? ""
-      if (/\.png$/i.test(path)) {
-        res.writeHead(200, { "Content-Type": "image/png", ...cors })
-        return res.end(MOCK_PNG)
-      }
-      if (/\.md$/i.test(path)) {
-        res.writeHead(200, { "Content-Type": "text/markdown", ...cors })
-        return res.end("# Cleanup report\n\nEverything tidied, nothing renamed.\n")
-      }
-      return json(res, 404, { error: { message: "No such file." } })
     }
     if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/gots/events") {
       const since = url.searchParams.get("since")

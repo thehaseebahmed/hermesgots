@@ -267,6 +267,9 @@ export function Cell({
       onClick={onOpen}
       aria-label={`Open ${item.name}`}
       aria-busy={item.state === "reading" || undefined}
+      // A read that failed keeps its cell and offers the tap again; where the host gave a reason (a
+      // cap it refused the file over), that sentence is what the reader can act on, not silence.
+      title={failed ? item.note : undefined}
       className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
     >
       {clip ? (

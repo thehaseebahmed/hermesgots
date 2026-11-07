@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { ChevronDownIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
 
+import { PreviewerProvider, usePreviewerAbove } from "@/components/chat/previewer"
 import { SortMenu } from "@/components/sort-menu"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
@@ -11,25 +12,30 @@ import { useStoredSort } from "@/lib/use-sort"
 import { defaultSort, withDir, type Sort, type SortKey } from "@/lib/sort"
 import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
-  getLibraryFile,
   getProjectLibrary,
   getSessionLibrary,
   type HermesConfig,
   type LibraryFile,
   type LibraryFolder,
 } from "@/lib/hermes"
-import { openExternal, openMediaViewer } from "@/lib/native"
+import { mediaKind } from "@/lib/media-kind"
+import { useOpenHostFile } from "@/lib/media-open"
 import { usePoll } from "@/lib/poll"
-import { noteFailure, quietly } from "@/lib/report"
+import { noteFailure } from "@/lib/report"
 import { cn } from "@/lib/utils"
 
 /** Bots whose plugin has no library routes (an older plugin). */
 const unsupported = cooldown()
 
-// The kind decides the icon and how a tap opens the file; the bytes come back with the content
-// type the plugin's route gives them (media.content_type), which covers the same extensions.
-const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
+// The icon a file's row wears, which is a look rather than a rule: what the row's tap does is decided
+// by the host's answer, through `useOpenHostFile`. A note's icon is worth a list of its own; a photo's
+// is `mediaKind`'s, since that is the rule the Previewer reads.
 const TEXT_FILE = /\.(md|markdown|txt|csv|json|pdf)$/i
+const ICONS = { image: ImageIcon, text: FileTextIcon, file: FileIcon } as const
+
+/** What a name's row looks like, from what the file is. */
+const iconOf = (name: string): keyof typeof ICONS =>
+  mediaKind(undefined, name) === "image" ? "image" : TEXT_FILE.test(name) ? "text" : "file"
 
 /** The keys the tree ranks by, each with the way it reads best (ADR 0091). */
 const LIBRARY_SORTS: readonly SortKey<LibrarySort>[] = [
@@ -53,42 +59,23 @@ function useLibrarySort(): [Sort<LibrarySort>, (sort: Sort<LibrarySort>) => void
 /** A session's library draws no sort control; its files read newest first, as they always have. */
 const NEWEST_FIRST: Sort<LibrarySort> = defaultSort(LIBRARY_SORTS)
 
-/** A library file's kind, for its icon and how it opens. */
-function kindOf(name: string) {
-  if (IMAGE_FILE.test(name)) return "image"
-  if (TEXT_FILE.test(name)) return "text"
-  return "file"
-}
-
-/** Opens a library file: an image in the system viewer, anything else in a new tab. */
-function openFile(config: HermesConfig, file: LibraryFile) {
-  void getLibraryFile(config, file.path, AbortSignal.timeout(READ_TIMEOUT_MS))
-    .then(async (blob) => {
-      const url = URL.createObjectURL(blob)
-      if (kindOf(file.name) !== "image") {
-        openExternal(url)
-        // The tab reads the URL after this returns, so its object URL outlives the click.
-        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-        return
-      }
-      try {
-        await openMediaViewer(url, { type: "image/*" })
-      } finally {
-        URL.revokeObjectURL(url)
-      }
-    })
-    .catch(quietly("Opening a library file"))
-}
-
-/** One file under a folder: its kind's icon and its name, nothing more. */
+/**
+ * One file under a folder: its kind's icon and its name, and a tap that opens it the way the app
+ * opens any file the host holds — the Previewer for a photo, a clip or a recording, and the
+ * platform for what the Previewer can't draw.
+ */
 function FileRow({ config, file }: { config: HermesConfig; file: LibraryFile }) {
-  const kind = kindOf(file.name)
-  const Icon = kind === "image" ? ImageIcon : kind === "text" ? FileTextIcon : FileIcon
+  const { open, busy } = useOpenHostFile(config)
+  const Icon = ICONS[iconOf(file.name)]
   return (
     <button
       type="button"
-      onClick={() => openFile(config, file)}
-      className="-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => open(file)}
+      aria-busy={busy || undefined}
+      className={cn(
+        "-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+        busy && "opacity-50",
+      )}
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
@@ -224,12 +211,15 @@ export function LibraryTree({
   onSort?: (sort: Sort<LibrarySort>) => void
 }) {
   const ordered = useMemo(() => sortFolders(folders, order), [folders, order])
+  // Read before the empty-tree return: a hook after it runs only once the tree fills, which is a
+  // render with more hooks than the one before.
+  const above = usePreviewerAbove()
   if (!folders.length) {
     return (
       <p className="px-3 py-8 text-center text-sm text-muted-foreground sm:px-4">No files yet.</p>
     )
   }
-  return (
+  const tree = (
     <div className="px-3 pb-4 sm:px-4">
       {onSort && (
         <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
@@ -249,6 +239,11 @@ export function LibraryTree({
       </div>
     </div>
   )
+  // The tree brings the Previewer its own rows tap into, so a screen that mounts it can't hand every
+  // tap the inert face a missing provider gives — and a screen that already mounts one (a chat with
+  // its outputs drawer) keeps that one, rather than opening a second the screen's own controls
+  // could never reach.
+  return above ? tree : <PreviewerProvider>{tree}</PreviewerProvider>
 }
 
 /**

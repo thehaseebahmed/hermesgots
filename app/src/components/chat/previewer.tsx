@@ -71,6 +71,9 @@ interface PreviewerFace {
 
 const PreviewerContext = createContext<PreviewerFace | null>(null)
 
+/** Whether a screen above this point already mounts the one Previewer a tap reaches. */
+const PreviewerAbove = createContext(false)
+
 /**
  * The one Previewer a screen mounts, and the way any tap on media reaches it: a Gallery cell, a
  * recording's row, an agent's image and a composer's tile all open this instance rather than one
@@ -96,10 +99,12 @@ export function PreviewerProvider({ children }: { children: ReactNode }) {
   )
   const current = shown ?? last
   return (
-    <PreviewerContext.Provider value={face}>
-      {children}
-      {current && <Previewer request={current} open={shown !== null} onIndex={onIndex} />}
-    </PreviewerContext.Provider>
+    <PreviewerAbove.Provider value={true}>
+      <PreviewerContext.Provider value={face}>
+        {children}
+        {current && <Previewer request={current} open={shown !== null} onIndex={onIndex} />}
+      </PreviewerContext.Provider>
+    </PreviewerAbove.Provider>
   )
 }
 
@@ -109,6 +114,15 @@ const INERT: PreviewerFace = { open: () => {}, update: () => {} }
 /** The screen's Previewer. */
 export function usePreviewer(): PreviewerFace {
   return useContext(PreviewerContext) ?? INERT
+}
+
+/**
+ * Whether something above already mounts the Previewer a tap reaches: a part that brings its own so
+ * its taps can't be inert asks this first, and joins the screen's instead of nesting a second one
+ * the screen's own controls could never reach.
+ */
+export function usePreviewerAbove(): boolean {
+  return useContext(PreviewerAbove)
 }
 
 /**

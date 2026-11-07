@@ -476,6 +476,26 @@ export function spyScrollIntoView() {
   }
 }
 
+/**
+ * jsdom has no tabs of its own, so a `window.open` stands in for the browser's effect: every URL a
+ * screen hands the platform is recorded, in the order it asked, and `restore` puts the window back.
+ */
+export function spyOpen() {
+  const real = window.open
+  const opened: string[] = []
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
+  return {
+    /** The URLs a tab was opened at, in the order they were asked for. */
+    opened,
+    restore() {
+      window.open = real
+    },
+  }
+}
+
 export async function type(element: Element | null, value: string) {
   assert.ok(element, "the field is on screen")
   const prototype =

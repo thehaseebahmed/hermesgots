@@ -1,38 +1,25 @@
 export type MediaPart =
   { kind: "text"; at: number; text: string } | { kind: "media"; at: number; paths: string[] }
 
-/**
- * What a `MEDIA:<path>` tag may name: the extensions the plugin's media route serves with a type of
- * its own, and the tail it hands over as a generic binary, so a tag names a file the host can serve
- * whatever it calls it. The `MEDIA:` prefix and a path are still required, so a list this wide can't
- * swallow prose (and where one extension starts another, the longer comes first in the grammar).
- * `scripts/test-media-types.mjs` holds both against the route's own map, so a route that grows a
- * type can't leave a reply's file as text.
- */
-export const MEDIA_NAMES: { served: string[]; binary: string[] } = {
-  served: [
-    "jpeg png jpg gif webp bmp svg",
-    "mp4 m4v mov webm ogv",
-    "mp3 m4a aac wav ogg oga opus flac",
-    "markdown md txt log csv tsv html htm css xml json pdf yaml yml toml ini",
-    "py rb go rs cc cpp hpp cs java kt swift tsx ts jsx js mjs cjs sh bash zsh sql php lua pl r scala exs ex erl hs clj vue svelte dart zig c h",
-  ].flatMap((group) => group.split(" ")),
-  binary: "zip tar gz docx xlsx pptx epub apk wasm ics vcf srt vtt".split(" "),
-}
-const MEDIA_EXTS = [...MEDIA_NAMES.served, ...MEDIA_NAMES.binary].join("|")
 const CJK_TERMINATORS = "（）〈〉《》：，。；！？、“”‘’【】"
+/** A path the agent hands over, rather than a name it says: under `~/`, absolute, or a drive. */
+const PATH_START = "(?:~/|/|[A-Za-z]:[/\\\\])"
 /**
- * The `MEDIA:<path>` tag shape Hermes's own `MEDIA_TAG_CLEANUP_RE` strips for messaging adapters,
- * limited to the extensions the plugin's media route serves, so a reply draws here whatever file the
- * agent produced there — nothing it can fetch is left as a dead path in the text.
+ * The `MEDIA:<path>` tag shape Hermes's own `MEDIA_TAG_CLEANUP_RE` strips for messaging adapters:
+ * a path the agent hands over, quoted or bare. The extension is deliberately unconstrained — the
+ * plugin's media route answers any suffix, so a grammar that enumerated them left a `.doc` or a
+ * `.7z` as prose in the middle of a reply, which is the very thing a reader cannot act on. A bare
+ * path may hold spaces (`/opt/data/lib/a report.pdf`), and only ends at its suffix when it does:
+ * that is what stops a sentence's own words being taken as part of the path.
  */
 const TAG = new RegExp(
   "[`\"'*_]{0,3}MEDIA:\\s*" +
     "(?<path>`[^`\\n]+?`|\"[^\"\\n]+?\"|'[^'\\n]+?'|" +
-    "(?:~/|/|[A-Za-z]:[/\\\\])\\S+?(?:[^\\S\\n]+\\S+?)*?\\.(?:" +
-    MEDIA_EXTS +
-    "))" +
-    "(?=[\\s`\"'*_,;:)\\]\\[}\\" +
+    PATH_START +
+    "\\S+?(?:[^\\S\\n]+\\S+?)*?\\.[A-Za-z0-9]{1,16}|" +
+    PATH_START +
+    "\\S+)" +
+    "(?=[\\s`\"'*_,;:)\\]\\[}\"" +
     CJK_TERMINATORS +
     "]|MEDIA:|\\.(?:\\s|$)|$)[`\"'*_]{0,3}\\.?",
   "gi",

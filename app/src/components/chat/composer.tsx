@@ -32,7 +32,7 @@ import { filesReason, fresh, isPhoto, MAX_ATTACHMENTS } from "@/lib/attachment-c
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { openAttachment, prepareIntake } from "@/lib/attachments"
 import { attachmentUrl } from "@/lib/attachment-url"
-import { mediaCell, mediaKind } from "@/lib/media-kind"
+import { drawnCell, mediaKind } from "@/lib/media-kind"
 import { previewItem } from "@/lib/media-items"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
@@ -450,7 +450,7 @@ export function Composer({
       {
         key: attachment.id,
         kind: mediaKind(attachment.type, attachment.name),
-        cell: mediaCell(attachment.type, attachment.name),
+        cell: drawnCell(attachment.type, attachment.name),
         name: attachment.name,
         type: attachment.type,
         size: attachment.size,
@@ -460,12 +460,12 @@ export function Composer({
       { width: attachment.width, height: attachment.height },
     )
   const media = attachments.filter(
-    (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
+    (attachment) => drawnCell(attachment.type, attachment.name) !== "file",
   )
   // A tap that means "look at this" opens the screen's own Previewer, here as in the thread; a file
   // the Previewer can't draw is handed to the platform instead.
   const open = (attachment: Attachment) => {
-    if (mediaCell(attachment.type, attachment.name) === "file") {
+    if (drawnCell(attachment.type, attachment.name) === "file") {
       void openAttachment(null, attachment)
       return
     }

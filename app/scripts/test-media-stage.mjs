@@ -22,7 +22,7 @@ test("a read still out draws a skeleton, and the URL a picture", () => {
 test("a read that failed is the retry, and one the host has no file for is never drawn", () => {
   assert.equal(mediaStage({ status: "failed" }), "failed")
   assert.equal(
-    mediaStage({ status: "gone" }),
+    mediaStage({ status: "undrawable" }),
     "failed",
     "a cell asked to draw one says it couldn't",
   )

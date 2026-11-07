@@ -214,35 +214,6 @@ def tree(root: Path, worktree: Optional[str] = None) -> List[Dict[str, Any]]:
     ]
 
 
-def library_roots(hermes_home: Path) -> List[Path]:
-    """Every project's library folder (``<primary folder>/files/``): the only place the tool files.
-
-    A host without Projects, or with a project row that can't be read, holds no library file, so
-    the walk answers nothing rather than failing the route.
-    """
-    projects_db = hermes_home / "projects.db"
-    try:
-        from hermes_cli import projects_db as pdb
-
-        if not projects_db.exists():
-            return []
-        with pdb.connect_closing(db_path=projects_db) as conn:
-            projects = pdb.list_projects(conn, include_archived=True)
-        return [library_root(project) for project in projects]
-    except Exception:
-        logger.debug("gots: couldn't read projects' library folders", exc_info=True)
-        return []
-
-
-def holds(hermes_home: Path, path: Path) -> bool:
-    """Whether ``path`` sits under a project's library folder.
-
-    Both sides are resolved: the path comes from Hermes's media check with its symlinks already
-    resolved, so a project folder that is itself a symlink has to be resolved to match it.
-    """
-    return any(path.is_relative_to(root.resolve()) for root in library_roots(hermes_home))
-
-
 TOOL = "library_add"
 SCHEMA = {
     "name": TOOL,

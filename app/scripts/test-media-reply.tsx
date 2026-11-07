@@ -22,6 +22,7 @@ import {
   mediaReads,
   mount,
   seedChat,
+  spyOpen,
   text,
   until,
 } from "./component-kit.tsx"
@@ -102,28 +103,12 @@ const download = (name: string) => labelled("button", `Download ${name}`)
 /** Whether the cell or row a file draws in is in: its place is kept, busy until its URL answers. */
 const filled = (name: string) => (cell(name) ?? row(name))?.hasAttribute("aria-busy") === false
 
-/** jsdom has no tabs of its own, so a tab opening stands in for the browser's effect. */
-function stubBrowser() {
-  const real = { open: window.open }
-  const opened: string[] = []
-  window.open = ((url: string | URL) => {
-    opened.push(String(url))
-    return null
-  }) as typeof window.open
-  return {
-    opened,
-    restore: () => {
-      window.open = real.open
-    },
-  }
-}
-
 test("a thread's sent media and a reply's tags draw through the same cells", async () => {
   const profile = botProfile("media-reply")
   await seedChat({ id: "c1", profile, messages: thread() })
-  // Every file is read from a URL the host signs; one it has no copy of is the text it came from.
+  // Every file is read from a URL the host signs; one it has no copy of draws nothing at all.
   const asked = mediaHost({ fail: ["missing.png"] })
-  const browser = stubBrowser()
+  const browser = spyOpen()
   try {
     await mount(chatScreen("c1"), async () => {
       await until(async () => filled("render.mp4"), "the reply's clip")
@@ -151,14 +136,16 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
       assert.ok(row("take.mp3"), "it takes a row of its own")
       assert.ok(download("report.pdf"), "and the document a row the platform takes")
 
-      // A tag is drawn, not left as the path it came from — but the one the host has no file for is.
+      // A tag is drawn, not left as the path it came from — and one the host has no file for draws
+      // nothing at all: a path is how the agent hands a file over, never a word of the reply.
       assert.equal(text().includes(`${LIBRARY}/render.mp4`), false, "a drawn tag isn't text")
       assert.equal(text().includes(`${LIBRARY}/take.mp3`), false, "a drawn recording isn't text")
-      assert.match(
-        text(),
-        new RegExp(`MEDIA:${LIBRARY}/missing.png`),
-        "a tag whose file the host has no copy of falls back to its text",
+      assert.equal(
+        text().includes(`${LIBRARY}/missing.png`),
+        false,
+        "a tag whose file the host has no copy of is not left as its text",
       )
+      assert.equal(cell("missing.png"), null, "and it leaves no empty cell in its place")
       assert.match(
         text(),
         new RegExp(`MEDIA: ${LIBRARY}/example.png`),

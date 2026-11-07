@@ -37,7 +37,7 @@ import type { FootLine } from "@/lib/thinking"
 import { describeActivity, formatCount, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
 import { COLUMN, REPLY_EDGE, REPLY_INSET, REPLY_TEXT } from "@/lib/layout"
-import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
+import { drawnCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { mediaImages } from "@/lib/media-parts"
 import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
 import { mediaStage } from "@/lib/media-stage"
@@ -291,7 +291,7 @@ function SentAttachments({
   const srcOf = (attachment: Attachment) => {
     const url = mediaRead(state(attachment))?.url
     if (url) return url
-    const gone = state(attachment)?.status === "gone"
+    const gone = state(attachment)?.status === "undrawable"
     if (!gone && attachment.path) return undefined
     return attachment.blob ? attachmentUrl(attachment) : undefined
   }
@@ -315,9 +315,9 @@ function SentAttachments({
   // from those bytes, so a file that never reached the host is still the reader's own.
   const drawn = attachments.filter(
     (attachment) =>
-      mediaCell(attachment.type, attachment.name) === "file" ||
+      drawnCell(attachment.type, attachment.name) === "file" ||
       attachment.blob !== undefined ||
-      state(attachment)?.status !== "gone",
+      state(attachment)?.status !== "undrawable",
   )
   const download = (one: MediaItem) => {
     const attachment = attachments.find((it) => it.id === one.key)
@@ -327,7 +327,7 @@ function SentAttachments({
     <div className={cn("flex w-full max-w-full flex-col items-end gap-2", dim && "opacity-60")}>
       <MediaItems
         items={drawn.map((attachment) =>
-          item(attachment, mediaCell(attachment.type, attachment.name)),
+          item(attachment, drawnCell(attachment.type, attachment.name)),
         )}
         server={server}
         align="end"
@@ -897,9 +897,12 @@ function AssistantRow({
               )
             if (part.kind === "media")
               return (
-                <div key={part.at} className={edge}>
-                  <MediaTag conversationId={conversationId} paths={part.paths} />
-                </div>
+                <MediaTag
+                  key={part.at}
+                  conversationId={conversationId}
+                  paths={part.paths}
+                  className={edge}
+                />
               )
             if (part.kind === "openui")
               return (

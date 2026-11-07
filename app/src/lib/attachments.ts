@@ -14,7 +14,7 @@ import {
 import { attachmentParts } from "@/lib/attachment-text"
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
-import { loadHostMediaUrl } from "@/lib/media-url"
+import { askNote, askThreadMediaUrl } from "@/lib/media-url"
 import { isNative, openMediaViewer } from "@/lib/native"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
@@ -180,8 +180,9 @@ export type Handover = Pick<Attachment, "name" | "type" | "path" | "blob"> & {
  * drawn: the destination decides. A failed hand-over is said to the user here, so a caller only
  * says which file to hand over.
  *
- * `conversationId` is null for a file this device picked and the host was never given: its own
- * bytes are all there is, and nothing is asked of a host.
+ * `conversationId` is the thread whose bot mints a fresh URL for a file the host holds, and null is
+ * a caller that has none to ask — a staged file's own bytes, or a host file with its URL already in
+ * `src`. Nothing else about the hand-over changes between the two.
  */
 export async function openAttachment(conversationId: string | null, file: Handover) {
   try {
@@ -201,15 +202,27 @@ export async function openAttachment(conversationId: string | null, file: Handov
     // A file the host holds is asked for a URL here, whatever one the thread was drawing from: the
     // host names the file in how it serves it, which a copy this device kept cannot, and what it
     // answers is fresh.
-    const minted =
-      conversationId && file.path ? await loadHostMediaUrl(conversationId, file.path) : null
-    const read = minted?.url ?? file.src
+    const answer =
+      conversationId && file.path ? await askThreadMediaUrl(conversationId, file.path) : null
+    // The host's own sentence where it gave one — a cap it refused the file over is the one the
+    // reader can act on, and saying "no copy" of a file it holds is a lie.
+    if (answer && answer.state !== "ready") throw new Error(askNote(answer, file.name))
+    const read = (answer?.state === "ready" ? answer.read.url : undefined) ?? file.src
     if (!read) throw new Error(`There is no copy of ${file.name}.`)
     await openMediaViewer(read, { type: file.type, name: file.name })
   } catch (error) {
-    noteFailure(`opening ${file.name}`, error)
-    toast.error(error instanceof Error ? error.message : `Couldn't open ${file.name}.`)
+    openFailed(file.name, error)
   }
+}
+
+/**
+ * Says a file couldn't be opened, in the app's one voice — the platform's own sentence where it has
+ * one, this app's otherwise — and records why. Every tap that hands a file over ends here, whether
+ * the thread's row or a screen's own, so the two can't drift into saying different things.
+ */
+export function openFailed(name: string, error: unknown) {
+  noteFailure(`opening ${name}`, error)
+  toast.error(error instanceof Error ? error.message : `Couldn't open ${name}.`)
 }
 
 // Attachments being saved on the Hermes host right now, so their tiles can say so.

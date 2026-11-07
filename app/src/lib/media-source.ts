@@ -33,13 +33,14 @@ export type MediaRead = MediaUrl
 
 /**
  * What a source draws from: a URL that is in, a read still out, a read that failed and can be
- * asked again, or a host that says it has no such file. Only the last is drawn as absence.
+ * asked again, or nothing at all — which is a host that answered it has no such file, or one whose
+ * plugin can't sign for a URL, and the screen draws both the same way.
  */
 export type MediaState =
   | { status: "reading" }
   | { status: "ready"; read: MediaRead }
   | { status: "failed"; note?: string }
-  | { status: "gone" }
+  | { status: "undrawable" }
 
 export type MediaSources = ReadonlyMap<string, MediaState>
 
@@ -52,7 +53,8 @@ export const mediaRead = (state?: MediaState) =>
  * still out, the URL it signed, or a read that failed and can be asked again.
  */
 function stateOf(source: MediaSource, answer: MediaAsk | null | undefined): MediaState {
-  if (!source.path || answer?.state === "gone") return { status: "gone" }
+  if (!source.path || answer?.state === "gone" || answer?.state === "unsupported")
+    return { status: "undrawable" }
   if (!answer) return { status: "reading" }
   if (answer.state === "ready") return { status: "ready", read: answer.read }
   return answer.state === "refused" ? { status: "failed", note: answer.note } : { status: "failed" }

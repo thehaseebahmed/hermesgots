@@ -377,3 +377,18 @@ test("a clip's first paint is kept, so its cell has a frame to draw next time", 
     document.createElement = create
   }
 })
+
+test("a bot whose plugin can't sign answers that, rather than that the file is missing", async () => {
+  const profile = botProfile("media-old-plugin")
+  await seedChat({ id: CHAT, profile, messages: [message([photo])] })
+  // A plugin from before the signed URL advertises no `media_url`: nothing it holds can be drawn,
+  // so the path settles without a mint — and the answer says which of the two it was.
+  const asked = mediaHost({ host: "media-old-plugin", features: ["attachments"] })
+  const [answer] = await askMediaUrls(CHAT, [photo.path!])
+  assert.equal(answer.state, "unsupported", "the ask names what is behind it, not a missing file")
+  assert.deepEqual(
+    mediaReads(asked).filter((path) => path.endsWith("/media/url")),
+    [],
+    "and no URL was asked for at all",
+  )
+})

@@ -84,6 +84,16 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   await shot("library")
   pass("the Library tab is the project Library's tree, the session's folders only")
 
+  await page.getByRole("button", { name: "dashboard-light.png" }).click()
+  // The URL the photo draws from is `test-library-open.tsx`'s claim, at the tier that can hold it;
+  // this flow's own is that a real tap in a real browser lands in the Previewer and closes again.
+  const photo = page.locator("img[alt='dashboard-light.png']")
+  await photo.waitFor({ timeout: 15_000 })
+  await shot("library-preview")
+  await page.keyboard.press("Escape")
+  await photo.waitFor({ state: "detached", timeout: 5_000 })
+  pass("a library file opens in the app's Previewer, and closes with it")
+
   // The drawer in each of its forms — a bottom sheet on a phone, the same sheet capped and centred on
   // a tablet, a side drawer from 1024px — in both modes.
   await drawer.getByRole("tab", { name: "PRs" }).click()

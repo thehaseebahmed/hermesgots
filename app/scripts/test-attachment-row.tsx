@@ -15,12 +15,14 @@ import {
   chatScreen,
   click,
   findAll,
+  labelled,
   mediaAsks,
   mediaHost,
   mediaReads,
   mount,
   seedChat,
   seedSettings,
+  spyOpen,
   text,
   until,
 } from "./component-kit.tsx"
@@ -162,5 +164,71 @@ test("a staged file, which the host has never been given, opens from its own byt
     })
   } finally {
     browser.restore()
+  }
+})
+
+test("a photo no browser draws is a row that hands it over, not a cell that can never fill", async () => {
+  // A phone's HEIC: the route serves it as a binary and no browser paints it, so the message draws a
+  // row the platform opens rather than a Gallery cell that would read "Couldn't load" for ever.
+  const heic: Attachment = {
+    id: "a2",
+    name: "photo.heic",
+    type: "image/heic",
+    size: 4096,
+    image: true,
+    path: "/home/h/.hermes/plugin-data/gots/attachments/session-1/photo.heic",
+  }
+  const profile = botProfile("attachment-heic")
+  await seedSettings()
+  await seedChat({ id: "c1", profile, messages: [message([heic])] })
+  const asked = mediaHost({ host: "attachment-heic" })
+  const browser = spyOpen()
+  try {
+    await mount(chatScreen("c1"), async () => {
+      await until(
+        async () => labelled("button", "Download photo.heic") !== null,
+        "the photo's download row",
+      )
+      assert.equal(
+        labelled("button", "Open photo.heic"),
+        null,
+        "no Gallery cell for a type the browser can't paint",
+      )
+      await click(labelled("button", "Download photo.heic"))
+      await until(async () => browser.opened.length > 0, "the tab")
+      assert.match(browser.opened[0], /photo\.heic&token=/, "at the URL the host signed")
+      assert.deepEqual(
+        mediaAsks(asked).map((one) => one.path),
+        [heic.path],
+        "and the host was asked for that one file",
+      )
+    })
+  } finally {
+    browser.restore()
+  }
+})
+
+test("a tap the host refused over a size says its own sentence, not that the file is missing", async () => {
+  // The mint answers 413 with the cap it met: that is the one refusal the reader can act on, so the
+  // row says it — "there is no copy" of a file the host holds is the drift ADR 0111 is about.
+  const profile = botProfile("attachment-cap")
+  await seedSettings()
+  await seedChat({ id: "c1", profile, messages: [message([attachment])] })
+  const sentence = "field notes.pdf is 31 MB; the limit is 25 MB."
+  mediaHost({ host: "attachment-cap", fail: [NAME], failure: 413, refusal: sentence })
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await mount(chatScreen("c1"), async () => {
+      await until(async () => row() !== null, "the file's row")
+      await click(row())
+      await until(async () => said.length > 0, "the refusal")
+      assert.deepEqual(said, [sentence], "the host's own words, which name the limit it met")
+    })
+  } finally {
+    toast.error = original
   }
 })

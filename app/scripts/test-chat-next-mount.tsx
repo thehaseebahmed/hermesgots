@@ -27,6 +27,7 @@ import {
   sendPress,
   seedChats,
   settle,
+  spyOpen,
   text,
   type,
 } from "./component-kit.tsx"
@@ -1138,12 +1139,7 @@ test("a file this device sent opens a tab at the URL the host signs for it", asy
     path: "/host/files/field notes.txt",
   }
   host.seed([{ user: attachmentsText("Read this", [file]), reply: "Read." }])
-  const opened: string[] = []
-  const real = { open: window.open }
-  window.open = ((url: string | URL) => {
-    opened.push(String(url))
-    return null
-  }) as typeof window.open
+  const browser = spyOpen()
   try {
     await mount(chatScreen("c-held"), async () => {
       const row = () =>
@@ -1152,10 +1148,14 @@ test("a file this device sent opens a tab at the URL the host signs for it", asy
         ) ?? null
       await until(() => row() !== null, "the file's row")
       await click(row())
-      await until(async () => opened.length > 0, "the tab")
-      assert.match(opened[0], /\/media\?path=.*token=/, "at the URL the host signed for the file")
+      await until(async () => browser.opened.length > 0, "the tab")
+      assert.match(
+        browser.opened[0],
+        /\/media\?path=.*token=/,
+        "at the URL the host signed for the file",
+      )
     })
   } finally {
-    window.open = real.open
+    browser.restore()
   }
 })

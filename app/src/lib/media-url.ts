@@ -21,12 +21,15 @@ export type MediaUrl = MediaUrlAnswer & {
 
 /**
  * What asking the host for one file's URL answered. `gone` is the host saying it has no such file,
- * which settles the path; `unanswered` is a host that was out or a read that failed, which may
- * answer differently the next time it is asked.
+ * which settles the path; `unsupported` is a bot whose plugin predates the signed URL, which can
+ * draw nothing either but is not the same thing to tell a reader who tapped one of its files;
+ * `unanswered` is a host that was out or a read that failed, which may answer differently the next
+ * time it is asked.
  */
 export type MediaAsk =
   | { state: "ready"; read: MediaUrl }
   | { state: "gone" }
+  | { state: "unsupported" }
   | { state: "refused"; note: string }
   | { state: "unanswered" }
 
@@ -44,15 +47,32 @@ const asking = new Map<string, Promise<MediaAsk>>()
 const cacheKey = (config: HermesConfig, path: string) => `${config.baseUrl}\u0000${path}`
 
 /**
+ * The URL this page holds for one path, while its signature is worth drawing from. One that isn't is
+ * let go of here rather than left to break a cell, so "is this URL still good" has one answer.
+ */
+function held(key: string): MediaUrl | undefined {
+  const known = urls.get(key)
+  if (!known) return undefined
+  if (!mediaSpent(known.expires)) return known
+  urls.delete(key)
+  return undefined
+}
+
+/** Lets go of what this page remembers about one path: the URL it holds, and the miss it settled. */
+function forget(key: string) {
+  urls.delete(key)
+  gone.delete(key)
+}
+
+/**
  * Asks the host for a URL for one path, saying whether its answer is the last word. A URL this page
  * already holds is answered with itself unless its signature has run out: what is kept is worth
  * drawing from, and one that isn't is asked for again here rather than left to break a cell.
  */
 function ask(config: HermesConfig, path: string): Promise<MediaAsk> {
   const key = cacheKey(config, path)
-  const known = urls.get(key)
-  if (known && !mediaSpent(known.expires)) return Promise.resolve({ state: "ready", read: known })
-  if (known) urls.delete(key)
+  const known = held(key)
+  if (known) return Promise.resolve({ state: "ready", read: known })
   if (gone.has(key)) return Promise.resolve({ state: "gone" })
   let pending = asking.get(key)
   if (!pending) {
@@ -100,16 +120,17 @@ async function hostOf(conversationId: string) {
  */
 async function refusal(profile: { baseUrl: string; apiKey: string }): Promise<MediaAsk | null> {
   const key = connectionKey(profile)
-  if (unsupported.cooling(key)) return { state: "gone" }
+  if (unsupported.cooling(key)) return { state: "unsupported" }
   const features = await getPluginFeatureList(profile)
   // A host that was away never answered, which isn't the same as one without the route: it is
   // asked again rather than sat out for the route's cooldown.
   if (!features) return { state: "unanswered" }
-  // A host from before the signed URL serves the file but can't sign for one: its media keeps the
-  // fallback it had, a reply's tag as the text it came from, rather than a cell that never fills.
+  // A host from before the signed URL serves the file but can't sign for one: nothing it holds can
+  // be drawn, so a reply's tag draws no cell at all (ADR 0111) — and a reader who tapped one of its
+  // files is told the plugin is what's behind, not that the file is missing.
   if (!features.includes("media") || !features.includes("media_url")) {
     unsupported.start(key)
-    return { state: "gone" }
+    return { state: "unsupported" }
   }
   unsupported.clear(key)
   return null
@@ -146,18 +167,54 @@ export async function askMediaUrls(conversationId: string, paths: string[]): Pro
 /**
  * The host's own URL for one file, never the copy this device keeps: where a file is handed over — a
  * download, a preview the platform opens — the host names it in how it serves it, which a kept copy
- * cannot.
+ * cannot. `null` is every way the host can decline, which a caller with nothing to draw has no use
+ * for; a caller that says what happened asks `askThreadMediaUrl` and keeps the difference.
  */
 export async function loadHostMediaUrl(
   conversationId: string,
   path: string,
 ): Promise<MediaUrl | null> {
-  const profile = await hostOf(conversationId)
-  if (!profile) return null
-  const refused = await refusal(profile)
-  if (refused) return null
-  const answer = await ask(profile, path)
+  const answer = await askThreadMediaUrl(conversationId, path)
   return answer.state === "ready" ? answer.read : null
+}
+
+/**
+ * What the host answers for one file, asked through the bot a chat belongs to — the whole answer,
+ * for a row that hands the file over and has to say what the host said (a size cap's own sentence,
+ * a plugin too old to sign, a host that didn't reply) rather than guess at a missing file.
+ */
+export async function askThreadMediaUrl(conversationId: string, path: string): Promise<MediaAsk> {
+  const profile = await hostOf(conversationId)
+  // A chat this device no longer holds has no bot to ask: nothing was asked, so nothing is claimed.
+  return profile ? askMediaUrl(profile, path) : { state: "unanswered" }
+}
+
+/**
+ * What the host answers for one file, asked from a bot's own connection rather than a thread's: a
+ * library lists files no chat carries, so a screen outside a thread names the bot it belongs to
+ * instead. The whole answer comes back — a file the host has not got, one it refused and why, a host
+ * that didn't reply — so the screen can say which of those it met rather than guess (ADR 0111).
+ *
+ * `again` forgets a miss this page remembered: a listing that named the path a moment ago knows
+ * better than a 404 the page got before the file was written.
+ */
+export async function askMediaUrl(
+  config: HermesConfig,
+  path: string,
+  { again = false }: { again?: boolean } = {},
+): Promise<MediaAsk> {
+  if (again) gone.delete(cacheKey(config, path))
+  const refused = await refusal(config)
+  if (refused) return refused
+  return ask(config, path)
+}
+
+/**
+ * The URL this page already holds for one file, while its signature is worth drawing from: a tap
+ * that has one opens at once instead of dimming its row for a mint that never happens.
+ */
+export function heldMediaUrl(config: HermesConfig, path: string): MediaUrl | undefined {
+  return held(cacheKey(config, path))
 }
 
 /**
@@ -177,9 +234,20 @@ export async function forgetMediaUrl(conversationId: string, path: string) {
   const profile = await hostOf(conversationId)
   if (!profile) return
   const key = cacheKey(profile, path)
-  urls.delete(key)
-  gone.delete(key)
+  forget(key)
   asking.delete(key)
   unsupported.clear(connectionKey(profile))
   await forgetCached(profile.baseUrl, path)
+}
+
+/**
+ * What a reader is told when a tap's ask came back without a URL: one sentence per way that happens,
+ * said here so a screen that hands a host file over and a row that shows one tell the same story —
+ * and a new state is taught once rather than in each screen that taps.
+ */
+export function askNote(answer: Exclude<MediaAsk, { state: "ready" }>, name: string): string {
+  if (answer.state === "refused") return answer.note
+  if (answer.state === "unsupported") return `The bot's plugin is too old to open ${name}.`
+  if (answer.state === "unanswered") return `The bot didn't answer for ${name}.`
+  return `The bot has no ${name}.`
 }

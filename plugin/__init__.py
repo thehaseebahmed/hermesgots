@@ -2262,13 +2262,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
         return web.json_response({"object": "gots.dictation_cancelled", "removed": bool(removed)})
 
-    async def served_file(
-        request: "web.Request", resolve: Any, allowed: Any = None
-    ) -> "web.StreamResponse":
-        """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
-        it (a library file has to sit under a project's library folder). What the platform shows is
-        served in place; anything else is handed over as a download named as the file. aiohttp's own
-        file response answers a ``Range`` with the span asked for, which is what lets a player seek.
+    async def served_file(request: "web.Request", resolve: Any) -> "web.StreamResponse":
+        """Serves the file a query's ``path`` names, once ``resolve`` has validated it. What the
+        platform shows is served in place; anything else is handed over as a download named as the
+        file. aiohttp's own file response answers a ``Range`` with the span asked for, which is what
+        lets a player seek.
 
         It takes no view on who may ask: each route below says who it lets in, so no caller can
         serve a file by handing this helper a flag.
@@ -2277,8 +2275,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             file = await asyncio.to_thread(resolve, request.query.get("path", ""))
         except media.MediaError as error:
             return _error(web, str(error), error.status)
-        if allowed is not None and not await asyncio.to_thread(allowed, file):
-            return _error(web, "Not a library file.", 404)
         headers = {"content-type": media.content_type(file), "accept-ranges": "bytes"}
         download = media.disposition(file)
         if download:
@@ -2345,15 +2341,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/media", serve_media)
     app.router.add_post(f"{PREFIX}/media/url", sign_media_url)
 
-    async def serve_library_file(request: "web.Request") -> "web.StreamResponse":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        return await served_file(
-            request, media.media_file, lambda file: library.holds(hermes_home(), file)
-        )
-
-    app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
     # A take's three verbs (ADR 0074): a Piece goes up blind, the Confirm answers for the whole take,
     # and Cancel takes its audio away at once.

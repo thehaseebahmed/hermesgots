@@ -510,8 +510,12 @@ The row of media in a thread: images and video side by side, each opened in the 
 _Avoid_: carousel, thumbnails, media strip, lightbox
 
 **Previewer**:
-The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the message's media: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
+The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
+
+**Library**:
+The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, or handed to the platform where the Previewer can't draw it.
+_Avoid_: outputs folder, artifacts, files tab, downloads
 
 **Signed URL**:
 The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send. It is asked for once per file and kept only while the expiry it names is worth drawing from: a page outlives the minutes a signature lives for, so another is minted when one runs out.

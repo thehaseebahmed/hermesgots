@@ -3493,19 +3493,6 @@ export async function getSessionLibrary(
   }
 }
 
-/** A library file's bytes, for opening it: an image in the system viewer, anything else in a tab. */
-export async function getLibraryFile(
-  config: HermesConfig,
-  path: string,
-  signal?: AbortSignal,
-): Promise<Blob> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/library/file?path=${encodeURIComponent(path)}`,
-    { headers: headers(config), signal },
-  )
-  return response.blob()
-}
-
 /** One of a project's tasks: an issue the user has marked ready for an agent to work. */
 export interface ProjectTask extends ProjectIssue {
   /** Who has it, when a person took it. */

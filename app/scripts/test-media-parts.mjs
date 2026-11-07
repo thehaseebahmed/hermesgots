@@ -1,8 +1,8 @@
 /**
  * A reply's own text against the media it names: a fenced block is the reply's text, never a tag,
  * and it has to come back out whole — a reply that ends in one used to lose it entirely. The tag's
- * grammar takes the extensions the plugin's media route serves, so a clip, a recording or a document
- * the agent produced is a part like an image.
+ * shape is the path, whatever the suffix, so a clip, a recording, a document or a phone's photo the
+ * agent produced is a part like an image.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -15,113 +15,6 @@ const media = (parts) => parts.filter((part) => part.kind === "media").flatMap((
 
 /** Each part draws as its own block, so the blank line between two of them is the only thing lost. */
 const words = (value) => value.replace(/\s+/g, " ").trim()
-
-/** Every extension the plugin's `media.py` answers with a content type, and a binary tail after it. */
-const SERVED = [
-  // images, the raster the app has always drawn and the SVG it draws too
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "svg",
-  // video
-  "mp4",
-  "m4v",
-  "mov",
-  "webm",
-  "ogv",
-  // audio
-  "mp3",
-  "m4a",
-  "aac",
-  "wav",
-  "ogg",
-  "oga",
-  "opus",
-  "flac",
-  // text, documents and data
-  "txt",
-  "log",
-  "md",
-  "markdown",
-  "csv",
-  "tsv",
-  "html",
-  "htm",
-  "css",
-  "xml",
-  "json",
-  "pdf",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  // code
-  "py",
-  "rb",
-  "go",
-  "rs",
-  "c",
-  "h",
-  "cc",
-  "cpp",
-  "hpp",
-  "cs",
-  "java",
-  "kt",
-  "swift",
-  "ts",
-  "tsx",
-  "jsx",
-  "js",
-  "mjs",
-  "cjs",
-  "sh",
-  "bash",
-  "zsh",
-  "sql",
-  "php",
-  "lua",
-  "pl",
-  "r",
-  "scala",
-  "ex",
-  "exs",
-  "erl",
-  "hs",
-  "clj",
-  "vue",
-  "svelte",
-  "dart",
-  "zig",
-  // what the route still hands over as a binary
-  "zip",
-  "tar",
-  "gz",
-  "docx",
-  "xlsx",
-  "pptx",
-  "epub",
-  "apk",
-  "wasm",
-  "ics",
-  "vcf",
-  "srt",
-  "vtt",
-]
-
-test("the grammar takes every type the media route serves", () => {
-  for (const extension of SERVED) {
-    const reply = `Here it is: MEDIA: /home/h/.hermes/library/produced.${extension}`
-    assert.deepEqual(
-      media(mediaImages(reply)),
-      [`/home/h/.hermes/library/produced.${extension}`],
-      `.${extension} is a tag`,
-    )
-  }
-})
 
 test("a clip, a recording and a document sent together are one part", () => {
   const reply = [
@@ -152,9 +45,20 @@ test("a fenced block shields a clip and a recording too", () => {
   assert.match(text(mediaImages(reply)), /MEDIA: \/tmp\/render\.mp4/, "and stays as it was written")
 })
 
-test("a path the route can't name stays text", () => {
-  for (const tag of ["MEDIA: /tmp/mystery", "MEDIA: /tmp/archive.xyzzy", "MEDIA: no/path.png"])
-    assert.deepEqual(media(mediaImages(tag)), [], tag)
+test("a bare path keeps the spaces in its name", () => {
+  // The path is the shape, so where it ends is the reader's sentence: a name with spaces ends at its
+  // own suffix, and the words after it are still the reply's.
+  const parts = mediaImages("MEDIA:/opt/data/lib/a report for march.pdf and then some words.")
+  assert.deepEqual(media(parts), ["/opt/data/lib/a report for march.pdf"])
+  assert.match(text(parts), /and then some words\./, "the sentence after the path is left alone")
+})
+
+test("a path is a tag whatever its suffix, and only a path is", () => {
+  // The route answers any suffix, so a `.doc`, a `.7z` or no suffix at all is still a file handed
+  // over.
+  for (const tag of ["MEDIA: /tmp/mystery", "MEDIA: /tmp/archive.xyzzy", "MEDIA: /tmp/report.doc"])
+    assert.deepEqual(media(mediaImages(tag)), [tag.replace("MEDIA: ", "")], tag)
+  assert.deepEqual(media(mediaImages("MEDIA: no/path.png")), [], "a bare name is not a path")
 })
 
 test("a quoted path keeps its spaces and a full stop isn't part of it", () => {
