@@ -61,10 +61,6 @@ export function marker(attachment: Attachment) {
   return `<attachment ${attrs.map(([key, value]) => `${key}="${escapeAttr(value)}"`).join(" ")} />`
 }
 
-/**
- * Whether the message has to say its files aren't inlined: the bytes of a photo the model is sent
- * ride along as an image part, so only an attachment carrying no part needs telling.
- */
 const needsInstruction = (attachments: Attachment[]) => attachments.some((a) => !carriesPart(a))
 
 /** The message as Hermes's transcript keeps it: the text, then a line per attachment. */

@@ -141,9 +141,6 @@ export function SharePage() {
     if (!share || !profile || readStarted.current === share.id) return
     readStarted.current = share.id
     let live = true
-    // The share screen's own guess, which is what it has always made: it never refuses a file on
-    // the route's account (its own banner says when a model can't take photos), so its intake reads
-    // as one whose route is open, and its photos ride the road they always did.
     void prepareIntake(share.files, {
       readsImages: imagesAvailable,
       route: "yes",

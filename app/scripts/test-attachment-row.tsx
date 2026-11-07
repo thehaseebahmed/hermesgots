@@ -137,9 +137,6 @@ test("a file the host never took is drawn, and a tap says there is no copy of it
 })
 
 test("a photo the browser can't draw is still drawn as a picture", async () => {
-  // A HEIC on the file road: the bytes this device holds are the picture itself, and a browser renders
-  // nothing from them, so the tile names it — with the picture's own icon — rather than showing a
-  // broken frame. A photo the browser can decode is still drawn from its bytes.
   const heic: Attachment = {
     id: "heic-1",
     name: "IMG_0001.heic",

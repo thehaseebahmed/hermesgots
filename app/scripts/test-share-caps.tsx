@@ -239,9 +239,6 @@ test("a photo lands as a photo, and only a model that takes images is given its 
     })
   })
 
-  // The same share to a bot whose model takes no images: the plugin can still carry it as a file,
-  // and a photo is a picture on either road — the tile draws the bytes it can decode, so the file on
-  // its way to the host is still shown as the photo it is.
   await seedSettings({ activeProfileId: "bot-1" })
   await db.profiles.clear()
   await db.profiles.put(botProfile("share-no-images", { imageInput: false }))

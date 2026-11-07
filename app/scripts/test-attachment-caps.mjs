@@ -149,8 +149,6 @@ test("a photo for a model that takes no images is refused where the host has no 
 })
 
 test("a photo picked before the host answered is tried on its file road", () => {
-  // An answer not read yet is not a no (Q2): the photo is offered and tried, and the send is where a
-  // host that won't take it says so. A document still needs the route confirmed.
   assert.deepEqual(
     pickRoad({ picture: true, readsImages: false, route: "unknown" }),
     { road: "file" },
@@ -211,8 +209,6 @@ test("a photo over the file cap is exempt from it, since scaling is what makes i
 })
 
 test("a photo over the file cap is taken on the file road too", () => {
-  // The cap measures a file the host is handed, and a photo is scaled to fit on either road, so a
-  // 12 MB camera photo is taken on the file road exactly as it is inline (step 5 of the spec).
   const camera = file("IMG_0001.heic", 12 * 1024 * 1024, "image/heic")
   assert.deepEqual(
     pickRoad({ picture: true, readsImages: false, route: "yes" }),

@@ -450,7 +450,6 @@ export function Composer({
         name: attachment.name,
         type: attachment.type,
         size: attachment.size,
-        // A photo this device can't decode has nothing to show; a clip or a file opens from its URL.
         src: attachment.image && !drawable(attachment) ? undefined : attachmentUrl(attachment),
         state: "ready",
       },
@@ -460,8 +459,7 @@ export function Composer({
     (attachment) => drawnCell(attachment.type, attachment.name) !== "file",
   )
   // A tap that means "look at this" opens the screen's own Previewer, here as in the thread; a file
-  // the Previewer can't draw is handed to the platform instead, and so is a photo whose bytes this
-  // device can't decode — the Previewer would open on nothing and sit on a Retry that never works.
+  // the Previewer can't draw is handed to the platform instead.
   const open = (attachment: Attachment) => {
     const previews =
       drawnCell(attachment.type, attachment.name) !== "file" &&

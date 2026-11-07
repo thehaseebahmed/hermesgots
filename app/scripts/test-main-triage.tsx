@@ -368,10 +368,6 @@ test("a stay keeps the files already saved and saves nothing twice", async () =>
 })
 
 test("a stored photo with no part still goes inline when its message is sent again", async () => {
-  // A row the build before this one wrote: `image` was then the only record that a photo's bytes
-  // rode inline, so the row keeps no part of its own. This device's store gives it one as it opens,
-  // which is what a message sent again from that row has to carry. The older store carries the chat
-  // the message belongs to, as a real one would: the fold reads each chat's user rows.
   const older = new Dexie("gots")
   older.version(34).stores({ messages: MESSAGE_STORES, conversations: "id, updatedAt" })
   await db.close()
@@ -406,7 +402,6 @@ test("a stored photo with no part still goes inline when its message is sent aga
     ],
   })
   await older.close()
-  // Opening this device's store is what folds the row, as it is on the first open after an upgrade.
   await db.open()
   await seed("route-stored-photo", { keepMessages: true })
   const seen = host("route-stored-photo", "stay")
@@ -421,9 +416,6 @@ test("a stored photo with no part still goes inline when its message is sent aga
 })
 
 test("a photo that travels as a file says why it never reached the agent when the host won't take it", async () => {
-  // F3: a photo picked while the host hasn't answered about its upload route is tried, and the file
-  // road's upload is its only copy — so a host that won't take it stops the send, in the host's own
-  // reason, rather than handing the model a picture it never got.
   await seed("route-photo-refused")
   uploads.length = 0
   noUploadRoute.add("route-photo-refused")

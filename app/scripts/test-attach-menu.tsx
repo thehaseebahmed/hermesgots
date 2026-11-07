@@ -1,15 +1,3 @@
-/**
- * The `+` menu offers each source by the road what it picks can take. Files is offered where the
- * bot's host advertises the plugin's `attachments` feature and refused there, with the reason,
- * where it doesn't — so a host whose plugin predates the upload route refuses at the menu instead
- * of failing at send. Camera and Photos pick pictures, so they follow a picture's road: offered
- * wherever the model reads images (the inline road) or the host may still take a file, refused only
- * where the host answered that it has no route and the model reads no images — the one state where
- * a photo reaches the agent by no road at all, said out loud in the same sentence. The answer
- * follows the plugin features rule (`src/lib/features.ts`): a real answer is remembered for its
- * connection, and a host that was away is asked again rather than read as a no. The host is faked at
- * the HTTP boundary and the menu is read off the screen, never out of its internals.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -69,7 +57,6 @@ test("a host that advertises no attachments refuses Files at the menu, and offer
       "a picture the model reads rides inline, so the camera is still offered",
     )
     assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
-    // Files is refused, so its reason is said — under the sources, where it names that one.
     assert.match(text(), /File uploads need a newer Gots plugin\./, "and Files' reason is said")
   })
 })
@@ -96,8 +83,6 @@ test("a model that takes no pictures still offers Camera and Photos", async () =
 
 test("a host with no upload route refuses all three, with its reason", async () => {
   await seed("attach-menu-none", { imageInput: false })
-  // An answer owed is not a no: with the model reading no images, a photo is still tried on the
-  // host's route, and only Files — which needs that route confirmed — is refused.
   host("away", "attach-menu-none", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
@@ -109,8 +94,6 @@ test("a host with no upload route refuses all three, with its reason", async () 
     assert.equal(source("Photos")?.hasAttribute("disabled"), false, "nor the gallery")
     assert.equal(source("Files")?.hasAttribute("disabled"), true, "while Files waits on the answer")
   })
-  // Once the host answers that it has none, no photo can reach the agent either, and the sheet
-  // says why in the one sentence above them.
   host(["media"], "attach-menu-none", [])
   await mount(chatScreen(CHAT), async () => {
     await openMenu()
@@ -135,9 +118,6 @@ test("a host that advertises attachments offers Files as it always has", async (
 })
 
 test("a host that hasn't answered offers Camera and Photos, and says why Files waits", async () => {
-  // The model reads no images, so a photo waits on the host's route; the answer is still owed, which
-  // is not a no, so the two photo sources are offered. Files needs that route confirmed, so it is
-  // refused — and the sheet says so, because a refused source with no reason is a dead button.
   await seed("attach-menu-owed", { imageInput: false })
   host("away", "attach-menu-owed", [])
   await mount(chatScreen(CHAT), async () => {

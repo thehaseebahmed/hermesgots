@@ -1316,18 +1316,9 @@ db.version(33).upgrade((tx) =>
 // with the host away. A new table: nothing older has to be moved into it.
 db.version(34).stores({ appCache: "key, connection" })
 
-/**
- * Whether an attachment is one a row written *before* v35 holds with no inline part: `image` was
- * then the only record that a photo's bytes went inline, so a picture holding a blob and no part is
- * one whose bytes the model was sent. A row written *after* v35 with that shape means the opposite
- * — a picture this device could not decode, which carries no part — so this rule is only ever read
- * as what a pre-v35 row meant, by the fold that gives those rows their part back.
- */
 const rodeInlineBeforeV35 = (attachment: Attachment) =>
   Boolean(attachment.image && !carriesPart(attachment) && attachment.blob)
 
-/** That photo, given the part it rode with: an attachment already carrying one, or holding no
- * bytes, is left as it is. */
 const withInlinePart = (attachment: Attachment): Attachment =>
   rodeInlineBeforeV35(attachment) ? { ...attachment, inline: attachment.blob } : attachment
 
@@ -1338,9 +1329,6 @@ const withInlinePart = (attachment: Attachment): Attachment =>
 // rewritten; Dexie puts back every row it visits otherwise. Both tables are read at once, inside the
 // one transaction the upgrade already runs in.
 db.version(35).upgrade(async (tx) => {
-  // Only a message the user wrote carries an attachment, so each chat's own user rows are the ones
-  // to read — through the compound index, and never a reply's, whose calls and thinking are the
-  // bulk of a transcript.
   const photos = async () => {
     const messages = tx.table<Message>("messages")
     const chats = await tx.table<Conversation>("conversations").toCollection().primaryKeys()

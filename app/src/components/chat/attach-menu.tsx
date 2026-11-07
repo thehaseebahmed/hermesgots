@@ -63,15 +63,9 @@ export function AttachMenu({
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
-  // Each source is offered when what it picks has a road to the agent: the bytes the model reads,
-  // or the host's file route. Camera and Photos pick a picture, so they follow a picture's road —
-  // still open while the host hasn't answered, and shut only where it answered that it has none and
-  // the model can't read the photo itself. Files picks a document, which needs that route confirmed.
   const offers = (id: Source) =>
     pickRoad({ picture: id !== "files", readsImages: imagesAvailable, route: filesFeature })
       .road !== "none"
-  // Said whenever Files is shut — it names Files, and a disabled source with no reason is what this
-  // sheet exists to stop — and the same sentence covers the state where every source is shut.
   const because = filesReason(filesFeature)
 
   return (

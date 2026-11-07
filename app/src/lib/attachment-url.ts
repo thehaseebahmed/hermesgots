@@ -21,12 +21,6 @@ export function drawingBlob(attachment: Attachment) {
   return attachment.blob
 }
 
-/**
- * Whether this device can draw the picture an attachment is: the bytes there are to draw are bytes
- * a browser renders. A HEIC on the file road is still the picture it is, but nothing paints it — so
- * a tile names it instead of showing a broken frame, and a tap hands it to the platform rather than
- * opening a viewer on nothing.
- */
 export function drawable(attachment: Attachment) {
   const blob = drawingBlob(attachment)
   return Boolean(blob && renderableImage(blob.type))

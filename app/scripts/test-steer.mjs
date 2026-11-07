@@ -8,7 +8,6 @@ import test from "node:test"
 import { canSteer, midReply, steerAsked } from "../src/lib/steer.ts"
 
 const note = { id: "f1", name: "notes.txt", type: "text/plain", size: 12, image: false }
-// A photo the model is sent carries the bytes inline; the flag alone says nothing about that.
 const photo = {
   id: "f2",
   name: "cat.png",

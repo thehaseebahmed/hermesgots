@@ -43,15 +43,8 @@ export const isPhoto = (type: string) => PHOTO_TYPES.test(type)
 /** A host's answer about a plugin feature its manifest either has or hasn't (see `features.ts`). */
 export type RouteAnswer = PluginFeatureAnswer
 
-/**
- * The two facts an intake surface has before it reads a file: whether this chat's model takes image
- * input, and what the host answered about the plugin's upload route. With the file's own kind they
- * are all `pickRoad` asks.
- */
 export interface RoadFacts {
-  /** Whether the chosen model takes image input. */
   readsImages: boolean
-  /** What the host answered about the plugin's upload route. */
   route: RouteAnswer
 }
 
@@ -70,32 +63,17 @@ export function filesReason(answer: RouteAnswer): string | null {
 /** Where a pick travels: the bytes the model reads, the host's file route, or nowhere at all. */
 export type PickRoad = { road: "inline" } | { road: "file" } | { road: "none"; message: string }
 
-/**
- * Which road a pick takes. A picture the model reads rides inline and needs no upload route. A
- * picture the model can't read travels as the file it is, on the host's route — and while the host
- * hasn't answered about that route it is tried all the same, since an answer not read yet is not a
- * no and the send is where a host that won't take it says why. Any other pick — a document, a clip —
- * needs the route confirmed: a host that hasn't answered one carries it nowhere, so it is refused in
- * the sentence Files already gives, since it is the same missing capability.
- */
 export function pickRoad({
   picture,
   readsImages,
   route,
-}: RoadFacts & {
-  /** Whether the pick is a picture this app would send as an image (`isPhoto`). */
-  picture: boolean
-}): PickRoad {
+}: RoadFacts & { picture: boolean }): PickRoad {
   if (picture && readsImages) return { road: "inline" }
   if (picture && route !== "no") return { road: "file" }
   const because = filesReason(route)
   return because ? { road: "none", message: because } : { road: "file" }
 }
 
-/**
- * Whether one file rides inline — `pickRoad` asked of that file, which is what the read that
- * prepares it hands to `prepareAttachment`, so each file in a batch is read by its own road.
- */
 export function ridesInline(file: CappedFile, facts: RoadFacts): boolean {
   return pickRoad({ ...facts, picture: isPhoto(file.type) }).road === "inline"
 }
@@ -140,11 +118,6 @@ export function carriesPart<T extends { inline?: unknown }>(
   return Boolean(attachment.inline)
 }
 
-/**
- * What a pick of `files` becomes on a message already holding `held` attachments. A picture is never
- * measured here: its read scales it, or — where this device can't decode it — refuses it by its size.
- * Anything else — a document, a clip — is measured against the per-file cap before it is read.
- */
 export function intake<T extends CappedFile>(files: T[], held = 0): Intake<T> {
   const room = Math.max(0, MAX_ATTACHMENTS - held)
   const chosen = files.slice(0, room)
@@ -161,12 +134,6 @@ export function intake<T extends CappedFile>(files: T[], held = 0): Intake<T> {
 /** What an image keeps: the bytes it holds on this device, and the bytes the model is sent. */
 export type KeptImage<B> = { kept: B; inline: B }
 
-/**
- * The bytes an image attachment keeps — the file the user chose, which is what the host stores and
- * this device caches — and the bytes the model is sent: the file itself where nothing was scaled,
- * else the scaled copy. An original past the per-file cap can't be the copy kept, so the scaled copy
- * stands in for both.
- */
 export function keptImage<B extends { size: number }>(file: B, scaled: B | null): KeptImage<B> {
   if (scaled && file.size > MAX_FILE_BYTES) return { kept: scaled, inline: scaled }
   return { kept: file, inline: scaled ?? file }

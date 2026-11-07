@@ -27,7 +27,6 @@ const file = (patch = {}) => ({
   ...patch,
 })
 
-// A photo the model is sent: the part is the bytes that ride in the message itself.
 const photo = (patch = {}) => ({
   id: "p1",
   name: "shot.png",

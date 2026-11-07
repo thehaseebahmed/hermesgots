@@ -73,7 +73,6 @@ export function AttachmentTile({
   className?: string
 }) {
   const uploading = useUploading(attachment.id)
-  // A photo's bytes are drawn only where this device can decode them; a file's own row draws none.
   const url = drawable(attachment) ? attachmentUrl(attachment) : undefined
   const Icon = attachment.image ? ImageIcon : action === "download" ? DownloadIcon : FileIcon
   const busy = preparing || uploading

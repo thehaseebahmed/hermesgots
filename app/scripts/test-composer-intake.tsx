@@ -192,7 +192,6 @@ test("a pasted photo is refused where the host has no upload route, in the same 
     said.push(String(message))
   }) as typeof toast.error
   try {
-    // A model that takes no images has no inline road, and this host has no file route either.
     await mount(composer(sent, "no", false), async () => {
       await paste([new File(["png"], "cat.png", { type: "image/png", lastModified: 6 })])
       assert.deepEqual(said, ["File uploads need a newer Gots plugin."], "the route's own reason")
@@ -269,12 +268,9 @@ test("a clip picked from the gallery lands, and one over nine megabytes is refus
 })
 
 test("a photo picked for a model that takes no pictures lands as a file, and its send names the path", async () => {
-  // A camera's own HEIC, for a model that reads no images: the bytes travel as the file Files sends,
-  // so the message the model reads names the path the host saved it at and carries no image part.
   const saved = host("composer-intake")
   const sent: { text: string; attachments: Attachment[] }[] = []
   const send = async (text: string, attachments: Attachment[]) => {
-    // The send's own first step: every attachment saved on the host, then the message read back.
     sent.push({ text, attachments: await uploadAttachments(bot, "session-1", attachments, true) })
   }
   await mount(composer(sent, "yes", false, send), async () => {
@@ -313,8 +309,6 @@ test("a photo picked for a model that takes no pictures lands as a file, and its
 })
 
 test("a photo over nine megabytes is scaled to fit on the file road", async () => {
-  // A modern camera's photo past the per-file cap, for a model that reads no images: the file road
-  // takes it anyway, and the copy the host is handed is the 1600px JPEG the inline road makes.
   const saved = host("composer-intake")
   const sent: { text: string; attachments: Attachment[] }[] = []
   const send = async (text: string, attachments: Attachment[]) => {
@@ -393,8 +387,6 @@ test("a photo over nine megabytes is scaled to fit on the file road", async () =
 })
 
 test("a photo over nine megabytes the browser can't decode is still refused by its size", async () => {
-  // No scaled copy can be made of a photo the browser cannot decode, so the file road has nothing to
-  // hand the host: it is refused in the cap's own words, exactly as it was before step 5.
   const refusals: string[] = []
   const original = toast.error
   toast.error = ((message: unknown) => {
@@ -417,9 +409,6 @@ test("a photo over nine megabytes the browser can't decode is still refused by i
 })
 
 test("a photo the browser can't decode is still the picture it is, and carries no part", async () => {
-  // A HEIC picked for a model that reads images, on a device that decodes none of it: the inline
-  // road has no bytes it can give the model, so the photo is read as the picture it is and no part
-  // rides — the same answer the file road gives it, since `image` says what the file is.
   const saved = host("composer-intake")
   const sent: { text: string; attachments: Attachment[] }[] = []
   const send = async (text: string, attachments: Attachment[]) => {
@@ -449,8 +438,6 @@ test("a photo the browser can't decode is still the picture it is, and carries n
 })
 
 test("a photo picked before the host answered is tried, not refused", async () => {
-  // Q2: an answer not read yet is not a no, so the pick lands on the file road; the send is where a
-  // host that won't take it says why (`test-main-triage.tsx`).
   const said: string[] = []
   const original = toast.error
   const sent: { text: string; attachments: Attachment[] }[] = []
@@ -510,8 +497,6 @@ test("a staged photo and clip open the screen's Previewer, and Remove takes one 
 })
 
 test("a staged photo this device can't draw is handed to the platform, not the Previewer", async () => {
-  // A HEIC the browser paints nothing from: the Previewer would open on nothing and sit on a Retry
-  // that can never work, so the tap goes where a file's does — the platform's own app.
   const sent: { text: string; attachments: Attachment[] }[] = []
   const real = {
     create: URL.createObjectURL,

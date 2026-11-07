@@ -96,26 +96,12 @@ function attachmentOf({
   }
 }
 
-/**
- * Reads a picked file into an attachment. A picture is the picture it is on either road — `image`
- * says what the file is, never where its bytes go — and the browser's own decode decides what of it
- * can be scaled: on the inline road the model is sent the scaled copy (or the file itself where
- * nothing needed scaling), and a picture this device can't decode is one with no part at all. On
- * the file road the file is handed over as it is, scaled only where its size is past the cap, so
- * the JPEG `scaled` makes is the copy kept under its own `.jpg` name. Only a picture past that cap
- * that can't be scaled is refused, by its size. Anything else is a plain file, measured against the
- * cap before it is read.
- *
- * `inline` is `ridesInline`'s answer for this file: whether the model is sent its bytes in the
- * message. Nothing defaults it — the road is a fact the surface has, never this read's guess.
- */
 export async function prepareAttachment(file: File, inline: boolean): Promise<Attachment> {
   const name = file.name || "file"
   if (!isPhoto(file.type)) {
     if (file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
     return attachmentOf({ name, blob: file, picture: false })
   }
-  // The decode is what either scales the bytes or says they can't be scaled.
   const photo = inline || file.size > MAX_FILE_BYTES ? await scaled(file) : null
   if (!photo && file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
   const { kept, inline: part } = keptImage<Blob>(file, photo?.blob ?? null)
@@ -143,13 +129,6 @@ export interface PreparedIntake {
   refusals: Refusal[]
 }
 
-/**
- * What `files` becomes on a message already holding `held` attachments — the one intake a pick, a
- * paste, a drop and a share land through. The two facts a surface has (whether this chat's model
- * reads pictures, and what the host answered about its upload route) are asked of every file: one
- * with no road is dropped and said so, and the rest is read by the road it takes and held to the
- * caps. `onTake` is how a surface holds the place of the files it is now reading.
- */
 export async function prepareIntake(
   files: File[],
   {
@@ -172,7 +151,6 @@ export async function prepareIntake(
   },
 ): Promise<PreparedIntake> {
   const facts: RoadFacts = { readsImages, route }
-  // Said once for the batch, in the words the menu gives for the same missing route.
   let because: string | null = null
   const onRoad = files.filter((file) => {
     const road = pickRoad({ ...facts, picture: isPhoto(file.type) })
@@ -297,11 +275,6 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
-/**
- * The message's content for Hermes: the text with a marker per attachment, and each part inline. The
- * model reads the bytes a part carries — the scaled copy where scaling made one — and never a file
- * the message names alone. Every part is read at once, so a message of photos costs one wait.
- */
 export async function wireContent(
   text: string,
   attachments: Attachment[] = [],
