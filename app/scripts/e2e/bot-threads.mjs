@@ -939,6 +939,30 @@ await flow(
       "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",
     )
 
+    // Once the bot's thread list has answered and a thread stands beside Main, the two chats share
+    // the room the sidebar leaves: half each, as a share of the row rather than a width, so it is
+    // right with the sidebar open or a rail (ADR 0110).
+    const lanes = await page.evaluate(() => {
+      const width = (slot) => {
+        const node = document.querySelector(`[data-pane="${slot}"]`)
+        return node ? node.getBoundingClientRect().width : null
+      }
+      return { main: width("main"), thread: width("thread") }
+    })
+    assert.ok(
+      lanes.main && lanes.thread,
+      `both chats are drawn beside each other (Main ${lanes.main}, thread ${lanes.thread})`,
+    )
+    assert.ok(
+      Math.abs(lanes.main - lanes.thread) <= 2,
+      `the two chats are given the same width (Main ${Math.round(lanes.main)} against the thread ${Math.round(lanes.thread)})`,
+    )
+    assert.ok(
+      lanes.main > 500 && lanes.thread > 500,
+      `and both are wider than the lane Main alone keeps (Main ${Math.round(lanes.main)}, thread ${Math.round(lanes.thread)})`,
+    )
+    pass("the thread beside Main shares the lane evenly")
+
     const secondBot = await addBot(page, { name: SECOND_BOT, messages: SECOND_MESSAGES })
     const secondMain = `/c/main-${secondBot}`
     // The second bot keeps a thread beside its Main too, so the switch has two lanes to read.
