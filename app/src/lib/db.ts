@@ -58,8 +58,12 @@ export interface Settings {
   promptsAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
-  /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
-  botThreads?: boolean
+  /**
+   * The layout the app drew before bot threads: Recents in the sidebar and a New chat screen. Local
+   * and off by default, since bot threads — bots in the sidebar, each chat a thread in its bot — are
+   * the layout a device gets; on is the opt-out, read by `useBotThreads` in `threads.ts`.
+   */
+  legacyChat?: boolean
   /** A chat opens on chat-next instead of the current screen (ADR 0065). Developer, local. */
   chatNext?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
@@ -1213,8 +1217,10 @@ db.version(22).stores({ prompts: "id" })
  * Settings keys this build retired: a row an older build wrote, or one another device still runs
  * and syncs, can carry them. Dexie v23 takes them out of every row, and each save takes them out
  * again — a save re-puts the row it reads, so without that a dead key would outlive its screen.
+ * `botThreads` is the layout's old switch: bot threads became the default and the switch now stores
+ * `legacyChat`, so a row that still says `botThreads` says nothing and is shed the same way.
  */
-const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault"] as const
+const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault", "botThreads"] as const
 
 // v23: "Fold thinking by default" is retired — a reply's thinking opens in a sheet now, so nothing
 // opens on its own and there is nothing left to fold. The key goes from every device's settings

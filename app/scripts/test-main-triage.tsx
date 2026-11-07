@@ -100,7 +100,7 @@ async function seed(
   extra: { main?: boolean; bot?: Partial<Profile> } = { main: true },
 ) {
   const bot = botProfile(name, extra.bot)
-  await seedSettings({ developer: true, botThreads: true })
+  await seedSettings({ developer: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()

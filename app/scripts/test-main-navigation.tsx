@@ -26,10 +26,8 @@ const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly" })
 const MAIN = mainThreadId(bot.id)
 const defaultBot = BOTS.find((one) => one.id === DEFAULT_BOT_ID)!
 
-async function seed(patch: { developer?: boolean; botThreads?: boolean } = {}) {
+async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
   await seedSettings({
-    developer: true,
-    botThreads: true,
     activeProfileId: bot.id,
     ...patch,
   })
@@ -191,6 +189,27 @@ async function seedThreads() {
   )
 }
 
+test("with nothing stored the app is the bot-first layout", async () => {
+  await seed()
+  globalThis.fetch = async () => json({})
+  await mount(homeScreen, async () => {
+    await until(async () => where() === `/c/${MAIN}`, "Main's address")
+    assert.ok(await db.conversations.get(MAIN), "Main is made so the address lands somewhere")
+  })
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(
+        async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        "the bot row",
+      )
+      assert.equal(findText("button", "New chat"), null, "no New chat button beside the bots")
+    },
+  )
+})
+
 test("home opens the bot's Main thread", async () => {
   await seed()
   globalThis.fetch = async () => json({})
@@ -265,15 +284,28 @@ test("Main's empty state sends a suggestion into Main, triaged, without a thread
   )
 })
 
-test("with the Developer switch off no Main is made and the app is as it was", async () => {
-  await seed({ botThreads: false })
+test("the legacy switch brings the Recents list and the New chat button back", async () => {
+  await seed({ legacyChat: true })
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
-    assert.equal(where(), "/", "home is still the new-chat screen")
+    assert.equal(where(), "/", "home is the new-chat screen again")
     assert.equal(await db.conversations.count(), 0, "no Main")
   })
   await mount(staleScreen, async () => {
     assert.equal(where(), "/", "the old address falls back home")
     assert.equal(await db.conversations.count(), 0, "no Main")
   })
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(findText("button", "New chat")), "the New chat button")
+      assert.equal(
+        findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        false,
+        "nothing opens a bot's Main: the list is Recents",
+      )
+    },
+  )
 })

@@ -78,7 +78,7 @@ const seed = () =>
         messages: [{ id: "tb-1", content: "the other bot's thread", at: at(3) }],
       },
     ],
-    { bots: [first, second], active: first.id, botThreads: true },
+    { bots: [first, second], active: first.id },
   )
 
 const VIEWPORT = 720

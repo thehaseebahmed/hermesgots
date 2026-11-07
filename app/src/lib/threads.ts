@@ -87,11 +87,15 @@ export function useNow() {
   return now
 }
 
-/** Whether the bot-first layout is on: experimental, so only behind the Developer switch. */
+/**
+ * Whether the bot-first layout is on: bots in the sidebar, each chat a thread in its bot. That is the
+ * layout every device gets, so this reads the one switch that says otherwise — Developer's **Enable
+ * legacy chat UX** (`Settings.legacyChat`, local) — and never the Developer switch itself.
+ */
 export function useBotThreads() {
   return useLiveQuery(async () => {
     const settings = await getSettings()
-    return Boolean(settings.developer && settings.botThreads)
+    return !settings.legacyChat
   }, [])
 }
 

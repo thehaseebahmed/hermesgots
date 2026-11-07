@@ -209,7 +209,7 @@ function refusesQueue(name: string) {
 
 async function seed(name: string, bot: Partial<Profile> = {}): Promise<Profile> {
   const profile = botProfile(name, { id: "bot-1", name: "Pinner", ...bot })
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: profile.id })
+  await seedSettings({ developer: true, activeProfileId: profile.id })
   await db.profiles.clear()
   await db.profiles.put(profile)
   await db.messages.clear()

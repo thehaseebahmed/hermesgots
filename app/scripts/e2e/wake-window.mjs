@@ -27,6 +27,12 @@ await flow(
 
     const chat = `e2e-wake-${runId()}`
     await seed([{ id: chat, title: TITLE }])
+    // The chat opens under the legacy layout: under bot threads it draws beside Main from the start,
+    // which splits Main's own composer in beside the question this flow answers.
+    await page.evaluate(async () => {
+      const { saveSettings } = await import("/src/lib/db.ts")
+      await saveSettings({ legacyChat: true })
+    })
     await page.goto(`${app}/c/${chat}`)
 
     // The chat's Hermes session, so `runs/live` can be read at the moments that matter.
@@ -60,16 +66,20 @@ await flow(
       "the composer to come back once the answer is sent",
     )
 
-    // Main draws its threads as cards under the bot-threads switch, where a thread's state is read.
-    // Flipped now rather than before the chat opened: on from the start it splits Main's own
+    // Main draws its threads as cards under the bot-threads layout, where a thread's state is read.
+    // Turned on now rather than before the chat opened: on from the start it splits Main's own
     // composer in beside the question, and the answer's Send belongs to the question alone.
     const flipped = await page.evaluate(async () => {
       const { db } = await import("/src/lib/db.ts")
-      await db.settings.update("settings", { developer: true, botThreads: true })
+      await db.settings.update("settings", { developer: true, legacyChat: false })
       const row = await db.settings.get("settings")
-      return { developer: row?.developer, botThreads: row?.botThreads }
+      return { developer: row?.developer, legacyChat: row?.legacyChat }
     })
-    assert.deepEqual(flipped, { developer: true, botThreads: true }, "the switch is on and stored")
+    assert.deepEqual(
+      flipped,
+      { developer: true, legacyChat: false },
+      "the legacy switch is off and stored, so the layout is bot threads",
+    )
 
     // The turn ends with its subagent's wake still owed: no run of the chat in flight, and the host
     // naming the wake that has yet to start.

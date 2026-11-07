@@ -26,10 +26,9 @@ const MAIN = mainThreadId(bot.id)
 const THREAD = "t1"
 const PICK = { provider: "picked", model: "picked/model" }
 
-async function seed(patch: { developer?: boolean; botThreads?: boolean } = {}) {
+async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
   await seedSettings({
     developer: true,
-    botThreads: true,
     activeProfileId: bot.id,
     ...patch,
   })
@@ -260,8 +259,8 @@ test("inside an open thread /thread is not offered", async () => {
   })
 })
 
-test("with the switch off the command is /new, as it was, and /thread is absent", async () => {
-  await seed({ botThreads: false })
+test("under the legacy layout the command is /new, as it was, and /thread is absent", async () => {
+  await seed({ legacyChat: true })
   host("bot-thread")
   await mount(screen(MAIN), async () => {
     await until(async () => Boolean(composerField()), "Main's composer")
@@ -276,8 +275,8 @@ test("with the switch off the command is /new, as it was, and /thread is absent"
   })
 })
 
-test("with the switch off a message typed with /thread goes to the bot as text", async () => {
-  await seed({ botThreads: false })
+test("under the legacy layout a message typed with /thread goes to the bot as text", async () => {
+  await seed({ legacyChat: true })
   const seen = host("bot-thread")
   await mount(screen(MAIN), async () => {
     await until(async () => Boolean(composerField()), "Main's composer")

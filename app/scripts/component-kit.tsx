@@ -240,17 +240,17 @@ export async function seedChats(
   chats: SeededChat[],
   {
     bots = [],
-    botThreads = false,
+    legacyChat = false,
     active = bots[0]?.id,
     settings = {},
   }: {
     bots?: Profile[]
-    botThreads?: boolean
+    legacyChat?: boolean
     active?: string
     settings?: Partial<Omit<Settings, "id">>
   } = {},
 ) {
-  await seedSettings({ developer: true, botThreads, activeProfileId: active, ...settings })
+  await seedSettings({ developer: true, legacyChat, activeProfileId: active, ...settings })
   await db.profiles.clear()
   await db.profiles.bulkPut(bots)
   await db.conversations.clear()

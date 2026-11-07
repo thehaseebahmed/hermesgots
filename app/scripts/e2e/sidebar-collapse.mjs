@@ -53,6 +53,12 @@ for (const dark of [false, true]) {
   await flow(
     `sidebar-collapse-${look}`,
     async ({ page, shot }) => {
+      // The legacy layout: this flow's first half reads the Recents sidebar and its New chat button,
+      // and the bots' own sidebar is only turned on further down.
+      await page.evaluate(async () => {
+        const { saveSettings } = await import("/src/lib/db.ts")
+        await saveSettings({ legacyChat: true })
+      })
       await page.goto(`${app}/code`)
       await page.getByRole("link", { name: "Code" }).first().waitFor({ timeout: 15_000 })
       // A tablet at lg: the docked sidebar is 320px before the button is pressed.
@@ -131,10 +137,11 @@ for (const dark of [false, true]) {
         "the wordmark is back",
       )
 
-      // With bot threads on, the Bots heading and its sort control go and the bots keep their icons.
+      // Back under bot threads, the layout the app now ships: the Bots heading and its sort control
+      // go and the bots keep their icons.
       await page.evaluate(async () => {
         const { saveSettings } = await import("/src/lib/db.ts")
-        await saveSettings({ developer: true, botThreads: true })
+        await saveSettings({ developer: true, legacyChat: false })
       })
       await page.reload()
       await page.getByRole("link", { name: "Test bot" }).first().waitFor({ timeout: 15_000 })

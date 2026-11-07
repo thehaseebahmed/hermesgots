@@ -95,7 +95,7 @@ const msg = (
 ): Message => ({ id, conversationId, role, content, status: "done", createdAt })
 
 async function seed(moves: Move[], { copy = true } = {}) {
-  await seedSettings({ developer: true, botThreads: true })
+  await seedSettings({ developer: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()

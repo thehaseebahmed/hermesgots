@@ -60,7 +60,7 @@ async function seedMain(name: string) {
       { id: main, title: "Main", main: true, at: 1 },
       { id: `${name}-t1`, title: "Trip to Lisbon", at: 2 },
     ],
-    { bots: [bot], botThreads: true, settings: { chatNext: true } },
+    { bots: [bot], settings: { chatNext: true } },
   )
   // The thread has been sent in, as one triage or a /thread made would have: the message that opened
   // it is what its card says, so this device is given that row too.
