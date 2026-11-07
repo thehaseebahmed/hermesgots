@@ -162,7 +162,7 @@ sequenceDiagram
    — by its size, as the cap does today. Goals: G2. After: 3, 4. Layers: the pure intake rule, the
    attachments model. Check: "a photo over the file cap is taken on the file road too"
    (`test-attachment-caps.mjs`) and "a photo over nine megabytes is scaled to fit on the file road"
-   (`test-composer-intake.tsx`) — red first.
+   (`test-composer-intake.tsx`) — red first. **Done.**
 6. **The sheet offers what can reach, and says why when nothing can.** The sheet asks the rule for each
    source: Files follows today's gate (the route must be confirmed), Camera and Photos follow a picture's
    road — offered when the model reads images or the host hasn't refused, refused only where the host

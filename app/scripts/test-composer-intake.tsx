@@ -311,6 +311,110 @@ test("a photo picked for a model that takes no pictures lands as a file, and its
   })
 })
 
+test("a photo over nine megabytes is scaled to fit on the file road", async () => {
+  // A modern camera's photo past the per-file cap, for a model that reads no images: the file road
+  // takes it anyway, and the copy the host is handed is the 1600px JPEG the inline road makes.
+  const saved = host("composer-intake")
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const send = async (text: string, attachments: Attachment[]) => {
+    sent.push({ text, attachments: await uploadAttachments(bot, "session-1", attachments, true) })
+  }
+  // jsdom decodes no image, draws none and makes no object URL: the browser's own effect stands in.
+  const proto = Object.getPrototypeOf(document.createElement("canvas")) as HTMLCanvasElement
+  const real = {
+    bitmap: globalThis.createImageBitmap,
+    context: proto.getContext,
+    toBlob: proto.toBlob,
+    create: URL.createObjectURL,
+    revoke: URL.revokeObjectURL,
+  }
+  globalThis.createImageBitmap = (async () => ({
+    width: 4000,
+    height: 3000,
+    close: () => {},
+  })) as unknown as typeof createImageBitmap
+  proto.getContext = (() => ({ drawImage() {} })) as typeof proto.getContext
+  proto.toBlob = ((done: BlobCallback) =>
+    done(new Blob(["jpeg"], { type: "image/jpeg" }))) as typeof proto.toBlob
+  URL.createObjectURL = (blob: Blob | MediaSource) => `blob:${(blob as Blob).type}`
+  URL.revokeObjectURL = () => {}
+  const refusals: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    refusals.push(String(message))
+  }) as typeof toast.error
+  try {
+    await mount(composer(sent, "yes", false, send), async () => {
+      await pick("camera", [
+        new File([new Uint8Array(MAX_FILE_BYTES + 1)], "IMG_0001.heic", {
+          type: "image/heic",
+          lastModified: 9,
+        }),
+      ])
+      assert.deepEqual(refusals, [], "nothing is refused over its size")
+      await until(async () => tileNames().length === 1, "the photo's tile")
+      assert.deepEqual(tileNames(), ["IMG_0001.jpg"], "the scaled JPEG is what is on the message")
+
+      await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Send"))
+      await until(async () => sent.length > 0, "the send")
+
+      assert.deepEqual(
+        saved,
+        [{ name: "IMG_0001.jpg", type: "image/jpeg" }],
+        "the host is handed the JPEG, not the photo it could not take",
+      )
+      const [photo] = sent[0].attachments
+      assert.equal(photo.image, true, "it is still the picture it is")
+      assert.equal(photo.inline, undefined, "and no bytes of it ride in the message")
+      assert.equal(photo.type, "image/jpeg", "the copy is typed as what it is")
+      assert.ok(photo.size < MAX_FILE_BYTES, "the copy is the scaled one, so it fits the cap")
+      assert.equal(photo.name, "IMG_0001.jpg", "named after the photo the user picked")
+
+      const parts = await wireContent(sent[0].text, sent[0].attachments)
+      const said =
+        typeof parts === "string"
+          ? parts
+          : parts
+              .map((part) => (part.type === "text" ? part.text : `[${part.type}]`))
+              .join("\n")
+      assert.match(said, /path="\/host\/IMG_0001\.jpg"/, "the message names the copy the agent opens")
+      assert.doesNotMatch(said, /\[screenshot\]/, "and no photo is promised inline")
+    })
+  } finally {
+    toast.error = original
+    if (real.bitmap) globalThis.createImageBitmap = real.bitmap
+    else delete (globalThis as { createImageBitmap?: typeof createImageBitmap }).createImageBitmap
+    proto.getContext = real.context
+    proto.toBlob = real.toBlob
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+  }
+})
+
+test("a photo over nine megabytes the browser can't decode is still refused by its size", async () => {
+  // No scaled copy can be made of a photo the browser cannot decode, so the file road has nothing to
+  // hand the host: it is refused in the cap's own words, exactly as it was before step 5.
+  const refusals: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    refusals.push(String(message))
+  }) as typeof toast.error
+  try {
+    await mount(composer([], "yes", false), async () => {
+      await pick("camera", [
+        new File([new Uint8Array(MAX_FILE_BYTES + 1)], "IMG_0003.heic", {
+          type: "image/heic",
+          lastModified: 12,
+        }),
+      ])
+      assert.deepEqual(refusals, ["IMG_0003.heic is over the 9 MB limit."])
+      assert.deepEqual(tileNames(), [], "and it never lands")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
 test("a photo picked before the host answered is tried, not refused", async () => {
   // Q2: an answer not read yet is not a no, so the pick lands on the file road; the send is where a
   // host that won't take it says why (`test-main-triage.tsx`).

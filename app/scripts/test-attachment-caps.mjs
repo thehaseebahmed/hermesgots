@@ -19,14 +19,11 @@ import {
 
 const file = (name, size, type = "application/octet-stream") => ({ name, size, type })
 
-/** The open case: a chat whose model reads pictures, on a host that answered yes about its route. */
-const OPEN = { readsImages: true, route: "yes" }
-
 test("a pick stops at ten attachments and says how many were left out", () => {
   const many = Array.from({ length: 12 }, (_, index) =>
     file(`photo-${index}.jpg`, 1000, "image/jpeg"),
   )
-  const picked = intake(many, 0, OPEN)
+  const picked = intake(many, 0)
   assert.equal(picked.take.length, MAX_ATTACHMENTS)
   assert.deepEqual(
     picked.refusals.map((refusal) => refusal.message),
@@ -34,16 +31,16 @@ test("a pick stops at ten attachments and says how many were left out", () => {
     "the leftovers are one line, naming the limit",
   )
 
-  const almostFull = intake(many, 8, OPEN)
+  const almostFull = intake(many, 8)
   assert.equal(almostFull.take.length, 2, "what the message already holds comes off the room")
   assert.match(almostFull.refusals[0].message, /so 10 were left out\./)
 
-  assert.equal(intake(many, 10, OPEN).take.length, 0, "a full message takes nothing")
-  assert.match(intake(many, 10, OPEN).refusals[0].message, /so 12 were left out\./)
+  assert.equal(intake(many, 10).take.length, 0, "a full message takes nothing")
+  assert.match(intake(many, 10).refusals[0].message, /so 12 were left out\./)
 })
 
 test("a file over nine megabytes is refused in its own name", () => {
-  const picked = intake([file("clip.mov", MAX_FILE_BYTES + 1, "video/quicktime")], 0, OPEN)
+  const picked = intake([file("clip.mov", MAX_FILE_BYTES + 1, "video/quicktime")], 0)
   assert.deepEqual(picked.take, [], "it never lands")
   assert.deepEqual(
     picked.refusals.map((refusal) => refusal.message),
@@ -52,25 +49,16 @@ test("a file over nine megabytes is refused in its own name", () => {
   assert.equal(picked.refusals[0].limit, "file")
 
   assert.equal(
-    intake([file("clip.mov", MAX_FILE_BYTES, "video/quicktime")], 0, OPEN).take.length,
+    intake([file("clip.mov", MAX_FILE_BYTES, "video/quicktime")], 0).take.length,
     1,
   )
 })
 
 test("a photo that will be scaled is taken however big it arrives", () => {
   const shot = file("shot.heic", 12 * 1024 * 1024, "image/heic")
-  assert.equal(
-    intake([shot], 0, OPEN).take.length,
-    1,
-    "scaling it is what makes it fit the request",
-  )
-  assert.equal(
-    intake([shot], 0, { readsImages: false, route: "yes" }).take.length,
-    0,
-    "a model that takes no images is sent the file itself, so the cap applies",
-  )
+  assert.equal(intake([shot], 0).take.length, 1, "scaling it is what makes it fit the request")
   assert.deepEqual(
-    intake([file("draw.svg", 10 * 1024 * 1024, "image/svg+xml")], 0, OPEN).take,
+    intake([file("draw.svg", 10 * 1024 * 1024, "image/svg+xml")], 0).take,
     [],
     "SVG goes as a file",
   )
@@ -216,13 +204,29 @@ test("an original too big to keep is what the scaled copy stands in for", () => 
 test("a photo over the file cap is exempt from it, since scaling is what makes it fit", () => {
   // A modern camera's photo is past 9 MB, and refusing it would be hostile: the caps measure a
   // file the host is handed, while a photo is scaled and its kept copy is what rides.
-  const camera = file("IMG_0001.heic", 12 * 1024 * 1024, "image/heic")
   const shot = { size: 12 * 1024 * 1024, type: "image/heic" }
   const scaled = { size: 700 * 1024, type: "image/jpeg" }
-  assert.deepEqual(intake([camera], 0, OPEN).take, [camera], "a pick takes it")
-  assert.equal(intake([camera], 0, OPEN).refusals.length, 0, "and says nothing about its size")
   assert.equal(keptImage(shot, scaled).kept, scaled, "the scaled JPEG is what the host keeps")
   assert.equal(sizeRefusal("IMG_0001.heic").limit, "file", "the words are still a file's")
+})
+
+test("a photo over the file cap is taken on the file road too", () => {
+  // The cap measures a file the host is handed, and a photo is scaled to fit on either road, so a
+  // 12 MB camera photo is taken on the file road exactly as it is inline (step 5 of the spec).
+  const camera = file("IMG_0001.heic", 12 * 1024 * 1024, "image/heic")
+  assert.deepEqual(
+    pickRoad({ picture: true, readsImages: false, route: "yes" }),
+    { road: "file" },
+    "a model that reads no images sends the photo down the host's file road",
+  )
+  const picked = intake([camera], 0)
+  assert.deepEqual(picked.take, [camera], "the file road takes the photo at any size")
+  assert.deepEqual(picked.refusals, [], "and says nothing about its size")
+  assert.deepEqual(
+    intake([file("notes.bin", MAX_FILE_BYTES + 1)], 0).take,
+    [],
+    "a file that isn't a picture is still measured against the cap",
+  )
 })
 
 test("a photo that needed no scaling is one copy, and it is the model's too", () => {

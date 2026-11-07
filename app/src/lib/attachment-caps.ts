@@ -91,9 +91,9 @@ export function pickRoad({
 }
 
 /**
- * Whether one file rides inline — the road rule, asked of that file. The intake exempts a file from
- * the per-file cap on this answer, and the read that prepares it hands the same answer to
- * `prepareAttachment`, so both follow the road rather than one flag for the batch.
+ * Whether one file rides inline — the road rule, asked of that file. The read that prepares it hands
+ * this answer to `prepareAttachment`, so each file in a batch is read by the road it takes; the caps
+ * no longer ask it, since a picture is taken at any size on either road.
  */
 export function ridesInline(file: CappedFile, facts: RoadFacts): boolean {
   return pickRoad({ ...facts, picture: isPhoto(file.type) }).road === "inline"
@@ -129,20 +129,22 @@ export const unreadableRefusal = (name: string): Refusal => ({
 export const fitsInline = (size: number, used: number) => used + size <= MAX_INLINE_BYTES
 
 /**
- * What a pick of `files` becomes on a message already holding `held` attachments. A file that rides
- * inline is taken however big it arrived, since scaling is what makes it fit; anything else — a
- * document, a clip, or a photo on the host's file road — is measured against the per-file cap before
- * it is read. The road is asked once per file, so a batch can hold files that take different roads.
+ * What a pick of `files` becomes on a message already holding `held` attachments. A picture is taken
+ * however big it arrives: scaling is what makes it fit, inline for the model or on the host's file
+ * road where the copy the host is handed is scaled the same way, so a photo the browser can't decode
+ * at all is refused by its size where it is read, not here. Anything else — a document, a clip — is
+ * measured against the per-file cap before it is read.
  */
-export function intake<T extends CappedFile>(files: T[], held = 0, facts: RoadFacts): Intake<T> {
+export function intake<T extends CappedFile>(files: T[], held = 0): Intake<T> {
   const room = Math.max(0, MAX_ATTACHMENTS - held)
   const chosen = files.slice(0, room)
   const left = files.length - chosen.length
   const refusals = left > 0 ? [countRefusal(left)] : []
   const take: T[] = []
   for (const file of chosen) {
-    if (!ridesInline(file, facts) && file.size > MAX_FILE_BYTES)
-      refusals.push(sizeRefusal(file.name))
+    // A picture is never measured here: scaling makes it fit on either road, and the read that
+    // cannot scale one refuses it by its size.
+    if (!isPhoto(file.type) && file.size > MAX_FILE_BYTES) refusals.push(sizeRefusal(file.name))
     else take.push(file)
   }
   return { take, refusals }

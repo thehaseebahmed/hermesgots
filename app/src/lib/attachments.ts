@@ -69,20 +69,36 @@ function jpegName(name: string) {
  * goes inline always carries the bytes the model is sent: the file itself where nothing was scaled,
  * else the scaled copy. With `inline: false` — a file `ridesInline` sends as a file — a picture
  * keeps being the picture it is and carries no part: its own bytes are what the host is handed, and
- * that upload is the only copy the model's message can point at.
+ * that upload is the only copy the model's message can point at. A picture past the per-file cap is
+ * scaled to fit on either road, so the file road takes one at any size: the JPEG `scaled` makes is
+ * the copy the host is handed, under its own `.jpg` name, and only a picture the browser can't
+ * decode is refused, by its size, since no scaled copy can be made of it.
  */
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
   const picture = isPhoto(file.type)
+  const over = file.size > MAX_FILE_BYTES
   if (picture && !inline) {
-    if (file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
+    if (!over)
+      return {
+        id: randomId(),
+        name,
+        type: file.type,
+        size: file.size,
+        image: true,
+        blob: file,
+      }
+    const photo = await scaled(file)
+    if (!photo) throw new Error(sizeRefusal(name).message)
     return {
       id: randomId(),
-      name,
-      type: file.type,
-      size: file.size,
+      name: jpegName(name),
+      type: "image/jpeg",
+      size: photo.blob.size,
       image: true,
-      blob: file,
+      blob: photo.blob,
+      width: photo.width,
+      height: photo.height,
     }
   }
   if (picture) {
@@ -102,7 +118,7 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
       }
     }
   }
-  if (file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
+  if (over) throw new Error(sizeRefusal(name).message)
   return {
     id: randomId(),
     name,
@@ -130,7 +146,8 @@ export interface PreparedIntake {
  * What `files` becomes on a message already holding `held` attachments — the one intake a pick, a
  * paste, a drop and a share land through. The two facts a surface has (whether this chat's model
  * reads pictures, and what the host answered about its upload route) are asked of every file, so
- * each one is capped and read by the road it takes. `onTake` is how a surface holds the place of
+ * each one is read by the road it takes — while the caps ask neither, since a picture is taken at
+ * any size and scaled for whichever road carries it. `onTake` is how a surface holds the place of
  * the files it is now reading.
  */
 export async function prepareIntake(
@@ -155,7 +172,7 @@ export async function prepareIntake(
   },
 ): Promise<PreparedIntake> {
   const facts: RoadFacts = { readsImages, route }
-  const { take, refusals } = intake(files, held.length + reserved, facts)
+  const { take, refusals } = intake(files, held.length + reserved)
   onTake?.(take)
   const answers = await Promise.all(
     take.map(async (file): Promise<{ attachment?: Attachment; error?: Error }> => {
