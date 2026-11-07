@@ -214,6 +214,8 @@ flows and their audit rows; no message of either remains, so there is nothing to
      `test-e2e-registry.mjs` is red until the flows, their audit rows and the counts move together;
      `pnpm lint`, `typecheck`, `test`, `build`; `pnpm e2e afk-claim`.
 
+   Done.
+
 5. **The app draws no library and no pickers.** Goals: G2 G4. After: 2, 4. Layers: App workflow
    screens (deleted), AFK screen, host API, device data, Developer settings, test host, flows.
    - `src/lib/workflow.ts`, `workflow-sheet.tsx`, `workflow-editor.tsx`, `test-workflow.mjs`,

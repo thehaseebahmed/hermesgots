@@ -224,29 +224,6 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   assert.equal(held.task.number, HELD, "the oldest hold is still the one a shipped app draws")
 
-  // The stage belongs to the session working a hold: the oldest one is staged — the mock's dev
-  // handle moves the record it holds, as `afk-stage.mjs` does — and the tasks behind it have no
-  // session of their own to name one. With no workflow to name the stage, the row says the app's
-  // own word for it.
-  await say({ project_id: projectId, stage: "build" })
-  const oldest = page.locator(`[data-hold="${HELD}"]`)
-  await until(
-    async () => (await oldest.getAttribute("data-stage")) === "build",
-    20_000,
-    "the oldest hold to read its stage",
-  )
-  assert.match(
-    await oldest.locator("a[data-task]").textContent(),
-    /^#265Building: /,
-    "the staged hold's row prefixes its title with the stage",
-  )
-  assert.equal(
-    await page.locator(`[data-hold="${SECOND}"]`).getAttribute("data-stage"),
-    null,
-    "a hold with no session of its own names no stage",
-  )
-  await shot("staged")
-
   // A claimed task leaves the frontier — every one of them — and is listed as claimed. The tasks the
   // sweep hasn't reached are still offered: a project holding three of five leaves two ready.
   await until(
@@ -336,5 +313,5 @@ for (const width of [390, 768, 1024]) {
   }
 }
 pass(
-  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first and each with the stage of the session working it, over a count row — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
+  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first, over a count row — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
 )

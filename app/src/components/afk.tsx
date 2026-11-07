@@ -78,7 +78,6 @@ import {
   type PromptWrite,
   type Skill,
 } from "@/lib/hermes"
-import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
 import { promptLine } from "@/lib/prompt-library"
 import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
@@ -101,13 +100,6 @@ export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 
 /** And the one it advertises when it holds the Prompt a project's runs are told. */
 export const AFK_PROMPT_FEATURE = "afk_prompt"
-
-/**
- * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
- * project with no critique skill has none to name. `done` has no word here — nothing is held by
- * then, so this row never says it.
- */
-const STAGE_LABELS: Record<AfkStage, string | null> = { ...STAGE_WORDS, done: null }
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -433,8 +425,6 @@ export function AfkPopup({
               task={afk.task}
               holds={picks ? afk.holds : null}
               pickCount={picks ? pickCount : null}
-              stage={afk.stage}
-              stageName={afk.stageName}
               refusal={afk.refusal}
               manyRepos={manyRepos}
             />
@@ -855,8 +845,6 @@ function Working({
   task,
   holds,
   pickCount,
-  stage,
-  stageName,
   refusal,
   manyRepos,
 }: {
@@ -865,9 +853,6 @@ function Working({
   holds: AfkHold[] | null | undefined
   /** How many it may hold at once, drawn over the list; null where the host answers none. */
   pickCount: number | null | undefined
-  stage: AfkStage | null | undefined
-  /** The stage's own name from the task's snapshot, so a workflow's words show rather than ours. */
-  stageName: string | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
@@ -875,12 +860,7 @@ function Working({
   const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = held
     ? held.map((hold) => ({ hold, kind: "hold" as const }))
     : task
-      ? [
-          {
-            hold: { ...task, stage: stage ?? null, stageName: stageName ?? null, stalled: null },
-            kind: "task" as const,
-          },
-        ]
+      ? [{ hold: { ...task, stalled: null }, kind: "task" as const }]
       : []
   if (!refusal && !rows.length) return null
   return (
@@ -891,7 +871,7 @@ function Working({
         </p>
       )}
       {rows.length > 0 && (
-        <section aria-label="Working" data-working data-stage={stage ?? undefined}>
+        <section aria-label="Working" data-working>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
           {/* Only a host that answered a list is counted: one task against a count of one is a
               sentence about nothing. */}
@@ -906,16 +886,8 @@ function Working({
           )}
           <ul>
             {rows.map(({ hold, kind }) => (
-              <li
-                key={`${hold.repo}#${hold.number}`}
-                data-hold={kind === "hold" ? hold.number : undefined}
-                data-stage={kind === "hold" ? (hold.stage ?? undefined) : undefined}
-              >
-                <TaskLink
-                  task={hold}
-                  label={holdRowLabel(hold)}
-                  note={manyRepos ? hold.repo : undefined}
-                />
+              <li key={`${hold.repo}#${hold.number}`} data-hold={kind === "hold" ? hold.number : undefined}>
+                <TaskLink task={hold} note={manyRepos ? hold.repo : undefined} />
               </li>
             ))}
           </ul>
@@ -923,11 +895,6 @@ function Working({
       )}
     </div>
   )
-}
-
-/** One hold's stage as its row prefixes the title: the workflow's own word first, then ours. */
-function holdRowLabel(hold: AfkHold) {
-  return hold.stageName ?? (hold.stage ? STAGE_LABELS[hold.stage] : null)
 }
 
 /** The groups that hold something, or the one line that says why none does. */
@@ -977,16 +944,13 @@ function Tasks({
   )
 }
 
-/** One issue as the sheet shows it: its number and its title, the stage prefixing the title when it
- * has one, opening it on GitHub, a note under it. */
+/** One issue as the sheet shows it: its number and its title, opening it on GitHub, a note under it. */
 function TaskLink({
   task,
-  label,
   note,
   badge,
 }: {
   task: ProjectIssue
-  label?: string | null
   note?: ReactNode
   badge?: ReactNode
 }) {
@@ -1000,10 +964,7 @@ function TaskLink({
     >
       <span className="flex min-w-0 items-start gap-2">
         <span className="shrink-0 font-mono text-base text-muted-foreground">#{task.number}</span>
-        <span className="min-w-0 flex-1 text-base leading-snug break-words">
-          {label && <span className="text-muted-foreground">{`${label}: `}</span>}
-          {task.title}
-        </span>
+        <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
         {badge}
       </span>
       {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}

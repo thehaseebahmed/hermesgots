@@ -21,7 +21,6 @@ import type { Doc } from "@/lib/merge"
 import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import type { PendingInput, PendingQueue } from "@/lib/pending"
-import { parsePipeline, parseStage, type AfkStage, type SessionPipeline } from "@/lib/pipeline"
 import {
   parseWorkflowEntry,
   parseWorkflowLibrary,
@@ -2767,8 +2766,6 @@ export interface SessionWorkspace {
   instructions: string
   /** Why the session can't take another turn: a repo it works in left the project, or it's archived. */
   blocked: string | null
-  /** The stages a staged AFK task ran in, on the session's own record; null when it isn't staged. */
-  pipeline: SessionPipeline | null
 }
 
 const MODES = new Set<string>(["accept_edits", "auto", "plan"])
@@ -2802,8 +2799,6 @@ function parseWorkspace(raw: unknown, sessionId: string): SessionWorkspace | nul
     planFile: typeof record.plan_file === "string" && record.plan_file ? record.plan_file : null,
     instructions: typeof body?.instructions === "string" ? body.instructions : "",
     blocked: typeof body?.blocked === "string" && body.blocked ? body.blocked : null,
-    // A plugin from before the stages answers none: that session is one run, which is what it is.
-    pipeline: parsePipeline(record.pipeline),
   }
 }
 
@@ -3583,15 +3578,11 @@ export async function getProjectTasks(
 }
 
 /**
- * A task AFK holds: the issue, the stage the session working it is in, and why nothing is working
- * it. One session a hold, so a project up to its pick count holds several (ADR 0025). Needs plugin
- * 0.80, which made the project's read answer a list.
+ * A task AFK holds: the issue, and why nothing is working it. One session a hold, so a project up to
+ * its pick count holds several (ADR 0025). Needs plugin 0.80, which made the project's read answer a
+ * list.
  */
 export interface AfkHold extends ProjectIssue {
-  /** The stage that hold's session is in; null for a task running one run, or past its last stage. */
-  stage: AfkStage | null
-  /** That stage's own name in the workflow's words; null once past the last one. */
-  stageName: string | null
   /** Why nothing is working it, when something stopped; null while its session runs. */
   stalled: string | null
 }
@@ -3646,10 +3637,6 @@ export interface ProjectAfk extends BotAfk {
   buildSkill: string | null
   /** The bot's skills the project picked for its critique, in the order it picked them. */
   critiqueSkills: string[]
-  /** The stage the task it holds is in, while it is a staged one; null for one run, or none held. */
-  stage: AfkStage | null
-  /** That stage's own name in the workflow's words ("Migrate", "Verify"); null once past the last. */
-  stageName: string | null
   workflow: WorkflowEntry | null
   /**
    * How the project's work is carried out, told to every run it starts: the project's own words,
@@ -3672,9 +3659,6 @@ function parseHold(value: unknown): AfkHold | null {
   const found = (value ?? {}) as Record<string, unknown>
   return {
     ...issue,
-    // A host answers each hold's stage the way it answers the one task's: null is one run.
-    stage: parseStage(found.stage),
-    stageName: str(found.stage_name) || null,
     stalled: str(found.stalled) || null,
   }
 }
@@ -3712,9 +3696,6 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     refusal: str(body.refusal) || null,
     buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
-    // A plugin from before the stages answers none: that task is one run, which is what it does.
-    stage: parseStage(body.stage),
-    stageName: str(body.stage_name) || null,
     // And one from before the workflows answers none: the project runs what it always ran.
     workflow: parseWorkflowEntry(body.workflow),
     // A plugin from before the Prompt answers none, which is only read where the host advertises it.

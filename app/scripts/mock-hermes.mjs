@@ -141,20 +141,15 @@
 // GET /api/plugins/gots/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
-// POST projects/{id}/afk { workflow_id }, and its answer carries that workflow and the name of the
-// stage its task is in; `{ prompt }` writes the Prompt its runs are told instead, and
-// `{ prompt, prompt_id }` writes it as a copy of a library entry — the plain shape clears that
-// source, as the entry a project picked goes when the user types over it. `{ pick_count }` is how
-// many tasks its AFK holds at once, and the answer names all of them (oldest first, each with the
-// stage of the session working it) over the bot's own numbers: `pick_budget` and `holds_held`.
+// POST projects/{id}/afk { workflow_id }, and its answer carries that workflow; `{ prompt }` writes
+// the Prompt its runs are told instead, and `{ prompt, prompt_id }` writes it as a copy of a library
+// entry — the plain shape clears that source, as the entry a project picked goes when the user types
+// over it. `{ pick_count }` is how many tasks its AFK holds at once, and the answer names all of them
+// (oldest first) over the bot's own numbers: `pick_budget` and `holds_held`.
 // GET/POST /api/plugins/gots/afk is the bot's own row, naming no project: `{ pick_budget }` is
-// how many tasks its projects hold together, from one to ten. `pipeline?` below
-// takes the new snapshot shape too — one entry per stage, each with its rounds — which is how a flow
-// puts a staged task on a second round.
-// POST /__mock/afk { project_id, stage?, reason?, pipeline?, pr?, reset? } is the dev handle on AFK's
-// own records: it stalls the project's held task at a stage, and writes the pipeline on the session
-// that task is worked in — the stage the pill reads, the gate's answer, a pull request a finished
-// pipeline opened — which is what drives each state without a real build.
+// how many tasks its projects hold together, from one to ten.
+// POST /__mock/afk { project_id, reason?, reset? } is the dev handle on AFK's own records: it stalls
+// the project's held task, and clears every stall a flow set.
 // GET /api/plugins/gots/mcp lists the bot's MCP servers and …/mcp/catalogue the Catalogue Hermes
 // offers, each entry marked as the bot's servers have it (and `needs_config` where it declares
 // values); GET …/mcp/catalogue/{name} is one entry with the values it declares. GET …/mcp/{name} is
@@ -253,9 +248,6 @@ const afkStalled = new Map()
 // The skills each project's work follows, as the plugin's row keeps them and `afk.skills_from` reads
 // them: `build_skill` and `critique_skills`, written together.
 const afkSkills = new Map()
-// The stage each project's held task is in, as the plugin keeps it on the session's own record
-// (`plugin/pipeline.py`). A claimed task builds until a flow says the sheet should read another.
-const afkStages = new Map()
 const afkWorkflow = new Map()
 // The Prompt each project's work is told, as the plugin keeps it on the row (`afk.set_prompt`) and
 // serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
@@ -1524,9 +1516,6 @@ const workspaceRecord = (project, { sessionId, slug, mode }) => {
     repos,
     files_dir: `${repos[0].repo_root}/files/${slug}`,
     plan_file: null,
-    // The stage a staged AFK task is in, on the session's own record (`plugin/pipeline.py`); null
-    // for a session nothing staged, which is every session the app opens from Code.
-    pipeline: null,
   }
 }
 const projectTasks = (project) => {
@@ -1577,33 +1566,6 @@ function afkTask(project) {
 
 const afkSessionId = (projectId) => `gots-afk-${projectId}`
 
-/**
- * The stage AFK's pop-up names for the task a project holds. The plugin reads it off the session's
- * own record (`afk.stage`), so the fixture moves the two together: a record write can't leave the
- * pop-up naming a stage the record isn't in. `afk-stage.mjs` writes a stage on its own, for a
- * project whose session carries no record.
- */
-function setAfkStage(projectId, stage) {
-  if (stage) afkStages.set(projectId, stage)
-  else afkStages.delete(projectId)
-}
-
-/**
- * A staged task's pipeline record as the plugin writes it (`pipeline.start`), or null when the
- * project has no critique skill — the one thing that turns staging on.
- */
-function pipelineRecord(skills) {
-  const critique = skills?.critique_skills ?? []
-  if (!critique.length) return null
-  return {
-    stage: "build",
-    build_skill: skills?.build_skill ?? null,
-    critique_skills: critique,
-    gate: null,
-    reason: null,
-  }
-}
-
 const AFK_BODY = "Read the project's tasks from GitHub and list them."
 
 function afkSession(project) {
@@ -1640,46 +1602,16 @@ function afkSession(project) {
 function afkSweep(project) {
   if (afkSwept.has(project.id)) return
   afkSwept.add(project.id)
-  const skills = afkSkills.get(project.id)
-  const staged = pipelineRecord(skills)
-  setAfkStage(project.id, afkStageOf(staged))
   afkSession(project)
-  // The stage is recorded on the session the claim made, before its build run is posted.
-  const record = projectSessions.get(afkSessionId(project.id))
-  if (record) record.pipeline = staged
-}
-
-/** The step a record's position is, as `plugin/pipeline.py`'s `kinds` reads it: what a stage is judged as. */
-function afkStageOf(record) {
-  if (!record) return null
-  if (!Array.isArray(record.stages)) return record.stage ?? null
-  const stages = record.stages
-  const at = record.stage ?? 0
-  if (at >= stages.length) return "done"
-  const ship = stages.findLastIndex((one) => one.ships)
-  if (ship === -1) return "build"
-  if (at === ship) return "critique"
-  if (at > ship) return "done"
-  return stages[at].check && !stages[at].steps?.length ? "gate" : "build"
-}
-
-function afkStageName(record) {
-  if (!record) return null
-  if (Array.isArray(record.stages)) return record.stages[record.stage]?.name ?? null
-  // A record from before workflows names the three steps it meant, as the plugin's upgrade does.
-  return { build: "Build", gate: "Test", critique: "Review" }[record.stage] ?? null
 }
 
 /** AFK's answer for a project: its switch, the tasks it holds, and its last refusal (none mocked). */
 function afkAnswer(project, reason) {
   const on = afkProjects.has(project.id)
   const skills = afkSkills.get(project.id) ?? { build_skill: null, critique_skills: [] }
-  const record = afkSwept.has(project.id)
-    ? (projectSessions.get(afkSessionId(project.id))?.pipeline ?? null)
-    : null
-  // Every task it holds, oldest first, with what the sheet reads off each: its stage and its stall
-  // belong to the session working that hold, and the mock keeps one session — the oldest hold's —
-  // so the ones behind it have neither.
+  // Every task it holds, oldest first, with what the sheet reads off each: its stall belongs to the
+  // session working that hold, and the mock keeps one session — the oldest hold's — so the ones
+  // behind it have none.
   const holds = afkHolds(project).map(([number, title], index) => {
     const task = mockTask(repoOf(project), number, title)
     return {
@@ -1688,14 +1620,9 @@ function afkAnswer(project, reason) {
       title: task.title,
       url: task.url,
       created_at: task.created_at,
-      // The stage its session's record holds, null for a task claimed with no critique skill: one
-      // run, which ships, and no stage to name.
-      stage: index === 0 ? (afkStages.get(project.id) ?? null) : null,
-      stage_name: index === 0 ? afkStageName(record) : null,
       stalled: index === 0 ? (afkStalled.get(project.id) ?? null) : null,
     }
   })
-  const oldest = holds[0] ?? { stage: null, stage_name: null }
   return {
     object: "gots.afk",
     project_id: project.id,
@@ -1709,8 +1636,6 @@ function afkAnswer(project, reason) {
     pick_count: afkPickCount(project),
     prompt_id: afkPromptIds.get(project.id) ?? null,
     refusal: null,
-    stage: oldest.stage,
-    stage_name: oldest.stage_name,
     workflow: workflowOf(project.id),
     prompt: afkPrompts.get(project.id) ?? MOCK_DEFAULT_PROMPT,
     // The bot's own two numbers, answered here so one read draws the sheet's budget line.
@@ -4285,7 +4210,6 @@ http
           "afk_workflows",
           "afk_prompt",
           "afk_picks",
-          "afk_pipeline",
           ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
           ...(RESEARCH
             ? ["research", "research_followup", "research_rewrite", "research_compare"]
@@ -6241,49 +6165,13 @@ http
     // the record the session's pill reads, and { reset: true } clears every project's, which a flow
     // that repeats needs since the mock keeps its state.
     if (url.pathname === "/__mock/afk" && req.method === "POST") {
-      const {
-        project_id: projectId,
-        reason,
-        stage = null,
-        pipeline,
-        pr = null,
-        reset = false,
-      } = await readBody(req)
+      const { project_id: projectId, reason, reset = false } = await readBody(req)
       if (reset) {
         afkStalled.clear()
-        afkStages.clear()
-      } else {
-        // Only a write that names a stop stalls the task: one that moves the pipeline's record
-        // leaves the session working, so a shipped pipeline isn't also reported as stalled.
-        if (typeof reason === "string") afkStalled.set(projectId, reason)
-        const project = mockProjects().find((p) => p.id === projectId)
-        const record = project && projectSessions.get(afkSessionId(project.id))
-        // Dev only: the stage the sheet's Working row names for the task that project holds. The
-        // host moves the session's own record as its pipeline advances, and the row's name is read
-        // off that record, so a record from before workflows moves with it.
-        if (stage) {
-          setAfkStage(projectId, stage)
-          if (record?.pipeline && !Array.isArray(record.pipeline.stages))
-            record.pipeline.stage = stage
-        }
-        // Dev only: the record the session's own strip draws — each stage, a gate's answer, a
-        // reason — and the pull request a finished pipeline opened.
-        if (record && pipeline !== undefined) {
-          record.pipeline = pipeline
-          setAfkStage(projectId, afkStageOf(pipeline))
-        }
-        if (record && pr) {
-          const repo = repoOf(project)
-          const number = pr.number ?? 27
-          record.prs = [
-            {
-              repo,
-              number,
-              title: pr.title ?? "The frontier is read from GitHub and listed",
-              url: `https://github.com/${repo}/pull/${number}`,
-            },
-          ]
-        }
+      } else if (typeof reason === "string") {
+        // Only a write that names a stop stalls the task, which is what drives a stalled session
+        // without a real run.
+        afkStalled.set(projectId, reason)
       }
       return json(res, 200, { ok: true })
     }

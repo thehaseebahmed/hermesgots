@@ -42,15 +42,6 @@ test("the pop-up names the workflow the project's work runs under", async () => 
   })
 })
 
-test("the Working row names the stage the task's snapshot says", async () => {
-  globalThis.fetch = afkHost({ stageName: "Migrate" }).fetch as unknown as typeof fetch
-  await libraryOn(async () => {
-    const row = find("[data-working]")
-    assert.match(row?.textContent ?? "", /Migrate/, "a workflow's own word for its stage")
-    assert.equal(row?.getAttribute("data-stage"), "build", "the step the stage is judged as")
-  })
-})
-
 test("the library lists presets first, and picking one is one write", async () => {
   const fake = afkHost()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
