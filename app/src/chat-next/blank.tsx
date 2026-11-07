@@ -6,7 +6,7 @@
  * delivery path, and this surface posts nothing itself.
  */
 import { useLiveQuery } from "dexie-react-hooks"
-import { useLayoutEffect, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
@@ -32,16 +32,21 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
   const botThreads = useBotThreads()
   const navigate = useNavigate()
   const [pick, setPick] = useState<ModelChoice>()
+  // A press that lands while the first chat is being made must not make a second one.
+  const starting = useRef(false)
   // A new chat gives its id without a fade: there is no chat it left behind.
   useLayoutEffect(() => {
     hold(slot, undefined)
   })
   if (!bot) return null
   const send = async (text: string, attachments: Attachment[] = []) => {
+    if (starting.current) return
+    starting.current = true
     try {
       const chat = await beginThread(bot.id, { modelChoice: chosenOf(pick), text, attachments })
       navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
     } catch (error) {
+      starting.current = false
       toast.error(error instanceof Error ? error.message : "Couldn't start the chat.")
       throw error
     }

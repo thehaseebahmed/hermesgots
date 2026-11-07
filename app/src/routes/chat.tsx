@@ -1464,7 +1464,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
       ) : (
         <EmptyState
           botId={profile?.botId}
-          configured={configured}
+          configured={configured && Boolean(id)}
           session={session && { repos: sessionRepos }}
           id={conversation?.id}
           line={!gone}
