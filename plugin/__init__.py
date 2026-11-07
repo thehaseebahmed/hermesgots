@@ -63,6 +63,7 @@ from . import (
     reporting,
     repos,
     research,
+    rooms,
     speech,
     speech_probe,
     triage,
@@ -517,6 +518,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # authority that owns it; a host with either missing offers no card at all, rather than an
         # empty one that reads as "nothing is waiting" (pending.available says which moved).
         pending_features = await asyncio.to_thread(_advertised, pending.FEATURES)
+        # The Host's rooms are the gateway's, reached through its own RPC dispatch (rooms.py,
+        # ADR 0117). Advertised only where the Host answers for a driver that is running: a host
+        # with neither the dispatch nor one offers no room and no New room rather than an error.
+        rooms_reason = await asyncio.to_thread(rooms.available, adapter)
         return web.json_response(
             {
                 "name": "gots",
@@ -524,6 +529,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "features": [
                     "cron_runs",
                     "chats",
+                    # The Host's rooms, drawn as chat rows of their own; a host that can't reach
+                    # them advertises nothing and the app keeps the list it has (rooms.py).
+                    *([rooms.FEATURE] if rooms_reason is None else []),
                     *general_features,
                     "draft_text",
                     "context",
