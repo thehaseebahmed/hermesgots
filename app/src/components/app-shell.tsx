@@ -46,7 +46,23 @@ interface ListPane {
   item?: ReactNode
   /** The item open beside the list: when it changes, the item left fades out over the next. */
   itemKey?: string
+  /** How the list takes its share of the row, and how an item arrives beside it. */
+  layout: PaneLayout
 }
+
+/**
+ * How a list and the item beside it share the row: the width the list keeps while an item is open,
+ * and whether an arriving item slides in from the right or the row rearranges instead.
+ */
+interface PaneLayout {
+  /** The list's width class while an item is open. Closed, it takes the whole row. */
+  list: string
+  /** Whether an arriving item slides in 48px from the right, fading, as the list narrows. */
+  slide: boolean
+}
+
+/** A list lane: Material 3's 412px, as in Settings, and the item sliding in beside it. */
+const LIST_LANE: PaneLayout = { list: "w-103", slide: true }
 
 /**
  * From `lg` Settings' sections open beside its menu, and a list and what it opened beside it, so
@@ -155,14 +171,16 @@ function ThreadLane({ threads }: { threads?: boolean }) {
 }
 
 /**
- * A list and the item open beside it: the list narrows to a pane and the item slides in to its
- * right. Both stay mounted while items are swapped.
+ * A list and the item open beside it: the list narrows to its lane and the item arrives at its
+ * right — sliding in unless the pane's layout says the row rearranges instead. Both stay mounted
+ * while items are swapped.
  */
 function Panes({ pane, children }: { pane: ListPane | undefined; children: ReactNode }) {
   const session = useRef<HTMLDivElement>(null)
   const open = Boolean(pane?.open)
+  const layout = pane?.layout
   useLayoutEffect(() => {
-    if (!open || prefersReducedMotion()) return
+    if (!open || !layout?.slide || prefersReducedMotion()) return
     session.current?.animate(
       [
         { opacity: 0, transform: "translateX(48px)" },
@@ -170,7 +188,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       ],
       { duration: 300, easing: EASE },
     )
-  }, [open])
+  }, [open, layout?.slide])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -178,8 +196,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
         <div
           className={cn(
             `flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
-            // Material 3's list pane width, as in Settings.
-            open ? "w-103 border-r" : "w-full",
+            open ? cn(pane.layout.list, "border-r") : "w-full",
           )}
         >
           <Suspense fallback={null}>{pane.node}</Suspense>
@@ -238,15 +255,23 @@ export function AppShell({ children }: { children?: ReactNode }) {
         ),
         item: botItem,
         itemKey: shown,
+        layout: LIST_LANE,
       }
     : code
-      ? { screen: "/code", open: code.open, itemKey: code.selected, node: <CodePane pane={code} /> }
+      ? {
+          screen: "/code",
+          open: code.open,
+          itemKey: code.selected,
+          node: <CodePane pane={code} />,
+          layout: LIST_LANE,
+        }
       : projects
         ? {
             screen: "/projects",
             open: projects.open,
             itemKey: projects.selected,
             node: <ProjectsPane pane={projects} />,
+            layout: LIST_LANE,
           }
         : meetings
           ? {
@@ -254,6 +279,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
               open: meetings.open,
               itemKey: meetings.selected,
               node: <MeetingsPane pane={meetings} />,
+              layout: LIST_LANE,
             }
           : research
             ? {
@@ -261,12 +287,14 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 open: research.open,
                 itemKey: research.selected,
                 node: <ResearchPane pane={research} />,
+                layout: LIST_LANE,
               }
             : apps && {
                 screen: "/apps",
                 open: apps.open,
                 itemKey: apps.selected,
                 node: <AppsPane pane={apps} />,
+                layout: LIST_LANE,
               }
   usePageTransition(main, pane)
 
