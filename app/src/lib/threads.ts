@@ -95,11 +95,12 @@ export function useNow() {
  * layout every device gets, so this reads the one switch that says otherwise — Developer's **Enable
  * legacy chat UX** (`Settings.legacyChat`, local) — and never the Developer switch itself.
  */
+export function botThreadsOn(settings: { legacyChat?: boolean } | undefined) {
+  return !settings?.legacyChat
+}
+
 export function useBotThreads() {
-  return useLiveQuery(async () => {
-    const settings = await getSettings()
-    return !settings.legacyChat
-  }, [])
+  return useLiveQuery(async () => botThreadsOn(await getSettings()), [])
 }
 
 export interface Thread {

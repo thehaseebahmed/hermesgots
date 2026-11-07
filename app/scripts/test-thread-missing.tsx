@@ -6,12 +6,13 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { THREAD_MISSING } from "@/components/chat/empty-states"
 import { db } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
-import { botProfile, json, mount, seedChats } from "./component-kit.tsx"
+import { botProfile, json, mount, seedChats, settle } from "./component-kit.tsx"
 
 const BOT = botProfile("thread-missing")
 
@@ -32,10 +33,20 @@ const screen = (
   </MemoryRouter>
 )
 
+/** Waits on the screen as a person would, not on one fixed sleep. */
+async function until(check: () => boolean, what: string) {
+  const by = Date.now() + 6_000
+  while (!check() && Date.now() < by) {
+    await settle()
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 25)))
+  }
+  assert.ok(check(), what)
+}
+
 test("a synced chat on an uncallable bot says the thread didn't load", async () => {
   await seed()
   await mount(screen, async () => {
-    await new Promise((resolve) => setTimeout(resolve, 800))
+    await until(() => (document.body.textContent ?? "").includes(THREAD_MISSING), "the notice")
     const body = document.body.textContent ?? ""
     assert.ok(body.includes(THREAD_MISSING), "the pane says the thread didn't load")
     assert.ok(body.includes("Try again"), "and offers the read again")

@@ -13,6 +13,9 @@ export const COLUMN = "mx-auto w-full max-w-[640px]"
  */
 export const COLUMN_BOX = "mx-auto w-full max-w-[672px]"
 
+/** The foot every chat screen gives its composer, so the app and a blank surface share one gutter. */
+export const COMPOSER_SLOT = "px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+
 /**
  * The inset every part of a reply stands on — its text, the interface a block draws, the rows that
  * account for its work — so one edge serves them all and a block starting to draw moves nothing

@@ -18,7 +18,7 @@ import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { db, type Attachment, type ModelChoice } from "@/lib/db"
 import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { chosenOf, storedPick } from "@/lib/model-pick"
 import { beginThread, useBotThreads } from "@/lib/threads"
 
@@ -31,19 +31,19 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
   const botThreads = useBotThreads()
   const navigate = useNavigate()
-  const [pick, setPick] = useState<ModelChoice>()
+  const [modelPick, setModelPick] = useState<ModelChoice>()
   // A press that lands while the first chat is being made must not make a second one.
   const starting = useRef(false)
   // A new chat gives its id without a fade: there is no chat it left behind.
   useLayoutEffect(() => {
     hold(slot, undefined)
-  })
+  }, [slot])
   if (!bot) return null
   const send = async (text: string, attachments: Attachment[] = []) => {
     if (starting.current) return
     starting.current = true
     try {
-      const chat = await beginThread(bot.id, { modelChoice: chosenOf(pick), text, attachments })
+      const chat = await beginThread(bot.id, { modelChoice: chosenOf(modelPick), text, attachments })
       navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
     } catch (error) {
       starting.current = false
@@ -64,7 +64,7 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
       <div
         data-slot="composer-slot"
         data-toast-above
-        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+        className={COMPOSER_SLOT}
       >
         {botThreads === false && (
           <div className={`${COLUMN_BOX} flex pb-2`}>
@@ -74,8 +74,8 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
         <ChatComposer
           bot={bot}
           draftKey={draftKey(undefined, bot.id)}
-          modelChoice={pick}
-          onChooseModel={(choice) => setPick(storedPick(choice))}
+          modelChoice={modelPick}
+          onChooseModel={(choice) => setModelPick(storedPick(choice))}
           dictationHint={dictationHint({})}
           busy={false}
           canSteer={false}
