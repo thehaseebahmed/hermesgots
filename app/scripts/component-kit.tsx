@@ -617,15 +617,6 @@ export const expanded = (line: Element) => line.getAttribute("aria-expanded")
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
-export const workflowStage = (name: string, extra: Record<string, unknown> = {}) => ({
-  name,
-  steps: [],
-  check: null,
-  loop: null,
-  ships: false,
-  ...extra,
-})
-
 export const DEFAULT_AFK_PROMPT =
   "# Work in checkpoints\n\nSmall slices of the issue, one at a time."
 
@@ -911,7 +902,11 @@ export function afkHost({
           title: hold.title ?? `Task ${hold.number}`,
           url: `https://x/${hold.number}`,
           created_at: "2026-10-01T00:00:00Z",
-              stalled: hold.stalled ?? null,
+          // A host from before this change still answers these on a hold; the app reads neither,
+          // which is what `test-afk-picks` proves with a host that sends them.
+          stage: hold.stage ?? null,
+          stage_name: hold.stage_name ?? null,
+          stalled: hold.stalled ?? null,
         }))
   let count = pickCount
   // The bot's own budget: what the host holds, the host's default where it holds none, and what a

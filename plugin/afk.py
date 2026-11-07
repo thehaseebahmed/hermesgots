@@ -1574,7 +1574,7 @@ def _column(value: Any, kind: type) -> Any:
 
 
 def _text(value: Any) -> Optional[str]:
-    """One stored name as a row holds it: trimmed, and nothing for what isn't text."""
+    """One stored value as a row holds it: trimmed, and nothing for what isn't text."""
     if not isinstance(value, str):
         return None
     return value.strip() or None

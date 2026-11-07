@@ -532,7 +532,10 @@ function Working({
           )}
           <ul>
             {rows.map(({ hold, kind }) => (
-              <li key={`${hold.repo}#${hold.number}`} data-hold={kind === "hold" ? hold.number : undefined}>
+              <li
+                key={`${hold.repo}#${hold.number}`}
+                data-hold={kind === "hold" ? hold.number : undefined}
+              >
                 <TaskLink task={hold} note={manyRepos ? hold.repo : undefined} />
               </li>
             ))}

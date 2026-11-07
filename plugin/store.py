@@ -914,9 +914,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v58: the stage machine and the workflow library it ran are gone (ADR 0110), so the column
         # the stage record lived in and the three the library's pick and skills lived in go with
         # them. SQLite cannot drop a column, so both tables are rebuilt and every other column is
-        # carried over — the shape v45's dictations set. The one hold a project kept in columns
-        # before v40 is a row of its own by here (above), so nothing is left to carry; a store that
-        # runs this twice finds nothing left to rebuild.
+        # carried over — the shape v45's dictations set. The column lists below are the tables as
+        # this version leaves them, spelled out rather than reused from the DDL above: that one is
+        # the table before every later step's columns, and a rebuild from it would drop them all.
+        # The one hold a project kept in columns before v40 is a row of its own by here (above), so
+        # nothing is left to carry; a store that runs this twice finds nothing left to rebuild.
         afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
         if afk_columns & {"workflow_id", "build_skill", "critique_skills"}:
             conn.execute("ALTER TABLE project_afk RENAME TO project_afk_v57")

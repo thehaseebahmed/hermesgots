@@ -1,9 +1,8 @@
 /**
  * AFK's Prompt row and its editor, over a seeded device database and a faked HTTP boundary: the row
- * drawn only where the host holds a Prompt and the workflow library is off, the words it reads, the
- * editor writing them with no other mode to switch to, the skills pickers the Prompt doesn't need
- * left out, a save answering the row, a refusal keeping the words typed, and an emptied field reading
- * the host's default again; and a plugin that predates the Prompt, on a connection of its own, with
+ * drawn wherever the host holds a Prompt, the words it reads, the editor writing them with no other
+ * mode to switch to, a save answering the row, a refusal keeping the words typed, and an emptied
+ * field reading the host's default again; and a plugin that predates the Prompt, on a connection of
  * no row to write words it can't hold.
  */
 import assert from "node:assert/strict"
