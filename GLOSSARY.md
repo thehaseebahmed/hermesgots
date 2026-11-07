@@ -215,6 +215,14 @@ _Avoid_: default chat, general chat, inbox
 A bot's one chat surface: its Main thread and the threads drawn inside it as cards. A project session is not one.
 _Avoid_: bot screen, chat screen, bot page
 
+**Thread lane**:
+The pane a bot's Chat opens beside Main for the one thread it holds: half the room the sidebar leaves while it holds one, and not there at all once the thread is closed, so Main has the whole width. A bot's alone — Code, the projects, the meetings, research and the apps keep their list lane.
+_Avoid_: sidebar, third pane, detail pane, right pane
+
+**Split handle**:
+The separator between a bot's Main and its Thread lane: dragged, it sets the share the two read at, and a double-click or Enter returns it to half. Not a **Divider**, which is a thing that happened between two turns.
+_Avoid_: divider, gutter, grip, drag bar
+
 **Triage**:
 The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays.
 _Avoid_: routing, sorting, dispatch
