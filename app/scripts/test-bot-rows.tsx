@@ -28,7 +28,7 @@ const MAIN = mainThreadId(bot.id)
  * One bot with Main, a thread of its own and a coding session, and nothing else in the device. The
  * thread's own clock is `thread.at`, so a case can put its activity either side of a read mark.
  */
-async function seed(thread: { id: string; at: number }) {
+async function seed(thread: { id: string; at: number; sessionAt?: number }) {
   await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.put(bot)
@@ -61,7 +61,7 @@ async function seed(thread: { id: string; at: number }) {
       title: "A session",
       hermesSessionId: "gots-row-session",
       createdAt: 3,
-      updatedAt: 3,
+      updatedAt: thread.sessionAt ?? 3,
       changedAt: 3,
     },
   ])
@@ -116,6 +116,20 @@ test("a bot with something newer than this device's mark dots its row", async ()
     assert.ok(
       botRow()?.textContent?.includes("New activity"),
       "and the dot says so to a reader who cannot see it",
+    )
+  })
+})
+
+test("a coding session's news never dots its bot's row", async () => {
+  await seed({ id: "session-quiet-thread", at: 2, sessionAt: 500 })
+  markRead("session-quiet-thread", 900)
+  markRead("row-session", 100)
+  await mount(screen("/"), async () => {
+    await until(async () => Boolean(botRow()), "the bot's row")
+    assert.equal(
+      dotted(botRow()),
+      false,
+      "a session's news is Code's row to report: the bot's row cannot lead to it",
     )
   })
 })
