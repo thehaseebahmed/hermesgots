@@ -183,8 +183,7 @@ test("the rules the schema cannot express are the module's, once each", async ()
   await warm()
   const onScreen = () => wordsOf(document.body)
   await mount(screen, async () => {
-    // The screen documents the chat's library, so the app's own rules are not its to say.
-    for (const rule of PROSE_RULES.filter((one) => one.in !== "app")) {
+    for (const rule of PROSE_RULES) {
       const words = rule.listed ?? rule.gloss
       if (words) assert.ok(onScreen().includes(words), `the screen says "${words}"`)
     }

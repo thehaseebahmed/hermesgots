@@ -12,9 +12,7 @@ import { z } from "zod/v4"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
-import { ActionButton } from "./action-button.tsx"
 import { Chart } from "./chart.tsx"
-import { Link } from "./link.tsx"
 import { Map } from "./map.tsx"
 import { signatureRule } from "./prose.ts"
 import { OPENUI_ROOT } from "./root.ts"
@@ -108,10 +106,8 @@ const Callout = defineComponent({
 })
 
 /**
- * The two containers, built per library: what a parent may nest is part of the component's own
- * schema, so a chat's Stack and Card name no `Link` (ADR 0101) — a reply has nowhere to move to, and
- * the reference built from the chat's schema must not show it. `kids` is read lazily because a Card
- * nests itself.
+ * The two containers: what a parent may nest is part of the component's own schema, so they are
+ * built with the list of what they may hold. `kids` is read lazily because a Card nests itself.
  */
 function containers(kids: () => { ref: z.core.$ZodType }[]) {
   const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
@@ -158,21 +154,9 @@ function containers(kids: () => { ref: z.core.$ZodType }[]) {
   return { Stack, Card }
 }
 
-/**
- * The two libraries, built from one module and differing by the components they pass in (ADR 0101):
- * a reply draws the chat's, an app's page the wider one. `extend()` is not the move — it throws on
- * this root's lazy union — so each library gets its own containers.
- */
 const chat = containers(() => [chat.Card, Table, List, Callout, Chart, Map])
 export const library = createLibrary({
   components: [chat.Stack, chat.Card, Table, List, Callout, Chart, Map],
   root: OPENUI_ROOT,
 })
 export const parser = createParser(library.toJSONSchema(), OPENUI_ROOT)
-
-const app = containers(() => [app.Card, Table, List, Callout, Chart, Map, Link, ActionButton])
-export const appLibrary = createLibrary({
-  components: [app.Stack, app.Card, Table, List, Callout, Chart, Map, Link, ActionButton],
-  root: OPENUI_ROOT,
-})
-export const appParser = createParser(appLibrary.toJSONSchema(), OPENUI_ROOT)

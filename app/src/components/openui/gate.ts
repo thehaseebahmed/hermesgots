@@ -1,6 +1,6 @@
 import type { InterfaceDraw } from "@/lib/openui-thread.ts"
 
-import { parser as chatParser } from "./library.tsx"
+import { parser } from "./library.tsx"
 
 export type Props = {
   source: string
@@ -23,10 +23,7 @@ export type Verdict = {
  * healthy block's own prefixes (`root`, `root =`, `c = Card("Hi")` all parse to no root) from
  * flashing their fenced source on every flush: only a settled answer may say `code`.
  */
-export function gate(
-  { source, open, streaming, draw }: Props,
-  parser: typeof chatParser = chatParser,
-): Verdict {
+export function gate({ source, open, streaming, draw }: Props): Verdict {
   if (draw === "patch")
     return open && !streaming
       ? { answer: "code", failure: new Error("a patch's fence never closed in a stopped reply") }

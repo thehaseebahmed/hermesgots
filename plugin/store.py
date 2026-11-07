@@ -5,7 +5,7 @@ pinned projects (``projects.py``), merged pull requests (``merges.py``), a proje
 the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
 push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
 missions with their evidence ledgers (``research.py``), the dictations a bot has heard
-(``dictations.py``) and the apps a bot keeps with their pages (``apps.py``)."""
+(``dictations.py``)."""
 
 from __future__ import annotations
 
@@ -32,15 +32,11 @@ logger = logging.getLogger(__name__)
 # already written has to move. 51 adds the routine messages a chat holds and the one that is still
 # waiting for its chat to be free (`platform_gots.py`, ADR 0081): two indexes beside one new table.
 # 54 drops the composer draft an earlier build mirrored onto a chat that was never saved as one
-# (`chats.py`); it is a data pass over existing rows and adds nothing. 55 adds the apps a bot keeps
-# and their pages (`apps.py`, ADR 0099): one row per app, one per page, and a page keeps the source
-# its last change replaced — the one step of undo. Both are new tables, so nothing already written
-# has to move. 56 gives an app the columns a built-in one lives by (`apps.py`, #865): its bundle key,
-# the bundle version it was seeded at, whether a person has edited it and whether it is hidden.
-# 57 keeps the tools an app was agreed to call (`app_tools.py`, ADR 0102), filled from the pages each
-# app already has so none loses a tool it was drawing. 58 drops the workflow library and the stage
-# record (ADR 0110): two tables rebuilt without the columns only they read, and one table gone.
-SCHEMA_VERSION = 58
+# (`chats.py`); it is a data pass over existing rows and adds nothing. 55 to 57 once kept the apps a
+# bot made and their pages; no step builds them now, since 59 drops them (ADR 0113). 58 drops the
+# workflow library and the stage record (ADR 0110): two tables rebuilt without the columns only they
+# read, and one table gone. 59 drops the apps tables, saved apps with them.
+SCHEMA_VERSION = 59
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -860,57 +856,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  AND json_valid(value)
                  AND json_extract(value, '$.draftAt') IS NULL"""
         )
-        # v55: the apps a bot keeps and their pages (apps.py, ADR 0099). An app is its title and the
-        # library version its pages were written against; a page is its own `openui-lang` source
-        # with its own first-line id, kept in the order a build answered them in — one page per
-        # place, so the first is the root the app opens on — and `previous_source` is the source its
-        # last change replaced, which is the one step of undo.
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS apps (
-                   id TEXT PRIMARY KEY,
-                   title TEXT NOT NULL,
-                   library_version TEXT NOT NULL,
-                   created_at INTEGER NOT NULL
-               )"""
-        )
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS app_pages (
-                   app_id TEXT NOT NULL,
-                   page_id TEXT NOT NULL,
-                   position INTEGER NOT NULL CHECK (position >= 0),
-                   source TEXT NOT NULL,
-                   previous_source TEXT,
-                   PRIMARY KEY (app_id, page_id),
-                   UNIQUE (app_id, position)
-               )"""
-        )
-        # v56 (apps.py): guarded by the table's own columns, since a store may already carry some.
-        app_columns = {row[1] for row in conn.execute("PRAGMA table_info(apps)")}
-        for column, definition in (
-            ("builtin_key", "TEXT"),
-            ("builtin_version", "INTEGER"),
-            ("edited", "INTEGER NOT NULL DEFAULT 0"),
-            ("hidden", "INTEGER NOT NULL DEFAULT 0"),
-        ):
-            if column not in app_columns:
-                conn.execute(f"ALTER TABLE apps ADD COLUMN {column} {definition}")
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS apps_builtin_key ON apps (builtin_key)"
-            " WHERE builtin_key IS NOT NULL"
-        )
-        if "consent" not in {row[1] for row in conn.execute("PRAGMA table_info(apps)")}:
-            conn.execute("ALTER TABLE apps ADD COLUMN consent TEXT")
-        # Imported here: app_tools stays free of the store.
-        from .app_tools import dump, tools_of
-
-        for (app_id,) in conn.execute("SELECT id FROM apps WHERE consent IS NULL").fetchall():
-            sources = [
-                row[0]
-                for row in conn.execute("SELECT source FROM app_pages WHERE app_id = ?", (app_id,))
-            ]
-            conn.execute(
-                "UPDATE apps SET consent = ? WHERE id = ?", (dump(tools_of(sources)), app_id)
-            )
         # v58: the stage machine and the workflow library it ran are gone (ADR 0110), so the column
         # the stage record lived in and the three the library's pick and skills lived in go with
         # them. SQLite cannot drop a column, so both tables are rebuilt and every other column is
@@ -978,4 +923,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
             conn.execute("DROP TABLE project_sessions_v57")
         conn.execute("DROP TABLE IF EXISTS workflows")
+        # v59: the apps a bot kept and their pages are gone (ADR 0113). Their tables were made by
+        # steps no store builds any more, so a store from below never makes them and one that has
+        # them drops them here, without a copy; the unique index goes with its table.
+        conn.execute("DROP TABLE IF EXISTS app_pages")
+        conn.execute("DROP TABLE IF EXISTS apps")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

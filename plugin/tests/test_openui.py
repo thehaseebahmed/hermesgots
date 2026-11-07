@@ -18,12 +18,9 @@ from types import SimpleNamespace
 from unittest import mock
 
 from plugin import openui
-from plugin.store import db_path
 
 ARTIFACT = Path(openui.__file__).parent / "openui" / "prompt.txt"
-APP_ARTIFACT = Path(openui.__file__).parent / "openui" / "app-prompt.txt"
 UNREGISTERED = openui._refusal_reason
-UNREGISTERED_APP = openui._app_refusal_reason
 
 
 class FakeCtx:
@@ -43,11 +40,8 @@ class FakeCtx:
 class SectionState(unittest.TestCase):
     def setUp(self) -> None:
         state = mock.patch.object(openui, "_refusal_reason", UNREGISTERED)
-        app_state = mock.patch.object(openui, "_app_refusal_reason", UNREGISTERED_APP)
         state.start()
-        app_state.start()
         self.addCleanup(state.stop)
-        self.addCleanup(app_state.stop)
 
 
 class RegistrationTest(SectionState):
@@ -95,94 +89,6 @@ class AdvertisementTest(SectionState):
         # object — so one None is both halves: no feature entry, and no version beside it.
         openui.register(SimpleNamespace())
         self.assertIsNone(openui.advertised())
-
-
-class AppSectionTest(SectionState):
-    def test_the_app_section_registers_under_its_own_id(self) -> None:
-        ctx = FakeCtx()
-        self.assertTrue(openui.app_register(ctx))
-        self.assertEqual(ctx.calls[0]["id"], "apps")
-        self.assertEqual(ctx.calls[0]["position"], "after_memory")
-        self.assertEqual(ctx.calls[0]["content"], openui.app_content)
-
-    def test_a_host_that_predates_the_app_section_advertises_no_apps(self) -> None:
-        # A host whose plugin predates the feature answers no app feature, and the screen reads
-        # that as "this bot cannot make apps" rather than as a fault (ADR 0101).
-        ctx = SimpleNamespace(register_hook=lambda *args: None)
-        self.assertFalse(openui.app_register(ctx))
-        self.assertIsNone(openui.app_advertised())
-
-    def test_a_refused_app_section_leaves_both_sections_working_alone(self) -> None:
-        with self.assertLogs("plugin.openui", level="WARNING"):
-            self.assertFalse(openui.app_register(FakeCtx(refuses=True)))
-        self.assertIsNone(openui.app_advertised())
-        self.assertTrue(openui.register(FakeCtx()))
-        self.assertIsNotNone(openui.advertised())
-
-    def test_the_app_version_rides_beside_its_feature(self) -> None:
-        openui.app_register(FakeCtx())
-        header = APP_ARTIFACT.read_text(encoding="utf-8").splitlines()[0]
-        self.assertEqual(openui.app_advertised(), {"version": header.rsplit(" ", 1)[1]})
-        self.assertEqual(openui.APP_FEATURE, "apps")
-        self.assertNotIn(":", openui.APP_FEATURE)
-
-
-class AppRunTest(unittest.TestCase):
-    """The seam the two sections divide sessions by: a marked run is an app's, anything else a chat's."""
-
-    def setUp(self) -> None:
-        self.home = Path(tempfile.mkdtemp())
-        self.path = db_path(self.home)
-
-    def home_for(self):
-        return mock.patch.object(openui, "path_for", return_value=self.path)
-
-    def test_a_marked_run_is_told_the_app_section_and_none_of_the_chats(self) -> None:
-        with self.home_for():
-            self.assertTrue(openui.mark_app_run("run-1"))
-            session = {"session_id": "run-1", "profile_name": "default"}
-            self.assertEqual(openui.app_content(session), openui.APP_TEXT)
-            self.assertEqual(openui.content(session), "")
-
-    def test_a_chat_is_told_the_library_and_none_of_the_apps_rules(self) -> None:
-        with self.home_for():
-            session = {"session_id": "chat-1", "profile_name": "default"}
-            self.assertEqual(openui.content(session), openui.TEXT)
-            self.assertEqual(openui.app_content(session), "")
-
-    def test_a_mark_names_one_session_alone(self) -> None:
-        with self.home_for():
-            self.assertTrue(openui.mark_app_run("run-1"))
-            self.assertTrue(openui.is_app_run({"session_id": "run-1"}, self.path))
-            self.assertFalse(openui.is_app_run({"session_id": "run-2"}, self.path))
-            self.assertFalse(openui.is_app_run({}, self.path))
-            self.assertFalse(openui.is_app_run(None, self.path))
-
-    def test_off_withholds_both_sections_even_from_an_app_run(self) -> None:
-        with self.home_for():
-            self.assertTrue(openui.mark_app_run("run-1"))
-            openui.set_enabled(self.path, False)
-            session = {"session_id": "run-1"}
-            self.assertEqual(openui.app_content(session), "")
-            self.assertEqual(openui.content(session), "")
-            openui.set_enabled(self.path, True)
-            self.assertEqual(openui.app_content(session), openui.APP_TEXT)
-
-    def test_a_finished_run_forgets_its_mark(self) -> None:
-        with self.home_for():
-            self.assertTrue(openui.mark_app_run("run-1"))
-            openui.unmark_app_run("run-1")
-            self.assertFalse(openui.is_app_run({"session_id": "run-1"}, self.path))
-            # And a clear with nothing to clear, or no session at all, is a quiet no-op.
-            openui.unmark_app_run("run-1")
-            openui.unmark_app_run(None)
-            openui.unmark_app_run("")
-
-    def test_a_mark_with_no_session_or_no_store_marks_nothing(self) -> None:
-        with self.home_for():
-            self.assertFalse(openui.mark_app_run(""))
-        with mock.patch.object(openui, "path_for", return_value=None):
-            self.assertFalse(openui.mark_app_run("run-1"))
 
 
 class ArtifactTest(unittest.TestCase):

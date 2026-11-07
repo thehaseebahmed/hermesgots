@@ -1,20 +1,16 @@
 /**
- * Writes the two system-prompt sections from one library: `plugin/openui/prompt.txt` (the chat's)
- * and `plugin/openui/app-prompt.txt` (the app's — ADR 0101). Run it with `pnpm build:openui-prompt`;
- * a test fails the gates on drift or an oversize section.
+ * Writes the chat's system-prompt section from the library: `plugin/openui/prompt.txt`. Run it with
+ * `pnpm build:openui-prompt`; a test fails the gates on drift or an oversize section.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-import { appLibrary, library } from "../src/components/openui/library.tsx"
+import { library } from "../src/components/openui/library.tsx"
 import { listedRules } from "../src/components/openui/prose.ts"
 
 /** `plugin/openui.py` wins the import over its sibling `plugin/openui/` folder. */
 export const ARTIFACT = fileURLToPath(new URL("../../plugin/openui/prompt.txt", import.meta.url))
-export const APP_ARTIFACT = fileURLToPath(
-  new URL("../../plugin/openui/app-prompt.txt", import.meta.url),
-)
 
 /** `DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS` in Hermes's `hermes_cli/plugins_dispatch.py`. */
 export const MAX_CHARS = 4_000
@@ -31,7 +27,7 @@ const ASKS_THROUGH_CLARIFY =
   "- The agent's own question for the user goes through the clarify tool where the host offers one " +
   "— the thread draws it as a question card — else text; a question is never drawn as an interface."
 
-/** The library's long prose, compressed the same way in both sections. */
+/** The library's long prose, compressed. */
 const COMPRESSIONS = [
   {
     what: "the hoisting paragraph",
@@ -110,52 +106,19 @@ Example:`,
   },
 ]
 
-const CHOOSE_FIND =
-  "- Choose components that best represent the content (tables for comparisons, charts for " +
-  "trends, forms for input, etc.)"
-
-/** One rule, the two sections' own words: a link is the app's alone (ADR 0101). */
-const chooseRule = (replace) => ({
-  what: "the choose-a-component rule's forms",
-  find: CHOOSE_FIND,
-  replace,
-})
-
 export const CHAT_TABLE = [
   ...CHAT_ONLY,
   ...COMPRESSIONS,
-  chooseRule(
-    "- Pick the component that fits: Table for comparison, Chart for trend, Map for places.",
-  ),
+  {
+    what: "the choose-a-component rule's forms",
+    find:
+      "- Choose components that best represent the content (tables for comparisons, charts for " +
+      "trends, forms for input, etc.)",
+    replace:
+      "- Pick the component that fits: Table for comparison, Chart for trend, Map for places.",
+  },
   TAIL_COMPRESSION,
 ]
-
-export const APP_TABLE = [
-  ...COMPRESSIONS,
-  chooseRule(
-    "- Pick the component that fits: Table for comparison, Chart for trend, Map for places, " +
-      "Link for a page.",
-  ),
-  TAIL_COMPRESSION,
-]
-
-/** Each section's whole record: the library it is generated from, its words, its rewrite table. */
-const SECTIONS = {
-  chat: {
-    library,
-    inlineMode: true,
-    preamble: "You draw interfaces in openui-lang.",
-    artifact: ARTIFACT,
-    table: CHAT_TABLE,
-  },
-  app: {
-    library: appLibrary,
-    inlineMode: false,
-    preamble: "You draw an app's pages in openui-lang.",
-    artifact: APP_ARTIFACT,
-    table: APP_TABLE,
-  },
-}
 
 /** The pinned `@openuidev/react-lang` version, as the artifact's header and its test name it. */
 export function version() {
@@ -165,15 +128,14 @@ export function version() {
 }
 
 /** The library's words as it writes them, before this script has its say. */
-export function generated(of = "chat") {
-  const section = SECTIONS[of]
-  const body = section.library.prompt({
-    inlineMode: section.inlineMode,
+export function generated() {
+  const body = library.prompt({
+    inlineMode: true,
     toolCalls: false,
     bindings: false,
     builtinFunctions: false,
-    preamble: section.preamble,
-    additionalRules: listedRules(of),
+    preamble: "You draw interfaces in openui-lang.",
+    additionalRules: listedRules(),
   })
   return `# ${LIBRARY} ${version()}\n\n${body}\n`
 }
@@ -197,16 +159,16 @@ export function rewrite(text, table) {
   }, text)
 }
 
-export function render(of = "chat") {
-  return rewrite(generated(of), SECTIONS[of].table)
+export function render() {
+  return rewrite(generated(), CHAT_TABLE)
 }
 
-function write(of) {
-  const { artifact } = SECTIONS[of]
-  const text = render(of)
+function write() {
+  const artifact = ARTIFACT
+  const text = render()
   if (text.length > MAX_CHARS) {
     console.error(
-      `openui prompt (${of}): ${text.length} characters, over the host's ${MAX_CHARS}-character ` +
+      `openui prompt: ${text.length} characters, over the host's ${MAX_CHARS}-character ` +
         `section limit by ${text.length - MAX_CHARS}. A section that size is dropped whole, so trim ` +
         `a rule, the preamble, a component description or a chart's summary rather than truncating.`,
     )
@@ -223,12 +185,11 @@ function write(of) {
   mkdirSync(dirname(artifact), { recursive: true })
   writeFileSync(artifact, text, "utf8")
   console.log(
-    `openui prompt (${of}): wrote ${artifact} — ${text.length} characters, ` +
+    `openui prompt: wrote ${artifact} — ${text.length} characters, ` +
       `${MAX_CHARS - text.length} headroom of ${MAX_CHARS}, ${delta} against the checked-in artifact`,
   )
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  write("chat")
-  write("app")
+  write()
 }

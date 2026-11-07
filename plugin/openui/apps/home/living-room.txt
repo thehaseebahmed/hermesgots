@@ -1,7 +1,0 @@
-# id: living-room
-root = Stack([sample, entities, history, back])
-data = Query("homeassistant.room", {room: "living-room"}, {notice: "Sample data: these entities are an example, not your house.", entities: [{label: "Ceiling light", detail: "On"}, {label: "Floor lamp", detail: "Off"}, {label: "Thermostat", detail: "21.4 °C, heating"}], history: [{x: "08:00", y: 19.5}, {x: "12:00", y: 20.8}, {x: "16:00", y: 21.6}, {x: "20:00", y: 21.4}], historySummary: "Sample temperature through the day, rising from 19.5 to 21.6."})
-sample = Callout("info", data.notice)
-entities = List(data.entities)
-history = Chart("line", [{name: "Temperature (°C)", points: data.history}], "Time", "°C", data.historySummary)
-back = Link("Back to the house", "root")

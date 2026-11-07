@@ -87,14 +87,6 @@
 // Say "draw the map" for a reply whose block is a map: one `Map` of four labelled places on the
 // north waterfront, each with its detail, and a summary — the receipt under it long enough to
 // scroll a phone's thread past the map, so a scroll gesture has somewhere to go.
-// The apps a bot keeps (apps.py, ADR 0099–0102) live in mock-apps.mjs, off the plugin's own bundle:
-// the list, one page read and written with a step of undo behind it, a built-in's hidden mark and
-// consent, and the mark a run is told the app's rules by. A run the app marks a build's is answered
-// as an app's — its build prompt with a page's whole block, its change prompt with the changed page's
-// fence held open, so a screen drawing the change while it arrives can be watched. Both openers are
-// the app's own words (`apps.ts`'s build, `app-build.ts`'s `changePrompt`); a turn in a session
-// nobody marked is answered as a chat's, whatever it says. A query the app was agreed to is
-// answered 502, so its page draws the defaults it declared.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/gots/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -183,7 +175,6 @@ import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
 import { handleResearch } from "./mock-research.mjs"
-import { BUILT_PAGE, CHANGED_PAGE, handleApps, isAppRun } from "./mock-apps.mjs"
 import { durableUserRow } from "./host-row.mjs"
 
 // Two real turns whose tool rows rendered in the wrong place (from session exports), replayed by
@@ -2069,26 +2060,6 @@ async function playTurn(req, body, last, out) {
   // connection does: the run ends with an error and the transcript holds no answer.
   if (/fail the turn/i.test(last)) {
     return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: true }
-  }
-
-  // An app's build and its change (ADR 0101). The turn has to run in a session the app marked a
-  // build's — the host's own rule, so a chat whose words happen to open the same way gets no page —
-  // and the app's two prompts (apps.ts's build, app-build.ts's changePrompt) are how the mark is
-  // told apart from a change. A change's block goes out with its fence still open, so the screen
-  // draws the changed page while the change is still arriving, and closes it only when the answer
-  // is whole; the hold is the window the apps flow measures, so it is a fixed wait by design.
-  if (isAppRun(sessionOf(req, body))) {
-    if (/^Change this page:/i.test(last.trim())) {
-      await say(`\`\`\`openui-lang\n${CHANGED_PAGE}\n`, 12)
-      await sleep(5000)
-      await say("\n```\n\nThat's the page after the rain.", 25)
-      record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
-      return { spoken, prompt_tokens: 3000, completion_tokens: pieces }
-    }
-    await say(`Here's the app, in one page.\n\n\`\`\`openui-lang\n${BUILT_PAGE}\n\`\`\`\n\n`, 12)
-    await say("That's the garden, and its beds.", 25)
-    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
-    return { spoken, prompt_tokens: 3000, completion_tokens: pieces }
   }
 
   if (/\bdraw the interface\b/i.test(last)) {
@@ -4109,10 +4080,6 @@ http
           "media",
           "media_url",
           "openui",
-          // The apps a bot keeps and their pages (apps.py, ADR 0099) — and the app's own library a
-          // build is told (openui.py, ADR 0101), which the plugin advertises under this same name,
-          // so one entry covers both. The Apps screen gates its build on it (`buildBlocked`).
-          "apps",
           "profile_routes",
           "pr_tool",
           "close",
@@ -4166,9 +4133,6 @@ http
         clarify: true,
         hooks: true,
         openui: { version: OPENUI_VERSION },
-        // The sibling object the plugin sends beside the bare `apps` feature, for shape fidelity:
-        // nothing in the app reads it (its own answer is a hash of the app prompt's text).
-        apps: { version: OPENUI_VERSION },
         research: {
           ready: true,
           reason: null,
@@ -4199,8 +4163,6 @@ http
       !profile &&
       (await handleResearch(req, res, url.pathname, { json, readBody, noteEvent }))
     )
-      return
-    if (PLUGIN && !profile && (await handleApps(req, res, url.pathname, { json, readBody, noteEvent })))
       return
     if (
       PLUGIN &&

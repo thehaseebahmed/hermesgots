@@ -17,7 +17,6 @@ import concurrent.futures
 import threading
 import time
 import contextlib
-import functools
 import json
 import logging
 import re
@@ -29,7 +28,6 @@ from . import (
     afk,
     alerts,
     approvals,
-    apps,
     attachments,
     chats,
     clarify,
@@ -57,7 +55,6 @@ from . import (
     moves,
     openui,
     outbox,
-    page_calls,
     pending,
     platform_gots,
     projects,
@@ -503,8 +500,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         # Whether the model is told the component library, which is what the openui feature means.
         openui_info = openui.advertised()
-        # And whether an app's own rules are told — the `apps` feature a build is gated on.
-        app_info = openui.app_advertised()
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
         # Hermes is too old gets no row rather than an error; the switch, the removal, the Catalogue
         # and adding from it are advertised apart from it and from each other, because each needs a
@@ -625,19 +620,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "meetings",
                     "meetings_ask",
                     "community",
-                    # The apps a bot keeps and their pages (apps.py, ADR 0099): the list, with each
-                    # app's title, library version and page ids and never a source, and one page
-                    # read on its own. A client that predates it draws no Apps screen rather than
-                    # one asking for a route that isn't there.
-                    "apps",
                     # The component library, told to a new session as a system-prompt section
                     # (openui.py). Advertised only where this host took it: a host that can't add a
                     # section says nothing, rather than offering a vocabulary never told.
                     *([openui.FEATURE] if openui_info else []),
-                    # The app's own library and rules (openui.py, ADR 0101): `apps` is what the
-                    # Apps screen gates a build on, so a host whose plugin predates it answers
-                    # nothing and the screen refuses with the reason rather than starting a run.
-                    *([openui.APP_FEATURE] if app_info else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # A routine's answer delivered into a chat as the bot's own message, and the
@@ -659,7 +645,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 },
                 # `features` is matched with `includes`: the version rides in the sibling object.
                 **({"openui": openui_info} if openui_info else {}),
-                **({"apps": app_info} if app_info else {}),
             }
         )
 
@@ -3165,75 +3150,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         answer = await asyncio.to_thread(dictations.clear, store_path(), _request_profile())
         return web.json_response({"object": "gots.dictations.cleared", "stats": answer})
 
-    async def list_apps(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        rows = await asyncio.to_thread(
-            apps.listing, store_path(), request.query.get("hidden") == "1"
-        )
-        return web.json_response({"object": "gots.apps", "apps": rows})
-
-    async def query_usage(args: Dict[str, Any]) -> Dict[str, Any]:
-        provider = str(args.get("provider") or "").strip().lower()
-        if not provider:
-            raise ValueError("usage needs a provider")
-        return await read_usage(provider)
-
-    async def query_projects(args: Dict[str, Any]) -> Dict[str, Any]:
-        return {"projects": await read_projects()}
-
-    async def query_routines(args: Dict[str, Any]) -> Dict[str, Any]:
-        return {"jobs": await asyncio.to_thread(_runs_by_job, None, DEFAULT_PER_JOB)}
-
-    async def query_sessions(args: Dict[str, Any]) -> Dict[str, Any]:
-        return {"sessions": await asyncio.to_thread(chats.read, store_path())}
-
-    async def query_app(request: "web.Request") -> "web.Response":
-        """A page's `Query` answered by `page_calls`, with the apps' consent (ADR 0102)."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        sent = await json_body(request)
-        if sent is None:
-            return _error(web, "Body must be a JSON object", 400)
-        try:
-            value = await page_calls.answer(
-                sent,
-                reads=app_queries,
-                may_call=functools.partial(apps.may_call, store_path()),
-                profile=_request_profile(),
-                locks=app_act_locks,
-            )
-        except page_calls.CallRefused as error:
-            return _error(web, str(error), error.status)
-        return web.json_response(
-            {"object": "gots.app.query", "shape": sent.get("shape"), "value": value}
-        )
-
-    app_act_locks: Dict[str, asyncio.Lock] = {}
-    app_queries = {
-        "usage": query_usage,
-        "routines": query_routines,
-        "projects": query_projects,
-        "sessions": query_sessions,
-    }
-
-    async def get_app_page(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            found = await asyncio.to_thread(
-                apps.page,
-                store_path(),
-                request.match_info["app_id"],
-                request.match_info["page_id"],
-            )
-        except apps.AppsError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.app.page", "page": found})
-
     app.router.add_get(f"{PREFIX}/dictations", list_dictations)
     app.router.add_get(f"{PREFIX}/dictations/stats", dictation_stats)
     app.router.add_post(f"{PREFIX}/dictations", write_dictation)
@@ -3259,127 +3175,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
-    async def apps_write(request: "web.Request", work, key: str, status: int, *, body: bool):
-        """One apps write: the key checked, a JSON body read where it takes one, and the host's
-        refusal answered with its own status."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        sent = None
-        if body:
-            sent = await json_body(request)
-            if sent is None:
-                return _error(web, "Body must be a JSON object", 400)
-        try:
-            made = await asyncio.to_thread(work, store_path(), sent)
-        except apps.AppsError as error:
-            return _error(web, str(error), error.status)
-        label = "gots.app" if key == "app" else "gots.app.page"
-        return web.json_response({"object": label, key: made}, status=status)
-
-    async def create_app(request: "web.Request") -> "web.Response":
-        return await apps_write(
-            request,
-            lambda path, sent: apps.create(
-                path,
-                sent.get("title"),
-                sent.get("source"),
-                sent.get("library_version"),
-                sent.get("pages"),
-            ),
-            "app",
-            201,
-            body=True,
-        )
-
-    async def mark_app_build(request: "web.Request") -> "web.Response":
-        """Marks the session a build is about to run in, so it is told the app's rules (ADR 0101)."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        sent = await json_body(request)
-        if sent is None:
-            return _error(web, "Body must be a JSON object", 400)
-        marked = await asyncio.to_thread(
-            openui.mark_app_run, sent.get("session_id"), _request_profile()
-        )
-        if not marked:
-            return _error(web, "A build needs a session id.", 400)
-        return web.json_response({"object": "gots.app.build", "marked": True}, status=201)
-
-    async def write_app_page(request: "web.Request") -> "web.Response":
-        info = request.match_info
-        return await apps_write(
-            request,
-            lambda path, sent: apps.write(
-                path, info["app_id"], info["page_id"], sent.get("source")
-            ),
-            "page",
-            200,
-            body=True,
-        )
-
-    async def undo_app_page(request: "web.Request") -> "web.Response":
-        info = request.match_info
-        return await apps_write(
-            request,
-            lambda path, _: apps.undo(path, info["app_id"], info["page_id"]),
-            "page",
-            200,
-            body=False,
-        )
-
-    async def remove_app(request: "web.Request") -> "web.Response":
-        info = request.match_info
-        return await apps_write(
-            request,
-            lambda path, _: apps.remove(path, info["app_id"]),
-            "app",
-            200,
-            body=False,
-        )
-
-    async def hide_app(request: "web.Request") -> "web.Response":
-        info = request.match_info
-        return await apps_write(
-            request,
-            lambda path, sent: apps.set_hidden(path, info["app_id"], sent.get("hidden")),
-            "app",
-            200,
-            body=True,
-        )
-
-    async def consent_app(request: "web.Request") -> "web.Response":
-        info = request.match_info
-        return await apps_write(
-            request,
-            lambda path, sent: apps.consent(path, info["app_id"], sent),
-            "app",
-            200,
-            body=True,
-        )
-
-    async def update_app(request: "web.Request") -> "web.Response":
-        info = request.match_info
-        return await apps_write(
-            request,
-            lambda path, _: apps.take_update(path, info["app_id"]),
-            "app",
-            200,
-            body=False,
-        )
-
-    app.router.add_get(f"{PREFIX}/apps", list_apps)
-    app.router.add_post(f"{PREFIX}/apps/query", query_app)
-    app.router.add_delete(f"{PREFIX}/apps/{{app_id}}", remove_app)
-    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/hidden", hide_app)
-    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/update", update_app)
-    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/consent", consent_app)
-    app.router.add_post(f"{PREFIX}/apps", create_app)
-    app.router.add_post(f"{PREFIX}/apps/builds", mark_app_build)
-    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", write_app_page)
-    app.router.add_post(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}/undo", undo_app_page)
-    app.router.add_get(f"{PREFIX}/apps/{{app_id}}/pages/{{page_id}}", get_app_page)
     mirror_for_profiles(app, web)
     logger.info("gots: serving %s on the API server", PREFIX)
 
@@ -3429,13 +3224,6 @@ def register(ctx) -> None:
         # again rather than waiting out its tick.
         register_hook("subagent_start", delegation.started)
         register_hook("on_session_end", lambda **_kwargs: delegation.wake())
-        # An app run's mark dies with its session: the prompt it steered is already frozen (ADR 0101).
-        register_hook(
-            "on_session_end",
-            lambda **kwargs: openui.unmark_app_run(
-                kwargs.get("session_id"), kwargs.get("profile_name")
-            ),
-        )
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(
@@ -3450,7 +3238,6 @@ def register(ctx) -> None:
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
     openui.register(ctx)
-    openui.app_register(ctx)
     # Gots is a delivery platform, so a routine can speak in a chat (platform_gots.py, ADR 0081).
     platform_gots.register(ctx)
     platform_gots.register_section(ctx)

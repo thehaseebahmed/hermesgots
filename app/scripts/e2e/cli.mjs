@@ -384,11 +384,6 @@ export const FLOWS = {
     about:
       "A reply's interface draws at 390 and 768px, light and dark; a block that can't draw stays code; a patch landing while the thread is scrolled up doesn't move the reader",
   },
-  apps: {
-    script: "e2e/apps.mjs",
-    about:
-      "A bot's built-in apps draw their sample and lead page to page; an app built from the list's + opens on its page, a change streams into it before it is written, Undo puts the page back, a stopped host still draws the app and the list from this device, and a hidden built-in leaves the list at 390 and 768px",
-  },
   "openui-map": {
     script: "e2e/openui-map.mjs",
     about:
