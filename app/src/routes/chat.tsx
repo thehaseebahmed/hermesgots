@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { XIcon } from "lucide-react"
 import { matchPath, useLocation, useNavigate, useParams } from "react-router"
@@ -17,9 +26,7 @@ import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
 import { COLUMN_BOX } from "@/lib/layout"
-import type { ComposerControls } from "@/chat-next/page"
 import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
-import { prepareTurn, queueTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
@@ -28,7 +35,6 @@ import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
-import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
@@ -225,7 +231,6 @@ function LoadOlderWindow({
 }
 
 const loadChatNext = () => import("@/chat-next/app-view")
-const ChatNextThread = lazy(() => loadChatNext().then((m) => ({ default: m.AppChatNextThread })))
 const loadBlankChat = () => import("@/chat-next/blank")
 const ChatNextBlank = lazy(() => loadBlankChat().then((m) => ({ default: m.ChatNextBlank })))
 
@@ -520,22 +525,7 @@ function NextChat({
       ) : (
         <PendingChat />
       )}
-      <TodosSheet
-        open={todosOpen}
-        onOpenChange={setTodosOpen}
-        items={todos}
-        progress={progress}
-        live={live}
-      />
-      {session && (
-        <OutputsDrawer
-          open={outputsOpen}
-          onOpenChange={setOutputsOpen}
-          session={session}
-          config={serverConfig(bot)}
-        />
-      )}
-    </>
+    </div>
   )
 }
 
@@ -544,140 +534,6 @@ function NextChat({
  * in the order the current screen draws them — closed, blocked, then a plan waiting to be approved —
  * and a chat this device holds nothing of draws none of it.
  */
-function NextComposerBody({
-  controls,
-  chatId,
-  botId,
-  main,
-  home,
-  notice,
-}: {
-  controls: ComposerControls
-  chatId: string
-  botId: string
-  /** A bot's Main: `/thread` starts a thread of it. */
-  main: boolean
-  /** Where `/new` goes: a thread's Main, else home. */
-  home?: string
-  /** The account's warning, which the composer draws above its text while it holds. */
-  notice?: ReactNode
-}) {
-  const navigate = useNavigate()
-  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
-  const session = chat?.projectId ? chat : null
-  // What the dictation hears best with: the chat's title, its project and the repos it works in.
-  const projects = useProjects(
-    session && bot ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey } : undefined,
-  )
-  const project = projects?.find((one) => one.id === session?.projectId)
-  const repos = session?.worktree?.repos.length
-    ? session.worktree.repos
-    : project
-      ? projectRepos(project)
-      : []
-  // `/thread` from Main: a thread of its own, with Main's pick, opened on the message the reader
-  // typed with it. The thread's own screen sends that message, so the turn is drawn there as it
-  // arrives and Main's card has the opener to show (ADR 0096).
-  const startThread = async (text: string, attachments: Attachment[]) => {
-    try {
-      const from = await db.conversations.get(chatId)
-      const thread = await beginThread(botId, {
-        modelChoice: chosenOf(from?.modelChoice),
-        text,
-        attachments,
-      })
-      navigate(`/c/${thread.id}`, { state: { bot: botId } })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
-      throw error
-    }
-  }
-  if (!bot || !chat) return null
-  const kept = chat.modelChoice
-  // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
-  const tracked = Boolean(bot.apiKey && !bot.disabled)
-  // Where the chat's model goes when the plan-ready card's pill picks another.
-  const chooseModel = (choice: ModelChoice | undefined) => {
-    const stored = storedPick(choice)
-    // Re-picking the model the chat already holds would wake every query over its row for nothing.
-    if (!samePick(kept, stored)) void updateConversation(chatId, { modelChoice: stored })
-  }
-  const said =
-    (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
-    async (text: string, attachments: Attachment[]) => {
-      try {
-        await go(text, attachments)
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : String(error))
-        throw error
-      }
-    }
-  if (session?.discardedAt) return <DiscardedCard />
-  if (session?.resolvedAt)
-    return (
-      <ResolvedCard onReopen={() => updateConversation(session.id, { resolvedAt: undefined })} />
-    )
-  if (session?.blocked && !controls.busy) return <BlockedCard reason={session.blocked} />
-  if (session?.planPending && session.mode === "plan" && !controls.busy)
-    return (
-      <PlanReadyCard
-        autoAvailable={tracked}
-        model={
-          tracked && (
-            <ModelMenu
-              profile={bot}
-              choice={chosenOf(kept)}
-              onChoose={chooseModel}
-              display="block"
-            />
-          )
-        }
-        onApprove={async (mode) => {
-          await setSessionMode(session.id, mode)
-          await controls.send(planApprovalMessage(session.planFile), [])
-        }}
-        onKeepPlanning={() => setSessionMode(session.id, "plan")}
-      />
-    )
-  return (
-    <ChatComposer
-      bot={bot}
-      draftKey={draftKey(chatId)}
-      modelChoice={kept}
-      onChooseModel={chooseModel}
-      dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
-      session={
-        session
-          ? {
-              mode:
-                session.mode === "auto" && !tracked
-                  ? "accept_edits"
-                  : (session.mode ?? "accept_edits"),
-              autoAvailable: tracked,
-              onMode: (mode) =>
-                setSessionMode(session.id, mode).catch((error) =>
-                  toast.error(error instanceof Error ? error.message : "Couldn't change the mode."),
-                ),
-            }
-          : undefined
-      }
-      notice={notice}
-      main={main}
-      home={home}
-      busy={controls.busy}
-      canSteer={controls.canSteer}
-      subagents={controls.subagents}
-      runId={controls.runId}
-      onSend={controls.send}
-      onQueue={said(controls.queue)}
-      onSteer={said(controls.steer)}
-      onStop={controls.stop}
-      onThread={(message) => startThread(message.text, message.attachments)}
-    />
-  )
-}
-
 function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProps) {
   const params = useParams()
   const { pathname, state: address } = useLocation()
