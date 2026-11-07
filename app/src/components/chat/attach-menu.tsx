@@ -5,7 +5,7 @@ import { Banner } from "@/components/banner"
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
-import { filesReason } from "@/lib/attachment-caps"
+import { filesReason, pickRoad } from "@/lib/attachment-caps"
 import type { SessionMode } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 import { cn } from "@/lib/utils"
@@ -31,7 +31,7 @@ export function AttachMenu({
   /** A project session's permission mode, picked in the same sheet. */
   session?: ModeSettings
   filesFeature: PluginFeatureAnswer
-  /** Camera and Photos send images the model has to read itself. */
+  /** Whether the model takes images, which decides whether a picture rides inline or as a file. */
   imagesAvailable: boolean
   onAdd: (files: File[]) => void
 }) {
@@ -63,7 +63,13 @@ export function AttachMenu({
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
-  const filesAvailable = filesFeature === "yes"
+  // Each source is offered when what it picks has a road to the agent: the bytes the model reads,
+  // or the host's file route. Camera and Photos pick a picture, so they follow a picture's road —
+  // still open while the host hasn't answered, and shut only where it answered that it has none and
+  // the model can't read the photo itself. Files picks a document, which needs that route confirmed.
+  const offers = (id: Source) =>
+    pickRoad({ picture: id !== "files", readsImages: imagesAvailable, route: filesFeature })
+      .road !== "none"
   const because = filesReason(filesFeature)
 
   return (
@@ -134,7 +140,7 @@ export function AttachMenu({
                 type="button"
                 variant="outline"
                 className="h-auto min-h-24 flex-col gap-2 rounded-2xl py-5 text-[15px] font-normal"
-                disabled={id === "files" ? !filesAvailable : !imagesAvailable}
+                disabled={!offers(id)}
                 onClick={() => pick(id)}
               >
                 <Icon className="size-6!" />

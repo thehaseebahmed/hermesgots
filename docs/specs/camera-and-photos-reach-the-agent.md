@@ -170,7 +170,7 @@ sequenceDiagram
    reach. Goals: G1, G3. After: 2, 3. Layers: composer/menu UI, the pure intake rule. Check:
    `test-attach-menu.tsx` — "a model that takes no pictures still offers Camera and Photos" goes from
    disabled to offered, and "a host with no upload route refuses all three, with its reason" replaces
-   "Camera is untouched" — red first.
+   "Camera is untouched" — red first. **Done.**
 
 ## Decisions
 - **A photo that travels as a file and is over the 9 MB cap is scaled to fit, not refused.** Made by the user

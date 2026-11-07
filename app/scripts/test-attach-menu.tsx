@@ -1,10 +1,14 @@
 /**
- * The `+` menu's Files entry is offered where the bot's host advertises the plugin's `attachments`
- * feature, and refused there, with the reason, where it doesn't — so a host whose plugin predates
- * the upload route refuses at the menu instead of failing at send. The answer follows the plugin
- * features rule (`src/lib/features.ts`): a real answer is remembered for its connection, and a host
- * that was away is asked again rather than read as a no. The host is faked at the HTTP boundary and
- * the menu is read off the screen, never out of its internals.
+ * The `+` menu offers each source by the road what it picks can take. Files is offered where the
+ * bot's host advertises the plugin's `attachments` feature and refused there, with the reason,
+ * where it doesn't — so a host whose plugin predates the upload route refuses at the menu instead
+ * of failing at send. Camera and Photos pick pictures, so they follow a picture's road: offered
+ * wherever the model reads images (the inline road) or the host may still take a file, refused only
+ * where the host answered that it has no route and the model reads no images — the one state where
+ * a photo reaches the agent by no road at all, said out loud in the same sentence. The answer
+ * follows the plugin features rule (`src/lib/features.ts`): a real answer is remembered for its
+ * connection, and a host that was away is asked again rather than read as a no. The host is faked at
+ * the HTTP boundary and the menu is read off the screen, never out of its internals.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -40,7 +44,8 @@ function host(features: string[] | "away", name: string, asked: string[]) {
 
 const infoReads = (asked: string[]) => asked.filter((path) => path.endsWith("/info")).length
 
-const seed = (name: string) => seedChat({ id: CHAT, profile: botProfile(name, { id: "bot-1" }) })
+const seed = (name: string, patch: Parameters<typeof botProfile>[1] = {}) =>
+  seedChat({ id: CHAT, profile: botProfile(name, { id: "bot-1", ...patch }) })
 
 const addContext = () => document.querySelector('[aria-label="Add context"]')
 const source = (label: string) =>
@@ -59,7 +64,62 @@ test("a host that advertises no attachments refuses Files at the menu, with its 
     await openMenu()
     assert.equal(source("Files")?.hasAttribute("disabled"), true, "Files is refused")
     assert.match(text(), /File uploads need a newer Gots plugin\./, "and says what is missing")
-    assert.equal(source("Camera")?.hasAttribute("disabled"), false, "Camera is untouched")
+    assert.equal(
+      source("Camera")?.hasAttribute("disabled"),
+      false,
+      "a picture the model reads rides inline, so the camera is still offered",
+    )
+    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
+  })
+})
+
+test("a model that takes no pictures still offers Camera and Photos", async () => {
+  await seed("attach-menu-no-images", { imageInput: false })
+  host(["attachments", "media"], "attach-menu-no-images", [])
+  await mount(chatScreen(CHAT), async () => {
+    await openMenu()
+    assert.equal(
+      source("Camera")?.hasAttribute("disabled"),
+      false,
+      "a picture travels as a file where the model can't read it",
+    )
+    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "and the gallery with it")
+    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files keeps its own road")
+    assert.doesNotMatch(
+      text(),
+      /File uploads need/,
+      "and nothing is refused, so nothing is explained",
+    )
+  })
+})
+
+test("a host with no upload route refuses all three, with its reason", async () => {
+  await seed("attach-menu-none", { imageInput: false })
+  // An answer owed is not a no: with the model reading no images, a photo is still tried on the
+  // host's route, and only Files — which needs that route confirmed — is refused.
+  host("away", "attach-menu-none", [])
+  await mount(chatScreen(CHAT), async () => {
+    await openMenu()
+    assert.equal(
+      source("Camera")?.hasAttribute("disabled"),
+      false,
+      "a route not answered yet refuses no photo",
+    )
+    assert.equal(source("Photos")?.hasAttribute("disabled"), false, "nor the gallery")
+    assert.equal(source("Files")?.hasAttribute("disabled"), true, "while Files waits on the answer")
+  })
+  // Once the host answers that it has none, no photo can reach the agent either, and the sheet
+  // says why in the one sentence above them.
+  host(["media"], "attach-menu-none", [])
+  await mount(chatScreen(CHAT), async () => {
+    await openMenu()
+    for (const label of ["Camera", "Photos", "Files"])
+      assert.equal(source(label)?.hasAttribute("disabled"), true, `${label} is refused`)
+    assert.match(
+      text(),
+      /File uploads need a newer Gots plugin\./,
+      "in the one sentence above them",
+    )
   })
 })
 
