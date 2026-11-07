@@ -249,7 +249,7 @@ flows and their audit rows; no message of either remains, so there is nothing to
    - AGENTS.md: the AFK library and stage bullets go, the `pipeline` and `workflow` layout rows and
      the pill's mention leave with them. plugin/README.md: the library and stage bullets go, the AFK
      route bullet becomes switch, Prompt and picks. plugin/plugin.yaml's description stops naming
-     skills and workflows, and its version and `dashboard/manifest.json`'s move to 0.110.0 together,
+     skills and workflows, and its version and `dashboard/manifest.json`'s move to 0.112.0 together,
      because the release check refuses a moved artifact at its old version.
    - GLOSSARY.md loses workflow, preset, stage, round, step, checkpoint, loop, shipping stage,
      pipeline, rewind, build, test, review, summary and findings, and rewrites AFK, refusal and model
@@ -283,9 +283,10 @@ flows and their audit rows; no message of either remains, so there is nothing to
   user's data, so it gets its own red check over a hand-built v57 store.
 - **The Prompt's heading becomes `## The Project's Prompt`.** Made by the agent: "User's Workflow"
   would be the last workflow word in every AFK run.
-- **`plugin.yaml` and the dashboard manifest move to 0.110.0; `MIN_PLUGIN_VERSION` does not.** Made
+- **`plugin.yaml` and the dashboard manifest move to 0.112.0; `MIN_PLUGIN_VERSION` does not.** Made
   by the agent: the release check refuses a moved artifact at its old version, while the floor stays
-  a floor (ADR 0015).
+  a floor (ADR 0015). The plan was written against 0.110.0; main released 0.111.0 while this was in
+  review, so the rebase puts this change above it.
 - **No Dexie version for the two stale device copies.** Made by the agent: nothing reads them, so a
   device migration would buy tidiness only.
 
