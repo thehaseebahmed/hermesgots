@@ -1,0 +1,87 @@
+/**
+ * A chat with no record yet, as chat-next draws it (ADR 0065): the bot's face, an empty thread and
+ * the app's own composer — nothing more, and nothing written. Its first send is what makes the
+ * chat: `beginThread` writes the record and hands the message over, and the address moves to the
+ * thread, which sends it as its first turn (ADR 0096). So a new chat and `/thread` share one
+ * delivery path, and this surface posts nothing itself.
+ */
+import { useLiveQuery } from "dexie-react-hooks"
+import { useLayoutEffect, useState } from "react"
+import { useNavigate } from "react-router"
+import { toast } from "sonner"
+
+import { BotPicker } from "@/components/chat/bot-picker"
+import { ChatComposer } from "@/components/chat/chat-composer"
+import { ChatHeader } from "@/components/chat/chat-header"
+import { EmptyState } from "@/components/chat/empty-states"
+import { hold, type HoldSlot } from "@/lib/chat-hold"
+import { db, type Attachment, type ModelChoice } from "@/lib/db"
+import { dictationHint } from "@/lib/dictation-hint"
+import { draftKey } from "@/lib/drafts"
+import { COLUMN_BOX } from "@/lib/layout"
+import { chosenOf, storedPick } from "@/lib/model-pick"
+import { beginThread, useBotThreads } from "@/lib/threads"
+
+/**
+ * The bot a new chat would go to, drawn before the chat exists. The picker writes the active bot and
+ * the screen's verdict draws this surface again for it; the model pill's pick has no row to be
+ * written to yet, so it rides into the record the first send makes.
+ */
+export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }) {
+  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
+  const botThreads = useBotThreads()
+  const navigate = useNavigate()
+  const [pick, setPick] = useState<ModelChoice>()
+  // A new chat gives its id without a fade: there is no chat it left behind.
+  useLayoutEffect(() => {
+    hold(slot, undefined)
+  })
+  if (!bot) return null
+  const send = async (text: string, attachments: Attachment[] = []) => {
+    try {
+      const chat = await beginThread(bot.id, { modelChoice: chosenOf(pick), text, attachments })
+      navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the chat.")
+      throw error
+    }
+  }
+  return (
+    <div
+      data-slot="chat-pane"
+      data-pane={slot}
+      data-chat-next
+      data-blank
+      className="relative flex min-h-0 flex-1 flex-col"
+    >
+      <ChatHeader title="" showBot={false} />
+      <EmptyState botId={bot.botId} configured />
+      <div
+        data-slot="composer-slot"
+        data-toast-above
+        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+      >
+        {botThreads === false && (
+          <div className={`${COLUMN_BOX} flex pb-2`}>
+            <BotPicker profile={bot} />
+          </div>
+        )}
+        <ChatComposer
+          bot={bot}
+          draftKey={draftKey(undefined, bot.id)}
+          modelChoice={pick}
+          onChooseModel={(choice) => setPick(storedPick(choice))}
+          dictationHint={dictationHint({})}
+          busy={false}
+          canSteer={false}
+          subagents={0}
+          onSend={send}
+          // Nothing runs in a chat that has not been made: every press is a send.
+          onQueue={send}
+          onSteer={send}
+          onStop={() => false}
+        />
+      </div>
+    </div>
+  )
+}

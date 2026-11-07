@@ -171,7 +171,10 @@ test("with nothing stored the app is the bot-first layout", async () => {
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
     await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    assert.ok(await db.conversations.get(MAIN), "Main is made so the address lands somewhere")
+    await until(
+      async () => Boolean(await db.conversations.get(MAIN)),
+      "Main is made so the address lands somewhere",
+    )
   })
   await mount(
     <MemoryRouter initialEntries={["/"]}>
@@ -192,7 +195,10 @@ test("home opens the bot's Main thread", async () => {
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
     await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    assert.ok(await db.conversations.get(MAIN), "Main is made so the address lands somewhere")
+    await until(
+      async () => Boolean(await db.conversations.get(MAIN)),
+      "Main is made so the address lands somewhere",
+    )
   })
 })
 
