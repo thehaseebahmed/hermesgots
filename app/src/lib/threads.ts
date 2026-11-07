@@ -410,7 +410,7 @@ export async function lastOpened(profileId: string): Promise<LastOpened> {
     db.conversations
       .where("[profileId+updatedAt]")
       .between([profileId, -Infinity], [profileId, Infinity])
-      .filter((chat) => listsAsThread(chat))
+      .filter(listsAsThread)
       .count(),
     stored ? db.conversations.get(stored) : Promise.resolve(undefined),
   ])
