@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  askingMember,
   foldRoom,
   memberLabel,
   memberName,
@@ -181,4 +182,46 @@ test("a member is named by its label: the seat's name, its handle, its profile, 
   assert.equal(memberLabel({ memberId: "m1", profile: "p", handle: "h" }), "h")
   assert.equal(memberLabel({ memberId: "m1", profile: "p" }), "p")
   assert.equal(memberLabel({ memberId: "m1" }), "m1")
+})
+
+test("a reply addressed to @user says the room needs the user", () => {
+  const asking = askingMember(
+    [user(1, "who is free?"), reply(2, "m1", "I can, but @user has to pick the release.", "Hermes")],
+    members,
+  )
+  assert.deepEqual(asking, { memberId: "m1", name: "Hermes" })
+})
+
+test("the user answering ends it, and a later reply says the round moved on", () => {
+  assert.equal(
+    askingMember([reply(1, "m1", "which one, @user?", "Hermes"), user(2, "the second")], members),
+    undefined,
+    "the user has answered, so the room asks nothing",
+  )
+  assert.equal(
+    askingMember(
+      [
+        reply(1, "m1", "which one, @user?", "Hermes"),
+        reply(2, "m2", "I'll take the first then.", "Coder"),
+      ],
+      members,
+    ),
+    undefined,
+    "the last thing said is a member's reply, and it asks nothing",
+  )
+})
+
+test("a handle that only begins with @user is somebody's name, not the user", () => {
+  assert.equal(askingMember([reply(1, "m1", "@usernames are fine here", "Hermes")], members), undefined)
+})
+
+test("a user's own words never ask for the user", () => {
+  assert.equal(askingMember([user(1, "tell @user about it")], members), undefined)
+})
+
+test("a reply addressed to @user names the member even where the roster no longer seats it", () => {
+  assert.deepEqual(askingMember([reply(1, "m9", "over to @user", "Gone")], members), {
+    memberId: "m9",
+    name: "Gone",
+  })
 })

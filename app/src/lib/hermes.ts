@@ -1918,6 +1918,36 @@ function roomEventOf(raw: Record<string, unknown>): RoomEvent | undefined {
   }
 }
 
+/** One approval a room's member waits on: the Host's own coordinates for resolving it, and no more. */
+export interface RoomApproval {
+  kind: "approval"
+  memberId: string
+  taskId: string
+  generation: number
+  requestId: string
+  command?: string
+  description?: string
+}
+
+/** One question a member asked, with the choices it offers, as the Host asked it. */
+export interface RoomQuestion {
+  id: string
+  question: string
+  choices?: string[]
+  multiSelect?: boolean
+}
+
+/** One question a room's member waits on: what it asks, and the request the answer resolves. */
+export interface RoomAsked {
+  kind: "question"
+  memberId: string
+  questionId: string
+  questions: RoomQuestion[]
+}
+
+/** What a room waits on the user for, in the two shapes a card draws. */
+export type RoomAsk = RoomApproval | RoomAsked
+
 /** One room as one read answers it: the log's delta, its live state, and whether it takes a send. */
 export interface RoomRead {
   room: { id: string; name: string; members: RoomMember[] }
@@ -1927,7 +1957,60 @@ export interface RoomRead {
   hasMore: boolean
   working: boolean
   activity: { memberId: string; status: string }[]
+  /** The approvals and questions waiting for the user, in the order the Host holds them. */
+  waiting: RoomAsk[]
+  /** Whether this room's round can be stopped from here. */
+  canStop: boolean
   canSend: boolean
+}
+
+const text = (raw: Record<string, unknown>, key: string) =>
+  typeof raw[key] === "string" ? (raw[key] as string) : undefined
+
+/** One waiting approval, or nothing where the Host left out a coordinate its approve needs. */
+function roomApprovalOf(raw: Record<string, unknown>): RoomApproval | undefined {
+  const memberId = text(raw, "memberId")
+  const taskId = text(raw, "taskId")
+  const requestId = text(raw, "requestId")
+  const generation = raw.generation
+  if (!memberId || !taskId || !requestId) return undefined
+  if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 0) {
+    return undefined
+  }
+  return {
+    kind: "approval",
+    memberId,
+    taskId,
+    generation,
+    requestId,
+    ...(text(raw, "command") ? { command: text(raw, "command") } : {}),
+    ...(text(raw, "description") ? { description: text(raw, "description") } : {}),
+  }
+}
+
+/** One waiting question, or nothing where it asks nothing a card could answer. */
+function roomAskedOf(raw: Record<string, unknown>): RoomAsked | undefined {
+  const memberId = text(raw, "memberId")
+  const questionId = text(raw, "questionId")
+  if (!memberId || !questionId) return undefined
+  const questions: RoomQuestion[] = []
+  for (const row of Array.isArray(raw.questions) ? raw.questions : []) {
+    if (!row || typeof row !== "object") continue
+    const one = row as Record<string, unknown>
+    const id = text(one, "id")
+    const question = text(one, "question")
+    if (!id || !question) continue
+    const choices = (Array.isArray(one.choices) ? one.choices : []).filter(
+      (choice): choice is string => typeof choice === "string" && Boolean(choice),
+    )
+    questions.push({
+      id,
+      question,
+      ...(choices.length ? { choices, multiSelect: one.multiSelect === true } : {}),
+    })
+  }
+  if (!questions.length) return undefined
+  return { kind: "question", memberId, questionId, questions }
 }
 
 function roomReadOf(body: unknown): RoomRead {
@@ -1946,6 +2029,13 @@ function roomReadOf(body: unknown): RoomRead {
     const one = roomEventOf(row as Record<string, unknown>)
     if (one) events.push(one)
   }
+  const waiting: RoomAsk[] = []
+  for (const row of Array.isArray(held.waiting) ? held.waiting : []) {
+    if (!row || typeof row !== "object") continue
+    const one = row as Record<string, unknown>
+    const ask = one.kind === "approval" ? roomApprovalOf(one) : roomAskedOf(one)
+    if (ask) waiting.push(ask)
+  }
   const count = (key: string) => (typeof held[key] === "number" ? (held[key] as number) : 0)
   return {
     room: {
@@ -1959,6 +2049,8 @@ function roomReadOf(body: unknown): RoomRead {
     hasMore: Boolean(held.hasMore),
     working: held.working === true,
     activity,
+    waiting,
+    canStop: held.canStop === true,
     canSend: held.canSend === true,
   }
 }
@@ -2001,6 +2093,70 @@ export async function sendRoomMessage(
   const body = (await response.json()) as Record<string, unknown>
   const event = body.event
   return roomEventOf(event && typeof event === "object" ? (event as Record<string, unknown>) : {})
+}
+
+/**
+ * The approval a room's member waits on, answered Once or Deny: the Host resolves exactly the
+ * request the card named, so a card that sat on screen while the Host moved on is refused in its own
+ * words rather than answering something else.
+ */
+export async function approveRoom(
+  config: HermesConfig,
+  roomId: string,
+  approval: RoomApproval,
+  choice: "once" | "deny",
+): Promise<void> {
+  await request(`${roomRoot(config, roomId)}/approve`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({
+      member_id: approval.memberId,
+      task_id: approval.taskId,
+      execution_generation: approval.generation,
+      request_id: approval.requestId,
+      choice,
+    }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+}
+
+/**
+ * One member's question answered with what the user picked: the choice as the Host asked it, keyed
+ * by question id, and words for an open-ended one.
+ */
+export async function answerRoom(
+  config: HermesConfig,
+  roomId: string,
+  asked: RoomAsked,
+  answers: Record<string, string | string[]>,
+): Promise<void> {
+  await request(`${roomRoot(config, roomId)}/answer`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({
+      member_id: asked.memberId,
+      question_id: asked.questionId,
+      answers,
+    }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+}
+
+/**
+ * The round stopped: the Host cancels the room's work, and the log it writes is what the transcript
+ * reads, so the room says in its own words that the round was stopped.
+ */
+export async function stopRoom(
+  config: HermesConfig,
+  roomId: string,
+  cancelId?: string,
+): Promise<void> {
+  await request(`${roomRoot(config, roomId)}/stop`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(cancelId ? { cancel_id: cancelId } : {}),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
 }
 
 /** The bot's research missions on the plugin (`research.py`), as it sends them. */

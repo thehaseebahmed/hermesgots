@@ -6,6 +6,13 @@
 // members answer in turn, one of them passes, and the third round is the bound (v1's rules). A send
 // is inert — it appends one event — and the driver works it afterwards with no client attached,
 // which is what the app's screen reads back.
+//
+// What a send asks for decides the round it runs, so a flow can ask for one thing at a time:
+//   "clean the build"  — the first member opens an approval, Once or Deny, and its turn waits;
+//   "which database?"  — the second member asks a question with two choices, and waits on it;
+//   "hand it to @user" — a member ends addressed to @user, which is the room's needs-you mark;
+//   "hold a while"     — a round that runs long enough for Stop to land in the middle of it;
+//   anything else      — the three rounds the room usually runs.
 
 const MEMBERS = [
   { member_id: "m1", profile: "default", handle: "hermes", display_name: "Hermes" },
@@ -17,6 +24,29 @@ const ROUND = 700
 const PASS = 1_400
 const SECOND = 2_100
 const BOUND = 2_900
+/** A round long enough to be stopped mid-flight ("hold a while"). */
+const HOLD = 8_000
+
+/** The approval a member opens, with the four coordinates the Host's own approve resolves. */
+const APPROVAL = {
+  kind: "approval",
+  memberId: "m1",
+  taskId: "dtask:1",
+  generation: 1,
+  requestId: "approval-1",
+  command: "rm -rf build",
+  description: "Clear the build",
+}
+
+/** The question a member asks, with the choices it offers. */
+const QUESTION = {
+  kind: "question",
+  memberId: "m2",
+  questionId: "srq-1",
+  questions: [
+    { id: "q0", question: "Which database?", choices: ["Postgres", "SQLite"], multiSelect: false },
+  ],
+}
 
 const memberRow = (member) => ({
   memberId: member.member_id,
@@ -35,6 +65,8 @@ export function createRoomStore() {
     events: [],
     working: false,
     activity: [],
+    // What the room waits on the user for: an approval or a question, and nothing at rest.
+    waiting: [],
     at: now,
     created_at: now,
     timers: [],
@@ -93,25 +125,32 @@ function drawnEvent(row) {
   }
 }
 
+/** One member's spoken row, appended to the room's log. */
+function say(room, id, text) {
+  const seated = room.members.find((one) => one.member_id === id)
+  room.events.push(
+    event(
+      room,
+      "message.member",
+      { kind: "member", id, profile: seated.profile, display_name: seated.display_name },
+      {
+        text,
+        member_id: id,
+        thread_id: "room-thread",
+      },
+    ),
+  )
+  room.at = Date.now()
+}
+
+/** The room at rest: no member at work, and nothing it waits on. */
+function rest(room) {
+  room.working = false
+  room.activity = []
+}
+
 /** What the rounds a send wakes do to the room, one step at a time. */
-function rounds(room, noteEvent) {
-  const member = (id) => room.members.find((one) => one.member_id === id)
-  const say = (id, text) => {
-    const seated = member(id)
-    room.events.push(
-      event(
-        room,
-        "message.member",
-        { kind: "member", id, profile: seated.profile, display_name: seated.display_name },
-        {
-          text,
-          member_id: id,
-          thread_id: "room-thread",
-        },
-      ),
-    )
-    room.at = Date.now()
-  }
+function rounds(room, noteEvent, text = "") {
   // One round at a time, as the Host's driver runs it: a second send waits for the round in hand
   // rather than stacking a second timeline on the same room.
   for (const timer of room.timers) clearTimeout(timer)
@@ -123,16 +162,60 @@ function rounds(room, noteEvent) {
         noteEvent("room", room.room_id)
       }, at),
     )
-  step(0, () => {
+  const working = (activity) => () => {
     room.working = true
-    room.activity = [
+    room.activity = activity
+  }
+
+  if (/clean/i.test(text)) {
+    // A member's turn opens an approval and waits for the Host's own answer: the room draws the
+    // card until Once or Deny arrives, and nothing else happens in the room meanwhile.
+    step(0, working([{ memberId: "m1", status: "running" }]))
+    step(ROUND, () => {
+      room.waiting = [APPROVAL]
+    })
+    return
+  }
+  if (/which database|question/i.test(text)) {
+    step(0, working([{ memberId: "m2", status: "running" }]))
+    step(ROUND, () => {
+      room.waiting = [QUESTION]
+    })
+    return
+  }
+  if (/@user/i.test(text)) {
+    // The round settles addressed to the user, which is the room's needs-you mark: no call, no
+    // round in the way — just the last words of a member.
+    step(0, working([{ memberId: "m1", status: "running" }]))
+    step(ROUND, () => say(room, "m1", "That one is yours to call, @user."))
+    step(PASS, () => {
+      rest(room)
+      room.events.push(
+        event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
+          status: "settled",
+          thread_id: "room-thread",
+        }),
+      )
+    })
+    return
+  }
+  if (/hold/i.test(text)) {
+    // A round with time in it, so a Stop lands while a member is still working.
+    step(0, working([
       { memberId: "m1", status: "running" },
       { memberId: "m2", status: "queued" },
-    ]
-  })
+    ]))
+    step(HOLD, () => say(room, "m1", "Still working on it."))
+    return
+  }
+
+  step(0, working([
+    { memberId: "m1", status: "running" },
+    { memberId: "m2", status: "queued" },
+  ]))
   // The first round: Hermes answers, and Coder passes — silence, which the room draws as nothing.
   step(ROUND, () => {
-    say("m1", "I'll take the API and the routes.")
+    say(room, "m1", "I'll take the API and the routes.")
     room.activity = [{ memberId: "m2", status: "running" }]
   })
   step(PASS, () => {
@@ -151,7 +234,7 @@ function rounds(room, noteEvent) {
   })
   // The second round: Coder answers the reply it read.
   step(SECOND, () => {
-    say("m2", "Coder here. I'll take the screen and the tests.")
+    say(room, "m2", "Coder here. I'll take the screen and the tests.")
   })
   // The third round is the bound: a room works at most three rounds, and says so.
   step(BOUND, () => {
@@ -168,8 +251,7 @@ function rounds(room, noteEvent) {
       ),
     )
     room.at = Date.now()
-    room.working = false
-    room.activity = []
+    rest(room)
   })
 }
 
@@ -208,8 +290,104 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
     room.events.push(appended)
     room.at = Date.now()
     noteEvent("room", room.room_id)
-    rounds(room, noteEvent)
+    rounds(room, noteEvent, text)
     json(res, 200, { object: "gots.room.sent", event: drawnEvent(appended) })
+    return true
+  }
+  const approve = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/approve$/.exec(path)
+  if (approve && req.method === "POST") {
+    const room = store.rooms.get(decodeURIComponent(approve[1]))
+    if (!room) return (fail(404, "This host has no such room."), true)
+    const body = await readBody(req)
+    const held = room.waiting.find((one) => one.kind === "approval")
+    if (!held) return (fail(400, "room approval is no longer pending"), true)
+    // The Host's own approve resolves the exact request the app named, and takes Once or Deny only.
+    if (
+      body?.member_id !== held.memberId ||
+      body?.task_id !== held.taskId ||
+      body?.execution_generation !== held.generation ||
+      body?.request_id !== held.requestId
+    ) {
+      return (fail(400, "room approval is no longer pending"), true)
+    }
+    if (body?.choice !== "once" && body?.choice !== "deny") {
+      return (fail(400, "room approval choice must be once or deny"), true)
+    }
+    room.waiting = room.waiting.filter((one) => one !== held)
+    if (body.choice === "once") {
+      say(room, "m1", "Approved — clearing the build.")
+    } else {
+      room.events.push(
+        event(room, "turn.cancelled", { kind: "gateway", id: "gw-1" }, {
+          member_id: "m1",
+          thread_id: "room-thread",
+          reason: "denied",
+        }),
+      )
+    }
+    room.events.push(
+      event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
+        status: "settled",
+        thread_id: "room-thread",
+      }),
+    )
+    room.at = Date.now()
+    rest(room)
+    noteEvent("room", room.room_id)
+    json(res, 200, { object: "gots.room.approved", approved: true, choice: body.choice })
+    return true
+  }
+  const answer = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/answer$/.exec(path)
+  if (answer && req.method === "POST") {
+    const room = store.rooms.get(decodeURIComponent(answer[1]))
+    if (!room) return (fail(404, "This host has no such room."), true)
+    const body = await readBody(req)
+    const held = room.waiting.find((one) => one.kind === "question")
+    if (!held || body?.question_id !== held.questionId) {
+      return (fail(409, "That question isn't waiting for an answer any more."), true)
+    }
+    const given = body?.answers ?? {}
+    room.waiting = room.waiting.filter((one) => one !== held)
+    say(room, "m2", `${given.q0 ?? "Your call"} it is — I'll take that.`)
+    room.events.push(
+      event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
+        status: "settled",
+        thread_id: "room-thread",
+      }),
+    )
+    room.at = Date.now()
+    rest(room)
+    noteEvent("room", room.room_id)
+    json(res, 200, { object: "gots.room.answered", questionId: held.questionId })
+    return true
+  }
+  const stop = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/stop$/.exec(path)
+  if (stop && req.method === "POST") {
+    const room = store.rooms.get(decodeURIComponent(stop[1]))
+    if (!room) return (fail(404, "This host has no such room."), true)
+    const body = await readBody(req)
+    for (const timer of room.timers) clearTimeout(timer)
+    room.timers = []
+    // Stop cancels queued and running work, and the room's own log is where it says so.
+    const working = room.activity.map((one) => one.memberId)
+    room.events.push(
+      event(room, "room.stop_requested", { kind: "user", id: "user" }, {
+        thread_id: "room-thread",
+        ...(body?.cancel_id ? { cancel_id: body.cancel_id } : {}),
+      }),
+    )
+    room.events.push(
+      event(room, "turn.cancelled", { kind: "gateway", id: "gw-1" }, {
+        member_id: working[0] ?? "m1",
+        thread_id: "room-thread",
+        reason: "stopped",
+      }),
+    )
+    room.waiting = []
+    room.at = Date.now()
+    rest(room)
+    noteEvent("room", room.room_id)
+    json(res, 200, { object: "gots.room.stopped", cancelled: Math.max(1, working.length) })
     return true
   }
   const read = /^\/api\/plugins\/gots\/rooms\/([^/]+)$/.exec(path)
@@ -227,6 +405,8 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
       hasMore: false,
       working: room.working,
       activity: room.activity,
+      waiting: room.waiting,
+      canStop: true,
       canSend: true,
     })
     return true

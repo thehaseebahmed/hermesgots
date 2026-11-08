@@ -113,6 +113,42 @@ export function memberOf(members: RoomMember[], memberId?: string): RoomMember |
   return memberId ? members.find((member) => member.memberId === memberId) : undefined
 }
 
+/** The user's own handle at the end of a member's words, as a mention rather than a name's start. */
+const MENTION = /@user\b/i
+
+/**
+ * The member whose reply ended addressed to the user — `@user` — and nothing while the room isn't
+ * asking for them.
+ *
+ * An `@user` escalation is the Host settling a round with no peer cited, so it is a reading of the
+ * log and never a call (the plan's own decision). The last thing said decides: a reply addressed to
+ * the user asks, the user answering answers it, and a member's later reply says the round moved on.
+ * A handle that merely begins with `@user` is somebody's name, not the user, so the mention ends on
+ * a word boundary.
+ */
+export function askingMember(
+  events: RoomEvent[],
+  members: RoomMember[] = [],
+): { memberId?: string; name?: string } | undefined {
+  const seen = new Set<number>()
+  let asking: { memberId?: string; name?: string } | undefined
+  for (const event of [...events].sort((one, two) => one.seq - two.seq)) {
+    if (seen.has(event.seq)) continue
+    seen.add(event.seq)
+    if (event.kind === "message.user") {
+      asking = undefined
+      continue
+    }
+    if (event.kind !== "message.member") continue
+    const addressed = MENTION.test(event.text ?? "")
+    const name = event.name || memberName(members, event.memberId)
+    asking = addressed
+      ? { ...(event.memberId ? { memberId: event.memberId } : {}), ...(name ? { name } : {}) }
+      : undefined
+  }
+  return asking
+}
+
 /** A member's name, by id: its label where the roster seats it. */
 export function memberName(members: RoomMember[], memberId?: string): string | undefined {
   const seated = memberOf(members, memberId)

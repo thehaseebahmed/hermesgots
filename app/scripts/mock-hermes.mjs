@@ -4091,6 +4091,7 @@ http
           "media_url",
           "openui",
           "rooms",
+          ...(ROOMS ? ["rooms_questions"] : []),
           "profile_routes",
           "pr_tool",
           "close",

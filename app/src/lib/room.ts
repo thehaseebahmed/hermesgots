@@ -12,10 +12,27 @@ import {
 } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { CHAT_IDLE_MS, CHAT_POLL_MS } from "@/lib/freshness"
-import { HermesError, getRoom, sendRoomMessage } from "@/lib/hermes"
+import {
+  HermesError,
+  answerRoom,
+  approveRoom,
+  getRoom,
+  sendRoomMessage,
+  stopRoom,
+  type RoomApproval,
+  type RoomAsked,
+  type RoomAsk,
+} from "@/lib/hermes"
 import { useChanges } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
-import { foldRoom, newestSeq, queuedMembers, workingLine, workingMembers } from "@/lib/room-log"
+import {
+  askingMember,
+  foldRoom,
+  newestSeq,
+  queuedMembers,
+  workingLine,
+  workingMembers,
+} from "@/lib/room-log"
 
 /**
  * A room on this device (ADR 0116): its words are the Host's log, read by sequence and kept on the
@@ -45,17 +62,25 @@ export interface RoomLive {
   members: RoomMember[]
   /** The who-is-working line, and nothing at all while the room is at rest. */
   working?: string
+  /** What the room waits on the user for: an approval, or a question, and nothing at rest. */
+  waiting: RoomAsk[]
+  /** Whether this room's round can be stopped, and `undefined` until a read has said either way. */
+  canStop?: boolean
   /** Whether this room takes a send, and `undefined` until a read has said either way. */
   canSend?: boolean
+  /** The member whose reply ended addressed to `@user`, read from the log this device holds. */
+  asking?: { memberId?: string; name?: string }
   /** The last read that failed, in the Host's own words, and cleared by the next good read. */
   error?: string
-  /** A send the Host refused, in its own words: it stands until the next attempt. */
+  /** A send, an answer or a stop the Host refused, in its own words: it stands until the next try. */
   refused?: string
   /** A send on its way to the Host. */
   sending: boolean
+  /** An answer or a stop on its way to the Host. */
+  acting: boolean
 }
 
-const EMPTY: RoomLive = { name: "", members: [], sending: false }
+const EMPTY: RoomLive = { name: "", members: [], waiting: [], sending: false, acting: false }
 
 /** The index range one room's page sits in, which every read and write of it asks for. */
 const pageRange = (roomId: string) =>
@@ -149,9 +174,12 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
               queuedMembers(members, found.activity),
               found.working,
             ),
+            waiting: found.waiting,
+            canStop: found.canStop,
             canSend: found.canSend,
             sending: held.sending,
-            // A refusal is the send's, not the read's: a good read does not take its words away.
+            acting: held.acting,
+            // A refusal is the write's, not the read's: a good read does not take its words away.
             ...(held.refused ? { refused: held.refused } : {}),
           }
           return equal(next, held) ? held : next
@@ -243,6 +271,51 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
     [roomId, bot, config, sync],
   )
 
+  /**
+   * One answer into the room — an approval, a question, or a stop — and a read the moment it lands,
+   * since what the room waits on is the Host's own state and not this device's guess. A refusal
+   * stays on screen in the Host's words, as a refused send does.
+   */
+  const act = useCallback(
+    async (work: () => Promise<void>): Promise<boolean> => {
+      if (!roomId || !hasServer(bot)) return false
+      setLive((held) => ({ ...held, acting: true, refused: undefined }))
+      try {
+        await work()
+        return true
+      } catch (error) {
+        setLive((held) => ({ ...held, refused: reasonOf(error) }))
+        return false
+      } finally {
+        setLive((held) => ({ ...held, acting: false }))
+        sync(undefined, true)
+      }
+    },
+    [roomId, bot, sync],
+  )
+
+  const approve = useCallback(
+    (approval: RoomApproval, choice: "once" | "deny") =>
+      roomId
+        ? act(() => approveRoom(config, roomId, approval, choice))
+        : Promise.resolve(false),
+    [roomId, config, act],
+  )
+
+  const answer = useCallback(
+    (asked: RoomAsked, answers: Record<string, string | string[]>) =>
+      roomId ? act(() => answerRoom(config, roomId, asked, answers)) : Promise.resolve(false),
+    [roomId, config, act],
+  )
+
+  const stop = useCallback(
+    () =>
+      roomId
+        ? act(() => stopRoom(config, roomId, crypto.randomUUID()))
+        : Promise.resolve(false),
+    [roomId, config, act],
+  )
+
   // One read as the screen opens, another each time the Host says the room moved, and the poll as
   // the net under a dropped stream: a room whose turn is running reads at a chat's pace, and one at
   // rest reads slowly.
@@ -253,5 +326,15 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
     [live.members, chat],
   )
   const folded = useMemo(() => foldRoom(rows ?? [], members), [rows, members])
-  return { live: { ...live, members }, rows: folded, send }
+  // What the room is asking of the user, read from the page this device holds: the Host settles a
+  // round addressed to `@user`, so there is no call to make — only the last words to read.
+  const asking = useMemo(() => askingMember(rows ?? [], members), [rows, members])
+  return {
+    live: { ...live, members, asking },
+    rows: folded,
+    send,
+    approve,
+    answer,
+    stop,
+  }
 }

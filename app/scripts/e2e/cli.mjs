@@ -51,6 +51,11 @@ export const FLOWS = {
     about:
       "A room of two bots of one Host: its row in the sidebar, a message sent into it running the members' rounds with no client attached, each reply drawn with its member's name and picture, the who-is-working line while a turn runs, the third round's bound, a member that passes as nothing, and a reload landing on the same transcript",
   },
+  "room-waiting": {
+    script: "e2e/room-waiting.mjs",
+    about:
+      "A room that needs the user, answered there: a member's approval Once and then Denied, a member's question answered with one of its choices, a reply addressed to @user drawing needs-you, and Stop cancelling a round the transcript then says was stopped — at a phone's width and a tablet's",
+  },
   "routine-message": {
     script: "e2e/routine-message.mjs",
     about:

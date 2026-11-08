@@ -7,6 +7,7 @@ import { Markdown } from "@/components/chat/markdown"
 import { SystemLine } from "@/components/chat/system-line"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { RoomComposer } from "@/components/room/room-composer"
+import { RoomWaiting } from "@/components/room/room-waiting"
 import { Banner } from "@/components/banner"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message"
@@ -49,7 +50,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     () => (chat ? chatOwner(chat, seated).bot : undefined),
     [chat, seated],
   )
-  const { live, rows, send } = useRoom(chat, answerer)
+  const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
   // A member's picture is the bot seated at its profile on the room's own Host, which is the same
   // seat the answerer came from: a profile name is unique on its Host, not across a device's bots.
   const pictures = useMemo(
@@ -109,6 +110,18 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           <Banner tone="error">{live.refused ?? live.error}</Banner>
         </div>
       )}
+      {/* The room's own cards: a member's approval, a member's question, the @user mark, and Stop. */}
+      <RoomWaiting
+        members={live.members}
+        waiting={live.waiting}
+        asking={live.asking}
+        canStop={answerer ? (live.canStop ?? false) : false}
+        working={Boolean(live.working)}
+        busy={live.acting}
+        onApprove={approve}
+        onAnswer={answer}
+        onStop={stop}
+      />
       <RoomComposer
         onSend={send}
         // No answerer, no send: a room whose members this device holds no bot for still draws, and
