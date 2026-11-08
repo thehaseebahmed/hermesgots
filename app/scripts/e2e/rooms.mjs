@@ -3,7 +3,7 @@
 // reply with its member's name and picture, the who-is-working line while a turn runs, the third
 // round's bound, and a member that passes as nothing at all. A reload lands on the same transcript,
 // read from the device rather than the Host.
-import { assert, flow, mock, pass } from "./lib.mjs"
+import { assert, flow, mock, pass, settled } from "./lib.mjs"
 
 const SENT = "Plan the next release."
 const FIRST = "I'll take the API and the routes."
@@ -98,6 +98,87 @@ await flow("rooms", async ({ page, until, shot }) => {
     "a reload reads the same rows back from the device",
   )
   await shot("reloaded")
+
+  // The screen at every size a device is — a phone, a tablet and a laptop, in both themes: a room
+  // draws at the app's reading measure and never past it, its rows stay on screen, and the
+  // composer keeps its gutters. Geometry is what no DOM without layout measures, so it is here.
+  const BOX = 672
+  const sizes = [
+    { name: "phone", width: 390, height: 844 },
+    { name: "tablet", width: 768, height: 1024 },
+    { name: "laptop", width: 1440, height: 900 },
+  ]
+  for (const { name, width, height } of sizes) {
+    for (const scheme of ["light", "dark"]) {
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme: scheme })
+      await settled(page)
+      const seen = await page.evaluate(() => {
+        const box = (element) => {
+          const at = element?.getBoundingClientRect()
+          return at ? { left: at.left, right: at.right, width: at.width } : null
+        }
+        const rows = [
+          ...document.querySelectorAll('[data-slot="room-row"]:not([data-kind="notice"])'),
+        ]
+        return {
+          viewport: window.innerWidth,
+          rows: rows.map(box),
+          field: box(document.querySelector('[aria-label="Message the room"]')),
+          send: box(document.querySelector('button[aria-label="Send"]')),
+          room: (() => {
+            const at = document.querySelector('[aria-label="Room messages"]')
+            const rect = at?.getBoundingClientRect()
+            // clientWidth leaves the scroller's own scrollbar out of the room a row is centred in.
+            return rect ? { left: rect.left, right: rect.left + at.clientWidth } : null
+          })(),
+          title: document.querySelector("header")?.innerText.trim() ?? "",
+          overflow: document.documentElement.scrollWidth > window.innerWidth,
+        }
+      })
+      const where = `${name} ${scheme}`
+      assert.equal(seen.rows.length, 3, `three rows at ${where}`)
+      assert.ok(!seen.overflow, `nothing scrolls sideways at ${where}`)
+      assert.match(seen.title, /Planning/, `the room's name is on screen at ${where}`)
+      assert.ok(seen.field && seen.field.width > 0, `the composer is drawn at ${where}`)
+      for (const row of seen.rows) {
+        assert.ok(
+          row.width <= BOX + 1,
+          `a row stays in the reading column at ${where} (${row.width}px)`,
+        )
+        assert.ok(
+          row.left >= -1 && row.right <= seen.viewport + 1,
+          `a row stays on screen at ${where}`,
+        )
+      }
+      assert.ok(seen.send && seen.send.right <= seen.viewport + 1, `Send is on screen at ${where}`)
+      // Where the pane is wider than the measure, the room's column sits centred in it: the same
+      // gutter either side, so a message never drifts towards one edge as the window grows.
+      assert.ok(seen.room, `the room's scroller is drawn at ${where}`)
+      if (seen.room.right - seen.room.left > BOX + 2) {
+        const column = seen.rows[0]
+        assert.ok(
+          Math.abs(column.left - seen.room.left - (seen.room.right - column.right)) <= 2,
+          `the room's column is centred in its pane at ${where}`,
+        )
+      }
+      // One bubble of each side, in the order they are drawn: the user's on the right.
+      const user = await page.locator('[data-slot="room-row"][data-kind="user"]').boundingBox()
+      const member = await page
+        .locator('[data-slot="room-row"][data-kind="member"]')
+        .first()
+        .boundingBox()
+      assert.ok(user && member, `both sides are drawn at ${where}`)
+      assert.ok(
+        user.x + user.width >= member.x + member.width,
+        `the user's message stands right of a member's at ${where}`,
+      )
+      await shot(`${name}-${scheme}`)
+    }
+  }
+  await page.emulateMedia({ colorScheme: "light" })
+  await page.setViewportSize({ width: 1440, height: 900 })
+
   pass(
     `a room's message ran three rounds — ${FIRST.length} and ${SECOND.length} characters of reply`,
   )
