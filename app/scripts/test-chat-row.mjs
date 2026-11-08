@@ -1,27 +1,35 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { rowAnswers, rowBot, rowProfileId } from "../src/lib/chat-row.ts"
+import { rowBot, rowDraws } from "../src/lib/chat-row.ts"
 
 const bots = new Map([
   ["on", { id: "on" }],
   ["off", { id: "off", disabled: true }],
+  ["keyless", { id: "keyless", apiKey: "" }],
 ])
 
-const cases = [
-  { name: "a bot this device holds and the user has left on", row: { profileId: "on" }, bot: "on", answers: true },
-  { name: "a bot the user has turned off", row: { profileId: "off" }, bot: "off", answers: false },
-  { name: "a bot this device no longer holds", row: { profileId: "gone" }, bot: undefined, answers: true },
-]
+const rows = ["on", "off", "keyless", "gone", ""].map((profileId) => ({ profileId }))
 
-test("a row carries the profile id its record names", () => {
-  for (const { name, row } of cases) assert.equal(rowProfileId(row), row.profileId, name)
+/** What the Recents filter asked before this rule moved: a row draws unless its bot is off. */
+const drewBefore = (row, bots) => !bots.get(row.profileId)?.disabled
+
+test("a row draws exactly as the chat list drew it before the rule moved", () => {
+  for (const row of rows) {
+    assert.equal(rowDraws(row, bots), drewBefore(row, bots), JSON.stringify(row.profileId))
+  }
 })
 
 test("a bot turned off is the one thing that stops a row drawing", () => {
-  for (const { name, row, answers } of cases) assert.equal(rowAnswers(row, bots), answers, name)
+  assert.equal(rowDraws({ profileId: "on" }, bots), true)
+  assert.equal(rowDraws({ profileId: "off" }, bots), false)
+})
+
+test("a row a bot can be called from still draws, a keyless bot's included", () => {
+  assert.equal(rowDraws({ profileId: "keyless" }, bots), true)
 })
 
 test("a row draws with the bot this device holds, when it holds one", () => {
-  for (const { name, row, bot } of cases) assert.equal(rowBot(row, bots)?.id, bot, name)
+  assert.equal(rowBot({ profileId: "on" }, bots)?.id, "on")
+  assert.equal(rowBot({ profileId: "gone" }, bots), undefined)
 })

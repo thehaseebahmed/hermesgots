@@ -1,6 +1,6 @@
 /**
  * A row of the chat list: the bot whose record it is, the bot this device holds for it, and whether
- * that bot can answer for it today.
+ * the list draws it.
  *
  * A record's `profileId` names the bot whose list carried it. For a chat that is also the bot whose
  * screen the row opens on; for a room it is bookkeeping, since a room belongs to a Host and answers
@@ -15,15 +15,18 @@ export function rowProfileId(row: ChatRow): string {
   return row.profileId
 }
 
-export function rowBot<B>(row: ChatRow, bots: ReadonlyMap<string, B>): B | undefined {
+export function rowBot<B extends { disabled?: boolean }>(
+  row: ChatRow,
+  bots: ReadonlyMap<string, B>,
+): B | undefined {
   return bots.get(rowProfileId(row))
 }
 
 /**
- * Whether a row's bot can answer for it today: one the user has turned off answers nothing, and the
- * row is not drawn. A bot this device doesn't hold is not one that is off — deleting a bot takes its
- * chats with it — so nothing here hides a row for a record that outlived its bot.
+ * Whether the chat list draws a row: one whose bot the user has turned off draws nothing. A bot this
+ * device doesn't hold is not one that is off — deleting a bot takes its chats with it — so nothing
+ * here hides a row for a record that outlived its bot.
  */
-export function rowAnswers(row: ChatRow, bots: ReadonlyMap<string, { disabled?: boolean }>): boolean {
-  return bots.get(rowProfileId(row))?.disabled !== true
+export function rowDraws(row: ChatRow, bots: ReadonlyMap<string, { disabled?: boolean }>): boolean {
+  return rowBot(row, bots)?.disabled !== true
 }
