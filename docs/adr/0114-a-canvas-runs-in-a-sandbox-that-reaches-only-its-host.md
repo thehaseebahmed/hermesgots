@@ -18,7 +18,11 @@ host is the only door out of it:
   bundle and is inlined at render, so the page needs no CDN. This also keeps minified third-party code
   out of `plugin/`, which Hermes's install scanner reads file by file.
 - **The bridge:** the page reaches anything only through a `postMessage` bridge. The parent answers
-  only its own frame and passes calls to one host route, which enforces the rules below.
+  only its own frame. A read of the canvas's data is answered from the device's copy
+  ([ADR 0113](0113-a-canvas-is-its-bots-record-edited-only-through-its-own-session.md)); a write, and
+  a call to a declared tool, goes to one host route, which enforces the rules below. Every call
+  carries the epoch of the page that asked, so a reply can only settle a promise of the page it
+  answers.
 
 **Consent is declared, not derived.** ADR 0102 read an app's tools off its source, which openui-lang
 allowed and JavaScript doesn't: the parser reported every call, so an app could not call something it
@@ -32,3 +36,10 @@ anyone noticing.
 **The four host shapes stay free.** A canvas reads usage, routines, projects and sessions without
 declaring or asking, as ADR 0102 had them; the user chose this. The consequence is that any canvas can
 read the user's chat titles, and one granted an outbound tool could pass them on.
+
+**The canvas's own data is free too, and capped.** A page's `data.put` and `data.remove` write the
+canvas's own store and read nothing of the user's, so they are answered without a declared tool or a
+consent; a declared tool is still what reaches anything else. The whole of a canvas's data is capped
+at 1 MB and a write past it is refused whole, naming the cap, with each document counted beside the
+content a read carries for it; a collection or a document id is a name of at most 64 characters. The
+cap is the canvas's because the whole of the data rides every open and every device's copy.

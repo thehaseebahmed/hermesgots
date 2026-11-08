@@ -3,13 +3,17 @@
  * being trusted (ADR 0114).
  *
  * The page is drawn in a `<iframe sandbox="allow-scripts" srcdoc>` — no `allow-same-origin`, so it
- * has an opaque origin and reaches nothing of the app's — and three things are put in its head
- * before anything the bot wrote: the policy, the app's theme tokens, and the script that takes
- * WebRTC away. The app's own CSP carries `frame-src 'self'`, so the frame can't navigate itself
- * anywhere either. The scan on the host is hygiene; this is the defence (ADR 0114).
+ * has an opaque origin and reaches nothing of the app's — and five things are put in its head
+ * before anything the bot wrote: the policy, the app's theme tokens, the script that takes WebRTC
+ * away, and the scroll and data bridges the page talks to the app through. The app's own CSP
+ * carries `frame-src 'self'`, so the frame can't navigate itself anywhere either. The scan on the
+ * host is hygiene; this is the defence (ADR 0114).
  *
- * Import-free, so `scripts/test-canvas-document.mjs` runs it as a pure rule.
+ * Import-free but for the page's data bridge (`canvas-bridge.ts`, itself import-free), so
+ * `scripts/test-canvas-document.mjs` runs it as a pure rule.
  */
+
+import { BRIDGE_SCRIPT } from "./canvas-bridge.ts"
 
 export type CanvasMode = "light" | "dark"
 
@@ -94,11 +98,12 @@ export function themeVariables(tokens: Record<string, string>, mode: CanvasMode)
 }
 
 /**
- * The document a frame is given: the page, with the policy, the theme, the WebRTC removal and the
- * scroll bridge in its head ahead of anything it wrote. `scroll` is the position the bridge last
- * reported, so a page rebuilt at a new version opens where the reader left the one before it. A page
- * with no head can't be drawn — the plugin's scan refuses one, so this is a bug rather than a page,
- * and it throws instead of drawing something unstyled.
+ * The document a frame is given: the page, with the policy, the theme, the WebRTC removal, the
+ * scroll bridge and the data bridge in its head ahead of anything it wrote — five things, the bridge
+ * last. `scroll` is the position the bridge last reported, so a page rebuilt at a new version opens
+ * where the reader left the one before it. A page with no head can't be drawn — the plugin's scan
+ * refuses one, so this is a bug rather than a page, and it throws instead of drawing something
+ * unstyled.
  */
 export function canvasDocument(
   html: string,
@@ -115,7 +120,8 @@ export function canvasDocument(
     `<meta http-equiv="Content-Security-Policy" content="${CANVAS_CSP}">` +
     `<style>${themeVariables(tokens, mode)}</style>` +
     `<script>${NO_PEER}</script>` +
-    `<script>${scrollBridge(scroll)}</script>`
+    `<script>${scrollBridge(scroll)}</script>` +
+    `<script>${BRIDGE_SCRIPT}</script>`
   return html.slice(0, at) + prefix + html.slice(at)
 }
 

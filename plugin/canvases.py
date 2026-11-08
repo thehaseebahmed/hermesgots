@@ -15,6 +15,13 @@ answers the version the pointer names — so the agent always edits what the use
 The scan is hygiene, not the defence — the sandbox the page is drawn in is (ADR 0114). It refuses a
 write whole, naming why: past ``MAX_BYTES``, holding what looks like a secret, not a complete
 document, or reaching outside itself for anything it loads.
+
+A canvas also keeps data of its own: JSON documents in collections (``data``, ``put_doc``,
+``remove_doc``), written by the page through the host's call route and by the agent through
+``canvas_data_read`` and ``canvas_data_write``. The data is the canvas's, not a version's — a
+write or an undo never touches it — so a page keeps its state through a version the user walks
+back, and the whole of it is capped at ``DATA_BYTES`` because every open and every device's copy
+carries it.
 """
 
 from __future__ import annotations
@@ -25,8 +32,9 @@ import re
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from . import chats, events, outbox, sessions, tools_common, triage
 from .store import connect
@@ -38,10 +46,22 @@ MAX_BYTES = 256 * 1024
 KEEP_VERSIONS = 20
 # How much of a prompt becomes a canvas's title — and so its chat's.
 TITLE_CHARS = 60
+# The whole of a canvas's data. It rides every open and every device's copy of the page, so the cap
+# is the canvas's rather than one document's, and a write past it is refused whole.
+DATA_BYTES = 1024 * 1024
+# What one document weighs beside its content: the keys, the clock and the punctuation a read of the
+# data carries for it. Counting only the content would let a page keep a hundred thousand one-byte
+# documents and hand every open an answer many times the cap.
+DOC_BYTES = 64
+# A collection and a document id are names the page sends, so they stay short and readable: what a
+# key and a URL can carry without becoming a page of their own.
+NAME_CHARS = 64
 
 TOOL_WRITE = "canvas_write"
 TOOL_EDIT = "canvas_edit"
 TOOL_READ = "canvas_read"
+TOOL_DATA_READ = "canvas_data_read"
+TOOL_DATA_WRITE = "canvas_data_write"
 
 # Set by register() and _wire_api_server, and what `ready` answers with.
 ctx: Any = None
@@ -262,21 +282,65 @@ def _answer(
     return {**found, **version, "can_undo": can_undo}
 
 
-def current(path: Path, canvas_id: str) -> Dict[str, Any]:
-    """A canvas as the app draws it, answered from one connection: its record, the version the
-    record points at, and whether there is a version under that one to undo to."""
+@contextmanager
+def _writing(path: Path) -> Iterator[sqlite3.Connection]:
+    """A connection inside the store's write lock: committed on a clean exit, rolled back and closed
+    however the block ends.
+
+    Every write in this module takes the lock the same way, and reads what the write is built on
+    inside it: two writers racing would otherwise both take the same version number, or both fit
+    under the data's cap when only one of them does.
+    """
+    conn = connect(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+def _page(conn: sqlite3.Connection, canvas_id: str) -> Dict[str, Any]:
+    """A canvas's record and the version it points at, over a connection the caller holds."""
+    found = _record(conn, canvas_id)
+    if found is None:
+        raise CanvasError("There is no such canvas.", 404)
+    version = _version(conn, canvas_id, found["version"]) or _empty_version(found)
+    # A canvas at its first version, or one whose older versions were trimmed, has nothing to undo:
+    # the read of what sits under the pointer is on this same connection.
+    under = _greatest_below(conn, canvas_id, version["version"])
+    return _answer(found, version, under is not None)
+
+
+def page(path: Path, canvas_id: str) -> Dict[str, Any]:
+    """A canvas's page alone — its record and the version it points at — and not its data.
+
+    What a read of the page itself answers, which is what ``canvas_read`` is asked for: the agent
+    has the data tools for the canvas's documents, so a page read never parses them.
+    """
     if not canvas_id or not path.exists():
         raise CanvasError("There is no such canvas.", 404)
     conn = connect(path)
     try:
-        found = _record(conn, canvas_id)
-        if found is None:
-            raise CanvasError("There is no such canvas.", 404)
-        version = _version(conn, canvas_id, found["version"]) or _empty_version(found)
-        # A canvas at its first version, or one whose older versions were trimmed, has nothing to
-        # undo: the read of what sits under the pointer is on this same connection.
-        under = _greatest_below(conn, canvas_id, version["version"])
-        return _answer(found, version, under is not None)
+        return _page(conn, canvas_id)
+    finally:
+        conn.close()
+
+
+def current(path: Path, canvas_id: str) -> Dict[str, Any]:
+    """A canvas as the app draws it, answered from one connection: its record, the version the
+    record points at, whether there is a version under it to undo to, and the data it keeps."""
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    conn = connect(path)
+    try:
+        # The data beside the page, on this same connection: a page that keeps state needs it the
+        # moment it opens, and no version has ever touched it.
+        return {**_page(conn, canvas_id), "data": _documents(conn, canvas_id)}
     finally:
         conn.close()
 
@@ -365,14 +429,12 @@ def _commit(
     """One version, written under the store's write lock, and the canvas as it now is.
 
     ``html`` is a write's whole document; ``edits`` are an edit's pairs, applied to the version the
-    record points at, which is read on this connection under this transaction. Both answer the same
-    shape ``current`` does.
+    record points at, which is read on this connection under this transaction. Both answer the
+    shape ``current`` does but for its ``data``: a version never touches a canvas's data.
     """
     named = title_of(title) if isinstance(title, str) and title.strip() else None
-    now = int(time.time() * 1000)
-    conn = connect(path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
+    with _writing(path) as conn:
+        now = int(time.time() * 1000)
         # Read under the write lock: two writers racing here would otherwise both take the same
         # number, and the second would fail on the versions' primary key.
         found = _record(conn, canvas_id)
@@ -415,7 +477,6 @@ def _commit(
         )
         # What sits under the version just written, read before the commit rather than after it.
         can_undo = _greatest_below(conn, canvas_id, number) is not None
-        conn.execute("COMMIT")
         answer = _answer(
             {**found, "title": named or found["title"], "version": number, "at": now},
             {
@@ -426,12 +487,6 @@ def _commit(
             },
             can_undo,
         )
-    except BaseException:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
     if named:
         # The version is stored either way: a chat this can't rename is a title that lags, not a
         # write that failed.
@@ -448,14 +503,14 @@ def undo(path: Path, canvas_id: str) -> Dict[str, Any]:
 
     Undo is the pointer and nothing else: the versions above it stay stored but unreachable, since
     there is no redo, and the first version has nothing under it to walk back to. The answer is read
-    on the connection the pointer was moved on, so it costs one connection rather than four.
+    on the connection the pointer was moved on, so it costs one connection rather than four, and it
+    carries the canvas's data like every other one-canvas answer — the data is no version's, so an
+    undo leaves every document where it was.
     """
     if not path.exists():
         raise CanvasError("There is no such canvas.", 404)
-    now = int(time.time() * 1000)
-    conn = connect(path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
+    with _writing(path) as conn:
+        now = int(time.time() * 1000)
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
@@ -467,16 +522,212 @@ def undo(path: Path, canvas_id: str) -> Dict[str, Any]:
         )
         version = _version(conn, canvas_id, number) or _empty_version(found)
         can_undo = _greatest_below(conn, canvas_id, number) is not None
-        conn.execute("COMMIT")
-        answer = _answer({**found, "version": number, "at": now}, version, can_undo)
-    except BaseException:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
+        answer = {
+            **_answer({**found, "version": number, "at": now}, version, can_undo),
+            "data": _documents(conn, canvas_id),
+        }
     events.note("canvas", found["session_id"], path, True)
     return answer
+
+
+# --- the data ------------------------------------------------------------------------------------
+
+# One order for every read, so a page's list of a collection is the same however its writes landed.
+_DOCUMENTS = "SELECT collection, id, value, at FROM canvas_docs WHERE canvas_id = ?"
+
+
+def _document(collection: str, doc_id: str, value: str, at: int) -> Dict[str, Any]:
+    """One row of ``canvas_docs`` as the document it holds: a collection, an id, the document and
+    the host's clock for it."""
+    return {"collection": collection, "id": doc_id, "doc": json.loads(value), "at": at}
+
+
+def _documents(
+    conn: sqlite3.Connection,
+    canvas_id: str,
+    collection: Optional[str] = None,
+    doc_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """A canvas's documents, ordered by collection then id, narrowed by whichever name is given.
+
+    The narrowing is the read's own: a page or a bot asking for one document costs one point lookup
+    on the table's primary key rather than a parse of everything the canvas keeps.
+    """
+    query, args = _DOCUMENTS, [canvas_id]
+    if collection is not None:
+        query += " AND collection = ?"
+        args.append(collection)
+    if doc_id is not None:
+        query += " AND id = ?"
+        args.append(doc_id)
+    rows = conn.execute(query + " ORDER BY collection, id", args).fetchall()
+    return [_document(*row) for row in rows]
+
+
+def data(
+    path: Path,
+    canvas_id: str,
+    collection: Optional[str] = None,
+    doc_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """A canvas's documents — all of them, one collection's or one — ordered as the store keeps them.
+
+    Read over a connection of its own, opened and closed like ``listing``. A canvas this store has
+    never heard of is a 404, as it is for a write and for a read of the page: one rule for "there is
+    no such canvas", whichever part of it was asked for.
+    """
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    if collection is not None:
+        collection = _name(collection, "collection")
+    if doc_id is not None:
+        doc_id = _name(doc_id, "id")
+    conn = connect(path)
+    try:
+        if _record(conn, canvas_id) is None:
+            raise CanvasError("There is no such canvas.", 404)
+        return _documents(conn, canvas_id, collection, doc_id)
+    finally:
+        conn.close()
+
+
+def _name(value: Any, what: str) -> str:
+    """A collection or a document id as a page sends one: a short name, with no control character.
+
+    The page names its own collections and documents, so these are checked rather than trusted: a
+    name is what a JSON key and a URL can carry, and a newline or a NUL in one is a page writing
+    something it didn't mean to.
+    """
+    if not isinstance(value, str) or not value:
+        raise CanvasError(f"A document's {what} is a name of 1 to {NAME_CHARS} characters.")
+    if len(value) > NAME_CHARS:
+        raise CanvasError(
+            f"A document's {what} is at most {NAME_CHARS} characters; this one is {len(value)}."
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise CanvasError(f"A document's {what} can't hold a control character.")
+    return value
+
+
+def _json(doc: Any) -> str:
+    """A document as it is stored, refusing what JSON can't carry rather than storing a surprise.
+
+    ``allow_nan`` is off because ``NaN`` and ``Infinity`` are Python's and not JSON's: a page that
+    read one back couldn't parse it.
+    """
+    try:
+        return json.dumps(doc, allow_nan=False)
+    except (TypeError, ValueError):
+        raise CanvasError(
+            "A document has to be JSON: a canvas's data is stored as JSON, so every value in a "
+            "document has to be one."
+        ) from None
+
+
+def _stored_bytes(
+    conn: sqlite3.Connection, canvas_id: str, collection: str, doc_id: str, value: str
+) -> int:
+    """A canvas's data in bytes, with one write counted in place of the row it replaces.
+
+    Measured by SQLite rather than by walking every row here: each row counts its collection, its id,
+    its JSON value as UTF-8 bytes, and ``DOC_BYTES`` for the envelope a read carries for it — so the
+    cap bounds the answer a page is handed, not only the text inside it. A write onto a row already
+    there counts that row once, as the document about to land, so an update that fits is never
+    refused for the bytes it is about to release.
+    """
+    counted = conn.execute(
+        """SELECT COALESCE(SUM(length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
+                              + length(CAST(value AS BLOB)) + ?), 0)
+           FROM canvas_docs WHERE canvas_id = ? AND NOT (collection = ? AND id = ?)""",
+        (DOC_BYTES, canvas_id, collection, doc_id),
+    ).fetchone()[0]
+    return (
+        counted
+        + DOC_BYTES
+        + len(collection.encode("utf-8"))
+        + len(doc_id.encode("utf-8"))
+        + len(value.encode("utf-8"))
+    )
+
+
+def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) -> Dict[str, Any]:
+    """Stores one document as the canvas's own, and answers it as it now is.
+
+    A document is one row of its canvas's data: the last write wins, on the host's clock rather than
+    anything the caller sent. The whole of the data is capped at ``DATA_BYTES``, read under the
+    write lock with this write counted in, so two writers racing can't both fit under it — and a
+    write past it is refused whole, leaving every document the canvas had where it was.
+    """
+    collection = _name(collection, "collection")
+    doc_id = _name(doc_id, "id")
+    value = _json(doc)
+    with _writing(path) as conn:
+        if _record(conn, canvas_id) is None:
+            raise CanvasError("There is no such canvas.", 404)
+        # The clock is read under the lock, so `at` follows the order the writes landed in: two
+        # racing writers can't store the later stamp first and be read as the older one.
+        now = int(time.time() * 1000)
+        size = _stored_bytes(conn, canvas_id, collection, doc_id, value)
+        if size > DATA_BYTES:
+            raise CanvasError(
+                "A canvas's data is capped at 1 MB; this write would make it "
+                f"{-(-size // 1024)} KB. Remove something first."
+            )
+        conn.execute(
+            """INSERT INTO canvas_docs (canvas_id, collection, id, value, at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(canvas_id, collection, id)
+               DO UPDATE SET value = excluded.value, at = excluded.at""",
+            (canvas_id, collection, doc_id, value, now),
+        )
+    # The answer is the stored document read back, not the caller's object: what a page reads next
+    # is exactly this, whatever it sent.
+    return _document(collection, doc_id, value, now)
+
+
+def remove_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any) -> Dict[str, Any]:
+    """Takes one document out of a canvas's data, and answers whether there was one.
+
+    Removing a document that isn't there is no error: a page asks again for a remove whose answer
+    came slowly, and the second ask is the one that lands. A canvas this store has never heard of
+    is still a 404, since no page of it can be open.
+    """
+    collection = _name(collection, "collection")
+    doc_id = _name(doc_id, "id")
+    with _writing(path) as conn:
+        if _record(conn, canvas_id) is None:
+            raise CanvasError("There is no such canvas.", 404)
+        removed = conn.execute(
+            "DELETE FROM canvas_docs WHERE canvas_id = ? AND collection = ? AND id = ?",
+            (canvas_id, collection, doc_id),
+        ).rowcount
+    return {"collection": collection, "id": doc_id, "removed": removed > 0}
+
+
+def put_call(path: Path, canvas_id: str, args: Any) -> Dict[str, Any]:
+    """One ``data.put`` call, as the page's route and the agent's tool both make it.
+
+    The document is the call's whole point, so the key's presence decides — a stored null is a value
+    a page wrote — and a call naming none is refused here rather than storing a null nobody wrote.
+    """
+    args = args if isinstance(args, dict) else {}
+    if "doc" not in args:
+        raise CanvasError("A write call needs the doc to store, or remove: true to remove one.")
+    return put_doc(path, canvas_id, args.get("collection"), args.get("id"), args["doc"])
+
+
+def remove_call(path: Path, canvas_id: str, args: Any) -> Dict[str, Any]:
+    """One ``data.remove`` call, as the page's route and the agent's tool both make it."""
+    args = args if isinstance(args, dict) else {}
+    return remove_doc(path, canvas_id, args.get("collection"), args.get("id"))
+
+
+def write_call(path: Path, canvas_id: str, args: Any) -> Dict[str, Any]:
+    """The agent's one write tool: a document to store, or ``remove: true`` to take one out."""
+    args = args if isinstance(args, dict) else {}
+    if args.get("remove") is True:
+        return remove_call(path, canvas_id, args)
+    return put_call(path, canvas_id, args)
 
 
 def _insert(path: Path, found: Dict[str, Any]) -> None:
@@ -500,11 +751,13 @@ def _insert(path: Path, found: Dict[str, Any]) -> None:
 
 
 def _drop(path: Path, canvas_id: str) -> None:
-    """Takes a record back whose first run never got queued, with the versions it wrote."""
+    """Takes a record back whose first run never got queued, with everything that was its."""
     conn = connect(path)
     try:
         conn.execute("DELETE FROM canvases WHERE id = ?", (canvas_id,))
         conn.execute("DELETE FROM canvas_versions WHERE canvas_id = ?", (canvas_id,))
+        # The data is the canvas's too: a row nothing can reach is a store that only grows.
+        conn.execute("DELETE FROM canvas_docs WHERE canvas_id = ?", (canvas_id,))
     finally:
         conn.close()
 
@@ -705,6 +958,52 @@ EDIT_SCHEMA = {
 }
 
 
+DATA_READ_SCHEMA = {
+    "name": TOOL_DATA_READ,
+    "description": (
+        "Canvas sessions only: reads the data the canvas keeps — the documents its page stores "
+        "on the host, which no version and no undo touches. No arguments answers every "
+        "collection; a collection answers that one; a collection and an id answers one document, "
+        "or null when there is none."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "collection": {
+                "type": "string",
+                "description": "One collection's name, for its documents.",
+            },
+            "id": {"type": "string", "description": "One document's id within that collection."},
+        },
+    },
+}
+
+DATA_WRITE_SCHEMA = {
+    "name": TOOL_DATA_WRITE,
+    "description": (
+        "Canvas sessions only: stores one document in the canvas's data, or removes it. A write "
+        "replaces the document with that collection and id, and the whole of a canvas's data is "
+        "capped at 1 MB, so a write past it is refused whole."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "collection": {
+                "type": "string",
+                "description": "The collection the document belongs to.",
+            },
+            "id": {"type": "string", "description": "The document's id within that collection."},
+            "doc": {"description": "The document, as any JSON value."},
+            "remove": {
+                "type": "boolean",
+                "description": "Removes the document instead of storing one.",
+            },
+        },
+        "required": ["collection", "id"],
+    },
+}
+
+
 def _tool_answer(
     tool: str,
     task_id: Optional[str],
@@ -765,7 +1064,7 @@ def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[s
         TOOL_READ,
         task_id,
         session_id,
-        current,
+        page,
         lambda found: {
             "id": found["id"],
             "title": found["title"],
@@ -773,6 +1072,40 @@ def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[s
             "tools": found["tools"],
             "html": found["html"],
         },
+    )
+
+
+def handle_data_read(
+    args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: the canvas's own documents — all of them, a collection, or one document."""
+    args = args if isinstance(args, dict) else {}
+    collection, doc_id = args.get("collection"), args.get("id")
+
+    def read(path: Path, canvas_id: str) -> Dict[str, Any]:
+        if doc_id is not None and collection is None:
+            # A document is one of one collection: an id on its own would read whichever collection
+            # sorts first, which is not the document the caller named.
+            raise CanvasError(f"{TOOL_DATA_READ} needs the collection that id belongs to.")
+        documents = data(path, canvas_id, collection, doc_id)
+        if doc_id is None:
+            return {"documents": documents}
+        return {"document": documents[0] if documents else None}
+
+    return _tool_answer(TOOL_DATA_READ, task_id, session_id, read, lambda found: found)
+
+
+def handle_data_write(
+    args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: stores one of the canvas's documents, or removes one."""
+    args = args if isinstance(args, dict) else {}
+    return _tool_answer(
+        TOOL_DATA_WRITE,
+        task_id,
+        session_id,
+        lambda path, canvas_id: write_call(path, canvas_id, args),
+        lambda found: found,
     )
 
 
@@ -791,13 +1124,14 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
         "action": "block",
         "message": (
             f"This is a canvas's session: change the canvas with {TOOL_WRITE}, {TOOL_EDIT} and "
-            f"{TOOL_READ} only. It can't ship a pull request, file a library item or take a task."
+            f"{TOOL_READ}, and its data with {TOOL_DATA_READ} and {TOOL_DATA_WRITE}. It can't "
+            "ship a pull request, file a library item or take a task."
         ),
     }
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's three tools."""
+    """Keeps the context and registers the canvas's five tools."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -808,6 +1142,8 @@ def register(plugin_ctx: Any) -> bool:
         (TOOL_WRITE, WRITE_SCHEMA, handle_write),
         (TOOL_EDIT, EDIT_SCHEMA, handle_edit),
         (TOOL_READ, READ_SCHEMA, handle_read),
+        (TOOL_DATA_READ, DATA_READ_SCHEMA, handle_data_read),
+        (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, handle_data_write),
     ):
         try:
             if register_tool(name=tool, toolset="gots", schema=schema, handler=handler, emoji="🖼️") is False:
@@ -820,7 +1156,7 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives a canvas's agents its three tools, and only them: every other session would carry
+    """Gives a canvas's agents its five tools, and only them: every other session would carry
     tools it can't use."""
     global adapter, _wired
     adapter = api_adapter
@@ -832,6 +1168,12 @@ def wire(api_adapter: Any) -> bool:
         took = False
     if not tools_common.wire_tool(api_adapter, TOOL_READ, READ_SCHEMA, TOOL_READ, when=is_canvas):
         took = False
+    for tool, schema in (
+        (TOOL_DATA_READ, DATA_READ_SCHEMA),
+        (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA),
+    ):
+        if not tools_common.wire_tool(api_adapter, tool, schema, tool, when=is_canvas):
+            took = False
     _wired = took
     return took
 

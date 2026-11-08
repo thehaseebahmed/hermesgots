@@ -56,6 +56,7 @@ from . import (
     moves,
     openui,
     outbox,
+    page_calls,
     pending,
     platform_gots,
     projects,
@@ -3146,6 +3147,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
         return await canvas_view(request, canvases.undo)
 
+    async def call_canvas(request: "web.Request") -> "web.Response":
+        """A call a canvas's page makes: the canvas's own data, put or removed on the host.
+
+        The page owns that data (ADR 0113), so these shapes are answered without consent: they write
+        the canvas's own store and nothing that leaves the host. The tab is told nothing it could
+        call for any other canvas, since the id is this route's and not the body's.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        canvas_id = request.match_info["canvas_id"]
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        path = store_path()
+        writes = {
+            "data.put": lambda args: canvases.put_call(path, canvas_id, args),
+            "data.remove": lambda args: canvases.remove_call(path, canvas_id, args),
+        }
+        try:
+            result = await page_calls.answer(body, writes=writes)
+        except page_calls.CallRefused as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas.call", "result": result})
+
     async def list_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -3496,6 +3522,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/canvases", create_canvas)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)
+    app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/call", call_canvas)
     app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/brief", research_brief)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/edit", research_edit)

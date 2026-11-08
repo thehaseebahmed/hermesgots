@@ -2235,6 +2235,27 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 }
 
 /**
+ * A call a canvas's page makes, through the app: the canvas's own data, put or removed on the host.
+ * The answer is what the host kept, read as the bridge's own rule reads it.
+ */
+export async function callCanvas(
+  config: HermesConfig,
+  id: string,
+  shape: "data.put" | "data.remove",
+  args: Record<string, unknown>,
+) {
+  const response = await request(`${canvasRoot(config, id)}/call`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ shape, args }),
+    // A write the host never answers is refused on this device's clock rather than leaving the
+    // page's promise waiting on a socket timeout.
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.result as unknown
+}
+
+/**
  * A canvas from a prompt: the plugin writes the record and the chat, and queues the run that builds
  * it on the canvas's own session, so it is built with the app closed (ADR 0113).
  */

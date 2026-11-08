@@ -8,8 +8,10 @@ import test from "node:test"
 import { act } from "react"
 import { Link, MemoryRouter, Route, Routes } from "react-router"
 
-import { db } from "@/lib/db"
+import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
+import { refreshCanvas } from "@/lib/canvases"
+import { db } from "@/lib/db"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { connectionKey, noteChange } from "@/lib/live"
 import { CanvasView } from "@/routes/canvas"
@@ -65,7 +67,7 @@ const VERSIONS = new Map<number, string>([
 /** The canvas as its host answers it at one version: that version's document, and whether a version
  * sits under it to undo to. A second canvas is its own record, its own session, its own chat and its
  * own page, so a frame's text names which canvas was drawn. */
-const canvasAt = (version: number, id = CANVAS.id) => ({
+const canvasAt = (version: number, id = CANVAS.id, data?: CanvasDoc[]) => ({
   ...CANVAS,
   id,
   title: id === CANVAS.id ? CANVAS.title : `Canvas ${id}`,
@@ -74,30 +76,75 @@ const canvasAt = (version: number, id = CANVAS.id) => ({
   version,
   html: id === CANVAS.id ? (VERSIONS.get(version) ?? PAGE) : versionPage(`Canvas ${id}`),
   can_undo: version > 1,
+  ...(data ? { data } : {}),
 })
 
 interface Host {
   version: number
   undos: number
+  /** The documents the host keeps, which its one-canvas read answers. */
+  docs?: CanvasDoc[]
+  /** Every call a page made, in the order they landed. */
+  calls?: { shape: string; args: Record<string, unknown> }[]
+  /** Holds the next one-canvas read until it is released, so a slow read can be raced. */
+  hold?: () => Promise<void>
 }
 
 /**
- * The bot's plugin, as far as a canvas's screen asks it: its features, the list, one canvas and the
- * undo. `host` is the mutable state the answers move with, so a case writes a version by moving it.
+ * The bot's plugin, as far as a canvas's screen asks it: its features, the list, one canvas, the
+ * undo and a page's own data. `host` is the mutable state the answers move with, so a case writes a
+ * version by moving it and reads back what a page wrote.
  */
 function serveCanvases(host: Host) {
+  host.docs ??= []
+  host.calls ??= []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) return json({ version: "0.113.0", features: ["canvas"] })
+    const call = /\/canvases\/([^/]+)\/call$/.exec(url.pathname)
+    if (call) {
+      assert.equal(init?.method, "POST", "a page's call is asked for with a POST")
+      const body = JSON.parse(String(init?.body)) as {
+        shape: string
+        args: Record<string, unknown>
+      }
+      host.calls!.push(body)
+      if (body.shape === "data.put") {
+        const { collection, id, doc } = body.args as { collection: string; id: string; doc: unknown }
+        const result = { collection, id, doc, at: 100 }
+        host.docs = [
+          ...host.docs.filter((row) => row.collection !== collection || row.id !== id),
+          result,
+        ]
+        return json({ object: "gots.canvas.call", result })
+      }
+      if (body.shape === "data.remove") {
+        const { collection, id } = body.args as { collection: string; id: string }
+        const removed = host.docs.some((row) => row.collection === collection && row.id === id)
+        host.docs = host.docs.filter((row) => row.collection !== collection || row.id !== id)
+        return json({ object: "gots.canvas.call", result: { collection, id, removed } })
+      }
+      return json({ error: { message: `This host cannot call ${body.shape}.` } }, 501)
+    }
     const undo = /\/canvases\/([^/]+)\/undo$/.exec(url.pathname)
     if (undo) {
       assert.equal(init?.method, "POST", "an undo is asked for with a POST")
       host.undos += 1
       host.version -= 1
-      return json({ object: "gots.canvas", canvas: canvasAt(host.version, undo[1]) })
+      return json({ object: "gots.canvas", canvas: canvasAt(host.version, undo[1], host.docs) })
     }
     const one = /\/canvases\/([^/]+)$/.exec(url.pathname)
-    if (one) return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1]) })
+    if (one) {
+      // A held read answers the documents the host had when it was asked, as a slow read would.
+      const asked = host.docs
+      if (host.hold) {
+        const held = host.hold
+        host.hold = undefined
+        await held()
+        return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], asked) })
+      }
+      return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], host.docs) })
+    }
     if (/\/canvases$/.test(url.pathname))
       return json({
         object: "gots.canvases",
@@ -273,6 +320,164 @@ test(
         await until(() => drawn().includes("<h1>Canvas c2</h1>"), "the second canvas to open")
         assert.match(drawn(), /var at=0/, "the second canvas is built at its own top")
         assert.doesNotMatch(drawn(), /var at=300/)
+      },
+    )
+  }),
+)
+
+test(
+  "a canvas's page keeps its own data through the app",
+  atWidth(390, async () => {
+    // The served canvas carries a document of its own; a write from its frame goes to the host's
+    // one route and the host's answer is what the page reads back, while another window's message
+    // reaches no route at all.
+    const host: Host = {
+      version: 3,
+      undos: 0,
+      docs: [
+        { collection: "items", id: "one", doc: { n: 1 }, at: 3 },
+        { collection: "notes", id: "a", doc: "hi", at: 4 },
+      ],
+    }
+    serveCanvases(host)
+    await seedCanvasChat("c1")
+    await mount(
+      <MemoryRouter initialEntries={["/canvas/c1"]}>
+        <Routes>
+          <Route path="/canvas/:id" element={<CanvasView />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the frame to draw")
+        const page = (find("iframe[data-canvas-frame]") as HTMLIFrameElement).contentWindow
+        assert.ok(page, "the frame has a window of its own")
+        // What the app posts into the page, read the way the page's own listener reads it. A DOM
+        // without a live srcdoc is no page to run the bridge in, so the answer is observed here.
+        const posted: { reply: number; ok: boolean; value?: unknown }[] = []
+        Object.defineProperty(page, "postMessage", {
+          configurable: true,
+          value: (data: { reply: number; ok: boolean; value?: unknown }) => posted.push(data),
+        })
+        const say = (data: unknown, source: MessageEventSource | null = page) =>
+          act(async () => {
+            window.dispatchEvent(new window.MessageEvent("message", { data, source }))
+          })
+        const put = (call: number, n: number) => ({
+          type: BRIDGE_MESSAGE,
+          call,
+          method: "put",
+          collection: "items",
+          id: "one",
+          doc: { n },
+        })
+
+        // A read from the frame is answered from the copy the served canvas carried.
+        await say({ type: BRIDGE_MESSAGE, call: 1, method: "get", collection: "notes", id: "a" })
+        await until(() => posted.length > 0, "the read answered from the copy")
+        assert.deepEqual(posted[0], {
+          type: BRIDGE_MESSAGE,
+          reply: 1,
+          ok: true,
+          value: { collection: "notes", id: "a", doc: "hi", at: 4 },
+        })
+
+        // A message from another window is not the canvas talking.
+        await say(put(2, 9), window)
+        await settle()
+        assert.deepEqual(host.calls, [], "no route is asked for another window's message")
+
+        await say(put(3, 7))
+        await until(() => (host.calls ?? []).length === 1, "the write to reach the host")
+        assert.deepEqual(host.calls?.[0], {
+          shape: "data.put",
+          args: { collection: "items", id: "one", doc: { n: 7 } },
+        })
+        await until(() => posted.length > 1, "the host's answer to be posted back")
+        assert.deepEqual(posted[1], {
+          type: BRIDGE_MESSAGE,
+          reply: 3,
+          ok: true,
+          value: { collection: "items", id: "one", doc: { n: 7 }, at: 100 },
+        })
+
+        // The host's answer is the copy the page reads: a read from the frame is answered with it.
+        await say({ type: BRIDGE_MESSAGE, call: 4, method: "get", collection: "items", id: "one" })
+        await until(() => posted.length > 2, "the read answered from the copy")
+        assert.deepEqual(posted[2].value, {
+          collection: "items",
+          id: "one",
+          doc: { n: 7 },
+          at: 100,
+        })
+        assert.equal(host.calls?.length, 1, "a read never goes to the host")
+      },
+    )
+  }),
+)
+
+test(
+  "a read that began before a write cannot put the old copy back",
+  atWidth(390, async () => {
+    // The page writes while a read is still out: that read carries the copy from before the tap, so
+    // it is older than the one the write left and must not reinstate it.
+    const host: Host = {
+      version: 3,
+      undos: 0,
+      docs: [{ collection: "items", id: "one", doc: { n: 1 }, at: 3 }],
+    }
+    serveCanvases(host)
+    await seedCanvasChat("c1")
+    await mount(
+      <MemoryRouter initialEntries={["/canvas/c1"]}>
+        <Routes>
+          <Route path="/canvas/:id" element={<CanvasView />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the frame to draw")
+        const page = (find("iframe[data-canvas-frame]") as HTMLIFrameElement).contentWindow
+        assert.ok(page, "the frame has a window of its own")
+        const posted: { reply: number; ok: boolean; value?: unknown }[] = []
+        Object.defineProperty(page, "postMessage", {
+          configurable: true,
+          value: (data: { reply: number; ok: boolean; value?: unknown }) => posted.push(data),
+        })
+        const say = (data: unknown) =>
+          act(async () => {
+            window.dispatchEvent(new window.MessageEvent("message", { data, source: page }))
+          })
+
+        // A read the host is slow to answer, holding the copy the canvas opened with. The write waits
+        // until the host has been asked, so the read really did begin first.
+        let release: () => void = () => {}
+        let asked = false
+        host.hold = () => {
+          asked = true
+          return new Promise<void>((done) => (release = done))
+        }
+        const slow = refreshCanvas("c1")
+        await until(() => asked, "the read to reach the host")
+
+        await say({
+          type: BRIDGE_MESSAGE,
+          call: 1,
+          method: "put",
+          collection: "items",
+          id: "one",
+          doc: { n: 7 },
+        })
+        await until(() => (host.calls ?? []).length === 1, "the write to reach the host")
+        await act(async () => release())
+        await slow
+        await settle()
+
+        // The page reads its document back: what the write stored, not what the slow read carried.
+        await say({ type: BRIDGE_MESSAGE, call: 2, method: "get", collection: "items", id: "one" })
+        await until(() => posted.some((reply) => reply.reply === 2), "the read answered")
+        assert.deepEqual(
+          posted.find((reply) => reply.reply === 2)?.value,
+          { collection: "items", id: "one", doc: { n: 7 }, at: 100 },
+        )
       },
     )
   }),

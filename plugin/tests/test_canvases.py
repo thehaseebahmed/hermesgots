@@ -1,5 +1,6 @@
-"""A canvas: the run its prompt starts, the chat record that carries it, the scan every write passes,
-and the session — compression's children included — that is the only one told its tools and guide.
+"""A canvas: the run its prompt starts, the chat record that carries it, the scan every write
+passes, the data it keeps of its own, and the session — compression's children included — that is
+the only one told its tools and guide.
 
 Run: python3 -m unittest plugin.tests.test_canvases -v
 """
@@ -10,6 +11,7 @@ import asyncio
 import json
 import sqlite3
 import sys
+import time
 import unittest
 from contextlib import contextmanager
 from types import ModuleType
@@ -293,9 +295,15 @@ class SessionTest(unittest.TestCase):
             plain_agent = adapter._create_agent(session_id=self.plain)
         self.assertEqual(
             sorted(canvas_agent.valid_tool_names),
-            [canvases.TOOL_EDIT, canvases.TOOL_READ, canvases.TOOL_WRITE],
+            [
+                canvases.TOOL_DATA_READ,
+                canvases.TOOL_DATA_WRITE,
+                canvases.TOOL_EDIT,
+                canvases.TOOL_READ,
+                canvases.TOOL_WRITE,
+            ],
         )
-        self.assertEqual(len(canvas_agent.tools), 3)
+        self.assertEqual(len(canvas_agent.tools), 5)
         self.assertEqual(plain_agent.tools, [])
         self.assertEqual(plain_agent.valid_tool_names, set())
 
@@ -335,6 +343,62 @@ class SessionTest(unittest.TestCase):
         with mock.patch.object(canvases, "_session_canvas", return_value=None):
             self.assertIn("error", json.loads(canvases.handle_write({"html": DOCUMENT}, session_id="s")))
             self.assertIn("error", json.loads(canvases.handle_read({}, session_id="s")))
+
+    def test_a_canvas_session_keeps_data_of_its_own(self) -> None:
+        with mock.patch.object(canvases, "_session_canvas", return_value=self.canvas["id"]):
+            written = json.loads(
+                canvases.handle_data_write(
+                    {"collection": "notes", "id": "a", "doc": {"text": "one"}},
+                    session_id=self.session,
+                )
+            )
+            self.assertEqual(
+                (written["collection"], written["id"], written["doc"]),
+                ("notes", "a", {"text": "one"}),
+            )
+            every = json.loads(canvases.handle_data_read({}, session_id=self.session))
+            self.assertEqual([row["doc"] for row in every["documents"]], [{"text": "one"}])
+            one = json.loads(
+                canvases.handle_data_read(
+                    {"collection": "notes", "id": "a"}, session_id=self.session
+                )
+            )
+            self.assertEqual(one["document"]["doc"], {"text": "one"})
+            absent = json.loads(
+                canvases.handle_data_read(
+                    {"collection": "notes", "id": "nope"}, session_id=self.session
+                )
+            )
+            self.assertEqual(absent, {"document": None})
+            # A document is one of one collection: an id on its own names nothing to read.
+            unnamed = json.loads(
+                canvases.handle_data_read({"id": "a"}, session_id=self.session)
+            )
+            self.assertIn("collection", unnamed["error"])
+            gone = json.loads(
+                canvases.handle_data_write(
+                    {"collection": "notes", "id": "a", "remove": True}, session_id=self.session
+                )
+            )
+            self.assertEqual(gone, {"collection": "notes", "id": "a", "removed": True})
+            # A call that says neither what to store nor to remove says what is missing.
+            neither = json.loads(
+                canvases.handle_data_write(
+                    {"collection": "notes", "id": "a"}, session_id=self.session
+                )
+            )
+            self.assertIn("doc", neither["error"])
+        # And outside a canvas's session neither data tool answers anything of a canvas.
+        with mock.patch.object(canvases, "_session_canvas", return_value=None):
+            self.assertIn("error", json.loads(canvases.handle_data_read({}, session_id="s")))
+            self.assertIn(
+                "error",
+                json.loads(
+                    canvases.handle_data_write(
+                        {"collection": "n", "id": "i", "doc": 1}, session_id="s"
+                    )
+                ),
+            )
 
 
 class EditTest(unittest.TestCase):
@@ -482,6 +546,145 @@ class EditTest(unittest.TestCase):
         self.assertGreater(one["version"], 0)
 
 
+class DataTest(unittest.TestCase):
+    """A canvas's own data: the host's clock, its own cap, and untouched by versions and undo."""
+
+    def setUp(self) -> None:
+        self.path = store_of(self)
+        self.canvas = make_canvas(self.path)
+        self.other = make_canvas(self.path)
+
+    def test_data_writes_win_by_host_clock_survive_an_undo_and_stop_at_the_cap(self) -> None:
+        canvas_id = self.canvas["id"]
+        # A document is answered as it was stored, stamped with the host's clock.
+        first = canvases.put_doc(self.path, canvas_id, "notes", "a", {"text": "one"})
+        self.assertEqual(
+            (first["collection"], first["id"], first["doc"]), ("notes", "a", {"text": "one"})
+        )
+        self.assertLessEqual(first["at"], int(time.time() * 1000))
+        self.assertGreater(first["at"], int(time.time() * 1000) - 60_000)
+
+        # A second write of the same row replaces the first, and its `at` is the host's: an `at` in
+        # the document is the caller's own data, never the clock.
+        second = canvases.put_doc(self.path, canvas_id, "notes", "a", {"text": "two", "at": 1})
+        self.assertGreaterEqual(second["at"], first["at"])
+        self.assertEqual(second["doc"], {"text": "two", "at": 1})
+        rows = canvases.data(self.path, canvas_id)
+        self.assertEqual([(row["collection"], row["id"]) for row in rows], [("notes", "a")])
+        self.assertEqual(rows[0]["doc"], {"text": "two", "at": 1})
+        self.assertEqual(rows[0]["at"], second["at"])
+        self.assertNotEqual(rows[0]["at"], 1)
+
+        canvases.put_doc(self.path, self.other["id"], "notes", "a", {"text": "theirs"})
+        self.assertEqual(
+            [row["doc"] for row in canvases.data(self.path, self.other["id"])],
+            [{"text": "theirs"}],
+        )
+        self.assertEqual(
+            [row["doc"] for row in canvases.data(self.path, canvas_id)],
+            [{"text": "two", "at": 1}],
+        )
+
+        # Data is not versioned: two versions, a document, an undo — and the documents are as they
+        # were, which is what a page keeping its state across a rejected page relies on.
+        canvases.write(self.path, canvas_id, DOCUMENT)
+        canvases.write(
+            self.path, canvas_id, DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split</h1>")
+        )
+        canvases.put_doc(self.path, canvas_id, "notes", "kept", {"text": "kept"})
+        before = canvases.data(self.path, canvas_id)
+        restored = canvases.undo(self.path, canvas_id)
+        self.assertEqual(restored["version"], 1)
+        # An undo answers the canvas's data with its page, and leaves every document where it was.
+        self.assertEqual(restored["data"], before)
+        self.assertEqual(canvases.data(self.path, canvas_id), before)
+        self.assertEqual(canvases.current(self.path, canvas_id)["data"], before)
+
+        # A write past the cap is refused whole — the canvas keeps the documents it had — and the
+        # words name the cap and what the data would have become.
+        huge = {"text": "x" * (canvases.DATA_BYTES + 1)}
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.put_doc(self.path, canvas_id, "notes", "big", huge)
+        self.assertIn("1 MB", str(refused.exception))
+        self.assertIn("KB", str(refused.exception))
+        self.assertIn("Remove something first", str(refused.exception))
+        self.assertEqual(canvases.data(self.path, canvas_id), before)
+        # The size is the canvas's whole data after the write, rounded up a KB: on a canvas holding
+        # nothing else it is that one row's collection, id and JSON value as UTF-8 bytes.
+        blank = make_canvas(self.path)
+        with self.assertRaises(canvases.CanvasError) as too_big:
+            canvases.put_doc(self.path, blank["id"], "notes", "big", huge)
+        would_be = (
+            len("notes") + len("big") + len(json.dumps(huge, allow_nan=False)) + canvases.DOC_BYTES
+        )
+        self.assertIn(f"{-(-would_be // 1024)} KB", str(too_big.exception))
+        self.assertEqual(canvases.data(self.path, blank["id"]), [])
+
+        # Removing takes one document and leaves the rest, and removing what is not there is not an
+        # error: a page asks again on a slow answer.
+        self.assertEqual(
+            canvases.remove_doc(self.path, canvas_id, "notes", "a"),
+            {"collection": "notes", "id": "a", "removed": True},
+        )
+        self.assertEqual([row["id"] for row in canvases.data(self.path, canvas_id)], ["kept"])
+        self.assertEqual(
+            canvases.remove_doc(self.path, canvas_id, "notes", "a")["removed"], False
+        )
+        self.assertEqual([row["id"] for row in canvases.data(self.path, canvas_id)], ["kept"])
+
+        # A canvas that isn't there is a 404 for a write and for a read of its data, as it is for a
+        # read of its page: one rule for "there is no such canvas".
+        for call in (
+            lambda: canvases.put_doc(self.path, "nope", "notes", "a", {}),
+            lambda: canvases.remove_doc(self.path, "nope", "notes", "a"),
+            lambda: canvases.data(self.path, "nope"),
+        ):
+            with self.assertRaises(canvases.CanvasError) as missing:
+                call()
+            self.assertEqual(missing.exception.status, 404)
+
+    def test_a_name_has_to_be_a_name_and_a_document_json(self) -> None:
+        canvas_id = self.canvas["id"]
+        for bad, named in (
+            ("", "collection"),
+            ("x" * (canvases.NAME_CHARS + 1), "collection"),
+            ("notes\n", "collection"),
+            ("", "id"),
+            ("x" * (canvases.NAME_CHARS + 1), "id"),
+            ("a\x00b", "id"),
+        ):
+            with self.subTest(bad=bad, named=named):
+                collection, doc_id = (bad, "a") if named == "collection" else ("notes", bad)
+                with self.assertRaises(canvases.CanvasError) as refused:
+                    canvases.put_doc(self.path, canvas_id, collection, doc_id, {})
+                self.assertIn(named, str(refused.exception))
+                self.assertEqual(refused.exception.status, 400)
+        # A value JSON can't carry — a NaN, a set — is refused rather than stored as something else.
+        for value in ({"when": float("nan")}, {"tags": {"a"}}):
+            with self.assertRaises(canvases.CanvasError) as refused:
+                canvases.put_doc(self.path, canvas_id, "notes", "a", value)
+            self.assertIn("JSON", str(refused.exception))
+            self.assertEqual(refused.exception.status, 400)
+        # A read takes the same names a write does: the page's names are checked on both paths.
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.data(self.path, canvas_id, "")
+        self.assertEqual(refused.exception.status, 400)
+        self.assertIn("collection", str(refused.exception))
+        self.assertEqual(canvases.data(self.path, canvas_id), [])
+
+    def test_the_cap_counts_each_document_beside_its_content(self) -> None:
+        # A page could otherwise keep a hundred thousand one-byte documents and hand every open an
+        # answer many times the cap: the envelope a read carries for each one is counted too.
+        canvas_id = self.canvas["id"]
+        with mock.patch.object(canvases, "DATA_BYTES", 1000):
+            for n in range(14):
+                canvases.put_doc(self.path, canvas_id, "c", f"d{n}", 0)
+            with self.assertRaises(canvases.CanvasError) as refused:
+                canvases.put_doc(self.path, canvas_id, "c", "d14", 0)
+        self.assertIn("capped at 1 MB", str(refused.exception))
+        self.assertEqual(len(canvases.data(self.path, canvas_id)), 14)
+
+
 class RouteTest(unittest.TestCase):
     def setUp(self) -> None:
         temp_hermes_home(self)
@@ -493,6 +696,17 @@ class RouteTest(unittest.TestCase):
         request.match_info, request.headers = match, {}
         request.json = mock.AsyncMock(return_value=body)
         return asyncio.run(route(self.app, plugin.PREFIX + path, method)(request))
+
+    def make(self) -> str:
+        """A canvas made through the route, as the app makes one, by its id."""
+        made = self.call(
+            "/canvases", "POST", {"prompt": PROMPT, "profile_id": "bot-1", "body": BODY}
+        )
+        return made["payload"]["canvas"]["id"]
+
+    def documents(self, canvas_id: str) -> list:
+        """The documents the canvas's GET answers."""
+        return self.call("/canvases/{canvas_id}", canvas_id=canvas_id)["payload"]["canvas"]["data"]
 
     def test_a_canvas_is_made_listed_and_read_through_the_routes(self) -> None:
         made = self.call("/canvases", "POST", {"prompt": PROMPT, "profile_id": "bot-1", "body": BODY})
@@ -532,6 +746,98 @@ class RouteTest(unittest.TestCase):
         # At the first version there is nothing left to walk back to.
         again = self.call("/canvases/{canvas_id}/undo", "POST", canvas_id=canvas_id)
         self.assertEqual(again["status"], 409)
+
+    def test_the_get_carries_the_canvas_s_own_data(self) -> None:
+        canvas_id = self.make()
+        self.assertEqual(self.documents(canvas_id), [])
+        canvases.put_doc(self.path, canvas_id, "notes", "a", {"text": "one"})
+        documents = self.documents(canvas_id)
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(
+            (documents[0]["collection"], documents[0]["id"], documents[0]["doc"]),
+            ("notes", "a", {"text": "one"}),
+        )
+        self.assertIsInstance(documents[0]["at"], int)
+
+    def test_a_call_puts_and_removes_the_canvas_s_own_data(self) -> None:
+        canvas_id = self.make()
+        put = self.call(
+            "/canvases/{canvas_id}/call",
+            "POST",
+            {
+                "shape": "data.put",
+                "args": {"collection": "notes", "id": "a", "doc": {"text": "one"}, "at": 5},
+            },
+            canvas_id=canvas_id,
+        )
+        self.assertEqual((put["status"], put["payload"]["object"]), (200, "gots.canvas.call"))
+        result = put["payload"]["result"]
+        self.assertEqual(
+            (result["collection"], result["id"], result["doc"]),
+            ("notes", "a", {"text": "one"}),
+        )
+        # The caller's `at` is not the clock: the host stamps the row itself.
+        self.assertNotEqual(result["at"], 5)
+        documents = self.documents(canvas_id)
+        self.assertEqual([row["doc"] for row in documents], [{"text": "one"}])
+        self.assertEqual(documents[0]["at"], result["at"])
+
+        removed = self.call(
+            "/canvases/{canvas_id}/call",
+            "POST",
+            {"shape": "data.remove", "args": {"collection": "notes", "id": "a"}},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(
+            (removed["status"], removed["payload"]["object"]), (200, "gots.canvas.call")
+        )
+        self.assertEqual(
+            removed["payload"]["result"],
+            {"collection": "notes", "id": "a", "removed": True},
+        )
+        self.assertEqual(self.documents(canvas_id), [])
+
+    def test_a_call_for_a_canvas_that_is_not_there_is_a_404_and_a_bad_one_a_400(self) -> None:
+        put = {"shape": "data.put", "args": {"collection": "notes", "id": "a", "doc": {}}}
+        missing = self.call("/canvases/{canvas_id}/call", "POST", put, canvas_id="nope")
+        self.assertEqual(missing["status"], 404)
+        self.assertIn("no such canvas", missing["payload"]["error"]["message"])
+        # A body that isn't a JSON object is the caller's mistake.
+        for body in (None, ["data.put"]):
+            refused = self.call("/canvases/{canvas_id}/call", "POST", body, canvas_id="nope")
+            self.assertEqual(refused["status"], 400)
+            self.assertIn("JSON object", refused["payload"]["error"]["message"])
+
+        canvas_id = self.make()
+        # The data rules' own refusal reaches the caller with its status.
+        bad = self.call(
+            "/canvases/{canvas_id}/call",
+            "POST",
+            {"shape": "data.put", "args": {"collection": "", "id": "a", "doc": {}}},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(bad["status"], 400)
+        self.assertIn("collection", bad["payload"]["error"]["message"])
+        # A put that names no document is refused rather than storing a null nothing wrote.
+        without_doc = self.call(
+            "/canvases/{canvas_id}/call",
+            "POST",
+            {"shape": "data.put", "args": {"collection": "notes", "id": "a"}},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(without_doc["status"], 400)
+        self.assertIn("doc", without_doc["payload"]["error"]["message"])
+        self.assertEqual(self.documents(canvas_id), [])
+        # A shape no host answers for a canvas is a 501 that names it.
+        unknown = self.call(
+            "/canvases/{canvas_id}/call",
+            "POST",
+            {"shape": "home.light", "args": {}},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(unknown["status"], 501)
+        self.assertIn("home.light", unknown["payload"]["error"]["message"])
+        self.assertEqual(self.documents(canvas_id), [])
 
     def test_info_advertises_canvas_only_where_it_can_be_worked(self) -> None:
         # The tools have to reach a canvas's session and that session has to be told its guide: a

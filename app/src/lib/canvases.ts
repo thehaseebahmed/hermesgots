@@ -1,9 +1,11 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { applyWrite, storedDoc, type BridgeWriteCall, type CanvasDoc } from "@/lib/canvas-bridge"
 import { hostTargets } from "@/lib/connection"
 import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
+  callCanvas,
   createCanvas,
   getCanvas,
   hasPluginFeature,
@@ -44,6 +46,13 @@ export interface Canvas {
   html?: string
   /** The host tools that version's page declared. */
   tools?: string[]
+  /** The canvas's own data, as the last read answered it. Only the canvas on screen keeps it. */
+  data?: CanvasDoc[]
+  /**
+   * How many of a page's writes this device has taken into the copy. A read that began before the
+   * last of them is older than the copy it would replace, whatever the record's clock says.
+   */
+  dataWrites?: number
 }
 
 interface CanvasState {
@@ -65,7 +74,18 @@ const store = createStore<CanvasState>({
   unsupported: {},
 })
 
+/**
+ * The documents a canvas's answer carries, or nothing for an answer that carries none — a host from
+ * before a canvas had data answers without it. Each row is read by the bridge's own rule, so the
+ * copy and a write's answer agree on what a document is.
+ */
+function docsOf(raw: unknown): CanvasDoc[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  return raw.map(storedDoc).filter((row): row is CanvasDoc => row !== null)
+}
+
 function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
+  const data = docsOf(raw.data)
   return {
     id: String(raw.id ?? ""),
     profileId,
@@ -78,6 +98,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     sessionId: String(raw.session_id ?? ""),
     chatId: String(raw.chat_id ?? ""),
     canUndo: Boolean(raw.can_undo),
+    ...(data ? { data } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),
     ...(Array.isArray(raw.tools) ? { tools: raw.tools.filter((t): t is string => typeof t === "string") } : {}),
   }
@@ -85,12 +106,18 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
 
 /**
  * Keeps a canvas as the app now has it. A listing answers records and no documents, so only the
- * canvas being drawn keeps its `html`, and it replaces the last one drawn: a page can be 256 KB, and
- * holding one for every canvas ever opened is a phone's memory for nothing.
+ * canvas being drawn keeps its `html` and its `data`, and it replaces the last one drawn: a page can
+ * be 256 KB, and holding one for every canvas ever opened is a phone's memory for nothing.
+ *
+ * `started` is the count of writes this device had taken when the read that answered began. A
+ * write's answer lands in the copy as it arrives, so a read that was already out when the page wrote
+ * is older than the copy it would replace: the count says so, and that read's documents are dropped
+ * rather than reinstating the page the user just changed. An answer that carries no documents at all
+ * leaves the copy as it is.
  */
-function put(canvas: Canvas) {
+function put(canvas: Canvas, started: number) {
   const state = store.get()
-  const { html, ...listed } = canvas
+  const { html, data, ...listed } = canvas
   const rows = state.lists[canvas.profileId] ?? []
   const index = rows.findIndex((row) => row.id === canvas.id)
   const next = index === -1 ? [listed, ...rows] : rows.map((row) => (row.id === canvas.id ? listed : row))
@@ -100,12 +127,41 @@ function put(canvas: Canvas) {
   // says which of the two the host wrote last, so an older document never replaces a newer one.
   const held = state.details[canvas.id]
   const stale = html !== undefined && held !== undefined && held.at > canvas.at
+  const superseded = held !== undefined && (held.dataWrites ?? 0) > started
+  const kept = superseded || data === undefined ? held?.data : data
+  const drawn =
+    html === undefined || stale
+      ? undefined
+      : {
+          ...canvas,
+          ...(kept ? { data: kept } : {}),
+          ...(superseded && held?.dataWrites ? { dataWrites: held.dataWrites } : {}),
+        }
   store.set({
     ...state,
     lists: { ...state.lists, [canvas.profileId]: next },
-    details: html === undefined || stale ? state.details : { [canvas.id]: canvas },
+    details: drawn ? { [canvas.id]: drawn } : state.details,
     missing,
   })
+}
+
+/** How many writes this device has taken into a copy: a read begun before one is older than it. */
+let writes = 0
+
+/** Keeps the copy a page's write left, without the record bookkeeping a read's answer goes through. */
+function keepCopy(id: string, copy: CanvasDoc[]) {
+  const state = store.get()
+  const held = state.details[id]
+  if (!held) return
+  store.set({
+    ...state,
+    details: { ...state.details, [id]: { ...held, data: copy, dataWrites: (writes += 1) } },
+  })
+}
+
+/** The device's copy of a canvas's data, as the last read or write left it. */
+export function canvasData(id: string): CanvasDoc[] {
+  return store.get().details[id]?.data ?? []
 }
 
 /** The bot a canvas belongs to, from what this device already holds. */
@@ -184,8 +240,9 @@ async function readInto(
   if (store.get().missing[id]) return
   const profileId = await botHolding(id)
   if (!profileId) return
+  const started = writes
   const raw = await read(await configOf(profileId), id)
-  if (raw) put(toCanvas(raw, profileId))
+  if (raw) put(toCanvas(raw, profileId), started)
 }
 
 // One read in flight per canvas, and one more owed to whatever asked while it ran: a screen's poll,
@@ -216,6 +273,27 @@ export function refreshCanvas(id: string) {
  */
 export async function undoCanvas(id: string) {
   return readInto(id, (profile, canvasId) => undoCanvasOnHost(profile, canvasId))
+}
+
+/**
+ * A page's write, through the host's one route: the host stores (or removes) the document and the
+ * answer replaces the copy this device keeps, so the page reads back what the host kept rather than
+ * what it sent. A refusal is thrown, which is the sentence the page's promise gets.
+ */
+export async function writeCanvasData(id: string, call: BridgeWriteCall) {
+  const profileId = await botHolding(id)
+  if (!profileId) throw new Error("There is no such canvas.")
+  const args =
+    call.method === "put"
+      ? { collection: call.collection, id: call.id, doc: call.doc }
+      : { collection: call.collection, id: call.id }
+  const answer = await callCanvas(await configOf(profileId), id, `data.${call.method}`, args)
+  const copy = applyWrite(canvasData(id), call, answer)
+  // An answer the bridge can't read applied nothing: the page's promise is refused rather than told
+  // a write landed that this device holds no evidence of.
+  if (!copy) throw new Error("The host answered a write the app couldn't read.")
+  keepCopy(id, copy)
+  return answer
 }
 
 /** Every bot's canvases, newest first, kept fresh while a screen draws them. */
@@ -260,7 +338,7 @@ export async function startCanvas(profile: Profile, prompt: string, choice?: Mod
   const raw = await createCanvas(profile, { prompt, profileId: profile.id, body })
   if (!raw) throw new Error("The bot didn't make the canvas.")
   const canvas = toCanvas(raw, profile.id)
-  put(canvas)
+  put(canvas, writes)
   return canvas
 }
 

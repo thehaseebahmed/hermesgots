@@ -4,15 +4,18 @@ Run: python3 -m unittest plugin.tests.test_page_calls -v
 """
 
 import asyncio
+import threading
 import unittest
 from unittest import mock
 
 from plugin import mcp, page_calls
 
 
-def run(sent, reads=None, allow=lambda app, tool, write: False, profile="p"):
+def run(sent, reads=None, writes=None, allow=lambda app, tool, write: False, profile="p"):
     return asyncio.run(
-        page_calls.answer(sent, reads=reads or {}, may_call=allow, profile=profile, locks={})
+        page_calls.answer(
+            sent, reads=reads or {}, writes=writes, may_call=allow, profile=profile, locks={}
+        )
     )
 
 
@@ -46,6 +49,66 @@ class HostShapes(unittest.TestCase):
         with self.assertRaises(page_calls.CallRefused) as caught:
             run({"shape": "usage"}, reads={"usage": usage})
         self.assertEqual((caught.exception.status, str(caught.exception)), (400, "usage needs a provider"))
+
+
+class CanvasData(unittest.TestCase):
+    """A canvas's own data: the page owns it, so it is answered without asking anyone."""
+
+    def test_a_canvas_shape_is_answered_without_asking_consent(self) -> None:
+        asked = []
+        put = mock.Mock(return_value={"collection": "notes", "id": "a"})
+        value = run(
+            {"shape": "data.put", "args": {"collection": "notes", "id": "a", "doc": 1}},
+            writes={"data.put": put},
+            allow=lambda *a: asked.append(a) or False,
+        )
+        self.assertEqual(value, {"collection": "notes", "id": "a"})
+        put.assert_called_once_with({"collection": "notes", "id": "a", "doc": 1})
+        self.assertEqual(asked, [])
+
+    def test_a_canvas_write_runs_off_the_loop(self) -> None:
+        # A write is one store write, so it is taken off the loop rather than blocking it.
+        seen = []
+        run(
+            {"shape": "data.remove", "args": {"collection": "notes", "id": "a"}},
+            writes={"data.remove": lambda args: seen.append(threading.current_thread())},
+        )
+        self.assertEqual(len(seen), 1)
+        self.assertIsNot(seen[0], threading.main_thread())
+
+    def test_a_canvas_write_value_error_is_a_400(self) -> None:
+        def put(args):
+            raise ValueError("A document has to be JSON.")
+
+        with self.assertRaises(page_calls.CallRefused) as caught:
+            run({"shape": "data.put"}, writes={"data.put": put}, allow=lambda *a: True)
+        self.assertEqual(
+            (caught.exception.status, str(caught.exception)),
+            (400, "A document has to be JSON."),
+        )
+
+    def test_a_refusal_that_names_a_status_keeps_it(self) -> None:
+        class Missing(ValueError):
+            status = 404
+
+        def put(args):
+            raise Missing("There is no such canvas.")
+
+        with self.assertRaises(page_calls.CallRefused) as caught:
+            run({"shape": "data.put"}, writes={"data.put": put})
+        self.assertEqual(
+            (caught.exception.status, str(caught.exception)), (404, "There is no such canvas.")
+        )
+
+    def test_a_shape_in_neither_reads_nor_writes_still_asks_consent(self) -> None:
+        asked = []
+        with mock.patch.object(page_calls.mcp_call, "call_async", mock.AsyncMock(return_value=1)):
+            run(
+                {"shape": "home.light"},
+                writes={"data.put": lambda args: 1},
+                allow=lambda *a: asked.append(a) or True,
+            )
+        self.assertEqual(asked, [(None, "home.light", False)])
 
 
 class Tools(unittest.TestCase):

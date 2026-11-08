@@ -68,3 +68,12 @@ nothing, so the page is never half-written, and the user can undo one step.
 If the user asks for something the canvas can't be — a pull request, an entry in their project's
 library, a task taken from their board — say so plainly: this session changes the canvas, and those
 belong to a chat.
+
+## Its data
+
+A canvas keeps data of its own: documents of `{collection, id, doc, at}`, where `doc` is what was
+stored. The page reads and writes it with `canvas.data.list(collection)`,
+`canvas.data.get(collection, id)`, `canvas.data.put(collection, id, doc)` and
+`canvas.data.remove(collection, id)`, all promises: reads come from the device's copy, a write
+goes to the host. You read and write the same with `canvas_data_read` and `canvas_data_write`. It
+is not versioned, so an undo never loses it, and it is capped at 1 MB a canvas.

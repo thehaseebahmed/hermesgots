@@ -5,7 +5,8 @@ pinned projects (``projects.py``), merged pull requests (``merges.py``), a proje
 the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
 push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
 missions with their evidence ledgers (``research.py``), the dictations a bot has heard
-(``dictations.py``) and the canvases it writes with their versions (``canvases.py``)."""
+(``dictations.py``) and the canvases it writes with their versions and the documents they keep
+(``canvases.py``)."""
 
 from __future__ import annotations
 
@@ -37,8 +38,10 @@ logger = logging.getLogger(__name__)
 # workflow library and the stage record (ADR 0110): two tables rebuilt without the columns only they
 # read, and one table gone. 59 drops the apps tables, saved apps with them. 60 adds the canvases a
 # bot writes and their versions (`canvases.py`, ADR 0113): two new tables, so nothing already
-# written has to move.
-SCHEMA_VERSION = 60
+# written has to move. 61 adds the documents a canvas keeps, one row per collection and id
+# (`canvases.py`'s data, ADR 0113): one new table, so nothing already written has to move, and no
+# version or undo touches it.
+SCHEMA_VERSION = 61
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -956,6 +959,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    tools TEXT,
                    at INTEGER NOT NULL,
                    PRIMARY KEY (canvas_id, version)
+               )"""
+        )
+        # v61: the data a canvas keeps, one row per document of one collection. `value` is the
+        # document as JSON and `at` is the host's clock when it was written, since the page owns the
+        # data and a device's copy is only the page it was drawn from. No version or undo reads or
+        # writes this table: a canvas's data outlives the page that kept it (canvases.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS canvas_docs (
+                   canvas_id TEXT NOT NULL,
+                   collection TEXT NOT NULL,
+                   id TEXT NOT NULL,
+                   value TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (canvas_id, collection, id)
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

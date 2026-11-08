@@ -16,8 +16,17 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { attempt } from "@/lib/attempt"
+import { bridgeHandler } from "@/lib/canvas-bridge"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
-import { refreshCanvas, startCanvas, undoCanvas, useCanvas, useCanvases } from "@/lib/canvases"
+import {
+  canvasData,
+  refreshCanvas,
+  startCanvas,
+  undoCanvas,
+  useCanvas,
+  useCanvases,
+  writeCanvasData,
+} from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
 import { useLarge } from "@/lib/media"
 import { useDark } from "@/lib/theme"
@@ -196,6 +205,20 @@ export function CanvasView() {
       if (at === null) return
       scrolled.current = { id, at }
     }
+    window.addEventListener("message", hear)
+    return () => window.removeEventListener("message", hear)
+  }, [id])
+
+  // The page's own data, through the app: a read is answered from the copy this device holds and a
+  // write goes to the host's one route, so the page keeps its state with the host away and the host
+  // is still what every device reads (ADR 0113). The copy is read from the store when a call
+  // arrives, so a read landing never re-registers the listener.
+  useEffect(() => {
+    const hear = bridgeHandler({
+      frame: () => frame.current?.contentWindow ?? null,
+      copy: () => canvasData(id),
+      write: (call) => writeCanvasData(id, call),
+    })
     window.addEventListener("message", hear)
     return () => window.removeEventListener("message", hear)
   }, [id])
