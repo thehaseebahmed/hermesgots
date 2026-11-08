@@ -638,10 +638,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # (openui.py). Advertised only where this host took it: a host that can't add a
                     # section says nothing, rather than offering a vocabulary never told.
                     *([openui.FEATURE] if openui_info else []),
-                    # A canvas is a page its bot writes and the app draws (canvases.py, ADR 0113).
-                    # Advertised only where a canvas's session is told the design guide: a canvas
-                    # built without its guide is a page written to no rules, and an app that
-                    # predates the feature draws no row for it.
+                    # A canvas is a page its bot writes and the app draws (canvases.py, ADR 0113),
+                    # advertised only where a canvas's session is told the design guide (openui.py).
                     *(["canvas"] if openui.canvas_ready() else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
@@ -2939,11 +2937,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             found = await asyncio.to_thread(
                 canvases.create,
                 path,
-                _request_profile(),
-                body.get("profile_id"),
-                body.get("prompt"),
-                body.get("body"),
-                body.get("at"),
+                request_profile=_request_profile(),
+                bot_id=body.get("profile_id"),
+                prompt=body.get("prompt"),
+                body=body.get("body"),
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)

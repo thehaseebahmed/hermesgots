@@ -32,13 +32,13 @@ logger = logging.getLogger(__name__)
 # A document a phone has to hold in memory and draw; the cap is the whole write or nothing.
 MAX_BYTES = 256 * 1024
 KEEP_VERSIONS = 20
-# How much of a prompt becomes a canvas's title, which is also its chat's.
+# How much of a prompt becomes a canvas's title — and so its chat's.
 TITLE_CHARS = 60
 
 TOOL_WRITE = "canvas_write"
 TOOL_READ = "canvas_read"
 
-# Set by register() and _wire_api_server, as research.py does.
+# Set by register() and _wire_api_server.
 ctx: Any = None
 adapter: Any = None
 
@@ -59,21 +59,31 @@ class CanvasError(ValueError):
 SECRETS = (
     ("private key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
     ("Anthropic key", re.compile(r"sk-ant-[A-Za-z0-9_-]{16,}")),
+    ("Stripe key", re.compile(r"(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}")),
     ("OpenAI key", re.compile(r"sk-(?:proj-)?[A-Za-z0-9_-]{20,}")),
     ("GitHub token", re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})")),
     ("AWS access key", re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")),
     ("Slack token", re.compile(r"xox[abposr]-[A-Za-z0-9-]{10,}")),
     ("Google API key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
+    ("Google OAuth token", re.compile(r"ya29\.[0-9A-Za-z_-]{20,}")),
     ("JSON Web Token", re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}")),
+    ("bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}=*")),
+    # A URL that carries its own password: the page would be handing one out with every copy of it.
+    ("credential in a URL", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:@/]+:[^\s:@/]{3,}@")),
+    # A value assigned to something named like a secret, camelCase and snake_case alike, which is
+    # how a key is written when it isn't one of the shapes above.
     (
         "secret assignment",
         re.compile(
-            r"(?i)\b(?:api[_-]?key|secret|password|passwd|access[_-]?token)\b\s*[:=]\s*"
-            r"[\"'][^\"'\s]{12,}[\"']"
+            r"(?i)(?:api[_-]?key|secret[A-Za-z0-9_]*|password|passwd|token[A-Za-z0-9_]*"
+            r"|access[_-]?key)\b\s*[:=]\s*[\"'][^\"'\s]{12,}[\"']"
         ),
     ),
 )
 
+_COMMENT_OPEN = "<!--"
+_COMMENT_CLOSE = "-->"
+_HEAD = re.compile(r"(?is)<head\b")
 _DOCTYPE = re.compile(r"(?is)^\ufeff?\s*<!doctype html")
 _LANG = re.compile(r"(?is)<html\b[^>]*\blang\s*=\s*[\"']?[A-Za-z]")
 _TITLE = re.compile(r"(?is)<title\b[^>]*>\s*\S")
@@ -94,10 +104,33 @@ _REMOTE = re.compile(
 )
 
 
-def scan(html: Any) -> str:
-    """The document as it will be stored, or a ``CanvasError`` naming why it can't be.
+def _markup(html: str) -> str:
+    """The document as its markup, with every comment cut out and the pieces joined by a space.
 
-    The size is read as UTF-8 bytes, which is what a device holds and what a version weighs.
+    A tag named in a comment is not a tag, and the app finds the page's head by the same rule — so a
+    comment that says ``<head>`` can't stand in for one, on either side.
+    """
+    pieces: List[str] = []
+    at = 0
+    while True:
+        opened = html.find(_COMMENT_OPEN, at)
+        if opened == -1:
+            pieces.append(html[at:])
+            return " ".join(pieces)
+        pieces.append(html[at:opened])
+        closed = html.find(_COMMENT_CLOSE, opened + len(_COMMENT_OPEN))
+        if closed == -1:
+            # An unterminated comment: nothing after it is markup.
+            return " ".join(pieces)
+        at = closed + len(_COMMENT_CLOSE)
+
+
+def scan(html: Any) -> None:
+    """Refuses a document that can't be a canvas, naming why; returns nothing when it can.
+
+    The size is read as UTF-8 bytes, which is what a device holds and what a version weighs. Secrets
+    are looked for in the whole file — a comment is drawn to anyone who opens the page — while the
+    standards are read off its markup, where a tag in a comment is no tag at all.
     """
     if not isinstance(html, str) or not html.strip():
         raise CanvasError("A canvas needs a document.")
@@ -112,13 +145,15 @@ def scan(html: Any) -> str:
                 f"The canvas holds what looks like a {name}. A canvas is drawn by anyone who opens "
                 "it, so a secret can't go in one: take it out and write it again."
             )
+    markup = _markup(html)
     missing = [
         words
         for words, found in (
-            ("a doctype", _DOCTYPE.search(html)),
-            ("an <html lang>", _LANG.search(html)),
-            ("a <title>", _TITLE.search(html)),
-            ("a viewport meta tag", _VIEWPORT.search(html)),
+            ("a doctype", _DOCTYPE.search(markup)),
+            ("an <html lang>", _LANG.search(markup)),
+            ("a <head>", _HEAD.search(markup)),
+            ("a <title>", _TITLE.search(markup)),
+            ("a viewport meta tag", _VIEWPORT.search(markup)),
         )
         if not found
     ]
@@ -133,12 +168,11 @@ def scan(html: Any) -> str:
         ("a <script src>", _SCRIPT_SRC),
         ("a URL it loads from outside itself", _REMOTE),
     ):
-        if pattern.search(html):
+        if pattern.search(markup):
             raise CanvasError(
                 f"The canvas holds {name}, which a canvas can't use: everything it loads has to be "
                 "written into the document."
             )
-    return html
 
 
 # --- the record ----------------------------------------------------------------------------------
@@ -154,18 +188,21 @@ def _row(row: Any) -> Dict[str, Any]:
     return record
 
 
+def _record(conn: sqlite3.Connection, canvas_id: str) -> Optional[Dict[str, Any]]:
+    """One canvas's record over a connection the caller holds."""
+    row = conn.execute(f"SELECT {_RECORD} FROM canvases WHERE id = ?", (canvas_id,)).fetchone()
+    return _row(row) if row else None
+
+
 def record(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
     """One canvas's record, or None when no canvas is that one."""
     if not canvas_id or not path.exists():
         return None
     conn = connect(path)
     try:
-        row = conn.execute(
-            f"SELECT {_RECORD} FROM canvases WHERE id = ?", (canvas_id,)
-        ).fetchone()
+        return _record(conn, canvas_id)
     finally:
         conn.close()
-    return _row(row) if row else None
 
 
 def listing(path: Path) -> List[Dict[str, Any]]:
@@ -180,24 +217,17 @@ def listing(path: Path) -> List[Dict[str, Any]]:
     return [_row(row) for row in rows]
 
 
-def version_of(path: Path, canvas_id: str, number: Optional[int] = None) -> Optional[Dict[str, Any]]:
-    """One version's document and the tools it declared; the newest when ``number`` is None."""
+def version_of(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
+    """The newest version's document and the tools it declared, or None before the first write."""
     if not canvas_id or not path.exists():
         return None
     conn = connect(path)
     try:
-        if number is None:
-            row = conn.execute(
-                """SELECT version, html, tools, at FROM canvas_versions
-                   WHERE canvas_id = ? ORDER BY version DESC LIMIT 1""",
-                (canvas_id,),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                """SELECT version, html, tools, at FROM canvas_versions
-                   WHERE canvas_id = ? AND version = ?""",
-                (canvas_id, number),
-            ).fetchone()
+        row = conn.execute(
+            """SELECT version, html, tools, at FROM canvas_versions
+               WHERE canvas_id = ? ORDER BY version DESC LIMIT 1""",
+            (canvas_id,),
+        ).fetchone()
     finally:
         conn.close()
     if row is None:
@@ -226,7 +256,7 @@ def current(path: Path, canvas_id: str) -> Dict[str, Any]:
 
 def title_of(prompt: Any) -> str:
     """The title a prompt gives a new canvas, which is the chat's title too."""
-    return triage._line(prompt, TITLE_CHARS) or "Canvas"
+    return triage.one_line(prompt, TITLE_CHARS) or "Canvas"
 
 
 def _tools(raw: Any) -> Optional[str]:
@@ -252,17 +282,19 @@ def write(
     the oldest version's row — never the newest, which is what a canvas is. A title writes the
     canvas's and its chat's together, so a rename is one name.
     """
-    found = record(path, canvas_id)
-    if found is None:
-        raise CanvasError("There is no such canvas.", 404)
     scan(html)
     declared = _tools(tools)
     named = title_of(title) if isinstance(title, str) and title.strip() else None
-    number = found["version"] + 1
     now = int(time.time() * 1000)
     conn = connect(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        # Read under the write lock: two writes racing here would otherwise both take the same
+        # number, and the second would fail on the versions' primary key.
+        found = _record(conn, canvas_id)
+        if found is None:
+            raise CanvasError("There is no such canvas.", 404)
+        number = found["version"] + 1
         conn.execute(
             """INSERT INTO canvas_versions (canvas_id, version, html, tools, at)
                VALUES (?, ?, ?, ?, ?)""",
@@ -293,7 +325,15 @@ def write(
         except Exception:
             logger.debug("gots: couldn't rename %s's chat", canvas_id, exc_info=True)
     events.note("canvas", found["session_id"], path, True)
-    return current(path, canvas_id)
+    return {
+        **found,
+        "title": named or found["title"],
+        "version": number,
+        "html": html,
+        "tools": json.loads(declared) if declared else [],
+        "written_at": now,
+        "at": now,
+    }
 
 
 def _insert(path: Path, found: Dict[str, Any]) -> None:
@@ -328,11 +368,11 @@ def _drop(path: Path, canvas_id: str) -> None:
 
 def create(
     path: Path,
-    profile: Optional[str],
-    profile_id: Optional[str],
+    *,
+    request_profile: Optional[str],
+    bot_id: Optional[str],
     prompt: Any,
     body: Any,
-    at: Optional[int] = None,
 ) -> Dict[str, Any]:
     """A canvas from a prompt: its record, its chat and the run that builds it, in that order.
 
@@ -350,10 +390,9 @@ def create(
     title = title_of(prompt)
     chat_id, session_id = triage.open_thread(
         path,
-        profile_id,
+        bot_id,
         chats.pick(run.get("provider"), run.get("model")),
         opener=prompt,
-        opener_at=at,
         title=title,
         canvas_id=canvas_id,
     )
@@ -364,17 +403,24 @@ def create(
         "chat_id": chat_id,
         "at": now,
     }
+    _insert(path, found)
     try:
-        _insert(path, found)
-        item = outbox.add(
-            path, session_id, profile, prompt, [], outbox.clean_body(session_id, body)
-        )
+        # The canvas row is in first: the run this queues may write to it the moment it starts.
+        item = triage.queue_first_turn(path, request_profile, chat_id, session_id, prompt, [], body)
     except Exception:
         _drop(path, canvas_id)
-        triage.discard(path, chat_id)
         raise
     events.note("canvas", session_id, path, True)
-    return {**current(path, canvas_id), "item": item}
+    return {
+        **found,
+        "version": 0,
+        "pinned": False,
+        "hidden": False,
+        "html": "",
+        "tools": [],
+        "written_at": now,
+        "item": item,
+    }
 
 
 def canvas_of_session(path: Path, home: Path, session_id: Optional[str]) -> Optional[str]:
@@ -388,8 +434,7 @@ def canvas_of_session(path: Path, home: Path, session_id: Optional[str]) -> Opti
         return None
     try:
         root = sessions.chat_session(home, session_id)
-        entry = chats.by_session(path, root)
-        value = entry.get("value") if isinstance(entry, dict) else None
+        value = (chats.by_session(path, root) or {}).get("value")
         found = value.get("canvasId") if isinstance(value, dict) else None
     except Exception:
         logger.debug("gots: couldn't resolve a canvas for %s", session_id, exc_info=True)
@@ -403,12 +448,17 @@ def _session_canvas(session_id: Optional[str]) -> Optional[str]:
     Never raises: it is asked on every tool call of a session and inside the agent wrapper, and a
     store or a home this can't read is no canvas rather than a turn that dies.
     """
+    return _tool_canvas(session_id)[0]
+
+
+def _tool_canvas(session_id: Optional[str]) -> tuple[Optional[str], Optional[Path]]:
+    """The canvas a run edits and the store it lives in, resolved once for the tool that asks."""
     try:
         path, home = sessions._paths()
     except Exception:
         logger.debug("gots: couldn't find the store a canvas lives in", exc_info=True)
-        return None
-    return canvas_of_session(path, home, session_id)
+        return None, None
+    return canvas_of_session(path, home, session_id), path
 
 
 # --- the tools -----------------------------------------------------------------------------------
@@ -449,10 +499,9 @@ READ_SCHEMA = {
 def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: writes the canvas whose session made the call."""
     args = args if isinstance(args, dict) else {}
-    canvas_id = _session_canvas(task_id or session_id)
-    if not canvas_id:
+    canvas_id, path = _tool_canvas(task_id or session_id)
+    if not canvas_id or path is None:
         return json.dumps({"error": f"{TOOL_WRITE} only works in a canvas's session."})
-    path, _home = sessions._paths()
     try:
         found = write(path, canvas_id, args.get("html"), args.get("title"), args.get("tools"))
     except CanvasError as error:
@@ -464,10 +513,9 @@ def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[
 
 def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: the canvas's newest version, as it stands."""
-    canvas_id = _session_canvas(task_id or session_id)
-    if not canvas_id:
+    canvas_id, path = _tool_canvas(task_id or session_id)
+    if not canvas_id or path is None:
         return json.dumps({"error": f"{TOOL_READ} only works in a canvas's session."})
-    path, _home = sessions._paths()
     try:
         found = current(path, canvas_id)
     except CanvasError as error:
@@ -497,7 +545,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
     return {
         "action": "block",
         "message": (
-            "This is a canvas's session: change the canvas with canvas_write and canvas_read only. "
+            f"This is a canvas's session: change the canvas with {TOOL_WRITE} and {TOOL_READ} only. "
             "It can't ship a pull request, file a library item or take a task."
         ),
     }
@@ -511,16 +559,13 @@ def register(plugin_ctx: Any) -> bool:
     if not callable(register_tool):
         return False
     took = True
-    for tool, schema, handler, emoji in (
-        (TOOL_WRITE, WRITE_SCHEMA, handle_write, "🖼️"),
-        (TOOL_READ, READ_SCHEMA, handle_read, "🖼️"),
+    for tool, schema, handler in (
+        (TOOL_WRITE, WRITE_SCHEMA, handle_write),
+        (TOOL_READ, READ_SCHEMA, handle_read),
     ):
         try:
-            took = (
-                register_tool(name=tool, toolset="gots", schema=schema, handler=handler, emoji=emoji)
-                is not False
-                and took
-            )
+            if register_tool(name=tool, toolset="gots", schema=schema, handler=handler, emoji="🖼️") is False:
+                took = False
         except Exception:
             logger.warning("gots: couldn't register the %s tool", tool, exc_info=True)
             took = False
@@ -532,20 +577,10 @@ def wire(api_adapter: Any) -> bool:
     tools it can't use."""
     global adapter
     adapter = api_adapter
-    original = getattr(api_adapter, "_create_agent", None)
-    if not callable(original):
-        return False
+    def is_canvas(session: Optional[str]) -> bool:
+        return _session_canvas(session) is not None
 
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        session_id = kwargs.get("session_id") or getattr(agent, "session_id", None)
-        if _session_canvas(session_id):
-            for tool, schema in ((TOOL_WRITE, WRITE_SCHEMA), (TOOL_READ, READ_SCHEMA)):
-                try:
-                    tools_common.equip_tool(agent, tool, schema)
-                except Exception:
-                    logger.debug("gots: couldn't add the %s tool to an agent", tool, exc_info=True)
-        return agent
-
-    api_adapter._create_agent = create_agent
-    return True
+    took = tools_common.wire_tool(api_adapter, TOOL_WRITE, WRITE_SCHEMA, TOOL_WRITE, when=is_canvas)
+    if not tools_common.wire_tool(api_adapter, TOOL_READ, READ_SCHEMA, TOOL_READ, when=is_canvas):
+        took = False
+    return took

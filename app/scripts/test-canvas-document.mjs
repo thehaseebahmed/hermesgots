@@ -1,8 +1,10 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import {
   CANVAS_CSP,
+  TOKENS,
   canvasDocument,
   themeTokens,
   themeVariables,
@@ -80,4 +82,20 @@ test("the tokens are read off the app's own theme, only the ones a canvas is tol
   const read = (name) => styles.get(name) ?? ""
   const tokens = themeTokens(read)
   assert.deepEqual(tokens, { background: "oklch(1 0 0)", foreground: "oklch(0.145 0 0)", radius: "0.625rem" })
+})
+
+test("the tokens the page is given are the ones its guide names", () => {
+  // The guide is the only contract a bot has for what it may style with, and nothing else ties the
+  // two lists together: a token in one and not the other is a colour that never lands.
+  const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
+  const named = new Set([...guide.matchAll(/--([a-z-]+)/g)].map((match) => match[1]))
+  assert.deepEqual([...named].sort(), [...TOKENS].sort())
+})
+
+test("the app's own policy keeps a canvas's frame from navigating itself away", () => {
+  // `frame-src 'self'` is the browser-level half of the sandbox (ADR 0114): without it a srcdoc frame
+  // can set `location` and leak what it was given. Nothing at the unit tier runs a frame, so this
+  // pins the one line the claim rests on.
+  const page = readFileSync(new URL("../index.html", import.meta.url), "utf8")
+  assert.match(page, /<meta http-equiv="Content-Security-Policy" content="frame-src 'self'" \/>/)
 })

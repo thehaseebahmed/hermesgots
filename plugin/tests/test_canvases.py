@@ -25,6 +25,14 @@ BODY = {
     "provider": "anthropic",
     "model": "claude-opus-5-5",
 }
+PAGE_WITHOUT_HEAD = """<!doctype html>
+<html lang="en">
+  <title>Tip</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <body><h1>Tip</h1></body>
+</html>
+"""
+
 DOCUMENT = """<!doctype html>
 <html lang="en">
   <head>
@@ -37,16 +45,9 @@ DOCUMENT = """<!doctype html>
 """
 
 
-def make_canvas(path: Path, **overrides) -> dict:
+def make_canvas(path: Path) -> dict:
     """A canvas made the way the route makes one, over a store in a throwaway home."""
-    return canvases.create(
-        path,
-        "default",
-        "bot-1",
-        overrides.pop("prompt", PROMPT),
-        overrides.pop("body", BODY),
-        overrides.pop("at", None),
-    )
+    return canvases.create(path, request_profile="default", bot_id="bot-1", prompt=PROMPT, body=BODY)
 
 
 def store_of(case: unittest.TestCase) -> Path:
@@ -167,6 +168,12 @@ class WriteTest(unittest.TestCase):
             ("ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8", "GitHub token"),
             ("AKIA" + "ABCDEFGHIJKLMNOP", "AWS access key"),
             ("-----BEGIN RSA PRIVATE KEY-----", "private key"),
+            ("sk_live_" + "a1b2c3d4e5f6g7h8i9j0", "Stripe key"),
+            ("ya29." + "a0AfH6SMBx1y2z3w4v5u6t7s8r9q", "Google OAuth token"),
+            ("Authorization: Bearer " + "a1b2c3d4e5f6g7h8i9j0k1l2", "bearer token"),
+            ("postgres://admin:" + "hunter2hunter2" + "@db.example.com/app", "credential in a URL"),
+            ("const secretKey = \"" + "9f8e7d6c5b4a39281706" + "\"", "secret assignment"),
+            ("aws_secret_access_key = \"" + "wJalrXUtnFEMIK7MDENGbPxRfiCY" + "\"", "secret assignment"),
         ):
             with self.subTest(named=named):
                 with self.assertRaises(canvases.CanvasError) as refused:
@@ -177,8 +184,23 @@ class WriteTest(unittest.TestCase):
     def test_a_write_that_is_no_whole_document_is_refused_naming_what_it_lacks(self) -> None:
         with self.assertRaises(canvases.CanvasError) as refused:
             canvases.write(self.path, self.canvas["id"], "<html><body>hi</body></html>")
-        for words in ("doctype", "lang", "title", "viewport"):
+        for words in ("doctype", "lang", "<head>", "title", "viewport"):
             self.assertIn(words, str(refused.exception))
+
+    def test_a_head_named_only_in_a_comment_is_no_head(self) -> None:
+        # A comment is not markup: the app finds the page's head the same way this does, so a
+        # document whose only `<head>` is inside a comment is one nothing can put a policy into.
+        commented = PAGE_WITHOUT_HEAD.replace(
+            "<html lang=\"en\">", "<html lang=\"en\"><!-- the <head> goes here -->"
+        )
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, self.canvas["id"], commented)
+        self.assertIn("<head>", str(refused.exception))
+        # A comment that merely mentions it is no reason to refuse a document that has one.
+        mentioned = DOCUMENT.replace(
+            "<html lang=\"en\">", "<html lang=\"en\"><!-- a note: <head> follows -->"
+        )
+        self.assertEqual(canvases.write(self.path, self.canvas["id"], mentioned)["version"], 1)
 
     def test_a_write_that_loads_from_outside_itself_is_refused(self) -> None:
         for hole in (
@@ -246,8 +268,11 @@ class SessionTest(unittest.TestCase):
             adapter._create_agent(session_id=self.session + "-c1")
             adapter._create_agent(session_id=self.plain)
         self.assertEqual(
-            equipped,
-            [(self.session + "-c1", canvases.TOOL_WRITE), (self.session + "-c1", canvases.TOOL_READ)],
+            sorted(equipped),
+            [
+                (self.session + "-c1", canvases.TOOL_READ),
+                (self.session + "-c1", canvases.TOOL_WRITE),
+            ],
         )
 
         # The guide is the canvas's, and the component library's is withheld from that session.

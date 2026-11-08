@@ -6,8 +6,8 @@ drift-tested by the app. Hermes freezes a section at session start, and off answ
 nothing, so the next chat isn't told the library.
 
 ``canvas/prompt.txt`` is the canvas's guide (ADR 0113), told only to a canvas's session: a canvas is
-written as plain HTML, so the library's vocabulary would be a language its page can't speak. The two
-sections are therefore each other's opposite — a session is told one of them, never both.
+written as plain HTML, so the library's vocabulary would be a language its page can't speak, and a
+canvas's session is told the guide instead of the library.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 FEATURE = "openui"
 SECTION = "openui"
 POSITION = "after_memory"
-# The canvas's section: its own id, and its own artifact beside this module (ADR 0113).
 CANVAS_SECTION = "canvas"
 CANVAS_ARTIFACT = Path(__file__).parent / "canvas" / "prompt.txt"
 # The key the switch is kept under in the profile's `host_settings` (store.py). Absent means on, so
@@ -64,7 +63,6 @@ CANVAS_TEXT = _read(CANVAS_ARTIFACT)
 
 # Why the section isn't registered: `advertised` reports nothing, so `info` claims nothing.
 _refusal_reason: Optional[str] = "The openui section isn't registered."
-# The same, for the canvas's guide: `canvas_ready` reports whether a canvas is told it at all.
 _canvas_refusal: Optional[str] = "The canvas section isn't registered."
 
 
@@ -194,33 +192,40 @@ def _register(ctx: Any) -> Optional[str]:
     register_section = getattr(ctx, "register_system_prompt_section", None)
     if not callable(register_section):
         _canvas_refusal = "This Hermes can't add a system-prompt section."
-        return "This Hermes can't add a system-prompt section."
-    if not TEXT or VERSION is None:
-        reason = "The openui prompt artifact didn't load."
-    elif len(TEXT) > LIMIT:
-        reason = "The openui prompt artifact is over the host's section limit."
-    else:
-        reason = None
-        try:
-            register_section(SECTION, content, position=POSITION)
-        except Exception:
-            logger.warning("gots: couldn't register the openui section", exc_info=True)
-            reason = "This Hermes refused the openui section."
-    _canvas_refusal = _register_canvas(register_section)
+        return _canvas_refusal
+    reason = (
+        "The openui prompt artifact didn't load."
+        if not TEXT or VERSION is None
+        else _register_section(register_section, SECTION, TEXT, content, "openui", "the openui section")
+    )
+    _canvas_refusal = _register_section(
+        register_section, CANVAS_SECTION, CANVAS_TEXT, canvas_content, "canvas", "the canvas section"
+    )
     return reason
 
 
-def _register_canvas(register_section: Any) -> Optional[str]:
-    """Registers the canvas's guide beside the library's, and answers why it couldn't."""
-    if not CANVAS_TEXT:
-        return "The canvas prompt artifact didn't load."
-    if len(CANVAS_TEXT) > LIMIT:
-        return "The canvas prompt artifact is over the host's section limit."
+def _register_section(
+    register_section: Any,
+    section: str,
+    text: str,
+    content: Any,
+    name: str,
+    label: str,
+) -> Optional[str]:
+    """Registers one section and answers why it couldn't, or None where it took.
+
+    A section the host drops whole over its cap would advertise a vocabulary the model is never
+    told, so an artifact over ``LIMIT`` is not registered at all.
+    """
+    if not text:
+        return f"The {name} prompt artifact didn't load."
+    if len(text) > LIMIT:
+        return f"The {name} prompt artifact is over the host's section limit."
     try:
-        register_section(CANVAS_SECTION, canvas_content, position=POSITION)
+        register_section(section, content, position=POSITION)
     except Exception:
-        logger.warning("gots: couldn't register the canvas section", exc_info=True)
-        return "This Hermes refused the canvas section."
+        logger.warning("gots: couldn't register %s", label, exc_info=True)
+        return f"This Hermes refused {label}."
     return None
 
 
@@ -237,7 +242,7 @@ def register(ctx: Any) -> bool:
 
 def canvas_ready() -> bool:
     """Whether a canvas's session is told its guide, which is what `info` advertises as `canvas`."""
-    return _canvas_refusal is None and bool(CANVAS_TEXT)
+    return _canvas_refusal is None
 
 
 def advertised() -> Optional[Dict[str, str]]:

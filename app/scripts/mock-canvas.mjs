@@ -1,7 +1,5 @@
-// The Gots plugin's canvases (canvases.py), for the mock Hermes server. A canvas is made from a
-// prompt, the run that builds it writes its first page a moment later, and the record then says so:
-// the list and the screen read the same record, and the page is a real document the screen draws in
-// its sandbox. MOCK_CANVAS=0 serves a plugin from before canvases — no routes, no `canvas` feature.
+// The Gots plugin's canvases (canvases.py), for the mock Hermes server. MOCK_CANVAS=0 serves a
+// plugin from before them — no routes, no `canvas` feature.
 
 const KEEP = 20
 
@@ -69,7 +67,7 @@ export function createCanvasStore() {
   return { canvases, summary, full }
 }
 
-export function handleCanvas(req, res, path, { json, readBody, noteEvent }, store) {
+export async function handleCanvas(req, res, path, { json, readBody, noteEvent }, store) {
   if (!path.startsWith("/api/plugins/gots/canvases")) return false
   const { canvases, summary, full } = store
   const fail = (status, message) => json(res, status, { error: { message } })
@@ -80,7 +78,8 @@ export function handleCanvas(req, res, path, { json, readBody, noteEvent }, stor
       json(res, 200, { object: "gots.canvases", canvases: list })
       return true
     }
-    return readBody(req).then((body) => {
+    const body = await readBody(req)
+    {
       const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
       if (!prompt) return fail(400, "A canvas needs a prompt to build it from."), true
       const now = Date.now()
@@ -99,7 +98,8 @@ export function handleCanvas(req, res, path, { json, readBody, noteEvent }, stor
         prompt,
       }
       canvases.set(canvas.id, canvas)
-      // The run the canvas's session makes: its first page, a moment later, as a version.
+      // The gap is what lets the screen draw version 0 — "your bot is building it" — before the
+      // page lands.
       setTimeout(() => {
         canvas.version += 1
         canvas.at = Date.now()
@@ -109,7 +109,7 @@ export function handleCanvas(req, res, path, { json, readBody, noteEvent }, stor
       }, 1500)
       json(res, 202, { object: "gots.canvas", canvas: full(canvas) })
       return true
-    })
+    }
   }
 
   const match = /^\/api\/plugins\/gots\/canvases\/([^/]+)$/.exec(path)

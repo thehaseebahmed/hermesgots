@@ -4,17 +4,15 @@
  *
  * The page is drawn in a `<iframe sandbox="allow-scripts" srcdoc>` — no `allow-same-origin`, so it
  * has an opaque origin and reaches nothing of the app's — and three things are put in its head
- * before anything the bot wrote: the policy below, the app's theme tokens, and the script that takes
- * WebRTC away. The policy allows what a page needs to draw itself (inline styles and scripts, `data:`
- * images) and nothing that leaves it: no connection, no frame, no form, no outside resource. The app's
- * own CSP carries `frame-src 'self'`, so the frame can't navigate itself anywhere either.
+ * before anything the bot wrote: the policy, the app's theme tokens, and the script that takes
+ * WebRTC away. The app's own CSP carries `frame-src 'self'`, so the frame can't navigate itself
+ * anywhere either. The scan on the host is hygiene; this is the defence (ADR 0114).
  *
  * Import-free, so `scripts/test-canvas-document.mjs` runs it as a pure rule.
  */
 
 export type CanvasMode = "light" | "dark"
 
-/** What a canvas page may do: draw itself from what it holds, and reach nothing else. */
 export const CANVAS_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
   "font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'"
@@ -50,7 +48,7 @@ export const TOKENS = [
  */
 const NO_PEER = `(function(){var names=["RTCPeerConnection","webkitRTCPeerConnection","mozRTCPeerConnection"];for(var i=0;i<names.length;i++){try{delete window[names[i]]}catch(e){}try{window[names[i]]=undefined}catch(e){}}})()`
 
-/** The tokens the app's own theme holds, read off a computed style; an unset one is left out. */
+/** The tokens the app's theme holds; one it doesn't set is left out rather than written blank. */
 export function themeTokens(read: (name: string) => string): Record<string, string> {
   const tokens: Record<string, string> = {}
   for (const name of TOKENS) {
@@ -60,7 +58,6 @@ export function themeTokens(read: (name: string) => string): Record<string, stri
   return tokens
 }
 
-/** The tokens as CSS variables, for the mode the reader is in. */
 export function themeVariables(tokens: Record<string, string>, mode: CanvasMode): string {
   const declared = TOKENS.filter((name) => tokens[name])
     .map((name) => `--${name}: ${tokens[name]};`)

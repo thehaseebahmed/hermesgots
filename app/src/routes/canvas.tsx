@@ -19,12 +19,8 @@ import { formatRelative } from "@/lib/format"
 import { useNow } from "@/lib/threads"
 
 /**
- * Canvas: every bot's pages, and one page drawn.
- *
- * The list is the hosts' own — each bot's plugin holds its canvases (`canvases.py`, ADR 0113) — and
- * a page is drawn from the newest version it was written as, in a sandboxed frame that reaches
- * nothing of the app's (ADR 0114). Creating one is a prompt: the plugin writes the canvas and runs
- * its session, so the page is built with this screen closed.
+ * The two Canvas routes: `/canvas` lists every bot's pages beside the prompt that makes one, and
+ * `/canvas/:id` draws one page in a sandboxed frame (ADR 0114).
  */
 
 export function CanvasPage() {
@@ -144,7 +140,7 @@ export function CanvasPage() {
 /** One canvas, drawn from its newest version. */
 export function CanvasView() {
   const { id } = useParams()
-  const { canvas, loaded } = useCanvas(id ?? "")
+  const { canvas, missing, loaded } = useCanvas(id ?? "")
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -154,8 +150,9 @@ export function CanvasView() {
   )
   const drawn = useMemo(() => {
     if (!html) return null
+    const tokens = themeTokens(readTheme())
     try {
-      return { document: canvasDocument(html, { mode, tokens: themeTokens(readTheme()) }) }
+      return { document: canvasDocument(html, { mode, tokens }) }
     } catch {
       return { error: "This canvas can't be drawn: its document has no head." }
     }
@@ -184,7 +181,11 @@ export function CanvasView() {
       </header>
 
       <div className="min-h-0 flex-1 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        {drawn?.error ? (
+        {missing ? (
+          <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
+            This canvas is gone. Its bot doesn't hold one by that name.
+          </p>
+        ) : drawn?.error ? (
           <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
         ) : drawn?.document ? (
           <iframe
@@ -205,7 +206,7 @@ export function CanvasView() {
   )
 }
 
-/** The app's own theme, as it has landed on the page for the mode the reader is in. */
+/** A reader of the app's own theme, as it has landed on the page for the mode drawn. */
 function readTheme() {
   const styles = getComputedStyle(document.documentElement)
   return (name: string) => styles.getPropertyValue(name)

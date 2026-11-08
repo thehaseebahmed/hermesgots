@@ -25,7 +25,9 @@ const RETRY_MS = [1000, 2000, 5000, 10_000, 30_000]
 /** A `runs` event often comes with a status the server sets a moment later. */
 const RUNS_SETTLE_MS = 300
 
-export type Kind = "cron" | "runs" | "projects" | "research" | "meetings" | "closes" | "canvas"
+/** Every kind of change a screen can be woken by; `catchUpAll` asks each of them after a gap. */
+export const KINDS = ["cron", "runs", "projects", "research", "meetings", "closes", "canvas"] as const
+export type Kind = (typeof KINDS)[number]
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
 
 export { connectionKey }
@@ -197,8 +199,7 @@ function catchUpAll(key: string) {
     })
   }
   sessionListeners.forEach((listener) => listener(key))
-  for (const kind of ["cron", "runs", "projects", "research", "meetings", "closes", "canvas"] as const)
-    bump(key, kind)
+  for (const kind of KINDS) bump(key, kind)
 }
 
 async function applyTitle(key: string, sessionId: unknown) {
