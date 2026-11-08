@@ -463,10 +463,13 @@ def notify(
     kinds that aren't about one the routine's job id (``routine_failed``), the project's id
     (``clone_failed``), the research mission's id (``research_*``) or the room's id
     (``room_input``); it only picks what a tap opens. ``title`` names what it is about when that
-    isn't a session (whose chat title is looked up). Never raises: it runs inside Hermes's hooks."""
+    isn't a session (whose chat title is looked up). Answers whether a push will be sent — a device
+    exists that asked for this category, and one of this kind for this id wasn't told a moment ago —
+    so a caller that remembers what it has told the user doesn't remember a push that was dropped.
+    Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
-            return
+            return False
         if path is None:
             # Hooks run inside the turn's profile scope, so this is that profile's store.
             path = current_path()
@@ -474,17 +477,19 @@ def notify(
         key = (str(path), kind, session_id)
         with _lock:
             if now - _last.get(key, -THROTTLE_SECONDS) < THROTTLE_SECONDS:
-                return
+                return False
             _last[key] = now
             if len(_last) > 512:
                 _last.clear()
         if not reachable(path):
-            return
+            return False
         threading.Thread(
             target=_run, args=(path, kind, session_id, title), name="gots-push", daemon=True
         ).start()
+        return True
     except Exception:
         logger.debug("gots: couldn't send a push", exc_info=True)
+        return False
 
 
 BOT_ID = re.compile(r"^[a-z0-9-]{1,32}$")

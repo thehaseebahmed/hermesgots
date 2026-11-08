@@ -157,11 +157,11 @@ _projections: Dict[str, Projection] = {}
 _loads: Dict[str, threading.Lock] = {}
 _projections_lock = threading.Lock()
 
-# Which rooms were waiting on the user at the last look, by home and room: a push is a transition
-# into waiting, so a room already marked is one the user has been told about, or a send that failed
-# silently, and a room the user has answered is marked again on the pass that sees it at rest.
-_pushes: Dict[Tuple[str, str], bool] = {}
-_pushes_lock = threading.Lock()
+# Which rooms were needing the user at the last look, by home and room: a push is a transition into
+# needing them, so a room named here is one the user has been told about, and a room whose wait is
+# over is dropped so its next wait is a new one.
+_waiting_rooms: Set[Tuple[str, str]] = set()
+_waiting_lock = threading.Lock()
 # The watcher's own wake-up: a transition the Host's hook can see is pushed now, not on a tick.
 _ticker = ticker.Ticker("room needs")
 
@@ -172,6 +172,14 @@ class RoomError(Exception):
     def __init__(self, message: str, status: int = 502) -> None:
         super().__init__(message)
         self.status = status
+
+
+def _spare(deadline: float) -> float:
+    """What is left of one read's budget, or the 502 a call that spent it answers with."""
+    spare = deadline - time.monotonic()
+    if spare <= 0:
+        raise RoomError("This host took too long to answer about its rooms.")
+    return spare
 
 
 class HostRefusal(RoomError):
@@ -677,8 +685,7 @@ def answer_question(
     # so the user's tap is not lost with the answer.
     with _questions_lock:
         _questions.pop(question_id, None)
-    _forget(room_id, home)
-    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    _answered(room_id, home)
     return {"questionId": question_id}
 
 
@@ -705,8 +712,7 @@ def approve(
         },
         timeout=timeout, home=home,
     )
-    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
-    _forget(room_id, home)
+    _answered(room_id, home)
     return {"approved": found.get("approved") is not False, "choice": choice}
 
 
@@ -727,9 +733,8 @@ def stop_room(
     with _questions_lock:
         for one in [one for one in _questions.values() if one["roomId"] == room_id]:
             _questions.pop(one["questionId"], None)
-    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
     # A stopped round answers nothing it was waiting on, so the room is armed for its next wait.
-    _forget(room_id, home)
+    _answered(room_id, home)
     cancelled = found.get("cancelled")
     return {"cancelled": cancelled if type(cancelled) is int else 0}
 
@@ -802,14 +807,7 @@ def read_room(
     ``timeout``: it is one screen's read, so a Host that is quiet must not cost three waits.
     """
     deadline = time.monotonic() + timeout
-
-    def left() -> float:
-        spare = deadline - time.monotonic()
-        if spare <= 0:
-            raise RoomError("This host took too long to answer about its rooms.")
-        return spare
-
-    found = call("groups.state", {"room_id": room_id}, timeout=left(), home=home)
+    found = call("groups.state", {"room_id": room_id}, timeout=_spare(deadline), home=home)
     room = found.get("room")
     if not isinstance(room, dict) or room.get("room_id") != room_id:
         raise RoomError("This host answered with no room.")
@@ -819,9 +817,9 @@ def read_room(
     if since is None:
         reached = room.get("latest_seq")
         since = max(0, reached - LOG_WINDOW) if type(reached) is int else 0
-    events, cursor, latest, more = _log_pages(room_id, since, left, home)
+    events, cursor, latest, more = _log_pages(room_id, since, lambda: _spare(deadline), home)
     driver = found.get("driver_status")
-    known = methods(home, timeout=left())
+    known = methods(home, timeout=_spare(deadline))
     return {
         "room": {
             "id": room_id,
@@ -1091,13 +1089,13 @@ def on_member_activity(**kwargs: Any) -> None:
     room_id = room_id.strip()
     payload = kwargs.get("payload") if isinstance(kwargs.get("payload"), dict) else {}
     request_id = payload.get("request_id") or kwargs.get("request_id")
-    if _asked_a_question(payload, request_id):
+    asked = _asked_a_question(payload, request_id)
+    if asked:
         hold_question(room_id, kwargs.get("member_id"), request_id, payload.get("questions"))
-        _ticker.wake()
-    elif kwargs.get("kind") == "request.opened":
-        # A request that isn't a question opened — an approval the Host now holds standing — so the
-        # user is told now rather than on the next tick. Everything else, a reply ending addressed to
-        # the user included, is the log's, which the tick reads.
+    # A question held here, or a request the Host has now opened — an approval standing pending — is
+    # the user's now rather than on the next tick. Everything else, a reply ending addressed to the
+    # user included, is the log's, which the tick reads.
+    if asked or kwargs.get("kind") == "request.opened":
         _ticker.wake()
     now = time.monotonic()
     with _notes_lock:
@@ -1213,30 +1211,20 @@ def _projected(timeout: float, home: Any) -> Tuple[Dict[str, Dict[str, Any]], fl
     if found is None:
         return {}, PROJECTION_FAILURE_TTL
     records: Dict[str, Dict[str, Any]] = {}
-    offset: Optional[int] = None
-    for _ in range(MAX_ROOM_PAGES):
-        left = deadline - time.monotonic()
-        if left <= 0:
-            logger.debug("gots: no rooms to project into the chat list: the budget ran out asking")
-            return {}, PROJECTION_FAILURE_TTL
-        try:
-            # A disbanded room answers here only when it is asked for, and its record is the row's
-            # deletion: a room the Host retired must leave the devices that merged it. The list is
-            # read to its last page, so a room past the Host's first page still gets a row.
-            listed = list_rooms(
-                include_disbanded=True, limit=ROOM_PAGE, offset=offset, timeout=left, home=home
-            )
-        except RoomError as error:
-            logger.debug("gots: no rooms to project into the chat list: %s", error)
-            return {}, PROJECTION_FAILURE_TTL
-        for room in listed.get("rooms") or ():
-            record = chat_record(room)
-            if record is not None:
-                records[room["room_id"]] = record
-        following = listed.get("next_offset")
-        if not isinstance(following, int):
-            break
-        offset = following
+
+    def keep(room: Dict[str, Any]) -> None:
+        record = chat_record(room)
+        if record is not None:
+            records[room["room_id"]] = record
+
+    try:
+        # A disbanded room answers here only when it is asked for, and its record is the row's
+        # deletion: a room the Host retired must leave the devices that merged it. The list is read
+        # to its last page, so a room past the Host's first page still gets a row.
+        _each_room(home, deadline, keep, include_disbanded=True)
+    except RoomError as error:
+        logger.debug("gots: no rooms to project into the chat list: %s", error)
+        return {}, PROJECTION_FAILURE_TTL
     return records, PROJECTION_TTL
 
 
@@ -1323,16 +1311,9 @@ def _addressed_to_user(rows: List[Dict[str, Any]]) -> bool:
     return asking
 
 
-def _waits(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> bool:
-    """Whether this room is waiting on the user: an approval, a question, or words addressed to them."""
-
-    def left() -> float:
-        spare = deadline - time.monotonic()
-        if spare <= 0:
-            raise RoomError("This host took too long to answer about its rooms.")
-        return spare
-
-    found = call("groups.state", {"room_id": room_id}, timeout=left(), home=home)
+def _needs_user(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> bool:
+    """Whether this room needs the user: an approval, a question, or words addressed to them."""
+    found = call("groups.state", {"room_id": room_id}, timeout=_spare(deadline), home=home)
     if waiting(found.get("driver_status"), declared, room_id):
         return True
     room = found.get("room") if isinstance(found.get("room"), dict) else {}
@@ -1342,30 +1323,61 @@ def _waits(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) 
     page = call(
         "groups.log",
         {"room_id": room_id, "since_seq": max(0, reached - ASK_WINDOW)},
-        timeout=left(),
+        timeout=_spare(deadline),
         home=home,
     )
     rows = [one for one in (_event(raw) for raw in page.get("events") or ()) if one]
     return _addressed_to_user(rows)
 
 
-def _forget(room_id: str, home: Any) -> None:
-    """A room whose wait is over — answered, approved or stopped: the next wait is a new one."""
-    with _pushes_lock:
-        _pushes.pop((str(home), room_id), None)
+def _answered(room_id: str, home: Any) -> None:
+    """A room whose wait the user has just ended — answered, approved or stopped.
+
+    The mark goes so the next wait is a transition the watcher pushes, and the room's change is noted
+    so a device with it on screen re-reads it without waiting for its own poll.
+    """
+    with _waiting_lock:
+        _waiting_rooms.discard((str(home), room_id))
+    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+
+
+def _each_room(
+    home: Any, deadline: float, visit: Callable[[Dict[str, Any]], None], *,
+    include_disbanded: bool = False,
+) -> bool:
+    """Offers the Host's rooms to ``visit`` as its list pages in, within ``deadline``.
+
+    True when the list was read to its end, False when this read's page cap came first: a caller that
+    needs every room reads that as a short read, and one projecting the list keeps what it has. A page
+    the Host refuses, or a budget that runs out, is `list_rooms`' own RoomError.
+    """
+    offset: Optional[int] = None
+    for _ in range(MAX_ROOM_PAGES):
+        listed = list_rooms(
+            include_disbanded=include_disbanded,
+            limit=ROOM_PAGE,
+            offset=offset,
+            timeout=_spare(deadline),
+            home=home,
+        )
+        for room in listed.get("rooms") or ():
+            visit(room)
+        following = listed.get("next_offset")
+        if not isinstance(following, int):
+            return True
+        offset = following
+    return False
 
 
 def check(hermes_home: Path) -> int:
-    """One pass over this home's rooms: how many started waiting on the user and were pushed once.
+    """One pass over this home's rooms: how many started needing the user and were pushed once.
 
-    A push is a transition into waiting, so a room already marked is one the user has been told
-    about, a room seen at rest is marked again for its next wait, and a room the Host no longer
-    lists is dropped. The whole pass is bounded: a Host pages its own list, and a watcher still
-    reading a busy one when the next tick comes would only fall further behind. A pass that couldn't
-    read every room leaves the marks it never reached alone, so a room it didn't look at is not
-    forgotten as gone.
+    A push is a transition into needing the user, so a room already named is one the user has been
+    told about, a room seen at rest is dropped for its next wait, and a room the Host no longer lists
+    is forgotten. A pass that couldn't read every room leaves the rooms it never reached alone, so one
+    it didn't look at is not forgotten as gone.
 
-    With no device that could be told the pass does nothing: a wait it would have pushed is still a
+    With no device that could be told the pass does nothing: a need it would have pushed is still a
     transition for the next pass, because nothing was marked.
     """
     path = db_path(hermes_home)
@@ -1376,55 +1388,50 @@ def check(hermes_home: Path) -> int:
         return 0
     declared = tuple(found.get("methods") or ())
     deadline = time.monotonic() + WATCH_BUDGET
-    alive: List[str] = []
+    alive: Set[str] = set()
     pushed = 0
     complete = True
-    offset: Optional[int] = None
-    for _ in range(MAX_ROOM_PAGES):
-        left = deadline - time.monotonic()
-        if left <= 0:
-            complete = False
-            break
+
+    def visit(room: Dict[str, Any]) -> None:
+        nonlocal complete, pushed
+        room_id = room.get("room_id")
+        if not isinstance(room_id, str) or not room_id:
+            return
+        if room.get("disbanded_at") is not None:
+            return
+        alive.add(room_id)
         try:
-            listed = list_rooms(limit=ROOM_PAGE, offset=offset, timeout=left, home=hermes_home)
+            needs = _needs_user(room_id, declared, hermes_home, deadline)
         except RoomError:
             complete = False
-            break
-        for room in listed.get("rooms") or ():
-            room_id = room.get("room_id")
-            if not isinstance(room_id, str) or not room_id:
-                continue
-            if room.get("disbanded_at") is not None:
-                continue
-            alive.append(room_id)
-            try:
-                waits = _waits(room_id, declared, hermes_home, deadline)
-            except RoomError:
-                complete = False
-                continue
-            key = (str(hermes_home), room_id)
-            with _pushes_lock:
-                told = _pushes.get(key, False)
-                if len(_pushes) > 1024:
-                    _pushes.clear()
-                _pushes[key] = waits
-            if waits and not told:
-                name = room.get("name") if isinstance(room.get("name"), str) else None
-                push.notify("room_input", room_id, path=path, title=name)
-                pushed += 1
-        following = listed.get("next_offset")
-        if not isinstance(following, int):
-            break
-        offset = following
-    else:
-        complete = False
-    if complete:
-        with _pushes_lock:
+            return
+        key = (str(hermes_home), room_id)
+        with _waiting_lock:
+            told = key in _waiting_rooms
+        if needs and not told:
+            name = room.get("name") if isinstance(room.get("name"), str) else None
+            # A push the throttle or a quiet Host dropped is one the user hasn't heard: the room stays
+            # unmarked, and the next pass is still the transition it pushes.
+            if not push.notify("room_input", room_id, path=path, title=name):
+                return
+            pushed += 1
+        with _waiting_lock:
+            if needs:
+                _waiting_rooms.add(key)
+            else:
+                _waiting_rooms.discard(key)
+
+    try:
+        read_all = _each_room(hermes_home, deadline, visit)
+    except RoomError:
+        read_all = False
+    if complete and read_all:
+        with _waiting_lock:
             for key in [
-                one for one in _pushes
+                one for one in _waiting_rooms
                 if one[0] == str(hermes_home) and one[1] not in alive
             ]:
-                _pushes.pop(key, None)
+                _waiting_rooms.discard(key)
     return pushed
 
 

@@ -89,6 +89,16 @@ class Categories(unittest.TestCase):
         worker = (app / "public" / "push-sw.js").read_text()
         words = re.search(r"const WORDS = \{(.*?)\}", worker, re.S).group(1)
         self.assertEqual(tuple(re.findall(r"^\s*(\w+):", words, re.M)), push.KINDS)
+        # The same event read out of a closed app and out of an open page is one sentence, or the two
+        # ways a device hears about it disagree.
+        said = re.search(r"const WORDS[^{]*\{(.*?)\n\}", fcm, re.S).group(1)
+        theirs = dict(re.findall(r'(\w+): "([^"]*)"', said))
+        theirs.pop("test", None)  # the registry's own probe, which no device is told
+        self.assertEqual(
+            dict(re.findall(r'(\w+): "([^"]*)"', words)),
+            theirs,
+            "the registry and the worker say the same words",
+        )
 
     def test_a_database_from_before_categories_gains_the_column(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1869,8 +1869,8 @@ class RoomPushes(unittest.TestCase):
         store.connect(store.db_path(self.home)).close()
         with rooms._questions_lock:
             rooms._questions.clear()
-        with rooms._pushes_lock:
-            rooms._pushes.clear()
+        with rooms._waiting_lock:
+            rooms._waiting_rooms.clear()
         rooms._noted.clear()
         self.told = []
         patches = [
@@ -1880,14 +1880,22 @@ class RoomPushes(unittest.TestCase):
                 "notify",
                 lambda kind, session_id, path=None, title=None: self.told.append(
                     (kind, session_id, title)
-                ),
+                )
+                or True,
             ),
         ]
         for one in patches:
             one.start()
             self.addCleanup(one.stop)
 
-    def host(self, *, waiting=False, events=(), listed=()):
+    def test_a_push_nothing_took_leaves_the_room_for_the_next_pass(self):
+        host = self.host(waiting=True)
+        with mock.patch.object(rooms.push, "notify", lambda *args, **kwargs: False):
+            self.assertEqual(self.check(host), 0, "a push the throttle dropped is no push")
+        self.assertEqual(self.check(host), 1, "so the wait is still a transition the next pass pushes")
+        self.assertEqual(len(self.told), 1)
+
+    def host(self, *, waiting=False, events=(), listed=(ROOM,)):
         """A Host with one room, at rest or holding the approval m1 waits on."""
         status = {
             "running": True, "working": waiting, "blocked": waiting, "counts": {},
@@ -1901,16 +1909,12 @@ class RoomPushes(unittest.TestCase):
             states={"room-1": {**ROOM, "latest_seq": len(events)}},
         )
 
-    @property
-    def listed(self):
-        return [ROOM]
-
     def check(self, host):
         with dispatcher(host), no_loopback():
             return rooms.check(self.home)
 
     def test_a_room_that_starts_waiting_is_pushed_once(self):
-        host = self.host(listed=self.listed)
+        host = self.host()
         self.assertEqual(self.check(host), 0, "a room at rest is no news")
         self.assertEqual(self.told, [])
         host.driver_status["pending_actions"] = [APPROVAL]
@@ -1924,7 +1928,7 @@ class RoomPushes(unittest.TestCase):
             event(1, "message.user", USER, {"text": "who is free?"}),
             event(2, "message.member", MEMBER, {"text": "me", "thread_id": "e1"}),
         ]
-        host = self.host(events=conversation, listed=self.listed)
+        host = self.host(events=conversation)
         self.assertEqual(self.check(host), 0)
         conversation.append(event(3, "message.member", MEMBER, {"text": "and the routes"}))
         self.assertEqual(self.check(host), 0, "a member answering is the room working, not asking")
@@ -1935,7 +1939,7 @@ class RoomPushes(unittest.TestCase):
             event(2, "message.member", MEMBER, {"text": "That one is yours, @user."}),
             event(3, "room.activity", {"kind": "gateway", "id": "gw-1"}, {"status": "settled"}),
         ]
-        host = self.host(events=conversation, listed=self.listed)
+        host = self.host(events=conversation)
         self.assertEqual(self.check(host), 1, "the round settled on the user, so the room waits")
         self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
         self.assertEqual(self.check(host), 0)
@@ -1945,17 +1949,17 @@ class RoomPushes(unittest.TestCase):
             event(1, "message.member", MEMBER, {"text": "yours, @user"}),
             event(2, "message.user", USER, {"text": "so it is"}),
         ]
-        host = self.host(events=conversation, listed=self.listed)
+        host = self.host(events=conversation)
         self.assertEqual(self.check(host), 0)
 
     def test_a_question_the_hook_held_is_a_wait(self):
-        host = self.host(listed=self.listed)
+        host = self.host()
         rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
         self.assertEqual(self.check(host), 1)
         self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
 
     def test_the_answer_arms_the_room_for_the_next_wait(self):
-        host = self.host(listed=self.listed)
+        host = self.host()
         rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
         self.assertEqual(self.check(host), 1)
         with dispatcher(host), no_loopback(), answerable([]):
@@ -1972,7 +1976,7 @@ class RoomPushes(unittest.TestCase):
         )
 
     def test_a_room_that_is_gone_is_not_waited_on(self):
-        host = self.host(waiting=True, listed=self.listed)
+        host = self.host(waiting=True)
         self.assertEqual(self.check(host), 1)
         host.listed = [{**ROOM, "disbanded_at": 1_760_001_000.0}]
         self.assertEqual(self.check(host), 0)
