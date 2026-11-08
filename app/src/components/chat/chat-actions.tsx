@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArchiveXIcon,
   BellIcon,
@@ -40,7 +40,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
 import { useWide } from "@/lib/media"
+import { chosenOf } from "@/lib/model-pick"
 import { useNow } from "@/lib/threads"
 import { stopMessage } from "@/lib/chat"
 import { contextWindow } from "@/lib/context"
@@ -115,6 +117,40 @@ export function useChatUsage(
   }, [profileId, baseUrl, apiKey, provider])
 
   return { usage, provider, providerUsage, notice, noticeDismissed }
+}
+
+/**
+ * What a chat's screen reads of its surface, in one place: the rows its thread keeps for the
+ * compactions its record names, the context and provider-limit usage of the model it runs next, and
+ * the value the composer's limit notice is handed. The usage sheet's open state stays each screen's
+ * own — a chat's sheet is drawn by `ChatActions`, a canvas's beside its page — so the screen passes
+ * the `onView` that opens it.
+ */
+export function useChatSurface(
+  chat: Conversation | undefined | null,
+  profile: Profile | undefined | null,
+  onView: () => void,
+) {
+  // A live query hands back a fresh array on every run, so what the thread keeps is keyed on the ids
+  // the record names rather than on the array that carried them.
+  const summaryKey = summaryKeyOf(chat?.compactions)
+  const summaries = useMemo(() => summaryRowsOfKey(summaryKey), [summaryKey])
+  const { usage, providerUsage, notice, provider, noticeDismissed } = useChatUsage(
+    chat,
+    profile,
+    chosenOf(chat?.modelChoice),
+  )
+  // The limit value keeps its identity while the notice does, since the composer is one component for
+  // the chat's life: `onView` is read through a ref so a fresh closure doesn't rebuild it.
+  const view = useRef(onView)
+  useEffect(() => {
+    view.current = onView
+  }, [onView])
+  const limit = useMemo(
+    () => ({ usage: { notice, provider, noticeDismissed }, onView: () => view.current() }),
+    [notice, provider, noticeDismissed],
+  )
+  return { summaries, usage, providerUsage, limit }
 }
 
 /**

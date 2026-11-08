@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { Bot } from "@/components/bot"
-import { useChatUsage } from "@/components/chat/chat-actions"
+import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
@@ -18,10 +18,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { attempt } from "@/lib/attempt"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { refreshCanvas, startCanvas, undoCanvas, useCanvas, useCanvases } from "@/lib/canvases"
-import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
 import { db, getActiveProfile } from "@/lib/db"
+import { isLive } from "@/lib/live"
 import { useLarge } from "@/lib/media"
-import { chosenOf } from "@/lib/model-pick"
 import { useDark } from "@/lib/theme"
 import { formatRelative } from "@/lib/format"
 import { useNow } from "@/lib/threads"
@@ -148,7 +147,7 @@ export function CanvasPage() {
 /** Where the canvas's chat comes to rest on a phone: half the screen, or all of it. */
 const SNAPS = [0.5, 1]
 
-/** One canvas, drawn from its newest version, with its chat beside it or raised over it. */
+/** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
 export function CanvasView() {
   const { id = "" } = useParams()
   const { canvas, missing, loaded } = useCanvas(id)
@@ -160,49 +159,48 @@ export function CanvasView() {
   const [undoing, setUndoing] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
-  // Where the frame's page last said it was. Read when the document is built, never per scroll: a
-  // scroll is news for the next draw, not a reason to draw again.
-  const scrolled = useRef(0)
+  // Where the frame's page last said it was, and which canvas said it. Read when the document is
+  // built, never per scroll: a scroll is news for the next draw, not a reason to draw again. The id
+  // rides it because this screen draws every canvas's address — it isn't keyed on one — so a second
+  // canvas opens at its own top rather than at the offset the first one was left at.
+  const scrolled = useRef<{ id: string; at: number }>({ id, at: 0 })
   const chatId = canvas?.chatId
   const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
   const profile = useLiveQuery(
     () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
     [canvas?.profileId],
   )
-  // A live query hands back a fresh array on every run, so what the thread keeps is keyed on the ids
-  // the record names rather than on the array that carried them.
-  const summaryKey = summaryKeyOf(chat?.compactions)
-  const summaries = useMemo(() => summaryRowsOfKey(summaryKey), [summaryKey])
-  const { usage, providerUsage, notice, provider, noticeDismissed } = useChatUsage(
-    chat,
-    profile,
-    chosenOf(chat?.modelChoice),
-  )
-  const limit = useMemo(
-    () => ({ usage: { notice, provider, noticeDismissed }, onView: () => setUsageOpen(true) }),
-    [notice, provider, noticeDismissed],
+  const { summaries, usage, providerUsage, limit } = useChatSurface(chat, profile, () =>
+    setUsageOpen(true),
   )
   const drawn = useMemo(() => {
     if (!html) return null
     const tokens = themeTokens(readTheme())
     try {
-      return { document: canvasDocument(html, { mode, tokens, scroll: scrolled.current }) }
+      return {
+        document: canvasDocument(html, {
+          mode,
+          tokens,
+          scroll: scrolled.current.id === id ? scrolled.current.at : 0,
+        }),
+      }
     } catch {
       return { error: "This canvas can't be drawn: its document has no head." }
     }
-  }, [html, mode])
+  }, [id, html, mode])
 
   // The page says where it has been scrolled to, and only this screen's own frame is heard: a message
   // from any other window is not the canvas talking.
   useEffect(() => {
     const hear = (event: MessageEvent) => {
+      if (event.source !== frame.current?.contentWindow) return
       const at = readScroll(event.data)
-      if (at === null || event.source !== frame.current?.contentWindow) return
-      scrolled.current = at
+      if (at === null) return
+      scrolled.current = { id, at }
     }
     window.addEventListener("message", hear)
     return () => window.removeEventListener("message", hear)
-  }, [])
+  }, [id])
 
   const undo = async () => {
     if (!canvas || undoing) return
@@ -212,7 +210,7 @@ export function CanvasView() {
   }
 
   // The canvas's own session, as any chat body holds it: it edits the page with the host's tools, and
-  // every turn's end is a version this screen re-reads (ADR 0113).
+  // a turn's end is a version this screen re-reads (ADR 0113).
   const body =
     chat && profile ? (
       <PreviewerProvider>
@@ -221,9 +219,13 @@ export function CanvasView() {
           bot={profile}
           summaries={summaries}
           start={undefined}
-          onAway={stay}
           limit={limit}
-          onSettled={() => void refreshCanvas(id)}
+          afterSettled={() => {
+            // The plugin notes a `canvas` change on every write, so a live stream has already redrawn
+            // this page: reading it here as well would make one edit cost two GETs.
+            if (isLive(profile)) return
+            void refreshCanvas(id).catch(() => undefined)
+          }}
         />
       </PreviewerProvider>
     ) : null
@@ -297,15 +299,17 @@ export function CanvasView() {
             </Button>
           )}
         </div>
+        {/* The house's list lane: 412px, the width the app already asks its text to read in
+            (`w-103`, `SPLIT_FLOOR` in `lib/split.ts`), with the page beside it never narrower. */}
         {large && body && (
-          <div className="flex min-h-0 w-[26rem] max-w-[45%] shrink-0 flex-col border-l">
+          <div className="flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l">
             {body}
           </div>
         )}
       </div>
 
       {!large && (
-        <Popup open={editing} onOpenChange={setEditing} modal={false} snapPoints={SNAPS}>
+        <Popup open={editing} onOpenChange={setEditing} snapPoints={SNAPS}>
           <PopupContent bare>
             <PopupHeader className="pb-2">
               <PopupTitle>Edit with {profile?.name || "your bot"}</PopupTitle>
@@ -323,9 +327,6 @@ export function CanvasView() {
     </div>
   )
 }
-
-/** A canvas's chat says nothing about being away: it is drawn beside or over its page, not in a pane. */
-function stay() {}
 
 /** A reader of the app's own theme, as it has landed on the page for the mode drawn. */
 function readTheme() {

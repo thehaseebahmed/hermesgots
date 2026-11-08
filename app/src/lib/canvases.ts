@@ -18,7 +18,8 @@ import { createStore } from "@/lib/store"
 /**
  * Canvases live on each bot's Gots plugin (`canvases.py`, ADR 0113), which keeps the record, the
  * versions and the session that changes them — so a canvas is built, kept and edited with the app
- * closed. The app is the view: it lists what the host holds and draws the newest version.
+ * closed. The app is the view: it lists what the host holds and draws the version its record points
+ * at.
  */
 
 export interface Canvas {
@@ -26,6 +27,7 @@ export interface Canvas {
   /** The bot whose plugin holds it. */
   profileId: string
   title: string
+  /** The version the record points at: an undo moves it back, and a read answers that one. */
   version: number
   pinned: boolean
   hidden: boolean
@@ -38,7 +40,7 @@ export interface Canvas {
   chatId: string
   /** Whether a version sits under this one, which is what Undo has to walk back to. */
   canUndo: boolean
-  /** The newest document. Only the canvas on screen is kept with one. */
+  /** That version's document. Only the canvas on screen is kept with one. */
   html?: string
   /** The host tools that version's page declared. */
   tools?: string[]
@@ -171,13 +173,36 @@ async function botHolding(id: string): Promise<string | null> {
   return found ?? null
 }
 
-/** Reads one canvas with its newest document, which is what its screen draws. */
-export async function refreshCanvas(id: string, signal?: AbortSignal) {
+/**
+ * One canvas, read by a call of the caller's choosing and kept as the app now has it: the guard for
+ * a canvas no bot holds, the bot that does, its config, and the record the read answered.
+ */
+async function readInto(
+  id: string,
+  read: (profile: Profile, id: string) => Promise<Record<string, unknown> | null | undefined>,
+) {
   if (store.get().missing[id]) return
   const profileId = await botHolding(id)
   if (!profileId) return
-  const raw = await getCanvas(await configOf(profileId), id, signal)
+  const raw = await read(await configOf(profileId), id)
   if (raw) put(toCanvas(raw, profileId))
+}
+
+// One read in flight per canvas: a screen's poll, a turn's end and a change heard together are one
+// GET, and the answer lands once — the same rule the list's own sweep keeps below.
+const reading = new Map<string, Promise<void>>()
+
+/** Reads one canvas with the document its record points at, which is what its screen draws. */
+export function refreshCanvas(id: string, signal?: AbortSignal) {
+  const running = reading.get(id)
+  if (running) return running
+  const read = readInto(id, (profile, canvasId) => getCanvas(profile, canvasId, signal)).finally(
+    () => {
+      reading.delete(id)
+    },
+  )
+  reading.set(id, read)
+  return read
 }
 
 /**
@@ -186,11 +211,7 @@ export async function refreshCanvas(id: string, signal?: AbortSignal) {
  * so a canvas at its first version is refused with a 409 and nothing is drawn differently.
  */
 export async function undoCanvas(id: string) {
-  if (store.get().missing[id]) return
-  const profileId = await botHolding(id)
-  if (!profileId) return
-  const raw = await undoCanvasOnHost(await configOf(profileId), id)
-  if (raw) put(toCanvas(raw, profileId))
+  return readInto(id, (profile, canvasId) => undoCanvasOnHost(profile, canvasId))
 }
 
 /** Every bot's canvases, newest first, kept fresh while a screen draws them. */
@@ -208,7 +229,7 @@ export function useCanvases() {
   return { canvases, loaded: state.loaded, unsupported: state.unsupported }
 }
 
-/** One canvas, its newest document read and kept fresh while it is on screen. */
+/** One canvas, the document its record points at read and kept fresh while it is on screen. */
 export function useCanvas(id: string) {
   const state = store.use()
   const canvas = state.details[id] ?? Object.values(state.lists).flat().find((row) => row.id === id)

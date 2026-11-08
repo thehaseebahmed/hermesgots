@@ -20,12 +20,13 @@ import { cn } from "@/lib/utils"
 
 /**
  * What a pop-up is on this screen. Below 1024px a modal bottom sheet (full width on a phone, 640px
- * at most and centred on a tablet). From 1024px a side drawer: full height on the right, swiped off
- * to the right, a third of the viewport wide — never narrower than the 412px list pane it sits
- * beside, never wider than four thirds of it (549px). Material's line for side sheets, which "often
- * become bottom sheets on mobile". A small pick made from a button (the composer's `+` and model
- * pill, a model field) passes that button as `anchor` and is a menu beside it from 1024px instead,
- * since a drawer on the far right would move the eye across the screen for one tap.
+ * at most and centred on a tablet) — unless it is given `snapPoints`, which makes it a non-modal
+ * sheet over a page that keeps working under it. From 1024px a side drawer: full height on the
+ * right, swiped off to the right, a third of the viewport wide — never narrower than the 412px list
+ * pane it sits beside, never wider than four thirds of it (549px). Material's line for side sheets,
+ * which "often become bottom sheets on mobile". A small pick made from a button (the composer's `+`
+ * and model pill, a model field) passes that button as `anchor` and is a menu beside it from 1024px
+ * instead, since a drawer on the far right would move the eye across the screen for one tap.
  *
  * Confirmations aren't pop-ups: they stay `AlertDialog`s, a centred dialog on every screen. A
  * recording or a photo takes the whole screen (`FullscreenPopup`).
@@ -35,7 +36,6 @@ export function Popup({
   open,
   onOpenChange,
   onOpenChangeComplete,
-  modal,
   snapPoints,
   children,
 }: {
@@ -44,11 +44,9 @@ export function Popup({
   onOpenChangeComplete?: (open: boolean) => void
   /** The button the pop-up opens from: from 1024px it's a menu beside it rather than a drawer. */
   anchor?: RefObject<HTMLElement | null>
-  /** Whether the screen behind it is out of reach while it's open. A sheet given `snapPoints` is
-   * non-modal: it is drawn over a page that keeps working under it. */
-  modal?: boolean
   /** Where a sheet comes to rest as it is dragged, as fractions of the screen's height (0.5 is half).
-   * A sheet given them is dragged between them and swiped down to leave. */
+   * A sheet given them is dragged between them and swiped down to leave, and it is non-modal: it is
+   * drawn over a page that keeps working under it. Every other pop-up is modal. */
   snapPoints?: number[]
   children?: ReactNode
 }) {
@@ -74,9 +72,12 @@ export function Popup({
               onOpenChange={(next) => onOpenChange?.(next)}
               onOpenChangeComplete={onOpenChangeComplete}
               // A snapped sheet is a surface over a page that is still the one being read.
-              modal={snapped ? false : modal}
+              modal={snapped ? false : undefined}
               snapPoints={snapped}
               defaultSnapPoint={snapped?.[0]}
+              // And a press on that page is the page's, not a way out of the sheet: a canvas is
+              // tapped to read it, and while the chat is up it is tapped to point at an element.
+              disablePointerDismissal={Boolean(snapped)}
             >
               {children}
             </Drawer.Root>
@@ -203,18 +204,31 @@ const MENU_SIZE: Record<PopupSize, string> = {
 }
 
 /**
+ * The lift a sheet gives when another opens over it: Base UI sets the nested count, both heights and
+ * the child's swipe progress on the popup, and the lift keeps the peek constant whatever either
+ * sheet's height is, unwinding with the child's swipe. Both sheets define it, so a sheet opened from
+ * inside a snapped one lifts it with a peek exactly as it lifts a stacked one.
+ */
+const STACK_LIFT =
+  "[--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)]"
+
+/**
+ * How a sheet leaves and how it drags, whichever way it rests: the transform that takes it off the
+ * bottom, scaled by how hard it was swiped, the transform it starts at, and a drag that doesn't
+ * animate or select anything. Both sheets extend this, so a sheet leaves the same way in both.
+ */
+const SHEET_MOTION =
+  "data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0"
+
+/**
  * How a sheet rests and moves. One opened on top of another stacks on it: it lifts so a peek shows
  * above the child, its content and handle fading out, and the child's own scrim dims this sheet so the
- * stack reads as layers. Base UI sets the nested count, both heights and the child's swipe progress on
- * the popup, and the lift keeps the peek constant whatever either sheet's height is, unwinding with
- * the child's swipe. A sheet given snap stops instead rests at the stop it was dragged to, Base UI
- * holding that offset and the drag in two variables.
+ * stack reads as layers. A sheet given snap stops instead rests at the stop it was dragged to, Base UI
+ * holding that offset and the drag in two variables, and lifts with a peek the same way.
  */
-const SHEET_STACK =
-  "[transform:translateY(calc(var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0"
+const SHEET_STACK = `[transform:translateY(calc(var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] ${STACK_LIFT} data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 ${SHEET_MOTION}`
 
-const SHEET_SNAP =
-  "[transform:translateY(var(--drawer-snap-point-offset))] transition-transform duration-300 ease-[cubic-bezier(0.2,0,0,1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateY(100%)] data-swiping:[transform:translateY(var(--drawer-swipe-movement-y))] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0"
+const SHEET_SNAP = `[transform:translateY(calc(var(--drawer-snap-point-offset)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] ${STACK_LIFT} data-swiping:[transform:translateY(var(--drawer-swipe-movement-y))] ${SHEET_MOTION}`
 
 export function PopupContent({
   className,
@@ -244,8 +258,8 @@ export function PopupContent({
   dataSlot?: string
   /** The pop-up's scroll box, handed to the one consumer that follows it — the thinking sheet. */
   scrollRef?: (node: HTMLDivElement | null) => void
-  /** The children are a whole screen part (a chat), filling the sheet and scrolling themselves: no
-   * scroll box of this pop-up's own, and no header of its own to look for. */
+  /** The children are a whole screen part (a chat), filling the pop-up and scrolling themselves: no
+   * scroll box of this pop-up's own. */
   bare?: boolean
 }) {
   const popup = useRef<HTMLDivElement>(null)
@@ -257,12 +271,12 @@ export function PopupContent({
   const form = usePopupForm()
   const anchor = useContext(Anchor)
   const snapped = useContext(SnapPoints)
-  // Every pop-up renders a header. Only an open one can be missing it: its children mount then, and
-  // the header reports through the context below. The check waits a frame, since Base UI puts the
-  // popup in the document after the commit that opens it, and clears the flag while it's closed so a
-  // later open is checked afresh.
+  // Every pop-up renders a header, a bare one included. Only an open one can be missing it: its
+  // children mount then, and the header reports through the context below. The check waits a frame,
+  // since Base UI puts the popup in the document after the commit that opens it, and clears the flag
+  // while it's closed so a later open is checked afresh.
   useEffect(() => {
-    if (bare || !import.meta.env.DEV || !children) return
+    if (!import.meta.env.DEV || !children) return
     const frame = requestAnimationFrame(() => {
       if (!popup.current?.isConnected) {
         headerSeen.current = false
@@ -298,9 +312,13 @@ export function PopupContent({
                 "max-h-[min(36rem,var(--available-height))]",
               )}
             >
-              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
-                {children}
-              </Scroll>
+              {bare ? (
+                children
+              ) : (
+                <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                  {children}
+                </Scroll>
+              )}
             </Popover.Popup>
           </Popover.Positioner>
         </Popover.Portal>
@@ -330,9 +348,13 @@ export function PopupContent({
               )}
             >
               <Drawer.Content className="flex min-h-0 flex-1 flex-col">
-                <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
-                  {children}
-                </Scroll>
+                {bare ? (
+                  children
+                ) : (
+                  <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                    {children}
+                  </Scroll>
+                )}
               </Drawer.Content>
             </Drawer.Popup>
           </Drawer.Viewport>
@@ -357,7 +379,14 @@ export function PopupContent({
             )}
           />
         )}
-        <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
+        <Drawer.Viewport
+          className={cn(
+            "fixed inset-0 z-50 flex items-end justify-center",
+            // The strip of page above a snapped sheet stays the page's: the viewport covers the
+            // screen so the sheet can slide within it, and only the sheet itself takes a press.
+            snapped && "pointer-events-none",
+          )}
+        >
           <Drawer.Popup
             ref={popup}
             data-popup-form={form}
@@ -370,7 +399,7 @@ export function PopupContent({
               snapped ? SHEET_SNAP : SHEET_STACK,
               // The stops are fractions of the screen, so the sheet is the whole screen tall and the
               // offset Base UI sets is what holds it at the stop it was dragged to.
-              snapped && "h-dvh max-h-none",
+              snapped && "pointer-events-auto h-dvh max-h-none",
               // A bare child fills the sheet to its own edges, and its own content pads them.
               bare && "pb-0",
               className,

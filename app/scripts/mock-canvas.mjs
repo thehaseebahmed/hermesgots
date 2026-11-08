@@ -42,10 +42,17 @@ function page(prompt, title, version) {
 export function createCanvasStore() {
   const canvases = new Map()
 
-  /** The greatest version stored under the record's pointer, as the plugin's `_greatest_below` reads. */
-  const below = (c) =>
-    c.versions.filter((v) => v.version < c.version).sort((a, b) => b.version - a.version)[0]
+  /**
+   * The greatest version stored under the record's pointer, as the plugin's `_greatest_below` reads:
+   * the number itself, or null when nothing sits below the pointer.
+   */
+  const below = (c) => {
+    const under = c.versions.filter((v) => v.version < c.version).map((v) => v.version)
+    return under.length ? Math.max(...under) : null
+  }
 
+  // A listing carries the record and no document, so no `can_undo`: only the one-canvas answer does,
+  // as the plugin's own `listing` answers.
   const summary = (c) => ({
     id: c.id,
     title: c.title,
@@ -56,18 +63,19 @@ export function createCanvasStore() {
     hidden: c.hidden,
     at: c.at,
     created_at: c.created_at,
-    can_undo: Boolean(below(c)),
   })
 
   // The pointer's version, not the newest stored one: an undo moves the pointer back and leaves the
   // versions above it stored but unreachable, as the plugin does.
   const full = (c) => {
     const current = c.versions.find((v) => v.version === c.version)
+    const earlier = below(c)
     return {
       ...summary(c),
       html: current?.html ?? "",
       tools: current?.tools ?? [],
       written_at: current?.at ?? c.at,
+      can_undo: earlier !== null,
     }
   }
 
@@ -131,11 +139,11 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent }
       return true
     }
     const earlier = below(canvas)
-    if (!earlier) {
+    if (earlier === null) {
       fail(409, "This canvas has no earlier version to undo to.")
       return true
     }
-    canvas.version = earlier.version
+    canvas.version = earlier
     canvas.at = Date.now()
     noteEvent("canvas", canvas.session_id)
     json(res, 200, { object: "gots.canvas", canvas: full(canvas) })

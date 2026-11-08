@@ -2965,31 +2965,26 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             logger.debug("gots: couldn't follow a new canvas's queue", exc_info=True)
         return web.json_response({"object": "gots.canvas", "canvas": found}, status=202)
 
-    async def get_canvas(request: "web.Request") -> "web.Response":
-        """One canvas with the newest version's document, which is what the app draws."""
+    async def canvas_view(request: "web.Request", read, *args) -> "web.Response":
+        """A canvas answered by one read of it: the GET and the undo both say what the app draws."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
         try:
             found = await asyncio.to_thread(
-                canvases.current, store_path(), request.match_info["canvas_id"]
+                read, store_path(), request.match_info["canvas_id"], *args
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.canvas", "canvas": found})
 
+    async def get_canvas(request: "web.Request") -> "web.Response":
+        """One canvas: the version its record points at, which is what the app draws."""
+        return await canvas_view(request, canvases.current)
+
     async def undo_canvas(request: "web.Request") -> "web.Response":
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            found = await asyncio.to_thread(
-                canvases.undo, store_path(), request.match_info["canvas_id"]
-            )
-        except canvases.CanvasError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.canvas", "canvas": found})
+        return await canvas_view(request, canvases.undo)
 
     async def list_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

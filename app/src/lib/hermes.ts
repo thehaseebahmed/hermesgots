@@ -1937,7 +1937,7 @@ export async function listCanvases(config: HermesConfig, signal?: AbortSignal) {
   return Array.isArray(body?.canvases) ? (body.canvases as Record<string, unknown>[]) : []
 }
 
-/** One canvas with the newest document it was written as, which is what the screen draws. */
+/** One canvas with the document its record points at, which is what the screen draws. */
 export async function getCanvas(config: HermesConfig, id: string, signal?: AbortSignal) {
   const response = await request(canvasRoot(config, id), { headers: headers(config), signal })
   return (await response.json())?.canvas as Record<string, unknown> | undefined

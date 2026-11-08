@@ -48,6 +48,7 @@ import { usePluginFeature } from "@/lib/features"
 import { mayHoldArchive } from "@/lib/history-window"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useNav } from "@/lib/nav"
+import { quietly } from "@/lib/report"
 import { beginThread } from "@/lib/threads"
 import { useProjects } from "@/lib/projects"
 import { markRead } from "@/lib/read-marks"
@@ -78,16 +79,18 @@ export interface ChatBodyProps {
   main?: MainView
   /** The message a thread opened by `/thread` is handed, taken once by the route. */
   start: ComponentProps<typeof ChatNextThread>["start"]
-  onAway: (away: boolean) => void
+  /** Said when the chat leaves or comes back to the screen; a container that never leaves one has
+   * no use for it. */
+  onAway?: (away: boolean) => void
   /** Where `/new` goes from the composer: a thread's Main, else home. */
   home?: string
   limit: LimitValue
   /**
    * The container's own read at a turn's end, run after the body's follow-up reads (the plugin's
-   * title, context, todos, pull requests and library): a canvas re-reads its page, since its session
-   * has just written a version of it.
+   * title, context, todos, pull requests and library) — and run even when one of those fails, since
+   * what it reads is its own: a canvas re-reads the page its session has just written.
    */
-  onSettled?: (reason: string, thread: unknown) => void
+  afterSettled?: NonNullable<ComponentProps<typeof ChatNextThread>["onSettled"]>
 }
 
 /**
@@ -105,7 +108,7 @@ export function ChatBody({
   onAway,
   home,
   limit,
-  onSettled,
+  afterSettled,
 }: ChatBodyProps) {
   const id = chat.id
   const mainOn = Boolean(main)
@@ -148,10 +151,13 @@ export function ChatBody({
           // What the plugin holds beside the transcript — the title, the context, the todos, a
           // session's workspace, pull requests and library — read as every chat reads it, and then
           // whatever the container reads of its own: a canvas re-reads the page its session edited.
+          // That one runs even when this read fails, since it is a read of something else.
           onSettled={(reason, thread) => {
             const read =
               reason === "turn" ? readAfterTurn(id, { turn: thread.turns }) : refreshChatDetails(id)
-            void Promise.resolve(read).then(() => onSettled?.(reason, thread))
+            void Promise.resolve(read)
+              .catch(quietly("Reading a chat's details"))
+              .then(() => afterSettled?.(reason, thread))
           }}
           onAway={onAway}
           Composer={composer}

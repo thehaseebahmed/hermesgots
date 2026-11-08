@@ -437,6 +437,33 @@ class EditTest(unittest.TestCase):
         # The agent reads what the user is looking at, not the version the undo walked off.
         self.assertEqual((read["version"], read["html"]), (kept["version"], kept["html"]))
 
+    def test_an_edit_after_an_undo_builds_on_the_restored_version(self) -> None:
+        # True of the code before an edit took the write lock too, and kept as the pin on the order it
+        # now guarantees: the pairs are applied to the version the record points at, read on the
+        # connection that writes them, so an undo landing between that read and that write can't be
+        # reverted by an edit built from the version it walked off. The race itself needs two writers,
+        # which a single-threaded test cannot stage — so what this holds is that the edit builds on
+        # the restored version and stores it as the version above the highest.
+        first = canvases.write(
+            self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>First</h1>")
+        )
+        canvases.write(
+            self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>Second</h1>")
+        )
+        restored = canvases.undo(self.path, self.canvas["id"])
+        self.assertEqual(restored["version"], first["version"])
+        edited = canvases.edit(
+            self.path,
+            self.canvas["id"],
+            [{"find": "<h1>First</h1>", "replace": "<h1>Restored</h1>"}],
+        )
+        # Version 3, since an edit lands above the highest stored version, and built on the text the
+        # undo restored rather than the version it walked off.
+        self.assertEqual(edited["version"], 3)
+        self.assertIn("<h1>Restored</h1>", edited["html"])
+        self.assertNotIn("<h1>Second</h1>", edited["html"])
+        self.assertEqual(canvases.version_of(self.path, self.canvas["id"])["version"], 3)
+
 
 class RouteTest(unittest.TestCase):
     def setUp(self) -> None:

@@ -66,10 +66,14 @@ export function readScroll(data: unknown): number | null {
  * Where the page is, in both directions: it tells the parent where it has been scrolled to, and it
  * starts at the position it was last seen at, once its own content has loaded. A page rebuilt at the
  * version its bot just wrote keeps the reader where they were instead of at the top.
+ *
+ * A report is sent when a scroll comes to rest, not on every frame of one: the parent only needs the
+ * position for the next draw, and a scroll reports itself once 150ms after the last movement, plus
+ * once when the page has loaded.
  */
 function scrollBridge(scroll: number): string {
   const at = Number.isFinite(scroll) && scroll > 0 ? Math.round(scroll) : 0
-  return `(function(){var at=${at};var report=function(){try{parent.postMessage({type:"${SCROLL_MESSAGE}",scroll:window.scrollY||0},"*")}catch(e){}};var queued=false;addEventListener("scroll",function(){if(queued)return;queued=true;requestAnimationFrame(function(){queued=false;report()})},{passive:true});addEventListener("load",function(){if(at>0)try{window.scrollTo(0,at)}catch(e){}report()})})()`
+  return `(function(){var at=${at};var report=function(){try{parent.postMessage({type:"${SCROLL_MESSAGE}",scroll:window.scrollY||0},"*")}catch(e){}};var timer=0;addEventListener("scroll",function(){clearTimeout(timer);timer=setTimeout(report,150)},{passive:true});addEventListener("load",function(){if(at>0)try{window.scrollTo(0,at)}catch(e){}report()})})()`
 }
 
 /** The tokens the app's theme holds; one it doesn't set is left out rather than written blank. */

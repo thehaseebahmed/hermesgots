@@ -37,7 +37,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
-import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
+import { ChatActions, LimitNotice, useChatSurface, useChatUsage } from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
@@ -101,7 +101,6 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { compactionMarks } from "@/lib/compactions"
-import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type DelegatedAgent, type HermesProject } from "@/lib/hermes"
@@ -336,10 +335,6 @@ function NextChat({
   closeThread?: () => void
 }) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
-  // A live query hands back a fresh array on every run, so what the thread keeps is keyed on the ids
-  // the record names rather than on the array that carried them.
-  const summaryKey = summaryKeyOf(chat?.compactions)
-  const summaries = useMemo(() => summaryRowsOfKey(summaryKey), [summaryKey])
   const bot = useLiveQuery(
     async () => (chat ? db.profiles.get(chat.profileId) : undefined),
     [chat?.profileId],
@@ -420,18 +415,12 @@ function NextChat({
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   }, [ready, slot, id])
-  const { usage, providerUsage, notice, provider, noticeDismissed } = useChatUsage(
-    chat,
-    bot,
-    chosenOf(chat?.modelChoice),
-  )
   const [usageOpen, setUsageOpen] = useState(false)
+  const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, () =>
+    setUsageOpen(true),
+  )
   const [away, setAway] = useState(false)
   const online = useOnline()
-  const limit = useMemo(
-    () => ({ usage: { notice, provider, noticeDismissed }, onView: () => setUsageOpen(true) }),
-    [notice, provider, noticeDismissed],
-  )
   const actions = chat && bot && (
     <ChatActions
       chat={chat}
