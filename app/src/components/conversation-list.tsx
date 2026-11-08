@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
-import { rowAnswers, rowBot, rowOwner } from "@/lib/chat-row"
+import { rowAnswers, rowBot, rowProfileId } from "@/lib/chat-row"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { presence } from "@/lib/registry"
 import type { Message } from "@/lib/db"
@@ -202,7 +202,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
   const owner = useLiveQuery(async () => {
     if (!chat) return undefined
     const found = await db.conversations.get(chat)
-    return found && listsAsChat(found) ? rowOwner(found) : undefined
+    return found && listsAsChat(found) ? rowProfileId(found) : undefined
   }, [chat])
   const now = useNow()
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { rowAnswers, rowBot, rowOwner } from "../src/lib/chat-row.ts"
+import { rowAnswers, rowBot, rowProfileId } from "../src/lib/chat-row.ts"
 
 const bots = new Map([
   ["on", { id: "on" }],
@@ -14,8 +14,8 @@ const cases = [
   { name: "a bot this device no longer holds", row: { profileId: "gone" }, bot: undefined, answers: true },
 ]
 
-test("a row belongs to the bot its record names", () => {
-  for (const { name, row } of cases) assert.equal(rowOwner(row), row.profileId, name)
+test("a row carries the profile id its record names", () => {
+  for (const { name, row } of cases) assert.equal(rowProfileId(row), row.profileId, name)
 })
 
 test("a bot turned off is the one thing that stops a row drawing", () => {

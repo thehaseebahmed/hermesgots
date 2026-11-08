@@ -16,7 +16,7 @@ import {
   type Profile,
   type Unsent,
 } from "@/lib/db"
-import { rowOwner } from "@/lib/chat-row"
+import { rowProfileId, type ChatRow } from "@/lib/chat-row"
 import { listsAsChat, listsAsThread } from "@/lib/lists-as-chat"
 import { useXLarge } from "@/lib/media"
 import { createStore } from "@/lib/store"
@@ -423,7 +423,7 @@ export async function lastOpened(profileId: string): Promise<LastOpened> {
 type LaneAnswer = LastOpened & { profileId: string }
 
 /** What a chat's row says about who owns it: its bot, and whether it is a project session. */
-type ChatOwner = Pick<Conversation, "profileId" | "projectId">
+type ChatOwner = ChatRow & Pick<Conversation, "projectId">
 
 /**
  * What a bot's third pane is, as one answer: closed, so Main has the row's whole width; open at a
@@ -499,7 +499,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     const found = await db.conversations.get(chat)
     return {
       chat,
-      found: found ? { profileId: rowOwner(found), projectId: found.projectId } : null,
+      found: found ? { profileId: rowProfileId(found), projectId: found.projectId } : null,
     }
   }, [chat, main])
   const found = owner && owner.chat === chat ? owner.found : undefined

@@ -8,20 +8,15 @@
  * asked here rather than read off the field at each screen that draws a row.
  */
 
-/** A chat row, as these rules read it. */
-type Row = { profileId: string }
+export type ChatRow = { profileId: string }
 
-/**
- * The bot whose record carried a row: whose row it is, and — until a room separates the two — whose
- * screen it opens on.
- */
-export function rowOwner(row: Row): string {
+/** The `profileId` a row carries: for a room, only the bot whose list carried its record. */
+export function rowProfileId(row: ChatRow): string {
   return row.profileId
 }
 
-/** The bot this device holds for a row, when it holds one. */
-export function rowBot<B>(row: Row, bots: ReadonlyMap<string, B>): B | undefined {
-  return bots.get(rowOwner(row))
+export function rowBot<B>(row: ChatRow, bots: ReadonlyMap<string, B>): B | undefined {
+  return bots.get(rowProfileId(row))
 }
 
 /**
@@ -29,6 +24,6 @@ export function rowBot<B>(row: Row, bots: ReadonlyMap<string, B>): B | undefined
  * row is not drawn. A bot this device doesn't hold is not one that is off — deleting a bot takes its
  * chats with it — so nothing here hides a row for a record that outlived its bot.
  */
-export function rowAnswers(row: Row, bots: ReadonlyMap<string, { disabled?: boolean }>): boolean {
-  return bots.get(rowOwner(row))?.disabled !== true
+export function rowAnswers(row: ChatRow, bots: ReadonlyMap<string, { disabled?: boolean }>): boolean {
+  return bots.get(rowProfileId(row))?.disabled !== true
 }
