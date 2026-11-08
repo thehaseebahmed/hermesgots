@@ -28,6 +28,9 @@ const RUNS_SETTLE_MS = 300
 /** Every kind of change a screen can be woken by; `catchUpAll` asks each of them after a gap. */
 export const KINDS = ["cron", "runs", "projects", "research", "meetings", "closes", "canvas"] as const
 export type Kind = (typeof KINDS)[number]
+
+/** Whether a frame's name is a kind this build knows; anything else is a newer plugin's news. */
+const isKind = (name: string): name is Kind => (KINDS as readonly string[]).includes(name)
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
 
 export { connectionKey }
@@ -252,12 +255,10 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
     case "runs":
       bumpRunsSoon(key)
       break
-    case "cron":
-    case "projects":
-    case "research":
-    case "meetings":
-    case "closes":
-      bump(key, event)
+    default:
+      // Every other kind is a screen's own: the frame names it and its listeners refresh. A kind
+      // added to `KINDS` bumps here without being listed again; a newer plugin's news is ignored.
+      if (isKind(event)) bump(key, event)
       break
   }
 }

@@ -185,6 +185,8 @@ class WriteTest(unittest.TestCase):
         with self.assertRaises(canvases.CanvasError) as refused:
             canvases.write(self.path, self.canvas["id"], huge)
         self.assertIn("256 KB", str(refused.exception))
+        # The size it names is rounded up: a write a byte over is not "256 KB".
+        self.assertIn("257 KB", str(refused.exception))
         # Refused whole: the canvas keeps the version it had.
         self.assertEqual(canvases.record(self.path, self.canvas["id"])["version"], 0)
 
@@ -299,6 +301,14 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(openui.content({"session_id": self.session + "-c1"}), "")
         self.assertEqual(openui.canvas_content({"session_id": self.plain}), "")
         self.assertEqual(openui.content({"session_id": self.plain}), openui.TEXT)
+
+    def test_a_call_is_found_from_either_id_hermes_gives_it(self) -> None:
+        # A tool and a hook are handed a task id that is the run's own, which is not always the
+        # session's: the canvas is found from whichever of the two names it.
+        with mock.patch.object(canvases, "_session_canvas", side_effect=lambda s: self.canvas["id"] if s == self.session else None):
+            self.assertEqual(canvases._canvas_of_call("task-abc", self.session), self.canvas["id"])
+            self.assertEqual(canvases._canvas_of_call(self.session, None), self.canvas["id"])
+            self.assertIsNone(canvases._canvas_of_call("task-abc", "not-a-canvas"))
 
     def test_a_canvas_session_cannot_ship_or_file_anything(self) -> None:
         with mock.patch.object(canvases, "_session_canvas", return_value=self.canvas["id"]):

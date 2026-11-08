@@ -74,12 +74,32 @@ export function canvasDocument(
   html: string,
   { mode, tokens }: { mode: CanvasMode; tokens: Record<string, string> },
 ): string {
-  const head = /<head\b[^>]*>/i.exec(html)
+  const head = findHead(html)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
-  const at = head.index + head[0].length
+  const at = head.index + head.length
   const prefix =
     `<meta http-equiv="Content-Security-Policy" content="${CANVAS_CSP}">` +
     `<style>${themeVariables(tokens, mode)}</style>` +
     `<script>${NO_PEER}</script>`
   return html.slice(0, at) + prefix + html.slice(at)
+}
+
+/**
+ * Where the page's own head starts, searched for in its markup: a comment that mentions `<head>`
+ * must not be where the policy lands, or the page would be drawn with no policy at all. The host's
+ * scan reads a document the same way, so the two agree on what its head is.
+ */
+function findHead(html: string): { index: number; length: number } | null {
+  let at = 0
+  for (;;) {
+    const comment = html.indexOf("<!--", at)
+    const end = comment === -1 ? html.length : comment
+    const found = /<head\b[^>]*>/i.exec(html.slice(at, end))
+    if (found) return { index: at + found.index, length: found[0].length }
+    if (comment === -1) return null
+    const closed = html.indexOf("-->", comment + 4)
+    // An unterminated comment: nothing after it is markup, so there is no head to find.
+    if (closed === -1) return null
+    at = closed + 3
+  }
 }

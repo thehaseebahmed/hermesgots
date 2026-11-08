@@ -68,6 +68,23 @@ test("theme variables follow the mode", () => {
   assert.ok(light.indexOf("--background") < light.indexOf("<body"))
 })
 
+test("a comment naming the head is not where the policy lands", () => {
+  // The page's own comment can say `<head>`; splicing the policy into it would draw the page with
+  // no policy at all, which is the one thing this module exists to prevent.
+  const noted = PAGE.replace(
+    "<html lang=\"en\">",
+    "<html lang=\"en\"><!-- the <head> below carries the theme and the policy -->",
+  )
+  const html = canvasDocument(noted, { mode: "light", tokens: LIGHT })
+  const comment = html.indexOf("<!--")
+  const csp = html.indexOf('http-equiv="Content-Security-Policy"')
+  assert.ok(csp > comment, "the policy stands outside the comment")
+  assert.ok(csp > html.indexOf("-->"), "and after it closes")
+  // Inside the real head, ahead of the page's title.
+  assert.ok(csp < html.indexOf("<title>Tip</title>"))
+  assert.match(html.slice(csp - 40, csp), /<head[^>]*><meta /)
+})
+
 test("a document with no head is refused rather than drawn unstyled", () => {
   assert.throws(() => canvasDocument("<html><body>hi</body></html>", { mode: "light", tokens: LIGHT }), /head/)
 })

@@ -139,7 +139,7 @@ def scan(html: Any) -> None:
     size = len(html.encode("utf-8"))
     if size > MAX_BYTES:
         raise CanvasError(
-            f"A canvas is capped at 256 KB; this one is {size // 1024} KB. Send less."
+            f"A canvas is capped at 256 KB; this one is {-(-size // 1024)} KB. Send less."
         )
     for name, pattern in SECRETS:
         if pattern.search(html):
@@ -455,6 +455,25 @@ def _session_canvas(session_id: Optional[str]) -> Optional[str]:
     return _tool_canvas(session_id)[0]
 
 
+def _call_canvas(
+    task_id: Optional[str], session_id: Optional[str]
+) -> tuple[Optional[str], Optional[Path]]:
+    """The canvas a tool call edits and the store it lives in, from either id Hermes gives it.
+
+    A hook and a tool are handed a task id that is the run's own, which is not always the session's
+    (``sessions.record_for_call`` copes the same way), so both are asked rather than the first one.
+    """
+    canvas_id, path = _tool_canvas(task_id)
+    if canvas_id is None and session_id != task_id:
+        canvas_id, path = _tool_canvas(session_id)
+    return canvas_id, path
+
+
+def _canvas_of_call(task_id: Optional[str], session_id: Optional[str]) -> Optional[str]:
+    """The canvas a tool call edits, from either id Hermes gives it."""
+    return _call_canvas(task_id, session_id)[0]
+
+
 def _tool_canvas(session_id: Optional[str]) -> tuple[Optional[str], Optional[Path]]:
     """The canvas a run edits and the store it lives in, resolved once for the tool that asks."""
     try:
@@ -503,7 +522,7 @@ READ_SCHEMA = {
 def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: writes the canvas whose session made the call."""
     args = args if isinstance(args, dict) else {}
-    canvas_id, path = _tool_canvas(task_id or session_id)
+    canvas_id, path = _call_canvas(task_id, session_id)
     if not canvas_id or path is None:
         return json.dumps({"error": f"{TOOL_WRITE} only works in a canvas's session."})
     try:
@@ -517,7 +536,7 @@ def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[
 
 def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: the canvas's newest version, as it stands."""
-    canvas_id, path = _tool_canvas(task_id or session_id)
+    canvas_id, path = _call_canvas(task_id, session_id)
     if not canvas_id or path is None:
         return json.dumps({"error": f"{TOOL_READ} only works in a canvas's session."})
     try:
@@ -544,7 +563,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
     """The ``pre_tool_call`` hook: keeps a canvas's session to the canvas's own tools."""
     if kwargs.get("tool_name") not in BLOCKED_TOOLS:
         return None
-    if not _session_canvas(kwargs.get("task_id") or kwargs.get("session_id")):
+    if not _canvas_of_call(kwargs.get("task_id"), kwargs.get("session_id")):
         return None
     return {
         "action": "block",
