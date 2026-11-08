@@ -818,11 +818,11 @@ class BubbleService : Service() {
             Intent(this, BubbleService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val name = BubbleConfig.bot(this)?.name?.takeIf { it.isNotBlank() }
+        val botName = BubbleConfig.bot(this)?.name?.takeIf { it.isNotBlank() }
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_bubble_mic)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(name?.let { "$it is ready for AI dictation" } ?: NO_BOT)
+            .setContentText(botName?.let { "$it is ready for AI dictation" } ?: NO_BOT)
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(open)
