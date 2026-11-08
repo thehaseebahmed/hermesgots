@@ -5,7 +5,7 @@ import { promptOf } from "../lib/run-prompt.ts"
 
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
-import { isLast, newestRead, PAGE, uniq } from "./pages.ts"
+import { isLast, newestRead, PAGE, repeats, uniq } from "./pages.ts"
 import type { Waiting } from "./state"
 
 /** A bot's server, as its base URL (`/v1` or not, `/p/<profile>` or not) and key. */
@@ -60,6 +60,12 @@ export class HostRefused extends Error {}
  * The current chat screen answers the same 404 by polling instead (`chat.ts`).
  */
 export class RunGone extends Error {}
+/**
+ * A transcript walk the host would not move on: it answered a page with the rows it had just
+ * answered. The walk stops there rather than asking for the same page for ever, which a host that
+ * clamps or ignores `offset`, or a proxy serving one cached answer, would otherwise do.
+ */
+export class HostStuck extends Error {}
 const answered = (response: Response) => `The host answered ${response.status}.`
 const ensure = (response: Response) => {
   if (!response.ok) throw new Error(answered(response))
@@ -90,7 +96,9 @@ const refusal = async (response: Response): Promise<string | undefined> => {
 
 /**
  * One page of a session's transcript: the `PAGE` rows that end `offset` rows before the newest,
- * oldest first. A session the host has not heard of yet is an empty chat, not a failure.
+ * oldest first. A session the host has not heard of yet is an empty chat, not a failure, and so is
+ * an answer carrying no `data` array at all — no rows is the end of a read, never a page to ask for
+ * again.
  */
 export async function readPage(
   connection: Connection,
@@ -133,6 +141,7 @@ export async function readTranscript(
   const pages: Row[][] = []
   for (let offset = 0; ; offset += PAGE) {
     const page = await readPage(connection, session, offset, signal, archived)
+    if (repeats(page, pages[0])) throw new HostStuck(`The host answered offset ${offset} again.`)
     pages.unshift(page)
     if (isLast(page)) break
   }
@@ -159,7 +168,11 @@ export async function readNewest(
 ): Promise<{ rows: Row[]; more: boolean | undefined; joined: boolean }> {
   const pages: Row[][] = []
   for (let offset = 0; ; offset += PAGE) {
-    pages.unshift(await readPage(connection, session, offset, signal))
+    const page = await readPage(connection, session, offset, signal)
+    // A host that answered this page already is not paging any further: asking again would read the
+    // same rows for ever, which is no read at all.
+    if (repeats(page, pages[0])) throw new HostStuck(`The host answered offset ${offset} again.`)
+    pages.unshift(page)
     const read = newestRead(pages, held)
     if (read) return read
   }
