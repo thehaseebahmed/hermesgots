@@ -53,6 +53,8 @@ interface Call {
 
 /** What the Host holds now: the wakes it is waiting on, and the log as this device reads it. */
 let waiting: unknown[] = []
+/** The connection whose Host never declares `rooms_questions`, so its room draws no question card. */
+const NO_QUESTIONS = "http://room-waiting-off.test/v1"
 let canStop = true
 let log: { seq: number; eventId: string; kind: string; text?: string; memberId?: string; name?: string }[] = []
 const calls: Call[] = []
@@ -78,7 +80,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const method = (init?.method ?? "GET").toUpperCase()
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null
   if (url.pathname.endsWith("/plugins/gots/info")) {
-    return json({ name: "gots", features: ["rooms", "rooms_questions"] })
+    // The feature list is remembered per connection, so a host that withholds a row is its own.
+    const features = url.origin.startsWith(new URL(NO_QUESTIONS).origin)
+      ? ["rooms"]
+      : ["rooms", "rooms_questions"]
+    return json({ name: "gots", features })
   }
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`) && method === "GET") return json(read())
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}/approve`)) {
@@ -123,14 +129,14 @@ const QUESTION = {
   ],
 }
 
-async function fresh(wake: unknown[] = [], events = log) {
+async function fresh(wake: unknown[] = [], events = log, host = HOST) {
   waiting = wake
   canStop = true
   log = events
   calls.length = 0
   await seedSettings({ onboarded: true })
   await db.profiles.clear()
-  await db.profiles.put(bot)
+  await db.profiles.put({ ...bot, ...(host === HOST ? {} : { baseUrl: host, apiKey: "key" }) })
   await db.conversations.clear()
   await db.roomLog.clear()
   await db.conversations.put({
@@ -286,5 +292,14 @@ test("a room at rest offers no Stop, since there is no round to end",
     await mount(screen(), async () => {
       await until(async () => Boolean(find('[data-slot="room-row"]')), "the room's own row")
       assert.equal(button("Stop"), undefined, "a Stop at rest could only cancel nothing")
+    })
+  }))
+
+test("a host that never declares rooms_questions draws no question card",
+  atWidth(390, async () => {
+    await fresh([QUESTION], [], NO_QUESTIONS)
+    await mount(screen(), async () => {
+      await until(async () => Boolean(find('textarea[aria-label="Message the room"]')), "the room to draw")
+      assert.equal(find('[data-slot="room-question"]'), null, "no card the Host never offered")
     })
   }))

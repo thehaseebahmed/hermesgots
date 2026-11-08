@@ -15,15 +15,23 @@ the Host's own timeout.
 
 **A question is held by the plugin and answered into the Host's own wait.** A member's turn is a
 hidden session on the gateway, not an API-server run, so the plugin's `clarify` tool — which serves
-the app's runs — never sees it. What the Host does project is the turn's activity on
-`on_room_member_activity`; a Host that projects the clarify prompt as its own frame names the server
-request the turn blocks on, and the plugin keeps the words, the choices and who asked until the user
-answers. The answer is written back as a response frame on that request, through the Host's own
-`server_requests.resolve_response`, so the member's turn carries on in the same run with the answer
-the user picked. `rooms_questions` is advertised apart from `rooms`, only where the Host declares
-`room_member_questions`: where that pairing can't be made — an older Host that never projects a
-question — nothing is held, no card is drawn, and the Host's own clarify timeout answers. That is
-the plan's own risk made visible rather than papered over.
+the app's runs — never sees it. The Host's clarify prompt is a server request whose envelope carries
+its id and whose params carry the questions; a Host that forwarded both on
+`on_room_member_activity` would let the plugin keep the words, the choices and who asked until the
+user answers, and the answer is written back as a response frame on that request through the Host's
+own `server_requests.resolve_response`, so the member's turn carries on in the same run.
+
+That is a contract, not a guess: the frame must name the request id, and the plugin holds nothing
+without it — a card whose tap finds no waiter is worse than no card. It also reads the Host's own
+vocabulary (`qid` for a question's id), keeps a held question for half an hour (the Host's clarify
+wait gives up after an hour, so a card outliving that can only be refused), and bounds the questions
+one room may hold without touching another room's.
+
+`rooms_questions` is advertised apart from `rooms`, only where the Host declares
+`room_member_questions`, and the app draws a question card only where that row is on. Where the
+pairing can't be made — today's Host projects approvals only, forwards neither a question's kind nor
+its request id, and declares no such feature — nothing is held, no card is drawn, and the Host's own
+timeout answers. That is the plan's own risk made visible rather than papered over.
 
 **Stop is `groups.stop`, and the log is what says so.** Cancelling the room's work is one call with
 the app's `cancel_id`; what the user reads afterwards is the Host's own rows — `room.stop_requested`
@@ -34,7 +42,8 @@ transcript itself: a room's words are the Host's.
 on top of an escalation would race the settle and could cancel an unrelated live task. `askingMember`
 reads the newest message row instead: a member's reply mentioning `@user` (on a word boundary, so
 `@usernames` is somebody's name) asks, and the user's next message or a member's later reply clears
-it. The screen draws the mark beside the cards, never in place of one.
+it. The screen draws the mark where no card already asks, since a card is the user's move drawn in
+full and the mark only says what a card can't.
 
 **Departure from the plan's wording.** The plan said a question "goes through the plugin's own
 holding for that member's run" without naming how a plan-side Host would fill it. The Host as it

@@ -10,14 +10,10 @@ import { Input } from "@/components/ui/input"
 import type { RoomMember } from "@/lib/db"
 import type { RoomApproval, RoomAsk, RoomAsked } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
-import { memberLabel } from "@/lib/room-log"
+import { memberName } from "@/lib/room-log"
 import { cn } from "@/lib/utils"
 
 /**
- * What a room is waiting on the user for, drawn above its composer: a member's approval, a member's
- * question with the choices it offers, and the mark a reply addressed to `@user` earns — plus the
- * Stop that ends the round (F4).
- *
  * A room is not a session, so a card here is the room's own: it names the member it belongs to and
  * never a tool's row. The approval offers Once and Deny and no more, because the Host's own approve
  * takes nothing else; a question offers exactly the choices the Host asked with, and one that offers
@@ -65,7 +61,7 @@ export function RoomWaiting({
         <RoomApprovalCard
           key={approval.requestId}
           approval={approval}
-          name={nameOf(members, approval.memberId)}
+          name={memberName(members, approval.memberId)}
           busy={busy}
           onApprove={onApprove}
         />
@@ -74,7 +70,7 @@ export function RoomWaiting({
         <RoomQuestionCard
           key={asked.questionId}
           asked={asked}
-          name={nameOf(members, asked.memberId)}
+          name={memberName(members, asked.memberId)}
           busy={busy}
           onAnswer={onAnswer}
         />
@@ -94,8 +90,8 @@ export function RoomWaiting({
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            className="gap-1.5"
+            size="lg"
+            className="h-11 gap-1.5"
             disabled={busy}
             onClick={() => void onStop()}
           >
@@ -106,12 +102,6 @@ export function RoomWaiting({
       )}
     </div>
   )
-}
-
-/** A member's name as the room draws it, and nothing where the roster no longer seats it. */
-function nameOf(members: RoomMember[], memberId?: string): string | undefined {
-  const seated = memberId ? members.find((one) => one.memberId === memberId) : undefined
-  return seated ? memberLabel(seated) || undefined : undefined
 }
 
 function RoomApprovalCard({
@@ -126,15 +116,6 @@ function RoomApprovalCard({
   onApprove: (approval: RoomApproval, choice: "once" | "deny") => Promise<boolean>
 }) {
   const face = useCodeFace()
-  const [pending, setPending] = useState<"once" | "deny" | null>(null)
-  const answer = async (choice: "once" | "deny") => {
-    setPending(choice)
-    try {
-      await onApprove(approval, choice)
-    } finally {
-      setPending(null)
-    }
-  }
   return (
     <Card size="sm" data-slot="room-approval" className={cn(CARD_BASE, "shadow-xl shadow-black/10 dark:shadow-black/40")}>
       <CardHeader>
@@ -153,8 +134,8 @@ function RoomApprovalCard({
         <Button
           size="lg"
           className="h-11 sm:flex-1"
-          disabled={busy || pending !== null}
-          onClick={() => void answer("once")}
+          disabled={busy}
+          onClick={() => void onApprove(approval, "once")}
         >
           Once
         </Button>
@@ -162,8 +143,8 @@ function RoomApprovalCard({
           size="lg"
           variant="destructive"
           className="h-11 sm:flex-1"
-          disabled={busy || pending !== null}
-          onClick={() => void answer("deny")}
+          disabled={busy}
+          onClick={() => void onApprove(approval, "deny")}
         >
           Deny
         </Button>
@@ -186,7 +167,6 @@ function RoomQuestionCard({
   const face = useCodeFace()
   const [picked, setPicked] = useState<Record<string, string[]>>({})
   const [typed, setTyped] = useState<Record<string, string>>({})
-  const [sending, setSending] = useState(false)
 
   // Every question has to be answered before the card sends: the Host's turn waits on all of them,
   // and half an answer is a turn left waiting again.
@@ -208,16 +188,8 @@ function RoomQuestionCard({
     }
     return found
   }
-  const ready = asked.questions.every((question) => question.id in answers())
-  const send = async () => {
-    if (!ready) return
-    setSending(true)
-    try {
-      await onAnswer(asked, answers())
-    } finally {
-      setSending(false)
-    }
-  }
+  const given = answers()
+  const ready = asked.questions.every((question) => question.id in given)
 
   const pick = (questionId: string, choice: string, multi: boolean) => {
     setPicked((held) => {
@@ -254,7 +226,8 @@ function RoomQuestionCard({
                       size="sm"
                       variant={chosen.includes(choice) ? "default" : "outline"}
                       aria-pressed={chosen.includes(choice)}
-                      disabled={busy || sending}
+                      className="h-11"
+                      disabled={busy}
                       onClick={() => pick(question.id, choice, question.multiSelect === true)}
                     >
                       {choice}
@@ -265,7 +238,7 @@ function RoomQuestionCard({
                 <Input
                   aria-label="Type your answer"
                   value={typed[question.id] ?? ""}
-                  disabled={busy || sending}
+                  disabled={busy}
                   onChange={(event) =>
                     setTyped((held) => ({ ...held, [question.id]: event.target.value }))
                   }
@@ -279,8 +252,8 @@ function RoomQuestionCard({
         <Button
           size="lg"
           className="h-11 w-full sm:ml-auto sm:w-auto"
-          disabled={busy || sending || !ready}
-          onClick={() => void send()}
+          disabled={busy || !ready}
+          onClick={() => void onAnswer(asked, given)}
         >
           Send
         </Button>

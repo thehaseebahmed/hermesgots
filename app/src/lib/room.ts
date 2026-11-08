@@ -25,6 +25,7 @@ import {
 } from "@/lib/hermes"
 import { useChanges } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
+import { randomId } from "@/lib/utils"
 import {
   askingMember,
   foldRoom,
@@ -251,7 +252,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
         // is the Host's same message rather than a second one. Words the user changed are a new
         // message: the Host binds an id to its content, and would refuse the old id for them.
         const eventId =
-          failed.current?.text === words ? failed.current.eventId : crypto.randomUUID()
+          failed.current?.text === words ? failed.current.eventId : randomId()
         failed.current = { text: words, eventId }
         const sent = await sendRoomMessage(config, roomId, eventId, words)
         const held = await readMark(roomId)
@@ -311,7 +312,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const stop = useCallback(
     () =>
       roomId
-        ? act(() => stopRoom(config, roomId, crypto.randomUUID()))
+        ? act(() => stopRoom(config, roomId, randomId()))
         : Promise.resolve(false),
     [roomId, config, act],
   )
@@ -326,8 +327,6 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
     [live.members, chat],
   )
   const folded = useMemo(() => foldRoom(rows ?? [], members), [rows, members])
-  // What the room is asking of the user, read from the page this device holds: the Host settles a
-  // round addressed to `@user`, so there is no call to make — only the last words to read.
   const asking = useMemo(() => askingMember(rows ?? [], members), [rows, members])
   return {
     live: { ...live, members, asking },

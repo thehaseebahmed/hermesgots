@@ -125,7 +125,6 @@ function drawnEvent(row) {
   }
 }
 
-/** One member's spoken row, appended to the room's log. */
 function say(room, id, text) {
   const seated = room.members.find((one) => one.member_id === id)
   room.events.push(
@@ -143,10 +142,20 @@ function say(room, id, text) {
   room.at = Date.now()
 }
 
-/** The room at rest: no member at work, and nothing it waits on. */
+/** The room at rest: no member at work, whatever it still waits on. */
 function rest(room) {
   room.working = false
   room.activity = []
+}
+
+/** The round settled, which a room's screen draws as nothing at all. */
+function settles(room) {
+  room.events.push(
+    event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
+      status: "settled",
+      thread_id: "room-thread",
+    }),
+  )
 }
 
 /** What the rounds a send wakes do to the room, one step at a time. */
@@ -190,12 +199,7 @@ function rounds(room, noteEvent, text = "") {
     step(ROUND, () => say(room, "m1", "That one is yours to call, @user."))
     step(PASS, () => {
       rest(room)
-      room.events.push(
-        event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
-          status: "settled",
-          thread_id: "room-thread",
-        }),
-      )
+      settles(room)
     })
     return
   }
@@ -325,12 +329,7 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
         }),
       )
     }
-    room.events.push(
-      event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
-        status: "settled",
-        thread_id: "room-thread",
-      }),
-    )
+    settles(room)
     room.at = Date.now()
     rest(room)
     noteEvent("room", room.room_id)
@@ -349,12 +348,7 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
     const given = body?.answers ?? {}
     room.waiting = room.waiting.filter((one) => one !== held)
     say(room, "m2", `${given.q0 ?? "Your call"} it is — I'll take that.`)
-    room.events.push(
-      event(room, "room.activity", { kind: "gateway", id: "gw-1" }, {
-        status: "settled",
-        thread_id: "room-thread",
-      }),
-    )
+    settles(room)
     room.at = Date.now()
     rest(room)
     noteEvent("room", room.room_id)
@@ -368,7 +362,6 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
     const body = await readBody(req)
     for (const timer of room.timers) clearTimeout(timer)
     room.timers = []
-    // Stop cancels queued and running work, and the room's own log is where it says so.
     const working = room.activity.map((one) => one.memberId)
     room.events.push(
       event(room, "room.stop_requested", { kind: "user", id: "user" }, {

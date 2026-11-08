@@ -76,7 +76,35 @@ await flow("room-waiting", async ({ page, until, shot }) => {
   const question = await card(page, "room-question")
   assert.match(await question.innerText(), /Coder asks/, "the card names the member asking")
   assert.match(await question.innerText(), /Which database\?/, "and asks the Host's question")
-  await shot("question")
+
+  // The card is the room's own and takes the reading column's box at either width: its place above
+  // the composer and its width are geometry no DOM without layout measures.
+  for (const { width, height } of [
+    { width: 390, height: 844 },
+    { width: 1024, height: 900 },
+  ]) {
+    await page.setViewportSize({ width, height })
+    await settled(page)
+    const box = await page.evaluate(() => {
+      const card = document.querySelector('[data-slot="room-question"]')?.getBoundingClientRect()
+      const field = document.querySelector('[aria-label="Message the room"]')?.getBoundingClientRect()
+      return {
+        viewport: window.innerWidth,
+        card: card ? { left: card.left, right: card.right, width: card.width } : null,
+        field: field ? { left: field.left, right: field.right } : null,
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+      }
+    })
+    assert.ok(box.card, `the question card is drawn at ${width}px`)
+    assert.ok(box.card.width <= 672 + 1, `it takes the reading column at ${width}px (${box.card.width}px)`)
+    assert.ok(box.card.left >= -1 && box.card.right <= box.viewport + 1, `it stays on screen at ${width}px`)
+    assert.ok(box.card.right - box.card.left < box.viewport, `it leaves the composer its own row at ${width}px`)
+    assert.ok(box.field && box.field.right <= box.viewport + 1, `the composer stays on screen at ${width}px`)
+    assert.ok(!box.overflow, `nothing scrolls sideways at ${width}px`)
+    await shot(`question-${width}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await settled(page)
   await question.getByRole("button", { name: "Postgres", exact: true }).click()
   await question.getByRole("button", { name: "Send", exact: true }).click()
   await page.getByText(ANSWERED).first().waitFor({ timeout: 20_000 })
@@ -111,32 +139,6 @@ await flow("room-waiting", async ({ page, until, shot }) => {
   await page.getByText(STOPPED).first().waitFor({ timeout: 20_000 })
   await settled(page)
 
-  // The cards are the room's own, in the reading column, at a phone's width and a tablet's.
-  for (const { width, height } of [
-    { width: 390, height: 844 },
-    { width: 1024, height: 900 },
-  ]) {
-    await page.setViewportSize({ width, height })
-    await settled(page)
-    const box = await page.evaluate(() => {
-      const notices = [...document.querySelectorAll('[data-slot="room-row"][data-kind="notice"]')]
-      const notice = notices.at(-1)?.getBoundingClientRect()
-      const field = document.querySelector('[aria-label="Message the room"]')?.getBoundingClientRect()
-      return {
-        viewport: window.innerWidth,
-        notice: notice ? { left: notice.left, right: notice.right, width: notice.width } : null,
-        field: field ? { left: field.left, right: field.right } : null,
-        overflow: document.documentElement.scrollWidth > window.innerWidth,
-      }
-    })
-    assert.ok(box.notice, `the stopped round's notice is drawn at ${width}px`)
-    assert.ok(box.notice.width <= 672 + 1, `it takes the reading column at ${width}px (${box.notice.width}px)`)
-    assert.ok(box.notice.left >= -1 && box.notice.right <= box.viewport + 1, `it stays on screen at ${width}px`)
-    assert.ok(box.field && box.field.right <= box.viewport + 1, `the composer stays on screen at ${width}px`)
-    assert.ok(!box.overflow, `nothing scrolls sideways at ${width}px`)
-    await shot(`room-waiting-${width}`)
-  }
-  await page.setViewportSize({ width: 1440, height: 900 })
 
   pass(
     "a room's approval answered Once and Denied, a question answered with its choice, an @user reply drawing needs-you, and a stopped round",

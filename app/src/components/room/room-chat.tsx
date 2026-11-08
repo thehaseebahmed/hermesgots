@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { chatOwner } from "@/lib/chat-owner"
+import { usePluginFeatureOn } from "@/lib/features"
 import { DEFAULT_SETTINGS, db, getSettings, type Profile, type RoomMember } from "@/lib/db"
 import { COLUMN_BOX } from "@/lib/layout"
 import { useRoom } from "@/lib/room"
@@ -51,6 +52,9 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     [chat, seated],
   )
   const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
+  // A question card is drawn only where the Host declares it can be answered: `rooms_questions` is
+  // the row whose absence says the pairing can't be made (rooms.py, ADR 0118).
+  const asksQuestions = usePluginFeatureOn(answerer, "rooms_questions")
   // A member's picture is the bot seated at its profile on the room's own Host, which is the same
   // seat the answerer came from: a profile name is unique on its Host, not across a device's bots.
   const pictures = useMemo(
@@ -110,10 +114,9 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           <Banner tone="error">{live.refused ?? live.error}</Banner>
         </div>
       )}
-      {/* The room's own cards: a member's approval, a member's question, the @user mark, and Stop. */}
       <RoomWaiting
         members={live.members}
-        waiting={live.waiting}
+        waiting={asksQuestions ? live.waiting : live.waiting.filter((one) => one.kind === "approval")}
         asking={live.asking}
         canStop={answerer ? (live.canStop ?? false) : false}
         working={Boolean(live.working)}
