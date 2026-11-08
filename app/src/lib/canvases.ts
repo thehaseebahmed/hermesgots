@@ -3,7 +3,14 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { hostTargets } from "@/lib/connection"
 import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
-import { createCanvas, getCanvas, hasPluginFeature, listCanvases, runRequest } from "@/lib/hermes"
+import {
+  createCanvas,
+  getCanvas,
+  hasPluginFeature,
+  listCanvases,
+  runRequest,
+  undoCanvas as undoCanvasOnHost,
+} from "@/lib/hermes"
 import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { createStore } from "@/lib/store"
@@ -29,6 +36,8 @@ export interface Canvas {
   sessionId: string
   /** The chat record that session belongs to, which no list draws. */
   chatId: string
+  /** Whether a version sits under this one, which is what Undo has to walk back to. */
+  canUndo: boolean
   /** The newest document. Only the canvas on screen is kept with one. */
   html?: string
   /** The host tools that version's page declared. */
@@ -66,6 +75,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     createdAt: Number(raw.created_at) || 0,
     sessionId: String(raw.session_id ?? ""),
     chatId: String(raw.chat_id ?? ""),
+    canUndo: Boolean(raw.can_undo),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),
     ...(Array.isArray(raw.tools) ? { tools: raw.tools.filter((t): t is string => typeof t === "string") } : {}),
   }
@@ -147,21 +157,39 @@ async function configOf(profileId: string): Promise<Profile> {
   return profile
 }
 
+/**
+ * The bot holding a canvas, as this device knows it. An id it has never seen is looked for by one
+ * sweep, and a canvas no bot holds is remembered rather than looked for again — a stale link costs
+ * one read rather than a fan-out on every tick.
+ */
+async function botHolding(id: string): Promise<string | null> {
+  const known = profileOf(id)
+  if (known) return known
+  await refreshCanvases()
+  const found = profileOf(id)
+  if (!found) store.set({ ...store.get(), missing: { ...store.get().missing, [id]: true } })
+  return found ?? null
+}
+
 /** Reads one canvas with its newest document, which is what its screen draws. */
 export async function refreshCanvas(id: string, signal?: AbortSignal) {
   if (store.get().missing[id]) return
-  let profileId = profileOf(id)
-  if (!profileId) {
-    // The id is unknown to this device: one sweep looks for it, and a canvas no bot holds is not
-    // looked for again — a stale link costs one read rather than a fan-out on every tick.
-    await refreshCanvases()
-    profileId = profileOf(id)
-    if (!profileId) {
-      store.set({ ...store.get(), missing: { ...store.get().missing, [id]: true } })
-      return
-    }
-  }
+  const profileId = await botHolding(id)
+  if (!profileId) return
   const raw = await getCanvas(await configOf(profileId), id, signal)
+  if (raw) put(toCanvas(raw, profileId))
+}
+
+/**
+ * Undo: the host moves the canvas's pointer back one version and answers the canvas as it now is,
+ * which replaces what the screen draws. The versions above it stay on the host — there is no redo —
+ * so a canvas at its first version is refused with a 409 and nothing is drawn differently.
+ */
+export async function undoCanvas(id: string) {
+  if (store.get().missing[id]) return
+  const profileId = await botHolding(id)
+  if (!profileId) return
+  const raw = await undoCanvasOnHost(await configOf(profileId), id)
   if (raw) put(toCanvas(raw, profileId))
 }
 

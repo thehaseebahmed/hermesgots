@@ -1944,6 +1944,18 @@ export async function getCanvas(config: HermesConfig, id: string, signal?: Abort
 }
 
 /**
+ * Undo: the plugin moves the canvas's pointer back one version — nothing is deleted — and answers the
+ * canvas as it now is. A canvas at its first version has nothing to undo to and is refused with a 409.
+ */
+export async function undoCanvas(config: HermesConfig, id: string) {
+  const response = await request(`${canvasRoot(config, id)}/undo`, {
+    method: "POST",
+    headers: headers(config),
+  })
+  return (await response.json())?.canvas as Record<string, unknown> | undefined
+}
+
+/**
  * A canvas from a prompt: the plugin writes the record and the chat, and queues the run that builds
  * it on the canvas's own session, so it is built with the app closed (ADR 0113).
  */

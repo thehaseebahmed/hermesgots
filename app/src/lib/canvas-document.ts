@@ -48,6 +48,30 @@ export const TOKENS = [
  */
 const NO_PEER = `(function(){var names=["RTCPeerConnection","webkitRTCPeerConnection","mozRTCPeerConnection"];for(var i=0;i<names.length;i++){try{delete window[names[i]]}catch(e){}try{window[names[i]]=undefined}catch(e){}}})()`
 
+/** The name the page's scroll report carries, so the route and the script agree on one shape. */
+export const SCROLL_MESSAGE = "gots:canvas-scroll"
+
+/**
+ * The page's position, as the page reports it. A reader of a message's data, so the route can accept
+ * a report from its own frame and nothing else: a number, finite and not above the top of the page.
+ */
+export function readScroll(data: unknown): number | null {
+  if (!data || typeof data !== "object") return null
+  const { type, scroll } = data as { type?: unknown; scroll?: unknown }
+  if (type !== SCROLL_MESSAGE || typeof scroll !== "number") return null
+  return Number.isFinite(scroll) && scroll >= 0 ? scroll : null
+}
+
+/**
+ * Where the page is, in both directions: it tells the parent where it has been scrolled to, and it
+ * starts at the position it was last seen at, once its own content has loaded. A page rebuilt at the
+ * version its bot just wrote keeps the reader where they were instead of at the top.
+ */
+function scrollBridge(scroll: number): string {
+  const at = Number.isFinite(scroll) && scroll > 0 ? Math.round(scroll) : 0
+  return `(function(){var at=${at};var report=function(){try{parent.postMessage({type:"${SCROLL_MESSAGE}",scroll:window.scrollY||0},"*")}catch(e){}};var queued=false;addEventListener("scroll",function(){if(queued)return;queued=true;requestAnimationFrame(function(){queued=false;report()})},{passive:true});addEventListener("load",function(){if(at>0)try{window.scrollTo(0,at)}catch(e){}report()})})()`
+}
+
 /** The tokens the app's theme holds; one it doesn't set is left out rather than written blank. */
 export function themeTokens(read: (name: string) => string): Record<string, string> {
   const tokens: Record<string, string> = {}
@@ -66,13 +90,19 @@ export function themeVariables(tokens: Record<string, string>, mode: CanvasMode)
 }
 
 /**
- * The document a frame is given: the page, with the policy, the theme and the WebRTC removal in its
- * head ahead of anything it wrote. A page with no head can't be drawn — the plugin's scan refuses
- * one, so this is a bug rather than a page, and it throws instead of drawing something unstyled.
+ * The document a frame is given: the page, with the policy, the theme, the WebRTC removal and the
+ * scroll bridge in its head ahead of anything it wrote. `scroll` is the position the bridge last
+ * reported, so a page rebuilt at a new version opens where the reader left the one before it. A page
+ * with no head can't be drawn — the plugin's scan refuses one, so this is a bug rather than a page,
+ * and it throws instead of drawing something unstyled.
  */
 export function canvasDocument(
   html: string,
-  { mode, tokens }: { mode: CanvasMode; tokens: Record<string, string> },
+  {
+    mode,
+    tokens,
+    scroll = 0,
+  }: { mode: CanvasMode; tokens: Record<string, string>; scroll?: number },
 ): string {
   const head = findHead(html)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
@@ -80,7 +110,8 @@ export function canvasDocument(
   const prefix =
     `<meta http-equiv="Content-Security-Policy" content="${CANVAS_CSP}">` +
     `<style>${themeVariables(tokens, mode)}</style>` +
-    `<script>${NO_PEER}</script>`
+    `<script>${NO_PEER}</script>` +
+    `<script>${scrollBridge(scroll)}</script>`
   return html.slice(0, at) + prefix + html.slice(at)
 }
 

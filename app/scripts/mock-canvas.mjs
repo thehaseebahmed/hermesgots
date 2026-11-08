@@ -42,6 +42,10 @@ function page(prompt, title, version) {
 export function createCanvasStore() {
   const canvases = new Map()
 
+  /** The greatest version stored under the record's pointer, as the plugin's `_greatest_below` reads. */
+  const below = (c) =>
+    c.versions.filter((v) => v.version < c.version).sort((a, b) => b.version - a.version)[0]
+
   const summary = (c) => ({
     id: c.id,
     title: c.title,
@@ -52,24 +56,27 @@ export function createCanvasStore() {
     hidden: c.hidden,
     at: c.at,
     created_at: c.created_at,
+    can_undo: Boolean(below(c)),
   })
 
+  // The pointer's version, not the newest stored one: an undo moves the pointer back and leaves the
+  // versions above it stored but unreachable, as the plugin does.
   const full = (c) => {
-    const newest = c.versions[c.versions.length - 1]
+    const current = c.versions.find((v) => v.version === c.version)
     return {
       ...summary(c),
-      html: newest?.html ?? "",
-      tools: newest?.tools ?? [],
-      written_at: newest?.at ?? c.at,
+      html: current?.html ?? "",
+      tools: current?.tools ?? [],
+      written_at: current?.at ?? c.at,
     }
   }
 
-  return { canvases, summary, full }
+  return { canvases, summary, full, below }
 }
 
 export async function handleCanvas(req, res, path, { json, readBody, noteEvent }, store) {
   if (!path.startsWith("/api/plugins/gots/canvases")) return false
-  const { canvases, summary, full } = store
+  const { canvases, summary, full, below } = store
   const fail = (status, message) => json(res, status, { error: { message } })
 
   if (path === "/api/plugins/gots/canvases") {
@@ -110,6 +117,29 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent }
       json(res, 202, { object: "gots.canvas", canvas: full(canvas) })
       return true
     }
+  }
+
+  const undo = /^\/api\/plugins\/gots\/canvases\/([^/]+)\/undo$/.exec(path)
+  if (undo) {
+    const canvas = canvases.get(decodeURIComponent(undo[1]))
+    if (!canvas) {
+      fail(404, "There is no such canvas.")
+      return true
+    }
+    if (req.method !== "POST") {
+      fail(405, "Undo is a POST.")
+      return true
+    }
+    const earlier = below(canvas)
+    if (!earlier) {
+      fail(409, "This canvas has no earlier version to undo to.")
+      return true
+    }
+    canvas.version = earlier.version
+    canvas.at = Date.now()
+    noteEvent("canvas", canvas.session_id)
+    json(res, 200, { object: "gots.canvas", canvas: full(canvas) })
+    return true
   }
 
   const match = /^\/api\/plugins\/gots\/canvases\/([^/]+)$/.exec(path)

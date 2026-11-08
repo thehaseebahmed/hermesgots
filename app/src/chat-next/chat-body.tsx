@@ -82,6 +82,12 @@ export interface ChatBodyProps {
   /** Where `/new` goes from the composer: a thread's Main, else home. */
   home?: string
   limit: LimitValue
+  /**
+   * The container's own read at a turn's end, run after the body's follow-up reads (the plugin's
+   * title, context, todos, pull requests and library): a canvas re-reads its page, since its session
+   * has just written a version of it.
+   */
+  onSettled?: (reason: string, thread: unknown) => void
 }
 
 /**
@@ -99,6 +105,7 @@ export function ChatBody({
   onAway,
   home,
   limit,
+  onSettled,
 }: ChatBodyProps) {
   const id = chat.id
   const mainOn = Boolean(main)
@@ -139,12 +146,13 @@ export function ChatBody({
               : undefined
           }
           // What the plugin holds beside the transcript — the title, the context, the todos, a
-          // session's workspace, pull requests and library — read as every chat reads it.
-          onSettled={(reason, thread) =>
-            reason === "turn"
-              ? void readAfterTurn(id, { turn: thread.turns })
-              : refreshChatDetails(id)
-          }
+          // session's workspace, pull requests and library — read as every chat reads it, and then
+          // whatever the container reads of its own: a canvas re-reads the page its session edited.
+          onSettled={(reason, thread) => {
+            const read =
+              reason === "turn" ? readAfterTurn(id, { turn: thread.turns }) : refreshChatDetails(id)
+            void Promise.resolve(read).then(() => onSettled?.(reason, thread))
+          }}
           onAway={onAway}
           Composer={composer}
         />

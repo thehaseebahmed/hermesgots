@@ -73,7 +73,11 @@ function subscribe(listener: () => void) {
 
 const tickKey = (key: string, kind: Kind) => `${kind}\n${key}`
 
-function bump(key: string, kind: Kind) {
+/**
+ * The one place a change is noted: a server's frame comes through here, and so does a component test
+ * that stands in for a frame, so what a screen hears is the same news either way.
+ */
+export function noteChange(key: string, kind: Kind) {
   const id = tickKey(key, kind)
   ticks = { ...ticks, [id]: (ticks[id] ?? 0) + 1 }
   notify()
@@ -202,7 +206,7 @@ function catchUpAll(key: string) {
     })
   }
   sessionListeners.forEach((listener) => listener(key))
-  for (const kind of KINDS) bump(key, kind)
+  for (const kind of KINDS) noteChange(key, kind)
 }
 
 async function applyTitle(key: string, sessionId: unknown) {
@@ -220,7 +224,7 @@ function bumpRunsSoon(key: string) {
     key,
     window.setTimeout(() => {
       settling.delete(key)
-      bump(key, "runs")
+      noteChange(key, "runs")
     }, RUNS_SETTLE_MS),
   )
 }
@@ -258,7 +262,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
     default:
       // Every other kind is a screen's own: the frame names it and its listeners refresh. A kind
       // added to `KINDS` bumps here without being listed again; a newer plugin's news is ignored.
-      if (isKind(event)) bump(key, event)
+      if (isKind(event)) noteChange(key, event)
       break
   }
 }

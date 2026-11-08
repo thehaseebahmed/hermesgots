@@ -690,6 +690,10 @@ _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a thread, never a card in Main and never triaged, and it carries the canvas's name as its title.
 _Avoid_: canvas chat, build session, edit thread
 
+**Canvas sheet**:
+The canvas session raised over the canvas on a phone, where the page and its chat cannot share the screen. It opens at half height from the Edit pill, is dragged up to the full screen, and is swiped down to leave the page in view.
+_Avoid_: canvas drawer, edit mode, split view, bottom bar
+
 **Version**:
 One saved state of a canvas's HTML, made by every write its bot does. Undo steps back to the one before; a canvas's data is not part of a version.
 _Avoid_: revision, snapshot, draft

@@ -4,8 +4,10 @@ import test from "node:test"
 
 import {
   CANVAS_CSP,
+  SCROLL_MESSAGE,
   TOKENS,
   canvasDocument,
+  readScroll,
   themeTokens,
   themeVariables,
 } from "../src/lib/canvas-document.ts"
@@ -87,6 +89,38 @@ test("a comment naming the head is not where the policy lands", () => {
 
 test("a document with no head is refused rather than drawn unstyled", () => {
   assert.throws(() => canvasDocument("<html><body>hi</body></html>", { mode: "light", tokens: LIGHT }), /head/)
+})
+
+test("the page reports its scroll to the app and starts where it was told", () => {
+  const html = canvasDocument(PAGE, { mode: "light", tokens: LIGHT, scroll: 420 })
+  // The head script is the page's only way to say where it is: it names the message the app reads.
+  assert.ok(html.includes(SCROLL_MESSAGE), "the document carries the message's name")
+  // The position rides the script as a number, and the page scrolls to it once it has loaded.
+  assert.match(html, /var at=420/, "it starts at the position it was told")
+  assert.match(html, /scrollTo\(0,at\)/)
+  assert.match(html, /addEventListener\("load"/)
+  // After the policy, the theme and the WebRTC removal, so none of it runs before them.
+  assert.ok(html.indexOf("Content-Security-Policy") < html.indexOf(SCROLL_MESSAGE))
+  assert.ok(html.indexOf("RTCPeerConnection") < html.indexOf(SCROLL_MESSAGE))
+  // A page built with no position starts at the top, as a first draw should.
+  const top = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
+  assert.match(top, /var at=0/)
+  assert.ok(!/var at=[1-9]/.test(top))
+})
+
+test("readScroll takes a position and refuses everything else", () => {
+  assert.equal(readScroll({ type: SCROLL_MESSAGE, scroll: 120 }), 120)
+  assert.equal(readScroll({ type: SCROLL_MESSAGE, scroll: 0 }), 0)
+  assert.equal(readScroll({ type: SCROLL_MESSAGE, scroll: -1 }), null)
+  assert.equal(readScroll({ type: SCROLL_MESSAGE, scroll: Number.NaN }), null)
+  assert.equal(readScroll({ type: SCROLL_MESSAGE, scroll: Number.POSITIVE_INFINITY }), null)
+  // A string that looks like a number is another page's idea of the message, not this one's.
+  assert.equal(readScroll({ type: SCROLL_MESSAGE, scroll: "120" }), null)
+  assert.equal(readScroll({ type: SCROLL_MESSAGE }), null)
+  assert.equal(readScroll({ type: "something:else", scroll: 120 }), null)
+  assert.equal(readScroll(null), null)
+  assert.equal(readScroll("gots:canvas-scroll"), null)
+  assert.equal(readScroll(120), null)
 })
 
 test("the tokens are read off the app's own theme, only the ones a canvas is told", () => {
