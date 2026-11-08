@@ -5,6 +5,7 @@
  */
 import { readFile } from "node:fs/promises"
 import { statSync } from "node:fs"
+import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -58,11 +59,19 @@ export async function resolve(specifier, context, next) {
   // which would otherwise resolve to a file Node has no loader for.
   if (specifier.endsWith(".css")) return { url: "data:text/javascript,", shortCircuit: true }
   const parent = context.parentURL ? fileURLToPath(context.parentURL) : root
-  // `?raw` is Vite's: an asset imported as the string it holds.
+  // `?raw` is Vite's: an asset imported as the string it holds. A stylesheet a package ships
+  // (`tailwindcss/index.css?raw`) is a file in `node_modules`, which only the resolver can find.
   if (specifier.endsWith("?raw")) {
     const found = locate(specifier.slice(0, -"?raw".length), parent)
     if (found) return { url: `${pathToFileURL(found).href}?raw`, shortCircuit: true }
-    return next(specifier, context)
+    try {
+      const file = createRequire(isFile(parent) ? parent : path.join(parent, "index.mjs")).resolve(
+        specifier.slice(0, -"?raw".length),
+      )
+      return { url: `${pathToFileURL(file).href}?raw`, shortCircuit: true }
+    } catch {
+      return next(specifier, context)
+    }
   }
   const found = locate(specifier, parent)
   if (found) return { url: pathToFileURL(found).href, shortCircuit: true }

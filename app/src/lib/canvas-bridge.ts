@@ -13,6 +13,13 @@
 /** The name both halves mark a message with, so the page and the app agree on one shape. */
 export const BRIDGE_MESSAGE = "gots:canvas-data"
 
+/**
+ * What a page may ask of its data, in the order the page's half offers them: the same four names the
+ * guide tells a bot it may call, held here so a guide that names a fifth is a failing test rather
+ * than a promise the app doesn't keep.
+ */
+export const BRIDGE_METHODS = ["list", "get", "put", "remove"] as const
+
 /** One document of a canvas's own data, as the host answers it: a collection, an id and a clock. */
 export interface CanvasDoc {
   collection: string

@@ -17,6 +17,14 @@ import { BRIDGE_SCRIPT } from "./canvas-bridge.ts"
 
 export type CanvasMode = "light" | "dark"
 
+/**
+ * The libraries a page may ask for by name: the ones the app carries a source for, so a page reads
+ * them with the app's own copy rather than a CDN the policy wouldn't allow anyway. A name outside
+ * this list is dropped, which is how a page asking for something the app doesn't have still draws.
+ */
+export const LIBRARIES = ["chart", "date", "icons"] as const
+export type CanvasLibrary = (typeof LIBRARIES)[number]
+
 export const CANVAS_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
   "font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'"
@@ -98,12 +106,32 @@ export function themeVariables(tokens: Record<string, string>, mode: CanvasMode)
 }
 
 /**
- * The document a frame is given: the page, with the policy, the theme, the WebRTC removal, the
- * scroll bridge and the data bridge in its head ahead of anything it wrote — five things, the bridge
- * last. `scroll` is the position the bridge last reported, so a page rebuilt at a new version opens
- * where the reader left the one before it. A page with no head can't be drawn — the plugin's scan
- * refuses one, so this is a bug rather than a page, and it throws instead of drawing something
- * unstyled.
+ * A page's ask for a library, as the guide writes it: an empty script naming one. Other attributes
+ * may ride the tag, and both quote styles count — a bot writes markup, not a spec.
+ */
+const LIBRARY_TAG = /<script\b[^>]*\bdata-canvas-lib\s*=\s*["']([^"']*)["'][^>]*>\s*<\/script>/gi
+
+/**
+ * Every ask taken out, the ones the app can answer replaced by the library's own source. A name it
+ * doesn't know, and a known one the caller gave no source for, leave nothing behind: an empty script
+ * of the page's own would run as one, and the tag names a library the page never gets.
+ */
+function inlineLibraries(html: string, libraries: Partial<Record<CanvasLibrary, string>>): string {
+  return html.replace(LIBRARY_TAG, (_tag, name: string) => {
+    const known = (LIBRARIES as readonly string[]).includes(name)
+    const source = known ? libraries[name as CanvasLibrary] : undefined
+    return source ? `<script>${source}</script>` : ""
+  })
+}
+
+/**
+ * The document a frame is given: the page, with the policy, the theme, the compiled classes, the
+ * WebRTC removal, the scroll bridge and the data bridge in its head ahead of anything it wrote — the
+ * data bridge last, since the page's own scripts are what call it. `scroll` is the position the
+ * bridge last reported, so a page rebuilt at a new version opens where the reader left the one
+ * before it; `libraries` are the sources an ask for one is answered with, and `css` the Tailwind the
+ * page's own classes compiled to. A page with no head can't be drawn — the plugin's scan refuses one,
+ * so this is a bug rather than a page, and it throws instead of drawing something unstyled.
  */
 export function canvasDocument(
   html: string,
@@ -111,18 +139,28 @@ export function canvasDocument(
     mode,
     tokens,
     scroll = 0,
-  }: { mode: CanvasMode; tokens: Record<string, string>; scroll?: number },
+    libraries = {},
+    css = "",
+  }: {
+    mode: CanvasMode
+    tokens: Record<string, string>
+    scroll?: number
+    libraries?: Partial<Record<CanvasLibrary, string>>
+    css?: string
+  },
 ): string {
-  const head = findHead(html)
+  const page = inlineLibraries(html, libraries)
+  const head = findHead(page)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
   const at = head.index + head.length
   const prefix =
     `<meta http-equiv="Content-Security-Policy" content="${CANVAS_CSP}">` +
     `<style>${themeVariables(tokens, mode)}</style>` +
+    (css ? `<style>${css}</style>` : "") +
     `<script>${NO_PEER}</script>` +
     `<script>${scrollBridge(scroll)}</script>` +
     `<script>${BRIDGE_SCRIPT}</script>`
-  return html.slice(0, at) + prefix + html.slice(at)
+  return page.slice(0, at) + prefix + page.slice(at)
 }
 
 /**

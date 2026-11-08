@@ -1007,6 +1007,17 @@ export interface RoomLogRow extends RoomEvent {
   roomId: string
 }
 
+/**
+ * A canvas's compiled classes, kept on this device (`canvas-css.ts`): the canvas and the version
+ * the CSS was compiled for, the CSS itself, and when it was written, which is the order it is let
+ * go of in.
+ */
+export interface CanvasCssRow {
+  key: string
+  css: string
+  at: number
+}
+
 export const db = new Dexie("gots") as Dexie & {
   settings: EntityTable<Settings, "id">
   profiles: EntityTable<Profile, "id">
@@ -1030,6 +1041,7 @@ export const db = new Dexie("gots") as Dexie & {
   speechCache: EntityTable<SpeechCacheRow, "key">
   netLog: EntityTable<NetRequest, "id">
   roomLog: Table<RoomLogRow, [string, number]>
+  canvasCss: EntityTable<CanvasCssRow, "key">
 }
 
 /** The messages store as this device declares it, so a test can stand a database up at an old version. */
@@ -1408,6 +1420,10 @@ db.version(36).stores({ appCache: null })
 // page is read from the Host and kept once drawn, so nothing older has to be moved into it.
 db.version(37).stores({ roomLog: "[roomId+seq], roomId" })
 
+// v38: the classes each canvas version compiled to, so a page opened again is drawn from a read
+// rather than a compile. A new table: nothing older has to be moved into it.
+db.version(38).stores({ canvasCss: "key, at" })
+
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
@@ -1748,6 +1764,7 @@ export async function clearAllData() {
     db.speechCache,
     db.netLog,
     db.roomLog,
+    db.canvasCss,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

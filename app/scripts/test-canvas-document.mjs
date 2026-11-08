@@ -2,8 +2,10 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
+import { BRIDGE_METHODS } from "../src/lib/canvas-bridge.ts"
 import {
   CANVAS_CSP,
+  LIBRARIES,
   SCROLL_MESSAGE,
   TOKENS,
   canvasDocument,
@@ -11,6 +13,7 @@ import {
   themeTokens,
   themeVariables,
 } from "../src/lib/canvas-document.ts"
+import { canvasClasses, compileCanvasCss } from "../src/lib/canvas-tailwind.ts"
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -138,6 +141,74 @@ test("the tokens the page is given are the ones its guide names", () => {
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
   const named = new Set([...guide.matchAll(/--([a-z-]+)/g)].map((match) => match[1]))
   assert.deepEqual([...named].sort(), [...TOKENS].sort())
+})
+
+test("a named library is inlined and an unknown one dropped", () => {
+  // A page asks for a library by naming it in an empty script; the app puts the source where the
+  // ask was, and a name it can't answer is taken out rather than left as a tag the page would parse
+  // as an empty script of its own.
+  const page = PAGE.replace(
+    "<title>Tip</title>",
+    '<title>Tip</title>\n    <script data-canvas-lib="chart"></script>\n' +
+      '    <script data-canvas-lib="nope"></script>\n' +
+      "    <script data-canvas-lib='icons'></script>",
+  )
+  const html = canvasDocument(page, {
+    mode: "light",
+    tokens: LIGHT,
+    libraries: { chart: "window.Chart=function(){}" },
+  })
+  assert.match(html, /<script>window\.Chart=function\(\)\{\}<\/script>/, "the source is inlined")
+  assert.ok(
+    html.indexOf("window.Chart") < html.indexOf("<body"),
+    "and ahead of the page's own body",
+  )
+  assert.equal(html.includes("data-canvas-lib"), false, "no ask is left in the document")
+  assert.equal(html.includes("nope"), false, "an unknown name is dropped")
+  assert.equal(
+    html.includes("<script></script>"),
+    false,
+    "a known name with no source is dropped too",
+  )
+})
+
+test("bg-primary compiles to the token's variable", async () => {
+  // The page's classes are Tailwind's, compiled from the same tokens the page is handed: a utility
+  // that resolves to anything but `var(--primary)` would follow a colour the app never set.
+  const base = readFileSync(
+    new URL("../node_modules/tailwindcss/index.css", import.meta.url),
+    "utf8",
+  )
+  const css = await compileCanvasCss(base, ["bg-primary", "text-primary-foreground", "rounded-lg"])
+  const ruleFor = (name) => {
+    const found = new RegExp(
+      `\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{[^}]*\\}`,
+    ).exec(css)
+    assert.ok(found, `${name} is compiled`)
+    return found[0]
+  }
+  assert.match(ruleFor("bg-primary"), /background-color: var\(--primary\)/)
+  assert.match(ruleFor("text-primary-foreground"), /color: var\(--primary-foreground\)/)
+  assert.match(ruleFor("rounded-lg"), /border-radius: var\(--radius\)/)
+})
+
+test("the classes compiled are the ones the page's class attributes name", () => {
+  // Only what is in the markup is compiled (`classes` in the guide): the reader takes both quote
+  // styles, keeps each name once, and is not fooled by an attribute or a script that looks like one.
+  const page = `<div class="p-4  bg-card bg-card" data-x="p-4"></div>
+    <span class='text-foreground md:mt-2'></span>
+    <script>var prose = 'class="nope"'</script>
+    <style>.nope{color:red}</style>`
+  assert.deepEqual(canvasClasses(page), ["bg-card", "md:mt-2", "p-4", "text-foreground"])
+})
+
+test("the canvas section names exactly the libraries and bridge methods the app has", () => {
+  // The guide is what a bot is told it may ask for, and the app is what answers: a name in one and
+  // not the other is a page that draws a hole where a library or a call should be.
+  const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
+  const named = (pattern) => [...new Set([...guide.matchAll(pattern)].map((match) => match[1]))]
+  assert.deepEqual(named(/data-canvas-lib="([a-z]+)"/g).sort(), [...LIBRARIES].sort())
+  assert.deepEqual(named(/canvas\.data\.([a-z]+)/g).sort(), [...BRIDGE_METHODS].sort())
 })
 
 test("the app's own policy keeps a canvas's frame from navigating itself away", () => {
