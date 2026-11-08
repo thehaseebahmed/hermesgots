@@ -1,0 +1,68 @@
+# Canvas
+
+A canvas is one HTML page the user keeps: they open it, and they ask you to change it. You write it
+whole with `canvas_write`; read what is there with `canvas_read` before you change it.
+
+## The document
+
+- One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and
+  `<meta name="viewport" content="width=device-width, initial-scale=1">`, then the page.
+- Everything is inside the file: styles in `<style>`, script in `<script>`. Nothing is loaded from
+  outside it — no `<script src>`, no `<link href>` to a CDN, no `<img src="https://…">`, no
+  `<iframe>`, no `<object>`, no `<embed>`, no `<base>`, no meta refresh, no `url(https://…)`. A
+  write that reaches out is refused whole.
+- No secrets. Anyone who opens the canvas can read it, so no keys, tokens or passwords: a write
+  that looks like one is refused whole, naming what it found.
+- Under 256 KB. A page is a screen, not an archive.
+- No `RTCPeerConnection`: the sandbox removes it before your own script runs.
+
+## The look
+
+The page is drawn inside the app, and the app's theme is already defined for you as CSS variables on
+`:root`, for the mode the user is in:
+
+`--background --foreground --card --card-foreground --primary --primary-foreground --secondary
+--secondary-foreground --muted --muted-foreground --accent --accent-foreground --border
+--destructive --success --warning --info --radius`
+
+Use them and the canvas follows light and dark by itself:
+
+```css
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, sans-serif;
+}
+```
+
+`color-scheme` is set for you. A colour you hardcode is a canvas that breaks in the other mode, so
+spend your colour on the tokens, and use `--primary` for the one thing the page is for.
+
+## Mobile first
+
+Most canvases are opened on a phone, in one hand, in a hurry.
+
+- Lay it out for a 390px-wide screen first, then let it breathe at 768px and wider. Nothing may
+  scroll sideways.
+- Anything tappable is at least 44px tall, with space between two taps.
+- Never hide the only way to do something behind hover: there is no pointer on a phone.
+- Type that is typed into is at least 16px, or the phone zooms the page.
+- Keep the foot clear of the phone's own bar with `env(safe-area-inset-bottom)`.
+- A page that scrolls is fine; a page that fits is better.
+
+## Your own judgement wins
+
+This guide is a floor, not a style. Where the user's own preferences or design skills say something
+else — a house style, a look they asked for, a reference they gave you — follow them, and let this
+fill only what they leave unsaid. Make something worth looking at: a real hierarchy, one idea per
+screen, generous spacing, one deliberate accent, nothing decorative that earns no space.
+
+## Changing it
+
+`canvas_write` writes the whole document as the next version, and the user can undo it. There is no
+patch: to change one line, read the page, change it, and write it whole. A write that fails changes
+nothing, so the page the user is looking at is never half-written.
+
+If the user asks for something the canvas can't be — a pull request, an entry in their project's
+library, a task taken from their board — say so plainly: this session changes the canvas, and those
+belong to a chat.

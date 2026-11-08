@@ -1925,6 +1925,40 @@ export async function researchAction(
   return (await response.json())?.mission as Record<string, unknown> | undefined
 }
 
+function canvasRoot(config: HermesConfig, id?: string) {
+  const root = `${pluginRoot(config.baseUrl)}/canvases`
+  return id ? `${root}/${encodeURIComponent(id)}` : root
+}
+
+/** The bot's canvases on the plugin (`canvases.py`), newest first, without their documents. */
+export async function listCanvases(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(canvasRoot(config), { headers: headers(config), signal })
+  const body = await response.json()
+  return Array.isArray(body?.canvases) ? (body.canvases as Record<string, unknown>[]) : []
+}
+
+/** One canvas with the newest document it was written as, which is what the screen draws. */
+export async function getCanvas(config: HermesConfig, id: string, signal?: AbortSignal) {
+  const response = await request(canvasRoot(config, id), { headers: headers(config), signal })
+  return (await response.json())?.canvas as Record<string, unknown> | undefined
+}
+
+/**
+ * A canvas from a prompt: the plugin writes the record and the chat, and queues the run that builds
+ * it on the canvas's own session, so it is built with the app closed (ADR 0113).
+ */
+export async function createCanvas(
+  config: HermesConfig,
+  input: { prompt: string; profileId: string; body?: Record<string, unknown> },
+) {
+  const response = await request(canvasRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ prompt: input.prompt, profile_id: input.profileId, body: input.body }),
+  })
+  return (await response.json())?.canvas as Record<string, unknown> | undefined
+}
+
 function meetingRoot(config: HermesConfig, id?: string) {
   const root = `${pluginRoot(config.baseUrl)}/meetings`
   return id ? `${root}/${encodeURIComponent(id)}` : root

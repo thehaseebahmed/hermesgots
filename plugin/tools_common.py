@@ -9,20 +9,33 @@ definition to every agent — the same wrapper for every tool.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def wire_tool(adapter: Any, tool: str, schema: Dict[str, Any], label: str) -> bool:
+def wire_tool(
+    adapter: Any,
+    tool: str,
+    schema: Dict[str, Any],
+    label: str,
+    when: Optional[Callable[[Optional[str]], bool]] = None,
+) -> bool:
     """Makes every agent the API server builds carry the tool when this profile registered it,
-    since a saved ``platform_toolsets.api_server`` would otherwise leave the plugin's toolset out."""
+    since a saved ``platform_toolsets.api_server`` would otherwise leave the plugin's toolset out.
+
+    ``when`` keeps the tool to the sessions it is for — a research mission's agent, a canvas's — and
+    is asked the session the agent was built for. Without it every agent carries the tool.
+    """
     original = getattr(adapter, "_create_agent", None)
     if not callable(original):
         return False
 
     def create_agent(*args: Any, **kwargs: Any) -> Any:
         agent = original(*args, **kwargs)
+        session_id = kwargs.get("session_id") or getattr(agent, "session_id", None)
+        if when is not None and not when(session_id):
+            return agent
         try:
             equip_tool(agent, tool, schema)
         except Exception:

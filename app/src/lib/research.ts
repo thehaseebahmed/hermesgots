@@ -11,7 +11,7 @@ import {
 
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { connectionKey } from "@/lib/connection"
+import { hostTargets } from "@/lib/connection"
 import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
@@ -472,17 +472,6 @@ function put(mission: Mission) {
   })
 }
 
-/** Bots on the same server and profile share one list; the first bot keeps it. */
-async function targets() {
-  const seen = new Set<string>()
-  return (await listEnabledProfiles()).filter((profile) => {
-    const key = connectionKey(profile)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
 let listing: Promise<void> | undefined
 
 /** Lists every bot's missions (or joins the read on its way). */
@@ -492,7 +481,7 @@ export function refreshMissions() {
     const unsupported: Record<string, string> = {}
     const previous = store.get()
     await Promise.all(
-      (await targets()).map(async (profile) => {
+      (await hostTargets(await listEnabledProfiles())).map(async (profile) => {
         try {
           if (!(await hasPluginFeature(profile, "research"))) {
             unsupported[profile.id] = "Its Gots plugin needs an update for Research."

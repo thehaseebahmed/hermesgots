@@ -226,11 +226,27 @@ def set_choice(path: Path, chat_id: str, pinned: Dict[str, str]) -> None:
     moves past whatever it carried, since the merge keeps the newer of the two. A chat with no
     record, or a deleted one, takes nothing: there is nothing to keep the pick for.
     """
+    _set(path, chat_id, {"modelChoice": pinned})
+
+
+def set_title(path: Path, chat_id: str, title: str) -> None:
+    """Writes ``title`` as a chat's own, keeping the rest of its record.
+
+    A canvas's chat is named after the canvas and marked ``titleEdited`` when it is made, so
+    Hermes's auto-title never replaces it; a canvas renamed later renames its chat through here, and
+    the mark stays on. A chat with no record, or a deleted one, takes nothing.
+    """
+    _set(path, chat_id, {"title": title, "titleEdited": True})
+
+
+def _set(path: Path, chat_id: str, fields: Dict[str, Any]) -> None:
+    """Writes ``fields`` into a chat's record, keeping the rest of it, and nothing into a chat that
+    is gone: a record's clock moves past whatever it carried, since the merge keeps the newer one."""
     entry = one(path, chat_id)
     value = (entry or {}).get("value")
     if not isinstance(value, dict) or closed(entry):
         return
-    merge(path, {chat_id: {"at": _ahead(entry), "value": {**value, "modelChoice": pinned}}})
+    merge(path, {chat_id: {"at": _ahead(entry), "value": {**value, **fields}}})
 
 
 def _ahead(entry: Dict[str, Any]) -> int:

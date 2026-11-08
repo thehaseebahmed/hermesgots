@@ -173,6 +173,11 @@ export interface Conversation {
   title: string
   /** Renamed by the user, so Hermes's title never replaces it. */
   titleEdited?: boolean
+  /**
+   * The canvas this chat belongs to, when it is a canvas's own session (ADR 0113). It keeps the
+   * chat out of every list and off Main's cards, and its address opens the canvas instead.
+   */
+  canvasId?: string
   /** Client-minted id sent as `X-Hermes-Session-Id` so Hermes keeps one session per chat. */
   hermesSessionId: string
   createdAt: number

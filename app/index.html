@@ -2,6 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- A canvas is drawn in a srcdoc frame, and a frame with no parent policy can navigate itself
+         to an outside URL. `frame-src 'self'` stops that, and a srcdoc frame still runs (ADR 0114). -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'self'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Gots</title>
     <meta name="description" content="A playful companion app for your Hermes Agent." />

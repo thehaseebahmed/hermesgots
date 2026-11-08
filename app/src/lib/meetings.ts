@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 
-import { connectionKey, serverConfig } from "@/lib/connection"
+import { connectionKey, hostTargets, serverConfig } from "@/lib/connection"
 import { db, getActiveProfile, getSettings, listEnabledProfiles, type Profile } from "@/lib/db"
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
@@ -284,17 +284,6 @@ function drop(meeting: Meeting) {
   })
 }
 
-/** Bots on the same server and profile share one list; the first bot keeps it. */
-async function targets() {
-  const seen = new Set<string>()
-  return (await listEnabledProfiles()).filter((profile) => {
-    const key = connectionKey(profile)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
 let listing: Promise<void> | undefined
 
 /** Lists every bot's meetings (or joins the read on its way). */
@@ -305,7 +294,7 @@ export function refreshMeetings() {
     const noAudio: Record<string, string> = {}
     const previous = store.get()
     await Promise.all(
-      (await targets()).map(async (profile) => {
+      (await hostTargets(await listEnabledProfiles())).map(async (profile) => {
         try {
           if (!(await hasPluginFeature(profile, "meetings"))) {
             unsupported[profile.id] = "Its Gots plugin needs an update for Meetings."

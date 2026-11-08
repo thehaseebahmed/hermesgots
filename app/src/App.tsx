@@ -33,6 +33,10 @@ const MeetingPage = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingPage })),
 )
 const TopicPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.TopicPage })))
+const CanvasPage = lazy(() =>
+  import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })),
+)
+const CanvasView = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasView })))
 const ResearchPage = lazy(() =>
   import("@/routes/research").then((m) => ({ default: m.ResearchPage })),
 )
@@ -123,6 +127,8 @@ function AppRoutes() {
         <Route path="meetings/:id" element={<MeetingPage />} />
         <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
         <Route path="routines" element={<RoutinesPage />} />
+        <Route path="canvas" element={<CanvasPage />} />
+        <Route path="canvas/:id" element={<CanvasView />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />
         <Route path="settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />

@@ -1170,22 +1170,9 @@ def wire(api_adapter: Any) -> bool:
     tool it can't use."""
     global adapter
     adapter = api_adapter
-    original = getattr(api_adapter, "_create_agent", None)
-    if not callable(original):
-        return False
-
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        session_id = kwargs.get("session_id") or getattr(agent, "session_id", None)
-        if mission_of_session(session_id):
-            try:
-                tools_common.equip_tool(agent, TOOL, SCHEMA)
-            except Exception:
-                logger.debug("gots: couldn't add the claim_add tool to an agent", exc_info=True)
-        return agent
-
-    api_adapter._create_agent = create_agent
-    return True
+    return tools_common.wire_tool(
+        api_adapter, TOOL, SCHEMA, "claim_add", when=lambda session: bool(mission_of_session(session))
+    )
 
 
 # --- writing -----------------------------------------------------------------------------------

@@ -103,6 +103,7 @@ const CHAT_FIELDS = [
   "pinned",
   "main",
   "room",
+  "canvasId",
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 

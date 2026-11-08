@@ -72,7 +72,9 @@ def _llm() -> Any:
     return getattr(research.ctx, "llm", None)
 
 
-def _line(text: Any, limit: int) -> str:
+def one_line(text: Any, limit: int) -> str:
+    """``text`` on one line and at most ``limit`` characters, which is how a title, a last line and a
+    message are put to a model. Public because a canvas's title is read by the same rule."""
     if not isinstance(text, str):
         return ""
     flat = " ".join(text.split())
@@ -115,7 +117,7 @@ def _rows(
 
 
 def is_plain_thread(value: Dict[str, Any]) -> bool:
-    if value.get("main") or value.get("projectId") or value.get("room"):
+    if value.get("main") or value.get("projectId") or value.get("room") or value.get("canvasId"):
         return False
     if not isinstance(value.get("hermesSessionId"), str):
         return False
@@ -147,8 +149,8 @@ def candidates(records: Dict[str, Dict[str, Any]], main_id: str, home: Path) -> 
         result.append(
             {
                 "id": chat_id,
-                "title": _line(value.get("title"), 80),
-                "last": _line(last[0]["text"], LINE_CHARS) if last else "",
+                "title": one_line(value.get("title"), 80),
+                "last": one_line(last[0]["text"], LINE_CHARS) if last else "",
                 "active": int(active),
             }
         )
@@ -164,11 +166,11 @@ def _prompt(text: str, options: List[Dict[str, Any]], turns: List[Dict[str, str]
     lines.append("")
     lines.append("Main's latest turns:")
     for turn in turns:
-        lines.append(f'{turn["role"]}: {_line(turn["text"], TURN_CHARS)}')
+        lines.append(f'{turn["role"]}: {one_line(turn["text"], TURN_CHARS)}')
     if not turns:
         lines.append("(none)")
     lines.append("")
-    lines.append(f"The message: {_line(text, MAX_TEXT)}")
+    lines.append(f"The message: {one_line(text, MAX_TEXT)}")
     return "\n".join(lines)
 
 
@@ -271,14 +273,18 @@ def open_thread(
     *,
     opener: Optional[str] = None,
     opener_at: Optional[int] = None,
+    title: Optional[str] = None,
+    canvas_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
     The id is the app's own kind (a UUID) and the session is ``gots-<id>``, so every device and
-    the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs.
-    ``opener`` is the message that began the thread and ``opener_at`` when the reader sent it: with
-    them on the record, a device that never opens the thread still draws its card's bubble and
-    stands the card at that message's time (ADR 0090).
+    the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs,
+    unless one is given: a canvas's chat is named after the canvas and marked ``titleEdited``, so
+    Hermes's auto-title never replaces it, and carries ``canvasId``, which is what keeps it out of
+    every list and out of Main's cards. ``opener`` is the message that began the thread and
+    ``opener_at`` when the reader sent it: with them on the record, a device that never opens the
+    thread still draws its card's bubble and stands the card at that message's time (ADR 0090).
     """
     chat_id = str(uuid.uuid4())
     session_id = f"{GOTS_ID_PREFIX}{chat_id}"
@@ -286,15 +292,17 @@ def open_thread(
     value = {
         "id": chat_id,
         "profileId": profile_id,
-        "title": "New chat",
+        "title": title or "New chat",
         "hermesSessionId": session_id,
         "createdAt": now,
         # Past createdAt, so the daily cleanup doesn't read a thread whose first message is still
         # waiting in the queue as one nothing happened in.
         "updatedAt": now + 1,
         "changedAt": now,
+        **({"titleEdited": True} if title else {}),
+        **({"canvasId": canvas_id} if canvas_id else {}),
         **(
-            {"opener": _line(opener, MAX_TEXT), **({"openerAt": opener_at} if opener_at else {})}
+            {"opener": one_line(opener, MAX_TEXT), **({"openerAt": opener_at} if opener_at else {})}
             if opener
             else {}
         ),
@@ -329,12 +337,30 @@ def start_thread(
         opener=text,
         opener_at=at,
     )
+    item = queue_first_turn(path, profile, chat_id, session_id, text, files, body)
+    return {"thread": chat_id, "session_id": session_id, "item": item}
+
+
+def queue_first_turn(
+    path: Path,
+    profile: Optional[str],
+    chat_id: str,
+    session_id: str,
+    text: str,
+    files: List[Dict[str, Any]],
+    body: Any,
+) -> Dict[str, Any]:
+    """Queues a new thread's first turn, and takes the chat back when the queue refuses the run.
+
+    A thread whose first message never got queued is a tombstone rather than a chat nothing posts
+    in, so the caller can leave the message in Main. The run body is the app's own request, rebound
+    to the thread's session, which is what lets the dispatcher start it with the app closed.
+    """
     try:
-        item = outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))
+        return outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))
     except Exception:
         discard(path, chat_id)
         raise
-    return {"thread": chat_id, "session_id": session_id, "item": item}
 
 
 async def deliver(

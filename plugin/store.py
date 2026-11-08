@@ -5,7 +5,7 @@ pinned projects (``projects.py``), merged pull requests (``merges.py``), a proje
 the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
 push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
 missions with their evidence ledgers (``research.py``), the dictations a bot has heard
-(``dictations.py``)."""
+(``dictations.py``) and the canvases it writes with their versions (``canvases.py``)."""
 
 from __future__ import annotations
 
@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 # (`chats.py`); it is a data pass over existing rows and adds nothing. 55 to 57 once kept the apps a
 # bot made and their pages; no step builds them now, since 59 drops them (ADR 0113). 58 drops the
 # workflow library and the stage record (ADR 0110): two tables rebuilt without the columns only they
-# read, and one table gone. 59 drops the apps tables, saved apps with them.
-SCHEMA_VERSION = 59
+# read, and one table gone. 59 drops the apps tables, saved apps with them. 60 adds the canvases a
+# bot writes and their versions (`canvases.py`, ADR 0113): two new tables, so nothing already
+# written has to move.
+SCHEMA_VERSION = 60
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -925,4 +927,34 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("DROP TABLE IF EXISTS workflows")
         conn.execute("DROP TABLE IF EXISTS app_pages")
         conn.execute("DROP TABLE IF EXISTS apps")
+        # v60: a canvas is its bot's record and its versions are kept beside it (ADR 0113). `at` is
+        # the record's change clock, the one the app merges by, and `session_id` is the Hermes
+        # session the canvas is edited in — the chat's, which a run's own session reaches through
+        # the compression walk (sessions.chat_session). `version` is the newest one written, and a
+        # canvas with none yet is 0.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS canvases (
+                   id TEXT PRIMARY KEY,
+                   title TEXT NOT NULL,
+                   session_id TEXT NOT NULL,
+                   chat_id TEXT NOT NULL,
+                   version INTEGER NOT NULL DEFAULT 0,
+                   pinned INTEGER NOT NULL DEFAULT 0,
+                   hidden INTEGER NOT NULL DEFAULT 0,
+                   at INTEGER NOT NULL,
+                   created_at INTEGER NOT NULL
+               )"""
+        )
+        # A version's `tools` is the consent list it declared, kept with the words it was written
+        # for: a page reads what its own version declared, never a later one's.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS canvas_versions (
+                   canvas_id TEXT NOT NULL,
+                   version INTEGER NOT NULL,
+                   html TEXT NOT NULL,
+                   tools TEXT,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (canvas_id, version)
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
