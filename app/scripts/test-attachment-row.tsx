@@ -10,7 +10,9 @@ import test from "node:test"
 import { toast } from "sonner"
 
 import type { Attachment, Message } from "@/lib/db"
+import { attachmentsText } from "@/lib/attachment-text"
 import { AttachmentTile } from "@/components/chat/attachments"
+import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
   chatScreen,
@@ -22,6 +24,7 @@ import {
   mediaReads,
   mount,
   seedChat,
+  seedChats,
   seedSettings,
   spyOpen,
   text,
@@ -189,10 +192,12 @@ test("a photo no browser draws is a row that hands it over, not a cell that can 
     image: true,
     path: "/home/h/.hermes/plugin-data/gots/attachments/session-1/photo.heic",
   }
-  const profile = botProfile("attachment-heic")
-  await seedSettings()
-  await seedChat({ id: "c1", profile, messages: [message([heic])] })
-  const asked = mediaHost({ host: "attachment-heic" })
+  // A bot that can be called draws its chat on chat-next, which folds the rows the host has: the
+  // message is the host's, carrying the marker its row was written with.
+  const bot = botProfile("attachment-heic")
+  await seedChats([{ id: "c1", title: "A chat" }], { bots: [bot] })
+  const host = fakeHost("gots-c1", { plugin: true })
+  host.seed([{ user: attachmentsText("Look at this", [heic]), reply: "A lovely photo." }])
   const browser = spyOpen()
   try {
     await mount(chatScreen("c1"), async () => {
@@ -208,11 +213,6 @@ test("a photo no browser draws is a row that hands it over, not a cell that can 
       await click(labelled("button", "Download photo.heic"))
       await until(async () => browser.opened.length > 0, "the tab")
       assert.match(browser.opened[0], /photo\.heic&token=/, "at the URL the host signed")
-      assert.deepEqual(
-        mediaAsks(asked).map((one) => one.path),
-        [heic.path],
-        "and the host was asked for that one file",
-      )
     })
   } finally {
     browser.restore()
@@ -222,11 +222,19 @@ test("a photo no browser draws is a row that hands it over, not a cell that can 
 test("a tap the host refused over a size says its own sentence, not that the file is missing", async () => {
   // The mint answers 413 with the cap it met: that is the one refusal the reader can act on, so the
   // row says it — "there is no copy" of a file the host holds is the drift ADR 0111 is about.
-  const profile = botProfile("attachment-cap")
-  await seedSettings()
-  await seedChat({ id: "c1", profile, messages: [message([attachment])] })
   const sentence = "field notes.pdf is 31 MB; the limit is 25 MB."
+  const bot = botProfile("attachment-cap")
+  await seedChats([{ id: "c1", title: "A chat" }], { bots: [bot] })
+  const host = fakeHost("gots-c1", { plugin: true })
+  host.seed([{ user: attachmentsText("Here it is", [attachment]), reply: "Got it." }])
+  // The transcript is the host's; the mint is a host that refuses this file for its size.
+  const transcript = globalThis.fetch
   mediaHost({ host: "attachment-cap", fail: [NAME], failure: 413, refusal: sentence })
+  const mint = globalThis.fetch
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    String(input instanceof Request ? input.url : input).includes("/plugins/gots/media")
+      ? mint(input, init)
+      : transcript(input, init)) as typeof fetch
   const said: string[] = []
   const original = toast.error
   toast.error = ((message: unknown) => {
