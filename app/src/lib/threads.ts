@@ -16,6 +16,7 @@ import {
   type Profile,
   type Unsent,
 } from "@/lib/db"
+import { rowOwner } from "@/lib/chat-row"
 import { listsAsChat, listsAsThread } from "@/lib/lists-as-chat"
 import { useXLarge } from "@/lib/media"
 import { createStore } from "@/lib/store"
@@ -508,7 +509,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   if (main) {
     profileId = main
   } else if (found && listsAsChat(found)) {
-    profileId = found.profileId
+    profileId = rowOwner(found)
     thread = chat
   } else if (found === undefined && hint) {
     // Still loading: go by what the link said.
