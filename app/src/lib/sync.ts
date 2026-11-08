@@ -76,6 +76,7 @@ const LOCAL_BOT_FIELDS = [
   "disabled",
   "seenAt",
   "pluginVersion",
+  "hermesProfile",
   "contextWindow",
   "contextModel",
   "imageInput",

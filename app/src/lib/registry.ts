@@ -12,6 +12,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { isNative, SITE_URL } from "@/lib/native"
+import { localFields } from "@/lib/registry-fields"
 import { installAndLink, linkProfileAt } from "@/lib/repo"
 import { inboxKey, inboxPublic } from "@/lib/sync"
 import { inboxFingerprint, openFromInbox, toBase32, type SealedToInbox } from "@/lib/vault"
@@ -33,7 +34,8 @@ interface RegistryBot {
 /** What a plugin seals for the app (`record` in `plugin/link.py`). */
 interface BotRecord {
   name: string
-  profile: string
+  /** The Hermes profile this bot is; absent from a record sealed before the plugin sent one. */
+  profile?: string
   baseUrl: string
   apiKey: string
   pluginVersion?: string
@@ -182,11 +184,7 @@ async function pull() {
       // Sealed to a key this device doesn't hold yet; the host re-seals on its next check-in.
       continue
     }
-    const local = {
-      disabled: !record.enabled || undefined,
-      seenAt: record.seen?.at,
-      pluginVersion: record.seen?.pluginVersion ?? value.pluginVersion,
-    }
+    const local = localFields(record, value)
     const profiles = await db.profiles.toArray()
     if (!record.adopts && !profiles.some((p) => p.id === botId)) {
       const manual = profiles.find(
