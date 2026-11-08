@@ -1,5 +1,5 @@
 /**
- * A canvas with the host away (F5, D5, B6): the copy this device kept draws at once, the header says
+ * A canvas with the host away: the copy this device kept draws at once, the header says
  * the bot isn't answering, and a page's write is refused rather than queued — there is no queue. The
  * copy is written by every read and write the host answers, and goes with the bot that answered it.
  */
@@ -111,7 +111,6 @@ function serveCanvases(host: { docs: CanvasDoc[]; calls: Record<string, unknown>
   }) as unknown as typeof fetch
 }
 
-/** A host that answers nothing at all, recording what it was asked for. */
 function serveNothing(asked: string[]) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     asked.push(String(input))
@@ -147,7 +146,6 @@ test(
   "test_canvas_opens_offline_and_refuses_writes",
   atWidth(390, async () => {
     const bot = await seedCanvasChat("canvas-away")
-    // The copy a previous session left on this device, and a host that answers nothing.
     await db.canvasCache.put({
       key: canvasCacheKey(bot, KEPT.id),
       connection: connectionKey(bot),
@@ -160,7 +158,6 @@ test(
       // The copy draws although every request to the host has failed.
       await until(() => drawn().includes("<h1>Tip</h1>"), "the device's copy to draw")
       assert.ok(asked.length > 0, "the host was asked, and answered nothing")
-      // The read that got no answer is said in the header, in the chat header's own words.
       await until(() => Boolean(find("[data-canvas-offline]")), "the header to say the bot is away")
       assert.equal(find("[data-canvas-offline]")!.textContent, awayLine(true, true))
 

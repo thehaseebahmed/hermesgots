@@ -1020,8 +1020,8 @@ export interface CanvasCssRow {
 }
 
 /**
- * What this device last read of a bot's canvases, so a canvas opens with the host away (ADR 0113,
- * D5): one row for the list and one for each canvas read, carrying the page its record points at,
+ * What this device last read of a bot's canvases, so a canvas opens with the host away (ADR 0113):
+ * one row for the list and one for each canvas read, carrying the page its record points at,
  * its version, the tools it declared and its own data. It is this device's copy — nothing syncs it —
  * and it goes with the bot whose host answered it.
  */

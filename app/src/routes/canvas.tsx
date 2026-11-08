@@ -305,7 +305,6 @@ export function CanvasView() {
           {canvas?.version ? (
             <span className="shrink-0 text-xs text-muted-foreground">v{canvas.version}</span>
           ) : null}
-          {/* The bot isn't answering, so what is drawn is this device's copy (F5, D5). */}
           {away ? (
             <span
               role="status"

@@ -1,5 +1,5 @@
 /**
- * The copy of a bot's canvases this device keeps (`db.canvasCache`, ADR 0113, D5): the list its host
+ * The copy of a bot's canvases this device keeps (`db.canvasCache`, ADR 0113): the list its host
  * answered, and per canvas the page its record points at with the version, the tools it declared and
  * its own data. Every read and write the host answers writes it, so a canvas opens at once with the
  * host away, and it goes with the bot that answered it.
@@ -14,14 +14,11 @@ import { connectionKey } from "@/lib/connection"
 import { db, type Profile } from "@/lib/db"
 import { quietly } from "@/lib/report"
 
-/** The row a bot's list of canvases is kept under: `<connectionKey>\ncanvases`. */
 export const canvasListKey = (profile: Profile) => `${connectionKey(profile)}\ncanvases`
 
-/** The row one canvas is kept under: `<connectionKey>\n<canvasId>`, with `canvasId` indexed. */
 export const canvasCacheKey = (profile: Profile, id: string) =>
   `${connectionKey(profile)}\n${id}`
 
-/** A value without the fields a row doesn't keep. */
 function without<T, K extends keyof T>(value: T, drop: K[]): Omit<T, K> {
   const copy: Partial<T> = { ...value }
   for (const field of drop) delete copy[field]
@@ -33,27 +30,20 @@ export const recordOf = (canvas: Canvas): CanvasRecord =>
   without(canvas, ["html", "data", "tools", "dataWrites"])
 
 /**
- * A canvas as this device's copy keeps it: the page, the tools and the data, and not the count of
- * writes this session has taken — that counts reads against writes on one device's memory, so a copy
- * carrying an old count would look newer than the host's next answer.
+ * A copy leaves this session's write count behind: it counts reads against writes in one device's
+ * memory, so a copy carrying an old one would outrank the host's next answer.
  */
 const copyOf = (canvas: Canvas): Canvas => without(canvas, ["dataWrites"])
 
-/** A list with `row` in the place it already had, or at the front when it is new. */
 export const upsert = <T extends { id: string }>(rows: T[], row: T) =>
   rows.some((one) => one.id === row.id)
     ? rows.map((one) => (one.id === row.id ? row : one))
     : [row, ...rows]
 
-/**
- * A cheap fingerprint of a canvas's data: how many documents, and the newest clock among them. The
- * host stamps every write with its own clock and a remove changes the count, so two copies that agree
- * here hold the same documents — and a copy is only rewritten when it would change.
- */
+/** Each document's identity and clock, so two copies are compared without their bodies being read. */
 const dataStamp = (data?: Canvas["data"]) =>
-  `${data?.length ?? 0}:${data?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0}`
+  JSON.stringify((data ?? []).map((row) => [row.collection, row.id, row.at]))
 
-/** Whether an answer leaves a canvas's copy exactly as it is. */
 function unchanged(held: Canvas | undefined, canvas: Canvas) {
   if (!held) return false
   return (
