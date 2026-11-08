@@ -38,9 +38,11 @@ TITLE_CHARS = 60
 TOOL_WRITE = "canvas_write"
 TOOL_READ = "canvas_read"
 
-# Set by register() and _wire_api_server.
+# Set by register() and _wire_api_server, and what `ready` answers with.
 ctx: Any = None
 adapter: Any = None
+_registered = False
+_wired = False
 
 
 class CanvasError(ValueError):
@@ -384,7 +386,9 @@ def create(
     """
     if not isinstance(prompt, str) or not prompt.strip():
         raise CanvasError("A canvas needs a prompt to build it from.")
-    run = body if isinstance(body, dict) else {}
+    if not isinstance(body, dict) or not isinstance(body.get("input"), list) or not body["input"]:
+        raise CanvasError("body must be the run request that builds the canvas.")
+    run = body
     now = int(time.time() * 1000)
     canvas_id = str(uuid.uuid4())
     title = title_of(prompt)
@@ -553,7 +557,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
 
 def register(plugin_ctx: Any) -> bool:
     """Keeps the context and registers the canvas's two tools."""
-    global ctx
+    global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
     if not callable(register_tool):
@@ -569,13 +573,14 @@ def register(plugin_ctx: Any) -> bool:
         except Exception:
             logger.warning("gots: couldn't register the %s tool", tool, exc_info=True)
             took = False
+    _registered = took
     return took
 
 
 def wire(api_adapter: Any) -> bool:
     """Gives a canvas's agents its two tools, and only them: every other session would carry two
     tools it can't use."""
-    global adapter
+    global adapter, _wired
     adapter = api_adapter
     def is_canvas(session: Optional[str]) -> bool:
         return _session_canvas(session) is not None
@@ -583,4 +588,11 @@ def wire(api_adapter: Any) -> bool:
     took = tools_common.wire_tool(api_adapter, TOOL_WRITE, WRITE_SCHEMA, TOOL_WRITE, when=is_canvas)
     if not tools_common.wire_tool(api_adapter, TOOL_READ, READ_SCHEMA, TOOL_READ, when=is_canvas):
         took = False
+    _wired = took
     return took
+
+
+def ready() -> bool:
+    """Whether a canvas can be worked on this host: its tools registered and wired into the agents
+    the API server builds, so a canvas's session is given them."""
+    return _registered and _wired

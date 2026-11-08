@@ -9,7 +9,10 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import sys
 import unittest
+from contextlib import contextmanager
+from types import ModuleType
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -52,6 +55,29 @@ def make_canvas(path: Path) -> dict:
 
 def store_of(case: unittest.TestCase) -> Path:
     return db_path(temp_hermes_home(case))
+
+
+class Agent:
+    """What the API server builds: a tool list and the names the model may call, and nothing else."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self.tools: list = []
+        self.valid_tool_names: set = set()
+
+
+@contextmanager
+def tools_registered():
+    """Hermes's tool registry, answering that the plugin's tools are in it."""
+    registry = SimpleNamespace(get_entry=lambda name: object())
+    module = ModuleType("tools.registry")
+    module.registry = registry  # type: ignore[attr-defined]
+    package = ModuleType("tools")
+    package.registry = module  # type: ignore[attr-defined]
+    with mock.patch.dict(
+        sys.modules, {"tools": package, "tools.registry": module}
+    ):
+        yield
 
 
 def sessions_db(home: Path, rows: list) -> None:
@@ -255,25 +281,18 @@ class SessionTest(unittest.TestCase):
         self.assertIsNone(canvases.canvas_of_session(self.path, self.home, self.plain))
         self.assertIsNone(canvases.canvas_of_session(self.path, self.home, self.session + "-agent"))
 
-        equipped: list = []
+        # A real agent and a real registry entry, so the tools that reach it are the ones counted.
         adapter = SimpleNamespace(
-            _create_agent=lambda *args, **kwargs: SimpleNamespace(session_id=kwargs.get("session_id"))
+            _create_agent=lambda *args, **kwargs: Agent(kwargs.get("session_id"))
         )
-        with mock.patch.object(
-            canvases.tools_common,
-            "equip_tool",
-            side_effect=lambda agent, tool, schema: equipped.append((agent.session_id, tool)),
-        ):
+        with tools_registered():
             self.assertTrue(canvases.wire(adapter))
-            adapter._create_agent(session_id=self.session + "-c1")
-            adapter._create_agent(session_id=self.plain)
-        self.assertEqual(
-            sorted(equipped),
-            [
-                (self.session + "-c1", canvases.TOOL_READ),
-                (self.session + "-c1", canvases.TOOL_WRITE),
-            ],
-        )
+            canvas_agent = adapter._create_agent(session_id=self.session + "-c1")
+            plain_agent = adapter._create_agent(session_id=self.plain)
+        self.assertEqual(sorted(canvas_agent.valid_tool_names), [canvases.TOOL_READ, canvases.TOOL_WRITE])
+        self.assertEqual(len(canvas_agent.tools), 2)
+        self.assertEqual(plain_agent.tools, [])
+        self.assertEqual(plain_agent.valid_tool_names, set())
 
         # The guide is the canvas's, and the component library's is withheld from that session.
         self.assertEqual(openui.canvas_content({"session_id": self.session + "-c1"}), openui.CANVAS_TEXT)
@@ -334,12 +353,21 @@ class RouteTest(unittest.TestCase):
         refused = self.call("/canvases", "POST", {"prompt": "  "})
         self.assertEqual(refused["status"], 400)
         self.assertIn("prompt", refused["payload"]["error"]["message"])
+        # And a request that names no run is the caller's mistake, not a canvas half made.
+        without_run = self.call("/canvases", "POST", {"prompt": PROMPT})
+        self.assertEqual(without_run["status"], 400)
+        self.assertIn("run request", without_run["payload"]["error"]["message"])
+        self.assertEqual(self.call("/canvases")["payload"]["canvases"], [])
 
-    def test_info_advertises_canvas_only_where_the_guide_is_told(self) -> None:
-        with mock.patch.object(openui, "canvas_ready", return_value=True):
-            self.assertIn("canvas", self.call("/info")["payload"]["features"])
-        with mock.patch.object(openui, "canvas_ready", return_value=False):
-            self.assertNotIn("canvas", self.call("/info")["payload"]["features"])
+    def test_info_advertises_canvas_only_where_it_can_be_worked(self) -> None:
+        # The tools have to reach a canvas's session and that session has to be told its guide: a
+        # canvas with either half missing is a page nothing can build or change.
+        for wired, told, listed in ((True, True, True), (False, True, False), (True, False, False)):
+            with self.subTest(wired=wired, told=told):
+                with mock.patch.object(canvases, "ready", return_value=wired), mock.patch.object(
+                    openui, "canvas_ready", return_value=told
+                ):
+                    self.assertEqual("canvas" in self.call("/info")["payload"]["features"], listed)
 
 
 if __name__ == "__main__":

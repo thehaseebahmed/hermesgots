@@ -639,8 +639,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # section says nothing, rather than offering a vocabulary never told.
                     *([openui.FEATURE] if openui_info else []),
                     # A canvas is a page its bot writes and the app draws (canvases.py, ADR 0113),
-                    # advertised only where a canvas's session is told the design guide (openui.py).
-                    *(["canvas"] if openui.canvas_ready() else []),
+                    # advertised only where its tools reach a canvas's session and that session is
+                    # told the design guide (openui.py) — a canvas with neither can't be worked.
+                    *(["canvas"] if canvases.ready() and openui.canvas_ready() else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # A routine's answer delivered into a chat as the bot's own message, and the
