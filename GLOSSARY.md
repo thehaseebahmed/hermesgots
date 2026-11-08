@@ -447,6 +447,11 @@ _Avoid_: participant, teammate, occupant, seat
 The members a room holds, fixed when the room is made. Changing them means a new room.
 _Avoid_: member list, participants, seats
 
+**Disband**:
+End a room: its work is stopped and the Host leaves a tombstone where its record was, so no device
+draws it again. The word is the Host's, and the plugin only relays its answer.
+_Avoid_: delete, archive, close, remove, leave
+
 **Room log**:
 Everything that has happened in a room, in the Host's order, each event numbered in the room's own
 sequence. The thread is what the screen draws of it.

@@ -6,14 +6,16 @@ here keeps a roster, a log or a round; it asks the Host. The way in is the gatew
 
 This plugin runs in the same Hermes process as the gateway, so a request goes to the Host's own
 dispatcher in process first — the same handler, contract validation and typed refusals the desktop
-sees. A way in that can't be imported, raises or says nothing in time is not an answer, and the
-request is made again through the Host's gateway client over its loopback control socket. A refusal
-the Host sent is its answer and is never repeated: repeating a request it already read is how a write
-lands twice.
+sees. A way in that can't be imported or raises is not an answer, and the request is made again
+through the Host's gateway client over its loopback control socket; a way that says nothing in time
+has spent the call's whole budget, and the request is not asked twice (a quiet Host costs one
+timeout, not two). A refusal the Host sent is its answer and is never repeated either: repeating a
+request it already read is how a write lands twice.
 
-`available` is the gate `info` asks, and it asks the Host rather than the imports: a Host whose room
+`advertised` is the row `info` asks, and it asks the Host rather than the imports: a Host whose room
 driver isn't running accepts a room and never answers it, which is worse than a row that isn't there.
-A Host that answers neither way has no rooms in Gots and no error either.
+A Host that answers neither way has no rooms in Gots and no error either; `available` is the same
+answer as the one sentence a caller can show.
 """
 
 from __future__ import annotations
@@ -23,13 +25,17 @@ import itertools
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # What this module needs the Host to answer before a room is offered: the read the gate asks, and the
 # list a device's chat list is projected from.
 NEEDED: Tuple[str, ...] = ("groups.capabilities", "groups.list")
+
+# What a room is made, renamed and disbanded with. A Host can serve the read and not these, and a
+# control that can't work is worse than one that isn't drawn, so they are advertised apart.
+WRITES: Tuple[str, ...] = ("groups.create", "groups.rename", "groups.disband")
 
 # One call's whole budget, shared by both ways in; the gate's, which runs on every `info` inside the
 # app's 15 s read, so it gets the smallest; and how long the discovery behind the gateway client
@@ -54,11 +60,12 @@ class HostRefusal(RoomError):
     """The Host read the request and refused it, in its own words and with its own code.
 
     Kept apart from an unreachable Host: a refusal is an answer, so the seam never repeats the
-    request on the other way in, and a route can tell the app which of the two happened.
+    request on the other way in, and a route can tell the app which of the two happened: a refusal
+    is a 400, since the Host read the request and would not do it, where an unreachable Host is not.
     """
 
     def __init__(self, message: str, code: Optional[int] = None, data: Optional[Dict[str, Any]] = None):
-        super().__init__(message)
+        super().__init__(message, status=400)
         self.code = code
         self.data = dict(data or {})
 
@@ -146,6 +153,9 @@ def _over_loopback(
     if not callable(connect):
         raise _NoSeam("the Host's gateway client can't connect")
     refusal = getattr(gateway_client, "GatewayRPCError", None)
+    # The discovery spends the call's own budget, so the request gets what is left of it rather than
+    # a fresh `timeout` on top, which would make one call cost two.
+    deadline = time.monotonic() + timeout
     try:
         found = discover_gateway_endpoint(
             home or get_hermes_home(), timeout=min(DISCOVERY_TIMEOUT, timeout)
@@ -156,18 +166,29 @@ def _over_loopback(
     if not served:
         raise _NoSeam(f"no gateway serves this home ({getattr(found, 'state', 'unknown')})")
 
-    async def asked() -> Dict[str, Any]:
+    async def asked() -> Any:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise _NoSeam("the call's budget ran out finding the gateway")
         async with connect(found.endpoint) as client:
-            return await client.rpc(method, _timeout=timeout, **params)
+            return await client.rpc(method, _timeout=left, **params)
 
     try:
-        return _await(asked())
+        answered = _await(asked())
     except Exception as error:
         if refusal is not None and isinstance(error, refusal):
+            # The client forwards no free text, only the Host's bounded reason code and its scalar
+            # data, so a detail the Host put there is the closest thing to its own words this way
+            # has; the in-process way, which is the usual one, quotes it whole.
+            data = getattr(error, "data", None)
+            said = (data.get("detail") or data.get("reason")) if isinstance(data, dict) else None
             raise HostRefusal(
-                str(error), getattr(error, "code", None), getattr(error, "data", None)
+                str(said or error), getattr(error, "code", None), data
             ) from error
         raise _NoSeam(f"the gateway client didn't answer ({error})") from error
+    # The client answers the frame's result, which a Host can leave out; every caller here reads a
+    # mapping, so an answer that isn't one is no answer rather than a crash inside a route.
+    return answered if isinstance(answered, dict) else {}
 
 
 def _await(coro: Any) -> Any:
@@ -233,8 +254,63 @@ def list_rooms(
     return call("groups.list", params, timeout=timeout, home=home)
 
 
-def available(home: Any = None) -> Optional[str]:
-    """Why this bot has no rooms, or ``None`` where the Host hosts them and works them.
+def _asked(
+    method: str, key: str, params: Dict[str, Any], *, timeout: float, home: Any
+) -> Dict[str, Any]:
+    """One write, asked and read: the Host's answer, refused where it carries no ``key``.
+
+    A write the Host took and answered with nothing is not a success — the app would keep an object
+    it can't use — so it is the same 502 as a Host this bot can't reach.
+    """
+    found = call(method, params, timeout=timeout, home=home)
+    answered = found.get(key)
+    if not isinstance(answered, dict) or not answered.get("room_id"):
+        raise RoomError(f"This host answered {method} with no {key}.")
+    return found
+
+
+def create_room(
+    room_id: str, name: Any, members: Any, *, timeout: float = CALL_TIMEOUT, home: Any = None
+) -> Dict[str, Any]:
+    """``groups.create``: a room of this Host's profiles, as ``{room}``.
+
+    The id is the app's, so a create retried after a dropped answer is the same room and not a
+    second one. The roster is passed on as the app built it: how few or many members it may hold,
+    which handles are taken and which are reserved are the Host's rules, and its refusal says which.
+    """
+    params = {"room_id": room_id, "name": name, "members": members}
+    return _asked("groups.create", "room", params, timeout=timeout, home=home)
+
+
+def rename_room(
+    room_id: str, event_id: str, name: Any, *, timeout: float = CALL_TIMEOUT, home: Any = None
+) -> Dict[str, Any]:
+    """``groups.rename``: the room under its new name, as ``{room}``.
+
+    ``event_id`` is the app's too: the rename is one event in the Host's log, and the same id twice
+    is the same rename rather than a second one.
+    """
+    params = {"room_id": room_id, "event_id": event_id, "name": name}
+    return _asked("groups.rename", "room", params, timeout=timeout, home=home)
+
+
+def disband_room(
+    room_id: str, cancel_id: Optional[str] = None, *,
+    timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """``groups.disband``: the room's tombstone, as ``{tombstone}``.
+
+    The Host stops the room's work before it tombstones the room; ``cancel_id`` names that stop
+    where the app has an id of its own to give it.
+    """
+    params: Dict[str, Any] = {"room_id": room_id}
+    if cancel_id:
+        params["cancel_id"] = cancel_id
+    return _asked("groups.disband", "tombstone", params, timeout=timeout, home=home)
+
+
+def _probe(home: Any = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """This Host's capabilities, and why it has no rooms to offer where it doesn't.
 
     Asked of the Host, not of the imports: a Host whose driver isn't running accepts a room and
     never answers it, which is worse than a row that isn't there.
@@ -242,13 +318,36 @@ def available(home: Any = None) -> Optional[str]:
     try:
         found = capabilities(home=home)
     except RoomError as error:
-        return str(error)
+        return None, str(error)
     except Exception:  # a defect in the seam isn't "no rooms", but the row still stays absent
         logger.warning("gots: couldn't ask this host about its rooms", exc_info=True)
-        return "This host's rooms couldn't be asked for."
+        return None, "This host's rooms couldn't be asked for."
     if not found.get("driver"):
-        return "This host's room driver isn't running."
+        return None, "This host's room driver isn't running."
     missing = [name for name in NEEDED if name not in (found.get("methods") or ())]
     if missing:
-        return f"This host's rooms have no {missing[0]}."
-    return None
+        return None, f"This host's rooms have no {missing[0]}."
+    return found, None
+
+
+def available(home: Any = None) -> Optional[str]:
+    """Why this bot has no rooms, or ``None`` where the Host hosts them and works them."""
+    return _probe(home)[1]
+
+
+def advertised(home: Any = None) -> List[str]:
+    """The `info` rows this Host's rooms earn: ``rooms``, and ``rooms_write`` where it can be written.
+
+    One ask answers both, because `info` is read on every app open and a second probe would double
+    what a Host that can't answer already costs. The write row is separate from the read's for the
+    reason every family here splits them: a Host can list its rooms and not be able to make, rename
+    or disband one, and a New room drawn there is a tap that can only come back refused.
+    """
+    found, why = _probe(home)
+    if found is None:
+        logger.debug("gots: no rooms on this host: %s", why)
+        return []
+    answered = found.get("methods") or ()
+    if any(name not in answered for name in WRITES):
+        return ["rooms"]
+    return ["rooms", "rooms_write"]

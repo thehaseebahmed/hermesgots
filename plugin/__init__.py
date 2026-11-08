@@ -521,13 +521,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The Host's own rooms, reached through its own RPC surface (rooms.py): advertised only where
         # the dispatcher or the gateway client answers AND the Host reports its room driver running,
         # since a room taken by a Host that can't work it is worse than a row that isn't there
-        # (ADR 0117). The home is read here, on the loop, so the gate's Host RPC asks the gateway of
-        # the profile this request is for (see store_path); a host that can't name one still answers
-        # this read, with the gate asking where it stands.
+        # (ADR 0117). The write row rides with it, so a Host that can't make or rename a room offers
+        # no control that would only come back refused. The home is read here, on the loop, so the
+        # gate's Host RPC asks the gateway of the profile this request is for (see store_path); a
+        # host that can't name one still answers this read, with the gate asking where it stands.
         rooms_home = _stored(profile_home, None, "this profile's home")
-        rooms_features = await asyncio.to_thread(
-            _advertised, (("rooms", partial(rooms.available, rooms_home)),)
-        )
+        rooms_features = await asyncio.to_thread(rooms.advertised, rooms_home)
         return web.json_response(
             {
                 "name": "gots",
@@ -735,6 +734,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "gots.fallbacks", "fallbacks": fallbacks})
+
+    def minted(value: Any) -> Optional[str]:
+        """An id the app minted, as the string it is, or None where it isn't one.
+
+        A room, a rename and a stop are each named by an id the app made, which is what makes a
+        retried write the same write; a value that isn't that id is refused by the route that needs
+        it, never coerced into one.
+        """
+        return value.strip() if isinstance(value, str) and value.strip() else None
 
     async def json_body(request: "web.Request"):
         try:
@@ -1087,6 +1095,73 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
         return web.json_response({"object": "gots.chats", "chats": records})
+
+    async def create_room(request: "web.Request") -> "web.Response":
+        """A room of this Host's bots, under the id the app minted for it (rooms.py, ADR 0117)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        room_id = minted(body.get("room_id"))
+        if room_id is None:
+            return _error(web, "A room needs the room_id the app minted for it.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.create_room, room_id, body.get("name"), body.get("members"), home=home
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room", **found})
+
+    async def rename_room(request: "web.Request") -> "web.Response":
+        """A room under its new name, under the event id the app minted for the rename."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        event_id = minted(body.get("event_id"))
+        if event_id is None:
+            return _error(web, "A rename needs the event_id the app minted for it.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.rename_room,
+                request.match_info["room_id"].strip(),
+                event_id,
+                body.get("name"),
+                home=home,
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room", **found})
+
+    async def disband_room(request: "web.Request") -> "web.Response":
+        """A room disbanded: the Host stops its work, then answers its tombstone."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # A disband needs nothing of its body — the room is on the path — but a body it was sent and
+        # can't read is refused rather than dropped, since the stop's own id would be lost with it.
+        sent = (await request.text()).strip()
+        body = await json_body(request) if sent else {}
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        cancel_id = minted(body.get("cancel_id"))
+        if cancel_id is None and body.get("cancel_id") is not None:
+            return _error(web, "The cancel_id must be a string.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.disband_room, request.match_info["room_id"].strip(), cancel_id, home=home
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room.tombstone", **found})
 
     async def session_context(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1956,6 +2031,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
+    app.router.add_post(f"{PREFIX}/rooms", create_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}", rename_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/disband", disband_room)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)
     app.router.add_post(f"{PREFIX}/projects", create_project)

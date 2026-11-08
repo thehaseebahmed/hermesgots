@@ -94,6 +94,24 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tui_gateway/rpc_dispatch.py",), "def dispatch(req: dict"),
     (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.capabilities"'),
     (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.list"'),
+    # The three writes the app makes, each pinned as the class and the fields the plugin's body
+    # becomes, so a rename of one of them fails here rather than at a user's New room.
+    (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.create"'),
+    (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.rename"'),
+    (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.disband"'),
+    (
+        ("tui_gateway/contracts/groups_bot_relay.py",),
+        "class GroupsCreateParams(ProfileParams):\n    room_id: str\n    name: str\n"
+        "    members: list[RoomMemberInput]",
+    ),
+    (
+        ("tui_gateway/contracts/groups_bot_relay.py",),
+        "class GroupsRenameParams(RoomParams):\n    event_id: str\n    name: str",
+    ),
+    (
+        ("tui_gateway/contracts/groups_bot_relay.py",),
+        "class GroupsDisbandParams(RoomParams):\n    cancel_id: str | None = None",
+    ),
     (("tui_gateway/contracts/groups_bot_relay.py",), "class GroupsCapabilitiesResult(Result):"),
     (("tui_gateway/contracts/groups_bot_relay.py",), "    driver: bool"),
     (("hermes_cli/gateway_client.py",), "async def connect_gateway"),
