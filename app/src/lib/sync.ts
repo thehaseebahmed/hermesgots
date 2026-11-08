@@ -5,6 +5,7 @@ import { ACCOUNT_SYNC_MS, READ_TIMEOUT_MS, CHATS_MERGE_WAIT_MS } from "@/lib/fre
 import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
+import { equal } from "@/lib/equal"
 import { onWake } from "@/lib/wake"
 import { syncsAccount, type SyncTrigger } from "@/lib/sync-scope"
 import { within } from "@/lib/within"
@@ -101,6 +102,7 @@ const CHAT_FIELDS = [
   "muted",
   "pinned",
   "main",
+  "room",
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
@@ -562,6 +564,9 @@ const encoder = new TextEncoder()
 async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatValue>> {
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
+    // A room is the Host's, projected into every read of its list: it is never stored as a chat, so
+    // it is never carried back as one (ADR 0116).
+    if (c.room) continue
     const value = Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue
     if (
       !carriesSavedDraft(value) ||
@@ -578,32 +583,51 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
   return doc
 }
 
+/**
+ * Whether a record says what this device already holds: the clock it was written at, and every field
+ * it names. A field it leaves out has no opinion, which is what the write would do with it as well —
+ * comparing it against the row's own value would read every chat with a pinned model or a live
+ * composer as changed, for ever.
+ */
+function sameChat(existing: Conversation, synced: Record<string, unknown>, at: number) {
+  return (
+    existing.changedAt === at &&
+    CHAT_FIELDS.every((field) => !(field in synced) || equal(existing[field], synced[field]))
+  )
+}
+
 async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][]) {
   for (const [id, entry] of pull) {
     const existing = await db.conversations.get(id)
-    // Two bots on one server share its chat list; each chat stays with the bot that has it.
-    if (existing && existing.profileId !== profileId) continue
+    // Two bots on one server share its chat list; each chat stays with the bot that has it. A room
+    // belongs to its Host rather than to a bot, so any of its bots may carry the record: the one
+    // that first merged the row may be turned off, and the Host's rename or disband still has to
+    // land through another (ADR 0115).
+    if (existing && !existing.room && existing.profileId !== profileId) continue
     if (entry.deleted) {
       if (existing) await deleteConversation(id, { remote: true })
     } else if (entry.value) {
       const value = entry.value
-      await db.transaction("rw", db.conversations, db.tombstones, async () => {
-        // Field by field, so a record that dropped one (a reopened session) clears it here too.
-        const synced = Object.fromEntries(CHAT_FIELDS.map((field) => [field, value[field]]))
-        // Except the chat's model: a record naming none has nothing to say about it, because every
-        // choice made here writes either a pick or the Default row's marker. Clearing it would lose
-        // the pin, and the next merge would carry the loss back to the plugin as well.
-        if (value.modelChoice === undefined) delete synced.modelChoice
-        if (!carriesSavedDraft(value)) delete synced.draftText
-        await db.conversations.put({
-          ...(await db.conversations.get(id)),
-          ...synced,
-          id,
-          profileId,
-          changedAt: entry.at,
-        } as Conversation)
-        await db.tombstones.delete(`chat:${id}`)
-      })
+      // Field by field, so a record that dropped one (a reopened session) clears it here too.
+      const synced = Object.fromEntries(CHAT_FIELDS.map((field) => [field, value[field]]))
+      // Except the chat's model: a record naming none has nothing to say about it, because every
+      // choice made here writes either a pick or the Default row's marker. Clearing it would lose
+      // the pin, and the next merge would carry the loss back to the plugin as well.
+      if (value.modelChoice === undefined) delete synced.modelChoice
+      if (!carriesSavedDraft(value)) delete synced.draftText
+      // A room is projected unchanged on every read: writing it again would wake every live query
+      // over a chat list for news that nothing happened.
+      if (!existing || !sameChat(existing, synced, entry.at))
+        await db.transaction("rw", db.conversations, db.tombstones, async () => {
+          await db.conversations.put({
+            ...(await db.conversations.get(id)),
+            ...synced,
+            id,
+            profileId,
+            changedAt: entry.at,
+          } as Conversation)
+          await db.tombstones.delete(`chat:${id}`)
+        })
       if (carriesSavedDraft(entry.value)) await adoptDraft(draftKey(id), entry.value.draftText)
       // A pick made on another device follows the session here, and out to the plugin.
       if (entry.value.mode && entry.value.mode !== existing?.mode)

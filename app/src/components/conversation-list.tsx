@@ -30,6 +30,7 @@ import { presence } from "@/lib/registry"
 import type { Message } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { roomMembersLine } from "@/lib/rooms"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
@@ -83,6 +84,15 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
   stalled: TriangleAlertIcon,
 }
 
+/** A row's age, in the one voice every list that draws one uses. */
+function RowAge({ at, now }: { at: number; now: number }) {
+  return (
+    <span className="shrink-0 text-xs font-normal text-muted-foreground">
+      {formatRelative(at, now)}
+    </span>
+  )
+}
+
 /**
  * The newest chats across every bot, each with its bot's image, and a dot at the row's end when one
  * waits on the user. Project sessions stay on Code.
@@ -95,6 +105,7 @@ function Recents({
   collapsed?: boolean
 }) {
   const live = useWaiting()
+  const now = useNow()
   const recents = useLiveQuery(async () => {
     const profiles = await db.profiles.toArray()
     const bots = new Map(profiles.map((p) => [p.id, p]))
@@ -164,11 +175,26 @@ function Recents({
                 className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
               >
                 <Bot id={bot?.botId} className="size-5" />
-                {!collapsed && <span className="min-w-0 flex-1 truncate">{chat.title}</span>}
-                {!collapsed && reason && (
+                {!collapsed && (
                   <>
-                    <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
-                    <span className="sr-only">{reasonText(reason)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{chat.title}</span>
+                      {/* A room is a conversation of several bots, so its row names them: the
+                          record a device merges carries its roster, and nothing of its transcript
+                          (ADR 0116). */}
+                      {chat.room && (
+                        <span className="block truncate text-xs font-normal text-muted-foreground">
+                          {roomMembersLine(chat.room)}
+                        </span>
+                      )}
+                    </span>
+                    {chat.room && <RowAge at={chat.updatedAt} now={now} />}
+                    {reason && (
+                      <>
+                        <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
+                        <span className="sr-only">{reasonText(reason)}</span>
+                      </>
+                    )}
                   </>
                 )}
               </RootLink>
@@ -268,11 +294,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                           aria-label="Muted"
                         />
                       )}
-                      {age && (
-                        <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                          {formatRelative(age, now)}
-                        </span>
-                      )}
+                      {age && <RowAge at={age} now={now} />}
                     </span>
                     <span className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
@@ -315,6 +337,62 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
             {!collapsed && "Link a bot"}
           </RootLink>
         </li>
+      </ul>
+    </nav>
+  )
+}
+
+/**
+ * The Host's rooms, each its own row: a room is nobody's thread, so the bots layout lists it beside
+ * the bots rather than inside one of them (ADR 0115). Drawn only where this device has a room.
+ */
+function Rooms({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
+  const now = useNow()
+  const rooms = useLiveQuery(async () => {
+    const bots = new Map((await db.profiles.toArray()).map((p) => [p.id, p]))
+    const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
+    return held
+      .filter((chat) => chatOwner(chat, bots).listed)
+      .sort((one, two) => two.updatedAt - one.updatedAt)
+      .map((chat) => ({ chat, bot: chatOwner(chat, bots).bot }))
+  }, [])
+  if (!rooms?.length) return null
+
+  return (
+    <nav
+      className="flex flex-col gap-0.5"
+      aria-labelledby={collapsed ? undefined : "rooms-heading"}
+      aria-label={collapsed ? "Rooms" : undefined}
+    >
+      {!collapsed && (
+        <h2 id="rooms-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+          Rooms
+        </h2>
+      )}
+      <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
+        {rooms.map(({ chat, bot }) => (
+          <li key={chat.id}>
+            <RootLink
+              to={`/c/${chat.id}`}
+              onClick={onNavigate}
+              aria-label={collapsed ? chat.title : undefined}
+              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+            >
+              <Bot id={bot?.botId} className="size-5" />
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{chat.title}</span>
+                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                      {roomMembersLine(chat.room!)}
+                    </span>
+                  </span>
+                  <RowAge at={chat.updatedAt} now={now} />
+                </>
+              )}
+            </RootLink>
+          </li>
+        ))}
       </ul>
     </nav>
   )
@@ -516,7 +594,10 @@ export function ConversationList({
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
         {botThreads ? (
-          <Bots onNavigate={onNavigate} collapsed={collapsed} />
+          <>
+            <Bots onNavigate={onNavigate} collapsed={collapsed} />
+            <Rooms onNavigate={onNavigate} collapsed={collapsed} />
+          </>
         ) : (
           botThreads === false && <Recents onNavigate={onNavigate} collapsed={collapsed} />
         )}

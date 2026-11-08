@@ -1,5 +1,11 @@
 # A room's record rides the chat list, and its transcript is read from the Host
 
+**Amended 2026-11-08**: a room whose every member is unlinked from Gots still lists, read-only, on
+any device holding a bot of that Host — the projection lands in every bot's list on the Host, not
+only a member's — and a room the Host disbands is projected as the record's deletion, so the device
+that merged the row takes it away. A Host that pages its room list is read to its last page, and one
+Host's answer serves every bot of it for a breath rather than one ask per bot.
+
 A room needs two things on a device: enough to draw its row, and its words. They travel differently.
 The row is a **record** — a name, a roster, a last activity, a pin — and reaches a device the way a
 chat's row does. The words are a **transcript**, and are read from the Host's room log by sequence,
@@ -19,8 +25,9 @@ device keeps the page it read — bounded, read back by sequence when the reader
 is the same deal a chat offers: what this device has looked at, it can draw again.
 
 **What follows, and is accepted.** A room's read mark is the newest Host sequence this device drew, and
-stays on the device (no read mark ever syncs). A room whose every member is unlinked from Gots has no
-row on any device until a member is linked again, though the room itself is untouched. A reader who
+stays on the device (no read mark ever syncs). A room whose every member is unlinked from Gots still
+lists on any device holding a bot of that Host, read-only, with no bot to answer for it — the room
+itself is untouched on the Host, and nothing of it is lost while no bot can answer in it. A reader who
 opens a room on a new device waits for the Host to answer, as they do for a chat whose messages they
 have never drawn. A later per-room setting that must not look like a chat — a section, a saved draft
 shape — is the point at which a document of its own becomes right, and nothing here blocks it.

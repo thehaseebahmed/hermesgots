@@ -26,6 +26,12 @@ const cases = [
     asChat: true,
     asThread: true,
   },
+  {
+    name: "a room is its own row, not one of a bot's chats",
+    chat: { room: { id: "room-1", members: [] } },
+    asChat: false,
+    asThread: false,
+  },
 ]
 
 test("a project session and Main are not listed as threads", () => {

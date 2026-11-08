@@ -291,6 +291,29 @@ export interface Conversation {
    * every device reads them from the Gots plugin.
    */
   library?: { count: number; at: number }
+  /**
+   * The Host's room this row is, where it is one (ADR 0115): the id the Host knows it by and the
+   * members it seats. A room's words are read from the Host, so nothing of its transcript is on the
+   * row; `profileId` says only which bot carried the record onto this device.
+   */
+  room?: Room
+}
+
+/**
+ * A room as the chat list carries it: the Host's own id, and the members it seats. A member's
+ * `profile` is the Hermes profile it is, which is how the bot that answers for the room is found.
+ */
+export interface Room {
+  id: string
+  members: RoomMember[]
+}
+
+/** One of a room's members: who it is, under which handle the room addresses it, and its profile. */
+export interface RoomMember {
+  memberId?: string
+  profile?: string
+  handle?: string
+  displayName?: string
 }
 
 /** How much a project session may do without asking. */

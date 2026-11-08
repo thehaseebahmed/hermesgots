@@ -501,7 +501,9 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     const found = await db.conversations.get(chat)
     return {
       chat,
-      found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
+      found: found
+        ? { profileId: found.profileId, projectId: found.projectId, room: found.room }
+        : null,
     }
   }, [chat, main])
   const found = owner && owner.chat === chat ? owner.found : undefined
@@ -512,8 +514,10 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     profileId = main
   } else if (found) {
     const owner = chatOwner(found)
-    profileId = owner.answerer
-    thread = owner.listed ? chat : undefined
+    // The pane is a bot's thread, and a row that is only a chat list's — a room, a project session —
+    // has its own screen with nothing to stand beside it here.
+    profileId = listsAsThread(found) ? owner.answerer : undefined
+    thread = profileId ? chat : undefined
   } else if (found === undefined && hint) {
     // Still loading: go by what the link said.
     profileId = hint

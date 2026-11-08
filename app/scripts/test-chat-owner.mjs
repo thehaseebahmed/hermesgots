@@ -54,3 +54,58 @@ test("a screen that names no bots lists the row where its chat is a chat", () =>
   })
   assert.equal(chatOwner({ profileId: "gone", projectId: "project-1" }).listed, false)
 })
+
+const coder = { id: "coder", name: "Coder", hermesProfile: "coder" }
+const writer = { id: "writer", name: "Writer", hermesProfile: "writer", disabled: true }
+const roomBots = new Map([
+  [on.id, on],
+  [coder.id, coder],
+  [writer.id, writer],
+])
+const room = (...profiles) => ({
+  profileId: on.id,
+  room: { id: "room-1", members: profiles.map((profile) => ({ profile, handle: profile })) },
+})
+
+test("a room lists, and the bot that answers for it is one of its members", () => {
+  const owner = chatOwner(room("coder", "writer"), roomBots)
+  assert.equal(owner.listed, true, "a room is nobody's thread and every chat list's row")
+  assert.equal(owner.answerer, coder.id, "the first member this device has a bot for")
+  assert.equal(owner.bot, coder)
+})
+
+test("a room's member turned off in Gots answers nothing, and the room still lists", () => {
+  const owner = chatOwner(room("writer", "gone", "coder"), roomBots)
+  assert.equal(owner.listed, true, "an unlinked or turned-off member still draws, read-only")
+  assert.equal(owner.answerer, coder.id, "the turned-off member is skipped for the next one")
+  assert.deepEqual(
+    chatOwner(room("writer", "gone"), roomBots),
+    { bot: undefined, listed: true, answerer: undefined },
+    "a room whose members this device holds no bot for lists with no answerer",
+  )
+  assert.deepEqual(chatOwner(room("coder")), {
+    bot: undefined,
+    listed: true,
+    answerer: undefined,
+  })
+})
+
+test("a room's answerer is the Host's bot, never another server's of the same profile", () => {
+  const here = { id: "here", name: "Coder here", hermesProfile: "coder", hostId: "host-a" }
+  const elsewhere = { id: "there", name: "Coder there", hermesProfile: "coder", hostId: "host-b" }
+  const carrier = { id: "carrier", name: "Carrier", hermesProfile: "default", hostId: "host-a" }
+  const both = new Map([
+    [elsewhere.id, elsewhere],
+    [here.id, here],
+    [carrier.id, carrier],
+  ])
+  const row = { ...room("coder"), profileId: carrier.id }
+  assert.equal(chatOwner(row, both).answerer, here.id, "the Host the record came on's own bot")
+  assert.equal(
+    // With the bot that carried the record gone there is no Host to scope by, so the room answers
+    // with what this device has rather than with nothing.
+    chatOwner(row, new Map([[elsewhere.id, elsewhere]])).answerer,
+    elsewhere.id,
+    "the roster alone decides it where no carrier names the Host",
+  )
+})
