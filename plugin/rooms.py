@@ -119,9 +119,9 @@ METHODS_TTL = 30.0
 WATCH_SECONDS = 20.0
 WATCH_BUDGET = 8.0
 # How far back a room's log is read to see whether its last words were addressed to the user: a
-# settle or activity row can follow the reply that decides, so the window reaches back past a
-# round's worth of them.
-ASK_WINDOW = 20
+# settle or activity row can follow the reply that decides, so the window holds a room's longest
+# conversation without a word in it — three rounds of six members, each a reply or a settle.
+ASK_WINDOW = 64
 # A member's words addressed to the user, read exactly as the room's screen reads them
 # (`app/src/lib/room-log.ts`): a mention, not a name that merely begins with one.
 MENTION = re.compile(r"@user\b", re.IGNORECASE)
@@ -1047,7 +1047,8 @@ def send_message(
     The append is inert — the Host's driver does the work once it has the event — and idempotent on
     ``event_id``, so a send retried after a dropped answer is the same message rather than a second
     one. The event's own id is the thread the Host opens for it, which is how the desktop sends: one
-    message is one discussion. A send notes the room's change, so every other device hears it.
+    message is one discussion. The user's own words are the answer to a room that was waiting on
+    them, so the wait is ended here too, and the room's change is noted so every other device hears it.
 
     A message may carry files and no words at all, which is what a room's photo or PDF rides: the
     manifest travels with the message so the Host can commit each upload to the event it is sent
@@ -1069,7 +1070,7 @@ def send_message(
     sent = _event(found.get("event"))
     if sent is None:
         raise RoomError("This host answered groups.send with no message.")
-    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    _answered(room_id, home)
     return {"event": sent}
 
 

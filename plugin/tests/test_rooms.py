@@ -1952,6 +1952,22 @@ class RoomPushes(unittest.TestCase):
         host = self.host(events=conversation)
         self.assertEqual(self.check(host), 0)
 
+    def test_a_message_from_the_user_ends_the_wait(self):
+        host = self.host(waiting=True)
+        self.assertEqual(self.check(host), 1)
+        with dispatcher(host), no_loopback():
+            sent = asked_route(
+                self, plugin.PREFIX + "/rooms/{room_id}/send", room_id="room-1",
+                body={"event_id": "e9", "text": "that one's mine"},
+            )
+        self.assertEqual(sent["status"], 200)
+        self.assertEqual(self.check(host), 1, "the room asks again, and the user's answer armed it")
+
+    def test_the_watcher_passes_over_every_served_home(self):
+        with dispatcher(self.host(waiting=True)), no_loopback():
+            rooms._pass(SimpleNamespace())
+        self.assertEqual(len(self.told), 1, "the loop the server runs is the pass itself")
+
     def test_a_question_the_hook_held_is_a_wait(self):
         host = self.host()
         rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
