@@ -1986,18 +1986,12 @@ export async function getRoom(
  * One message into the room, under the id this device minted for it: the Host appends it once and
  * wakes the members' rounds, so a retry after a dropped answer is the same message.
  */
-export interface RoomSend {
-  event: RoomEvent | undefined
-  /** Whether the Host took the message: a 200 can carry a message it did not append. */
-  accepted: boolean
-}
-
 export async function sendRoomMessage(
   config: HermesConfig,
   roomId: string,
   eventId: string,
   text: string,
-): Promise<RoomSend> {
+): Promise<RoomEvent | undefined> {
   const response = await request(`${roomRoot(config, roomId)}/send`, {
     method: "POST",
     headers: headers(config),
@@ -2006,10 +2000,7 @@ export async function sendRoomMessage(
   })
   const body = (await response.json()) as Record<string, unknown>
   const event = body.event
-  return {
-    event: roomEventOf(event && typeof event === "object" ? (event as Record<string, unknown>) : {}),
-    accepted: body.accepted !== false,
-  }
+  return roomEventOf(event && typeof event === "object" ? (event as Record<string, unknown>) : {})
 }
 
 /** The bot's research missions on the plugin (`research.py`), as it sends them. */

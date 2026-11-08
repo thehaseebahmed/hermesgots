@@ -34,6 +34,9 @@ export interface RoomRow {
  */
 const NOTICES: Record<string, string> = {
   "member.unavailable": "A member couldn't answer.",
+  // A member whose turn could not be placed — unseated, unreachable, out of budget — is deferred
+  // with its reason, which is the Host's word for "this one did not get to answer".
+  "turn.deferred": "A member couldn't answer.",
   "turn.failed": "A member's turn failed.",
   "turn.cancelled": "A member's turn was stopped.",
   "room.activity": "The room stopped.",
@@ -41,13 +44,10 @@ const NOTICES: Record<string, string> = {
   "room.disbanded": "This room was disbanded.",
 }
 
-/**
- * What a bounded round says, by the Host's own reason: it stops at its round limit when the round
- * cap is what ended it, and "at its round limit" would be a lie about a room the user stopped.
- */
+/** The two bounds the Host reports (`room.activity`'s own reasons), each in the app's words. */
 const BOUNDED: Record<string, string> = {
   max_rounds: "The room stopped at its round limit.",
-  user_stop: "The room was stopped.",
+  max_messages: "The room stopped at its message limit.",
 }
 
 /**

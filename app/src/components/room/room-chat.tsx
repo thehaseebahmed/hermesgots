@@ -104,16 +104,18 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           </MessageScrollerViewport>
         </MessageScroller>
       </MessageScrollerProvider>
-      {live.error && (
+      {(live.refused ?? live.error) && (
         <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")} role="alert">
-          <Banner tone="error">{live.error}</Banner>
+          <Banner tone="error">{live.refused ?? live.error}</Banner>
         </div>
       )}
       <RoomComposer
         onSend={send}
-        canSend={live.canSend}
+        // No answerer, no send: a room whose members this device holds no bot for still draws, and
+        // every message to it could only come back refused (ADR 0115).
+        canSend={answerer ? live.canSend : false}
         sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
-        disabled={live.sending}
+        sending={live.sending}
       />
     </div>
   )

@@ -190,6 +190,12 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
     const eventId = typeof body?.event_id === "string" ? body.event_id : ""
     if (!eventId) return (fail(400, "A message needs the event_id the app minted for it."), true)
     if (!text) return (fail(400, "A message needs words to send."), true)
+    // The Host is idempotent on the event id: the same id twice is the same message, not a second.
+    const known = room.events.find((one) => one.event_id === eventId)
+    if (known) {
+      json(res, 200, { object: "gots.room.sent", event: drawnEvent(known) })
+      return true
+    }
     const appended = event(
       room,
       "message.user",
@@ -203,12 +209,7 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
     room.at = Date.now()
     noteEvent("room", room.room_id)
     rounds(room, noteEvent)
-    json(res, 200, {
-      object: "gots.room.sent",
-      event: drawnEvent(appended),
-      accepted: true,
-      driverStarted: true,
-    })
+    json(res, 200, { object: "gots.room.sent", event: drawnEvent(appended) })
     return true
   }
   const read = /^\/api\/plugins\/gots\/rooms\/([^/]+)$/.exec(path)

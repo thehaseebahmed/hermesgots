@@ -12,25 +12,24 @@ import { cn } from "@/lib/utils"
  * with it is the Host's business (ADR 0117).
  *
  * Enter starts a line unless this device's **Send on Enter** switch is on, and the send chord always
- * sends, which is the composer rule every other field in the app follows — an Enter that ends an IME
- * composition is the input method's, not the message's.
+ * sends, which is the composer rule every other field in the app follows.
  */
 export function RoomComposer({
   onSend,
   canSend,
   sendOnEnter = false,
-  disabled,
+  sending,
 }: {
   onSend: (text: string) => Promise<boolean> | boolean
   /** Whether the Host takes a send into this room, and `undefined` until a read has said either way. */
   canSend?: boolean
   sendOnEnter?: boolean
-  /** A send is in flight: the words stay in the field until the Host has them. */
-  disabled?: boolean
+  /** A send is in flight, so a second one is not offered. */
+  sending?: boolean
 }) {
   const [text, setText] = useState("")
   const writable = canSend !== false
-  const ready = writable && !disabled && Boolean(text.trim())
+  const ready = writable && !sending && Boolean(text.trim())
 
   const submit = async () => {
     if (!ready) return

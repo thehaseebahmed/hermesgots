@@ -141,12 +141,26 @@ test("a room whose members are all queued says who is next instead", () => {
   assert.equal(workingLine(workingMembers(members, activity), queuedMembers(members, activity)), "Hermes is next…")
 })
 
-test("a round the user stopped says so, rather than blaming the round limit", () => {
+test("a round bounded at its message cap says which cap ended it", () => {
   const rows = foldRoom(
-    [{ seq: 1, eventId: "e1", kind: "room.activity", status: "bounded", reason: "user_stop" }],
+    [{ seq: 1, eventId: "e1", kind: "room.activity", status: "bounded", reason: "max_messages" }],
     members,
   )
-  assert.equal(rows[0].text, "The room was stopped.")
+  assert.equal(rows[0].text, "The room stopped at its message limit.")
+})
+
+test("a member whose turn was deferred draws the line that says it couldn't answer", () => {
+  const rows = foldRoom(
+    [
+      { seq: 1, eventId: "e1", kind: "message.user", text: "anyone?" },
+      { seq: 2, eventId: "e2", kind: "turn.deferred", memberId: "m2", reason: "member_unavailable" },
+    ],
+    members,
+  )
+  assert.deepEqual(rows.map((row) => [row.kind, row.text]), [
+    ["user", "anyone?"],
+    ["notice", "A member couldn't answer."],
+  ], "silence would read as a pass, which is not what happened")
 })
 
 test("a bound with a reason the app doesn't know still says the room stopped", () => {
