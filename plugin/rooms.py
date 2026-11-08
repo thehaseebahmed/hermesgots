@@ -25,7 +25,7 @@ import itertools
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,32 @@ CALL_TIMEOUT = 10.0
 PROBE_TIMEOUT = 3.0
 DISCOVERY_TIMEOUT = 2.0
 
+# How long one Host's projected chat list is worth keeping, and how long one that couldn't answer is
+# left alone.
+PROJECTION_TTL = 2.0
+PROJECTION_FAILURE_TTL = 5.0
+# The most rooms one page of the Host's list asks for, and the most pages one projection reads: the
+# Host pages its list, so a Host with many rooms is followed rather than half-read, and one that
+# never ends its cursor costs a handful of reads instead of the merge's whole budget.
+ROOM_PAGE = 200
+MAX_ROOM_PAGES = 5
+
 _ids = itertools.count(1)
 _ids_lock = threading.Lock()
+
+
+class Projection(NamedTuple):
+    """One Host's last answer about its rooms: when it came, what it said, how long it stands."""
+
+    at: float
+    records: Dict[str, Dict[str, Any]]
+    ttl: float
+
+
+# One Host's last projection, by its home, and the lock one home's read holds while it asks.
+_projections: Dict[str, Projection] = {}
+_loads: Dict[str, threading.Lock] = {}
+_projections_lock = threading.Lock()
 
 
 class RoomError(Exception):
@@ -309,14 +333,16 @@ def disband_room(
     return _asked("groups.disband", "tombstone", params, timeout=timeout, home=home)
 
 
-def _probe(home: Any = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _probe(
+    home: Any = None, *, timeout: float = PROBE_TIMEOUT
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """This Host's capabilities, and why it has no rooms to offer where it doesn't.
 
     Asked of the Host, not of the imports: a Host whose driver isn't running accepts a room and
     never answers it, which is worse than a row that isn't there.
     """
     try:
-        found = capabilities(home=home)
+        found = capabilities(timeout=timeout, home=home)
     except RoomError as error:
         return None, str(error)
     except Exception:  # a defect in the seam isn't "no rooms", but the row still stays absent
@@ -328,6 +354,145 @@ def _probe(home: Any = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     if missing:
         return None, f"This host's rooms have no {missing[0]}."
     return found, None
+
+
+def _millis(value: Any) -> Optional[int]:
+    """One of the Host's own times, in the milliseconds the app counts in; None where it gave none."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value * 1000)
+
+
+def _member(row: Any) -> Optional[Dict[str, Any]]:
+    """One roster row in the list's words: who, under which handle, and the profile it is.
+
+    The Host spells its roster its own way (`member_id`, `display_name`); the wire's names end at
+    this seam, as every other field of the record's does, so the app has one vocabulary to read.
+    """
+    if not isinstance(row, dict):
+        return None
+    drawn = {
+        key: row[wire]
+        for wire, key in (
+            ("member_id", "memberId"),
+            ("profile", "profile"),
+            ("handle", "handle"),
+            ("display_name", "displayName"),
+        )
+        if isinstance(row.get(wire), str)
+    }
+    return drawn or None
+
+
+def chat_record(room: Any) -> Optional[Dict[str, Any]]:
+    """One Host room as a chat-list record: its name, its roster and its last activity.
+
+    A room's record is the list's, never a chat's: the clock is the Host's own, so a rename or a
+    reply moves the row, and the roster rides it because the bot that answers for the room is one of
+    its members, resolved when the row is read (ADR 0115). A disbanded room is the record's
+    **deletion**, at the Host's own disband time: a device that merged the row takes it away, where
+    omitting it would leave a name and a roster nothing owns any more drawn for good.
+    """
+    if not isinstance(room, dict):
+        return None
+    room_id = room.get("room_id")
+    if not isinstance(room_id, str) or not room_id:
+        return None
+    gone = _millis(room.get("disbanded_at"))
+    if gone is not None:
+        return {"at": gone, "deleted": True}
+    name = room.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    at = _millis(room.get("updated_at")) or _millis(room.get("created_at"))
+    if at is None:
+        return None
+    return {
+        "at": at,
+        "value": {
+            "title": name,
+            "createdAt": _millis(room.get("created_at")),
+            "updatedAt": at,
+            # The Host's own routing (`target` on a roster row) is not the app's: what a device draws
+            # is the name, the handle and the profile the answerer is resolved from.
+            "room": {
+                "id": room_id,
+                "members": [
+                    one for one in (_member(row) for row in room.get("members") or ()) if one
+                ],
+            },
+        },
+    }
+
+
+def _projected(timeout: float, home: Any) -> Tuple[Dict[str, Dict[str, Any]], float]:
+    """The rooms this Host hosts, read now, and how long that answer is worth keeping.
+
+    A Host that can't be asked is remembered too, for a little longer than a Host's rooms are: a
+    wedged dispatcher would otherwise cost the whole chat list its own timeout on every bot's merge.
+    """
+    deadline = time.monotonic() + timeout
+    found, _ = _probe(home, timeout=timeout)
+    if found is None:
+        return {}, PROJECTION_FAILURE_TTL
+    records: Dict[str, Dict[str, Any]] = {}
+    offset: Optional[int] = None
+    for _ in range(MAX_ROOM_PAGES):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            logger.debug("gots: no rooms to project into the chat list: the budget ran out asking")
+            return {}, PROJECTION_FAILURE_TTL
+        try:
+            # A disbanded room answers here only when it is asked for, and its record is the row's
+            # deletion: a room the Host retired must leave the devices that merged it. The list is
+            # read to its last page, so a room past the Host's first page still gets a row.
+            listed = list_rooms(
+                include_disbanded=True, limit=ROOM_PAGE, offset=offset, timeout=left, home=home
+            )
+        except RoomError as error:
+            logger.debug("gots: no rooms to project into the chat list: %s", error)
+            return {}, PROJECTION_FAILURE_TTL
+        for room in listed.get("rooms") or ():
+            record = chat_record(room)
+            if record is not None:
+                records[room["room_id"]] = record
+        following = listed.get("next_offset")
+        if not isinstance(following, int):
+            break
+        offset = following
+    return records, PROJECTION_TTL
+
+
+def chat_records(*, timeout: float = PROBE_TIMEOUT, home: Any = None) -> Dict[str, Dict[str, Any]]:
+    """This Host's rooms as the chat list's records, keyed by the room's id.
+
+    Projected into every read of the list, never stored as a chat (ADR 0116): the Host's room is the
+    only copy, so the row a device merges is a read of it, and nothing can edit a room through the
+    chat list. The gate `info` asks decides whether there is anything to project, so the row appears
+    exactly where `rooms` is advertised. The whole read spends one `timeout` — the probe and every
+    page share it — because it rides the chat-list merge, which every device waits on.
+
+    One Host's answer serves every bot of it for a breath, and a second bot reading while the first
+    is still out waits for that answer rather than asking again: bots on one Host share its rooms and
+    the app merges each bot's list in the same pass, so six bots would otherwise ask the same
+    question six times a pass for a row that moves at conversation pace. A read with no home to key
+    it by is asked and not kept, since a shared entry would answer one profile's list with another's.
+    """
+    if home is None:
+        records, _ = _projected(timeout, None)
+        return records
+    key = str(home)
+    with _projections_lock:
+        loading = _loads.setdefault(key, threading.Lock())
+    with loading:
+        with _projections_lock:
+            held = _projections.get(key)
+            if held is not None and time.monotonic() - held.at < held.ttl:
+                return dict(held.records)
+        records, ttl = _projected(timeout, home)
+        with _projections_lock:
+            _projections[key] = Projection(time.monotonic(), records, ttl)
+        return dict(records)
 
 
 def available(home: Any = None) -> Optional[str]:

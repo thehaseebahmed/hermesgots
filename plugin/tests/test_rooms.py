@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import json
 import sys
+import threading
 import unittest
 from types import ModuleType, SimpleNamespace
 from unittest import mock
@@ -41,6 +42,7 @@ class Host:
         refuse=None,
         refusal=None,
         inline=False,
+        page=None,
     ):
         self.listed = list(listed)
         self.driver = driver
@@ -49,6 +51,8 @@ class Host:
         # The Host's answer for the method it won't serve, in its own words and with its own code.
         self.refusal = refusal or (4123, "Group Chat worker is unavailable.")
         self.inline = inline
+        # The most rooms one `groups.list` answer carries, where the Host pages its list.
+        self.page = page
         self.requests = []
 
     def answer(self, method, params=None):
@@ -56,7 +60,20 @@ class Host:
         if method == "groups.capabilities":
             return {"protocol_version": 1, "driver": self.driver, "methods": self.methods}
         if method == "groups.list":
-            return {"rooms": self.listed, "next_offset": None}
+            # The Host's own reader: a room that has been disbanded answers only when it is asked
+            # for, which is what makes a tombstone reachable at all.
+            rooms = (
+                self.listed
+                if params.get("include_disbanded")
+                else [one for one in self.listed if one.get("disbanded_at") is None]
+            )
+            limit = self.page or params.get("limit")
+            offset = int(params.get("offset") or 0)
+            if not isinstance(limit, int) or limit <= 0:
+                return {"rooms": rooms, "next_offset": None}
+            page = rooms[offset:offset + limit]
+            nxt = offset + limit if offset + limit < len(rooms) else None
+            return {"rooms": page, "next_offset": nxt}
         if method == "groups.create":
             return {"room": {"room_id": params.get("room_id"), "name": params.get("name"),
                              "members": params.get("members"), "idempotent": False}}
@@ -342,6 +359,26 @@ ROSTER = [
 ]
 
 
+def asked_route(case, path, *, method=None, room_id=None, body=None, unreadable=False):
+    request = FakeWeb.Request()
+    request.headers = {}
+    request.match_info = {"room_id": room_id} if room_id is not None else {}
+    sent = "{not json" if unreadable else ("" if body is None else json.dumps(body))
+
+    async def read():
+        if unreadable:
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+        return body
+
+    async def text():
+        return sent
+
+    request.json = read
+    request.text = text
+    app = wire(case, RouteAdapter())
+    return asyncio.run(route(app, path, method)(request))
+
+
 class RoomRoutes(unittest.TestCase):
     """A room created, renamed and disbanded through the plugin's own routes."""
 
@@ -349,24 +386,7 @@ class RoomRoutes(unittest.TestCase):
         self.home = temp_hermes_home(self)
 
     def asked(self, path, *, room_id=None, body=None, unreadable=False):
-        """Ask one route the way the app does: a JSON body, and the room on the path where it has one."""
-        request = FakeWeb.Request()
-        request.headers = {}
-        request.match_info = {"room_id": room_id} if room_id is not None else {}
-        sent = "{not json" if unreadable else ("" if body is None else json.dumps(body))
-
-        async def read():
-            if unreadable:
-                raise ValueError("Expecting value: line 1 column 1 (char 0)")
-            return body
-
-        async def text():
-            return sent
-
-        request.json = read
-        request.text = text
-        app = wire(self, RouteAdapter())
-        return asyncio.run(route(app, path)(request))
+        return asked_route(self, path, room_id=room_id, body=body, unreadable=unreadable)
 
     def created(self, members=ROSTER, **extra):
         return self.asked(plugin.PREFIX + "/rooms", body={"room_id": "room-1", "name": "Planning", "members": members, **extra})
@@ -529,6 +549,154 @@ class RoomRoutes(unittest.TestCase):
         self.assertEqual(
             client.homes, [self.home], "the request's profile's gateway is the one asked"
         )
+
+
+ROOM = {
+    "room_id": "room-1",
+    "name": "Planning",
+    "members": [
+        {**ROSTER[0], "display_name": "Hermes", "target": {"url": "http://127.0.0.1:9/target"}},
+        ROSTER[1],
+    ],
+    "authority_gateway_id": "gw-1",
+    "authority_epoch": 1,
+    "revision": 1,
+    "created_at": 1_760_000_000.0,
+    "updated_at": 1_760_000_600.5,
+}
+
+
+class RoomInTheChatList(unittest.TestCase):
+    """A room's record in the chat list a device merges (ADR 0116).
+
+    The list is the plugin's, not a synced document, so the record is projected into every read:
+    no new document, no new encryption path, and a device that has never opened the room still gets
+    its row. It is projected and never stored, so nothing can edit a room through the chat list.
+    """
+
+    def setUp(self):
+        self.home = temp_hermes_home(self)
+        # One Host's projection serves every bot of it, so a read inside the window is the last
+        # read's answer; a case that changes the Host's rooms starts from no answer at all.
+        with rooms._projections_lock:
+            rooms._projections.clear()
+
+    def asked(self, path, body=None, method=None):
+        return asked_route(self, path, body=body, method=method)
+
+    def chats(self, rooms_listed=None, host=None):
+        """The chat list a device reads, over a Host that hosts these rooms and no chats."""
+        host = host or Host(listed=rooms_listed or [])
+        with dispatcher(host), no_loopback():
+            answer = self.asked(plugin.PREFIX + "/chats")
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.chats")
+        return answer["payload"]["chats"]
+
+    def test_a_room_is_a_record_a_device_merges(self):
+        record = self.chats([ROOM])["room-1"]
+        self.assertEqual(record["at"], 1_760_000_600_500, "the room's own clock, in the app's millis")
+        self.assertEqual(
+            record["value"],
+            {
+                "title": "Planning",
+                "createdAt": 1_760_000_000_000,
+                "updatedAt": 1_760_000_600_500,
+                "room": {
+                    "id": "room-1",
+                    "members": [
+                        {
+                            "memberId": "m1",
+                            "profile": "default",
+                            "handle": "hermes",
+                            "displayName": "Hermes",
+                        },
+                        {"memberId": "m2", "profile": "coder", "handle": "coder"},
+                    ],
+                },
+            },
+            "a row's name, its roster in the app's words, and nothing of the Host's routing",
+        )
+
+    def test_the_records_change_time_moves_with_the_room(self):
+        renamed = {**ROOM, "name": "Planning 2", "revision": 2, "updated_at": 1_760_001_200.0}
+        # No window, so the second read really asks the Host: one Host's answer stands for a breath.
+        with mock.patch.object(rooms, "PROJECTION_TTL", 0.0):
+            self.assertEqual(self.chats([ROOM])["room-1"]["at"], 1_760_000_600_500)
+            record = self.chats([renamed])["room-1"]
+        self.assertEqual(record["at"], 1_760_001_200_000, "a read after the rename says the room moved")
+        self.assertEqual(record["value"]["title"], "Planning 2")
+
+    def test_the_merge_answers_the_rooms_beside_the_chats_it_kept(self):
+        host = Host(listed=[ROOM])
+        with dispatcher(host), no_loopback():
+            answer = self.asked(
+                plugin.PREFIX + "/chats",
+                body={"chats": {"chat-1": {"at": 5, "value": {"title": "Mine"}}}},
+                method="POST",
+            )
+        chats = answer["payload"]["chats"]
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(chats["chat-1"], {"at": 5, "value": {"title": "Mine"}})
+        self.assertEqual(chats["room-1"]["value"]["title"], "Planning")
+        self.assertEqual(
+            [one["method"] for one in host.requests],
+            ["groups.capabilities", "groups.list"],
+            "the merge asked the Host for its rooms, and stored nothing of them",
+        )
+
+    def test_a_host_with_no_rooms_leaves_the_list_exactly_as_it_was(self):
+        host = Host(methods=["groups.list"])
+        with dispatcher(host), no_loopback():
+            answer = self.asked(
+                plugin.PREFIX + "/chats",
+                body={"chats": {"chat-1": {"at": 5, "value": {}}}},
+                method="POST",
+            )
+        self.assertEqual(answer["payload"]["chats"], {"chat-1": {"at": 5, "value": {}}})
+
+    def test_a_disbanded_room_is_the_records_deletion(self):
+        disbanded = {**ROOM, "disbanded_at": 1_760_001_000.0}
+        record = self.chats([disbanded])["room-1"]
+        self.assertEqual(
+            record,
+            {"at": 1_760_001_000_000, "deleted": True},
+            "a device that merged the row takes it away, rather than keeping a room the Host retired",
+        )
+
+    def test_the_hosts_rooms_are_asked_for_once_a_read(self):
+        host = Host(listed=[ROOM])
+        first = self.chats(host=host)
+        second = self.chats(host=host)
+        self.assertEqual(first, second)
+        self.assertEqual(
+            [one["method"] for one in host.requests],
+            ["groups.capabilities", "groups.list"],
+            "the second read is the first's answer",
+        )
+
+    def test_two_bots_reading_at_once_still_ask_the_host_once(self):
+        # The app merges a Host's bots side by side, so the second bot's read is in flight before
+        # the first bot's answer lands: it waits for that answer rather than asking again.
+        host = Host(listed=[ROOM])
+        answers = []
+        with dispatcher(host), no_loopback():
+            readers = [threading.Thread(target=lambda: answers.append(self.chats(host=host))) for _ in range(2)]
+            for reader in readers:
+                reader.start()
+            for reader in readers:
+                reader.join()
+        self.assertEqual(answers, [{"room-1": answers[0]["room-1"]}] * 2)
+        self.assertEqual(
+            [one["method"] for one in host.requests],
+            ["groups.capabilities", "groups.list"],
+            "one answer served both bots' reads",
+        )
+
+    def test_a_host_that_pages_its_rooms_is_read_to_the_last_page(self):
+        many = [{**ROOM, "room_id": f"room-{n}", "name": f"Room {n}"} for n in range(3)]
+        chats = self.chats(host=Host(listed=many, page=2))
+        self.assertEqual(sorted(chats), ["room-0", "room-1", "room-2"], "every page is a row")
 
 
 if __name__ == "__main__":

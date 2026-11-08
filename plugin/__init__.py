@@ -525,8 +525,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # no control that would only come back refused. The home is read here, on the loop, so the
         # gate's Host RPC asks the gateway of the profile this request is for (see store_path); a
         # host that can't name one still answers this read, with the gate asking where it stands.
-        rooms_home = _stored(profile_home, None, "this profile's home")
-        rooms_features = await asyncio.to_thread(rooms.advertised, rooms_home)
+        rooms_features = await asyncio.to_thread(rooms.advertised, rooms_home())
         return web.json_response(
             {
                 "name": "gots",
@@ -1073,12 +1072,25 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
         return Path(get_hermes_home())
 
+    def rooms_home() -> Any:
+        # On the loop thread, like store_path: the Host a projection asks is the gateway of the
+        # profile this request is for.
+        return _stored(profile_home, None, "this profile's home")
+
+    async def projected_rooms() -> Dict[str, Dict[str, Any]]:
+        """The Host's rooms as chat-list records, projected on every read of this bot's list.
+
+        A room is the Host's, so it is read rather than stored: a device that has never opened one
+        still gets its row, and nothing can edit a room through the chat list (rooms.py, ADR 0116).
+        """
+        return await asyncio.to_thread(rooms.chat_records, home=rooms_home())
+
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         records = await asyncio.to_thread(chats.read, store_path())
-        return web.json_response({"object": "gots.chats", "chats": records})
+        return web.json_response({"object": "gots.chats", "chats": {**records, **await projected_rooms()}})
 
     async def merge_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1094,7 +1106,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
-        return web.json_response({"object": "gots.chats", "chats": records})
+        return web.json_response({"object": "gots.chats", "chats": {**records, **await projected_rooms()}})
 
     async def create_room(request: "web.Request") -> "web.Response":
         """A room of this Host's bots, under the id the app minted for it (rooms.py, ADR 0117)."""

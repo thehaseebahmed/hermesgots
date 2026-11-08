@@ -115,7 +115,7 @@ def _rows(
 
 
 def is_plain_thread(value: Dict[str, Any]) -> bool:
-    if value.get("main") or value.get("projectId"):
+    if value.get("main") or value.get("projectId") or value.get("room"):
         return False
     if not isinstance(value.get("hermesSessionId"), str):
         return False
