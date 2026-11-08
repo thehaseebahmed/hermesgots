@@ -13,6 +13,12 @@ export const SAFETY_MS = 5 * 60_000
 export const CHAT_POLL_MS = 2_000
 export const CHAT_IDLE_MS = 15_000
 /**
+ * How often one room's page is read for the chat list at most, however often the Host says it moved:
+ * a room's round fires the change stream several times a second, and the row's mark does not need
+ * that pace to be right.
+ */
+export const ROOM_NEEDS_MS = 1_000
+/**
  * How often streamed text is written to IndexedDB, by both chat screens. Each write re-runs every
  * live query over the chat, and `useReveal` paces the text on screen anyway, so a faster write buys
  * nothing. A tool call, an approval, a question or a status change is written at once.

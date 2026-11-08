@@ -34,6 +34,15 @@ export function roomMembersLine(room: Room): string {
 }
 
 /**
+ * The one sentence a room that needs the user says, wherever it is drawn: its row in the chat list,
+ * and the room's own screen under the transcript. The member's name where the log names one, and
+ * the room's own words where it doesn't.
+ */
+export function needsYouLine(name?: string): string {
+  return name ? `${name} needs you — reply in the room.` : "The room needs you — reply."
+}
+
+/**
  * The bots this device holds, by the Hermes profile each one is: a room's member is a profile, so
  * its bubble's picture comes from the bot seated there, and a member with no bot here draws as its
  * name alone. `host` is the Host the room came on, because a profile name is unique on its Host and

@@ -616,6 +616,9 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
       // the pin, and the next merge would carry the loss back to the plugin as well.
       if (value.modelChoice === undefined) delete synced.modelChoice
       if (!carriesSavedDraft(value)) delete synced.draftText
+      // A room's record carries no pin — the Host's room has none to project (ADR 0116) — so this
+      // device's own pin on a room stands, where a chat's is the record's to say.
+      if (existing?.room && value.pinned === undefined) delete synced.pinned
       // A room is projected unchanged on every read: writing it again would wake every live query
       // over a chat list for news that nothing happened.
       if (!existing || !sameChat(existing, synced, entry.at))

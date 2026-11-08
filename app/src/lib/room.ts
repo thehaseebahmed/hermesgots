@@ -15,7 +15,7 @@ import {
 } from "@/lib/db"
 import { chatOwner } from "@/lib/chat-owner"
 import { equal } from "@/lib/equal"
-import { CHAT_IDLE_MS, CHAT_POLL_MS } from "@/lib/freshness"
+import { CHAT_IDLE_MS, CHAT_POLL_MS, ROOM_NEEDS_MS } from "@/lib/freshness"
 import {
   HermesError,
   answerRoom,
@@ -27,6 +27,7 @@ import {
   type RoomApproval,
   type RoomAsked,
   type RoomAsk,
+  type HermesConfig,
 } from "@/lib/hermes"
 import { onChanges, useChanges } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
@@ -105,6 +106,38 @@ async function readMark(roomId: string): Promise<number> {
 }
 
 /**
+ * One room's delta, followed to its newest row: the plugin answers a page at a time and says when it
+ * stopped before the end, so a long room is read on until this device holds what the screen draws.
+ * `MAX_PAGES` is the plugin's own page cap, so a room past it is read as far as one open goes.
+ */
+async function follow(
+  config: HermesConfig,
+  roomId: string,
+  since?: number,
+  signal?: AbortSignal,
+) {
+  let found = await getRoom(config, roomId, since, signal)
+  for (let pages = 1; found.hasMore && pages < MAX_PAGES; pages += 1) {
+    const next = await getRoom(config, roomId, found.cursor, signal)
+    found = { ...next, events: [...found.events, ...next.events] }
+  }
+  return found
+}
+
+/**
+ * Drops rows held above the Host's newest sequence: the Host is the only authority on what its log
+ * holds, so a row above it is one it never wrote, and it would otherwise stay as the read mark.
+ */
+async function trim(roomId: string, latestSeq?: number) {
+  if (!latestSeq) return
+  if (((await pageRange(roomId).last())?.seq ?? 0) <= latestSeq) return
+  await db.roomLog
+    .where("[roomId+seq]")
+    .between([roomId, latestSeq + 1], [roomId, Number.MAX_SAFE_INTEGER])
+    .delete()
+}
+
+/**
  * Says this device has drawn a room up to `seq`, which is where its row's needs-you mark stops
  * (ADR 0116: a room's read mark never syncs). Only a room's row carries one, and only a write that
  * moves it is made, so a screen that draws nothing new costs no write.
@@ -116,11 +149,15 @@ async function markSeen(roomId: string, seq: number): Promise<void> {
 }
 
 /** How often one room is read for the chat list at most, however often the Host says it moved. */
-const NEEDS_READ_MS = 1_000
+const NEEDS_READ_MS = ROOM_NEEDS_MS
 
-/** The rooms a read is out for, and when each was last read: shared by every screen that lists. */
+/**
+ * The rooms a read is out for, and when each was last tried — with whether it failed. A failed read
+ * keeps its stamp, so a Host that is away costs one ask a second rather than one per write of any
+ * other row; a read that landed does not, so the next thing its record says is read at once.
+ */
 const needsReading = new Set<string>()
-const needsReadAt = new Map<string, number>()
+const needsTried = new Map<string, { at: number; failed: boolean }>()
 
 /**
  * One room's page, read for the list rather than for the room's screen: what this device hasn't got
@@ -128,58 +165,71 @@ const needsReadAt = new Map<string, number>()
  * room that needs the user says so before anyone opens it.
  *
  * The read mark is left where it is — only the room's own screen advances it — which is what makes
- * opening the room the move that clears the row's mark.
+ * opening the room the move that clears the row's mark. A read that fails is not retried on the
+ * next write of any other row: the room is given the same breath the Host's own changes get, so a
+ * Host that is away costs one ask a second rather than one per write.
  */
-async function readNeeds(
-  room: { id: string; at: number; bot?: Profile },
-  { paced }: { paced: boolean },
-) {
-  const { id, bot } = room
+async function readNeeds({ chat, bot }: RoomNeedsRow, { paced }: { paced: boolean }) {
+  const id = chat.id
   if (!bot || !hasServer(bot) || needsReading.has(id)) return
-  if (paced && Date.now() - (needsReadAt.get(id) ?? 0) < NEEDS_READ_MS) return
+  const tried = needsTried.get(id)
+  // The Host's own pace for a change it announced, and a failure's pace on either path.
+  if (tried && Date.now() - tried.at < NEEDS_READ_MS && (paced || tried.failed)) return
   needsReading.add(id)
-  needsReadAt.set(id, Date.now())
   try {
-    const found = await getRoom(serverConfig(bot), id, (await readMark(id)) || undefined)
+    const config = serverConfig(bot)
+    const found = await follow(config, id, (await readMark(id)) || undefined)
     await merge(id, found.events)
-    await prune(id)
+    await trim(id, found.latestSeq)
+    if (found.events.length) await prune(id)
+    const held = await db.conversations.get(id)
     const members = found.room.members.length
       ? found.room.members
-      : ((await db.conversations.get(id))?.room?.members ?? [])
+      : (held?.room?.members ?? [])
     const asked = askingEvent(await page(id), members)
-    const next: RoomNeeds = { at: room.at, ...(asked ?? {}) }
-    const held = await db.conversations.get(id)
+    const next: RoomNeeds = { at: chat.changedAt, ...(asked ?? {}) }
     // A reading that says what the row already says costs no write: every write wakes the lists.
     if (held?.room && !equal(held.roomNeeds, next))
       await db.conversations.update(id, { roomNeeds: next })
+    needsTried.delete(id)
   } catch {
     // A room that couldn't be read says nothing new: its row keeps the reading it has, and a room
-    // this device may not reach still lists (ADR 0115).
+    // this device may not reach still lists (ADR 0115). Its stamp stays, so the failure is paced.
+    needsTried.set(id, { at: Date.now(), failed: true })
   } finally {
     needsReading.delete(id)
   }
 }
 
+/** One room the list lists, and the bot that answers for it: what the list's reader works from. */
+export interface RoomNeedsRow {
+  chat: Conversation
+  bot?: Profile
+  /** The record's clock this device last read the room's page at, or nothing before it has. */
+  read?: number
+}
+
 /**
  * Keeps the chat list's rooms read: a room whose record moved since this device last read its page,
- * and every listed room the Host says has moved. One read a second per room at most for the second
- * kind, and none at all for a room at rest.
+ * and every listed room the Host says has moved — one read a second per room at most, and none at
+ * all for a room at rest.
  *
  * A room's record carries its name, its roster and its last activity (ADR 0116), and no word about
  * what it waits on: the Host's own state is read from its log, so the row's mark is the device's
  * reading of that page against the mark of what it has drawn.
+ *
+ * Returns the rooms it lists, so the list that draws them reads the table once.
  */
-export function useRoomNeeds(): void {
+export function useRoomNeeds(): RoomNeedsRow[] | undefined {
   const rooms = useLiveQuery(async () => {
     const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
     const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
     return held
       .filter((chat) => chatOwner(chat, bots).listed)
       .map((chat) => ({
-        id: chat.id,
-        at: chat.changedAt,
-        read: chat.roomNeeds?.at,
+        chat,
         bot: chatOwner(chat, bots).bot,
+        read: chat.roomNeeds?.at,
       }))
   }, [])
   const current = useRef(rooms)
@@ -191,7 +241,7 @@ export function useRoomNeeds(): void {
   // follows whatever the newest reply in it ends on.
   useEffect(() => {
     for (const room of rooms ?? []) {
-      if (room.bot && room.read !== room.at) void readNeeds(room, { paced: false })
+      if (room.bot && room.read !== room.chat.changedAt) void readNeeds(room, { paced: false })
     }
   }, [rooms])
 
@@ -204,6 +254,7 @@ export function useRoomNeeds(): void {
       }),
     [],
   )
+  return rooms
 }
 
 /**
@@ -260,24 +311,13 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
       if (!roomId || !hasServer(bot) || reading.current) return
       reading.current = true
       try {
-        let found = await getRoom(config, roomId, (await readMark(roomId)) || undefined, signal)
-        // The plugin follows the Host's own pages up to its cap and says when it stopped there: a
-        // device opening a long room reads on until it holds the newest row, not the oldest page.
-        for (let pages = 1; found.hasMore && pages < MAX_PAGES; pages += 1) {
-          const next = await getRoom(config, roomId, found.cursor, signal)
-          found = { ...next, events: [...found.events, ...next.events] }
-        }
+        const found = await follow(config, roomId, (await readMark(roomId)) || undefined, signal)
         await merge(roomId, found.events)
         await prune(roomId)
         reset.current = false
         // The Host is the only authority on what its log holds: a row this device drew above the
         // Host's newest sequence is one it never wrote, so it goes rather than staying the read mark.
-        if (found.latestSeq && newestSeq(await page(roomId)) > found.latestSeq) {
-          await db.roomLog
-            .where("[roomId+seq]")
-            .between([roomId, found.latestSeq + 1], [roomId, Number.MAX_SAFE_INTEGER])
-            .delete()
-        }
+        await trim(roomId, found.latestSeq)
         const members = found.room.members.length
           ? found.room.members
           : (chat?.room?.members ?? [])

@@ -7,6 +7,7 @@ import type { ApprovalChoice, ClarifyAnswers, Message, RoomMember } from "@/lib/
 import type { RoomApproval, RoomAsk, RoomAsked } from "@/lib/hermes"
 import { COMPOSER_SLOT } from "@/lib/layout"
 import { memberName } from "@/lib/room-log"
+import { needsYouLine } from "@/lib/rooms"
 
 /**
  * What a room waits on the user for takes the composer's place, drawn by the chat's own cards rather
@@ -52,7 +53,7 @@ export function RoomWaiting({
           className="flex items-center justify-center gap-2 pb-2 text-sm text-muted-foreground"
         >
           <MessageCircleQuestionIcon className="size-4 text-info" />
-          {asking.name ? `${asking.name} needs you — reply in the room.` : "The room needs you — reply."}
+          {needsYouLine(asking.name)}
         </p>
       )}
       {approval ? (

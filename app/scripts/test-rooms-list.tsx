@@ -14,6 +14,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
@@ -21,6 +22,7 @@ import { RoomChat } from "@/components/room/room-chat"
 import { chatOwner } from "@/lib/chat-owner"
 import { db, chatTombstones, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { connectionKey, noteChange } from "@/lib/live"
 import { syncNow } from "@/lib/sync"
 import { useBotPane, useThreads } from "@/lib/threads"
 import {
@@ -65,8 +67,8 @@ const bots: Profile[] = [
 const moved = { at: LAST_AT, title: "Planning" }
 /** Whether the Host has disbanded the room: its record is then the row's deletion. */
 let retired = false
-/** Whether the Host holds the room's row above the list, as its own pin. */
-let pinned = false
+/** Whether the Host answers the room's page in two, its first ending before the newest reply. */
+let split = false
 /**
  * The room's log as the Host pages it to this device: a round that settled addressed to `@user`,
  * which is the room's needs-you mark (the plan's F4).
@@ -102,7 +104,6 @@ const record = () => ({
     title: moved.title,
     createdAt: LAST_AT - 60_000,
     updatedAt: moved.at,
-    ...(pinned ? { pinned: true } : {}),
     room: {
       id: ROOM,
       members: [
@@ -113,20 +114,26 @@ const record = () => ({
   },
 })
 
-/** One room, read the way the plugin answers it: the log since the device's mark, and its state. */
-const roomRead = () => ({
-  object: "gots.room",
-  room: { id: ROOM, name: moved.title, members: record().value.room.members },
-  events: log,
-  cursor: log.at(-1)?.seq ?? 0,
-  latestSeq: log.at(-1)?.seq ?? 0,
-  hasMore: false,
-  working: false,
-  activity: [],
-  waiting: [],
-  canStop: false,
-  canSend: true,
-})
+/**
+ * One room, read the way the plugin answers it: the log since the device's mark, and its state. A
+ * `split` room stops its first page early and says there is more, which the reader must follow.
+ */
+const roomRead = (since?: number) => {
+  const first = split && since === undefined
+  return {
+    object: "gots.room",
+    room: { id: ROOM, name: moved.title, members: record().value.room.members },
+    events: first ? [] : log,
+    cursor: first ? 0 : (log.at(-1)?.seq ?? 0),
+    latestSeq: log.at(-1)?.seq ?? 0,
+    hasMore: first,
+    working: false,
+    activity: [],
+    waiting: [],
+    canStop: false,
+    canSend: true,
+  }
+}
 
 let merges = 0
 
@@ -135,7 +142,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const body = init?.body ? JSON.parse(String(init.body)) : undefined
   if (url.pathname.endsWith("/capabilities")) return json({ features: {} })
   if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["draft_text"] })
-  if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`)) return json(roomRead())
+  if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`))
+    return json(roomRead(url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined))
   if (url.pathname.endsWith("/plugins/gots/chats")) {
     merges += 1
     // The plugin's own answer: what the device sent, and the Host's rooms built fresh on every read.
@@ -158,12 +166,12 @@ db.conversations.hook("updating", () => void writes.rows++)
 db.conversations.hook("deleting", () => void writes.rows++)
 
 async function fresh(
-  { chats = false, ask = false, pin = false }: { chats?: boolean; ask?: boolean; pin?: boolean } = {},
+  { chats = false, ask = false }: { chats?: boolean; ask?: boolean } = {},
 ) {
   moved.at = LAST_AT
   moved.title = "Planning"
   retired = false
-  pinned = pin
+  split = false
   log = ask ? asks() : []
   await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
   await db.profiles.clear()
@@ -411,11 +419,17 @@ test("a room takes its place among Recents by its last activity", async () => {
 })
 
 test("a pinned room stands in the pinned band, not in Recents", async () => {
-  await fresh({ chats: true, pin: true })
+  await fresh({ chats: true })
   await merged()
+  // A room's record carries no pin — the Host's room has none (ADR 0116) — so the pin is this
+  // device's own, and the merge that follows must not take it away.
+  await db.conversations.update(ROOM, { pinned: true })
+  await syncNow()
+  await settle()
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "the room's own pin stands")
   await mount(screen("/"), async () => {
     await until(async () => band("pinned").includes(`/c/${ROOM}`), "the pinned band's room")
-    assert.deepEqual(band("pinned"), [`/c/${ROOM}`], "the Host's pin is the room's, as a chat's is")
+    assert.deepEqual(band("pinned"), [`/c/${ROOM}`], "the pin lifts the room, as it lifts a chat")
     assert.ok(
       !band("recents").includes(`/c/${ROOM}`),
       "a pinned room is lifted out of Recents rather than drawn twice",
@@ -497,6 +511,36 @@ test("a room whose row moved is read again, and its mark follows the Host", asyn
       find(`a[href="/c/${ROOM}"] [data-needs-you]`),
       null,
       "an answered room's row says nothing",
+    )
+  })
+})
+
+test("a room's page is read on to its newest reply, not left at the first page", async () => {
+  await fresh({ ask: true })
+  split = true
+  await merged()
+  await mount(screen("/"), async () => {
+    await until(
+      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) !== null,
+      "the mark the second page carries",
+    )
+  })
+})
+
+test("the Host saying a room moved marks its row though the record never moved", async () => {
+  await fresh()
+  await merged()
+  await mount(screen("/"), async () => {
+    await until(async () => band("recents").includes(`/c/${ROOM}`), "the room's row")
+    // The list has read the room and found nothing; the member's reply lands while the record's own
+    // clock stands still, so only the change stream can tell the row.
+    const opened = Date.now()
+    while (Date.now() - opened < 1_100) await new Promise((done) => setTimeout(done, 50))
+    log = asks()
+    await act(async () => noteChange(connectionKey(bots[1]), "room"))
+    await until(
+      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) !== null,
+      "the mark the change stream carried",
     )
   })
 })
