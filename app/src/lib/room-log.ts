@@ -141,8 +141,26 @@ export function askingMember(
   events: RoomEvent[],
   members: RoomMember[] = [],
 ): { memberId?: string; name?: string } | undefined {
+  const asked = askingEvent(events, members)
+  return asked
+    ? {
+        ...(asked.memberId ? { memberId: asked.memberId } : {}),
+        ...(asked.name ? { name: asked.name } : {}),
+      }
+    : undefined
+}
+
+/**
+ * The reply that ends addressed to the user, with the sequence it sits at: the row that asks, which
+ * is what the chat list's needs-you mark is measured from. The room's screen names the member and
+ * the list compares the sequence with the newest one this device has drawn.
+ */
+export function askingEvent(
+  events: RoomEvent[],
+  members: RoomMember[] = [],
+): { seq: number; memberId?: string; name?: string } | undefined {
   const seen = new Set<number>()
-  let asking: { memberId?: string; name?: string } | undefined
+  let asking: { seq: number; memberId?: string; name?: string } | undefined
   for (const event of [...events].sort((one, two) => one.seq - two.seq)) {
     if (seen.has(event.seq)) continue
     seen.add(event.seq)
@@ -154,7 +172,11 @@ export function askingMember(
     const addressed = MENTION.test(event.text ?? "")
     const name = event.name || memberName(members, event.memberId)
     asking = addressed
-      ? { ...(event.memberId ? { memberId: event.memberId } : {}), ...(name ? { name } : {}) }
+      ? {
+          seq: event.seq,
+          ...(event.memberId ? { memberId: event.memberId } : {}),
+          ...(name ? { name } : {}),
+        }
       : undefined
   }
   return asking

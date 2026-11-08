@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
+import type { ReactNode } from "react"
 import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   AudioLinesIcon,
@@ -28,9 +29,10 @@ import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
 import { chatOwner } from "@/lib/chat-owner"
 import { presence } from "@/lib/registry"
-import type { Message } from "@/lib/db"
+import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { useRoomNeeds } from "@/lib/room"
 import { roomMembersLine } from "@/lib/rooms"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
@@ -85,6 +87,9 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
   stalled: TriangleAlertIcon,
 }
 
+/** A reason in words, or nothing at all where nothing waits: a chat at rest has none to say. */
+const reasonTextOf = (reason?: WaitingReason) => (reason ? reasonText(reason) : undefined)
+
 /** A row's age, in the one voice every list that draws one uses. */
 function RowAge({ at, now }: { at: number; now: number }) {
   return (
@@ -95,8 +100,114 @@ function RowAge({ at, now }: { at: number; now: number }) {
 }
 
 /**
+ * What a room's row says it needs the user for: the member whose reply ended addressed to them, and
+ * nothing once this device has drawn that reply. A reading of the page the row's room keeps —
+ * `roomNeeds` is what the log this device holds ends asking for, `roomSeenSeq` what it has shown —
+ * so a room nobody has opened still says it, and opening it is the move that clears the mark.
+ */
+function roomNeedsText(chat: Conversation): string | undefined {
+  const asked = chat.roomNeeds
+  if (!asked?.seq || asked.seq <= (chat.roomSeenSeq ?? 0)) return undefined
+  return asked.name ? `${asked.name} needs you — reply in the room.` : "The room needs you — reply."
+}
+
+/**
+ * One row of a chat list: the bot's picture, its name and what it holds, its age, and a dot when it
+ * waits on the user. A room is drawn by the same row — its name, the members it seats, and the mark
+ * its own log reads — so a room and a chat are ordered, pinned and marked by one rule (ADR 0116).
+ */
+function ChatRow({
+  chat,
+  bot,
+  reason,
+  now,
+  collapsed,
+  onNavigate,
+}: {
+  chat: Conversation
+  bot?: Profile
+  /** What waits on the user, in words the screen reader hears: a chat's, or the room's own reading. */
+  reason?: string
+  now: number
+  collapsed: boolean
+  onNavigate?: () => void
+}) {
+  return (
+    <RootLink
+      to={`/c/${chat.id}`}
+      onClick={onNavigate}
+      aria-label={collapsed ? chat.title : undefined}
+      className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+    >
+      <Bot id={bot?.botId} className="size-5" />
+      {!collapsed && (
+        <>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{chat.title}</span>
+            {/* A room is a conversation of several bots, so its row names them: the record a device
+                merges carries its roster, and nothing of its transcript (ADR 0116). */}
+            {chat.room && (
+              <span className="block truncate text-xs font-normal text-muted-foreground">
+                {roomMembersLine(chat.room)}
+              </span>
+            )}
+          </span>
+          {chat.room && <RowAge at={chat.updatedAt} now={now} />}
+          {reason && (
+            <>
+              <span
+                aria-hidden
+                data-needs-you
+                className="size-2 shrink-0 rounded-full bg-warning"
+              />
+              <span className="sr-only">{reason}</span>
+            </>
+          )}
+        </>
+      )}
+    </RootLink>
+  )
+}
+
+/**
+ * A band of the chat list: its heading, and the rows it holds, in the order the list decided. A band
+ * with nothing in it draws nothing at all.
+ */
+function Band({
+  name,
+  label,
+  collapsed,
+  children,
+}: {
+  name: string
+  label: string
+  collapsed: boolean
+  children: ReactNode
+}) {
+  return (
+    <>
+      {!collapsed && (
+        <h2 id={`${name}-heading`} className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+          {label}
+        </h2>
+      )}
+      <ul
+        data-band={name}
+        aria-labelledby={collapsed ? undefined : `${name}-heading`}
+        aria-label={collapsed ? label : undefined}
+        className={cn("flex flex-col gap-0.5", collapsed && "items-center")}
+      >
+        {children}
+      </ul>
+    </>
+  )
+}
+
+/**
  * The newest chats across every bot, each with its bot's image, and a dot at the row's end when one
- * waits on the user. Project sessions stay on Code.
+ * waits on the user. Project sessions stay on Code. A pinned chat is lifted into the band above —
+ * ADR 0103's rule, read here over chats and rooms alike — and a room is one of these rows: it takes
+ * its place among them by its last activity, and says it needs the user until it is opened.
  */
 function Recents({
   onNavigate,
@@ -110,22 +221,28 @@ function Recents({
   const recents = useLiveQuery(async () => {
     const profiles = await db.profiles.toArray()
     const bots = new Map(profiles.map((p) => [p.id, p]))
-    const chats = await db.conversations
+    // Pinned first by ADR 0103, so every listed chat is read: a pin may be older than the ten newest.
+    const listed = await db.conversations
       .orderBy("updatedAt")
       .reverse()
       .filter((c) => chatOwner(c, bots).listed)
-      .limit(RECENTS)
       .toArray()
+    const chats = [
+      ...listed.filter((c) => c.pinned),
+      ...listed.filter((c) => !c.pinned).slice(0, RECENTS),
+    ]
     // This device's own unanswered approval or question, which a keyless bot or one without the
     // plugin can't report. Only a chat's newest reply can wait, so only that one is read.
     const newest = await Promise.all(
       chats.map((c) =>
-        db.messages
-          .where("[conversationId+createdAt]")
-          .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
-          .reverse()
-          .filter((m) => m.role === "assistant")
-          .first(),
+        c.room
+          ? undefined
+          : db.messages
+              .where("[conversationId+createdAt]")
+              .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
+              .reverse()
+              .filter((m) => m.role === "assistant")
+              .first(),
       ),
     )
     const open = newest.filter(
@@ -143,9 +260,27 @@ function Recents({
     return chats.map((chat) => ({
       chat,
       bot: chatOwner(chat, bots).bot,
+      reason: chat.room ? roomNeedsText(chat) : undefined,
       local: local.get(chat.id),
     }))
   }, [])
+
+  const pinned = recents?.filter((one) => one.chat.pinned) ?? []
+  const rest = recents?.filter((one) => !one.chat.pinned) ?? []
+
+  const rows = (band: typeof rest) =>
+    band.map(({ chat, bot, reason, local }) => (
+      <li key={chat.id}>
+        <ChatRow
+          chat={chat}
+          bot={bot}
+          now={now}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+          reason={reason ?? reasonTextOf(local) ?? reasonTextOf(live[chat.hermesSessionId])}
+        />
+      </li>
+    ))
 
   return (
     <nav
@@ -153,57 +288,18 @@ function Recents({
       aria-labelledby={collapsed ? undefined : "recents-heading"}
       aria-label={collapsed ? "Recent chats" : undefined}
     >
-      {!collapsed && (
-        <h2
-          id="recents-heading"
-          className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
-        >
-          Recents
-        </h2>
+      {pinned.length > 0 && (
+        <Band name="pinned" label="Pinned" collapsed={collapsed}>
+          {rows(pinned)}
+        </Band>
       )}
-      {!collapsed && recents?.length === 0 && (
+      <Band name="recents" label="Recents" collapsed={collapsed}>
+        {rows(rest)}
+      </Band>
+      {!collapsed && rest.length === 0 && pinned.length === 0 && (
         <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet. Say hi to Hermes!</p>
       )}
-      <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {recents?.map(({ chat, bot, local }) => {
-          const reason = local ?? live[chat.hermesSessionId]
-          return (
-            <li key={chat.id}>
-              <RootLink
-                to={`/c/${chat.id}`}
-                onClick={onNavigate}
-                aria-label={collapsed ? chat.title : undefined}
-                className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-              >
-                <Bot id={bot?.botId} className="size-5" />
-                {!collapsed && (
-                  <>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{chat.title}</span>
-                      {/* A room is a conversation of several bots, so its row names them: the
-                          record a device merges carries its roster, and nothing of its transcript
-                          (ADR 0116). */}
-                      {chat.room && (
-                        <span className="block truncate text-xs font-normal text-muted-foreground">
-                          {roomMembersLine(chat.room)}
-                        </span>
-                      )}
-                    </span>
-                    {chat.room && <RowAge at={chat.updatedAt} now={now} />}
-                    {reason && (
-                      <>
-                        <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
-                        <span className="sr-only">{reasonText(reason)}</span>
-                      </>
-                    )}
-                  </>
-                )}
-              </RootLink>
-            </li>
-          )
-        })}
-      </ul>
-      {!collapsed && (recents?.length ?? 0) > 0 && (
+      {!collapsed && rest.length > 0 && (
         <button
           type="button"
           className="flex min-h-11 items-center gap-1 rounded-2xl px-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
@@ -219,6 +315,10 @@ function Recents({
 /**
  * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
  * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
+ *
+ * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it
+ * belongs to no bot's row, and it is not a section of its own either — it is drawn by the chat
+ * list's own row, with its members, its last activity and the mark its log reads (ADR 0115).
  */
 function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const summaries = useBotSummaries()
@@ -235,6 +335,14 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
+  const rooms = useLiveQuery(async () => {
+    const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
+    const held = await db.conversations.filter((one) => Boolean(one.room)).toArray()
+    return held
+      .filter((one) => chatOwner(one, bots).listed)
+      .sort((one, two) => two.updatedAt - one.updatedAt)
+      .map((one) => ({ chat: one, bot: chatOwner(one, bots).bot, reason: roomNeedsText(one) }))
+  }, [])
 
   return (
     <nav
@@ -320,6 +428,18 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
             </li>
           )
         })}
+        {rooms?.map(({ chat, bot, reason }) => (
+          <li key={chat.id}>
+            <ChatRow
+              chat={chat}
+              bot={bot}
+              reason={reason}
+              now={now}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+            />
+          </li>
+        ))}
         <li>
           <RootLink
             to="/settings/bots?link=1"
@@ -338,62 +458,6 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
             {!collapsed && "Link a bot"}
           </RootLink>
         </li>
-      </ul>
-    </nav>
-  )
-}
-
-/**
- * The Host's rooms, each its own row: a room is nobody's thread, so the bots layout lists it beside
- * the bots rather than inside one of them (ADR 0115). Drawn only where this device has a room.
- */
-function Rooms({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
-  const now = useNow()
-  const rooms = useLiveQuery(async () => {
-    const bots = new Map((await db.profiles.toArray()).map((p) => [p.id, p]))
-    const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
-    return held
-      .filter((chat) => chatOwner(chat, bots).listed)
-      .sort((one, two) => two.updatedAt - one.updatedAt)
-      .map((chat) => ({ chat, bot: chatOwner(chat, bots).bot }))
-  }, [])
-  if (!rooms?.length) return null
-
-  return (
-    <nav
-      className="flex flex-col gap-0.5"
-      aria-labelledby={collapsed ? undefined : "rooms-heading"}
-      aria-label={collapsed ? "Rooms" : undefined}
-    >
-      {!collapsed && (
-        <h2 id="rooms-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
-          Rooms
-        </h2>
-      )}
-      <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {rooms.map(({ chat, bot }) => (
-          <li key={chat.id}>
-            <RootLink
-              to={`/c/${chat.id}`}
-              onClick={onNavigate}
-              aria-label={collapsed ? chat.title : undefined}
-              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-            >
-              <Bot id={bot?.botId} className="size-5" />
-              {!collapsed && (
-                <>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{chat.title}</span>
-                    <span className="block truncate text-xs font-normal text-muted-foreground">
-                      {roomMembersLine(chat.room!)}
-                    </span>
-                  </span>
-                  <RowAge at={chat.updatedAt} now={now} />
-                </>
-              )}
-            </RootLink>
-          </li>
-        ))}
       </ul>
     </nav>
   )
@@ -508,6 +572,9 @@ export function ConversationList({
   const { root } = useNav()
   const botThreads = useBotThreads()
   const meetings = useMeetingsEnabled()
+  // The rooms this device lists, read from their Hosts so a row can say a room needs the user
+  // without opening it: one read a room, and none for a room at rest.
+  useRoomNeeds()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -604,10 +671,7 @@ export function ConversationList({
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
         {botThreads ? (
-          <>
-            <Bots onNavigate={onNavigate} collapsed={collapsed} />
-            <Rooms onNavigate={onNavigate} collapsed={collapsed} />
-          </>
+          <Bots onNavigate={onNavigate} collapsed={collapsed} />
         ) : (
           botThreads === false && <Recents onNavigate={onNavigate} collapsed={collapsed} />
         )}

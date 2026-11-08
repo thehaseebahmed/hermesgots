@@ -303,6 +303,29 @@ export interface Conversation {
    * row; `profileId` says only which bot carried the record onto this device.
    */
   room?: Room
+  /**
+   * What the room's log this device holds ends addressed to the user for: the sequence that asks,
+   * and the member that ends on `@user`. A reading of the page this device holds, so the list says
+   * a room needs the user without opening it; only a room carries it, and it never syncs.
+   */
+  roomNeeds?: RoomNeeds
+  /**
+   * The newest Host sequence this device has drawn of the room: its read mark (ADR 0116), advanced
+   * by the room's own screen. The row's needs-you mark stands until it reaches `roomNeeds.seq`.
+   * Local only, and only a room carries it.
+   */
+  roomSeenSeq?: number
+}
+
+/**
+ * A room's page as the chat list reads it: what the newest reply in it asks for, and the record's
+ * own clock this reading was taken at, so a room whose row hasn't moved is not read again.
+ */
+export interface RoomNeeds {
+  at: number
+  seq?: number
+  memberId?: string
+  name?: string
 }
 
 /**
