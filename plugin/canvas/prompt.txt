@@ -59,9 +59,11 @@ screen, generous spacing, one deliberate accent, nothing decorative that earns n
 
 ## Changing it
 
-`canvas_write` writes the whole document as the next version, and the user can undo it. There is no
-patch: to change one line, read the page, change it, and write it whole. A write that fails changes
-nothing, so the page the user is looking at is never half-written.
+Two ways to change it. `canvas_edit` takes a list of find-and-replace pairs for a small change: each
+`find` has to appear exactly once in the page, and either every pair lands as one new version or
+none does. `canvas_write` writes the whole document again, for a change too big to name. Read the
+page first with `canvas_read`: it is the version the user is looking at. A change that fails writes
+nothing, so the page is never half-written, and the user can undo one step.
 
 If the user asks for something the canvas can't be — a pull request, an entry in their project's
 library, a task taken from their board — say so plainly: this session changes the canvas, and those

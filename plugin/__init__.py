@@ -2978,6 +2978,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.canvas", "canvas": found})
 
+    async def undo_canvas(request: "web.Request") -> "web.Response":
+        """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                canvases.undo, store_path(), request.match_info["canvas_id"]
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas", "canvas": found})
+
     async def list_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -3327,6 +3340,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/canvases", list_canvases)
     app.router.add_post(f"{PREFIX}/canvases", create_canvas)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
+    app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)
     app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/brief", research_brief)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/edit", research_edit)

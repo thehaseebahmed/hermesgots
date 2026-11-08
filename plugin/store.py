@@ -930,7 +930,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v60: a canvas is its bot's record and its versions are kept beside it (ADR 0113). `at` is
         # the record's change clock, the one the app merges by, and `session_id` is the Hermes
         # session the canvas is edited in — the chat's, which a run's own session reaches through
-        # the compression walk (sessions.chat_session). `version` is the newest one written, and a
+        # the compression walk (sessions.chat_session). `version` is the version the user sees — the
+        # current one, which an undo moves back a version without deleting the ones above it — and a
         # canvas with none yet is 0.
         conn.execute(
             """CREATE TABLE IF NOT EXISTS canvases (
