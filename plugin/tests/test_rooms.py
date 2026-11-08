@@ -1855,7 +1855,7 @@ class RoomMedia(unittest.TestCase):
 
 
 class RoomPushes(unittest.TestCase):
-    """A room that starts needing the user is pushed once, and again only after it is answered (F6).
+    """A room that starts needing the user is pushed once, and not again until its wait ends (F6).
 
     What makes a room need the user is the room's own: an approval the Host holds pending, a
     question the plugin holds for a member's turn, or a member's reply that ends addressed to

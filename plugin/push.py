@@ -59,8 +59,8 @@ TITLE_MAX = 80
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
 # What a push is about. `approval`, `question`, `plan` and `room_input` wait on the user; the rest
-# are news. The registry
-# (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep the same lists.
+# are news. The registry (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep
+# the same lists.
 KINDS = (
     "approval",
     "question",
@@ -79,18 +79,17 @@ KINDS = (
     "routine_message",
     "meeting_done",
     "meeting_failed",
-    # A room of this Host's bots waits on the user: it is its own kind, because a room is nobody's
-    # chat — a push about one names the room, and a device switches it apart from a chat's questions.
+    # A room of this Host's bots waits on the user, and it is its own kind because a room is
+    # nobody's chat: a push about one names the room, not a session.
     "room_input",
 )
 # What a device switches: a kind within a feature (chats, code, routines, research). A session's
-# kinds belong to Code when it is a project session, else to Chats.
+# kinds belong to Code when it is a project session, else to Chats; a room's is the room's own,
+# whichever feature its session would have been in.
 CATEGORIES = (
     "chat_input",
     "chat_run_failed",
     "chat_run_done",
-    # A room of this Host's bots waits on the user as a whole, and is switched apart from a chat's
-    # questions, so it is a category of its own among the chats.
     "room_input",
     "code_input",
     "code_run_failed",

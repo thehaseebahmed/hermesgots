@@ -41,7 +41,8 @@ const UNTITLED = {
 // What the push is about when it isn't a session.
 const SCREENS = { routine_failed: "/routines", clone_failed: "/projects" }
 
-/** Where a tap lands: a screen of its own, a room's row (it is one), or the session that named it. */
+// Where a tap lands: a screen of its own, a room's row, or the screen the push's id names. The same
+// answer as `pushPath` in src/lib/push-kinds.ts, so the two move together.
 function screenFor(kind, sessionId) {
   if (SCREENS[kind]) return SCREENS[kind]
   if (kind === "room_input")

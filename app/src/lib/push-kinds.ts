@@ -218,11 +218,11 @@ export function channelName(category: PushCategoryInfo) {
     : category.title
 }
 
-/** Where a tapped notification goes: the session it is about, or the screen of what failed. */
+/** Where a tapped notification goes: the session or the room it is about, or the screen of what failed. */
 export function pushPath(kind: unknown, id: unknown) {
   if (kind === "routine_failed") return "/routines"
   if (kind === "clone_failed") return "/projects"
-  // A room is already a chat row here, under the Host's id, so a tap opens it like one.
+  // A room is already a chat row here, under the Host's room id, so a tap opens it like one.
   if (kind === "room_input")
     return typeof id === "string" && id ? `/c/${encodeURIComponent(id)}` : "/"
   if (typeof kind === "string" && kind.startsWith("meeting_"))

@@ -118,12 +118,12 @@ METHODS_TTL = 30.0
 # hook fired — a round that settled addressed to the user is only in the room's log.
 WATCH_SECONDS = 20.0
 WATCH_BUDGET = 8.0
-# How far back a room's log is read to see whether its last words were addressed to the user. A
-# settle or an activity row follows the reply it belongs to, so the last few rows are the ones that
-# decide; a window this wide holds a whole round of them.
+# How far back a room's log is read to see whether its last words were addressed to the user: a
+# settle or activity row can follow the reply that decides, so the window reaches back past a
+# round's worth of them.
 ASK_WINDOW = 20
-# A member's words addressed to the user, as the room's screen reads them: a mention, not a name
-# that merely begins with one.
+# A member's words addressed to the user, read exactly as the room's screen reads them
+# (`app/src/lib/room-log.ts`): a mention, not a name that merely begins with one.
 MENTION = re.compile(r"@user\b", re.IGNORECASE)
 
 _ids = itertools.count(1)
@@ -158,8 +158,8 @@ _loads: Dict[str, threading.Lock] = {}
 _projections_lock = threading.Lock()
 
 # Which rooms were waiting on the user at the last look, by home and room: a push is a transition
-# into waiting, so a room already marked is one the user has been told about and a room the user has
-# answered is marked again on the pass that sees it at rest.
+# into waiting, so a room already marked is one the user has been told about, or a send that failed
+# silently, and a room the user has answered is marked again on the pass that sees it at rest.
 _pushes: Dict[Tuple[str, str], bool] = {}
 _pushes_lock = threading.Lock()
 # The watcher's own wake-up: a transition the Host's hook can see is pushed now, not on a tick.
@@ -1095,9 +1095,9 @@ def on_member_activity(**kwargs: Any) -> None:
         hold_question(room_id, kwargs.get("member_id"), request_id, payload.get("questions"))
         _ticker.wake()
     elif kwargs.get("kind") == "request.opened":
-        # An approval opened: the Host holds it as a pending action, and the user is told now rather
-        # than on the watcher's next tick. Everything else — a reply ending addressed to the user
-        # included — is the log's, which the tick reads.
+        # A request that isn't a question opened — an approval the Host now holds standing — so the
+        # user is told now rather than on the next tick. Everything else, a reply ending addressed to
+        # the user included, is the log's, which the tick reads.
         _ticker.wake()
     now = time.monotonic()
     with _notes_lock:
@@ -1350,7 +1350,7 @@ def _waits(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) 
 
 
 def _forget(room_id: str, home: Any) -> None:
-    """A room the user has just answered: the next time it waits, that is a new wait and is pushed."""
+    """A room whose wait is over — answered, approved or stopped: the next wait is a new one."""
     with _pushes_lock:
         _pushes.pop((str(home), room_id), None)
 
@@ -1365,8 +1365,8 @@ def check(hermes_home: Path) -> int:
     read every room leaves the marks it never reached alone, so a room it didn't look at is not
     forgotten as gone.
 
-    Without a device that could be told there is nothing to do: a wait this pass would have pushed
-    is still a transition for the next pass, since nothing was marked.
+    With no device that could be told the pass does nothing: a wait it would have pushed is still a
+    transition for the next pass, because nothing was marked.
     """
     path = db_path(hermes_home)
     if not path.exists() or not push.reachable(path):
@@ -1437,5 +1437,5 @@ def _pass(adapter: Any) -> None:
 
 
 async def run(adapter: Any) -> None:
-    """Watches this Host's rooms for a wait on the user, until the server stops."""
+    """Watches every served home's rooms for a wait on the user: on a poke, else every tick."""
     await _ticker.run(WATCH_SECONDS, lambda: asyncio.to_thread(_pass, adapter))
