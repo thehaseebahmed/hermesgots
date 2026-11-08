@@ -75,13 +75,9 @@ export interface RoomLive {
   error?: string
   /** A send, an answer or a stop the Host refused, in its own words: it stands until the next try. */
   refused?: string
-  /** A send on its way to the Host. */
-  sending: boolean
-  /** An answer or a stop on its way to the Host. */
-  acting: boolean
 }
 
-const EMPTY: RoomLive = { name: "", members: [], waiting: [], sending: false, acting: false }
+const EMPTY: RoomLive = { name: "", members: [], waiting: [] }
 
 /** The index range one room's page sits in, which every read and write of it asks for. */
 const pageRange = (roomId: string) =>
@@ -178,8 +174,6 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
             waiting: found.waiting,
             canStop: found.canStop,
             canSend: found.canSend,
-            sending: held.sending,
-            acting: held.acting,
             // A refusal is the write's, not the read's: a good read does not take its words away.
             ...(held.refused ? { refused: held.refused } : {}),
           }
@@ -245,7 +239,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const send = useCallback(
     async (text: string): Promise<boolean> => {
       if (!roomId || !hasServer(bot) || !text.trim()) return false
-      setLive((held) => ({ ...held, sending: true, refused: undefined }))
+      setLive((held) => ({ ...held, refused: undefined }))
       try {
         const words = text.trim()
         // The id is minted here and kept with the words, so a send retried after a dropped answer
@@ -265,7 +259,6 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
         setLive((held) => ({ ...held, refused: reasonOf(error) }))
         return false
       } finally {
-        setLive((held) => ({ ...held, sending: false }))
         sync(undefined, true)
       }
     },
@@ -280,7 +273,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const act = useCallback(
     async (work: () => Promise<void>): Promise<boolean> => {
       if (!roomId || !hasServer(bot)) return false
-      setLive((held) => ({ ...held, acting: true, refused: undefined }))
+      setLive((held) => ({ ...held, refused: undefined }))
       try {
         await work()
         return true
@@ -288,7 +281,6 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
         setLive((held) => ({ ...held, refused: reasonOf(error) }))
         return false
       } finally {
-        setLive((held) => ({ ...held, acting: false }))
         sync(undefined, true)
       }
     },
