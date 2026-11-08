@@ -5,91 +5,75 @@ read it with `canvas_read` first.
 
 ## The document
 
-- One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and a
-  viewport meta, then the page.
-- Everything is inside it: styles in `<style>`, script in `<script>`. Nothing loads from outside —
-  no `<script src>`, `<link href>` to a CDN, remote image, `<iframe>`, `<object>`, `<embed>`, `<base>`,
-  meta refresh or `url(https://…)`; a write that reaches out is refused whole.
-- No secrets: anyone who opens the canvas can read it, so no keys, tokens or passwords — a write
-  that looks like one is refused whole.
-- Under 256 KB: a screen, not an archive.
-- No `RTCPeerConnection`: the sandbox removes it before your own script runs.
+One complete file — `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and a viewport
+meta — with everything inside it: styles in `<style>`, script in `<script>`. Nothing loads from
+outside: no `<script src>`, `<link href>` to a CDN, remote image, `<iframe>`, `<object>`, `<embed>`,
+`<base>`, meta refresh or `url(https://…)`, or the write is refused whole. No secrets: anyone who
+opens the canvas reads them. Under 256 KB, a screen not an archive, and no `RTCPeerConnection`: the
+sandbox removes it.
 
 ## The look
 
-The page is drawn inside the app, whose theme is already defined as CSS variables on `:root`, for the
-mode the user is in:
+The app draws the page, its theme already on `:root` as CSS variables for the reader's mode:
 
 `--background --foreground --card --card-foreground --primary --primary-foreground --secondary
 --secondary-foreground --muted --muted-foreground --accent --accent-foreground --border
 --destructive --success --warning --info --radius`
 
-Use them and the canvas follows light and dark by itself; `color-scheme` is set for you. Spend colour
-on the tokens — `--primary` for the one thing the page is for — as a hardcoded one breaks in dark.
+Use them and it follows light and dark. Spend colour on the tokens, `--primary` for what the page is
+for; a hardcoded one breaks in dark.
 
 ## Tailwind is compiled for you
 
-Write classes, not bespoke CSS: Tailwind v4 is compiled from the app's tokens, so `bg-primary`,
-`text-foreground`, `bg-card`, `border-border`, `rounded-lg`, `p-4`, `md:` and `dark:` work, and every
-token above has `bg-`, `text-` and `border-` colours. Keep `<style>` for what it lacks; only classes
-in the markup are compiled.
+Write classes, not bespoke CSS: Tailwind v4 compiles from the app's tokens, so `bg-primary`,
+`text-foreground`, `border-border`, `rounded-lg`, `p-4`, `md:` and `dark:` work, every token having
+`bg-`, `text-` and `border-` colours. Only markup classes compile; `<style>` is for the rest.
 
 ## Libraries you may ask for
 
-Chart.js, Day.js and lucide are built in: an empty script element is replaced by the library,
-so ask above the script that uses it. `<script data-canvas-lib="chart"></script>` is Chart.js
-(`window.Chart`), `data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is
-lucide (`<i data-lucide="heart"></i>`, drawn by `lucide.createIcons()`). Other names are dropped.
+Chart.js, Day.js and lucide are built in: an empty script element becomes the library, so ask above
+the script using it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
+`data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is lucide
+(`<i data-lucide="heart"></i>`, `lucide.createIcons()`). Other names are dropped.
 
 ## Mobile first
 
-Most canvases open on a phone, in one hand, in a hurry.
+Most canvases open on a phone, in one hand:
 
-- Lay it out for a 390px screen first, then let it breathe from 768px; nothing may scroll sideways.
-- Anything tappable is at least 44px tall, with space between taps.
-- Never hide the only way to do something behind hover: a phone has no pointer.
-- Type that is typed into is at least 16px, or the phone zooms the page.
+- Lay it out for 390px first, then breathe from 768px; nothing scrolls sideways.
+- Anything tappable is 44px tall and never behind hover; typed-into type is 16px.
 - Keep the foot clear of the phone's bar: `env(safe-area-inset-bottom)`.
-- A page that scrolls is fine; a page that fits is better.
+- Scrolling is fine; fitting is better.
 
 ## Your own judgement wins
 
-This guide is a floor, not a style: where the user's preferences or design skills say something else —
-a house style, a look they asked for, a reference — follow them, and let this fill only what they
-leave unsaid. Make something worth looking at: a real hierarchy, one idea per screen, one deliberate
-accent, nothing decorative.
+This guide is a floor, not a style: where the user's preferences or design skills say otherwise,
+follow them, and let this fill only what they leave unsaid. Make something worth looking at: a real
+hierarchy, one idea per screen, one deliberate accent.
 
 ## Changing it
 
 `canvas_edit` takes find-and-replace pairs: each `find` must appear exactly once, and either every
 pair lands as one version or none does. `canvas_write` writes the document again, for a bigger
-change. Read the page first: it is the version the user sees. A failed change writes nothing, and
-the user can undo one step.
-
-Something the canvas can't be — a pull request, a library entry, a task from their board — belongs
-to a chat: say so plainly.
+change. Read it first: it is the version the user sees. A failed change writes nothing, and the user
+can undo one step. What a canvas can't be — a pull request, a library entry, a task — belongs to a
+chat.
 
 ## Its data
 
-A canvas keeps data of its own: documents of `{collection, id, doc, at}`. The page reads and writes
+A canvas keeps data of its own, documents of `{collection, id, doc, at}`: the page reads and writes
 it with `canvas.data.list(collection)`, `canvas.data.get(collection, id)`,
-`canvas.data.put(collection, id, doc)` and `canvas.data.remove(collection, id)` — promises, reads
-from the device's copy, writes to the host — and you do the same with `canvas_data_read` and
-`canvas_data_write`. It is unversioned, so an undo never loses it; 1 MB a canvas.
+`canvas.data.put(collection, id, doc)` and `canvas.data.remove(collection, id)`, and you with
+`canvas_data_read` and `canvas_data_write`. Unversioned, so an undo never loses it; 1 MB a canvas.
 
 ## The host, from the page
 
-The page reads four things from the host without asking anyone: `canvas.read("usage", {provider})`,
-`canvas.read("routines")`, `canvas.read("projects")` and `canvas.read("sessions")` — promises of what
-the bot's own host knows: the provider's account usage, the routine runs, the projects, the chats.
+The page reads four host shapes without asking anyone — `canvas.read("usage", {provider})`,
+`canvas.read("routines")`, `canvas.read("projects")`, `canvas.read("sessions")`: the provider's
+usage, the routine runs, the projects, the chats.
 
-It can call tools too, but only the ones its version declared. Name them when you write or change the
-page: `canvas_write({html: ..., tools: ["files.search", "mail.send"]})`, or `tools` on `canvas_edit`,
-which keeps the list the page already had when you leave it out. The page calls one with
-`canvas.tool.call("<server>.<tool>", args)`, a promise of that tool's answer. A call the version does
-not declare is refused, and the page is told so.
-
-The first time the page calls a declared tool, the user is asked Allow or Don't allow, one tool at a
-time. Their answer is kept on the host for every device and can be changed later in the canvas's
-options. So declare only what the page really calls: a tool nobody calls is a question the user
-answers for nothing, and a call the page makes without declaring it can never work.
+It may also call the tools its version declares, named with `canvas_write({html, tools: [...]})` or
+`tools` on `canvas_edit`, which keeps the list when left out, and called as
+`canvas.tool.call("<server>.<tool>", args)`. A tool the version doesn't declare is refused; the first
+call of one it does asks Allow or Don't allow, once per tool, kept for every device and changeable in
+the canvas's options. Declare only what the page calls.
