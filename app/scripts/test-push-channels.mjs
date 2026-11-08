@@ -15,7 +15,7 @@ test("with the experiment off, Meetings' two are not this phone's", () => {
   assert.deepEqual(
     ids(reachableCategories(false)),
     ids(PUSH_CATEGORIES.filter((category) => category.feature !== "meetings")),
-    "fourteen, in the order the list keeps",
+    "sixteen, in the order the list keeps",
   )
 })
 
@@ -36,7 +36,7 @@ const push = read("push.ts")
 const registry = read("../../netlify/lib/fcm.ts")
 const manifest = read("../../android/app/src/main/AndroidManifest.xml")
 
-test("launch makes the channels this phone can reach, not all sixteen", () => {
+test("launch makes the channels this phone can reach, not all eighteen", () => {
   assert.match(
     push,
     /channelPlan\(reachableCategories\(meetings\), held\)/,

@@ -19,7 +19,7 @@ import { body, read } from "./push-source.mjs"
 const ids = (categories) => categories.map((category) => category.id)
 /** Every id, in the order the list keeps: what a phone that can reach everything is told. */
 const all = ids(reachableCategories(true))
-/** The fourteen a phone without the Meetings experiment can reach. */
+/** The sixteen a phone without the Meetings experiment can reach. */
 const withoutMeetings = ids(reachableCategories(false))
 /** A phone that has made every channel and left it alone: Android's importance 2, 3 or 4. */
 const healthy = PUSH_CATEGORIES.map(({ id, importance }) => ({ id, importance }))
@@ -71,7 +71,7 @@ test("a channel the phone doesn't list counts as allowed", () => {
 test("a healthy phone allows every type, in the order the list keeps", () => {
   const allowed = allowedCategoryIds({ allowed: true, channels: healthy }, true)
   assert.deepEqual(allowed, all)
-  assert.equal(allowed.length, PUSH_CATEGORIES.length, "the sixteen stay sixteen")
+  assert.equal(allowed.length, PUSH_CATEGORIES.length, "the eighteen stay eighteen")
 })
 
 test("with the phone's notifications off the registration carries an empty list", () => {
@@ -94,14 +94,14 @@ test("an importance the phone doesn't report is a channel the user left alone", 
 test("a phone that cannot reach Meetings does not register its two", () => {
   for (const meetings of [false, undefined]) {
     const allowed = allowedCategoryIds({ allowed: true, channels: healthy }, meetings)
-    assert.deepEqual(allowed, withoutMeetings, "fourteen, and Meetings' two among the missing")
+    assert.deepEqual(allowed, withoutMeetings, "sixteen, and Meetings' two among the missing")
     assert.equal(allowed.includes("meeting_done"), false, "no channel it will never be shown")
     assert.equal(allowed.includes("meeting_failed"), false)
   }
   assert.deepEqual(
     allowedCategoryIds({ allowed: true, channels: [] }, false),
     withoutMeetings,
-    "a first launch on such a phone registers fourteen",
+    "a first launch on such a phone registers sixteen",
   )
 })
 

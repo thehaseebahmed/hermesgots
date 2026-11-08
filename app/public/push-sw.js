@@ -21,6 +21,7 @@ const WORDS = {
   routine_message: "A bot has a message",
   meeting_done: "Your meeting notes are ready",
   meeting_failed: "Meeting notes failed",
+  room_input: "A room is waiting on you",
 }
 
 // When the plugin is older or couldn't find a name.
@@ -34,10 +35,24 @@ const UNTITLED = {
   research_failed: "A research mission",
   meeting_done: "A meeting",
   meeting_failed: "A meeting",
+  room_input: "A room",
 }
 
 // What the push is about when it isn't a session.
 const SCREENS = { routine_failed: "/routines", clone_failed: "/projects" }
+
+/** Where a tap lands: a screen of its own, a room's row (it is one), or the session that named it. */
+function screenFor(kind, sessionId) {
+  if (SCREENS[kind]) return SCREENS[kind]
+  if (kind === "room_input")
+    return sessionId ? `/c/${encodeURIComponent(sessionId)}` : "/"
+  const screen = String(kind).startsWith("research_")
+    ? "research"
+    : String(kind).startsWith("meeting_")
+      ? "meetings"
+      : ""
+  return screen ? `/${screen}${sessionId ? `/${encodeURIComponent(sessionId)}` : ""}` : undefined
+}
 
 self.addEventListener("push", (event) => {
   let data = {}
@@ -51,13 +66,7 @@ self.addEventListener("push", (event) => {
 
 async function show(data) {
   const sessionId = typeof data.session_id === "string" ? data.session_id : ""
-  const screen =
-    SCREENS[data.kind] ||
-    (String(data.kind).startsWith("research_")
-      ? `/research${sessionId ? `/${encodeURIComponent(sessionId)}` : ""}`
-      : String(data.kind).startsWith("meeting_")
-        ? `/meetings${sessionId ? `/${encodeURIComponent(sessionId)}` : ""}`
-        : undefined)
+  const screen = screenFor(data.kind, sessionId)
   // A newer push about the same thing replaces one still showing; what waits on the user is one
   // thing, whichever way.
   const group = ["approval", "question", "plan"].includes(data.kind) ? "session" : data.kind

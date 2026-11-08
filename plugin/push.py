@@ -58,7 +58,8 @@ TITLE_MAX = 80
 # The push services accept 4096 bytes; ours are far smaller.
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
-# What a push is about. The first three wait on the user; the rest are news. The registry
+# What a push is about. `approval`, `question`, `plan` and `room_input` wait on the user; the rest
+# are news. The registry
 # (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep the same lists.
 KINDS = (
     "approval",
@@ -78,6 +79,9 @@ KINDS = (
     "routine_message",
     "meeting_done",
     "meeting_failed",
+    # A room of this Host's bots waits on the user: it is its own kind, because a room is nobody's
+    # chat — a push about one names the room, and a device switches it apart from a chat's questions.
+    "room_input",
 )
 # What a device switches: a kind within a feature (chats, code, routines, research). A session's
 # kinds belong to Code when it is a project session, else to Chats.
@@ -85,6 +89,9 @@ CATEGORIES = (
     "chat_input",
     "chat_run_failed",
     "chat_run_done",
+    # A room of this Host's bots waits on the user as a whole, and is switched apart from a chat's
+    # questions, so it is a category of its own among the chats.
+    "room_input",
     "code_input",
     "code_run_failed",
     "code_run_done",
@@ -116,6 +123,9 @@ def category_of(kind: str, project: bool = False) -> str:
         return "routine_failed"
     if kind == "routine_message":
         return "routine_message"
+    # A room is nobody's chat, so which feature a session is in says nothing about it.
+    if kind == "room_input":
+        return "room_input"
     if kind == "clone_failed":
         return "code_setup_failed"
     if kind in ("research_brief", "research_scope"):

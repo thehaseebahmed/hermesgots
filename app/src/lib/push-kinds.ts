@@ -12,6 +12,7 @@ export type PushCategory =
   | "chat_input"
   | "chat_run_failed"
   | "chat_run_done"
+  | "room_input"
   | "code_input"
   | "code_run_failed"
   | "code_run_done"
@@ -58,6 +59,8 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   },
   { id: "chat_run_failed", feature: "chats", title: "Run failed", on: true, importance: 3 },
   { id: "chat_run_done", feature: "chats", title: "Run finished", on: false, importance: 3 },
+  // A room of bots waits on the user as a whole, so it is switched apart from a chat's questions.
+  { id: "room_input", feature: "chats", title: "Room needs you", on: true, importance: 4 },
   {
     id: "code_input",
     feature: "code",
@@ -131,7 +134,7 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
 
 /**
  * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
- * that experiment is on, the other fifteen always.
+ * that experiment is on, the other sixteen always.
  */
 export function reachableCategories(meetings?: boolean) {
   return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))
@@ -219,6 +222,9 @@ export function channelName(category: PushCategoryInfo) {
 export function pushPath(kind: unknown, id: unknown) {
   if (kind === "routine_failed") return "/routines"
   if (kind === "clone_failed") return "/projects"
+  // A room is already a chat row here, under the Host's id, so a tap opens it like one.
+  if (kind === "room_input")
+    return typeof id === "string" && id ? `/c/${encodeURIComponent(id)}` : "/"
   if (typeof kind === "string" && kind.startsWith("meeting_"))
     return typeof id === "string" && id ? `/meetings/${encodeURIComponent(id)}` : "/meetings"
   if (typeof kind === "string" && kind.startsWith("research_"))

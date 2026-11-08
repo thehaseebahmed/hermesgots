@@ -1,5 +1,5 @@
 /**
- * The seventeen notification types, each named for the event it reports: the title as the web's list
+ * The eighteen notification types, each named for the event it reports: the title as the web's list
  * shows it, how loudly its channel is created, whether it starts on, and the name Android's flat
  * list shows (the feature's in front, since that list has no headings). A device that already has
  * the channels keeps them, so the ids here are the ones that were shipped and must not move.
@@ -14,6 +14,7 @@ const NAMED = [
   ["chat_input", "Questions and approvals", 4, true],
   ["chat_run_failed", "Run failed", 3, true],
   ["chat_run_done", "Run finished", 3, false],
+  ["room_input", "Room needs you", 4, true],
   ["code_input", "Questions, approvals, plans", 4, true],
   ["code_run_failed", "Run failed", 3, true],
   ["code_run_done", "Run finished", 3, false],
@@ -42,7 +43,7 @@ const byId = (id) => {
 }
 
 test("every type reads as the event it reports", () => {
-  assert.equal(PUSH_CATEGORIES.length, NAMED.length, "the seventeen stay seventeen")
+  assert.equal(PUSH_CATEGORIES.length, NAMED.length, "the eighteen stay eighteen")
   for (const [id, title] of NAMED) assert.equal(byId(id).title, title, id)
 })
 
@@ -71,7 +72,7 @@ test("the two renamed types are the only wording that changed", () => {
     research_input: "Brief or scope to review",
   }
   for (const [id, title] of Object.entries(renamed)) assert.equal(byId(id).title, title)
-  // The other fifteen keep the wording they shipped with, as this table has it.
+  // The other sixteen keep the wording they shipped with, as this table has it.
   assert.deepEqual(
     PUSH_CATEGORIES.filter((c) => !(c.id in renamed)).map((c) => c.title),
     NAMED.filter(([id]) => !(id in renamed)).map(([, title]) => title),
@@ -79,7 +80,7 @@ test("the two renamed types are the only wording that changed", () => {
 })
 
 test("only what waits on the user peeks", () => {
-  assert.deepEqual(at(4), ["chat_input", "code_input", "research_input"])
+  assert.deepEqual(at(4), ["chat_input", "room_input", "code_input", "research_input"])
 })
 
 test("a failure nobody saw coming does not take over the screen", () => {

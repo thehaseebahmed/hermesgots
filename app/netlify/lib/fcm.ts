@@ -29,6 +29,7 @@ export const PUSH_KINDS = [
   "routine_message",
   "meeting_done",
   "meeting_failed",
+  "room_input",
 ] as const
 export type PushKind = (typeof PUSH_KINDS)[number] | "test"
 export type SendResult = "ok" | "gone" | "error"
@@ -37,6 +38,7 @@ export const PUSH_CATEGORIES = [
   "chat_input",
   "chat_run_failed",
   "chat_run_done",
+  "room_input",
   "code_input",
   "code_run_failed",
   "code_run_done",
@@ -64,6 +66,7 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   if (kind === "clone_failed") return "code_setup_failed"
   if (kind === "routine_failed") return "routine_failed"
   if (kind === "routine_message") return "routine_message"
+  if (kind === "room_input") return "room_input"
   if (kind === "research_brief" || kind === "research_scope") return "research_input"
   if (kind === "research_done" || kind === "research_failed") return kind
   if (kind === "meeting_done" || kind === "meeting_failed") return kind
@@ -112,6 +115,7 @@ const WORDS: Record<PushKind, string> = {
   routine_message: "A bot has a message",
   meeting_done: "Your meeting notes are ready",
   meeting_failed: "Meeting notes failed",
+  room_input: "A room is waiting on you",
   test: "This is a test notification",
 }
 
@@ -126,6 +130,7 @@ const UNTITLED: Partial<Record<PushKind, string>> = {
   research_failed: "A research mission",
   meeting_done: "A meeting",
   meeting_failed: "A meeting",
+  room_input: "A room",
 }
 
 /** The notification's title and body. */

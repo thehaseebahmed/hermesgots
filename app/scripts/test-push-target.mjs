@@ -23,6 +23,13 @@ test("a chat this device doesn't hold keeps the session route", () => {
   assert.equal(pushedSession("/s/hermes-1"), "hermes-1")
 })
 
+test("a room's tap opens the room's own row, which is a chat here", () => {
+  assert.equal(pushPath("room_input", "room-1"), "/c/room-1")
+  assert.equal(pushPath("room_input", "a b"), "/c/a%20b")
+  assert.equal(pushPath("room_input", undefined), "/")
+  assert.equal(pushedSession("/c/room-1"), undefined, "a room is no session, so nothing is looked up")
+})
+
 test("a tap that names something else names no session", () => {
   assert.equal(pushedSession("/c/chat-1"), undefined)
   assert.equal(pushedSession("/research/mission-1"), undefined)

@@ -63,6 +63,12 @@ class Categories(unittest.TestCase):
         self.assertEqual(push.category_of("meeting_done"), "meeting_done")
         self.assertEqual(push.category_of("meeting_failed", project=True), "meeting_failed")
 
+    def test_a_room_that_needs_the_user_is_a_category_of_its_own(self):
+        self.assertEqual(push.category_of("room_input"), "room_input")
+        self.assertEqual(push.category_of("room_input", project=True), "room_input")
+        self.assertIn("room_input", push.CATEGORIES)
+        self.assertIn("room_input", push.KINDS)
+
     def test_every_kind_lands_in_a_category_that_exists(self):
         for kind in push.KINDS:
             for project in (False, True):
