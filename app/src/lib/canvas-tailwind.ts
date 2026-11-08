@@ -18,15 +18,16 @@ const COLOURS = TOKENS.filter((token) => token !== "radius")
 /**
  * The app's tokens as Tailwind theme variables, inline: a utility carries the token's own
  * `var(--primary)`, so the page follows the mode's theme with no other CSS of ours in the way. The
- * radius is the one token that isn't a colour, so it is named through the three steps the app's own
- * `rounded-` utilities use.
+ * radius is the one token that isn't a colour, so it takes the same four steps the app's own
+ * `index.css` gives it.
  */
 export const CANVAS_THEME = [
   "@theme inline {",
   ...COLOURS.map((token) => `  --color-${token}: var(--${token});`),
+  "  --radius-sm: calc(var(--radius) * 0.6);",
+  "  --radius-md: calc(var(--radius) * 0.8);",
   "  --radius-lg: var(--radius);",
-  "  --radius-md: calc(var(--radius) - 2px);",
-  "  --radius-sm: calc(var(--radius) - 4px);",
+  "  --radius-xl: calc(var(--radius) * 1.4);",
   "}",
 ].join("\n")
 
@@ -47,7 +48,7 @@ export function canvasClasses(html: string): string[] {
   return [...found].sort()
 }
 
-/** The CSS a page's classes compile to, over the app's own base and tokens. */
+/** The CSS a page's classes compile to: `base` is Tailwind's own stylesheet, the theme is ours. */
 export async function compileCanvasCss(base: string, candidates: string[]): Promise<string> {
   const compiler = await compile(`${base}\n${CANVAS_THEME}`, {})
   return compiler.build(candidates)

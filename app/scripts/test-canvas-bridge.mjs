@@ -4,6 +4,7 @@ import vm from "node:vm"
 
 import {
   BRIDGE_MESSAGE,
+  BRIDGE_METHODS,
   BRIDGE_SCRIPT,
   answerRead,
   applyWrite,
@@ -229,7 +230,7 @@ test("the page's half posts the call it was asked for and settles on the reply",
     for (const fn of listeners) fn({ data })
   }
 
-  for (const method of ["list", "get", "put", "remove"]) {
+  for (const method of BRIDGE_METHODS) {
     assert.equal(typeof api[method], "function", `${method} is on window.canvas.data`)
   }
 

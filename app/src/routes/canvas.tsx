@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { attempt } from "@/lib/attempt"
 import { bridgeHandler } from "@/lib/canvas-bridge"
-import { canvasCss } from "@/lib/canvas-css"
+import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
 import {
@@ -175,17 +175,16 @@ export function CanvasView() {
   const scrolled = useRef<{ id: string; at: number }>({ id, at: 0 })
   const chatId = canvas?.chatId
   // The page's classes compiled, kept with the version they were compiled for: an answer that lands
-  // after the screen has moved to another version is no CSS to draw with, and null while a version
-  // has none yet keeps the frame off the page until it does. A version's CSS never changes, so a
-  // redraw at the same version reads it again and waits for nothing.
+  // after the screen has moved to another version is no CSS to draw with, and no CSS at all keeps
+  // the frame off the page until there is one.
   const [compiled, setCompiled] = useState<{ key: string; css: string } | null>(null)
   const canvasId = canvas?.id
   const version = canvas?.version
-  const cssKey = canvasId && version !== undefined ? `${canvasId}:${version}` : null
+  const cssKey = canvasId && version !== undefined ? canvasCssKey(canvasId, version) : null
   const css = compiled && compiled.key === cssKey ? compiled.css : null
   useEffect(() => {
     if (!canvasId || version === undefined || !html) return
-    const key = `${canvasId}:${version}`
+    const key = canvasCssKey(canvasId, version)
     let live = true
     void canvasCss(canvasId, version, html).then(
       (value) => {

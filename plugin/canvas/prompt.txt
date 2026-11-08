@@ -36,8 +36,8 @@ in the markup are compiled.
 
 ## Libraries you may ask for
 
-Chart.js, Day.js and lucide are built in: an empty script element is replaced by the library before
-the page's own scripts run. `<script data-canvas-lib="chart"></script>` is Chart.js
+Chart.js, Day.js and lucide are built in: an empty script element is replaced by the library,
+so ask above the script that uses it. `<script data-canvas-lib="chart"></script>` is Chart.js
 (`window.Chart`), `data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is
 lucide (`<i data-lucide="heart"></i>`, drawn by `lucide.createIcons()`). Other names are dropped.
 

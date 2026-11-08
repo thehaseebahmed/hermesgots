@@ -113,8 +113,8 @@ const LIBRARY_TAG = /<script\b[^>]*\bdata-canvas-lib\s*=\s*["']([^"']*)["'][^>]*
 
 /**
  * Every ask taken out, the ones the app can answer replaced by the library's own source. A name it
- * doesn't know, and a known one the caller gave no source for, leave nothing behind: an empty script
- * of the page's own would run as one, and the tag names a library the page never gets.
+ * doesn't know, and a known one the caller gave no source for, leave nothing behind: the page draws
+ * without the library rather than carrying a tag for one it never got.
  */
 function inlineLibraries(html: string, libraries: Partial<Record<CanvasLibrary, string>>): string {
   return html.replace(LIBRARY_TAG, (_tag, name: string) => {
@@ -125,13 +125,13 @@ function inlineLibraries(html: string, libraries: Partial<Record<CanvasLibrary, 
 }
 
 /**
- * The document a frame is given: the page, with the policy, the theme, the compiled classes, the
- * WebRTC removal, the scroll bridge and the data bridge in its head ahead of anything it wrote — the
- * data bridge last, since the page's own scripts are what call it. `scroll` is the position the
- * bridge last reported, so a page rebuilt at a new version opens where the reader left the one
- * before it; `libraries` are the sources an ask for one is answered with, and `css` the Tailwind the
- * page's own classes compiled to. A page with no head can't be drawn — the plugin's scan refuses one,
- * so this is a bug rather than a page, and it throws instead of drawing something unstyled.
+ * The document a frame is given: the page, with the app's own head ahead of anything it wrote — the
+ * policy, the theme, the compiled classes and the scripts a page is handed, the data bridge last
+ * since the page's own scripts are what call it. `scroll` is the position the bridge last reported,
+ * so a page rebuilt at a new version opens where the reader left the one before it; `libraries` are
+ * the sources an ask for one is answered with, and `css` the Tailwind the page's own classes
+ * compiled to. A page with no head can't be drawn — the plugin's scan refuses one, so this is a bug
+ * rather than a page, and it throws instead of drawing something unstyled.
  */
 export function canvasDocument(
   html: string,

@@ -13,7 +13,7 @@ import {
   themeTokens,
   themeVariables,
 } from "../src/lib/canvas-document.ts"
-import { canvasClasses, compileCanvasCss } from "../src/lib/canvas-tailwind.ts"
+import { canvasClasses, CANVAS_THEME, compileCanvasCss } from "../src/lib/canvas-tailwind.ts"
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -159,9 +159,20 @@ test("a named library is inlined and an unknown one dropped", () => {
     libraries: { chart: "window.Chart=function(){}" },
   })
   assert.match(html, /<script>window\.Chart=function\(\)\{\}<\/script>/, "the source is inlined")
+  // The ask is a placeholder, not a hoist: the library lands where the page put it, which is what
+  // the guide tells a bot to rely on when it asks above the script that uses it.
+  const late = PAGE.replace(
+    "<h1>Tip</h1>",
+    '<h1>Tip</h1>\n    <script data-canvas-lib="chart"></script>',
+  )
+  const after = canvasDocument(late, {
+    mode: "light",
+    tokens: LIGHT,
+    libraries: { chart: "window.Chart=function(){}" },
+  })
   assert.ok(
-    html.indexOf("window.Chart") < html.indexOf("<body"),
-    "and ahead of the page's own body",
+    after.indexOf("<h1>Tip</h1>") < after.indexOf("window.Chart"),
+    "the library lands where the page asked for it",
   )
   assert.equal(html.includes("data-canvas-lib"), false, "no ask is left in the document")
   assert.equal(html.includes("nope"), false, "an unknown name is dropped")
@@ -192,6 +203,21 @@ test("bg-primary compiles to the token's variable", async () => {
   assert.match(ruleFor("rounded-lg"), /border-radius: var\(--radius\)/)
 })
 
+test("the radius steps a canvas gets are the app's own", () => {
+  // The canvas copies the app's four radius steps rather than Tailwind's defaults, and a copy is
+  // only as good as the thing holding it to the original: a step the app changes is a step the
+  // canvas must change with, or a `rounded-lg` on a page stops matching the app's own.
+  const app = readFileSync(new URL("../src/index.css", import.meta.url), "utf8")
+  for (const step of ["sm", "md", "lg", "xl"]) {
+    const declared = new RegExp(`--radius-${step}:\\s*([^;]+);`).exec(app)?.[1].trim()
+    assert.ok(declared, `the app declares --radius-${step}`)
+    assert.ok(
+      CANVAS_THEME.includes(`--radius-${step}: ${declared};`),
+      `the canvas takes the app's --radius-${step}`,
+    )
+  }
+})
+
 test("the classes compiled are the ones the page's class attributes name", () => {
   // Only what is in the markup is compiled (`classes` in the guide): the reader takes both quote
   // styles, keeps each name once, and is not fooled by an attribute or a script that looks like one.
@@ -204,11 +230,13 @@ test("the classes compiled are the ones the page's class attributes name", () =>
 
 test("the canvas section names exactly the libraries and bridge methods the app has", () => {
   // The guide is what a bot is told it may ask for, and the app is what answers: a name in one and
-  // not the other is a page that draws a hole where a library or a call should be.
+  // not the other is a page that draws a hole where a library or a call should be. Over the host's
+  // 4,000-character section cap the section is dropped whole, so the guide's length is part of it.
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
   const named = (pattern) => [...new Set([...guide.matchAll(pattern)].map((match) => match[1]))]
   assert.deepEqual(named(/data-canvas-lib="([a-z]+)"/g).sort(), [...LIBRARIES].sort())
   assert.deepEqual(named(/canvas\.data\.([a-z]+)/g).sort(), [...BRIDGE_METHODS].sort())
+  assert.ok(guide.length <= 4_000, `the guide is ${guide.length} characters, under the host's 4,000`)
 })
 
 test("the app's own policy keeps a canvas's frame from navigating itself away", () => {

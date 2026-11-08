@@ -1008,9 +1008,9 @@ export interface RoomLogRow extends RoomEvent {
 }
 
 /**
- * A canvas's compiled classes, kept on this device (`canvas-css.ts`): the canvas and the version
- * the CSS was compiled for, the CSS itself, and when it was written, which is the order it is let
- * go of in.
+ * A canvas's compiled classes, kept on this device (`canvas-css.ts`): the row is named by the
+ * canvas, its version and the build, and `at` is when it was written, which is what rows are pruned
+ * by.
  */
 export interface CanvasCssRow {
   key: string
