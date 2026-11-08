@@ -1871,6 +1871,7 @@ class RoomPushes(unittest.TestCase):
             rooms._questions.clear()
         with rooms._waiting_lock:
             rooms._waiting_rooms.clear()
+        rooms._cursors.clear()
         rooms._noted.clear()
         self.told = []
         patches = [
@@ -1952,16 +1953,47 @@ class RoomPushes(unittest.TestCase):
         host = self.host(events=conversation)
         self.assertEqual(self.check(host), 0)
 
-    def test_a_message_from_the_user_ends_the_wait(self):
-        host = self.host(waiting=True)
+    def test_a_users_words_answer_the_mention_and_a_new_one_is_news(self):
+        host = self.host(events=[event(1, "message.member", MEMBER, {"text": "yours, @user"})])
         self.assertEqual(self.check(host), 1)
-        with dispatcher(host), no_loopback():
-            sent = asked_route(
-                self, plugin.PREFIX + "/rooms/{room_id}/send", room_id="room-1",
-                body={"event_id": "e9", "text": "that one's mine"},
+        host.events.append(event(2, "message.user", USER, {"text": "mine to call"}))
+        host.states["room-1"]["latest_seq"] = 2
+        self.assertEqual(self.check(host), 0, "the user answered it, and nothing new waits")
+        host.events.append(event(3, "message.member", MEMBER, {"text": "and this one, @user"}))
+        host.states["room-1"]["latest_seq"] = 3
+        self.assertEqual(self.check(host), 1, "a second mention is a second wait")
+
+    def test_answering_one_of_two_waits_does_not_push_the_other_again(self):
+        host = self.host(waiting=True)
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1, "one push for the room, however many waits it holds")
+        with dispatcher(host), no_loopback(), answerable([]):
+            answered = asked_route(
+                self, plugin.PREFIX + "/rooms/{room_id}/answer", room_id="room-1",
+                body={"member_id": "m2", "question_id": "srq-1", "answers": {"q0": "Postgres"}},
             )
-        self.assertEqual(sent["status"], 200)
-        self.assertEqual(self.check(host), 1, "the room asks again, and the user's answer armed it")
+        self.assertEqual(answered["status"], 200)
+        self.assertEqual(self.check(host), 0, "the approval was announced, and is still waiting")
+        host.driver_status["pending_actions"] = [{**APPROVAL, "request_id": "approval-2"}]
+        self.assertEqual(self.check(host), 1, "a wait the room has never announced is news")
+
+    def test_a_list_longer_than_one_pass_is_read_across_passes(self):
+        listed = [
+            {"room_id": f"room-{n}", "name": f"R{n}", "members": ROOM["members"]}
+            for n in (1, 2, 3)
+        ]
+        host = Host(listed=listed, page=1, driver_status={
+            "running": True, "working": True, "blocked": False, "counts": {},
+            "pending_actions": [APPROVAL], "member_activity": [], "peer_routes": [],
+        })
+        with mock.patch.object(rooms, "MAX_ROOM_PAGES", 1), dispatcher(host), no_loopback():
+            for _ in range(3):
+                self.assertEqual(rooms.check(self.home), 1)
+        self.assertEqual(
+            self.told,
+            [("room_input", "room-1", "R1"), ("room_input", "room-2", "R2"), ("room_input", "room-3", "R3")],
+            "each pass starts where the last one stopped, rather than at the head for ever",
+        )
 
     def test_the_watcher_passes_over_every_served_home(self):
         with dispatcher(self.host(waiting=True)), no_loopback():

@@ -157,11 +157,13 @@ _projections: Dict[str, Projection] = {}
 _loads: Dict[str, threading.Lock] = {}
 _projections_lock = threading.Lock()
 
-# Which rooms were needing the user at the last look, by home and room: a push is a transition into
-# needing them, so a room named here is one the user has been told about, and a room whose wait is
-# over is dropped so its next wait is a new one.
-_waiting_rooms: Set[Tuple[str, str]] = set()
+# The waits each room has announced, by home and room: a push is a wait the user hasn't been told
+# about, so a room is pushed only for an id it has never announced, and a room at rest forgets them.
+_waiting_rooms: Dict[Tuple[str, str], Set[str]] = {}
 _waiting_lock = threading.Lock()
+# Where the watcher's last pass stopped in a home's paged room list, so a Host with more rooms than
+# one pass reads is followed rather than read at its head for ever.
+_cursors: Dict[str, int] = {}
 # The watcher's own wake-up: a transition the Host's hook can see is pushed now, not on a tick.
 _ticker = ticker.Ticker("room needs")
 
@@ -1296,31 +1298,40 @@ def advertised(home: Any = None) -> List[str]:
 # -- The watcher --------------------------------------------------------------
 
 
-def _addressed_to_user(rows: List[Dict[str, Any]]) -> bool:
-    """Whether the last words in a room's log are a member addressing the user.
+def _asking_seq(rows: List[Dict[str, Any]]) -> Optional[int]:
+    """The sequence of the member's words that end addressed to the user, or None while none do.
 
-    An approval is the Host's pending action and a question is held here, but a round that settles
-    on the user is only in the log, so it is read there — by the rule the room's screen reads it
-    with: the last message decides, a member's mention asks, and the user's own words answer it.
+    An approval is the Host's pending action and a question is held here, but a round that settles on
+    the user is only in the log, so it is read there — by the rule the room's screen reads it with
+    (`app/src/lib/room-log.ts`): the last message decides, a member's mention asks, and the user's own
+    words answer it.
     """
-    asking = False
+    asking: Optional[int] = None
     for row in sorted(rows, key=lambda one: one["seq"]):
         if row["kind"] == "message.user":
-            asking = False
+            asking = None
         elif row["kind"] == "message.member":
-            asking = bool(MENTION.search(row.get("text") or ""))
+            asking = row["seq"] if MENTION.search(row.get("text") or "") else None
     return asking
 
 
-def _needs_user(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> bool:
-    """Whether this room needs the user: an approval, a question, or words addressed to them."""
+def _wait_ids(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> Set[str]:
+    """What this room waits on the user for, each wait by its own id.
+
+    The id is what makes a wait a wait: an approval's request, a question's id and the sequence of a
+    reply addressed to the user are all never reused, so a room that is answered and asks again is a
+    new set, and a wait that is answered while another is still pending is the same one.
+    """
     found = call("groups.state", {"room_id": room_id}, timeout=_spare(deadline), home=home)
-    if waiting(found.get("driver_status"), declared, room_id):
-        return True
+    found_ids: Set[str] = set()
+    for one in waiting(found.get("driver_status"), declared, room_id):
+        named = one.get("requestId") if one.get("kind") == "approval" else one.get("questionId")
+        if isinstance(named, str) and named:
+            found_ids.add(f"{one['kind']}:{named}")
     room = found.get("room") if isinstance(found.get("room"), dict) else {}
     reached = room.get("latest_seq")
     if type(reached) is not int or reached <= 0:
-        return False
+        return found_ids
     page = call(
         "groups.log",
         {"room_id": room_id, "since_seq": max(0, reached - ASK_WINDOW)},
@@ -1328,31 +1339,39 @@ def _needs_user(room_id: str, declared: Tuple[str, ...], home: Any, deadline: fl
         home=home,
     )
     rows = [one for one in (_event(raw) for raw in page.get("events") or ()) if one]
-    return _addressed_to_user(rows)
+    seq = _asking_seq(rows)
+    if seq is not None:
+        found_ids.add(f"ask:{seq}")
+    return found_ids
 
 
 def _answered(room_id: str, home: Any) -> None:
-    """A room whose wait the user has just ended — answered, approved or stopped.
+    """A room whose wait the user has just ended — answered, approved, stopped, or written in.
 
-    The mark goes so the next wait is a transition the watcher pushes, and the room's change is noted
-    so a device with it on screen re-reads it without waiting for its own poll.
+    Only the room's change is noted, so a device with it on screen re-reads it at once. The waits a
+    room has already announced need no bookkeeping here: they are named by their own ids, so the next
+    wait is a new id and is pushed without this having to un-announce the old ones — which is what
+    keeps answering one of two pending waits from pushing the other again.
     """
-    with _waiting_lock:
-        _waiting_rooms.discard((str(home), room_id))
     events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
 
 
 def _each_room(
     home: Any, deadline: float, visit: Callable[[Dict[str, Any]], None], *,
-    include_disbanded: bool = False,
+    include_disbanded: bool = False, resume: bool = False,
 ) -> bool:
     """Offers the Host's rooms to ``visit`` as its list pages in, within ``deadline``.
 
-    True when the list was read to its end, False when this read's page cap came first: a caller that
-    needs every room reads that as a short read, and one projecting the list keeps what it has. A page
-    the Host refuses, or a budget that runs out, is `list_rooms`' own RoomError.
+    True when the list was read to its end, False when this read's page cap or budget came first. A
+    page the Host refuses, or a budget that runs out, is `list_rooms`' own RoomError.
+
+    ``resume`` is for a caller that reads the list again and again: it starts where the last pass
+    stopped and leaves the cursor there when it stops early, so a Host with more rooms than one budget
+    can read is followed rather than read at its head for ever. A caller that wants the whole list in
+    one read, like the chat list's projection, leaves it off.
     """
-    offset: Optional[int] = None
+    key = str(home)
+    offset = _cursors.get(key) if resume else None
     for _ in range(MAX_ROOM_PAGES):
         listed = list_rooms(
             include_disbanded=include_disbanded,
@@ -1365,21 +1384,25 @@ def _each_room(
             visit(room)
         following = listed.get("next_offset")
         if not isinstance(following, int):
+            if resume:
+                _cursors.pop(key, None)
             return True
         offset = following
+        if resume:
+            _cursors[key] = offset
     return False
 
 
 def check(hermes_home: Path) -> int:
     """One pass over this home's rooms: how many started needing the user and were pushed once.
 
-    A push is a transition into needing the user, so a room already named is one the user has been
-    told about, a room seen at rest is dropped for its next wait, and a room the Host no longer lists
-    is forgotten. A pass that couldn't read every room leaves the rooms it never reached alone, so one
-    it didn't look at is not forgotten as gone.
+    What a room has been told about is the set of waits it has announced, so a room whose waits are
+    unchanged is silent, a new wait is one push, and a room at rest forgets everything it announced —
+    which is how the next wait it reaches is a transition again. The pass is bounded; a Host with
+    more rooms than one pass can read is picked up where the last pass stopped.
 
-    With no device that could be told the pass does nothing: a need it would have pushed is still a
-    transition for the next pass, because nothing was marked.
+    With no device that could be told the pass does nothing: a wait it would have pushed is still a
+    transition for the next pass, because nothing was announced.
     """
     path = db_path(hermes_home)
     if not path.exists() or not push.reachable(path):
@@ -1402,28 +1425,28 @@ def check(hermes_home: Path) -> int:
             return
         alive.add(room_id)
         try:
-            needs = _needs_user(room_id, declared, hermes_home, deadline)
+            ids = _wait_ids(room_id, declared, hermes_home, deadline)
         except RoomError:
             complete = False
             return
         key = (str(hermes_home), room_id)
         with _waiting_lock:
-            told = key in _waiting_rooms
-        if needs and not told:
+            told = set(_waiting_rooms.get(key, ()))
+        if ids - told:
             name = room.get("name") if isinstance(room.get("name"), str) else None
-            # A push the throttle or a quiet Host dropped is one the user hasn't heard: the room stays
-            # unmarked, and the next pass is still the transition it pushes.
+            # A push the throttle or a quiet Host dropped is one the user hasn't heard: the waits stay
+            # unannounced, and the next pass is still the transition it pushes.
             if not push.notify("room_input", room_id, path=path, title=name):
                 return
             pushed += 1
         with _waiting_lock:
-            if needs:
-                _waiting_rooms.add(key)
+            if ids:
+                _waiting_rooms[key] = told | ids
             else:
-                _waiting_rooms.discard(key)
+                _waiting_rooms.pop(key, None)
 
     try:
-        read_all = _each_room(hermes_home, deadline, visit)
+        read_all = _each_room(hermes_home, deadline, visit, resume=True)
     except RoomError:
         read_all = False
     if complete and read_all:
@@ -1432,7 +1455,7 @@ def check(hermes_home: Path) -> int:
                 one for one in _waiting_rooms
                 if one[0] == str(hermes_home) and one[1] not in alive
             ]:
-                _waiting_rooms.discard(key)
+                _waiting_rooms.pop(key, None)
     return pushed
 
 
