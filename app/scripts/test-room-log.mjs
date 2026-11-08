@@ -1,0 +1,184 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import {
+  foldRoom,
+  memberLabel,
+  memberName,
+  newestSeq,
+  queuedMembers,
+  workingLine,
+  workingMembers,
+} from "../src/lib/room-log.ts"
+
+const members = [
+  { memberId: "m1", profile: "default", handle: "hermes", displayName: "Hermes" },
+  { memberId: "m2", profile: "coder", handle: "coder", displayName: "Coder" },
+  { memberId: "m3", profile: "writer", handle: "writer" },
+]
+
+const user = (seq, text) => ({ seq, eventId: `e${seq}`, kind: "message.user", text, at: 1 })
+const reply = (seq, memberId, text, name) => ({
+  seq,
+  eventId: `e${seq}`,
+  kind: "message.member",
+  text,
+  memberId,
+  ...(name ? { name } : {}),
+})
+
+test("a room folds into the user's message, each member's reply, and nothing of the round's own rows", () => {
+  const rows = foldRoom(
+    [
+      user(1, "who is free?"),
+      reply(2, "m1", "me", "Hermes"),
+      { seq: 3, eventId: "e3", kind: "turn.started", memberId: "m2" },
+      { seq: 4, eventId: "e4", kind: "turn.settled", memberId: "m2", passed: true },
+      { seq: 5, eventId: "e5", kind: "room.activity", status: "settled" },
+      reply(6, "m2", "and me", "Coder"),
+    ],
+    members,
+  )
+  assert.deepEqual(
+    rows.map((row) => [row.kind, row.text]),
+    [
+      ["user", "who is free?"],
+      ["member", "me"],
+      ["member", "and me"],
+    ],
+  )
+  assert.equal(rows[1].name, "Hermes")
+  assert.equal(rows[1].memberId, "m1")
+})
+
+test("a member that passed draws nothing at all", () => {
+  const rows = foldRoom(
+    [
+      user(1, "anyone?"),
+      { seq: 2, eventId: "e2", kind: "turn.settled", memberId: "m2", passed: true },
+    ],
+    members,
+  )
+  assert.deepEqual(rows.map((row) => row.kind), ["user"], "silence is not a row")
+})
+
+test("a round the host bounded says so, once, in the host's own reason", () => {
+  const rows = foldRoom(
+    [
+      user(1, "go on"),
+      { seq: 2, eventId: "e2", kind: "room.activity", status: "bounded", reason: "max_rounds" },
+    ],
+    members,
+  )
+  assert.deepEqual(rows.at(-1), {
+    seq: 2,
+    kind: "notice",
+    text: "The room stopped at its round limit.",
+  })
+})
+
+test("a turn that failed carries what the host said failed", () => {
+  const rows = foldRoom(
+    [{ seq: 1, eventId: "e1", kind: "turn.failed", memberId: "m1", error: "rate limited" }],
+    members,
+  )
+  assert.equal(rows[0].kind, "notice")
+  assert.match(rows[0].text, /rate limited/)
+})
+
+test("a reply keeps the name the log was written with, even where the roster says another", () => {
+  const rows = foldRoom([reply(1, "m1", "still me", "Hermes (renamed)")], members)
+  assert.equal(rows[0].name, "Hermes (renamed)", "the log's own label outlives a roster change")
+})
+
+test("a reply the log names no label for takes the roster's name", () => {
+  assert.equal(foldRoom([reply(1, "m3", "hello")], members)[0].name, "writer")
+  assert.equal(memberName(members, "gone"), undefined)
+})
+
+test("rows are drawn in the host's order, and the same page read twice draws one row", () => {
+  const page = [reply(3, "m2", "third"), user(1, "first"), reply(2, "m1", "second")]
+  const rows = foldRoom([...page, ...page], members)
+  assert.deepEqual(rows.map((row) => row.seq), [1, 2, 3])
+})
+
+test("a message with no words draws no bubble", () => {
+  assert.deepEqual(foldRoom([user(1, "   "), reply(2, "m1", "")], members), [])
+})
+
+test("the newest sequence is the read mark a device's next read starts from", () => {
+  assert.equal(newestSeq([{ seq: 4 }, { seq: 9 }, { seq: 2 }]), 9)
+  assert.equal(newestSeq([]), 0)
+})
+
+test("who is working is the member the host has answering now, not the one queued behind it", () => {
+  const activity = [
+    { memberId: "m2", status: "running" },
+    { memberId: "m1", status: "queued" },
+  ]
+  assert.deepEqual(workingMembers(members, activity).map((one) => one.displayName), ["Coder"])
+  assert.deepEqual(queuedMembers(members, activity).map((one) => one.displayName), ["Hermes"])
+  assert.equal(workingLine(workingMembers(members, activity), queuedMembers(members, activity)), "Coder is working…")
+})
+
+test("a member the roster does not seat is drawn by nothing, and a room at rest says nothing", () => {
+  const activity = [{ memberId: "outsider", status: "running" }]
+  assert.deepEqual(workingMembers(members, activity), [])
+  assert.equal(workingLine([], []), undefined)
+  assert.equal(workingLine(workingMembers(members, [])), undefined)
+})
+
+test("two members at work are named as two", () => {
+  const activity = [
+    { memberId: "m1", status: "running" },
+    { memberId: "m2", status: "stopping" },
+  ]
+  assert.equal(workingLine(workingMembers(members, activity)), "Hermes and Coder are working…")
+})
+
+test("a room whose members are all queued says who is next instead", () => {
+  const activity = [{ memberId: "m1", status: "queued" }]
+  assert.equal(workingLine(workingMembers(members, activity), queuedMembers(members, activity)), "Hermes is next…")
+})
+
+test("a round bounded at its message cap says which cap ended it", () => {
+  const rows = foldRoom(
+    [{ seq: 1, eventId: "e1", kind: "room.activity", status: "bounded", reason: "max_messages" }],
+    members,
+  )
+  assert.equal(rows[0].text, "The room stopped at its message limit.")
+})
+
+test("a member whose turn was deferred draws the line that says it couldn't answer", () => {
+  const rows = foldRoom(
+    [
+      { seq: 1, eventId: "e1", kind: "message.user", text: "anyone?" },
+      { seq: 2, eventId: "e2", kind: "turn.deferred", memberId: "m2", reason: "member_unavailable" },
+    ],
+    members,
+  )
+  assert.deepEqual(rows.map((row) => [row.kind, row.text]), [
+    ["user", "anyone?"],
+    ["notice", "A member couldn't answer."],
+  ], "silence would read as a pass, which is not what happened")
+})
+
+test("a bound with a reason the app doesn't know still says the room stopped", () => {
+  const rows = foldRoom(
+    [{ seq: 1, eventId: "e1", kind: "room.activity", status: "bounded", reason: "log_full" }],
+    members,
+  )
+  assert.equal(rows[0].text, "The room stopped.")
+})
+
+test("a room whose host reports work without naming a member still says it is answering", () => {
+  assert.equal(workingLine([], [], true), "The room is answering…")
+  assert.equal(workingLine([], [], false), undefined)
+})
+
+test("a member is named by its label: the seat's name, its handle, its profile, then its id", () => {
+  assert.equal(memberLabel({ memberId: "m1", profile: "p", handle: "h", displayName: "D" }), "D")
+  assert.equal(memberLabel({ memberId: "m1", profile: "p", handle: "h" }), "h")
+  assert.equal(memberLabel({ memberId: "m1", profile: "p" }), "p")
+  assert.equal(memberLabel({ memberId: "m1" }), "m1")
+})

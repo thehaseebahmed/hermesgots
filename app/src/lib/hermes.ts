@@ -12,6 +12,7 @@ import type {
   ModelChoice,
   PrChecks,
   PrState,
+  RoomMember,
   SessionMode,
   Todo,
   TodoProgress,
@@ -21,6 +22,7 @@ import type { Doc } from "@/lib/merge"
 import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import type { PendingInput, PendingQueue } from "@/lib/pending"
+import type { RoomEvent } from "@/lib/room-log"
 import { isNative } from "@/lib/native"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
@@ -1878,6 +1880,127 @@ export async function discardPending(
 function researchRoot(config: HermesConfig, id?: string) {
   const root = `${pluginRoot(config.baseUrl)}/research`
   return id ? `${root}/${encodeURIComponent(id)}` : root
+}
+
+function roomRoot(config: HermesConfig, roomId: string) {
+  return `${pluginRoot(config.baseUrl)}/rooms/${encodeURIComponent(roomId)}`
+}
+
+/** The roster a room's read carries, in the words the plugin's seam translates it into. */
+function roomMember(raw: Record<string, unknown>): RoomMember {
+  const text = (key: string) => (typeof raw[key] === "string" ? (raw[key] as string) : undefined)
+  return {
+    memberId: text("memberId") ?? "",
+    ...(text("profile") ? { profile: text("profile") } : {}),
+    ...(text("handle") ? { handle: text("handle") } : {}),
+    ...(text("displayName") ? { displayName: text("displayName") } : {}),
+  }
+}
+
+/**
+ * One row of a room's log, or nothing where the row cannot be drawn: an event with no integer
+ * sequence would land at the front of the transcript and stay there, and one with no kind names no
+ * row at all, so a malformed row is dropped rather than coerced into a place.
+ */
+function roomEventOf(raw: Record<string, unknown>): RoomEvent | undefined {
+  if (typeof raw.seq !== "number" || typeof raw.kind !== "string" || !raw.kind) return undefined
+  const text = (key: string) => (typeof raw[key] === "string" ? (raw[key] as string) : undefined)
+  return {
+    seq: raw.seq,
+    eventId: text("eventId") ?? String(raw.seq),
+    kind: raw.kind,
+    ...(text("text") !== undefined ? { text: text("text") } : {}),
+    ...(text("memberId") !== undefined ? { memberId: text("memberId") } : {}),
+    ...(text("name") !== undefined ? { name: text("name") } : {}),
+    ...(text("status") !== undefined ? { status: text("status") } : {}),
+    ...(text("reason") !== undefined ? { reason: text("reason") } : {}),
+    ...(text("error") !== undefined ? { error: text("error") } : {}),
+  }
+}
+
+/** One room as one read answers it: the log's delta, its live state, and whether it takes a send. */
+export interface RoomRead {
+  room: { id: string; name: string; members: RoomMember[] }
+  events: RoomEvent[]
+  cursor: number
+  latestSeq: number
+  hasMore: boolean
+  working: boolean
+  activity: { memberId: string; status: string }[]
+  canSend: boolean
+}
+
+function roomReadOf(body: unknown): RoomRead {
+  const held = (body ?? {}) as Record<string, unknown>
+  const room = (held.room ?? {}) as Record<string, unknown>
+  const activity: { memberId: string; status: string }[] = []
+  for (const row of Array.isArray(held.activity) ? held.activity : []) {
+    if (!row || typeof row !== "object") continue
+    const one = row as Record<string, unknown>
+    if (typeof one.memberId === "string" && typeof one.status === "string")
+      activity.push({ memberId: one.memberId, status: one.status })
+  }
+  const events: RoomEvent[] = []
+  for (const row of Array.isArray(held.events) ? held.events : []) {
+    if (!row || typeof row !== "object") continue
+    const one = roomEventOf(row as Record<string, unknown>)
+    if (one) events.push(one)
+  }
+  const count = (key: string) => (typeof held[key] === "number" ? (held[key] as number) : 0)
+  return {
+    room: {
+      id: typeof room.id === "string" ? room.id : "",
+      name: typeof room.name === "string" ? room.name : "",
+      members: objects(room.members, roomMember),
+    },
+    events,
+    cursor: count("cursor"),
+    latestSeq: count("latestSeq"),
+    hasMore: Boolean(held.hasMore),
+    working: held.working === true,
+    activity,
+    canSend: held.canSend === true,
+  }
+}
+
+/**
+ * One room, read from its Host's plugin (`rooms.py`, ADR 0116): what this device hasn't got, who the
+ * Host has answering, and whether the room takes a send. `since` is the newest sequence this device
+ * drew, so a reload asks only for the rows it missed.
+ */
+export async function getRoom(
+  config: HermesConfig,
+  roomId: string,
+  since?: number,
+  signal?: AbortSignal,
+): Promise<RoomRead> {
+  const query = since === undefined ? "" : `?since=${since}`
+  const response = await request(`${roomRoot(config, roomId)}${query}`, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return roomReadOf(await response.json())
+}
+
+/**
+ * One message into the room, under the id this device minted for it: the Host appends it once and
+ * wakes the members' rounds, so a retry after a dropped answer is the same message.
+ */
+export async function sendRoomMessage(
+  config: HermesConfig,
+  roomId: string,
+  eventId: string,
+  text: string,
+): Promise<RoomEvent | undefined> {
+  const response = await request(`${roomRoot(config, roomId)}/send`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ event_id: eventId, text }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  const body = (await response.json()) as Record<string, unknown>
+  const event = body.event
+  return roomEventOf(event && typeof event === "object" ? (event as Record<string, unknown>) : {})
 }
 
 /** The bot's research missions on the plugin (`research.py`), as it sends them. */

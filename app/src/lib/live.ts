@@ -26,7 +26,16 @@ const RETRY_MS = [1000, 2000, 5000, 10_000, 30_000]
 const RUNS_SETTLE_MS = 300
 
 /** Every kind of change a screen can be woken by; `catchUpAll` asks each of them after a gap. */
-export const KINDS = ["cron", "runs", "projects", "research", "meetings", "closes", "canvas"] as const
+export const KINDS = [
+  "cron",
+  "runs",
+  "projects",
+  "research",
+  "meetings",
+  "closes",
+  "canvas",
+  "room",
+] as const
 export type Kind = (typeof KINDS)[number]
 
 /** Whether a frame's name is a kind this build knows; anything else is a newer plugin's news. */

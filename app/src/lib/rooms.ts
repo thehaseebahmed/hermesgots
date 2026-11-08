@@ -1,4 +1,5 @@
-import type { Profile, Room, RoomMember } from "./db.ts"
+import type { Profile, Room } from "./db.ts"
+import { memberLabel } from "./room-log.ts"
 
 /**
  * The bot that answers for a room: the first of its members this device has a bot for, turned on.
@@ -18,27 +19,33 @@ export function roomAnswerer(
   host?: string,
 ): Profile | undefined {
   if (!bots?.size) return undefined
-  const seated = new Map<string, Profile>()
-  for (const bot of bots.values()) {
-    if (bot.disabled || !bot.hermesProfile) continue
-    if (host && bot.hostId !== host) continue
-    if (!seated.has(bot.hermesProfile)) seated.set(bot.hermesProfile, bot)
-  }
+  const seated = botsByProfile(bots.values(), host)
   for (const member of room.members) {
     const bot = member.profile ? seated.get(member.profile) : undefined
-    if (bot) return bot
+    // A member turned off in Gots answers nothing, while the room still lists and still draws it.
+    if (bot && !bot.disabled) return bot
   }
   return undefined
 }
 
 /** A room's members as its row names them: what each is called, in the order the Host seats them. */
 export function roomMembersLine(room: Room): string {
-  return room.members
-    .map(memberName)
-    .filter(Boolean)
-    .join(", ")
+  return room.members.map(memberLabel).filter(Boolean).join(", ")
 }
 
-function memberName(member: RoomMember): string {
-  return member.displayName || member.handle || member.profile || ""
+/**
+ * The bots this device holds, by the Hermes profile each one is: a room's member is a profile, so
+ * its bubble's picture comes from the bot seated there, and a member with no bot here draws as its
+ * name alone. `host` is the Host the room came on, because a profile name is unique on its Host and
+ * not across a device's bots — the one rule the answerer and the pictures both read (ADR 0115).
+ * The first bot of a profile keeps the seat.
+ */
+export function botsByProfile(bots: Iterable<Profile>, host?: string): Map<string, Profile> {
+  const seated = new Map<string, Profile>()
+  for (const bot of bots) {
+    if (!bot.hermesProfile || seated.has(bot.hermesProfile)) continue
+    if (host && bot.hostId !== host) continue
+    seated.set(bot.hermesProfile, bot)
+  }
+  return seated
 }

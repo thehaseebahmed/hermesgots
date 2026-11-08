@@ -175,6 +175,7 @@ import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
 import { createCanvasStore, handleCanvas } from "./mock-canvas.mjs"
+import { createRoomStore, handleRooms, roomRecords } from "./mock-rooms.mjs"
 import { handleResearch } from "./mock-research.mjs"
 import { durableUserRow } from "./host-row.mjs"
 
@@ -536,6 +537,10 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // and `canvas` is missing from the features.
 const CANVAS = process.env.MOCK_CANVAS !== "0"
 const CANVASES = createCanvasStore()
+// Rooms (mock-rooms.mjs): MOCK_ROOMS=0 is a plugin whose host has no room driver, so its routes 404,
+// `rooms` is missing from the features, and no device lists a room.
+const ROOMS = process.env.MOCK_ROOMS !== "0"
+const ROOM_STORE = createRoomStore()
 // The meetings feature (mock-meetings.mjs); MOCK_MEETINGS=0 serves a plugin from before it.
 const MEETINGS = process.env.MOCK_MEETINGS !== "0"
 // The dictation log (plugin/dictations.py): MOCK_DICTATIONS=0 is a plugin from before it, so its
@@ -4085,6 +4090,7 @@ http
           "media",
           "media_url",
           "openui",
+          "rooms",
           "profile_routes",
           "pr_tool",
           "close",
@@ -4175,6 +4181,13 @@ http
       CANVAS &&
       !profile &&
       (await handleCanvas(req, res, url.pathname, { json, readBody, noteEvent }, CANVASES))
+    )
+      return
+    if (
+      PLUGIN &&
+      ROOMS &&
+      !profile &&
+      (await handleRooms(req, res, url.pathname, { json, readBody, noteEvent }, ROOM_STORE))
     )
       return
     if (
@@ -5198,7 +5211,10 @@ http
         }
         if (changed) noteEvent("chats", undefined, key)
       }
-      return json(res, 200, { object: "gots.chats", chats: Object.fromEntries(chatList) })
+      return json(res, 200, {
+        object: "gots.chats",
+        chats: { ...Object.fromEntries(chatList), ...(ROOMS ? roomRecords(ROOM_STORE) : {}) },
+      })
     }
     const sessionLabel = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/label$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
