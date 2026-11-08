@@ -76,3 +76,20 @@ it with `canvas.data.list(collection)`, `canvas.data.get(collection, id)`,
 `canvas.data.put(collection, id, doc)` and `canvas.data.remove(collection, id)` — promises, reads
 from the device's copy, writes to the host — and you do the same with `canvas_data_read` and
 `canvas_data_write`. It is unversioned, so an undo never loses it; 1 MB a canvas.
+
+## The host, from the page
+
+The page reads four things from the host without asking anyone: `canvas.read("usage", {provider})`,
+`canvas.read("routines")`, `canvas.read("projects")` and `canvas.read("sessions")` — promises of what
+the bot's own host knows: the provider's account usage, the routine runs, the projects, the chats.
+
+It can call tools too, but only the ones its version declared. Name them when you write or change the
+page: `canvas_write({html: ..., tools: ["files.search", "mail.send"]})`, or `tools` on `canvas_edit`,
+which keeps the list the page already had when you leave it out. The page calls one with
+`canvas.tool.call("<server>.<tool>", args)`, a promise of that tool's answer. A call the version does
+not declare is refused, and the page is told so.
+
+The first time the page calls a declared tool, the user is asked Allow or Don't allow, one tool at a
+time. Their answer is kept on the host for every device and can be changed later in the canvas's
+options. So declare only what the page really calls: a tool nobody calls is a question the user
+answers for nothing, and a call the page makes without declaring it can never work.

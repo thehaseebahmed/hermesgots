@@ -40,8 +40,9 @@ logger = logging.getLogger(__name__)
 # bot writes and their versions (`canvases.py`, ADR 0113): two new tables, so nothing already
 # written has to move. 61 adds the documents a canvas keeps, one row per collection and id
 # (`canvases.py`'s data, ADR 0113): one new table, so nothing already written has to move, and no
-# version or undo touches it.
-SCHEMA_VERSION = 61
+# version or undo touches it. 62 adds the answers a canvas's page got for the tools its version
+# declared (`canvases.py`'s grants, ADR 0114): one new table, so nothing already written has to move.
+SCHEMA_VERSION = 62
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -973,6 +974,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    value TEXT NOT NULL,
                    at INTEGER NOT NULL,
                    PRIMARY KEY (canvas_id, collection, id)
+               )"""
+        )
+        # v62: the user's answer for one tool a canvas's page calls, kept for the canvas rather than
+        # a version or a device: a version declares a tool, and whether the page may call it is the
+        # user's answer, which outlives the version that asked (canvases.py, ADR 0114). `at` is the
+        # host's clock the answer was recorded at. A row that is absent is a tool never asked about,
+        # which is not the same as one refused.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS canvas_grants (
+                   canvas_id TEXT NOT NULL,
+                   tool TEXT NOT NULL,
+                   allowed INTEGER NOT NULL,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (canvas_id, tool)
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

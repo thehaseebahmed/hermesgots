@@ -175,9 +175,14 @@ def _runs_by_job(job_id: str | None, per_job: int) -> Dict[str, List[Dict[str, A
     }
 
 
-def _error(web: Any, message: str, status: int):
-    # The API server's own error shape, so clients read every error the same way.
-    return web.json_response({"error": {"message": message}}, status=status)
+def _error(web: Any, message: str, status: int, code: str | None = None):
+    # The API server's own error shape, so clients read every error the same way. `code` is there
+    # only where the refusal has one a client can act on — a canvas's four consent verdicts — so a
+    # screen never has to read the words to know what to do next.
+    error: Dict[str, Any] = {"message": message}
+    if code is not None:
+        error["code"] = code
+    return web.json_response({"error": error}, status=status)
 
 
 def _request_profile():
@@ -3287,12 +3292,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
         return await canvas_view(request, canvases.undo)
 
-    async def call_canvas(request: "web.Request") -> "web.Response":
-        """A call a canvas's page makes: the canvas's own data, put or removed on the host.
+    # One table of act locks per wiring: a lock binds to the loop that first contends on it, so it
+    # can't outlive the server this table was made for.
+    canvas_locks: Dict[str, asyncio.Lock] = {}
 
-        The page owns that data (ADR 0113), so these shapes are answered without consent: they write
-        the canvas's own store and nothing that leaves the host. The tab is told nothing it could
-        call for any other canvas, since the id is this route's and not the body's.
+    async def call_canvas(request: "web.Request") -> "web.Response":
+        """A call a canvas's page makes: its own data, the four host reads, or a declared tool.
+
+        The page owns its data (ADR 0113) and reads the bot's own facts, so those shapes are
+        answered without consent — they write the canvas's own store and read what the app itself
+        renders. A tool named ``<server>.<tool>`` is answered only where the version the page is
+        drawn from declares it and the user allowed it (ADR 0114): ``canvases.may_call`` reads both
+        off the store, and a refusal's verdict rides back as the error's ``code``. The tab is told
+        nothing it could call for any other canvas, since the id is this route's and not the body's.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -3302,15 +3314,72 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
         path = store_path()
+
+        async def read_usage_shape(args: Dict[str, Any]) -> Dict[str, Any]:
+            provider = str(args.get("provider") or "").strip().lower()
+            if not provider:
+                # The host's own rule, kept where the page's call reaches it: usage is one
+                # provider's account, never every provider's.
+                raise ValueError("A usage read names the provider it is for: pass one in args.")
+            return await read_usage(provider)
+
+        async def read_routines_shape(args: Dict[str, Any]) -> Dict[str, Any]:
+            return {"jobs": await asyncio.to_thread(_runs_by_job, None, DEFAULT_PER_JOB)}
+
+        async def read_projects_shape(args: Dict[str, Any]) -> Dict[str, Any]:
+            return {"projects": await read_projects()}
+
+        async def read_sessions_shape(args: Dict[str, Any]) -> Dict[str, Any]:
+            return {"sessions": await asyncio.to_thread(chats.read, path)}
+
         writes = {
             "data.put": lambda args: canvases.put_call(path, canvas_id, args),
             "data.remove": lambda args: canvases.remove_call(path, canvas_id, args),
         }
         try:
-            result = await page_calls.answer(body, writes=writes)
+            result = await page_calls.answer(
+                body,
+                reads={
+                    "usage": read_usage_shape,
+                    "routines": read_routines_shape,
+                    "projects": read_projects_shape,
+                    "sessions": read_sessions_shape,
+                },
+                writes=writes,
+                may_call=partial(canvases.may_call, path, canvas_id),
+                profile=_request_profile(),
+                locks=canvas_locks,
+            )
         except page_calls.CallRefused as error:
-            return _error(web, str(error), error.status)
+            return _error(web, str(error), error.status, error.reason)
         return web.json_response({"object": "gots.canvas.call", "result": result})
+
+    async def grant_canvas(request: "web.Request") -> "web.Response":
+        """The user's answer for one tool a canvas's page declares, and the canvas's answers after it.
+
+        The answer is written on the host rather than kept by the device that gave it — the page
+        calls from every device the user has — and it is the canvas's, so the version a bot writes
+        next inherits it (ADR 0114). The list comes back with the row so a screen that asked never
+        has to read the canvas again to draw the answers it now holds.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        canvas_id = request.match_info["canvas_id"]
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        path = store_path()
+        try:
+            found = await asyncio.to_thread(
+                canvases.grant, path, canvas_id, body.get("tool"), body.get("allow")
+            )
+            rows = await asyncio.to_thread(canvases.grants, path, canvas_id)
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response(
+            {"object": "gots.canvas.grant", "grant": found, "grants": rows}
+        )
 
     async def list_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3663,6 +3732,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/call", call_canvas)
+    app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/grants", grant_canvas)
     app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/brief", research_brief)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/edit", research_edit)

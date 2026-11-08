@@ -22,6 +22,13 @@ A canvas also keeps data of its own: JSON documents in collections (``data``, ``
 write or an undo never touches it — so a page keeps its state through a version the user walks
 back, and the whole of it is capped at ``DATA_BYTES`` because every open and every device's copy
 carries it.
+
+A page calls a tool on the host only when the version it is drawn from declared that tool, and only
+once the user has answered for it: ``may_call`` reads the version's list and the canvas's own grant
+row, and answers one of the verdicts ``page_calls`` names. The grant is the canvas's rather than a
+version's — a page written again is no reason to ask again — while the version's list is what
+decides what its page may call, so a tool the newest version stopped declaring is refused before
+anybody is asked (ADR 0114).
 """
 
 from __future__ import annotations
@@ -36,7 +43,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from . import chats, events, outbox, sessions, tools_common, triage
+from . import chats, events, outbox, page_calls, sessions, tools_common, triage
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -275,11 +282,16 @@ def _greatest_below(conn: sqlite3.Connection, canvas_id: str, version: int) -> O
 
 
 def _answer(
-    found: Dict[str, Any], version: Dict[str, Any], can_undo: bool
+    found: Dict[str, Any], version: Dict[str, Any], can_undo: bool, grants: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
-    """A canvas as the app draws it: its record, the version the record points at, and whether a
-    version sits under that one to undo to."""
-    return {**found, **version, "can_undo": can_undo}
+    """A canvas as the app draws it: its record, the version the record points at, whether a
+    version sits under that one to undo to, and the user's answers for the tools it declares.
+
+    The grants ride every one-canvas answer because they are the canvas's, not a version's: the
+    page's calls are refused or allowed by them, and the options sheet that changes them reads the
+    canvas it is changing (ADR 0114).
+    """
+    return {**found, **version, "can_undo": can_undo, "grants": grants}
 
 
 @contextmanager
@@ -313,7 +325,7 @@ def _page(conn: sqlite3.Connection, canvas_id: str) -> Dict[str, Any]:
     # A canvas at its first version, or one whose older versions were trimmed, has nothing to undo:
     # the read of what sits under the pointer is on this same connection.
     under = _greatest_below(conn, canvas_id, version["version"])
-    return _answer(found, version, under is not None)
+    return _answer(found, version, under is not None, _grants(conn, canvas_id))
 
 
 def page(path: Path, canvas_id: str) -> Dict[str, Any]:
@@ -486,6 +498,7 @@ def _commit(
                 "written_at": now,
             },
             can_undo,
+            _grants(conn, canvas_id),
         )
     if named:
         # The version is stored either way: a chat this can't rename is a title that lags, not a
@@ -523,7 +536,12 @@ def undo(path: Path, canvas_id: str) -> Dict[str, Any]:
         version = _version(conn, canvas_id, number) or _empty_version(found)
         can_undo = _greatest_below(conn, canvas_id, number) is not None
         answer = {
-            **_answer({**found, "version": number, "at": now}, version, can_undo),
+            **_answer(
+                {**found, "version": number, "at": now},
+                version,
+                can_undo,
+                _grants(conn, canvas_id),
+            ),
             "data": _documents(conn, canvas_id),
         }
     events.note("canvas", found["session_id"], path, True)
@@ -730,6 +748,110 @@ def write_call(path: Path, canvas_id: str, args: Any) -> Dict[str, Any]:
     return put_call(path, canvas_id, args)
 
 
+# --- the tools a version declares -----------------------------------------------------------------
+
+# One order for every read, so the app's list of a canvas's answers is the same whichever read
+# asks for it, and two tools landed together are still two rows a reader can follow.
+_GRANTS = "SELECT tool, allowed FROM canvas_grants WHERE canvas_id = ? ORDER BY tool"
+
+
+def declares(tools: Any, tool: str) -> bool:
+    """Whether a version's declared list holds ``tool``.
+
+    A version's list is the whole of what its page may ask the host for: a name outside it is
+    refused before the user is asked anything, which is why the list is stored with the words of
+    that version rather than read off the page (ADR 0114).
+    """
+    return isinstance(tools, list) and tool in tools
+
+
+def _grants(conn: sqlite3.Connection, canvas_id: str) -> List[Dict[str, Any]]:
+    """A canvas's answers, one per tool, over a connection the caller holds."""
+    rows = conn.execute(_GRANTS, (canvas_id,)).fetchall()
+    return [{"tool": tool, "allowed": bool(allowed)} for tool, allowed in rows]
+
+
+def grants(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
+    """Every answer the user has given for a canvas's tools, for a caller holding no connection.
+
+    A canvas that isn't there is a 404, as it is for every other part of one: a list of nothing
+    would say the canvas exists and has refused nothing, which is a different canvas.
+    """
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    conn = connect(path)
+    try:
+        if _record(conn, canvas_id) is None:
+            raise CanvasError("There is no such canvas.", 404)
+        return _grants(conn, canvas_id)
+    finally:
+        conn.close()
+
+
+def may_call(path: Path, canvas_id: str, tool: str, write: bool = False) -> str:
+    """What a page's call to ``tool`` may do, as one of ``page_calls``' verdicts.
+
+    The two facts that decide it are read here rather than by the route: the current version must
+    declare the tool, and the canvas's grant for it must say the user allowed it. A tool never asked
+    about is ``consent_required`` rather than refused, since the page's first call is what raises the
+    question. A canvas that isn't there raises, so the route answers 404 as it does for its data.
+
+    ``write`` is the call's own flag and is not read: an answer is the user's for a tool, not for a
+    verb, so granting it lets the page both read and change what it names.
+    """
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    conn = connect(path)
+    try:
+        found = _record(conn, canvas_id)
+        if found is None:
+            raise CanvasError("There is no such canvas.", 404)
+        version = _version(conn, canvas_id, found["version"]) or _empty_version(found)
+        if not declares(version["tools"], tool):
+            return page_calls.NOT_DECLARED
+        row = conn.execute(
+            "SELECT allowed FROM canvas_grants WHERE canvas_id = ? AND tool = ?", (canvas_id, tool)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return page_calls.CONSENT_REQUIRED
+    return page_calls.ALLOWED if row[0] else page_calls.DENIED
+
+
+def grant(path: Path, canvas_id: str, tool: Any, allow: Any) -> Dict[str, Any]:
+    """Records the user's answer for one tool a canvas's page declares, and answers what it recorded.
+
+    A name that is not one, and a tool the version the user is looking at does not declare, are both
+    refused: an answer belongs to a question that version asked. The row outlives the version, so a
+    page written again keeps the answers it was given, and the version's list is what still decides
+    what may be called — a later version that stops declaring a tool can't call it, granted or not.
+    """
+    if not isinstance(tool, str) or not tool:
+        raise CanvasError("A grant names its tool: <server>.<tool>.")
+    if not isinstance(allow, bool):
+        raise CanvasError("A grant says whether the page may call the tool: allow true or false.")
+    with _writing(path) as conn:
+        found = _record(conn, canvas_id)
+        if found is None:
+            raise CanvasError("There is no such canvas.", 404)
+        version = _version(conn, canvas_id, found["version"]) or _empty_version(found)
+        if not declares(version["tools"], tool):
+            raise CanvasError(
+                f"The version this canvas shows does not declare {tool!r}, so there is nothing to "
+                "allow. Ask the bot to write a version that declares it."
+            )
+        # The host's clock, read under the lock, so the answers read in the order they were given.
+        now = int(time.time() * 1000)
+        conn.execute(
+            """INSERT INTO canvas_grants (canvas_id, tool, allowed, at) VALUES (?, ?, ?, ?)
+               ON CONFLICT(canvas_id, tool)
+               DO UPDATE SET allowed = excluded.allowed, at = excluded.at""",
+            (canvas_id, tool, 1 if allow else 0, now),
+        )
+    return {"tool": tool, "allowed": allow}
+
+
 def _insert(path: Path, found: Dict[str, Any]) -> None:
     conn = connect(path)
     try:
@@ -758,6 +880,8 @@ def _drop(path: Path, canvas_id: str) -> None:
         conn.execute("DELETE FROM canvas_versions WHERE canvas_id = ?", (canvas_id,))
         # The data is the canvas's too: a row nothing can reach is a store that only grows.
         conn.execute("DELETE FROM canvas_docs WHERE canvas_id = ?", (canvas_id,))
+        # And so are the answers it was given: a canvas gone leaves no grant behind it.
+        conn.execute("DELETE FROM canvas_grants WHERE canvas_id = ?", (canvas_id,))
     finally:
         conn.close()
 
@@ -816,6 +940,7 @@ def create(
         "hidden": False,
         "html": "",
         "tools": [],
+        "grants": [],
         "written_at": now,
         "item": item,
     }

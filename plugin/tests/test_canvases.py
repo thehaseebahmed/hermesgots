@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import plugin
-from plugin import canvases, chats, openui, outbox, triage
+from plugin import canvases, chats, openui, outbox, page_calls, triage
 from plugin.store import connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
@@ -828,16 +828,119 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(without_doc["status"], 400)
         self.assertIn("doc", without_doc["payload"]["error"]["message"])
         self.assertEqual(self.documents(canvas_id), [])
-        # A shape no host answers for a canvas is a 501 that names it.
+        # A tool the version doesn't declare is a refusal that says so, not a host without tools.
         unknown = self.call(
             "/canvases/{canvas_id}/call",
             "POST",
             {"shape": "home.light", "args": {}},
             canvas_id=canvas_id,
         )
-        self.assertEqual(unknown["status"], 501)
+        self.assertEqual(unknown["status"], 403)
+        self.assertEqual(unknown["payload"]["error"]["code"], "not_declared")
         self.assertIn("home.light", unknown["payload"]["error"]["message"])
         self.assertEqual(self.documents(canvas_id), [])
+
+    def test_an_undeclared_tool_is_refused_a_declared_one_asks_and_a_granted_one_is_called(self) -> None:
+        # A page calls the tools its own version declared, and the user's answer for each is kept on
+        # the host: refused before the user is asked, asked once, and called forever after.
+        canvas_id = self.make()
+        ask = mock.AsyncMock(return_value={"matches": ["notes.md"]})
+        body = {"shape": "files.search", "args": {"query": "notes"}}
+        with mock.patch.object(page_calls.mcp_call, "call_async", ask):
+            undeclared = self.call(
+                "/canvases/{canvas_id}/call", "POST", body, canvas_id=canvas_id
+            )
+            self.assertEqual(undeclared["status"], 403)
+            self.assertEqual(undeclared["payload"]["error"]["code"], "not_declared")
+            self.assertEqual(ask.await_count, 0)
+
+            # The bot writes a version declaring two tools: the page may ask for either, and the
+            # first call of one is the user's to answer.
+            canvases.write(self.path, canvas_id, DOCUMENT, tools=["files.search", "mail.send"])
+            asking = self.call("/canvases/{canvas_id}/call", "POST", body, canvas_id=canvas_id)
+            self.assertEqual(asking["status"], 403)
+            self.assertEqual(asking["payload"]["error"]["code"], "consent_required")
+            self.assertEqual(ask.await_count, 0)
+
+            allowed = self.call(
+                "/canvases/{canvas_id}/grants",
+                "POST",
+                {"tool": "files.search", "allow": True},
+                canvas_id=canvas_id,
+            )
+            self.assertEqual(allowed["status"], 200)
+            self.assertEqual(allowed["payload"]["object"], "gots.canvas.grant")
+            self.assertEqual(
+                allowed["payload"]["grant"], {"tool": "files.search", "allowed": True}
+            )
+            # The answer is the canvas's, so every one-canvas read carries it.
+            read = self.call("/canvases/{canvas_id}", canvas_id=canvas_id)
+            self.assertEqual(
+                read["payload"]["canvas"]["grants"], [{"tool": "files.search", "allowed": True}]
+            )
+
+            answered = self.call("/canvases/{canvas_id}/call", "POST", body, canvas_id=canvas_id)
+            self.assertEqual(answered["status"], 200)
+            self.assertEqual(answered["payload"]["object"], "gots.canvas.call")
+            self.assertEqual(answered["payload"]["result"], {"matches": ["notes.md"]})
+            self.assertEqual(ask.await_count, 1)
+            self.assertEqual(ask.await_args.args[1:], ("files.search", {"query": "notes"}))
+
+            # The other tool is not the one that was allowed: a refusal of its own, and no call.
+            refused = self.call(
+                "/canvases/{canvas_id}/grants",
+                "POST",
+                {"tool": "mail.send", "allow": False},
+                canvas_id=canvas_id,
+            )
+            self.assertEqual(refused["status"], 200)
+            denied = self.call(
+                "/canvases/{canvas_id}/call",
+                "POST",
+                {"shape": "mail.send", "args": {}},
+                canvas_id=canvas_id,
+            )
+            self.assertEqual(denied["status"], 403)
+            self.assertEqual(denied["payload"]["error"]["code"], "denied")
+            self.assertEqual(ask.await_count, 1)
+
+    def test_the_four_host_reads_answer_without_a_tool_or_a_grant(self) -> None:
+        canvas_id = self.make()
+        chats.merge(self.path, {"chat-1": {"at": 5, "value": {"title": "Groceries"}}})
+        sessions = self.call(
+            "/canvases/{canvas_id}/call", "POST", {"shape": "sessions"}, canvas_id=canvas_id
+        )
+        self.assertEqual(sessions["status"], 200)
+        self.assertEqual(
+            sessions["payload"]["result"]["sessions"]["chat-1"]["value"]["title"], "Groceries"
+        )
+        # The host's read keeps its own argument rule: usage is read for one provider.
+        unnamed = self.call(
+            "/canvases/{canvas_id}/call", "POST", {"shape": "usage", "args": {}}, canvas_id=canvas_id
+        )
+        self.assertEqual(unnamed["status"], 400)
+        self.assertIn("provider", unnamed["payload"]["error"]["message"])
+
+    def test_a_grant_names_a_declared_tool_of_a_canvas_that_is_there(self) -> None:
+        canvas_id = self.make()
+        for body, status, named in (
+            ({"tool": "", "allow": True}, 400, "tool"),
+            ({"tool": 3, "allow": True}, 400, "tool"),
+            ({"tool": "files.search", "allow": True}, 400, "files.search"),
+        ):
+            with self.subTest(body=body):
+                refused = self.call(
+                    "/canvases/{canvas_id}/grants", "POST", body, canvas_id=canvas_id
+                )
+                self.assertEqual(refused["status"], status)
+                self.assertIn(named, refused["payload"]["error"]["message"])
+        gone = self.call(
+            "/canvases/{canvas_id}/grants",
+            "POST",
+            {"tool": "files.search", "allow": True},
+            canvas_id="nope",
+        )
+        self.assertEqual(gone["status"], 404)
 
     def test_info_advertises_canvas_only_where_it_can_be_worked(self) -> None:
         # The tools have to reach a canvas's session and that session has to be told its guide: a
