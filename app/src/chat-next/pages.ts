@@ -56,6 +56,12 @@ export function newestRead(
   return undefined
 }
 
+/** A page the host answered with the rows it just answered with: it is not paging any further. */
+export const repeats = (page: Row[], previous: Row[] | undefined) => {
+  if (!previous?.length || page.length !== previous.length) return false
+  return page.every((row, at) => row.id === previous[at].id)
+}
+
 /**
  * The rows `held` now holds with the rows `read` laid over them from the row they start at, which is
  * how a read that joined lands; undefined where the held rows no longer have that row, since they

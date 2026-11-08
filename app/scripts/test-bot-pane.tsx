@@ -69,6 +69,31 @@ async function seed(threads: string[] = [], patch: { legacyChat?: boolean } = {}
   globalThis.fetch = async () => json({})
 }
 
+/**
+ * A thread a bot owns, as opening it wrote it: the record the bot's lane lists and the message that
+ * opened it, which is what its card says it is about.
+ */
+async function openThread(id: string, profileId: string, at: number) {
+  await db.conversations.put({
+    id,
+    profileId,
+    title: `Thread ${id}`,
+    titleEdited: true,
+    hermesSessionId: `gots-${id}`,
+    createdAt: at,
+    updatedAt: at,
+    changedAt: 10,
+  })
+  await db.messages.put({
+    id: `${id}-open`,
+    conversationId: id,
+    role: "user",
+    content: `Opened ${id}`,
+    status: "done",
+    createdAt: at + 1,
+  })
+}
+
 const screen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
@@ -125,15 +150,15 @@ const titles = () =>
 /** The card of the thread the pane is showing: the only one that says it is here. */
 const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
-/** The thread's own card in Main, wherever it was placed in the flow. */
-const threadCard = (id: string) => `[data-slot="thread-card"][data-thread="${id}"]`
+/** The thread's own card in Main, wherever it was placed in the flow, as a selector. */
+const cardSelector = (id: string) => `[data-slot="thread-card"][data-thread="${id}"]`
 const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
 /**
  * A thread this device remembers, written the way the app writes it. Storage on its own leaves the
  * lane's store holding the row it loaded earlier, so a close would move nothing and tell nobody —
  * which is a state no visit can produce.
  */
-const remembers = (thread: string) => rememberThread(bot.id, thread)
+const remembers = (thread: string, profileId = bot.id) => rememberThread(profileId, thread)
 /**
  * One Escape, as a reader's key arrives at the page: it bubbles and it can be claimed, which is what
  * a sheet or a menu answering the key does before the lane ever hears it.
@@ -358,24 +383,7 @@ test(
     await seed(["t-a"])
     // The other bot has a thread of its own, and this device remembers opening it.
     await ensureMainThread(other.id)
-    await db.conversations.put({
-      id: "t-b",
-      profileId: other.id,
-      title: "Thread t-b",
-      titleEdited: true,
-      hermesSessionId: "gots-t-b",
-      createdAt: 20,
-      updatedAt: 20,
-      changedAt: 20,
-    })
-    await db.messages.put({
-      id: "t-b-open",
-      conversationId: "t-b",
-      role: "user",
-      content: "Opened t-b",
-      status: "done",
-      createdAt: 21,
-    })
+    await openThread("t-b", other.id, 20)
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     localStorage.setItem(lastThreadKey(other.id), "t-b")
     await mount(screen(`/c/${MAIN}`), async () => {
@@ -432,25 +440,7 @@ test(
     await seed(["t-a", "t-b"])
     // The bot the reader switches to: its own thread is the one this device remembers, and its
     // thread count is what the lane waits on.
-    await ensureMainThread(other.id)
-    await db.conversations.put({
-      id: "t-o",
-      profileId: other.id,
-      title: "Thread t-o",
-      titleEdited: true,
-      hermesSessionId: "gots-t-o",
-      createdAt: 20,
-      updatedAt: 20,
-      changedAt: 20,
-    })
-    await db.messages.put({
-      id: "t-o-open",
-      conversationId: "t-o",
-      role: "user",
-      content: "Opened t-o",
-      status: "done",
-      createdAt: 21,
-    })
+    await openThread("t-o", other.id, 20)
     localStorage.setItem(lastThreadKey(other.id), "t-o")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => text().includes("2 threads"), "this bot's threads to load")
@@ -623,27 +613,10 @@ test(
     await seed()
     // The bot whose thread this is: a server to call and a key to call it with, so the thread is
     // chat-next's and the run is the one its own screen starts and follows.
-    await db.conversations.put({
-      id: "t-s",
-      profileId: other.id,
-      title: "Thread t-s",
-      titleEdited: true,
-      hermesSessionId: "gots-t-s",
-      createdAt: 10,
-      updatedAt: 10,
-      changedAt: 10,
-    })
-    await db.messages.put({
-      id: "t-s-open",
-      conversationId: "t-s",
-      role: "user",
-      content: "Opened t-s",
-      status: "done",
-      createdAt: 11,
-    })
-    rememberThread(other.id, "t-s")
-    // The host the thread's send runs on: the run is its own, and its ledger is what a card's
-    // spinner stands on while nothing draws the thread.
+    await openThread("t-s", other.id, 10)
+    remembers("t-s", other.id)
+    // The host the thread's send runs on: the run is the fake host's, and the host's own ledger is
+    // what a card's spinner stands on while nothing draws the thread.
     const host = fakeHost("gots-t-s", { plugin: true })
     await mount(screen(`/c/${mainThreadId(other.id)}`), async () => {
       await until(async () => titles().join("|") === "Otherly|Thread t-s", "the thread beside Main")
@@ -658,7 +631,7 @@ test(
 
       assert.equal(host.asked.stops, 0, "nothing was posted to stop the run the reader put away")
       await until(
-        async () => Boolean(find(`${threadCard("t-s")} [data-slot="spinner"]`)),
+        async () => Boolean(find(`${cardSelector("t-s")} [data-slot="spinner"]`)),
         "the closed thread's card still spinning",
       )
 
@@ -1048,25 +1021,8 @@ test(
     localStorage.clear()
     await seed()
     // The bot whose Main chat-next draws: a server to call and a key to call it with.
-    await db.conversations.put({
-      id: "t-o",
-      profileId: other.id,
-      title: "Thread t-o",
-      titleEdited: true,
-      hermesSessionId: "gots-t-o",
-      createdAt: 20,
-      updatedAt: 20,
-      changedAt: 20,
-    })
-    await db.messages.put({
-      id: "t-o-open",
-      conversationId: "t-o",
-      role: "user",
-      content: "Opened t-o",
-      status: "done",
-      createdAt: 21,
-    })
-    rememberThread(other.id, "t-o")
+    await openThread("t-o", other.id, 20)
+    remembers("t-o", other.id)
     await mount(screen(`/c/${mainThreadId(other.id)}`), async () => {
       await until(
         async () => titles().join("|") === "Otherly|Thread t-o",

@@ -2,8 +2,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { readNewest, readPage, readRun, readTranscript } from "../src/chat-next/api.ts"
-import { overlay } from "../src/chat-next/pages.ts"
+import { HostStuck, readNewest, readPage, readRun, readTranscript } from "../src/chat-next/api.ts"
+import { overlay, PAGE } from "../src/chat-next/pages.ts"
 import { promptFrom } from "../src/lib/run-prompt.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
@@ -71,8 +71,8 @@ test("a transcript whose newest rows are not the held ones is read on to the sta
 
 /**
  * A host that answers the transcript with JSON carrying no page at all, as an error envelope or an
- * older route does. It counts the pages asked for and refuses a sixth, so a read that never ends
- * fails the test rather than running the process out of memory.
+ * older route does. It returns the offsets it was asked for, and refuses the sixth, so a read that
+ * never ended fails on that refusal rather than running the process out of memory.
  */
 function pageLessHost() {
   const asked = []
@@ -92,6 +92,35 @@ test("an answer with no page is no rows, and the read ends on it", async () => {
   assert.deepEqual(read.rows, [], "and the read that asked for it holds no rows")
   assert.equal(read.more, false, "with nothing older left to read")
   assert.deepEqual(asked, [0, 0], "one page each, never a second offset asked for")
+})
+
+/**
+ * A host that answers every page with the same one, as a host that clamps `offset`, ignores it, or
+ * a proxy serving one cached answer does. It refuses a sixth ask, so a read with no guard fails on
+ * the refusal instead of reading the same page until the process runs out of memory.
+ */
+function stuckHost(count = PAGE) {
+  const asked = []
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    asked.push(Number(url.searchParams.get("offset")))
+    if (asked.length > 5) throw new Error(`the read asked for page ${asked.length} of five`)
+    const newest = Array.from({ length: count }, (_, at) => row(count - at))
+    return new Response(JSON.stringify({ data: newest }), { status: 200 })
+  }
+  return asked
+}
+
+test("a host that will not page on stops the read instead of answering it for ever", async () => {
+  const held = [row(1), row(2)]
+  stuckHost()
+  await assert.rejects(
+    () => readNewest(connection, "s", undefined, held),
+    HostStuck,
+    "a page the host has already answered is no page the read can go back through",
+  )
+  stuckHost()
+  await assert.rejects(() => readTranscript(connection, "s"), HostStuck, "and the whole read too")
 })
 
 /** A host answering one run's status with the body given, as `GET /v1/runs/{id}` does. */
