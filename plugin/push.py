@@ -462,9 +462,9 @@ def notify(
 ) -> None:
     """Something a device should hear about. ``session_id`` is the session it is about, or for the
     kinds that aren't about one the routine's job id (``routine_failed``), the project's id
-    (``clone_failed``) or the research mission's id (``research_*``); it only picks what a tap opens.
-    ``title`` names what it is about when that isn't a session (whose chat title is looked up).
-    Never raises: it runs inside Hermes's hooks."""
+    (``clone_failed``), the research mission's id (``research_*``) or the room's id
+    (``room_input``); it only picks what a tap opens. ``title`` names what it is about when that
+    isn't a session (whose chat title is looked up). Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return

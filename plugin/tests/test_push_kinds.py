@@ -117,6 +117,50 @@ class Categories(unittest.TestCase):
             self.assertTrue(push.once(path, "a"))
 
 
+class Delivery(unittest.TestCase):
+    """Who hears a push: a device that asked for its category, and never one with the app on screen."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = db_path(Path(self.tmp.name))
+        conn = connect(self.path)
+        conn.execute(
+            "INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
+            " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("https://push.example/1", "phone-1", "key", "auth", "vapid", "mailto:a@b.c", 1,
+             '["room_input"]'),
+        )
+        conn.close()
+        self.sent = []
+        patch = mock.patch.object(
+            push, "send", lambda row, payload, topic: self.sent.append(payload) or 201
+        )
+        patch.start()
+        self.addCleanup(patch.stop)
+        relay = mock.patch.object(push, "_relay", lambda *args, **kwargs: None)
+        relay.start()
+        self.addCleanup(relay.stop)
+
+    def deliver(self):
+        push._deliver(self.path, "room_input", "room_input", "room-1", {"title": "Planning"})
+
+    def test_a_waiting_room_reaches_a_device_that_asked_for_it(self):
+        self.deliver()
+        self.assertEqual(
+            self.sent,
+            [{"kind": "room_input", "session_id": "room-1", "title": "Planning"}],
+            "the room's id, so a tap opens it, and its name, so the notification says which",
+        )
+
+    def test_a_device_with_the_app_on_screen_is_not_pushed(self):
+        with push.watching(self.path, "phone-1"):
+            self.deliver()
+            self.assertEqual(self.sent, [], "the app is already drawing the room")
+        self.deliver()
+        self.assertEqual(len(self.sent), 1, "put away, it hears it then")
+
+
 class Mutes(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

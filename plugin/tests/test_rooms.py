@@ -29,7 +29,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import plugin
-from plugin import events, media, rooms, store
+from plugin import events, media, push, rooms, store
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 
@@ -1852,6 +1852,152 @@ class RoomMedia(unittest.TestCase):
             features = self.features()
         self.assertIn("rooms", features)
         self.assertIn("room_media", features, "a Host with both takes a file and gives it back")
+
+
+class RoomPushes(unittest.TestCase):
+    """A room that starts needing the user is pushed once, and again only after it is answered (F6).
+
+    What makes a room need the user is the room's own: an approval the Host holds pending, a
+    question the plugin holds for a member's turn, or a member's reply that ends addressed to
+    `@user`. A member's reply alone is not news, a room that is still waiting is not news twice, and
+    a room the user has answered is armed again. The watcher's tick is the backstop for a transition
+    no hook fired.
+    """
+
+    def setUp(self):
+        self.home = temp_hermes_home(self)
+        store.connect(store.db_path(self.home)).close()
+        with rooms._questions_lock:
+            rooms._questions.clear()
+        with rooms._pushes_lock:
+            rooms._pushes.clear()
+        rooms._noted.clear()
+        self.told = []
+        patches = [
+            mock.patch.object(push, "reachable", lambda path: True),
+            mock.patch.object(
+                push,
+                "notify",
+                lambda kind, session_id, path=None, title=None: self.told.append(
+                    (kind, session_id, title)
+                ),
+            ),
+        ]
+        for one in patches:
+            one.start()
+            self.addCleanup(one.stop)
+
+    def host(self, *, waiting=False, events=(), listed=()):
+        """A Host with one room, at rest or holding the approval m1 waits on."""
+        status = {
+            "running": True, "working": waiting, "blocked": waiting, "counts": {},
+            "pending_actions": [APPROVAL] if waiting else [], "member_activity": [],
+            "peer_routes": [],
+        }
+        return Host(
+            listed=list(listed),
+            driver_status=status,
+            events=list(events),
+            states={"room-1": {**ROOM, "latest_seq": len(events)}},
+        )
+
+    @property
+    def listed(self):
+        return [ROOM]
+
+    def check(self, host):
+        with dispatcher(host), no_loopback():
+            return rooms.check(self.home)
+
+    def test_a_room_that_starts_waiting_is_pushed_once(self):
+        host = self.host(listed=self.listed)
+        self.assertEqual(self.check(host), 0, "a room at rest is no news")
+        self.assertEqual(self.told, [])
+        host.driver_status["pending_actions"] = [APPROVAL]
+        self.assertEqual(self.check(host), 1)
+        self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
+        self.assertEqual(self.check(host), 0, "the same wait is not news twice")
+        self.assertEqual(len(self.told), 1)
+
+    def test_a_members_reply_is_not_news(self):
+        conversation = [
+            event(1, "message.user", USER, {"text": "who is free?"}),
+            event(2, "message.member", MEMBER, {"text": "me", "thread_id": "e1"}),
+        ]
+        host = self.host(events=conversation, listed=self.listed)
+        self.assertEqual(self.check(host), 0)
+        conversation.append(event(3, "message.member", MEMBER, {"text": "and the routes"}))
+        self.assertEqual(self.check(host), 0, "a member answering is the room working, not asking")
+
+    def test_a_reply_that_ends_addressed_to_the_user_is_a_wait(self):
+        conversation = [
+            event(1, "message.user", USER, {"text": "go"}),
+            event(2, "message.member", MEMBER, {"text": "That one is yours, @user."}),
+            event(3, "room.activity", {"kind": "gateway", "id": "gw-1"}, {"status": "settled"}),
+        ]
+        host = self.host(events=conversation, listed=self.listed)
+        self.assertEqual(self.check(host), 1, "the round settled on the user, so the room waits")
+        self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
+        self.assertEqual(self.check(host), 0)
+
+    def test_a_users_own_words_answer_the_mention(self):
+        conversation = [
+            event(1, "message.member", MEMBER, {"text": "yours, @user"}),
+            event(2, "message.user", USER, {"text": "so it is"}),
+        ]
+        host = self.host(events=conversation, listed=self.listed)
+        self.assertEqual(self.check(host), 0)
+
+    def test_a_question_the_hook_held_is_a_wait(self):
+        host = self.host(listed=self.listed)
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1)
+        self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
+
+    def test_the_answer_arms_the_room_for_the_next_wait(self):
+        host = self.host(listed=self.listed)
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1)
+        with dispatcher(host), no_loopback(), answerable([]):
+            self.assertEqual(self.answer()["status"], 200)
+        # The room asks again before the next tick: a mark left alone would swallow the second wait.
+        rooms.hold_question("room-1", "m2", "srq-2", [QUESTION])
+        self.assertEqual(self.check(host), 1)
+        self.assertEqual(len(self.told), 2)
+
+    def answer(self):
+        return asked_route(
+            self, plugin.PREFIX + "/rooms/{room_id}/answer", room_id="room-1",
+            body={"member_id": "m2", "question_id": "srq-1", "answers": {"q0": "Postgres"}},
+        )
+
+    def test_a_room_that_is_gone_is_not_waited_on(self):
+        host = self.host(waiting=True, listed=self.listed)
+        self.assertEqual(self.check(host), 1)
+        host.listed = [{**ROOM, "disbanded_at": 1_760_001_000.0}]
+        self.assertEqual(self.check(host), 0)
+        host.listed = [ROOM]
+        self.assertEqual(self.check(host), 1, "the room the Host lists again is a wait again")
+
+    def test_the_hosts_own_approval_wakes_the_watcher(self):
+        with mock.patch.object(rooms._ticker, "wake") as wake:
+            rooms.on_member_activity(room_id="room-1", kind="request.opened", member_id="m1",
+                                     payload={"request_id": "approval-1", "kind": "approval"})
+        wake.assert_called_once()
+
+    def test_a_question_wakes_the_watcher(self):
+        with mock.patch.object(rooms._ticker, "wake") as wake:
+            rooms.on_member_activity(
+                room_id="room-1", kind="request.opened", member_id="m1",
+                payload={"request_id": "srq-1", "questions": [QUESTION]},
+            )
+        wake.assert_called_once()
+
+    def test_a_members_delta_does_not_wake_the_watcher(self):
+        with mock.patch.object(rooms._ticker, "wake") as wake:
+            rooms.on_member_activity(room_id="room-1", kind="message.delta", member_id="m1",
+                                     payload={"delta": "working"})
+        wake.assert_not_called()
 
 
 if __name__ == "__main__":

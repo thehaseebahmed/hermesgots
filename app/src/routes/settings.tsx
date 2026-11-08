@@ -32,6 +32,7 @@ import {
   TelescopeIcon,
   TimerIcon,
   UserIcon,
+  UsersIcon,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -533,6 +534,7 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
   research_failed: CircleAlertIcon,
   meeting_done: CircleCheckIcon,
   meeting_failed: CircleAlertIcon,
+  room_input: UsersIcon,
 }
 
 const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {

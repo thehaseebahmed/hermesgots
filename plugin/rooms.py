@@ -33,12 +33,13 @@ import binascii
 import importlib
 import itertools
 import logging
+import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-from . import attachments, events, media
+from . import attachments, events, link, media, push, ticker
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,19 @@ LOG_WINDOW = 500
 # that asked every time would spend a third of its Host calls on an answer that cannot have moved.
 METHODS_TTL = 30.0
 
+# How often the room watcher looks anyway, and how long one pass over one home may take: a Host's
+# own activity hook pokes it at the transitions it can see, and the tick is the backstop for one no
+# hook fired — a round that settled addressed to the user is only in the room's log.
+WATCH_SECONDS = 20.0
+WATCH_BUDGET = 8.0
+# How far back a room's log is read to see whether its last words were addressed to the user. A
+# settle or an activity row follows the reply it belongs to, so the last few rows are the ones that
+# decide; a window this wide holds a whole round of them.
+ASK_WINDOW = 20
+# A member's words addressed to the user, as the room's screen reads them: a mention, not a name
+# that merely begins with one.
+MENTION = re.compile(r"@user\b", re.IGNORECASE)
+
 _ids = itertools.count(1)
 _ids_lock = threading.Lock()
 
@@ -142,6 +156,14 @@ _questions_lock = threading.Lock()
 _projections: Dict[str, Projection] = {}
 _loads: Dict[str, threading.Lock] = {}
 _projections_lock = threading.Lock()
+
+# Which rooms were waiting on the user at the last look, by home and room: a push is a transition
+# into waiting, so a room already marked is one the user has been told about and a room the user has
+# answered is marked again on the pass that sees it at rest.
+_pushes: Dict[Tuple[str, str], bool] = {}
+_pushes_lock = threading.Lock()
+# The watcher's own wake-up: a transition the Host's hook can see is pushed now, not on a tick.
+_ticker = ticker.Ticker("room needs")
 
 
 class RoomError(Exception):
@@ -655,6 +677,7 @@ def answer_question(
     # so the user's tap is not lost with the answer.
     with _questions_lock:
         _questions.pop(question_id, None)
+    _forget(room_id, home)
     events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
     return {"questionId": question_id}
 
@@ -683,6 +706,7 @@ def approve(
         timeout=timeout, home=home,
     )
     events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    _forget(room_id, home)
     return {"approved": found.get("approved") is not False, "choice": choice}
 
 
@@ -704,6 +728,8 @@ def stop_room(
         for one in [one for one in _questions.values() if one["roomId"] == room_id]:
             _questions.pop(one["questionId"], None)
     events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    # A stopped round answers nothing it was waiting on, so the room is armed for its next wait.
+    _forget(room_id, home)
     cancelled = found.get("cancelled")
     return {"cancelled": cancelled if type(cancelled) is int else 0}
 
@@ -1067,6 +1093,12 @@ def on_member_activity(**kwargs: Any) -> None:
     request_id = payload.get("request_id") or kwargs.get("request_id")
     if _asked_a_question(payload, request_id):
         hold_question(room_id, kwargs.get("member_id"), request_id, payload.get("questions"))
+        _ticker.wake()
+    elif kwargs.get("kind") == "request.opened":
+        # An approval opened: the Host holds it as a pending action, and the user is told now rather
+        # than on the watcher's next tick. Everything else — a reply ending addressed to the user
+        # included — is the log's, which the tick reads.
+        _ticker.wake()
     now = time.monotonic()
     with _notes_lock:
         last = _noted.get(room_id, 0.0)
@@ -1270,3 +1302,140 @@ def advertised(home: Any = None) -> List[str]:
     if any(name not in answered for name in WRITES):
         return rows
     return [*rows, "rooms_write"]
+
+
+# -- The watcher --------------------------------------------------------------
+
+
+def _addressed_to_user(rows: List[Dict[str, Any]]) -> bool:
+    """Whether the last words in a room's log are a member addressing the user.
+
+    An approval is the Host's pending action and a question is held here, but a round that settles
+    on the user is only in the log, so it is read there — by the rule the room's screen reads it
+    with: the last message decides, a member's mention asks, and the user's own words answer it.
+    """
+    asking = False
+    for row in sorted(rows, key=lambda one: one["seq"]):
+        if row["kind"] == "message.user":
+            asking = False
+        elif row["kind"] == "message.member":
+            asking = bool(MENTION.search(row.get("text") or ""))
+    return asking
+
+
+def _waits(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> bool:
+    """Whether this room is waiting on the user: an approval, a question, or words addressed to them."""
+
+    def left() -> float:
+        spare = deadline - time.monotonic()
+        if spare <= 0:
+            raise RoomError("This host took too long to answer about its rooms.")
+        return spare
+
+    found = call("groups.state", {"room_id": room_id}, timeout=left(), home=home)
+    if waiting(found.get("driver_status"), declared, room_id):
+        return True
+    room = found.get("room") if isinstance(found.get("room"), dict) else {}
+    reached = room.get("latest_seq")
+    if type(reached) is not int or reached <= 0:
+        return False
+    page = call(
+        "groups.log",
+        {"room_id": room_id, "since_seq": max(0, reached - ASK_WINDOW)},
+        timeout=left(),
+        home=home,
+    )
+    rows = [one for one in (_event(raw) for raw in page.get("events") or ()) if one]
+    return _addressed_to_user(rows)
+
+
+def _forget(room_id: str, home: Any) -> None:
+    """A room the user has just answered: the next time it waits, that is a new wait and is pushed."""
+    with _pushes_lock:
+        _pushes.pop((str(home), room_id), None)
+
+
+def check(hermes_home: Path) -> int:
+    """One pass over this home's rooms: how many started waiting on the user and were pushed once.
+
+    A push is a transition into waiting, so a room already marked is one the user has been told
+    about, a room seen at rest is marked again for its next wait, and a room the Host no longer
+    lists is dropped. The whole pass is bounded: a Host pages its own list, and a watcher still
+    reading a busy one when the next tick comes would only fall further behind. A pass that couldn't
+    read every room leaves the marks it never reached alone, so a room it didn't look at is not
+    forgotten as gone.
+
+    Without a device that could be told there is nothing to do: a wait this pass would have pushed
+    is still a transition for the next pass, since nothing was marked.
+    """
+    path = db_path(hermes_home)
+    if not path.exists() or not push.reachable(path):
+        return 0
+    found, _ = _probe(hermes_home)
+    if found is None:
+        return 0
+    declared = tuple(found.get("methods") or ())
+    deadline = time.monotonic() + WATCH_BUDGET
+    alive: List[str] = []
+    pushed = 0
+    complete = True
+    offset: Optional[int] = None
+    for _ in range(MAX_ROOM_PAGES):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            complete = False
+            break
+        try:
+            listed = list_rooms(limit=ROOM_PAGE, offset=offset, timeout=left, home=hermes_home)
+        except RoomError:
+            complete = False
+            break
+        for room in listed.get("rooms") or ():
+            room_id = room.get("room_id")
+            if not isinstance(room_id, str) or not room_id:
+                continue
+            if room.get("disbanded_at") is not None:
+                continue
+            alive.append(room_id)
+            try:
+                waits = _waits(room_id, declared, hermes_home, deadline)
+            except RoomError:
+                complete = False
+                continue
+            key = (str(hermes_home), room_id)
+            with _pushes_lock:
+                told = _pushes.get(key, False)
+                if len(_pushes) > 1024:
+                    _pushes.clear()
+                _pushes[key] = waits
+            if waits and not told:
+                name = room.get("name") if isinstance(room.get("name"), str) else None
+                push.notify("room_input", room_id, path=path, title=name)
+                pushed += 1
+        following = listed.get("next_offset")
+        if not isinstance(following, int):
+            break
+        offset = following
+    else:
+        complete = False
+    if complete:
+        with _pushes_lock:
+            for key in [
+                one for one in _pushes
+                if one[0] == str(hermes_home) and one[1] not in alive
+            ]:
+                _pushes.pop(key, None)
+    return pushed
+
+
+def _pass(adapter: Any) -> None:
+    for home in link.served_homes(adapter):
+        try:
+            check(home)
+        except Exception:
+            logger.debug("gots: the room watcher's pass failed for %s", home, exc_info=True)
+
+
+async def run(adapter: Any) -> None:
+    """Watches this Host's rooms for a wait on the user, until the server stops."""
+    await _ticker.run(WATCH_SECONDS, lambda: asyncio.to_thread(_pass, adapter))

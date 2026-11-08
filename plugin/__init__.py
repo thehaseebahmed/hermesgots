@@ -436,6 +436,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(afk.run(adapter)),
             # A finished subagent wakes its bot with its result; see delegation.py.
             asyncio.ensure_future(delegation.run(adapter)),
+            # A room that starts waiting on the user is pushed once; see rooms.py.
+            asyncio.ensure_future(rooms.run(adapter)),
             # A stopped turn takes the subagents it started with it; see delegation.py.
             asyncio.ensure_future(delegation.watch_stops(adapter)),
         ]
