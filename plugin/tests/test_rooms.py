@@ -17,16 +17,19 @@ Run: python3 -m unittest plugin.tests.test_rooms -v
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import hashlib
 import json
 import sys
 import threading
 import unittest
 from types import ModuleType, SimpleNamespace
 from unittest import mock
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import plugin
-from plugin import events, rooms, store
+from plugin import events, media, rooms, store
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 
@@ -39,7 +42,8 @@ class Host:
         driver=True,
         methods=("groups.capabilities", "groups.list", "groups.create", "groups.rename",
                  "groups.disband", "groups.state", "groups.log", "groups.send",
-                 "groups.approve", "groups.stop"),
+                 "groups.approve", "groups.stop",
+                 "groups.attachment.upload", "groups.attachment.download"),
         refuse=None,
         refusal=None,
         inline=False,
@@ -73,6 +77,12 @@ class Host:
         }
         self.states = dict(states or {})
         self.sends = []
+        # The Host's own attachment store (gateway/hosted_room_attachments.py): the uploads it was
+        # asked for, the downloads of them, and the bytes it kept under an id it minted itself.
+        self.uploads = []
+        self.downloads = []
+        self.blobs = {}
+        self.by_upload = {}
 
     def log_page(self, params):
         """One `groups.log` page: what the device hasn't got, bounded by the limit it asked for."""
@@ -92,16 +102,50 @@ class Host:
     def sent(self, params):
         """One `groups.send`: the Host appends the message its client named and wakes the driver."""
         self.sends.append(params)
+        carried = params["payload"].get("attachments")
         event = {
             "room_id": params["room_id"], "seq": (int(self.events[-1]["seq"]) if self.events else 0) + 1,
             "event_id": params["event_id"], "kind": "message.user",
             "actor": {"kind": "user", "id": "user"},
-            "payload": {"text": params["payload"]["text"], "thread_id": params["payload"]["thread_id"]},
+            "payload": {
+                "text": params["payload"]["text"],
+                "thread_id": params["payload"]["thread_id"],
+                **({"attachments": carried} if carried else {}),
+            },
             "created_at": 1_760_002_000.0, "idempotent": False,
         }
         self.events.append(event)
         return {"event": event, "client_event_id": params["event_id"], "accepted": True,
                 "driver_started": True}
+
+    def stored(self, params):
+        """One `groups.attachment.upload`: the Host keeps the bytes under an id of its own minting.
+
+        The upload id is what makes a retry the same file, so a second upload of one id answers the
+        row the first one stored rather than a second copy — as the Host's own store does.
+        """
+        self.uploads.append(params)
+        data = base64.b64decode(params.get("data_base64") or "")
+        known = self.by_upload.get(params.get("upload_id"))
+        if known is not None:
+            return dict(self.blobs[known]["attachment"])
+        attachment = {
+            "attachment_id": f"att_{len(self.blobs) + 1:032x}",
+            "kind": params.get("kind"), "name": params.get("name"), "mime": params.get("mime"),
+            "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+            "state": "staged", "created_at": 1_760_003_000.0, "idempotent": False,
+        }
+        self.blobs[attachment["attachment_id"]] = {"attachment": attachment, "data": data}
+        self.by_upload[params.get("upload_id")] = attachment["attachment_id"]
+        return dict(attachment)
+
+    def downloaded(self, params):
+        """One `groups.attachment.download`: the bytes the event's own attachment was committed under."""
+        self.downloads.append(params)
+        held = self.blobs.get(params.get("attachment_id"))
+        if held is None:
+            raise AssertionError(f"the Host was asked for an attachment it never stored: {params}")
+        return {**held["attachment"], "data_base64": base64.b64encode(held["data"]).decode("ascii")}
 
     def answer(self, method, params=None):
         params = params or {}
@@ -147,6 +191,10 @@ class Host:
         if method == "groups.stop":
             self.stops.append(params)
             return {"cancelled": 1}
+        if method == "groups.attachment.upload":
+            return self.stored(params)
+        if method == "groups.attachment.download":
+            return self.downloaded(params)
         raise AssertionError(f"the seam asked for {method}")
 
     def dispatch(self, request, transport=None):
@@ -431,12 +479,50 @@ ROSTER = [
 ]
 
 
-def asked_route(case, path, *, method=None, room_id=None, body=None, unreadable=False, query=None):
+class AskedUrl:
+    """A request's URL, as the routes that mint an address read it: a path to rewrite, a query to set."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.query = {}
+
+    def with_path(self, path: str) -> "AskedUrl":
+        rewritten = AskedUrl(path)
+        rewritten.query = dict(self.query)
+        return rewritten
+
+    def with_query(self, query: dict) -> "AskedUrl":
+        replaced = AskedUrl(self.path)
+        replaced.query = dict(query)
+        return replaced
+
+    def __str__(self) -> str:
+        said = urlencode(self.query)
+        return f"http://host{self.path}" + (f"?{said}" if said else "")
+
+
+def asked_route(
+    case, path, *, method=None, room_id=None, body=None, unreadable=False, query=None, raw=None,
+    headers=None, match=None, too_large=False, at=None, content_length=None, reads=None,
+):
     request = FakeWeb.Request()
-    request.headers = {}
+    request.headers = dict(headers or {})
     request.match_info = {"room_id": room_id} if room_id is not None else {}
+    request.match_info.update(match or {})
     request.query = query or {}
+    # What the request says its body weighs, as aiohttp's own read of the header does: a route can
+    # refuse on it before any bytes are read.
+    request.content_length = content_length
     sent = "{not json" if unreadable else ("" if body is None else json.dumps(body))
+    # The path the request really arrived at: the route's own template with the match_info filled
+    # in, or the mirrored address a /p/<profile> bot is served under. A route that signs an address
+    # for a sibling rewrites it the way aiohttp would have handed it over.
+    arrived = at or path
+    if at is None:
+        for key, value in request.match_info.items():
+            arrived = arrived.replace("{" + key + "}", str(value))
+    request.path = arrived
+    request.url = AskedUrl(arrived)
 
     async def read():
         if unreadable:
@@ -446,8 +532,18 @@ def asked_route(case, path, *, method=None, room_id=None, body=None, unreadable=
     async def text():
         return sent
 
+    async def read_bytes():
+        # A route that refuses a body on its declared length never asks for the bytes; ``reads`` is
+        # how a test tells that apart from one that read them and refused them afterwards.
+        if reads is not None:
+            reads.append(path)
+        if too_large:
+            raise FakeWeb.HTTPRequestEntityTooLarge()
+        return raw or b""
+
     request.json = read
     request.text = text
+    request.read = read_bytes
     app = wire(case, RouteAdapter())
     return asyncio.run(route(app, path, method)(request))
 
@@ -931,6 +1027,29 @@ class RoomConversation(unittest.TestCase):
         self.assertIn("words", answer["payload"]["error"]["message"])
         self.assertEqual(host.sends, [])
 
+    def test_a_send_with_neither_words_nor_files_is_the_seams_400_and_the_host_is_not_asked(self):
+        # "Words or files" is one rule about one value, so it lives where the manifest is typed
+        # rather than in the route, which can only see that the value is truthy.
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.send({"event_id": "e9", "text": "   "})
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(
+            answer["payload"], {"error": {"message": "A message needs words or files to send."}}
+        )
+        self.assertEqual(host.sends, [], "nothing to send is refused before the Host is asked")
+
+    def test_a_send_whose_attachments_are_not_a_list_is_the_manifests_400(self):
+        # A string is truthy, so only the manifest can say that it names no files at all.
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.send({"event_id": "e9", "text": "", "attachments": "pixel.png"})
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(
+            answer["payload"]["error"]["message"], "A message's attachments are the files it carries."
+        )
+        self.assertEqual(host.sends, [])
+
     def test_a_send_without_the_event_id_is_a_400_and_the_host_is_not_asked(self):
         host = Host(events=CONVERSATION)
         with dispatcher(host), no_loopback():
@@ -1357,6 +1476,382 @@ class RoomWaiting(unittest.TestCase):
         request.match_info, request.headers = {}, {}
         answer = asyncio.run(route(app, plugin.PREFIX + "/info")(request))
         return answer["payload"]["features"]
+
+
+PIXEL = b"\x89PNG\r\n\x1a\n" + b"one pixel"
+NOTES = b"the minutes\n"
+
+
+class RoomMedia(unittest.TestCase):
+    """A room's file: the Host's own attachment store, the manifest a message names, and the signed
+    address the app draws it through (F5).
+
+    The bytes live in one place — the Host's room attachment store — so the plugin's part is to hand
+    them over on upload, to put the manifest a message carries in the Host's own field names, and to
+    answer the bytes back through an address it signed without asking the Host to mint one.
+    """
+
+    def setUp(self):
+        self.home = temp_hermes_home(self)
+
+    def asked(self, path, *, room_id=None, method=None, body=None, query=None, raw=None,
+              headers=None, match=None, too_large=False, at=None, content_length=None, reads=None):
+        return asked_route(
+            self, path, method=method, room_id=room_id, body=body, query=query, raw=raw,
+            headers=headers, match=match, too_large=too_large, at=at,
+            content_length=content_length, reads=reads,
+        )
+
+    def upload(self, data=PIXEL, *, name="pixel.png", mime="image/png", upload_id="up-1",
+               room_id="room-1", too_large=False, content_length=None, reads=None):
+        return self.asked(
+            plugin.PREFIX + "/rooms/{room_id}/attachment", room_id=room_id,
+            query={"upload_id": upload_id, "name": name}, headers={"content-type": mime},
+            raw=data, too_large=too_large, content_length=content_length, reads=reads,
+        )
+
+    def send(self, body):
+        return self.asked(plugin.PREFIX + "/rooms/{room_id}/send", room_id="room-1", body=body)
+
+    def mint(self, attachment_id, *, event_id="e1"):
+        return self.asked(
+            plugin.PREFIX + "/rooms/{room_id}/attachment/url", room_id="room-1",
+            body={"event_id": event_id, "attachment_id": attachment_id},
+        )
+
+    def served(self, attachment_id, token, *, event_id="e1"):
+        return self.asked(
+            plugin.PREFIX + "/rooms/{room_id}/attachment/{attachment_id}", room_id="room-1",
+            match={"attachment_id": attachment_id}, method="GET",
+            query={"event": event_id, media.URL_PARAM: token},
+        )
+
+    def features(self):
+        app = wire(self, RouteAdapter())
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {}, {}
+        answer = asyncio.run(route(app, plugin.PREFIX + "/info")(request))
+        return answer["payload"]["features"]
+
+    def test_a_file_is_uploaded_against_the_apps_upload_id_and_answered_as_the_manifest_a_message_names(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.upload()
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.room.attachment")
+        (attachment_id,) = host.blobs
+        self.assertEqual(
+            answer["payload"]["attachment"],
+            {"attachmentId": attachment_id, "kind": "image", "name": "pixel.png",
+             "size": len(PIXEL), "mime": "image/png"},
+            "the manifest in the app's own words, since that is what the message sends back",
+        )
+        self.assertEqual(
+            host.uploads,
+            [{"room_id": "room-1", "upload_id": "up-1", "kind": "image", "name": "pixel.png",
+              "mime": "image/png", "data_base64": base64.b64encode(PIXEL).decode("ascii")}],
+            "the bytes go to the Host's own store, under the upload id the app minted for them",
+        )
+
+    def test_the_kind_is_read_from_the_mime_the_file_arrived_with(self):
+        host = Host()
+        asked = [
+            (PIXEL, "pixel.png", "image/png"),
+            (b"%PDF-1.7 the minutes", "minutes.pdf", "application/pdf"),
+            (NOTES, "notes.txt", "text/plain"),
+        ]
+        with dispatcher(host), no_loopback():
+            kinds = [
+                self.upload(data, name=name, mime=mime, upload_id=f"up-{n}")["payload"]["attachment"]["kind"]
+                for n, (data, name, mime) in enumerate(asked)
+            ]
+        self.assertEqual(kinds, ["image", "pdf", "file"])
+        self.assertEqual([one["kind"] for one in host.uploads], ["image", "pdf", "file"],
+                         "the Host's three kinds, since it stores one and reads it back")
+
+    def test_a_file_over_a_rooms_limit_is_a_413_that_names_it_and_the_host_is_not_asked(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.upload(
+                b"x" * (rooms.ROOM_FILE_BYTES + 1), name="huge.bin", mime="application/octet-stream"
+            )
+            refused = self.upload(name="huge.bin", too_large=True)
+        named = rooms.ROOM_FILE_BYTES // (1024 * 1024)
+        for one in (answer, refused):
+            self.assertEqual(one["status"], 413)
+            self.assertIn("huge.bin", one["payload"]["error"]["message"])
+            self.assertIn(f"{named} MB", one["payload"]["error"]["message"],
+                          "a refusal that names the limit, never \"too large\" on its own")
+        self.assertEqual(host.uploads, [], "a file the room can't hold never reaches its store")
+
+    def test_a_body_that_declares_itself_over_the_limit_is_a_413_before_a_byte_is_read(self):
+        # The request says how much it carries, so a file the room can't hold is refused on that
+        # number: the bytes never enter this process to be measured and then dropped.
+        host = Host()
+        reads = []
+        with dispatcher(host), no_loopback():
+            answer = self.upload(
+                b"", name="huge.bin", mime="application/octet-stream",
+                content_length=rooms.ROOM_FILE_BYTES + 1, reads=reads,
+            )
+        self.assertEqual(answer["status"], 413)
+        self.assertIn("huge.bin", answer["payload"]["error"]["message"])
+        self.assertIn(
+            f"{rooms.ROOM_FILE_BYTES // (1024 * 1024)} MB", answer["payload"]["error"]["message"],
+            "the refusal names the room's own limit, not the server's",
+        )
+        self.assertEqual(reads, [], "a declared body past the limit is refused unread")
+        self.assertEqual(host.uploads, [])
+
+    def test_a_body_the_server_refuses_is_still_the_rooms_limit_said_in_its_words(self):
+        # The second line of defence: a body whose length arrived in pieces is refused by the
+        # server's own cap, and the sentence is still the one the user can act on.
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.upload(name="huge.bin", mime="application/octet-stream", too_large=True)
+        self.assertEqual(answer["status"], 413)
+        self.assertEqual(answer["payload"]["error"]["message"], rooms.too_large("huge.bin"))
+        self.assertEqual(host.uploads, [])
+
+    def test_a_rooms_refusal_is_the_media_sentence_said_about_a_room_attachment(self):
+        # One sentence, one owner: the room names the noun and its own cap, and ``media`` writes it.
+        self.assertEqual(
+            rooms.too_large("huge.bin"),
+            "huge.bin is larger than the 9 MB limit for a room attachment.",
+        )
+        self.assertEqual(
+            rooms.too_large("huge.bin"),
+            media.too_large_for("huge.bin", "a room attachment", rooms.ROOM_FILE_BYTES),
+        )
+
+    def test_an_empty_file_is_a_400(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.upload(b"")
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(answer["payload"], {"error": {"message": "The file is empty."}})
+        self.assertEqual(host.uploads, [])
+
+    def test_a_send_carries_the_manifest_in_the_hosts_own_field_names_and_empty_words_are_allowed_with_one(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            manifest = self.upload()["payload"]["attachment"]
+            answer = self.send({"event_id": "e9", "text": "", "attachments": [manifest]})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(
+            host.sends,
+            [{"room_id": "room-1", "event_id": "e9",
+              "payload": {"text": "", "thread_id": "e9", "attachments": [
+                  {"attachment_id": manifest["attachmentId"], "kind": "image",
+                   "name": "pixel.png", "size": len(PIXEL), "mime": "image/png"}]}}],
+            "the Host's own manifest names on the thread the message opens, and words may be empty",
+        )
+        self.assertEqual(answer["payload"]["event"]["attachments"], [manifest],
+                         "and the row it comes back as draws the file the app uploaded")
+
+    def test_a_manifest_a_room_could_not_take_is_a_400_and_the_host_is_not_asked(self):
+        one = {"attachmentId": "att_00000000000000000000000000000001", "kind": "image",
+               "name": "pixel.png", "size": 4, "mime": "image/png"}
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answers = [
+                self.send({"event_id": "e9", "text": "", "attachments": [one, one]}),
+                self.send({"event_id": "e9", "text": "", "attachments": [{**one, "kind": "clip"}]}),
+                self.send({"event_id": "e9", "text": "", "attachments": [one] * 9}),
+                self.send({"event_id": "e9", "text": "", "attachments": [{**one, "size": 0}]}),
+            ]
+        self.assertEqual([one["status"] for one in answers], [400] * 4,
+                         "an id twice, a kind the Host has none of, a ninth file and a file of no size")
+        for answer in answers:
+            self.assertIn("attachment", answer["payload"]["error"]["message"].lower(),
+                          "refused for the manifest, not for having no words with it")
+        self.assertEqual(host.sends, [])
+
+    def test_a_read_draws_a_members_own_attachments_on_its_row_and_a_row_with_none_carries_no_key(self):
+        theirs = {"attachment_id": "att_0000000000000000000000000000000b", "kind": "pdf",
+                  "name": "minutes.pdf", "size": len(b"%PDF-1.7 the minutes"), "mime": "application/pdf"}
+        rows = [
+            event(1, "message.user", USER, {"text": "", "thread_id": "e1", "attachments": [
+                {"attachment_id": "att_0000000000000000000000000000000a", "kind": "image",
+                 "name": "pixel.png", "size": len(PIXEL), "mime": "image/png"}]}),
+            event(2, "message.member", MEMBER, {"text": "here it is", "member_id": "m1",
+                                                "thread_id": "e1", "attachments": [theirs]}),
+            event(3, "message.user", USER, {"text": "thanks", "thread_id": "e1"}),
+            event(4, "message.member", MEMBER, {"text": "any time", "member_id": "m1",
+                                                "thread_id": "e1",
+                                                "attachments": [{"attachment_id": "", "kind": "image"}]}),
+        ]
+        host = Host(events=rows)
+        with dispatcher(host), no_loopback():
+            drawn = self.asked(plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="GET")
+        events_drawn = drawn["payload"]["events"]
+        self.assertEqual(
+            events_drawn[0]["attachments"],
+            [{"attachmentId": "att_0000000000000000000000000000000a", "kind": "image",
+              "name": "pixel.png", "size": len(PIXEL), "mime": "image/png"}],
+            "the user's own file, in the words the manifest is drawn in",
+        )
+        self.assertEqual(
+            events_drawn[1]["attachments"],
+            [{"attachmentId": theirs["attachment_id"], "kind": "pdf", "name": "minutes.pdf",
+              "size": theirs["size"], "mime": "application/pdf"}],
+            "and a member's file on the member's row",
+        )
+        self.assertNotIn("attachments", events_drawn[2], "a row with no file carries no key to draw")
+        self.assertNotIn("attachments", events_drawn[3], "and a malformed entry draws nothing either")
+
+    def test_a_file_of_a_kind_the_host_has_no_case_for_still_draws_on_its_row(self):
+        # A member's reply can carry one file and no words: a row whose only file was dropped is a
+        # row with neither, which the app folds away — so an unknown kind draws as a file.
+        clip = {"attachment_id": "att_0000000000000000000000000000000c", "kind": "audio",
+                "name": "clip.m4a", "size": 2048, "mime": "audio/mp4"}
+        host = Host(events=[event(1, "message.member", MEMBER, {
+            "text": "", "member_id": "m1", "thread_id": "e1", "attachments": [clip]})])
+        with dispatcher(host), no_loopback():
+            drawn = self.asked(plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="GET")
+        rows = drawn["payload"]["events"]
+        self.assertEqual(len(rows), 1, "the row is still drawn, with the file it carried")
+        self.assertEqual(
+            rows[0]["attachments"],
+            [{"attachmentId": clip["attachment_id"], "kind": "file", "name": "clip.m4a",
+              "size": 2048, "mime": "audio/mp4"}],
+            "a kind the Host has no case for is drawn as the file it is",
+        )
+
+    def test_a_signed_address_is_minted_for_one_attachment_and_its_own_route_answers_the_bytes(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            manifest = self.upload()["payload"]["attachment"]
+            minted = self.mint(manifest["attachmentId"])
+            self.assertEqual(minted["status"], 200)
+            self.assertEqual(minted["payload"]["object"], "gots.room.attachment_url")
+            path = rooms.attachment_path("room-1", "e1", manifest["attachmentId"])
+            self.assertEqual(minted["payload"]["path"], path)
+            self.assertIsInstance(minted["payload"]["expires"], int)
+            # The URL the app is handed is the route beside the mint, without the `/url`.
+            url = urlsplit(minted["payload"]["url"])
+            self.assertEqual(
+                url.path, plugin.PREFIX + f"/rooms/room-1/attachment/{manifest['attachmentId']}"
+            )
+            signed = parse_qs(url.query)
+            self.assertEqual(signed["event"], ["e1"])
+            served = self.served(manifest["attachmentId"], signed[media.URL_PARAM][0])
+        self.assertEqual(served.status, 200)
+        self.assertEqual(served.body, PIXEL, "the bytes the Host stored, served as they are")
+        self.assertEqual(served.headers["content-type"], "image/png")
+        self.assertEqual(served.headers["accept-ranges"], "none")
+        self.assertNotIn("content-disposition", served.headers, "a picture is shown rather than saved")
+        self.assertEqual(
+            host.downloads,
+            [{"room_id": "room-1", "event_id": "e1", "attachment_id": manifest["attachmentId"]}],
+            "the read behind the address is the Host's own, for the event the file was committed under",
+        )
+
+    def test_a_minted_address_keeps_the_profile_a_bot_is_served_under(self):
+        # A multiplexed bot's routes are mirrored at /p/<profile>: a mint rewritten from the plugin's
+        # own prefix would hand the app an address its own gateway doesn't serve.
+        host = Host()
+        with dispatcher(host), no_loopback():
+            manifest = self.upload()["payload"]["attachment"]
+            minted = self.asked(
+                plugin.PREFIX + "/rooms/{room_id}/attachment/url", room_id="room-1",
+                body={"event_id": "e1", "attachment_id": manifest["attachmentId"]},
+                at=f"/p/coder{plugin.PREFIX}/rooms/room-1/attachment/url",
+            )
+        url = urlsplit(minted["payload"]["url"])
+        self.assertEqual(
+            url.path, f"/p/coder{plugin.PREFIX}/rooms/room-1/attachment/{manifest['attachmentId']}"
+        )
+
+    def test_a_room_file_the_platform_cannot_show_is_served_as_a_download_named_as_it_is(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            manifest = self.upload(
+                b"\x00\x01", name="room.bin", mime="application/octet-stream", upload_id="up-2"
+            )["payload"]["attachment"]
+            token, _ = media.mint(
+                media.signing_key(store.current_path()),
+                rooms.attachment_path("room-1", "e1", manifest["attachmentId"]), "",
+            )
+            served = self.served(manifest["attachmentId"], token)
+        self.assertEqual(served.status, 200)
+        self.assertEqual(
+            served.headers["content-disposition"],
+            "attachment; filename=\"room.bin\"; filename*=UTF-8''room.bin",
+            "a file nothing here paints is handed over under the name the Host stored",
+        )
+
+    def test_a_rooms_file_is_served_under_its_own_names_type_a_private_cache_and_the_hosts_digest(self):
+        # A browser that already drew this picture keeps it for the address's own minutes, and the
+        # Host's digest is what says its copy is still these bytes — so a gallery cell redrawn costs
+        # no second download. The type is read from the name, since the uploader's is only a claim.
+        host = Host()
+        with dispatcher(host), no_loopback():
+            manifest = self.upload(mime="application/octet-stream")["payload"]["attachment"]
+            token, _ = media.mint(
+                media.signing_key(store.current_path()),
+                rooms.attachment_path("room-1", "e1", manifest["attachmentId"]), "",
+            )
+            served = self.served(manifest["attachmentId"], token)
+        self.assertEqual(served.status, 200)
+        self.assertEqual(served.headers["content-type"], "image/png",
+                         "the name says what it is, whatever type it was uploaded as")
+        self.assertEqual(served.headers["cache-control"], f"private, max-age={media.URL_LIFETIME_S}")
+        self.assertEqual(served.headers["etag"], f'"{hashlib.sha256(PIXEL).hexdigest()}"')
+        self.assertEqual(served.headers["x-content-type-options"], "nosniff")
+
+    def test_a_host_that_refuses_an_upload_answers_in_its_own_words_and_is_not_asked_again(self):
+        host = Host(refuse="groups.attachment.upload",
+                    refusal=(4210, "This room's store is full."))
+        with dispatcher(host), loopback(Loopback(host)) as client:
+            answer = self.upload()
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(
+            answer["payload"], {"error": {"message": "This room's store is full."}}
+        )
+        self.assertEqual(client.methods, [], "a refusal is an answer, so it is never repeated")
+
+    def test_a_forged_or_spent_address_is_a_403_and_the_host_is_not_asked(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            manifest = self.upload()["payload"]["attachment"]
+            path = rooms.attachment_path("room-1", "e1", manifest["attachmentId"])
+            spent, _ = media.mint(media.signing_key(store.current_path()), path, "", lifetime=-10)
+            answers = [
+                self.served(manifest["attachmentId"], "1234567890.deadbeef"),
+                self.served(manifest["attachmentId"], spent),
+            ]
+        for answer in answers:
+            self.assertEqual(answer["status"], 403)
+            self.assertEqual(answer["payload"], {"error": {"message": "That address has run out."}})
+        self.assertEqual(host.downloads, [], "an address that doesn't cover the file reads no bytes")
+
+    def test_a_host_that_refuses_a_download_answers_in_its_own_words(self):
+        host = Host(refuse="groups.attachment.download",
+                    refusal=(4217, "This attachment is no longer in the room."))
+        with dispatcher(host), no_loopback():
+            manifest = self.upload()["payload"]["attachment"]
+            token, _ = media.mint(
+                media.signing_key(store.current_path()),
+                rooms.attachment_path("room-1", "e1", manifest["attachmentId"]), "",
+            )
+            answer = self.served(manifest["attachmentId"], token)
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(
+            answer["payload"], {"error": {"message": "This attachment is no longer in the room."}}
+        )
+
+    def test_room_media_is_advertised_only_where_the_host_declares_both_attachment_methods(self):
+        reads = ["groups.capabilities", "groups.list", "groups.state", "groups.log"]
+        with dispatcher(Host(methods=reads)), no_loopback():
+            self.assertNotIn("room_media", self.features(), "a Host with no store takes no file")
+        with dispatcher(Host(methods=[*reads, "groups.attachment.upload"])), no_loopback():
+            self.assertNotIn("room_media", self.features(),
+                             "half a store is a file uploaded and never drawn back")
+        with dispatcher(Host(methods=[*reads, *rooms.ATTACHMENT_METHODS])), no_loopback():
+            features = self.features()
+        self.assertIn("rooms", features)
+        self.assertIn("room_media", features, "a Host with both takes a file and gives it back")
 
 
 if __name__ == "__main__":

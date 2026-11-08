@@ -56,10 +56,20 @@ class FakeWeb:
     """The little of ``aiohttp.web`` the plugin's wiring touches, answering what it was given."""
 
     class Response:
-        pass
+        """A response carrying bytes and their headers, as a route that serves a file answers one."""
+
+        def __init__(self, *, body: Any = None, headers: Optional[Dict[str, Any]] = None,
+                     status: int = 200, **extra: Any) -> None:
+            self.body = body
+            self.headers = dict(headers or {})
+            self.status = status
+            self.extra = extra
 
     class StreamResponse:
         pass
+
+    class HTTPRequestEntityTooLarge(Exception):
+        """The request body passed the server's own cap, which a route answers in its own words."""
 
     class Request:
         pass

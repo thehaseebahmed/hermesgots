@@ -18,8 +18,19 @@ import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
 import { pinOf, samePick, storedPick, wantsPin } from "@/lib/model-pick"
 import { OPENER_CHARS, oneLine } from "@/lib/words"
 
-/** A turn that never started because an attachment couldn't be saved on the host. */
-export class AttachmentError extends HermesError {}
+/** A turn that never started because an attachment couldn't be saved on the host, naming the file. */
+export class AttachmentError extends HermesError {
+  /**
+   * The staged file the host refused, where the refusal was about one: a composer marks that tile
+   * rather than the message, so the reader can take it off and send the rest.
+   */
+  readonly attachmentId?: string
+
+  constructor(message: string, attachmentId?: string) {
+    super(message)
+    this.attachmentId = attachmentId
+  }
+}
 
 const UPLOADS_AT_ONCE = 3
 
@@ -58,6 +69,7 @@ export async function uploadAttachments(
             reason.includes(attachment.name)
               ? reason
               : `Couldn't attach ${attachment.name}${reason ? `: ${reason.replace(/\.$/, "")}` : ""}.`,
+            attachment.id,
           )
         }
       } finally {

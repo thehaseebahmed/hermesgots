@@ -11,7 +11,7 @@
 // own download pipeline saves the file under a name the user can find.
 import { statSync } from "node:fs"
 
-import { app, assert, flow, pass, runId, SEND_CHORD } from "./lib.mjs"
+import { app, assert, flow, pass, pick, png, runId, SEND_CHORD } from "./lib.mjs"
 
 const NOTE = "cleanup-notes.md"
 const NOTES = "# Cleanup notes\n\nNothing renamed, nothing lost.\n"
@@ -22,35 +22,11 @@ const ARCHIVE_SIZE = `${Buffer.byteLength(ARCHIVES)} B`
 const PHOTO = "chart.png"
 const SAID = "here is the plan"
 
-/** A PNG of the page's own making, so the flow carries no binary of its own. */
-const png = (page) =>
-  page.evaluate(() => {
-    const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 48 })
-    const context = canvas.getContext("2d")
-    context.fillStyle = "#3b7"
-    context.fillRect(0, 0, 64, 48)
-    context.fillStyle = "#fff"
-    context.fillRect(8, 8, 24, 30)
-    return canvas.toDataURL("image/png").split(",")[1]
-  })
-
 /**
- * A pick through the composer's `+`: the source's own button, and the chooser the browser opens in
- * answer. Answers whether the button was offered — a host without the plugin's `attachments`
- * feature leaves Files out of reach — so a caller can assert the gate it saw.
+ * The open chat's own pane. A bot's screen draws Main beside the chat it has open, and Main's
+ * composer answers in Main — so the field a flow types into is this pane's, never the page's.
  */
-async function pick(page, source, file) {
-  await page.getByRole("button", { name: "Add context" }).click()
-  const button = page.getByRole("button", { name: source, exact: true })
-  await button.waitFor({ timeout: 10_000 })
-  const offered = await button.isEnabled()
-  const [chooser] = await Promise.all([
-    page.waitForEvent("filechooser", { timeout: 10_000 }),
-    button.click(),
-  ])
-  await chooser.setFiles(file)
-  return offered
-}
+const openChat = (page) => page.locator('[data-slot="item-lane"]')
 
 /** The Gallery's cells, how many of them have painted, and the URL each one draws from. */
 const gallery = (page) =>
@@ -94,7 +70,7 @@ await flow("file-message", async ({ page, seed, until, shot, centreOf, drag }) =
   for (const name of [NOTE, ARCHIVE, PHOTO])
     await page.getByRole("button", { name: `Remove ${name}` }).waitFor({ timeout: 10_000 })
 
-  const composer = page.getByLabel("Message", { exact: true })
+  const composer = openChat(page).getByLabel("Message", { exact: true })
   await composer.fill(SAID)
   await composer.press(SEND_CHORD)
 

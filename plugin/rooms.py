@@ -16,11 +16,20 @@ request it already read is how a write lands twice.
 driver isn't running accepts a room and never answers it, which is worse than a row that isn't there.
 A Host that answers neither way has no rooms in Gots and no error either; `available` is the same
 answer as the one sentence a caller can show.
+
+A room's file is the Host's too: the bytes go up against an upload id the app minted, ride the
+message as a manifest of ids and bounded metadata, and come back down bound to the event they were
+committed under (``groups.attachment.*``). `room_media` is advertised only where the Host declares
+both of those methods, since a store that takes a file and can't give it back is one no screen could
+draw from. The address the app draws a file through is this plugin's own signature over the room,
+the event and the file, so nothing here has to ask the Host for a URL before a gallery cell can fill.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import importlib
 import itertools
 import logging
@@ -29,7 +38,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
-from . import events
+from . import attachments, events, media
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -42,6 +51,12 @@ NEEDED: Tuple[str, ...] = ("groups.capabilities", "groups.list", "groups.state",
 # What a room is made, renamed and disbanded with. A Host can serve the read and not these, and a
 # control that can't work is worse than one that isn't drawn, so they are advertised apart.
 WRITES: Tuple[str, ...] = ("groups.create", "groups.rename", "groups.disband")
+
+# What a room's file needs from the Host: the upload it goes up as, and the read that gives it back
+# bound to the event it was committed under. Both, or `room_media` isn't advertised: a Host that
+# takes a file and can't say it back has stored one that no screen could ever draw.
+ATTACHMENT_METHODS: Tuple[str, str] = ("groups.attachment.upload", "groups.attachment.download")
+MEDIA_FEATURE = "room_media"
 
 # One call's whole budget, shared by both ways in; the gate's, which runs on every `info` inside the
 # app's 15 s read, so it gets the smallest; and how long the discovery behind the gateway client
@@ -66,6 +81,15 @@ MAX_QUESTIONS = 8
 # How long a held question is worth drawing. The Host's own clarify wait gives up after an hour, so
 # a card outliving that is one whose turn has moved on and whose tap could only be refused.
 QUESTION_TTL = 1800.0
+
+# The kinds the Host's store has, as its own contract spells them: a picture, a document, and
+# whatever else a room may carry.
+KINDS: Tuple[str, ...] = ("image", "pdf", "file")
+# One file on a room's road: the app's nine megabytes, which is what the Host's own request and its
+# store are sized for, and the eight a message may name — the Host's manifest bound, kept here so a
+# message the Host would refuse is refused before it is sent.
+ROOM_FILE_BYTES = attachments.MAX_BYTES
+MAX_ATTACHMENTS = 8
 
 # How long one Host's projected chat list is worth keeping, and how long one that couldn't answer is
 # left alone.
@@ -407,6 +431,17 @@ def _event(row: Any) -> Optional[Dict[str, Any]]:
     text = payload.get("text")
     if isinstance(text, str):
         drawn["text"] = text
+    # A message may carry files, which the Host's log names on the row they were sent under: the
+    # user's own and a member's alike, in the words the manifest is drawn in. A row with none — or
+    # with entries that name no file — carries no key, so a screen never draws an empty gallery.
+    carried = payload.get("attachments")
+    files = [
+        one
+        for one in (_attachment(entry) for entry in (carried if isinstance(carried, list) else ()))
+        if one
+    ]
+    if files:
+        drawn["attachments"] = files
     # A member's message names itself on its actor; a turn's own rows name the member they belong to.
     member = actor.get("id") if actor.get("kind") == "member" else payload.get("member_id")
     if isinstance(member, str) and member:
@@ -788,8 +823,199 @@ def read_room(
     }
 
 
+def too_large(name: str) -> str:
+    """A refusal that names the file and the room's limit, in the sentence ``media`` writes.
+
+    The words a file's refusal is made of belong to ``media``, which serves the other files a message
+    carries: a room's limit is only the noun that sentence is said about, so a user reads one rule
+    however the file reached them.
+    """
+    return media.too_large_for(name, "a room attachment", ROOM_FILE_BYTES)
+
+
+def kind_of(mime: str) -> str:
+    """The Host's kind for a file, read from the type it arrived as: a picture, a PDF, or a file.
+
+    The Host stores three and refuses anything else, so the app's type travels to it as its own kind
+    rather than as a fourth word nothing downstream has a case for. A type's parameters describe the
+    bytes' encoding, never what the file is, so they are dropped before the read.
+    """
+    said = (mime or "").split(";", 1)[0].strip().lower()
+    if said.startswith("image/"):
+        return "image"
+    if said == "application/pdf":
+        return "pdf"
+    return "file"
+
+
+def _fields(
+    attachment_id: Any, kind: Any, name: Any, size: Any, mime: Any
+) -> Optional[Dict[str, Any]]:
+    """The five fields a file is drawn and sent back with, in the Host's own names, or None.
+
+    One rule, read by both dialects: a Host row is drawn in the app's words from it, and the app's row
+    is sent back in the Host's own from it — so each field name is written once per dialect and a file
+    the Host couldn't have stored is refused before either side sees it. The Host's store keeps a
+    digest, a state and a time beside these five; the app draws a file and hands those five back, so
+    those are the five that leave this seam. A row missing any of them names no file a screen could
+    draw, so it is dropped rather than drawn blank.
+    """
+    if not isinstance(attachment_id, str) or not attachment_id:
+        return None
+    if kind not in KINDS:
+        return None
+    if not isinstance(name, str) or not name:
+        return None
+    if not isinstance(mime, str) or not mime:
+        return None
+    if type(size) is not int or size <= 0:
+        return None
+    return {"attachment_id": attachment_id, "kind": kind, "name": name, "size": size, "mime": mime}
+
+
+def _attachment(row: Any) -> Optional[Dict[str, Any]]:
+    """One attachment in the app's words: the five fields a message's manifest is sent back with.
+
+    A kind the Host has no case for is drawn as a ``file`` rather than dropped: a member's reply can
+    carry one such file and no words at all, and a row with neither is one the app folds away, so the
+    file would vanish from the conversation it was sent in.
+    """
+    if not isinstance(row, dict):
+        return None
+    kind = row.get("kind")
+    held = _fields(
+        row.get("attachment_id"),
+        kind if kind in KINDS else "file",
+        row.get("name"),
+        row.get("size"),
+        row.get("mime"),
+    )
+    if held is None:
+        return None
+    return {
+        "attachmentId": held["attachment_id"],
+        "kind": held["kind"],
+        "name": held["name"],
+        "size": held["size"],
+        "mime": held["mime"],
+    }
+
+
+def _manifest(files: Any) -> List[Dict[str, Any]]:
+    """The files a message names, in the Host's own field names, or a refusal saying what is wrong.
+
+    The app draws an attachment in its own camelCase; the Host's manifest is its five snake_case
+    fields and nothing beside them, so nothing a screen keeps for itself reaches the room's log. A
+    message's manifest is refused here rather than by the Host, because the Host's refusal names a
+    field of its own contract and this one can name the file the user picked.
+    """
+    if files is None:
+        return []
+    if not isinstance(files, (list, tuple)):
+        raise RoomError("A message's attachments are the files it carries.", 400)
+    if len(files) > MAX_ATTACHMENTS:
+        raise RoomError(f"A message carries at most {MAX_ATTACHMENTS} attachments.", 400)
+    drawn: List[Dict[str, Any]] = []
+    for row in files:
+        one = _fields(
+            row.get("attachmentId") if isinstance(row, dict) else None,
+            row.get("kind") if isinstance(row, dict) else None,
+            row.get("name") if isinstance(row, dict) else None,
+            row.get("size") if isinstance(row, dict) else None,
+            row.get("mime") if isinstance(row, dict) else None,
+        )
+        if one is None:
+            raise RoomError(
+                "An attachment needs the id, kind, name, size and type the Host stored it under.", 400
+            )
+        drawn.append(one)
+    if len({one["attachment_id"] for one in drawn}) != len(drawn):
+        raise RoomError("A message carries each attachment once.", 400)
+    return drawn
+
+
+def attachment_path(room_id: str, event_id: str, attachment_id: str) -> str:
+    """The path a room file's signed address covers: the room, the event and the file, in one string.
+
+    Nothing lives at it — the bytes are the Host's — but a signature is minted over one string and
+    checked against the same one, so naming all three is what keeps an address from being moved to
+    another room's file, or to another message's copy of it.
+    """
+    return f"room/{room_id}/{event_id}/{attachment_id}"
+
+
+def upload_attachment(
+    room_id: str, upload_id: str, name: str, mime: str, data: bytes, *,
+    timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """``groups.attachment.upload``: one file into the Host's room store, as ``{attachment}``.
+
+    The bytes are the Host's to keep — that store is the only place a room's file lives — so they
+    travel base64-encoded under the Host's own field names, and the upload id the app minted is what
+    makes a retry after a dropped answer the same file rather than a second copy of it. What comes
+    back is the manifest the message that carries it will name: the app's own words, since the app
+    is what sends it back.
+    """
+    if not data:
+        raise RoomError("The file is empty.", 400)
+    if len(data) > ROOM_FILE_BYTES:
+        raise RoomError(too_large(name), 413)
+    found = call(
+        "groups.attachment.upload",
+        {
+            "room_id": room_id,
+            "upload_id": upload_id,
+            "kind": kind_of(mime),
+            "name": name,
+            "mime": mime,
+            "data_base64": base64.b64encode(data).decode("ascii"),
+        },
+        timeout=timeout, home=home,
+    )
+    drawn = _attachment(found)
+    if drawn is None:
+        raise RoomError("This host answered groups.attachment.upload with no attachment.", 502)
+    return {"attachment": drawn}
+
+
+def download_attachment(
+    room_id: str, event_id: str, attachment_id: str, *,
+    timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """``groups.attachment.download``: one committed file's bytes, as ``{attachment, data, sha256}``.
+
+    The event is part of the ask because the Host committed the upload to one message: a file is
+    readable only through the event that carries it. The bytes arrive base64 and are decoded
+    strictly — a body that isn't base64 is a Host answering with something that isn't a file, which
+    is a 502 rather than a route serving a corrupt image. The Host's own digest rides back beside the
+    five fields the app draws, because it names these exact bytes: the route hands it to the browser
+    as the file's ``etag``, so a copy the browser already holds costs no second read here.
+    """
+    found = call(
+        "groups.attachment.download",
+        {"room_id": room_id, "event_id": event_id, "attachment_id": attachment_id},
+        timeout=timeout, home=home,
+    )
+    drawn = _attachment(found)
+    if drawn is None:
+        raise RoomError("This host answered groups.attachment.download with no attachment.", 502)
+    encoded = found.get("data_base64")
+    if not isinstance(encoded, str) or not encoded:
+        raise RoomError("This host answered groups.attachment.download with no file.", 502)
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise RoomError("This host answered with bytes that aren't a file.", 502) from error
+    digest = found.get("sha256")
+    return {
+        "attachment": drawn,
+        "data": data,
+        "sha256": digest if isinstance(digest, str) and digest else None,
+    }
+
+
 def send_message(
-    room_id: str, event_id: str, text: str, *,
+    room_id: str, event_id: str, text: str, *, attachments: Any = None,
     timeout: float = CALL_TIMEOUT, home: Any = None,
 ) -> Dict[str, Any]:
     """``groups.send``: one message into the room, as ``{event}``.
@@ -798,10 +1024,22 @@ def send_message(
     ``event_id``, so a send retried after a dropped answer is the same message rather than a second
     one. The event's own id is the thread the Host opens for it, which is how the desktop sends: one
     message is one discussion. A send notes the room's change, so every other device hears it.
+
+    A message may carry files and no words at all, which is what a room's photo or PDF rides: the
+    manifest travels with the message so the Host can commit each upload to the event it is sent
+    under, and the log's row then names them back. With neither words nor files there is nothing to
+    send, and that rule is this seam's rather than a route's: the manifest is typed here, so what
+    counts as a file is known here.
     """
+    manifest = _manifest(attachments)
+    if not text.strip() and not manifest:
+        raise RoomError("A message needs words or files to send.", 400)
+    payload: Dict[str, Any] = {"text": text, "thread_id": event_id}
+    if manifest:
+        payload["attachments"] = manifest
     found = call(
         "groups.send",
-        {"room_id": room_id, "event_id": event_id, "payload": {"text": text, "thread_id": event_id}},
+        {"room_id": room_id, "event_id": event_id, "payload": payload},
         timeout=timeout, home=home,
     )
     sent = _event(found.get("event"))
@@ -1008,12 +1246,16 @@ def available(home: Any = None) -> Optional[str]:
 
 
 def advertised(home: Any = None) -> List[str]:
-    """The `info` rows this Host's rooms earn: `rooms`, `rooms_questions`, and `rooms_write`.
+    """The `info` rows this Host's rooms earn: `rooms`, `rooms_questions`, `room_media` and
+    `rooms_write`.
 
     One ask answers them all, because `info` is read on every app open and a second probe would
     double what a Host that can't answer already costs. The write row is separate from the read's for
     the reason every family here splits them: a Host can list its rooms and not be able to make,
-    rename or disband one, and a New room drawn there is a tap that can only come back refused.
+    rename or disband one, and a New room drawn there is a tap that can only come back refused. The
+    file row is the read's too, and stricter still: it takes both of the Host's attachment methods,
+    since a Host that takes an upload and can't hand the bytes back has stored a file no screen can
+    draw — the app draws only what comes back through the address this plugin mints.
     """
     found, why = _probe(home)
     if found is None:
@@ -1023,6 +1265,8 @@ def advertised(home: Any = None) -> List[str]:
     rows = ["rooms"]
     if QUESTION_FEATURE in (found.get("features") or ()):
         rows.append("rooms_questions")
+    if all(name in answered for name in ATTACHMENT_METHODS):
+        rows.append(MEDIA_FEATURE)
     if any(name not in answered for name in WRITES):
         return rows
     return [*rows, "rooms_write"]

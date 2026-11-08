@@ -23,6 +23,7 @@ import re
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 from . import (
     afk,
@@ -1220,7 +1221,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.room", **found})
 
     async def send_room_message(request: "web.Request") -> "web.Response":
-        """One message into the room, under the event id the app minted for it (rooms.py)."""
+        """One message into the room, under the event id the app minted for it (rooms.py).
+
+        A message may be files alone: a room's photo or PDF is sent with no words at all, and the
+        Host's own payload allows it. A body that is neither words nor files is refused by
+        ``rooms.send_message``, which is where the manifest is typed and so the one place that knows
+        what a file is; this route refuses only a ``text`` it can't read as words at all.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1231,15 +1238,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if event_id is None:
             return _error(web, "A message needs the event_id the app minted for it.", 400)
         text = body.get("text")
-        if not isinstance(text, str) or not text.strip():
+        if text is not None and not isinstance(text, str):
             return _error(web, "A message needs words to send.", 400)
+        words = (text or "").strip()
+        files = body.get("attachments")
         home = profile_home()
         try:
             found = await asyncio.to_thread(
                 rooms.send_message,
                 request.match_info["room_id"].strip(),
                 event_id,
-                text.strip(),
+                words,
+                attachments=files,
                 home=home,
             )
         except rooms.RoomError as error:
@@ -1338,6 +1348,135 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except rooms.RoomError as error:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.room.stopped", **found})
+
+    async def upload_room_attachment(request: "web.Request") -> "web.Response":
+        """One file's bytes onto the Host's own room store, under the upload id the app minted.
+
+        The body is the file itself rather than JSON: a room's file can be megabytes, and wrapping
+        it in base64 would cost a third more on the wire for nothing — the Host's own RPC takes the
+        base64, and `rooms.upload_attachment` encodes it there. The content-type header is the
+        file's type, since that is what the Host stores and what decides its kind; a request with
+        none is a binary, which is how a file nothing here recognizes arrives.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        upload_id = minted(request.query.get("upload_id"))
+        if upload_id is None:
+            return _error(web, "An upload needs the upload_id the app minted for it.", 400)
+        name = request.query.get("name", "")
+        mime = (request.headers.get("content-type") or "").split(";", 1)[0].strip()
+        mime = mime or "application/octet-stream"
+        # A body that declares its own length is refused on that length rather than read and then
+        # dropped: a file past the room's limit is megabytes this process would hold for nothing. The
+        # server's own cap stays the second line, for a body whose length arrived in pieces.
+        declared = request.content_length
+        if (
+            isinstance(declared, int)
+            and not isinstance(declared, bool)
+            and declared > rooms.ROOM_FILE_BYTES
+        ):
+            return _error(web, rooms.too_large(name), 413)
+        try:
+            data = await request.read()
+        except web.HTTPRequestEntityTooLarge:
+            # The server's own cap refused it before the bytes were read, so the sentence names the
+            # room's limit rather than the server's — the one the user can do something about.
+            return _error(web, rooms.too_large(name), 413)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.upload_attachment,
+                request.match_info["room_id"].strip(),
+                upload_id,
+                name,
+                mime,
+                data,
+                home=home,
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room.attachment", **found})
+
+    async def sign_room_attachment(request: "web.Request") -> "web.Response":
+        """Mints an address for one attachment of one room's message, without asking the Host.
+
+        An ``<img>`` can't carry the bot's key, so the app is handed a URL this plugin signed: one
+        room, one event and one file, for the minutes a signature lives for. Nothing is read here —
+        asking the Host whether the file exists would spend a round trip on every gallery cell
+        drawn — because the route the address names checks the signature and then reads through the
+        Host, which is where the answer to "may I have this" really lives.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        event_id = minted(body.get("event_id"))
+        attachment_id = minted(body.get("attachment_id"))
+        if event_id is None or attachment_id is None:
+            return _error(web, "An attachment's address needs its event_id and attachment_id.", 400)
+        room_id = request.match_info["room_id"].strip()
+        path = rooms.attachment_path(room_id, event_id, attachment_id)
+        key = await asyncio.to_thread(media.signing_key, store_path())
+        # The route beside this one, with the file's own id as its last part: one mint tail for both
+        # addresses, so a bot at /p/<profile> keeps its prefix here as it does there (media.py).
+        url, expires = media.signed_url(
+            request, key, path, _request_profile() or "", {"event": event_id},
+            segment=quote(attachment_id, safe=""),
+        )
+        return web.json_response(
+            {
+                "object": "gots.room.attachment_url",
+                "path": path,
+                "url": url,
+                "expires": expires,
+            }
+        )
+
+    async def serve_room_attachment(request: "web.Request") -> "web.StreamResponse":
+        """One attachment's bytes, behind the address this plugin signed rather than a key.
+
+        No key is asked for, because a gallery cell is an ``<img>`` and an element carries no header:
+        the signature is the permission, and it covers this room, this event and this file alone. A
+        token that doesn't cover them — forged, or past its expiry — is a 403 before the Host is
+        asked anything, since a spent address is not a question for the Host to answer.
+        """
+        room_id = request.match_info["room_id"].strip()
+        attachment_id = request.match_info["attachment_id"].strip()
+        event_id = (request.query.get("event") or "").strip()
+        path = rooms.attachment_path(room_id, event_id, attachment_id)
+        key = await asyncio.to_thread(media.signing_key, store_path())
+        permitted = await asyncio.to_thread(
+            media.covers, key, request.query.get(media.URL_PARAM, ""), path, _request_profile() or ""
+        )
+        if not permitted:
+            return _error(web, "That address has run out.", 403)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.download_attachment, room_id, event_id, attachment_id, home=home
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        attachment = found["attachment"]
+        digest = found.get("sha256")
+        # One header rule for both serving routes (media.py). A room's bytes have no ranges to
+        # answer — the Host hands them over whole — and they are worth the address's own minutes in
+        # the browser's private cache, so a picture a screen already drew costs no second download.
+        # The Host's digest names those bytes, which is what makes that cache entry checkable.
+        headers = media.response_headers(
+            attachment["name"],
+            attachment["mime"],
+            ranges="none",
+            cache=f"private, max-age={media.URL_LIFETIME_S}",
+            etag=f'"{digest}"' if digest else None,
+        )
+        # The type is the uploader's, so the browser is told not to read past it: a file handed over
+        # as one thing must not be sniffed into another.
+        headers["x-content-type-options"] = "nosniff"
+        return web.Response(body=found["data"], headers=headers)
 
     async def session_context(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2214,6 +2353,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/answer", answer_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/stop", stop_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/disband", disband_room)
+    # A room's file (F5): raw bytes against the upload id the app minted, the manifest's message,
+    # and the address the app draws it through — signed here, since an <img> carries no key.
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/attachment", upload_room_attachment)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/attachment/url", sign_room_attachment)
+    app.router.add_get(f"{PREFIX}/rooms/{{room_id}}/attachment/{{attachment_id}}", serve_room_attachment)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)
     app.router.add_post(f"{PREFIX}/projects", create_project)
@@ -2433,10 +2577,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             file = await asyncio.to_thread(resolve, request.query.get("path", ""))
         except media.MediaError as error:
             return _error(web, str(error), error.status)
-        headers = {"content-type": media.content_type(file), "accept-ranges": "bytes"}
-        download = media.disposition(file)
-        if download:
-            headers["content-disposition"] = download
+        headers = media.response_headers(file.name, media.content_type(file), ranges="bytes")
         return web.FileResponse(file, headers=headers)
 
     async def sign_media_url(request: "web.Request") -> "web.Response":
@@ -2459,13 +2600,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except media.MediaError as error:
             return _error(web, str(error), error.status)
         key = await asyncio.to_thread(media.signing_key, store_path())
-        token, expires = media.mint(key, path, _request_profile() or "")
-        # The media route beside this one: this address without `/url`, so a bot at /p/<profile>
-        # keeps its prefix.
-        url = str(
-            request.url.with_path(request.path.removesuffix("/url")).with_query(
-                {"path": path, media.URL_PARAM: token}
-            )
+        # The media route beside this one: one mint tail for both addresses (media.py), so a bot at
+        # /p/<profile> keeps its prefix.
+        url, expires = media.signed_url(
+            request, key, path, _request_profile() or "", {"path": path}
         )
         return web.json_response(
             {

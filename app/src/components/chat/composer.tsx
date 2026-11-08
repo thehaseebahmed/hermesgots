@@ -39,6 +39,8 @@ import type { PluginFeatureAnswer } from "@/lib/features"
 
 import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
 import { quietly } from "@/lib/report"
+import { AttachmentError } from "@/lib/send-turn"
+import { tell } from "@/lib/tell"
 import type { HermesConfig } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
 import {
@@ -122,6 +124,8 @@ export function Composer({
   notice,
   main = false,
   plain = false,
+  files = !plain,
+  maxAttachments,
   placeholder,
 }: {
   busy: boolean
@@ -179,15 +183,34 @@ export function Composer({
     message?: { text: string; attachments: Attachment[] },
   ) => Promise<void> | void
   /**
-   * A surface that carries words only — a room's, where nothing runs and no file is sent: no `/`
-   * menu, no attached files, no command carried out. The pill is the caller's to pass or leave out.
+   * A surface with no `/` menu and no local command carried out — a room's composer, which appends
+   * one message rather than driving a session. It no longer decides whether files land: `files` does,
+   * so a plain surface that has a place to put them still takes them.
    */
   plain?: boolean
+  /**
+   * Whether this composer takes files — a picked one, a pasted one, a dropped one — and offers the
+   * `+` menu they come from. Absent, it follows `plain`: a words-only surface takes none, and a chat
+   * takes files (its `filesFeature` and `imagesAvailable` decide which, and why a file can't land).
+   * A room names it on its own, since files go where its Host stores them and words go to its log.
+   */
+  files?: boolean
+  /**
+   * The most this surface takes, where it isn't a chat's ten: a room's Host caps a message at eight,
+   * and a ninth file is refused here rather than by the Host once every file had gone up.
+   */
+  maxAttachments?: number
   /** The field's placeholder; a chat's is `Message <bot>…`. */
   placeholder?: string
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  /**
+   * The staged files the Host refused, each with its own sentence: a tile the user can take off,
+   * rather than a message the whole of which was refused with no word about which file it was. A
+   * send that keeps a refused file says it again, because the Host is asked again.
+   */
+  const [refused, setRefused] = useState<Record<string, string>>({})
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
   // Files taken moments ago, so a paste and the drop it can also fire add one copy.
@@ -392,10 +415,22 @@ export function Composer({
     setAttachments([])
     const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(text, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
-    void Promise.resolve(go()).catch(() => {
-      setValue((current) => current || raw)
-      setAttachments((current) => (current.length ? current : sent))
-    })
+    void Promise.resolve(go()).then(
+      () => setRefused({}),
+      (error: unknown) => {
+        setValue((current) => current || raw)
+        setAttachments((current) => (current.length ? current : sent))
+        // A file the Host refused is the one thing here worth interrupting for: the tile that
+        // carries it turns red, and the Host's own sentence — the limit it names — is a toast on
+        // the phone and the page's own toaster on the web. A send refused for another reason keeps
+        // its place in the screen's own words, as it always has.
+        if (!(error instanceof AttachmentError)) return
+        const message = error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
+        if (error.attachmentId)
+          setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
+        tell.error(message)
+      },
+    )
   }
 
   // `picked` is a file chosen on purpose, which lands however recently it was taken.
@@ -409,6 +444,7 @@ export function Composer({
       reserved: preparing.length,
       readsImages: imagesAvailable,
       route: filesFeature,
+      maxAttachments,
       onTake: (take) => {
         placeholders = take.map((file) => ({
           id: randomId(),
@@ -418,47 +454,55 @@ export function Composer({
         setPreparing((current) => [...current, ...placeholders])
       },
     })
-    for (const refusal of refusals) toast.error(refusal.message)
+    for (const refusal of refusals) tell.error(refusal.message)
     if (prepared.length)
-      setAttachments((current) => [...current, ...prepared].slice(0, MAX_ATTACHMENTS))
+      setAttachments((current) =>
+        [...current, ...prepared].slice(0, maxAttachments ?? MAX_ATTACHMENTS),
+      )
     setPreparing((current) => current.filter((one) => !placeholders.some((p) => p.id === one.id)))
     textarea.current?.focus()
   }
 
   // A pasted photo or file is the same intake as a picked one, and never a send.
   const pasted = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (plain) return
+    if (!files) return
     const data = event.clipboardData
     // `files` and `items` can each carry a file, and the same one twice; `fresh` takes it once.
-    const files = [...(data?.files ?? [])]
+    const taken = [...(data?.files ?? [])]
     for (const item of data?.items ?? [])
       if (item.kind === "file") {
         const file = item.getAsFile()
-        if (file) files.push(file)
+        if (file) taken.push(file)
       }
-    if (!files.length) return
+    if (!taken.length) return
     event.preventDefault()
-    void addFiles(files)
+    void addFiles(taken)
   }
 
   const dragging = (event: DragEvent<HTMLFormElement>) => {
-    if (plain || !Array.from(event.dataTransfer?.types ?? []).includes("Files")) return
+    if (!files || !Array.from(event.dataTransfer?.types ?? []).includes("Files")) return
     event.preventDefault()
     setOver(true)
   }
 
   const dropped = (event: DragEvent<HTMLFormElement>) => {
-    if (plain) return
-    const files = [...(event.dataTransfer?.files ?? [])]
+    if (!files) return
+    const taken = [...(event.dataTransfer?.files ?? [])]
     // Text dragged into the field is the field's own drop; only files are taken here.
-    if (!files.length) return
+    if (!taken.length) return
     event.preventDefault()
     setOver(false)
-    void addFiles(files)
+    void addFiles(taken)
   }
 
-  const removeAttachment = (attachment: Attachment) =>
+  const removeAttachment = (attachment: Attachment) => {
     setAttachments((current) => current.filter((a) => a.id !== attachment.id))
+    setRefused((current) => {
+      if (!(attachment.id in current)) return current
+      const { [attachment.id]: _, ...rest } = current
+      return rest
+    })
+  }
 
   // A staged file's bytes exist only on this device: the previewer draws them from their own URL,
   // which is the one place an object URL is still what a file is read from.
@@ -505,15 +549,15 @@ export function Composer({
     refresh(owner, stagedNow.current.map(staged))
   }, [owner, stagedKeys, refresh])
 
-  const attach = plain ? null : (
+  const attach = files ? (
     <AttachMenu
       disabled={disabled}
       filesFeature={filesFeature}
       imagesAvailable={imagesAvailable}
-      onAdd={(files) => void addFiles(files, true)}
+      onAdd={(picked) => void addFiles(picked, true)}
       session={session}
     />
-  )
+  ) : null
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
@@ -739,6 +783,7 @@ export function Composer({
             <AttachmentTile
               key={attachment.id}
               attachment={attachment}
+              refused={refused[attachment.id]}
               onOpen={() => open(attachment)}
               onRemove={() => removeAttachment(attachment)}
             />

@@ -99,3 +99,43 @@ test("a path naming nothing draws as the file it is", () => {
   assert.equal(items[0].cell, "file")
   assert.equal(items[1].cell, "file")
 })
+
+test("a tag that names what its file is draws by that until the host answers, and by the host after", () => {
+  // A room's file has no extension in the path it is known by, and its manifest already says what it
+  // is: the cell a row holds its place with comes from the tag, not from an extension it hasn't got.
+  const chart = {
+    key: "at1",
+    path: "room/room-1/e1/at1",
+    name: "chart.png",
+    type: "image/png",
+    size: 2048,
+  }
+  const reading = mediaItems([chart], new Map([["at1", { status: "reading" }]]))
+  assert.equal(reading[0].cell, "gallery", "the cell the type names, with no URL yet")
+  assert.equal(reading[0].kind, "image")
+  assert.equal(reading[0].type, "image/png")
+  assert.equal(reading[0].size, 2048, "and the size the tag knew")
+  assert.equal(reading[0].src, undefined)
+
+  const answered = mediaItems(
+    [chart],
+    new Map([
+      [
+        "at1",
+        { status: "ready", read: { url: "https://host/signed", type: "application/pdf", size: 9 } },
+      ],
+    ]),
+  )
+  assert.equal(answered[0].type, "application/pdf", "what the host answered wins over the tag")
+  assert.equal(answered[0].size, 9)
+  assert.equal(answered[0].cell, "file", "a PDF is the row that hands it over")
+  assert.equal(answered[0].src, "https://host/signed")
+})
+
+test("a tag that names nothing of its own draws as it always did", () => {
+  const pending = tag("shot.png")
+  const items = mediaItems([pending], new Map([[pending.key, { status: "reading" }]]))
+  assert.equal(items[0].type, "", "no type until the host answers")
+  assert.equal(items[0].size, undefined)
+  assert.equal(items[0].cell, "gallery", "the extension still says what it is")
+})

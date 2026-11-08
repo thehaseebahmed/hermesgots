@@ -5,8 +5,10 @@ import { hasServer, serverConfig } from "@/lib/connection"
 import {
   ROOM_LOG_ROWS,
   db,
+  type Attachment,
   type Conversation,
   type Profile,
+  type RoomAttachment,
   type RoomEvent,
   type RoomMember,
 } from "@/lib/db"
@@ -19,12 +21,14 @@ import {
   getRoom,
   sendRoomMessage,
   stopRoom,
+  uploadRoomAttachment,
   type RoomApproval,
   type RoomAsked,
   type RoomAsk,
 } from "@/lib/hermes"
 import { useChanges } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
+import { AttachmentError } from "@/lib/send-turn"
 import { randomId } from "@/lib/utils"
 import {
   askingMember,
@@ -73,7 +77,7 @@ export interface RoomLive {
   asking?: { memberId?: string; name?: string }
   /** The last read that failed, in the Host's own words, and cleared by the next good read. */
   error?: string
-  /** A send, an answer or a stop the Host refused, in its own words: it stands until the next try. */
+  /** An answer or a stop the Host refused, in its own words: it stands until the next try. */
   refused?: string
 }
 
@@ -133,8 +137,18 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const trailing = useRef<number | undefined>(undefined)
   /** The page has already been dropped for a refused mark, so a bad room doesn't clear it a tick. */
   const reset = useRef(false)
-  /** The words a send failed to land, and the id they were minted: a retry must reuse both. */
-  const failed = useRef<{ text: string; eventId: string } | undefined>(undefined)
+  /**
+   * The message a send failed to land, and what it was minted: its words and files as a retry names
+   * them, the Host's event id, and per file its upload id with the manifest the Host answered for it.
+   * A retry must reuse all of them — the Host binds an event id to its content, so the same message
+   * lands once, and a file whose manifest is already in hand is not uploaded again: the upload id
+   * makes the Host's store idempotent, but every byte of a re-sent file is still the wire's.
+   */
+  const failed = useRef<{
+    key: string
+    eventId: string
+    uploads: Map<string, { uploadId: string; manifest?: RoomAttachment }>
+  } | undefined>(undefined)
 
   const read = useCallback(
     async (signal?: AbortSignal) => {
@@ -236,28 +250,74 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
 
   useEffect(() => () => window.clearTimeout(trailing.current), [])
 
+  /**
+   * One message into the room: its words, and the files it carries.
+   *
+   * A file goes to the Host's room store first, under an upload id this device minted, and the
+   * message then names what came back — the store is the only place a room's bytes live, so a
+   * manifest is all the log ever holds. The message's id, each file's id and the manifest it was
+   * answered with are kept until it lands, so a retry after a dropped answer is the same message and
+   * the same files rather than a second copy of either — and the bytes of a file already stored are
+   * not sent again. A Host that refuses a file says so in its own words, through the room's banner,
+   * and the error is thrown as itself — naming the staged file — so the composer can mark that tile
+   * and tell the reader, rather than only saying the message didn't go.
+   */
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
-      if (!roomId || !hasServer(bot) || !text.trim()) return false
-      setLive((held) => ({ ...held, refused: undefined }))
+    async (text: string, attachments: Attachment[] = []): Promise<void> => {
+      const words = text.trim()
+      const carried = attachments.filter(
+        (file): file is Attachment & { blob: Blob } => Boolean(file.blob),
+      )
+      if (!roomId || !hasServer(bot) || (!words && !carried.length)) return
       try {
-        const words = text.trim()
-        // The id is minted here and kept with the words, so a send retried after a dropped answer
-        // is the Host's same message rather than a second one. Words the user changed are a new
-        // message: the Host binds an id to its content, and would refuse the old id for them.
-        const eventId =
-          failed.current?.text === words ? failed.current.eventId : randomId()
-        failed.current = { text: words, eventId }
-        const sent = await sendRoomMessage(config, roomId, eventId, words)
+        // The ids are minted here and kept with the message, so a send retried after a dropped
+        // answer is the Host's same message rather than a second one. A message the user changed —
+        // its words, or the files it carries — is a new one: the Host binds an id to its content,
+        // and would refuse the old id for it.
+        const key = [words, ...carried.map((file) => file.id)].join("\u0000")
+        const reused = failed.current?.key === key ? failed.current : undefined
+        const eventId = reused?.eventId ?? randomId()
+        const uploads =
+          reused?.uploads ??
+          new Map<string, { uploadId: string; manifest?: RoomAttachment }>()
+        failed.current = { key, eventId, uploads }
+        const manifests: RoomAttachment[] = await Promise.all(
+          carried.map(async (file) => {
+            const kept = uploads.get(file.id)
+            // A file whose manifest the Host already answered is named by it: the message this
+            // retry sends is the same one, so the bytes it would upload are already stored.
+            if (kept?.manifest) return kept.manifest
+            const uploadId = kept?.uploadId ?? randomId()
+            uploads.set(file.id, { uploadId })
+            let manifest: RoomAttachment
+            try {
+              manifest = await uploadRoomAttachment(
+                config,
+                roomId,
+                { name: file.name, type: file.type, blob: file.blob },
+                uploadId,
+              )
+            } catch (error) {
+              // The Host refused this file, not the message: the error names the staged file so the
+              // composer can mark its tile and the reader can take it off, and so a retry that keeps
+              // it says the Host's words again rather than a sentence about the whole message.
+              throw new AttachmentError(reasonOf(error), file.id)
+            }
+            uploads.set(file.id, { uploadId, manifest })
+            return manifest
+          }),
+        )
+        const sent = await sendRoomMessage(config, roomId, eventId, words, manifests)
         const held = await readMark(roomId)
         // The Host's own event goes on the page at once, and only where it is the next row this
         // device was owed: a page with a hole in it would leave the rows before it unreadable.
         if (sent && sent.seq === held + 1) await merge(roomId, [sent])
         failed.current = undefined
-        return true
       } catch (error) {
-        setLive((held) => ({ ...held, refused: reasonOf(error) }))
-        return false
+        // A refused send is said where the user's own move is: a file the Host won't take marks its
+        // tile and is a toast (the composer's), and anything else about the message is a toast from
+        // the room's screen. Nothing here keeps a banner, so a refusal is not said twice.
+        throw error
       } finally {
         sync(undefined, true)
       }

@@ -14,6 +14,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from plugin import attachments, media
 
@@ -66,34 +67,57 @@ class ContentTypeTest(unittest.TestCase):
 
 class DispositionTest(unittest.TestCase):
     """What the platform shows serves in place; everything else is handed over as a file named as
-    it is on the host, so a tap saves it under its own name."""
+    it is on the host, so a tap saves it under its own name.
+
+    The header comes from ``response_headers``, the one rule both serving routes read: a file on a
+    path is read as its own name and type, and the rule is the same one a room's bytes take.
+    """
+
+    @staticmethod
+    def disposition(name: str, kind: str) -> "str | None":
+        """What a file of this name and type is served with, or None where it is shown."""
+        return media.response_headers(name, kind).get("content-disposition")
 
     def test_an_image_is_shown_in_place(self) -> None:
-        self.assertIsNone(media.disposition(Path("chart.png")))
+        self.assertIsNone(self.disposition("chart.png", "image/png"))
 
     def test_a_clip_is_shown_in_place(self) -> None:
-        self.assertIsNone(media.disposition(Path("take.mp4")))
+        self.assertIsNone(self.disposition("take.mp4", "video/mp4"))
 
     def test_a_recording_is_shown_in_place(self) -> None:
-        self.assertIsNone(media.disposition(Path("voice-memo.mp3")))
+        self.assertIsNone(self.disposition("voice-memo.mp3", "audio/mpeg"))
 
     def test_a_pdf_is_shown_in_place(self) -> None:
-        self.assertIsNone(media.disposition(Path("brief.pdf")))
+        self.assertIsNone(self.disposition("brief.pdf", "application/pdf"))
 
     def test_json_is_shown_in_place(self) -> None:
-        self.assertIsNone(media.disposition(Path("usage.json")))
+        self.assertIsNone(self.disposition("usage.json", "application/json"))
 
     def test_an_svg_is_shown_in_place(self) -> None:
-        self.assertIsNone(media.disposition(Path("icon.svg")))
+        self.assertIsNone(self.disposition("icon.svg", "image/svg+xml"))
 
     def test_an_unknown_type_is_a_download_named_as_the_file(self) -> None:
         self.assertEqual(
-            media.disposition(Path("notes.zip")),
+            self.disposition("notes.zip", "application/zip"),
             "attachment; filename=\"notes.zip\"; filename*=UTF-8''notes.zip",
         )
 
     def test_a_name_outside_ascii_survives_the_download(self) -> None:
-        header = media.disposition(Path("résumé.zip"))
+        header = self.disposition("résumé.zip", "application/zip")
+        self.assertIsNotNone(header)
+        self.assertIn("filename*=UTF-8''r%C3%A9sum%C3%A9.zip", header)
+
+    def test_a_room_attachments_name_and_type_are_all_its_header_reads(self) -> None:
+        # A room's file comes out of the Host's own store, so there is no path to read a type from:
+        # the name it was stored under and the type it was stored as are the whole of it.
+        self.assertEqual(
+            media.disposition_for("notes.zip", "application/octet-stream"),
+            "attachment; filename=\"notes.zip\"; filename*=UTF-8''notes.zip",
+        )
+        self.assertIsNone(media.disposition_for("chart.png", "image/png"))
+
+    def test_a_name_outside_ascii_survives_a_rooms_download_too(self) -> None:
+        header = media.disposition_for("résumé.zip", "application/zip")
         self.assertIsNotNone(header)
         self.assertIn("filename*=UTF-8''r%C3%A9sum%C3%A9.zip", header)
 
@@ -122,8 +146,7 @@ class MediaFileTest(unittest.TestCase):
         with mock.patch.dict(sys.modules, stub):
             self.assertEqual(media.media_file(str(saved)), saved)
         # And the route hands it over as a download under the name the message carries.
-        header = media.disposition(saved)
-        self.assertIsNotNone(header)
+        header = media.response_headers(saved.name, media.content_type(saved))["content-disposition"]
         self.assertIn("filename*=UTF-8''field%20notes.zip", header)
 
     def test_refuses_a_path_the_validator_rejects(self) -> None:
@@ -180,6 +203,114 @@ class CapTest(unittest.TestCase):
     def test_a_file_handed_over_as_a_download_keeps_the_older_cap(self) -> None:
         for name in ("brief.pdf", "notes.md", "notes.zip"):
             self.assertEqual(media.limit_for(Path(name)), media.DOWNLOAD_MAX_BYTES, name)
+
+
+class TooLargeTest(unittest.TestCase):
+    """One refusal sentence, said about whatever the limit is drawn on."""
+
+    def test_a_refusal_names_the_file_the_limit_and_what_it_is_a_limit_on(self) -> None:
+        self.assertEqual(
+            media.too_large_for("huge.bin", "a room attachment", 9 * 1024 * 1024),
+            "huge.bin is larger than the 9 MB limit for a room attachment.",
+        )
+
+    def test_a_media_refusal_keeps_the_words_it_has_always_had(self) -> None:
+        # The sentence is media's, so moving it behind ``too_large_for`` must not reword it.
+        self.assertEqual(
+            media.too_large(Path("chart.png"), media.STREAM_MAX_BYTES),
+            "chart.png is larger than the 200 MB limit for media.",
+        )
+        self.assertEqual(
+            media.too_large(Path("notes.zip"), 1024 * 1024),
+            "notes.zip is larger than the 1 MB limit for a file that downloads.",
+        )
+
+
+class HeadersTest(unittest.TestCase):
+    """The headers a file is served under, from its name and the type it is known by."""
+
+    def test_a_known_suffix_is_served_as_its_own_type(self) -> None:
+        self.assertEqual(
+            media.response_headers("pixel.png", "application/octet-stream")["content-type"],
+            "image/png",
+        )
+
+    def test_a_suffix_nothing_knows_is_served_as_the_type_it_arrived_with(self) -> None:
+        self.assertEqual(
+            media.response_headers("room.bin", "application/pdf")["content-type"], "application/pdf"
+        )
+
+    def test_ranges_are_said_only_where_they_are_given(self) -> None:
+        self.assertEqual(
+            media.response_headers("take.mp4", "video/mp4", ranges="bytes")["accept-ranges"], "bytes"
+        )
+        self.assertNotIn("accept-ranges", media.response_headers("take.mp4", "video/mp4", ranges=None))
+
+    def test_a_download_is_named_and_what_is_shown_is_not(self) -> None:
+        self.assertEqual(
+            media.response_headers("notes.zip", "application/octet-stream")["content-disposition"],
+            "attachment; filename=\"notes.zip\"; filename*=UTF-8''notes.zip",
+        )
+        self.assertNotIn(
+            "content-disposition", media.response_headers("pixel.png", "image/png")
+        )
+
+    def test_the_cache_and_validator_are_the_callers_own(self) -> None:
+        headers = media.response_headers(
+            "pixel.png", "image/png", cache="private, max-age=600", etag='"abc"'
+        )
+        self.assertEqual(headers["cache-control"], "private, max-age=600")
+        self.assertEqual(headers["etag"], '"abc"')
+        bare = media.response_headers("pixel.png", "image/png")
+        self.assertNotIn("cache-control", bare)
+        self.assertNotIn("etag", bare)
+
+
+class _Asked:
+    """A request as the mint reads it: the path it arrived at, and the URL it came with."""
+
+    def __init__(self, path: str, query: dict | None = None) -> None:
+        self.path = path
+        self.query = dict(query or {})
+        self.url = self
+
+    def with_path(self, path: str) -> "_Asked":
+        return _Asked(path, self.query)
+
+    def with_query(self, query: dict) -> "_Asked":
+        return _Asked(self.path, query)
+
+    def __str__(self) -> str:
+        return "http://host" + self.path + ("?" + urlencode(self.query) if self.query else "")
+
+
+class SignedUrlTest(unittest.TestCase):
+    """One mint tail for both addresses: the route beside the mint, in the caller's own query."""
+
+    KEY = b"\x01" * 32
+    PATH = "room/room-1/e1/att_00000000000000000000000000000001"
+
+    def test_a_signed_url_is_the_route_beside_the_mint_with_the_callers_own_query(self) -> None:
+        request = _Asked("/p/coder/api/plugins/gots/media/url")
+        url, expires = media.signed_url(request, self.KEY, self.PATH, "coder", {"path": self.PATH})
+        parsed = urlsplit(url)
+        self.assertEqual(parsed.path, "/p/coder/api/plugins/gots/media",
+                         "the request's own prefix is kept, so a mirrored bot is served")
+        query = parse_qs(parsed.query)
+        self.assertEqual(query["path"], [self.PATH])
+        self.assertTrue(media.covers(self.KEY, query[media.URL_PARAM][0], self.PATH, "coder",
+                                     now=expires - 1))
+        self.assertFalse(media.covers(self.KEY, query[media.URL_PARAM][0], self.PATH, "coder",
+                                      now=expires))
+
+    def test_a_segment_a_rooms_address_carries_is_the_addresses_last_part(self) -> None:
+        request = _Asked("/api/plugins/gots/rooms/room-1/attachment/url")
+        url, _ = media.signed_url(
+            request, self.KEY, self.PATH, "", {"event": "e1"}, segment="att_0001"
+        )
+        parsed = urlsplit(url)
+        self.assertEqual(parsed.path, "/api/plugins/gots/rooms/room-1/attachment/att_0001")
+        self.assertEqual(parse_qs(parsed.query)["event"], ["e1"])
 
 
 class SignatureTest(unittest.TestCase):

@@ -55,6 +55,102 @@ const memberRow = (member) => ({
   ...(member.display_name ? { displayName: member.display_name } : {}),
 })
 
+// A room's files (F5): the bytes live in the Host's room store and nowhere else. A file goes up
+// against the upload id the app minted — which is what makes a retry the same file rather than a
+// second copy — rides a message as a manifest of ids and bounded metadata, and comes back down bound
+// to the event it was committed under, behind an address minted for one room, one event and one file.
+//
+// The test host's own limit, and deliberately smaller than the app's 9 MB intake: a file the composer
+// takes has to reach a Host that still refuses it, or no flow could see a refusal at all. The cap is
+// this device's way of reaching that leg — a real Host's cap is its own size and its own sentence —
+// and the refusal is worded the way the plugin's is.
+const ATTACHMENT_BYTES = 2 * 1024 * 1024
+/** The same cap in the unit the refusal names, so the sentence and the arithmetic can't drift apart. */
+const ATTACHMENT_MB = ATTACHMENT_BYTES / (1024 * 1024)
+/** The test host's refusal for a file past its cap, in the plugin's arithmetic and its words. */
+const tooLarge = (name) =>
+  `${name} is larger than the ${ATTACHMENT_MB} MB limit for a room attachment.`
+/** The most files one message may carry, and the kinds the Host stores, both as the plugin's own. */
+const ATTACHMENT_MAX = 8
+const KINDS = ["image", "pdf", "file"]
+/** The four prefixes and two types the plugin's download rule shows in place; everything else saves. */
+const shown = (mime) =>
+  /^(image|video|audio|text)\//.test(mime) ||
+  mime === "application/pdf" ||
+  mime === "application/json"
+/**
+ * A 4×4 PNG of the mock's own making, so a member's reply can carry a picture without this file
+ * carrying a binary: two colours, a valid stream, and enough for a cell to paint.
+ */
+const MEMBER_PHOTO = "hermes-sketch.png"
+const MEMBER_PHOTO_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAGElEQVR42mP4//+/dTkDhGSAs4AkA04ZAABpHXnRFgm6AAAAAElFTkSuQmCC",
+  "base64",
+)
+
+/** The Host's kind for a type: a picture, a PDF, or a file, parameters and case dropped. */
+function kindOf(mime) {
+  const said = (mime || "").split(";", 1)[0].trim().toLowerCase()
+  if (said.startsWith("image/")) return "image"
+  if (said === "application/pdf") return "pdf"
+  return "file"
+}
+
+/** One file into the store, answering the record a message commits under an event. */
+function keepFile(store, { name, mime, bytes }) {
+  store.minted += 1
+  const meta = {
+    attachmentId: `att_${store.minted.toString(16)}`,
+    kind: kindOf(mime),
+    name,
+    size: bytes.length,
+    mime,
+  }
+  const record = { meta, bytes, eventId: null, tokens: new Set() }
+  store.attachments.set(meta.attachmentId, record)
+  return record
+}
+
+/**
+ * The files a message names, as the store's own records, or the sentence that refuses it.
+ *
+ * The plugin's `_manifest`, in the plugin's own words: the app sends back the five fields the Host
+ * stored a file under, so a row missing one of them names no file a screen could draw and is refused
+ * here rather than by the Host — whose refusal would name a field of its own contract. A message
+ * carries a bounded few, each of them once, and every id names a file this store holds.
+ */
+function manifestOf(files, store) {
+  const needed = "An attachment needs the id, kind, name, size and type the Host stored it under."
+  if (files === undefined || files === null) return { carried: [] }
+  if (!Array.isArray(files)) return { refused: "A message's attachments are the files it carries." }
+  if (files.length > ATTACHMENT_MAX)
+    return { refused: `A message carries at most ${ATTACHMENT_MAX} attachments.` }
+  const named = []
+  for (const one of files) {
+    const row = one && typeof one === "object" ? one : {}
+    const holds = (field) => typeof row[field] === "string" && row[field] !== ""
+    if (
+      !holds("attachmentId") ||
+      !holds("name") ||
+      !holds("mime") ||
+      !KINDS.includes(row.kind) ||
+      !Number.isInteger(row.size) ||
+      row.size <= 0
+    )
+      return { refused: needed }
+    named.push(row.attachmentId)
+  }
+  if (new Set(named).size !== named.length)
+    return { refused: "A message carries each attachment once." }
+  const carried = []
+  for (const id of named) {
+    const record = store.attachments.get(id)
+    if (!record) return { refused: needed }
+    carried.push(record)
+  }
+  return { carried }
+}
+
 export function createRoomStore() {
   const now = Date.now()
   const room = {
@@ -71,7 +167,18 @@ export function createRoomStore() {
     created_at: now,
     timers: [],
   }
-  return { rooms: new Map([[room.room_id, room]]) }
+  return {
+    rooms: new Map([[room.room_id, room]]),
+    // One file the store holds, by the id this mock minted: its manifest, its bytes, the event it
+    // was committed under once a message carries it, and the last token minted for it.
+    attachments: new Map(),
+    // The upload id the app minted, and the file it became: an upload is idempotent per id.
+    uploads: new Map(),
+    // The count attachment ids are minted from, and the count addresses' tokens are minted from:
+    // two counters, so a minted address never moves the id a later file is stored under.
+    minted: 0,
+    tokens: 0,
+  }
 }
 
 /** One room as the chat list carries it: what a device merges, and nothing of its transcript. */
@@ -122,23 +229,29 @@ function drawnEvent(row) {
     ...(typeof payload.status === "string" ? { status: payload.status } : {}),
     ...(reason ? { reason } : {}),
     ...(typeof payload.error === "string" ? { error: payload.error } : {}),
+    // A message may carry files: the row names them in the same camelCase the app draws a cell by,
+    // and a row with none keeps no key at all, so nothing draws an empty gallery.
+    ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
   }
 }
 
-function say(room, id, text) {
+function say(room, id, text, file) {
   const seated = room.members.find((one) => one.member_id === id)
-  room.events.push(
-    event(
-      room,
-      "message.member",
-      { kind: "member", id, profile: seated.profile, display_name: seated.display_name },
-      {
-        text,
-        member_id: id,
-        thread_id: "room-thread",
-      },
-    ),
+  const row = event(
+    room,
+    "message.member",
+    { kind: "member", id, profile: seated.profile, display_name: seated.display_name },
+    {
+      text,
+      member_id: id,
+      thread_id: "room-thread",
+      ...(file ? { attachments: [file.meta] } : {}),
+    },
   )
+  room.events.push(row)
+  // The store commits a file to the event that carries it: a reply's own picture is readable through
+  // that reply's address and no other.
+  if (file) file.eventId = row.event_id
   room.at = Date.now()
 }
 
@@ -159,7 +272,7 @@ function settles(room) {
 }
 
 /** What the rounds a send wakes do to the room, one step at a time. */
-function rounds(room, noteEvent, text = "") {
+function rounds(store, room, noteEvent, text = "", image = false) {
   // One round at a time, as the Host's driver runs it: a second send waits for the round in hand
   // rather than stacking a second timeline on the same room.
   for (const timer of room.timers) clearTimeout(timer)
@@ -218,8 +331,17 @@ function rounds(room, noteEvent, text = "") {
     { memberId: "m2", status: "queued" },
   ]))
   // The first round: Hermes answers, and Coder passes — silence, which the room draws as nothing.
+  // A message that carried a picture is answered with one: a member's own media is a file of the
+  // store's, committed to the reply's event, so it draws exactly as the user's does.
   step(ROUND, () => {
-    say(room, "m1", "I'll take the API and the routes.")
+    say(
+      room,
+      "m1",
+      "I'll take the API and the routes.",
+      image
+        ? keepFile(store, { name: MEMBER_PHOTO, mime: "image/png", bytes: MEMBER_PHOTO_BYTES })
+        : undefined,
+    )
     room.activity = [{ memberId: "m2", status: "running" }]
   })
   step(PASS, () => {
@@ -259,13 +381,107 @@ function rounds(room, noteEvent, text = "") {
   })
 }
 
-export async function handleRooms(req, res, path, { json, readBody, noteEvent }, store) {
+export async function handleRooms(req, res, path, { json, readBody, readRaw, noteEvent }, store) {
   if (!path.startsWith("/api/plugins/gots/rooms")) return false
   const fail = (status, message) => json(res, status, { error: { message } })
   if (path === "/api/plugins/gots/rooms" && req.method === "POST") {
     // Creating a room is a later step's (the plugin's own route is what the app will call); the
     // mock keeps the one it hosts, which is what a device lists.
     return (fail(405, "This host's rooms are made on its desktop."), true)
+  }
+  const upload = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/attachment$/.exec(path)
+  if (upload && req.method === "POST") {
+    const room = store.rooms.get(decodeURIComponent(upload[1]))
+    if (!room) return (fail(404, "This host has no such room."), true)
+    const query = new URL(req.url, "http://mock").searchParams
+    const uploadId = query.get("upload_id") ?? ""
+    if (!uploadId) return (fail(400, "An upload needs the upload_id the app minted for it."), true)
+    const name = query.get("name") ?? ""
+    if (!name) return (fail(400, "An upload needs the name of the file."), true)
+    // The store is idempotent on the upload id: the same id twice is the same file, not a second.
+    const known = store.uploads.get(uploadId)
+    if (known) {
+      const held = store.attachments.get(known).meta
+      json(res, 200, { object: "gots.room.attachment", attachment: held })
+      return true
+    }
+    // The body is the file itself, and its type is the request's content type: what the store keeps
+    // and what decides the file's kind. A body past the cap is refused before it is read — the
+    // length is on the request, so a file the store will not take costs a header and not its bytes —
+    // and the read's own check stays as the second line, for a request that declares no length.
+    const mime =
+      (req.headers["content-type"] ?? "").split(";", 1)[0].trim() || "application/octet-stream"
+    if (Number(req.headers["content-length"] ?? 0) > ATTACHMENT_BYTES) {
+      return (fail(413, tooLarge(name)), true)
+    }
+    const bytes = await readRaw(req)
+    if (!bytes.length) return (fail(400, "The file is empty."), true)
+    if (bytes.length > ATTACHMENT_BYTES) return (fail(413, tooLarge(name)), true)
+    const record = keepFile(store, { name, mime, bytes })
+    store.uploads.set(uploadId, record.meta.attachmentId)
+    json(res, 200, { object: "gots.room.attachment", attachment: record.meta })
+    return true
+  }
+  const sign = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/attachment\/url$/.exec(path)
+  if (sign && req.method === "POST") {
+    const room = store.rooms.get(decodeURIComponent(sign[1]))
+    if (!room) return (fail(404, "This host has no such room."), true)
+    const body = await readBody(req)
+    const eventId = typeof body?.event_id === "string" ? body.event_id : ""
+    const attachmentId = typeof body?.attachment_id === "string" ? body.attachment_id : ""
+    if (!eventId || !attachmentId) {
+      return (fail(400, "An attachment's address needs its event_id and attachment_id."), true)
+    }
+    // Nothing is read into the app here, and the attachment is looked up only to bind the token to
+    // it: like the plugin's own route, this mints an address for one room, one event and one file,
+    // and the route it names is where the file's own answer lives. The token is the mock's own
+    // opaque string, bound to that file.
+    // A signature is stateless: every mint for a file is worth the same until it runs out, so two
+    // addresses for one file both work — which is what the plugin's own HMAC gives, and what a cell
+    // asked twice (a render, then a cache copy) needs.
+    store.tokens += 1
+    const token = `t_${store.tokens.toString(16)}`
+    const record = store.attachments.get(attachmentId)
+    if (record) record.tokens.add(token)
+    const base = `/api/plugins/gots/rooms/${encodeURIComponent(room.room_id)}/attachment`
+    const url = new URL(`${base}/${encodeURIComponent(attachmentId)}`, `http://${req.headers.host}`)
+    url.searchParams.set("event", eventId)
+    url.searchParams.set("token", token)
+    json(res, 200, {
+      object: "gots.room.attachment_url",
+      path: `room/${room.room_id}/${eventId}/${attachmentId}`,
+      url: url.toString(),
+      expires: Math.floor(Date.now() / 1000) + 300,
+    })
+    return true
+  }
+  const bytes = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/attachment\/([^/]+)$/.exec(path)
+  if (bytes && req.method === "GET") {
+    const query = new URL(req.url, "http://mock").searchParams
+    const eventId = query.get("event") ?? ""
+    const token = query.get("token") ?? ""
+    // The signature is the permission: an address that doesn't cover this room's event and this file
+    // is refused before anything is read, as the plugin refuses one that is forged or has run out.
+    const record = store.attachments.get(decodeURIComponent(bytes[2]))
+    if (!record || !record.tokens.has(token) || record.eventId !== eventId) {
+      return (fail(403, "That address has run out."), true)
+    }
+    const headers = {
+      "Content-Type": record.meta.mime,
+      "Accept-Ranges": "none",
+      // The app is another origin: a cell paints from this URL, and the copy it keeps is a fetch of
+      // the same bytes, which a browser only hands over with this.
+      "Access-Control-Allow-Origin": "*",
+    }
+    // What a browser shows comes in place; everything else is handed over as a download named as
+    // the file, the way the plugin's route answers.
+    if (!shown(record.meta.mime)) {
+      const named = record.meta.name.replace(/[^A-Za-z0-9._ ()-]/g, "_")
+      headers["Content-Disposition"] = `attachment; filename="${named}"`
+    }
+    res.writeHead(200, headers)
+    res.end(record.bytes)
+    return true
   }
   const send = /^\/api\/plugins\/gots\/rooms\/([^/]+)\/send$/.exec(path)
   if (send && req.method === "POST") {
@@ -275,7 +491,17 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
     const text = typeof body?.text === "string" ? body.text.trim() : ""
     const eventId = typeof body?.event_id === "string" ? body.event_id : ""
     if (!eventId) return (fail(400, "A message needs the event_id the app minted for it."), true)
-    if (!text) return (fail(400, "A message needs words to send."), true)
+    // The files a message names are the store's already: a manifest is the five fields a file was
+    // stored under, at most eight of them and each once, and a message may be files alone, as a
+    // room's photo is sent. This is the plugin's own rule, so the mock refuses what the plugin
+    // refuses — in its sentences, with no event appended — rather than answering a message the Host
+    // would never have carried.
+    const files = manifestOf(body?.attachments, store)
+    if (files.refused) return (fail(400, files.refused), true)
+    const carried = files.carried
+    if (!text && !carried.length) {
+      return (fail(400, "A message needs words or files to send."), true)
+    }
     // The Host is idempotent on the event id: the same id twice is the same message, not a second.
     const known = room.events.find((one) => one.event_id === eventId)
     if (known) {
@@ -289,12 +515,16 @@ export async function handleRooms(req, res, path, { json, readBody, noteEvent },
       {
         text,
         thread_id: eventId,
+        ...(carried.length ? { attachments: carried.map((one) => one.meta) } : {}),
       },
     )
     room.events.push(appended)
+    // The store commits each file to the event it was sent under: from here it is readable through
+    // that event's address and no other.
+    for (const one of carried) one.eventId = appended.event_id
     room.at = Date.now()
     noteEvent("room", room.room_id)
-    rounds(room, noteEvent, text)
+    rounds(store, room, noteEvent, text, carried.some((one) => one.meta.kind === "image"))
     json(res, 200, { object: "gots.room.sent", event: drawnEvent(appended) })
     return true
   }

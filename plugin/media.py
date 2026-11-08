@@ -20,7 +20,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 
 # The raster the route serves as an image: what a browser shows in place.
@@ -125,14 +125,57 @@ def shown_inline(kind: str) -> bool:
     return kind.startswith(SHOWN_INLINE_PREFIXES) or kind in SHOWN_INLINE_TYPES
 
 
-def disposition(path: Path) -> str | None:
-    """The ``Content-Disposition`` a file needs: none for what the platform shows, else a download
-    named as the file is. The name is spelled twice, ASCII and percent-encoded (RFC 6266/5987), so
-    one outside ASCII survives in every browser."""
-    if shown_inline(content_type(path)):
+def disposition_for(name: str, kind: str) -> str | None:
+    """The ``Content-Disposition`` a file needs, from the name and type it is known by: none for what
+    the platform shows, else a download named as the file is. The name is spelled twice, ASCII and
+    percent-encoded (RFC 6266/5987), so one outside ASCII survives in every browser.
+
+    A file on a path can always be read for both — its last part and its suffix — but a room's file
+    is bytes in the Host's store with a name and a type and no path at all, so the two are taken as
+    they are and the rule lives once, here, for both callers.
+    """
+    if shown_inline(kind):
         return None
-    name = path.name
     return f"attachment; filename=\"{_BAD_ASCII.sub('_', name)}\"; filename*=UTF-8''{quote(name)}"
+
+
+def served_type(name: str, kind: str) -> str:
+    """What a file is served as: the type its own name's suffix is known by, else the type it arrived
+    as. A room's file comes out of the Host's store with a name and the uploader's type and no path,
+    and the name is what a browser reads past a type that says nothing — ``.png`` sent as an octet
+    stream is still a picture the platform can paint.
+    """
+    return SERVED_TYPES.get(Path(name).suffix.lower(), kind)
+
+
+def response_headers(
+    name: str,
+    kind: str,
+    *,
+    ranges: str | None = None,
+    cache: str | None = None,
+    etag: str | None = None,
+) -> Dict[str, str]:
+    """The headers a file is served under, from the name and type it is known by.
+
+    One rule for both routes: a file on a path and a room's bytes in the Host's store answer the same
+    headers for the same file, so neither route assembles them by hand and neither can drift from the
+    other. The served type is :func:`served_type`'s; ``accept-ranges`` is only said where the caller
+    can answer one (a room's bytes arrive whole from the Host, so they can't); a download's name comes
+    from :func:`disposition_for`; and the cache and validator are the caller's, since only it knows
+    whether these bytes are worth keeping and what names them.
+    """
+    headers = {"content-type": served_type(name, kind)}
+    if ranges is not None:
+        headers["accept-ranges"] = ranges
+    download = disposition_for(name, headers["content-type"])
+    if download:
+        headers["content-disposition"] = download
+    if cache is not None:
+        headers["cache-control"] = cache
+    if etag is not None:
+        headers["etag"] = etag
+    return headers
 
 
 def streams(path: Path) -> bool:
@@ -145,10 +188,20 @@ def limit_for(path: Path) -> int:
     return STREAM_MAX_BYTES if streams(path) else DOWNLOAD_MAX_BYTES
 
 
+def too_large_for(name: str, what: str, limit: int) -> str:
+    """A refusal that names the file, the limit it met and what that limit is drawn on.
+
+    ``what`` is the noun the caller's limit is for — media this route serves, a file it hands over as
+    a download, a room's attachment — so the sentence is written once and each cap says only what it
+    is a cap on. "Too large" alone leaves the user guessing whether to shrink the file or give up.
+    """
+    return f"{name} is larger than the {limit // (1024 * 1024)} MB limit for {what}."
+
+
 def too_large(path: Path, limit: int) -> str:
     """A refusal that names the file and the limit it met, so "too large" never stands alone."""
     what = "media" if streams(path) else "a file that downloads"
-    return f"{path.name} is larger than the {limit // (1024 * 1024)} MB limit for {what}."
+    return too_large_for(path.name, what, limit)
 
 
 def _validated_path(path_str: str, missing: str) -> Path:
@@ -228,6 +281,38 @@ def mint(
     """A signature over this path, this profile and an expiry, and the moment it expires."""
     expires = int((time.time() if now is None else now) + lifetime)
     return f"{expires}.{_signature(key, path, profile, expires)}", expires
+
+
+def signed_url(
+    request: Any,
+    key: bytes,
+    path: str,
+    profile: str,
+    query: Dict[str, str],
+    *,
+    segment: str = "",
+) -> Tuple[str, int]:
+    """A minted address and the moment it runs out: the route beside the one that asked.
+
+    Both mint routes hand the app an address for the route next to them — ``/media/url`` for
+    ``/media``, a room's ``/attachment/url`` for its ``/attachment/{id}`` — so the tail is written
+    once here: the signature over this path and profile, then the request's own URL with ``/url``
+    taken off and the route's query put on. Rewriting the URL the request arrived at, rather than
+    building one from the plugin's prefix, is what keeps a bot served at ``/p/<profile>`` handing out
+    an address its own gateway serves.
+
+    ``query`` is the route's own keys — the path, or a room's event — and the token is put beside
+    them under :data:`URL_PARAM`, the one name a signature travels in. ``segment`` is the one part a
+    room's address carries that its mint doesn't: the file's own id, as the address's last segment.
+    The key is passed in rather than read here, so this module never reaches for a profile's store on
+    a helper's behalf.
+    """
+    token, expires = mint(key, path, profile)
+    base = request.path.removesuffix("/url")
+    if segment:
+        base = f"{base}/{segment}"
+    url = str(request.url.with_path(base).with_query({**query, URL_PARAM: token}))
+    return url, expires
 
 
 def covers(key: bytes, token: str, path: str, profile: str, now: Optional[float] = None) -> bool:

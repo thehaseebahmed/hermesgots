@@ -4091,7 +4091,7 @@ http
           "media_url",
           "openui",
           "rooms",
-          ...(ROOMS ? ["rooms_questions"] : []),
+          ...(ROOMS ? ["rooms_questions", "room_media"] : []),
           "profile_routes",
           "pr_tool",
           "close",
@@ -4188,7 +4188,7 @@ http
       PLUGIN &&
       ROOMS &&
       !profile &&
-      (await handleRooms(req, res, url.pathname, { json, readBody, noteEvent }, ROOM_STORE))
+      (await handleRooms(req, res, url.pathname, { json, readBody, readRaw, noteEvent }, ROOM_STORE))
     )
       return
     if (

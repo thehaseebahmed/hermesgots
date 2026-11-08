@@ -8,6 +8,7 @@ import { Markdown } from "@/components/chat/markdown"
 import { SystemLine } from "@/components/chat/system-line"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { RoomWaiting } from "@/components/room/room-waiting"
+import { RoomRowMedia } from "@/components/room/room-media"
 import { Banner } from "@/components/banner"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message"
@@ -19,10 +20,21 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
+import { ROOM_MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { chatOwner } from "@/lib/chat-owner"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
-import { DEFAULT_SETTINGS, db, getSettings, type Profile, type RoomMember } from "@/lib/db"
+import { AttachmentError } from "@/lib/send-turn"
+import { tell } from "@/lib/tell"
+import type { HermesConfig } from "@/lib/hermes"
+import {
+  DEFAULT_SETTINGS,
+  db,
+  getSettings,
+  type Attachment,
+  type Profile,
+  type RoomMember,
+} from "@/lib/db"
 import { COLUMN_BOX } from "@/lib/layout"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
@@ -55,10 +67,20 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
   const connection = useMemo(() => serverConfig(answerer), [answerer])
   // A refused send goes back into the field, the way a chat's does: what the Host would not take is
-  // the user's words, and the banner beside the room says why in the Host's own words.
-  const write = async (text: string) => {
-    if (!(await send(text))) throw new Error("The room didn't take that message.")
+  // the user's words. A file the Host won't take is marked on its own tile and said in a toast by
+  // the composer; anything else it refused about the message is said here, so no banner is needed.
+  const write = async (text: string, files: Attachment[] = []) => {
+    try {
+      await send(text, files)
+    } catch (error) {
+      if (!(error instanceof AttachmentError))
+        tell.error(error instanceof Error && error.message ? error.message : "The room didn't take that message.")
+      throw error
+    }
   }
+  // A message's files are the Host's room store's, and the row that carries them is drawn only where
+  // the Host advertises the store: an older plugin's room is words alone.
+  const canMedia = usePluginFeatureOn(answerer, "room_media")
   // A question card is drawn only where the Host declares it can be answered: `rooms_questions` is
   // the row whose absence says the pairing can't be made (rooms.py, ADR 0118).
   const asksQuestions = usePluginFeatureOn(answerer, "rooms_questions")
@@ -94,8 +116,11 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
                 >
                   <RoomRowView
                     row={row}
+                    roomId={id}
                     member={row.memberId ? byMember.get(row.memberId) : undefined}
                     bots={pictures}
+                    connection={connection}
+                    canMedia={canMedia}
                   />
                 </MessageScrollerItem>
               ))}
@@ -117,7 +142,10 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         </MessageScroller>
       </MessageScrollerProvider>
       {(live.refused ?? live.error) && (
-        <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")} role="alert">
+        // A refused send is a toast (and a refused file its own red tile), so what stands here is
+        // the two things no toast says: a read that failed, and an answer or a stop the Host
+        // refused. A toast clears it as well as the composer, so the two never sit on each other.
+        <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")} role="alert" data-toast-above>
           <Banner tone="error">{live.refused ?? live.error}</Banner>
         </div>
       )}
@@ -140,7 +168,13 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
             // No answerer, no send: a room whose members this device holds no bot for still draws,
             // and every message to it could only come back refused (ADR 0115).
             disabled={!answerer || live.canSend === false}
-            filesFeature="no"
+            // A file is the Host's room store's, so it is offered only where the Host has one.
+            files={canMedia}
+            filesFeature={canMedia ? "yes" : "no"}
+            // The Host caps a room's message at eight, so a ninth is refused here rather than after
+            // every file had gone up and the send had failed.
+            maxAttachments={ROOM_MAX_ATTACHMENTS}
+            // A room's photo is a file the Host stores, never an inline image part.
             imagesAvailable={false}
             placeholder={
               answerer && live.canSend !== false ? "Message the room…" : "This room can't be written to"
@@ -159,13 +193,22 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
 /** One row: the user's words on the right, a member's reply on the left with its name and picture. */
 const RoomRowView = memo(function RoomRowView({
   row,
+  roomId,
   member,
   bots,
+  connection,
+  canMedia,
 }: {
   row: RoomRow
+  roomId: string
   member?: RoomMember
   bots: Map<string, Profile>
+  /** The room's Host, as its answerer's connection names it: what a file's address is signed by. */
+  connection: HermesConfig
+  /** Whether the Host advertises its room store: a room from an older plugin carries words alone. */
+  canMedia: boolean
 }) {
+  const files = canMedia && row.attachments?.length ? row.attachments : undefined
   if (row.kind === "notice") {
     return (
       <div className={cn(COLUMN_BOX, "px-1")}>
@@ -173,7 +216,26 @@ const RoomRowView = memo(function RoomRowView({
       </div>
     )
   }
-  if (row.kind === "user") return <UserBubble className="ml-auto">{row.text}</UserBubble>
+  // A message's files are one block, drawn above its words on the row's own edge: the user's on
+  // theirs, a member's under its name.
+  const media = files && (
+    <RoomRowMedia
+      roomId={roomId}
+      eventId={row.eventId}
+      attachments={files}
+      config={connection}
+      align={row.kind === "user" ? "end" : "start"}
+    />
+  )
+  if (row.kind === "user") {
+    // A sent file sits above the words, on the reader's own edge, as a chat's sent media does.
+    return (
+      <div className="flex flex-col items-end gap-2">
+        {media}
+        {row.text.trim() && <UserBubble className="ml-auto">{row.text}</UserBubble>}
+      </div>
+    )
+  }
   const bot = member?.profile ? bots.get(member.profile) : undefined
   const spoken = row.name || (member ? memberLabel(member) : "")
   return (
@@ -192,11 +254,14 @@ const RoomRowView = memo(function RoomRowView({
       </MessageAvatar>
       <MessageContent>
         {spoken && <MessageHeader>{spoken}</MessageHeader>}
-        <Bubble variant="outline" align="start">
-          <BubbleContent>
-            <Markdown tone="fill">{row.text}</Markdown>
-          </BubbleContent>
-        </Bubble>
+        {media}
+        {row.text.trim() && (
+          <Bubble variant="outline" align="start">
+            <BubbleContent>
+              <Markdown tone="fill">{row.text}</Markdown>
+            </BubbleContent>
+          </Bubble>
+        )}
       </MessageContent>
     </Message>
   )

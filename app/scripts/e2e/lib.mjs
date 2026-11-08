@@ -26,6 +26,39 @@ export const drawn = (page) => page.evaluate(() => document.body.innerText)
 export const long = (name, turns = 10) =>
   `${name}: ` + Array.from({ length: turns }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")
 
+/** A PNG of the page's own making, so a flow carries no binary of its own. */
+export const png = (page) =>
+  page.evaluate(() => {
+    const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 48 })
+    const context = canvas.getContext("2d")
+    context.fillStyle = "#3b7"
+    context.fillRect(0, 0, 64, 48)
+    context.fillStyle = "#fff"
+    context.fillRect(8, 8, 24, 30)
+    return canvas.toDataURL("image/png").split(",")[1]
+  })
+
+/**
+ * A pick through the composer's `+`: the source's own button, and the chooser the browser opens in
+ * answer. Answers whether the button was offered, so a caller can assert the gate it saw — a host
+ * without the plugin's `attachments` feature leaves Files out of reach. A bot's screen draws Main's
+ * composer beside the chat it has open, so the picker meant is the open chat's: the last one, as the
+ * field `helpers.composer` reaches is.
+ */
+export async function pick(page, source, file) {
+  const add = page.getByRole("button", { name: "Add context" }).last()
+  await add.click()
+  const button = page.getByRole("button", { name: source, exact: true })
+  await button.waitFor({ timeout: 10_000 })
+  const offered = await button.isEnabled()
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser", { timeout: 10_000 }),
+    button.click(),
+  ])
+  await chooser.setFiles(file)
+  return offered
+}
+
 /**
  * Resolves once nothing the clock drives is still moving: a sheet's slide, a pane's push, a fade.
  * Two frames first, so a transition the last step started has been created; then every animation

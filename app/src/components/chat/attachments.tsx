@@ -1,3 +1,4 @@
+import { useId } from "react"
 import { DownloadIcon, FileIcon, ImageIcon, XIcon } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -59,6 +60,7 @@ export function FileRow({
 export function AttachmentTile({
   attachment,
   preparing,
+  refused,
   action = "open",
   onOpen,
   onRemove,
@@ -66,6 +68,8 @@ export function AttachmentTile({
 }: {
   attachment: Attachment
   preparing?: boolean
+  /** The Host's own words for why it wouldn't take this file, where it wouldn't: the tile turns red. */
+  refused?: string
   /** What a tap does: open it here, or save it from the host. */
   action?: "open" | "download"
   onOpen?: () => void
@@ -76,11 +80,15 @@ export function AttachmentTile({
   const url = drawable(attachment) ? attachmentUrl(attachment) : undefined
   const Icon = attachment.image ? ImageIcon : action === "download" ? DownloadIcon : FileIcon
   const busy = preparing || uploading
+  // A refused tile is drawn in the error's own colour and says why in a sentence a reader can hear,
+  // while its remove button stays the one move that clears it.
+  const note = useId()
+  const wrong = refused ? "border-destructive ring-1 ring-destructive/40" : undefined
   const tile = url ? (
     <img
       src={url}
       alt={attachment.name}
-      className={cn("size-16 rounded-xl border object-cover", busy && "opacity-50")}
+      className={cn("size-16 rounded-xl border object-cover", busy && "opacity-50", wrong)}
       draggable={false}
     />
   ) : preparing ? (
@@ -90,30 +98,43 @@ export function AttachmentTile({
       className={cn(
         "flex h-16 max-w-48 min-w-28 items-center gap-2 rounded-xl border bg-muted/50 px-3 text-left text-sm text-foreground",
         busy && "text-muted-foreground",
+        refused && "border-destructive bg-destructive/5 text-destructive",
       )}
       title={attachment.name}
     >
       {busy ? (
         <Spinner className="size-5 shrink-0 text-muted-foreground" />
       ) : (
-        <Icon className="size-5 shrink-0 text-muted-foreground" />
+        <Icon className={cn("size-5 shrink-0", refused ? "text-destructive" : "text-muted-foreground")} />
       )}
       <MediaName name={attachment.name} size={attachment.size} />
     </div>
   )
   return (
-    <div className={cn("relative shrink-0", className)} aria-busy={busy || undefined}>
+    <div
+      className={cn("relative shrink-0", className)}
+      aria-busy={busy || undefined}
+      aria-invalid={refused ? true : undefined}
+      data-refused={refused ? "" : undefined}
+      title={refused}
+    >
       {onOpen && !preparing ? (
         <button
           type="button"
           onClick={onOpen}
           aria-label={`${action === "download" ? "Download" : "Open"} ${attachment.name}`}
+          aria-describedby={refused ? note : undefined}
           className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {tile}
         </button>
       ) : (
         tile
+      )}
+      {refused && (
+        <span id={note} className="sr-only">
+          {refused}
+        </span>
       )}
       {busy && (url || preparing) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

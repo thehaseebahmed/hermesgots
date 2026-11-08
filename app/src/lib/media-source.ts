@@ -4,7 +4,7 @@
  * a file is asked again: a read that failed, and a URL whose signature has run out. A returning app
  * re-mints what it holds that has lapsed, because a page outlives the ten minutes a URL is worth.
  */
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { Attachment } from "@/lib/db"
 import { mediaSpent } from "@/lib/media-expiry"
@@ -80,21 +80,50 @@ export interface MediaAsks {
 const pathsKey = (sources: MediaSource[]) =>
   [...new Set(sources.map((source) => source.path).filter(Boolean))].join("\u0000")
 
-export function useMediaSources(conversationId: string, sources: MediaSource[]): MediaAsks {
+/** Who asks for a file's URL: the thread's own ask, or one a screen outside a thread hands in. */
+export type MediaAsker = (paths: string[]) => Promise<MediaAsk[]>
+
+/** What a caller knows of the files before the hook reads anything for itself. */
+export interface MediaAskOptions {
+  /** The ask this screen makes, where it isn't the thread's own (`media-url`'s, by conversation). */
+  ask?: MediaAsker
+  /**
+   * The Host the files belong to, where the caller already holds it: a room's row has its Host's
+   * address in hand, so the conversation-and-profile read behind `mediaServer` is not run for it.
+   */
+  server?: string
+}
+
+export function useMediaSources(
+  conversationId: string,
+  sources: MediaSource[],
+  { ask: asker, server: held }: MediaAskOptions = {},
+): MediaAsks {
   const [answers, setAnswers] = useState<ReadonlyMap<string, MediaAsk>>(new Map())
-  const [server, setServer] = useState<string>()
+  // The bot the thread's files belong to, where the caller didn't already name it.
+  const [discovered, setDiscovered] = useState<string>()
   const [revision, setRevision] = useState(0)
+  // The ask this screen makes: a thread's own, or the ask a screen outside a thread hands in — a
+  // room's file is read through an address the plugin signs for its own room, not the chat's.
+  const own = useCallback(
+    (paths: string[]) => askMediaUrls(conversationId, paths),
+    [conversationId],
+  )
+  const ask = asker ?? own
   // Which bot this thread's files belong to: what this device keeps of them is keyed by its address,
-  // and a clip's frame is drawn from that key before any URL is asked for.
+  // and a clip's frame is drawn from that key before any URL is asked for. A caller that names the
+  // Host has already answered that, so nothing is read and no conversation is walked for it.
   useEffect(() => {
+    if (held) return
     let stale = false
     void mediaServer(conversationId).then((found) => {
-      if (!stale && found) setServer(found)
+      if (!stale && found) setDiscovered(found)
     })
     return () => {
       stale = true
     }
-  }, [conversationId])
+  }, [conversationId, held])
+  const server = held ?? discovered
   // A reply streams a chunk at a time, so this list is rebuilt on every render: what has been
   // answered stays answered, or a file's cell would ask the host again for every token.
   const answered = useRef<{ chat: string; paths: Set<string> }>({
@@ -133,7 +162,7 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     let stale = false
     // One ask per file, shared across the thread, and one read of the bot they belong to: the media
     // module keeps the URL it answered, so a group asks the host once each rather than once per cell.
-    void askMediaUrls(conversationId, paths).then((answers) => {
+    void ask(paths).then((answers) => {
       if (stale) return
       // Only an answer settles a path. One the host couldn't answer for stays unasked, so the next
       // time this thread's media changes it is asked again rather than the cell staying dead.
@@ -154,7 +183,7 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     return () => {
       stale = true
     }
-  }, [conversationId, joined, revision])
+  }, [conversationId, joined, revision, ask])
 
   // Nothing else re-renders the cells when the app comes back, so its own idea of a return is where
   // a URL that ran out while the page was away is noticed. A copy has no signature to outlive.

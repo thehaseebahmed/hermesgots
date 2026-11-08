@@ -323,6 +323,27 @@ export interface RoomMember {
 }
 
 /**
+ * What a room's stored file is, as the Host's store names it: a picture, a PDF, or anything else.
+ * The Host's three, and no more — a store that grew a fourth kind still reaches a screen as a file,
+ * which is the row that hands it over.
+ */
+export type RoomKind = "image" | "pdf" | "file"
+
+/**
+ * A file a room's message carries, in the words the plugin's seam hands over (`plugin/rooms.py`):
+ * the Host's store's own five fields, which is exactly what a message's manifest is sent back as.
+ * The bytes are never here — the Host's room store is the only place a room's file lives — so a
+ * screen draws one through an address the plugin signs.
+ */
+export interface RoomAttachment {
+  attachmentId: string
+  kind: RoomKind
+  name: string
+  size: number
+  mime: string
+}
+
+/**
  * One row of a room's log, in the words the plugin's seam hands over (`plugin/rooms.py`) and in the
  * words the device keeps: the Host's own sequence, who spoke, and the little a room's screen draws.
  * The Host's coordinates never reach here — a room is a conversation, not a session — and `reason`
@@ -340,6 +361,8 @@ export interface RoomEvent {
   status?: string
   reason?: string
   error?: string
+  /** The files the message carried, in the order they were sent; absent where it carried none. */
+  attachments?: RoomAttachment[]
 }
 
 /** How much a project session may do without asking. */

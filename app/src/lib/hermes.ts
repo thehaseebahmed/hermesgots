@@ -12,6 +12,8 @@ import type {
   ModelChoice,
   PrChecks,
   PrState,
+  RoomAttachment,
+  RoomKind,
   RoomMember,
   SessionMode,
   Todo,
@@ -1906,6 +1908,32 @@ function roomMember(raw: Record<string, unknown>): RoomMember {
   }
 }
 
+/** The kinds a room's store names a file by; anything else a store answers is a file to hand over. */
+const ROOM_KINDS: readonly RoomKind[] = ["image", "pdf", "file"]
+
+/**
+ * One file a room's message carries, or nothing where the row names no file a screen could draw:
+ * an id, a name and a size worth drawing are what a cell needs, and an entry short of one of them is
+ * dropped rather than drawn blank. A kind the app doesn't know is drawn as the file it is, so a
+ * store from a newer Host still shows what it holds.
+ */
+function roomAttachmentOf(raw: Record<string, unknown>): RoomAttachment | undefined {
+  const attachmentId = raw.attachmentId
+  const name = raw.name
+  const size = raw.size
+  if (typeof attachmentId !== "string" || !attachmentId) return undefined
+  if (typeof name !== "string" || !name) return undefined
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) return undefined
+  const kind = ROOM_KINDS.find((one) => one === raw.kind) ?? "file"
+  return {
+    attachmentId,
+    kind,
+    name,
+    size,
+    mime: typeof raw.mime === "string" && raw.mime ? raw.mime : "application/octet-stream",
+  }
+}
+
 /**
  * One row of a room's log, or nothing where the row cannot be drawn: an event with no integer
  * sequence would land at the front of the transcript and stay there, and one with no kind names no
@@ -1914,6 +1942,14 @@ function roomMember(raw: Record<string, unknown>): RoomMember {
 function roomEventOf(raw: Record<string, unknown>): RoomEvent | undefined {
   if (typeof raw.seq !== "number" || typeof raw.kind !== "string" || !raw.kind) return undefined
   const text = (key: string) => (typeof raw[key] === "string" ? (raw[key] as string) : undefined)
+  // A message may carry files: the Host's log names them on the row they were sent under, and a row
+  // with none — or with entries that name no file — carries no key, so no screen draws an empty gallery.
+  const carried: RoomAttachment[] = []
+  for (const one of Array.isArray(raw.attachments) ? raw.attachments : []) {
+    if (!one || typeof one !== "object") continue
+    const file = roomAttachmentOf(one as Record<string, unknown>)
+    if (file) carried.push(file)
+  }
   return {
     seq: raw.seq,
     eventId: text("eventId") ?? String(raw.seq),
@@ -1924,6 +1960,7 @@ function roomEventOf(raw: Record<string, unknown>): RoomEvent | undefined {
     ...(text("status") !== undefined ? { status: text("status") } : {}),
     ...(text("reason") !== undefined ? { reason: text("reason") } : {}),
     ...(text("error") !== undefined ? { error: text("error") } : {}),
+    ...(carried.length ? { attachments: carried } : {}),
   }
 }
 
@@ -2084,19 +2121,84 @@ export async function getRoom(
 }
 
 /**
+ * One file to the Host's room store (`plugin/rooms.py`): the bytes themselves, under the upload id
+ * its caller minted for it. The id is the whole of a retry's safety — the Host's store is idempotent
+ * per id, so asking again after a dropped answer is the same file rather than a second copy of it —
+ * which is why it is the caller's and never minted here: an id this function invented would be a
+ * second copy every time a send was retried. The manifest the Host answers with is what the message
+ * that carries the file names, and what a cell is drawn by.
+ */
+export async function uploadRoomAttachment(
+  config: HermesConfig,
+  roomId: string,
+  file: { name: string; type?: string; blob: Blob },
+  uploadId: string,
+): Promise<RoomAttachment> {
+  const mime = file.type || "application/octet-stream"
+  const query = new URLSearchParams({ upload_id: uploadId, name: file.name })
+  const response = await request(`${roomRoot(config, roomId)}/attachment?${query.toString()}`, {
+    method: "POST",
+    // The file's own type is what the Host stores and what decides its kind, so it is the request's
+    // content type rather than the JSON one every other route here speaks.
+    headers: headers(config, { "Content-Type": mime }),
+    body: file.blob,
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  const body = (await response.json()) as Record<string, unknown>
+  const drawn =
+    body.attachment && typeof body.attachment === "object"
+      ? roomAttachmentOf(body.attachment as Record<string, unknown>)
+      : undefined
+  // A body with no attachment leaves nothing for the message to name: a failure here, where it can
+  // be said, rather than an upload the user paid for and a message that can't carry it.
+  if (!drawn) throw new HermesError("The bot's plugin answered without the room's file.", 502)
+  return drawn
+}
+
+/**
+ * The address one of a room's files is drawn through: the plugin signs the room, the event and the
+ * file itself, and the URL is the permission — no Host call stands behind it, which is what lets a
+ * gallery cell fill without a round trip per cell.
+ */
+export async function getRoomAttachmentUrl(
+  config: HermesConfig,
+  roomId: string,
+  eventId: string,
+  attachmentId: string,
+): Promise<{ url: string; expires: number | null }> {
+  const response = await request(`${roomRoot(config, roomId)}/attachment/url`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ event_id: eventId, attachment_id: attachmentId }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  const body = (await response.json()) as Record<string, unknown>
+  if (typeof body.url !== "string" || !body.url)
+    throw new HermesError("The bot's plugin answered without an address for the room's file.", 502)
+  return { url: body.url, expires: Number(body.expires) > 0 ? Number(body.expires) : null }
+}
+
+/**
  * One message into the room, under the id this device minted for it: the Host appends it once and
- * wakes the members' rounds, so a retry after a dropped answer is the same message.
+ * wakes the members' rounds, so a retry after a dropped answer is the same message. A message may
+ * carry files and no words at all — a room's photo or PDF is sent with none — and the manifest names
+ * what the Host's store already holds, so the files are committed to the event they are sent under.
  */
 export async function sendRoomMessage(
   config: HermesConfig,
   roomId: string,
   eventId: string,
   text: string,
+  attachments: RoomAttachment[] = [],
 ): Promise<RoomEvent | undefined> {
   const response = await request(`${roomRoot(config, roomId)}/send`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ event_id: eventId, text }),
+    body: JSON.stringify({
+      event_id: eventId,
+      text,
+      ...(attachments.length ? { attachments } : {}),
+    }),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   const body = (await response.json()) as Record<string, unknown>

@@ -1,14 +1,20 @@
 /**
  * What every intake surface takes, and what it says when a file won't fit: the composer's pick,
- * paste and drop, and the share screen. A pure rule with nothing imported but the type of the answer
- * a host gives, so `scripts/test-attachment-caps.mjs` runs it, and the words a refusal uses are
- * written once.
+ * paste and drop, the share screen, and a room's own composer, which its Host caps lower than a
+ * chat. A pure rule with nothing imported but the type of the answer a host gives, so
+ * `scripts/test-attachment-caps.mjs` runs it, and the words a refusal uses are written once.
  */
 import type { PluginFeatureAnswer } from "@/lib/features"
 
 /** Under the API server's 10 MB request cap, which the plugin's upload shares. */
 export const MAX_FILE_BYTES = 9 * 1024 * 1024
 export const MAX_ATTACHMENTS = 10
+/**
+ * What one room message takes. `plugin/rooms.py` caps a message at the same eight
+ * (`MAX_ATTACHMENTS` there, the other home of this number): a room's files go up before its message
+ * is sent, so a ninth is refused at the intake rather than by the Host after every file had landed.
+ */
+export const ROOM_MAX_ATTACHMENTS = 8
 /** Photos go inline as base64 (a third bigger), so together they must leave the request room. */
 export const MAX_INLINE_BYTES = 6.5 * 1024 * 1024
 /** A paste and the drop it can also fire carry the same file; this long apart is one intake. */
@@ -91,9 +97,13 @@ export const sizeRefusal = (name: string): Refusal => ({
   message: `${name} is over the ${formatBytes(MAX_FILE_BYTES)} limit.`,
 })
 
-export const countRefusal = (left: number): Refusal => ({
+/**
+ * What the message says about the files it had no room for, in the words of the surface's own cap:
+ * a chat's ten, or the eight a room's Host takes.
+ */
+export const countRefusal = (left: number, cap = MAX_ATTACHMENTS): Refusal => ({
   limit: "count",
-  message: `A message can carry ${MAX_ATTACHMENTS} attachments, so ${left === 1 ? "1 was" : `${left} were`} left out.`,
+  message: `A message can carry ${cap} attachments, so ${left === 1 ? "1 was" : `${left} were`} left out.`,
 })
 
 export const inlineRefusal = (name: string): Refusal => ({
@@ -120,11 +130,20 @@ export function carriesPart<T extends { inline?: unknown }>(
   return Boolean(attachment.inline)
 }
 
-export function intake<T extends CappedFile>(files: T[], held = 0): Intake<T> {
-  const room = Math.max(0, MAX_ATTACHMENTS - held)
+/**
+ * What a surface takes of the files it was handed, in the order they arrived, and one line per
+ * limit broken. `held` is what the message already carries, and `cap` the most the surface takes:
+ * a chat's ten, or a room's eight.
+ */
+export function intake<T extends CappedFile>(
+  files: T[],
+  held = 0,
+  cap = MAX_ATTACHMENTS,
+): Intake<T> {
+  const room = Math.max(0, cap - held)
   const chosen = files.slice(0, room)
   const left = files.length - chosen.length
-  const refusals = left > 0 ? [countRefusal(left)] : []
+  const refusals = left > 0 ? [countRefusal(left, cap)] : []
   const take: T[] = []
   for (const file of chosen) {
     if (!isPhoto(file.type) && file.size > MAX_FILE_BYTES) refusals.push(sizeRefusal(file.name))

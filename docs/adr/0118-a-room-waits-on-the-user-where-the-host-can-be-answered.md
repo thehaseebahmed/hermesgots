@@ -49,8 +49,9 @@ full and the mark only says what a card can't.
 chat does: the approval and question cards are the same components the chat's thread uses, carrying
 the member's name in their header, and they hold the slot the composer would have. Stop is the
 composer's own control, offered while a round runs and the field is empty. The room's composer is the
-chat's composer in `plain` mode — words only, so no `/` menu, no attached files, and no model pill —
-because a room's message is an append and nothing in it runs.
+chat's composer in `plain` mode — no `/` menu and no model pill, because a room's message is an
+append and nothing in it runs — and it takes files where the Host has a room attachment store, which
+ADR 0119 records; where that row is absent it is words only, as it was here.
 
 **Departure from the plan's wording.** The plan said a question "goes through the plugin's own
 holding for that member's run" without naming how a plan-side Host would fill it. The Host as it

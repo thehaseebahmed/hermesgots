@@ -13,6 +13,7 @@ import {
   MAX_FILE_BYTES,
   MAX_INLINE_BYTES,
   pickRoad,
+  ROOM_MAX_ATTACHMENTS,
   sizeRefusal,
   unreadableRefusal,
 } from "../src/lib/attachment-caps.ts"
@@ -37,6 +38,36 @@ test("a pick stops at ten attachments and says how many were left out", () => {
 
   assert.equal(intake(many, 10).take.length, 0, "a full message takes nothing")
   assert.match(intake(many, 10).refusals[0].message, /so 12 were left out\./)
+})
+
+test("a room's message takes eight files, where a chat's takes ten", () => {
+  const nine = Array.from({ length: 9 }, (_, index) => file(`note-${index}.txt`, 1000))
+  const room = intake(nine, 0, ROOM_MAX_ATTACHMENTS)
+  assert.equal(room.take.length, 8, "the Host's own cap, and not one more")
+  assert.deepEqual(
+    room.take.map((one) => one.name),
+    nine.slice(0, 8).map((one) => one.name),
+    "the eight that fit, in the order they arrived",
+  )
+  assert.deepEqual(
+    room.refusals.map((refusal) => refusal.message),
+    ["A message can carry 8 attachments, so 1 was left out."],
+    "the ninth is refused in the room's own number, before it goes up",
+  )
+
+  assert.equal(intake(nine).take.length, 9, "a chat's default is still ten, so nine all land")
+  assert.deepEqual(intake(nine).refusals, [])
+  assert.equal(
+    intake(nine, 6, ROOM_MAX_ATTACHMENTS).take.length,
+    2,
+    "what the room's message already holds comes off its room too",
+  )
+  assert.equal(
+    countRefusal(1, ROOM_MAX_ATTACHMENTS).message,
+    "A message can carry 8 attachments, so 1 was left out.",
+  )
+  assert.equal(countRefusal(1).message, "A message can carry 10 attachments, so 1 was left out.")
+  assert.equal(MAX_ATTACHMENTS, 10, "and the chat's number is the one the share screen says")
 })
 
 test("a file over nine megabytes is refused in its own name", () => {

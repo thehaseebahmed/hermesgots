@@ -1,4 +1,4 @@
-import type { RoomEvent, RoomMember } from "./db.ts"
+import type { RoomAttachment, RoomEvent, RoomMember } from "./db.ts"
 
 export type { RoomEvent }
 
@@ -19,8 +19,12 @@ export interface RoomRow {
   seq: number
   kind: "user" | "member" | "notice"
   text: string
+  /** The Host's own id for the message, which its files' addresses are signed over. */
+  eventId: string
   memberId?: string
   name?: string
+  /** The files the message carried: drawn above the words, and enough on their own to draw a row. */
+  attachments?: RoomAttachment[]
 }
 
 /**
@@ -53,10 +57,13 @@ const BOUNDED: Record<string, string> = {
 /**
  * The room's rows, in the Host's order: what a reader sees of everything that has happened in it.
  *
- * A row with no words to draw is dropped rather than drawn empty — a notice the Host wrote for a
- * `room.activity` that settled, a reply whose text the Host trimmed — and a row names its member
- * by the label the log carries, falling back to the roster the caller passes for a row written
- * before a roster change or by a gateway that names none.
+ * A row with nothing to draw is dropped rather than drawn empty — a notice the Host wrote for a
+ * `room.activity` that settled, a reply whose text the Host trimmed — but a message's files are
+ * something to draw on their own: a room's photo or PDF is sent with no words at all, and a row
+ * whose text is empty is still the message that carried them. A row names its member by the label
+ * the log carries, falling back to the roster the caller passes for a row written before a roster
+ * change or by a gateway that names none, and every row keeps the Host's own event id — the fold is
+ * over the Host's log, where a row always has one, and a file's address is signed over it.
  */
 export function foldRoom(events: RoomEvent[], members: RoomMember[] = []): RoomRow[] {
   const seen = new Set<number>()
@@ -64,26 +71,30 @@ export function foldRoom(events: RoomEvent[], members: RoomMember[] = []): RoomR
   for (const event of [...events].sort((one, two) => one.seq - two.seq)) {
     if (seen.has(event.seq)) continue
     seen.add(event.seq)
+    const files = event.attachments?.length ? { attachments: event.attachments } : {}
     if (event.kind === "message.user") {
       const text = event.text ?? ""
-      if (text.trim()) rows.push({ seq: event.seq, kind: "user", text })
+      if (text.trim() || event.attachments?.length)
+        rows.push({ seq: event.seq, kind: "user", text, eventId: event.eventId, ...files })
       continue
     }
     if (event.kind === "message.member") {
       const text = event.text ?? ""
-      if (!text.trim()) continue
+      if (!text.trim() && !event.attachments?.length) continue
       const name = event.name || memberName(members, event.memberId)
       rows.push({
         seq: event.seq,
         kind: "member",
         text,
+        eventId: event.eventId,
         ...(event.memberId ? { memberId: event.memberId } : {}),
         ...(name ? { name } : {}),
+        ...files,
       })
       continue
     }
     const words = noticeOf(event)
-    if (words) rows.push({ seq: event.seq, kind: "notice", text: words })
+    if (words) rows.push({ seq: event.seq, kind: "notice", text: words, eventId: event.eventId })
   }
   return rows
 }

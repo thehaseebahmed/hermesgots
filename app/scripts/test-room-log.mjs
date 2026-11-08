@@ -75,6 +75,7 @@ test("a round the host bounded says so, once, in the host's own reason", () => {
     seq: 2,
     kind: "notice",
     text: "The room stopped at its round limit.",
+    eventId: "e2",
   })
 })
 
@@ -224,4 +225,69 @@ test("a reply addressed to @user names the member even where the roster no longe
     memberId: "m9",
     name: "Gone",
   })
+})
+
+const chart = { attachmentId: "at1", kind: "image", name: "chart.png", size: 2048, mime: "image/png" }
+const brief = { attachmentId: "at2", kind: "pdf", name: "brief.pdf", size: 4096, mime: "application/pdf" }
+
+test("a user's message and a member's reply keep the files they carry", () => {
+  const rows = foldRoom(
+    [
+      { seq: 1, eventId: "e1", kind: "message.user", text: "here it is", attachments: [chart, brief] },
+      reply(2, "m1", "read it", "Hermes"),
+      { seq: 3, eventId: "e3", kind: "message.member", text: "and mine", memberId: "m2", name: "Coder", attachments: [brief] },
+    ],
+    members,
+  )
+  assert.deepEqual(rows[0].attachments, [chart, brief], "the user's own files are drawn with their words")
+  assert.equal(rows[1].attachments, undefined, "a reply with no file carries no key")
+  assert.deepEqual(rows[2].attachments, [brief], "a member's reply carries its file too")
+})
+
+test("a message of files and no words is drawn", () => {
+  const rows = foldRoom(
+    [
+      { seq: 1, eventId: "e1", kind: "message.user", text: "  ", attachments: [chart] },
+      { seq: 2, eventId: "e2", kind: "message.member", text: "", memberId: "m1", name: "Hermes", attachments: [brief] },
+    ],
+    members,
+  )
+  assert.deepEqual(
+    rows.map((row) => [row.kind, row.attachments?.length]),
+    [
+      ["user", 1],
+      ["member", 1],
+    ],
+    "a room's file rides a message with no words at all",
+  )
+})
+
+test("a row with neither words nor files draws nothing", () => {
+  assert.deepEqual(
+    foldRoom([
+      { seq: 1, eventId: "e1", kind: "message.user", text: "   " },
+      { seq: 2, eventId: "e2", kind: "message.member", text: "", memberId: "m1", attachments: [] },
+    ], members),
+    [],
+  )
+})
+
+test("every folded row carries its event's id, which its files' addresses are signed over", () => {
+  const rows = foldRoom(
+    [
+      user(1, "here it is"),
+      reply(2, "m1", "read it", "Hermes"),
+      { seq: 3, eventId: "e3", kind: "turn.failed", memberId: "m2", error: "rate limited" },
+    ],
+    members,
+  )
+  assert.deepEqual(
+    rows.map((row) => [row.seq, row.eventId]),
+    [
+      [1, "e1"],
+      [2, "e2"],
+      [3, "e3"],
+    ],
+    "a message, a reply and a notice each know the Host event they came from",
+  )
 })

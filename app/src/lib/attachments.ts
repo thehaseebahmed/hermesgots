@@ -136,6 +136,7 @@ export async function prepareIntake(
     reserved = 0,
     readsImages,
     route,
+    maxAttachments,
     onTake,
   }: {
     /** The attachments the message already carries, whose count and inline room these share. */
@@ -146,6 +147,11 @@ export async function prepareIntake(
     readsImages: boolean
     /** What the host answered about the plugin's upload route: `pickRoad`'s second fact. */
     route: RouteAnswer
+    /**
+     * The most this surface takes, where it isn't a chat's ten: a room's Host caps a message lower,
+     * and a file it would refuse is refused here rather than after it has gone up.
+     */
+    maxAttachments?: number
     /** Called with the files that passed the caps, before any of them is read. */
     onTake?: (take: File[]) => void
   },
@@ -157,7 +163,7 @@ export async function prepareIntake(
     if (road.road === "none") because ??= road.message
     return road.road !== "none"
   })
-  const { take, refusals: capped } = intake(onRoad, held.length + reserved)
+  const { take, refusals: capped } = intake(onRoad, held.length + reserved, maxAttachments)
   const refusals: Refusal[] = because ? [{ limit: "route", message: because }, ...capped] : capped
   onTake?.(take)
   const answers = await Promise.all(
