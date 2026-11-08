@@ -79,12 +79,13 @@ sequenceDiagram
 
 - **The cause is the transcript read, not a render loop.** Made by the agent: a CPU sample of the hung test process names `readNewest` (`src/chat-next/api.ts`) spinning, the probes show its offset climbing with no render in between, and answering the same fake with `{data: []}` instead of `{}` makes the test pass in 0.5s. Refuted: a render loop in `AppShell`/`Panes` (render counts stay at three), `NextChat`'s back-guard and `hold` effects (they run once, and nothing re-renders during the spin), and the lane's transition (the lane is closed across the switch and asks no animation).
 - **The read is fixed where the page is read.** Made by the agent: `readPage` answering rows is the seam both readers share (`readNewest` and `readTranscript`), so a host that answers a body with no page can neither spin the reader nor throw on `page.length`.
+- **A page-less answer fails the read, rather than ending it.** Made by the user after the review: a `[]` for a body with no page let every paging site read it as the start of the chat, so an older page cleared `partial` with no retry and a whole-transcript read came back short. `readPage` raises `HostNoPage`; only a first page with nothing held becomes an empty chat.
 - **The mid-stream test moves to chat-next rather than keeping a bot it cannot send from.** Made by the agent: the branch seeds that bot keyless so the current screen draws it, and a keyless bot cannot post a run.
 - **This is not the plan's own gate.** Made by the agent: the request carries its own requirements, so the steps above are the wtf plan rather than a wdyt feature plan.
 
 ## Risks
 
-- `readPage` answering `[]` for an answer with no page is a behaviour change for a host that answers a 200 with an error body: the thread then draws empty rather than reporting a failure. A refusal is already a non-2xx and still reports.
+- An answer with no page is a failed read everywhere but the first page of a chat this device holds nothing of, so a host that sends one mid-thread leaves the thread as drawn and offers the retry a refused page gets — the same words, from a 200 rather than a 500.
 - The mid-stream test rewritten on chat-next asserts against the fake host's own record (`asked.stops`), so a regression in this device's stop path is caught there, not in the legacy send.
 - The component tier's three-at-once run is a sandbox limit, not a product one; if it still runs out of memory the workaround stays at 2 and the pull request says so.
 
