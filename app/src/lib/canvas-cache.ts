@@ -6,7 +6,7 @@
  *
  * A module of its own for the reason `canvas-css.ts` keeps its own table: this is the device's side
  * of the copy — its keys, its rows and the prune — while `canvases.ts` is the store the screens draw
- * from. Nothing here touches the store, and nothing in it syncs.
+ * from. The two share the row shapes here (`recordOf`, `copyOf`, `upsert`), and nothing in it syncs.
  */
 
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
@@ -40,20 +40,19 @@ export const upsert = <T extends { id: string }>(rows: T[], row: T) =>
     ? rows.map((one) => (one.id === row.id ? row : one))
     : [row, ...rows]
 
-/** Each document's identity and clock, so two copies are compared without their bodies being read. */
-const dataStamp = (data?: Canvas["data"]) =>
-  JSON.stringify((data ?? []).map((row) => [row.collection, row.id, row.at]))
+/** The newest clock among a canvas's documents, which is how old its data is. */
+const newestData = (data?: Canvas["data"]) =>
+  data?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0
 
-function unchanged(held: Canvas | undefined, canvas: Canvas) {
-  if (!held) return false
-  return (
-    held.at === canvas.at &&
-    held.version === canvas.version &&
-    held.canUndo === canvas.canUndo &&
-    (held.html ?? "") === (canvas.html ?? "") &&
-    (held.tools ?? []).join("\n") === (canvas.tools ?? []).join("\n") &&
-    dataStamp(held.data) === dataStamp(canvas.data)
-  )
+/**
+ * Whether `one` is newer than `other`: the record's clock first, then the version it points at, then
+ * the clock of the newest document. A read and a write's answer can arrive in either order, so the
+ * row keeps the newer of the two rather than the later to land.
+ */
+function newer(one: Canvas, other: Canvas) {
+  if (one.at !== other.at) return one.at > other.at
+  if (one.version !== other.version) return one.version > other.version
+  return newestData(one.data) > newestData(other.data)
 }
 
 /**
@@ -96,8 +95,10 @@ export function keepRecord(profile: Profile, canvas: Canvas) {
       const key = canvasListKey(profile)
       const rows = (await db.canvasCache.get(key))?.canvases ?? []
       const held = rows.find((one) => one.id === record.id)
-      // Every read of an open canvas comes through here, so a list that already says this is no write.
-      if (held && held.at === record.at && held.version === record.version) return
+      // Every read of an open canvas comes through here: a list that already says this is no write,
+      // and an answer older than the record kept never replaces it — a slow read can land after a
+      // newer one, and the cache would carry the older record across a restart.
+      if (held && held.at >= record.at) return
       await db.canvasCache.put({
         key,
         connection: connectionKey(profile),
@@ -107,13 +108,13 @@ export function keepRecord(profile: Profile, canvas: Canvas) {
     .catch(quietly("Keeping a bot's canvases"))
 }
 
-/** Keeps one canvas with the page it points at, its tools and its data, unless it already does. */
+/** Keeps one canvas with the page it points at, its tools and its data, unless it already holds a newer one. */
 export function keepCanvas(profile: Profile, canvas: Canvas) {
   const key = canvasCacheKey(profile, canvas.id)
-  void db.canvasCache
-    .get(key)
-    .then(async (held) => {
-      if (unchanged(held?.canvas, canvas)) return
+  void db
+    .transaction("rw", db.canvasCache, async () => {
+      const held = (await db.canvasCache.get(key))?.canvas
+      if (held && !newer(canvas, held)) return
       await db.canvasCache.put({
         key,
         connection: connectionKey(profile),
@@ -139,9 +140,23 @@ export async function keptBot(id: string) {
   return (await db.canvasCache.where("canvasId").equals(id).first())?.canvas?.profileId
 }
 
-/** Drops a copy the host says it no longer holds, so a deleted canvas isn't drawn for ever. */
+/**
+ * Drops a copy the host says it no longer holds, and its record with it: a listing would prune the
+ * record too, but a device that opens with the host away never runs one, and the list it draws would
+ * name a canvas the host has already said is gone.
+ */
 export async function forgetCanvas(profile: Profile, id: string) {
-  await db.canvasCache
-    .delete(canvasCacheKey(profile, id))
+  const key = canvasListKey(profile)
+  await db
+    .transaction("rw", db.canvasCache, async () => {
+      const rows = (await db.canvasCache.get(key))?.canvases ?? []
+      if (rows.some((one) => one.id === id))
+        await db.canvasCache.put({
+          key,
+          connection: connectionKey(profile),
+          canvases: rows.filter((one) => one.id !== id),
+        })
+      await db.canvasCache.delete(canvasCacheKey(profile, id))
+    })
     .catch(quietly("Letting a canvas's copy go"))
 }

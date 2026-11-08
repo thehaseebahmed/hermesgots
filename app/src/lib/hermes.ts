@@ -158,7 +158,7 @@ export class HermesError extends Error {
  * rethrown without a status, and a refusal carries the one the host sent, so a caller that must tell
  * "away" from "said no" asks here rather than reading `status` itself.
  */
-export const answered = (failure: unknown): failure is HermesError =>
+export const hostAnswered = (failure: unknown): failure is HermesError =>
   failure instanceof HermesError && failure.status !== undefined
 
 function endpoint(baseUrl: string, path: string) {
@@ -2224,7 +2224,9 @@ export async function listCanvases(config: HermesConfig, signal?: AbortSignal) {
     headers: headers(config),
     // A host that never answers is a canvas this device opens from its copy, so the read is given a
     // deadline rather than waiting on a socket the browser may hold open for minutes.
-    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
+      : AbortSignal.timeout(READ_TIMEOUT_MS),
   })
   const body = await response.json()
   return Array.isArray(body?.canvases) ? (body.canvases as Record<string, unknown>[]) : []
@@ -2234,7 +2236,9 @@ export async function listCanvases(config: HermesConfig, signal?: AbortSignal) {
 export async function getCanvas(config: HermesConfig, id: string, signal?: AbortSignal) {
   const response = await request(canvasRoot(config, id), {
     headers: headers(config),
-    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
+      : AbortSignal.timeout(READ_TIMEOUT_MS),
   })
   return (await response.json())?.canvas as Record<string, unknown> | undefined
 }

@@ -1573,7 +1573,24 @@ export async function addProfile(
 }
 
 export async function updateProfile(id: string, patch: Partial<Omit<Profile, "id">>) {
+  const before = await db.profiles.get(id)
   await db.profiles.update(id, { ...patch, updatedAt: Date.now() })
+  // A bot moved to another address or key can't reach the canvases kept under the old one, and nothing
+  // would ever prune them: they go, and the next read fills the new connection's rows.
+  const after = await db.profiles.get(id)
+  if (before && after && connectionKey(before) !== connectionKey(after))
+    await forgetCanvases(connectionKey(before), id)
+}
+
+/**
+ * Drops the canvases kept under a connection, unless another bot still reads them: the rows are keyed
+ * by the server and key a bot is reached at, so two bots on one connection share them.
+ */
+async function forgetCanvases(key: string, except: string) {
+  const twins = await db.profiles
+    .filter((other) => other.id !== except && connectionKey(other) === key)
+    .count()
+  if (!twins) await db.canvasCache.where("connection").equals(key).delete()
 }
 
 const RECENT_MODELS = 3
@@ -1637,9 +1654,8 @@ export async function deleteProfile(id: string, { remote = false, last = false }
       await db.dictationStats.delete(key)
       await db.mediaCache.where("key").startsWith(mediaKeyPrefix(profile.baseUrl)).delete()
       await db.speechCache.delete(key)
-      // The pages it answered go with it: a copy is only worth drawing while the bot that wrote it is
-      // here, and a twin on the same server reads its own back from the host.
-      await db.canvasCache.where("connection").equals(key).delete()
+      // The pages it answered go with it, unless a twin on the same connection is still here.
+      await forgetCanvases(key, id)
       // Its requests go with it: every row that names this bot, including the ones a twin on the same
       // server shares with it.
       await db.netLog.where("bots").equals(id).delete()

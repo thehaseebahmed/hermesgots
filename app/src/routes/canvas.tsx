@@ -161,11 +161,12 @@ const SNAPS = [0.5, 1]
 /** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const { canvas, missing, loaded, offline } = useCanvas(id)
+  const { canvas, missing, loaded, away } = useCanvas(id)
   const online = useOnline()
-  // What a screen says while its host can't be reached, in the chat header's own words (ADR 0071):
-  // a device with no network is told so, rather than being told its bot is down.
-  const away = offline ? awayLine(true, online) : undefined
+  // A device with no network can't reach the host either, and is told so in its own words (ADR 0071)
+  // rather than being told its bot is down.
+  const awayNow = away || !online
+  const awayWords = awayLine(awayNow, online)
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -305,17 +306,17 @@ export function CanvasView() {
           {canvas?.version ? (
             <span className="shrink-0 text-xs text-muted-foreground">v{canvas.version}</span>
           ) : null}
-          {away ? (
+          {awayWords ? (
             <span
               role="status"
               data-canvas-offline
               className="shrink-0 text-xs text-muted-foreground"
             >
-              {away}
+              {awayWords}
             </span>
           ) : null}
         </div>
-        {canvas?.canUndo && !offline ? (
+        {canvas?.canUndo && !awayNow ? (
           <Button
             variant="ghost"
             size="icon-lg"
@@ -350,7 +351,7 @@ export function CanvasView() {
             />
           ) : (
             <p className="p-4 text-center text-sm text-muted-foreground">
-              {offline && !html
+              {awayNow && !html
                 ? "This canvas isn't on this device, and its bot isn't answering."
                 : loaded && !html
                   ? "Your bot is building it…"
