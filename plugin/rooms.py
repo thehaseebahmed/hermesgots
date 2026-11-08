@@ -605,10 +605,14 @@ def answer_question(
             or (member_id and held["memberId"] != member_id)
         ):
             raise RoomError("That question isn't waiting for an answer any more.", 409)
-        # Forgotten before the write: a second tap while the first is out is the same stale card.
-        _questions.pop(question_id, None)
     if not _resolve(question_id, answers):
+        with _questions_lock:
+            _questions.pop(question_id, None)
         raise RoomError("That question isn't waiting for an answer any more.", 409)
+    # Forgotten only once the Host took it: a Host that couldn't be written to leaves the card up,
+    # so the user's tap is not lost with the answer.
+    with _questions_lock:
+        _questions.pop(question_id, None)
     events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
     return {"questionId": question_id}
 

@@ -1239,6 +1239,28 @@ class RoomWaiting(unittest.TestCase):
         self.assertEqual(answer["status"], 409)
         self.assertIn("waiting", answer["payload"]["error"]["message"])
 
+    def test_a_question_the_host_could_not_take_stays_up_for_another_tap(self):
+        # A write that failed is not an answer: the card stays, so the user's tap isn't lost with it.
+        host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
+        with dispatcher(host), no_loopback():
+            rooms.on_member_activity(
+                room_id="room-1", member_id="m1", task_id="dtask:1", kind="request.opened",
+                payload={"kind": "clarify", "request_id": "srq-1", "questions": [QUESTION]},
+            )
+            with answerable([]) as resolved:
+                resolved.open = set()
+                resolved.frames.clear()
+                module = sys.modules["tui_gateway.server_requests"]
+
+                def broken(frame, transport=None):
+                    raise RuntimeError("the request is gone")
+
+                module.resolve_response = broken
+                answer = self.answer()
+            waiting = self.read_room()["payload"]["waiting"]
+        self.assertEqual(answer["status"], 502)
+        self.assertEqual(len(waiting), 1, "the card is still there to answer again")
+
     def test_stop_cancels_the_rooms_work_and_notes_it(self):
         host = Host(events=CONVERSATION)
         path = store.current_path()
