@@ -101,7 +101,8 @@ export async function bubbleState(): Promise<BubbleState | undefined> {
  *
  * A write that fails is tried again and then said in the log, never swallowed: the phone would go on
  * dictating to the last bot it was told about — another host, another key, another vocabulary — and
- * every later take would land there without a word.
+ * every later take would land there without a word. With no bot the app can call, the phone is told
+ * to forget the one it held instead, so nothing it shows names a bot that is gone.
  */
 export async function mirrorBubble(profile?: Profile) {
   if (!bubbleAvailable()) return

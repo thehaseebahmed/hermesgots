@@ -153,7 +153,7 @@ leaves the host.
 
 **The phone keeps one bot.** The Bubble's own, kept the first time the app mirrors one and changed only in Bubble settings, so opening another bot's chat never moves it; while that bot is disabled or gone the selected bot answers, and nothing is written. `BubblePlugin.configure` writes the Bubble's own bot's plugin root, key, name,
 vocabulary and the host's own `wait_ms` into the phone's preferences; `useBubbleMirror` in the app shell
-rewrites it whenever the Bubble's bot, that bot's connection, or that host's own answer moves —
+rewrites it whenever the Bubble's bot, that bot's connection or name, or that host's own answer moves —
 it asks the host for the last of those itself, because the phone would otherwise hold the fallback for
 as long as the app stayed open, and give up on a cloud bot's take while the host was still hearing it.
 The Confirm is bounded by the host's number plus five seconds where there is one, and by 45 s where no

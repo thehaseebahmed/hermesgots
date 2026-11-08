@@ -17,7 +17,7 @@ export const bubbleAnswer = {
 }
 
 /** What the page told the Bubble to dictate with, one entry per `configure`, in order. */
-export const bubbleConfigured: { profileId: string; root: string }[] = []
+export const bubbleConfigured: { profileId: string; root: string; name?: string }[] = []
 
 /** How often the page told the phone no bot is left to hear a take: the mirror is withdrawn. */
 export const bubbleCleared = { times: 0 }

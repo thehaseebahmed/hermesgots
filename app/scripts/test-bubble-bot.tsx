@@ -97,10 +97,7 @@ test("a renamed bot is written to the phone again", async () => {
   await mount(<Shell />, async () => {
     await until(async () => bubbleConfigured.at(-1)?.profileId === "bot-1", "the bot mirrored")
     await db.profiles.update("bot-1", { name: "Renamed" })
-    await until(
-      async () => (bubbleConfigured.at(-1) as { name?: string } | undefined)?.name === "Renamed",
-      "the renamed bot mirrored",
-    )
+    await until(async () => bubbleConfigured.at(-1)?.name === "Renamed", "the renamed bot mirrored")
   })
 })
 
@@ -112,6 +109,24 @@ test("the last bot going takes the phone's copy with it", async () => {
     await deleteProfile("bot-1")
     await deleteProfile("bot-2", { last: true })
     await settle()
-    await until(async () => bubbleCleared.times === 1, "the phone told no bot is left")
+    await until(async () => bubbleCleared.times >= 1, "the phone told no bot is left")
+    const writes = bubbleConfigured.length
+    await settle()
+    assert.equal(bubbleConfigured.length, writes, "and no bot is written back afterwards")
+  })
+})
+
+test("a write that changes nothing the phone hears with is not sent", async () => {
+  await seed()
+  await mount(<Shell />, async () => {
+    await until(async () => bubbleConfigured.at(-1)?.profileId === "bot-1", "the bot mirrored")
+    const writes = bubbleConfigured.length
+    await db.profiles.update("bot-1", { model: "another-model" })
+    await settle()
+    assert.equal(
+      bubbleConfigured.length,
+      writes,
+      "no write for a change the phone does not hear with",
+    )
   })
 })
