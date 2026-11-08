@@ -159,7 +159,7 @@ const SNAPS = [0.5, 1]
 /** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const { canvas, missing, loaded } = useCanvas(id)
+  const { canvas, missing, loaded, offline } = useCanvas(id)
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -299,8 +299,18 @@ export function CanvasView() {
           {canvas?.version ? (
             <span className="shrink-0 text-xs text-muted-foreground">v{canvas.version}</span>
           ) : null}
+          {/* The bot isn't answering, so what is drawn is this device's copy (F5, D5). */}
+          {offline ? (
+            <span
+              role="status"
+              data-canvas-offline
+              className="shrink-0 text-xs text-muted-foreground"
+            >
+              Offline
+            </span>
+          ) : null}
         </div>
-        {canvas?.canUndo ? (
+        {canvas?.canUndo && !offline ? (
           <Button
             variant="ghost"
             size="icon-lg"
@@ -335,7 +345,11 @@ export function CanvasView() {
             />
           ) : (
             <p className="p-4 text-center text-sm text-muted-foreground">
-              {loaded && !html ? "Your bot is building it…" : "Reading the canvas…"}
+              {offline && !canvas
+                ? "This canvas isn't on this device, and its bot isn't answering."
+                : loaded && !html
+                  ? "Your bot is building it…"
+                  : "Reading the canvas…"}
             </p>
           )}
           {/* A phone has room for the page or its chat, not both: the chat is raised over the page
