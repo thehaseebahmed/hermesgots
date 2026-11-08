@@ -31,7 +31,6 @@ endgroup() {
 # block holding another gate's output is unreadable, and the end of a failure's log is the part a
 # reader needs. `mktemp`, never a path in the tree.
 LOGS=$(mktemp -d)
-trap 'rm -rf "$LOGS"' EXIT
 GATE_NAMES=()
 GATE_PIDS=()
 DURATIONS=()
@@ -44,22 +43,30 @@ record() {
 # request's own summary. The chain's wall clock is no longer the sum of these, so this table is how a
 # regression is read: the number that grew names the gate to look at. It is not a budget and nothing
 # fails on it — a shared runner's variance is not a broken change.
+#
+# Printed straight out and, where there is one, appended to the step's summary: a table written to a
+# file and read back can be lost to a cleanup running beside it, and the summary's own failure must
+# never be what a failed run reports.
 report() {
   [ "${#DURATIONS[@]}" -gt 0 ] || return 0
-  local entry
-  {
-    echo
-    echo "gate | seconds"
-    echo "--- | ---"
-    for entry in "${DURATIONS[@]}"; do
-      printf '%s | %s\n' "${entry%|*}" "${entry##*|}"
-    done
-  } > "$LOGS/report"
-  cat "$LOGS/report"
+  local entry row table=$'\ngate | seconds\n--- | ---\n'
+  for entry in "${DURATIONS[@]}"; do
+    printf -v row '%s | %s\n' "${entry%|*}" "${entry##*|}"
+    table+=$row
+  done
+  printf '%s\n' "$table"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    { echo "### ${AREA:-checks}"; cat "$LOGS/report"; } >> "$GITHUB_STEP_SUMMARY"
+    { echo "### ${AREA:-checks}"; printf '%s\n' "$table"; } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
   fi
   DURATIONS=()
+}
+
+# The one exit, in the order a reader needs it: what the gates that ran cost, then the logs they wrote.
+# It belongs to the area's own shell — the durations are recorded there, so a trap on the outer shell
+# has nothing to print — and being one function, nothing can replace the cleanup or outlive it.
+on_exit() {
+  report
+  rm -rf "$LOGS"
 }
 
 # One command, one group, its own duration. `|| status=$?` is load-bearing: a bare call under `set -e`
@@ -165,7 +172,7 @@ ci() {
 # way out — including when a gate failed and `set -e` ended the area early, which is the run whose
 # numbers a reader most wants.
 area() {
-  trap report EXIT
+  trap on_exit EXIT
   "$@"
 }
 
