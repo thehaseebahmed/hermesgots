@@ -217,11 +217,14 @@ function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; bus
     const timer = window.setInterval(read, PR_PENDING_MS)
     return () => window.clearInterval(timer)
   }, [chatId, checksRunning])
-  // The session's read mark rides the activity it has seen, as on the current screen.
-  const threadId = session?.id
-  const activity = session ? lastActivityAt(session) : 0
+  // The chat's read mark rides the activity it has seen, as on the current screen: every chat
+  // writes one, not only a coding session, because the sidebar's bot row reads the marks of the
+  // bot's own threads (ADR 0110). A session's moment is its last activity, which a pull request or
+  // a close moves too; a thread's is its last turn.
+  const threadId = chat?.id
+  const activity = chat ? (session ? lastActivityAt(chat) : chat.updatedAt) : 0
   useEffect(() => {
-    if (threadId) markRead(threadId, activity)
+    if (threadId && activity > 0) markRead(threadId, activity)
   }, [threadId, activity])
   if (!chat || !bot) return null
   const todos = (tracked && chat.todos?.items) || []
