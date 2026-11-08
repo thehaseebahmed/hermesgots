@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { botFields, type RegistryBotRecord, type SealedBotRecord } from "@/lib/bot-record"
 import { connectionKey } from "@/lib/connection"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import { checkHealth } from "@/lib/hermes"
@@ -21,22 +22,18 @@ import { inboxFingerprint, openFromInbox, toBase32, type SealedToInbox } from "@
  * sealed to the account's inbox, and every device turns the records into bots.
  */
 
-interface RegistryBot {
+interface RegistryBot extends RegistryBotRecord {
   hostId: string
   keyId: string
   sealed: SealedToInbox
-  enabled: boolean
   adopts?: string
-  seen?: { at: number; pluginVersion?: string }
 }
 
 /** What a plugin seals for the app (`record` in `plugin/link.py`). */
-interface BotRecord {
+interface BotRecord extends SealedBotRecord {
   name: string
-  profile: string
   baseUrl: string
   apiKey: string
-  pluginVersion?: string
 }
 
 /** The plugin checks in every 10 minutes, so two missed check-ins and a margin mean it's gone. */
@@ -182,11 +179,7 @@ async function pull() {
       // Sealed to a key this device doesn't hold yet; the host re-seals on its next check-in.
       continue
     }
-    const local = {
-      disabled: !record.enabled || undefined,
-      seenAt: record.seen?.at,
-      pluginVersion: record.seen?.pluginVersion ?? value.pluginVersion,
-    }
+    const local = botFields(record, value)
     const profiles = await db.profiles.toArray()
     if (!record.adopts && !profiles.some((p) => p.id === botId)) {
       const manual = profiles.find(

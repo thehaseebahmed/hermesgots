@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from . import events
+from .rooms import ROOM_PREFIX
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,14 @@ def _validate(chats: Any) -> list[tuple[str, int, int, str | None]]:
         raise InvalidChats("chats must be an object")
     rows = []
     for chat_id, entry in chats.items():
+        if not isinstance(chat_id, str):
+            raise InvalidChats("Invalid chat id")
+        # A room is the Host's, and its record is projected onto every chat list rather than stored
+        # on one (ADR 0116). A device that sends one back — an app older than rooms merges it as a
+        # chat — is dropped here, which is every writer's rule and not one route's. Its id is the
+        # projection's to shape, so an id no chat could carry is not this store's refusal either.
+        if chat_id.startswith(ROOM_PREFIX):
+            continue
         if not chat_id or len(chat_id) > MAX_ID_LENGTH:
             raise InvalidChats("Invalid chat id")
         if not isinstance(entry, dict):

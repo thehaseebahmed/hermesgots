@@ -16,6 +16,7 @@ import asyncio
 import concurrent.futures
 import threading
 import time
+import uuid
 import contextlib
 import json
 import logging
@@ -1065,28 +1066,130 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
         return Path(get_hermes_home())
 
+    async def with_rooms(records: Dict[str, Any]) -> Dict[str, Any]:
+        """A bot's chat list as a device reads it: its chats, and a record per room it sits in.
+
+        The room records are projected on every read and never stored (ADR 0116), so a device that
+        has never opened a room still gets its row and nothing here can edit one as a chat. A list
+        that can't reach the Host's rooms is the chats alone: a chat list never fails over rooms.
+        """
+        try:
+            home = profile_home()
+            # The seam's own budget bounds each Host call, but not a dispatcher that blocks on the
+            # thread it was called on, so the wait has one of its own — a second past it, where the
+            # seam's cleaner answer lands first.
+            records.update(
+                await asyncio.wait_for(
+                    asyncio.to_thread(rooms.chat_records, link.profile_name(home), home=home),
+                    rooms.CHAT_LIST_TIMEOUT + 1.0,
+                )
+            )
+        except TimeoutError:
+            logger.debug("gots: the host held the chat list past its rooms budget")
+        except Exception:  # a chat list must answer with its chats even when rooms can't be read
+            logger.warning("gots: the chat list carries no rooms this time", exc_info=True)
+        return records
+
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         records = await asyncio.to_thread(chats.read, store_path())
-        return web.json_response({"object": "gots.chats", "chats": records})
+        return web.json_response({"object": "gots.chats", "chats": await with_rooms(records)})
 
     async def merge_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        try:
-            body = await request.json()
-        except ValueError:
+        body = await json_body(request)
+        if body is None:
             return _error(web, "Body must be JSON", 400)
         try:
-            records = await asyncio.to_thread(
-                chats.merge, store_path(), (body or {}).get("chats") if isinstance(body, dict) else None
-            )
+            records = await asyncio.to_thread(chats.merge, store_path(), body.get("chats"))
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
-        return web.json_response({"object": "gots.chats", "chats": records})
+        return web.json_response({"object": "gots.chats", "chats": await with_rooms(records)})
+
+    def hosted_refusal(error: "rooms.HostRefusal") -> "web.Response":
+        """The Host refused the request: its words, code and reason, at the status it answers.
+
+        A refusal is the Host's answer rather than this plugin's, so nothing here rewords it; the
+        reason rides along because the Host marks some refusals with a word the app can act on.
+        """
+        reason = (error.data or {}).get("reason")
+        body: Dict[str, Any] = {"message": str(error)}
+        if isinstance(error.code, int):
+            body["code"] = error.code
+        if reason:
+            body["reason"] = reason
+        return web.json_response({"error": body}, status=error.status)
+
+    async def room_call(
+        call: Callable[..., Dict[str, Any]], *args: Any
+    ) -> "Tuple[Optional[Dict[str, Any]], Any]":
+        """One room call off the loop thread, or the Host's answer in place of one."""
+        try:
+            answer = await asyncio.wait_for(
+                asyncio.to_thread(call, *args, home=profile_home()), rooms.CALL_TIMEOUT + 1.0
+            )
+        except TimeoutError:
+            # A Host dispatcher that blocks holds the thread the seam called it on, where the seam's
+            # own budget can't reach it; the route answers rather than holding the request.
+            return None, _error(web, "This host didn't answer in time.", 504)
+        except rooms.HostRefusal as refused:
+            return None, hosted_refusal(refused)
+        except rooms.RoomError as error:
+            return None, _error(web, str(error), error.status)
+        # A room rides the chat list a device merges (ADR 0116), so making, renaming or disbanding
+        # one is a change to that list, and every other device hears it as one.
+        await asyncio.to_thread(events.note, "chats", None, store_path(), True)
+        return answer, None
+
+    async def create_room(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        room_id = body.get("room_id")
+        if not isinstance(room_id, str) or not room_id:
+            # The app mints the id so a send it retries is the same room, not a second one.
+            return _error(web, "A room needs the id its app minted.", 400)
+        answer, failed = await room_call(
+            rooms.create_room, room_id, body.get("name"), body.get("members")
+        )
+        if failed is not None:
+            return failed
+        return web.json_response({"object": "gots.room", "room": answer.get("room")})
+
+    async def rename_room(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        event_id = body.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            # The Host renames atomically with one replay event, so a call with no id gets a fresh
+            # one; an app that retries on purpose sends its own and that is the same rename.
+            event_id = uuid.uuid4().hex
+        answer, failed = await room_call(
+            rooms.rename_room, request.match_info["room_id"], body.get("name"), event_id
+        )
+        if failed is not None:
+            return failed
+        return web.json_response({"object": "gots.room", "room": answer.get("room")})
+
+    async def disband_room(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        answer, failed = await room_call(rooms.disband_room, request.match_info["room_id"])
+        if failed is not None:
+            return failed
+        return web.json_response({"object": "gots.room", "tombstone": answer.get("tombstone")})
 
     async def session_context(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1956,6 +2059,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
+    app.router.add_post(f"{PREFIX}/rooms", create_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}", rename_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/disband", disband_room)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)
     app.router.add_post(f"{PREFIX}/projects", create_project)

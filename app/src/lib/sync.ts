@@ -76,6 +76,7 @@ const LOCAL_BOT_FIELDS = [
   "disabled",
   "seenAt",
   "pluginVersion",
+  "hermesProfile",
   "contextWindow",
   "contextModel",
   "imageInput",
@@ -558,6 +559,12 @@ async function syncAppearance(key: CryptoKey) {
 const DRAFT_RECORD_CAP = 64 * 1024
 const encoder = new TextEncoder()
 
+/**
+ * The id a room's record rides the chat list under — the plugin's own `rooms.ROOM_PREFIX` (ADR 0116),
+ * which its test suite holds this spelling to.
+ */
+export const ROOM_ID_PREFIX = "room:"
+
 async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatValue>> {
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
@@ -579,6 +586,13 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
 
 async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][]) {
   for (const [id, entry] of pull) {
+    // A room's record is the plugin's projection of a room on the Host, not a chat this device
+    // holds (ADR 0116): merging one here would draw a chat with no session and no title. Its
+    // deletion is the one thing to act on — it takes away a row an app older than rooms drew.
+    if (id.startsWith(ROOM_ID_PREFIX)) {
+      if (entry.deleted && (await db.conversations.get(id))) await deleteConversation(id, { remote: true })
+      continue
+    }
     const existing = await db.conversations.get(id)
     // Two bots on one server share its chat list; each chat stays with the bot that has it.
     if (existing && existing.profileId !== profileId) continue

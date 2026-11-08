@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .sessions import COMPRESSION_DEPTH, _forks, _open_state
-from .store import connect, db_path
+from .store import connect, db_path, millis
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _ms(seconds: float) -> int:
     rows the compaction took away when it holds them, and a mark a millisecond under one of those
     still reads as "written after the compaction", which drops the divider one row too early.
     """
-    return int(seconds * 1000 + 0.5)
+    return millis(seconds)
 
 
 def _in_place(

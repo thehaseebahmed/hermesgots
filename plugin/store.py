@@ -150,6 +150,27 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def millis(seconds: Any) -> int:
+    """A time in seconds as the milliseconds the app stamps and merges rows by (``Math.round``)."""
+    return int(float(seconds) * 1000 + 0.5)
+
+
+def at_ms(value: Any) -> Optional[int]:
+    """A time a Host gave in seconds, as the milliseconds a synced record's ``at`` merges in.
+
+    Rounded half a millisecond up, so a value a fraction under the truth doesn't lose to a record it
+    should have beaten. ``None`` for anything that isn't a time — a Host that named none, a flag
+    where a timestamp belongs — because that is not the epoch: an ``at`` of 0 loses to every record a
+    device already holds, so the caller's answer is to project nothing rather than project that.
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        return millis(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
 

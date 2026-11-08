@@ -132,6 +132,11 @@ export interface Profile {
   vocabulary?: string[]
   /** The linked host that registered it; unset for a bot added by hand before linking. */
   hostId?: string
+  /**
+   * The Hermes profile name it answers as on its host, which a room's roster names it by and the
+   * member picker seats it with; backfilled by the next registry read.
+   */
+  hermesProfile?: string
   /** Its pushes are muted: nothing it says reaches any device. Synced; the plugin holds the mute. */
   muted?: boolean
   /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */

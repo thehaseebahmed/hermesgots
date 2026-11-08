@@ -87,13 +87,18 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("gateway/session_authority.py",), "async def resolve_unknown_as_owner"),
     (("gateway/session_api.py",), "def restore_api_session"),
     (("gateway/session_authorities.py",), "def authority_for_home"),
-    # The Host's rooms, as `plugin/rooms.py` reaches them (ADR 0117): the dispatcher the seam hands a
-    # request to in process, the two contract entries it calls and the two fields it reads out of
+    # The Host's rooms, as `plugin/rooms.py` reaches them (ADR 0117, ADR 0118): the dispatch the
+    # seam asks the server for — the split module's own copy can't run, and `register` publishes the
+    # rebound one onto the server — the contract entries it calls and the two fields it reads out of
     # `groups.capabilities`, and the loopback client it falls back to when neither the import nor the
     # call answers.
+    (("tui_gateway/server.py",), "register(sys.modules[__name__])"),
     (("tui_gateway/rpc_dispatch.py",), "def dispatch(req: dict"),
     (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.capabilities"'),
     (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.list"'),
+    (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.create"'),
+    (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.rename"'),
+    (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.disband"'),
     (("tui_gateway/contracts/groups_bot_relay.py",), "class GroupsCapabilitiesResult(Result):"),
     (("tui_gateway/contracts/groups_bot_relay.py",), "    driver: bool"),
     (("hermes_cli/gateway_client.py",), "async def connect_gateway"),
