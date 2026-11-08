@@ -1245,6 +1245,103 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.room.sent", **found})
 
+    async def approve_room(request: "web.Request") -> "web.Response":
+        """The approval a room's member waits on, answered Once or Deny (rooms.py).
+
+        The four coordinates are the Host's own: its approve resolves exactly the request they name,
+        so a card the user read is the request that is answered and no other.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        member_id = minted(body.get("member_id"))
+        task_id = minted(body.get("task_id"))
+        request_id = minted(body.get("request_id"))
+        generation = body.get("execution_generation")
+        if member_id is None or task_id is None or request_id is None:
+            return _error(web, "An approval needs its member_id, task_id and request_id.", 400)
+        if type(generation) is not int or generation < 0:
+            return _error(web, "An approval needs the execution_generation it was raised in.", 400)
+        choice = body.get("choice")
+        if choice not in rooms.CHOICES:
+            return _error(web, "An approval is answered Once or Deny.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.approve,
+                request.match_info["room_id"].strip(),
+                member_id,
+                task_id,
+                generation,
+                request_id,
+                choice,
+                home=home,
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room.approved", **found})
+
+    async def answer_room(request: "web.Request") -> "web.Response":
+        """One member's question answered with the choices the user picked (rooms.py).
+
+        A question is the plugin's own holding for that member's turn, so the answer is the request
+        the Host's turn waits on, and one that has already settled is a 409 rather than a second one.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        question_id = minted(body.get("question_id"))
+        if question_id is None:
+            return _error(web, "An answer needs the question_id it answers.", 400)
+        member_id = minted(body.get("member_id")) or ""
+        answers = body.get("answers")
+        if not isinstance(answers, dict) or not answers:
+            return _error(web, "An answer needs the answer to each question.", 400)
+        if any(not isinstance(value, (str, list)) for value in answers.values()):
+            return _error(web, "An answer is a choice, a list of them, or words.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.answer_question,
+                request.match_info["room_id"].strip(),
+                member_id,
+                question_id,
+                answers,
+                home=home,
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room.answered", **found})
+
+    async def stop_room(request: "web.Request") -> "web.Response":
+        """The round stopped: the Host cancels the room's work, and the log says so (rooms.py)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # A stop needs nothing of its body — the room is on the path — but one it was sent and can't
+        # read is refused rather than dropped, since the stop's own id would be lost with it.
+        sent = (await request.text()).strip()
+        body = await json_body(request) if sent else {}
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        cancel_id = minted(body.get("cancel_id"))
+        if cancel_id is None and body.get("cancel_id") is not None:
+            return _error(web, "The cancel_id must be a string.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.stop_room, request.match_info["room_id"].strip(), cancel_id, home=home
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room.stopped", **found})
+
     async def session_context(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2116,6 +2213,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/rooms/{{room_id}}", read_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}", rename_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/send", send_room_message)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/approve", approve_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/answer", answer_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/stop", stop_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/disband", disband_room)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)

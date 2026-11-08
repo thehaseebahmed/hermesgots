@@ -38,7 +38,8 @@ class Host:
         listed=(),
         driver=True,
         methods=("groups.capabilities", "groups.list", "groups.create", "groups.rename",
-                 "groups.disband", "groups.state", "groups.log", "groups.send"),
+                 "groups.disband", "groups.state", "groups.log", "groups.send",
+                 "groups.approve", "groups.stop"),
         refuse=None,
         refusal=None,
         inline=False,
@@ -46,10 +47,16 @@ class Host:
         events=(),
         driver_status=None,
         states=None,
+        features=None,
     ):
         self.listed = list(listed)
         self.driver = driver
         self.methods = list(methods)
+        # What the Host declares it can do beyond the methods: today a Host that projects a room
+        # member's questions names it here, which is what earns `rooms_questions` (rooms.py).
+        self.features = list(features or [])
+        self.approvals = []
+        self.stops = []
         self.refuse = refuse
         # The Host's answer for the method it won't serve, in its own words and with its own code.
         self.refusal = refusal or (4123, "Group Chat worker is unavailable.")
@@ -99,7 +106,8 @@ class Host:
     def answer(self, method, params=None):
         params = params or {}
         if method == "groups.capabilities":
-            return {"protocol_version": 1, "driver": self.driver, "methods": self.methods}
+            return {"protocol_version": 1, "driver": self.driver, "methods": self.methods,
+                    "features": self.features}
         if method == "groups.list":
             # The Host's own reader: a room that has been disbanded answers only when it is asked
             # for, which is what makes a tombstone reachable at all.
@@ -131,6 +139,14 @@ class Host:
             return self.log_page(params)
         if method == "groups.send":
             return self.sent(params)
+        if method == "groups.approve":
+            # The Host's own approve: it resolves only the exact request the app named.
+            self.approvals.append(params)
+            return {"approved": True, "result": {"choice": params.get("choice"), "request_id":
+                                                 params.get("request_id")}}
+        if method == "groups.stop":
+            self.stops.append(params)
+            return {"cancelled": 1}
         raise AssertionError(f"the seam asked for {method}")
 
     def dispatch(self, request, transport=None):
@@ -1011,6 +1027,266 @@ class RoomConversation(unittest.TestCase):
             [("room", "room-1")],
             "an activity frame that names no room notes nothing",
         )
+
+
+APPROVAL = {
+    "kind": "approval", "task_id": "dtask:1", "execution_generation": 3,
+    "run_id": "run-1", "session_id": "session-1", "request_id": "approval-1", "member_id": "m1",
+    "approval": {
+        "request_id": "approval-1", "command": "rm -rf build", "description": "Clear the build",
+        "choices": ["once", "deny", "session", "always"],
+    },
+}
+
+QUESTION = {
+    "id": "q0", "question": "Which database?", "choices": ["Postgres", "SQLite"],
+    "multi_select": False,
+}
+
+
+def waiting_host(**extra):
+    """A Host whose member m1 waits on an approval, and whose driver is otherwise at rest."""
+    return Host(driver_status={
+        "running": True, "working": True, "blocked": True, "counts": {"running": 1},
+        "pending_actions": [APPROVAL], "member_activity": [{"member_id": "m1", "status": "running"}],
+        "peer_routes": [],
+    }, **extra)
+
+
+@contextlib.contextmanager
+def answerable(resolved):
+    """The Host's own server-request seam, as the plugin reaches it in process: `resolved` collects
+    every response frame written for a waiting request and says whether one is still open."""
+    module = ModuleType("tui_gateway.server_requests")
+    held = SimpleNamespace(frames=resolved, open={"srq-1"})
+
+    def resolve_response(frame, transport=None):
+        held.frames.append(dict(frame))
+        return frame.get("id") in held.open
+
+    module.resolve_response = resolve_response
+    with planted({"tui_gateway": package("tui_gateway"), "tui_gateway.server_requests": module}):
+        yield held
+
+
+class RoomWaiting(unittest.TestCase):
+    """The room needs the user, and the user answers there (F4).
+
+    An approval is the Host's own pending action, answered through its own `groups.approve`, which
+    takes Once or Deny and nothing else. A question is held by the plugin for the member's turn — a
+    Host that never projects one holds nothing, and a room there draws no card it can't answer.
+    """
+
+    def setUp(self):
+        self.home = temp_hermes_home(self)
+        with rooms._questions_lock:
+            rooms._questions.clear()
+
+    def asked(self, path, *, room_id=None, body=None, method="POST", unreadable=False):
+        return asked_route(self, path, method=method, room_id=room_id, body=body,
+                           unreadable=unreadable)
+
+    def read_room(self):
+        return self.asked(plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="GET")
+
+    def approve(self, body=None):
+        return self.asked(
+            plugin.PREFIX + "/rooms/{room_id}/approve", room_id="room-1",
+            body={"member_id": "m1", "task_id": "dtask:1", "execution_generation": 3,
+                  "request_id": "approval-1", "choice": "once"} if body is None else body,
+        )
+
+    def answer(self, body=None):
+        return self.asked(
+            plugin.PREFIX + "/rooms/{room_id}/answer", room_id="room-1",
+            body={"member_id": "m1", "question_id": "srq-1",
+                  "answers": {"q0": "Postgres"}} if body is None else body,
+        )
+
+    def stop(self, body=None):
+        return self.asked(plugin.PREFIX + "/rooms/{room_id}/stop", room_id="room-1", body=body)
+
+    def test_the_read_says_which_approval_the_room_waits_on(self):
+        host = waiting_host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            payload = self.read_room()["payload"]
+        self.assertEqual(
+            payload["waiting"],
+            [{"kind": "approval", "memberId": "m1", "taskId": "dtask:1", "generation": 3,
+              "requestId": "approval-1", "command": "rm -rf build", "description": "Clear the build"}],
+            "the pending action's exact coordinates, and only Once or Deny to answer it with",
+        )
+
+    def test_a_room_at_rest_waits_on_nothing(self):
+        with dispatcher(Host(events=CONVERSATION)), no_loopback():
+            self.assertEqual(self.read_room()["payload"]["waiting"], [])
+
+    def test_an_approval_is_not_drawn_where_the_host_cannot_take_an_answer(self):
+        # A Host that lists rooms and declares no approve: the card would be a tap that can only
+        # come back refused, so the room draws none and the Host's own timeout answers it.
+        host = waiting_host(
+            events=CONVERSATION,
+            methods=["groups.capabilities", "groups.list", "groups.state", "groups.log"],
+        )
+        with dispatcher(host), no_loopback():
+            payload = self.read_room()["payload"]
+        self.assertEqual(payload["waiting"], [])
+        self.assertFalse(payload["canStop"], "and a Stop it never declared is not offered either")
+
+    def test_an_approval_is_answered_once_through_the_hosts_own_approve(self):
+        host = waiting_host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.approve()
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.room.approved")
+        self.assertEqual(
+            host.approvals,
+            [{"room_id": "room-1", "member_id": "m1", "task_id": "dtask:1",
+              "execution_generation": 3, "request_id": "approval-1", "choice": "once"}],
+            "the Host resolves the one request the app named, and nothing beside it",
+        )
+
+    def test_deny_is_the_other_answer(self):
+        host = waiting_host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.approve({"member_id": "m1", "task_id": "dtask:1",
+                                   "execution_generation": 3, "request_id": "approval-1",
+                                   "choice": "deny"})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(host.approvals[-1]["choice"], "deny")
+
+    def test_a_third_choice_is_a_400_and_the_host_is_not_asked(self):
+        # The Host's own approve takes Once or Deny only; a Session or Always tap would be a card
+        # that can only come back refused.
+        host = waiting_host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.approve({"member_id": "m1", "task_id": "dtask:1",
+                                   "execution_generation": 3, "request_id": "approval-1",
+                                   "choice": "always"})
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("Once", answer["payload"]["error"]["message"])
+        self.assertEqual(host.approvals, [])
+
+    def test_an_approval_with_no_member_is_a_400(self):
+        host = waiting_host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.approve({"task_id": "dtask:1", "execution_generation": 3,
+                                   "request_id": "approval-1", "choice": "once"})
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("member_id", answer["payload"]["error"]["message"])
+        self.assertEqual(host.approvals, [])
+
+    def test_an_approval_the_host_no_longer_waits_on_is_its_own_refusal(self):
+        host = waiting_host(events=CONVERSATION, refuse="groups.approve",
+                            refusal=(4127, "room approval is no longer pending"))
+        with dispatcher(host), loopback(Loopback(host)) as client:
+            answer = self.approve()
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(answer["payload"]["error"]["message"],
+                         "room approval is no longer pending")
+        self.assertEqual(client.methods, [], "a refusal is an answer, so it is never repeated")
+
+    def test_an_answered_approval_notes_the_room_so_every_device_hears_it(self):
+        host = waiting_host(events=CONVERSATION)
+        path = store.current_path()
+        before = events.latest(path)
+        with dispatcher(host), no_loopback():
+            self.approve()
+        self.assertEqual(
+            [(row["kind"], row["session_id"]) for row in events.read_since(path, before)[0]],
+            [("room", "room-1")],
+        )
+
+    def test_a_question_a_member_asks_is_held_and_read_back_with_its_choices(self):
+        host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
+        with dispatcher(host), no_loopback():
+            rooms.on_member_activity(
+                room_id="room-1", member_id="m1", task_id="dtask:1", kind="request.opened",
+                payload={"kind": "clarify", "request_id": "srq-1", "questions": [QUESTION]},
+            )
+            payload = self.read_room()["payload"]
+        self.assertEqual(
+            payload["waiting"],
+            [{"kind": "question", "memberId": "m1", "questionId": "srq-1",
+              "questions": [{"id": "q0", "question": "Which database?",
+                             "choices": ["Postgres", "SQLite"], "multiSelect": False}]}],
+            "the question, the choices it offers, and the request the Host waits on",
+        )
+
+    def test_a_question_is_answered_with_its_choice(self):
+        host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
+        with dispatcher(host), no_loopback():
+            rooms.on_member_activity(
+                room_id="room-1", member_id="m1", task_id="dtask:1", kind="request.opened",
+                payload={"kind": "clarify", "request_id": "srq-1", "questions": [QUESTION]},
+            )
+            with answerable([]) as resolved:
+                answer = self.answer()
+            waiting = self.read_room()["payload"]["waiting"]
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.room.answered")
+        self.assertEqual(
+            resolved.frames,
+            [{"id": "srq-1", "result": {"answers": {"q0": "Postgres"}, "outcome": "submitted"}}],
+            "the answer reaches the request the Host's own turn waits on",
+        )
+        self.assertEqual(waiting, [], "and the card goes")
+
+    def test_an_answer_to_a_question_nothing_waits_on_is_a_409(self):
+        host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
+        with dispatcher(host), no_loopback(), answerable([]):
+            answer = self.answer()
+        self.assertEqual(answer["status"], 409)
+        self.assertIn("waiting", answer["payload"]["error"]["message"])
+
+    def test_stop_cancels_the_rooms_work_and_notes_it(self):
+        host = Host(events=CONVERSATION)
+        path = store.current_path()
+        before = events.latest(path)
+        with dispatcher(host), no_loopback():
+            answer = self.stop({"cancel_id": "c1"})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.room.stopped")
+        self.assertEqual(answer["payload"]["cancelled"], 1)
+        self.assertEqual(host.stops, [{"room_id": "room-1", "cancel_id": "c1"}])
+        self.assertEqual(
+            [(row["kind"], row["session_id"]) for row in events.read_since(path, before)[0]],
+            [("room", "room-1")],
+        )
+
+    def test_stop_with_no_body_asks_the_host_without_a_cancel_id(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            self.stop()
+        self.assertEqual(host.stops, [{"room_id": "room-1"}])
+
+    def test_stop_on_a_host_that_cannot_stop_a_room_is_a_400_in_its_words(self):
+        host = Host(events=CONVERSATION, refuse="groups.stop",
+                    refusal=(4130, "This room's work can't be stopped."))
+        with dispatcher(host), loopback(Loopback(host)):
+            answer = self.stop()
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(answer["payload"]["error"]["message"], "This room's work can't be stopped.")
+
+    def test_rooms_questions_is_advertised_only_where_the_host_names_its_questions(self):
+        # A Host that never projects a member's question can't be answered in the room, so the
+        # card is not offered there: `rooms` alone, as before.
+        reads = ["groups.capabilities", "groups.list", "groups.state", "groups.log"]
+        with dispatcher(waiting_host(events=CONVERSATION, methods=reads)), no_loopback():
+            self.assertEqual([one for one in self.features() if one.startswith("rooms")], ["rooms"])
+        with dispatcher(waiting_host(events=CONVERSATION, methods=reads,
+                                     features=[rooms.QUESTION_FEATURE])), no_loopback():
+            self.assertEqual(
+                [one for one in self.features() if one.startswith("rooms")],
+                ["rooms", "rooms_questions"],
+            )
+
+    def features(self):
+        app = wire(self, RouteAdapter())
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {}, {}
+        answer = asyncio.run(route(app, plugin.PREFIX + "/info")(request))
+        return answer["payload"]["features"]
 
 
 if __name__ == "__main__":

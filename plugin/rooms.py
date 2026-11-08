@@ -49,6 +49,20 @@ CALL_TIMEOUT = 10.0
 PROBE_TIMEOUT = 3.0
 DISCOVERY_TIMEOUT = 2.0
 
+# What a room's approval card offers: the Host's own approve resolves Once or Deny and nothing else,
+# so a Session or Always tap would be a control that can only come back refused.
+CHOICES: Tuple[str, str] = ("once", "deny")
+
+# The Host feature a room's question rides: a Host that projects a member's clarify prompt as room
+# activity, so the answer has a request to reach. A Host without it holds no question for us, and
+# `rooms_questions` is not advertised there — a card drawn over a question nothing can answer is
+# worse than the Host's own timeout answering it (rooms.py's read says which of the two it is).
+QUESTION_FEATURE = "room_member_questions"
+
+# How many questions one room may have in hand: a member asks one at a time, and a room of six
+# members cannot hold more than six without something having gone wrong.
+MAX_QUESTIONS = 8
+
 # How long one Host's projected chat list is worth keeping, and how long one that couldn't answer is
 # left alone.
 PROJECTION_TTL = 2.0
@@ -88,6 +102,13 @@ _methods: Dict[str, Tuple[float, Tuple[str, ...]]] = {}
 NOTE_SECONDS = 1.0
 _noted: Dict[str, float] = {}
 _notes_lock = threading.Lock()
+
+# The questions a room's members are waiting on, by the request the Host's own turn waits with: a
+# question is the one thing a room can't read from the Host's state, because a member's turn is a
+# hidden session and its clarify prompt is the Host's own. It is held here from the activity frame
+# that opened it, and answered back into that same request.
+_questions: Dict[str, Dict[str, Any]] = {}
+_questions_lock = threading.Lock()
 
 # One Host's last projection, by its home, and the lock one home's read holds while it asks.
 _projections: Dict[str, Projection] = {}
@@ -416,6 +437,241 @@ def _activity(driver: Any) -> List[Dict[str, Any]]:
     return drawn
 
 
+def _questions_of(raw: Any) -> List[Dict[str, Any]]:
+    """The questions one clarify prompt asks, in the app's words: what to ask and what it offers.
+
+    A question with no id or no words names nothing a screen can answer, so it is dropped rather
+    than drawn blank; the choices are the Host's own labels and stay as it wrote them.
+    """
+    drawn: List[Dict[str, Any]] = []
+    for row in raw if isinstance(raw, (list, tuple)) else ():
+        if not isinstance(row, dict):
+            continue
+        qid, question = row.get("id"), row.get("question")
+        if not isinstance(qid, str) or not qid or not isinstance(question, str) or not question:
+            continue
+        one: Dict[str, Any] = {"id": qid, "question": question}
+        choices = [c for c in row.get("choices") or () if isinstance(c, str) and c]
+        if choices:
+            one["choices"] = choices
+            one["multiSelect"] = row.get("multi_select") is True or row.get("multiSelect") is True
+        drawn.append(one)
+    return drawn
+
+
+def hold_question(
+    room_id: Any, member_id: Any, request_id: Any, questions: Any, *, task_id: Any = None
+) -> bool:
+    """Keeps one member's question until the user answers it here; False when there is none to keep.
+
+    A room's question is not on the Host's state: a member's turn runs as a hidden session, and the
+    prompt it waits on is that session's own server request. The Host's activity hook names the
+    request it opened, so the answer can be written back to exactly that wait and nowhere else. What
+    is kept is the little a card draws — the words, the choices, and who asked.
+    """
+    if not (isinstance(room_id, str) and room_id.strip()):
+        return False
+    if not (isinstance(member_id, str) and member_id.strip()):
+        return False
+    if not (isinstance(request_id, str) and request_id.strip()):
+        return False
+    drawn = _questions_of(questions)
+    if not drawn:
+        return False
+    held = {
+        "roomId": room_id.strip(),
+        "memberId": member_id.strip(),
+        "questionId": request_id.strip(),
+        "questions": drawn,
+        "at": time.time(),
+    }
+    with _questions_lock:
+        _questions[held["questionId"]] = held
+        if len(_questions) > MAX_QUESTIONS:
+            # A room whose questions were never answered keeps its newest: the older ones have been
+            # timed out by the Host's own wait, and a card over one could not be answered anyway.
+            oldest = sorted(_questions.values(), key=lambda one: one["at"])[: len(_questions) - MAX_QUESTIONS]
+            for one in oldest:
+                _questions.pop(one["questionId"], None)
+    return True
+
+
+def _held_questions(room_id: str) -> List[Dict[str, Any]]:
+    """The questions this room is waiting on, oldest first, in the words a card draws."""
+    with _questions_lock:
+        held = [one for one in _questions.values() if one["roomId"] == room_id]
+    return [
+        {
+            "kind": "question",
+            "memberId": one["memberId"],
+            "questionId": one["questionId"],
+            "questions": one["questions"],
+        }
+        for one in sorted(held, key=lambda row: row["at"])
+    ]
+
+
+def _approval(row: Any) -> Optional[Dict[str, Any]]:
+    """One approval the Host is holding, with the exact coordinates that resolve it and nothing else.
+
+    The Host's driver reports it as a pending action: which member, which task, which generation and
+    which request. Losing any of the four would answer a request other than the one the user read.
+    """
+    if not isinstance(row, dict) or row.get("kind") != "approval":
+        return None
+    member, task = row.get("member_id"), row.get("task_id")
+    generation, request = row.get("execution_generation"), row.get("request_id")
+    if not (isinstance(member, str) and member and isinstance(task, str) and task):
+        return None
+    if type(generation) is not int or not (isinstance(request, str) and request):
+        return None
+    approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
+    drawn: Dict[str, Any] = {
+        "kind": "approval",
+        "memberId": member,
+        "taskId": task,
+        "generation": generation,
+        "requestId": request,
+    }
+    # The Host redacts the command before it reports one; what is left is what a card shows.
+    for wire, key in (("command", "command"), ("description", "description")):
+        said = approval.get(wire)
+        if isinstance(said, str) and said:
+            drawn[key] = said
+    return drawn
+
+
+def waiting(driver: Any, methods: Tuple[str, ...], room_id: str) -> List[Dict[str, Any]]:
+    """What this room waits on the user for: the approvals it can be answered about, and questions.
+
+    An approval the Host declares no approve for is not drawn: a card whose tap could only come
+    back refused is worse than the Host's own timeout answering it. A question is drawn only where
+    the plugin is holding one, which is only where the Host projected it.
+    """
+    found: List[Dict[str, Any]] = []
+    if "groups.approve" in methods:
+        for row in (driver or {}).get("pending_actions") or ():
+            drawn = _approval(row)
+            if drawn is not None:
+                found.append(drawn)
+    found.extend(_held_questions(room_id))
+    return found
+
+
+def _resolve(request_id: str, answers: Dict[str, Any]) -> bool:
+    """Writes one answer onto the Host's own server request; False when nothing waits for it.
+
+    The Host's turn blocks on the same request every surface answers, so the answer is handed to the
+    Host's own registry rather than to a copy of it: the member's turn carries on in the same run.
+    """
+    try:
+        import importlib
+
+        server_requests = importlib.import_module("tui_gateway.server_requests")
+    except ImportError as error:
+        raise RoomError("This host can't take an answer to that question.", 501) from error
+    resolve = getattr(server_requests, "resolve_response", None)
+    if not callable(resolve):
+        raise RoomError("This host can't take an answer to that question.", 501)
+    frame = {
+        "id": request_id,
+        "result": {"answers": dict(answers), "outcome": "submitted"},
+    }
+    try:
+        return resolve(frame) is not False
+    except Exception as error:
+        logger.warning("gots: couldn't answer a room's question", exc_info=True)
+        raise RoomError("The host couldn't take that answer.", 502) from error
+
+
+def answer_question(
+    room_id: str, member_id: str, question_id: str, answers: Any,
+    *, timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """Answers the question a member's turn is waiting on, and forgets it once the Host has it.
+
+    The answer is keyed by question id, as the Host asks them, so a card that sat on the screen
+    while another device answered first is refused (409) rather than answered twice.
+    """
+    if not isinstance(question_id, str) or not question_id:
+        raise RoomError("An answer needs the question it answers.", 400)
+    if not isinstance(answers, dict) or not answers:
+        raise RoomError("An answer needs the answer to each question.", 400)
+    with _questions_lock:
+        held = _questions.get(question_id)
+        if (
+            held is None
+            or held["roomId"] != room_id
+            or (member_id and held["memberId"] != member_id)
+        ):
+            raise RoomError("That question isn't waiting for an answer any more.", 409)
+        # Forgotten before the write: a second tap while the first is out is the same stale card.
+        _questions.pop(question_id, None)
+    if not _resolve(question_id, answers):
+        raise RoomError("That question isn't waiting for an answer any more.", 409)
+    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    return {"questionId": question_id}
+
+
+def approve(
+    room_id: str, member_id: str, task_id: str, generation: int, request_id: str, choice: str,
+    *, timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """``groups.approve``: the one approval the user read, answered Once or Deny.
+
+    The Host resolves the exact request or refuses; a choice it doesn't take is refused here rather
+    than offered, because its approve has no other ending.
+    """
+    if choice not in CHOICES:
+        raise RoomError("An approval is answered Once or Deny.", 400)
+    found = call(
+        "groups.approve",
+        {
+            "room_id": room_id,
+            "member_id": member_id,
+            "task_id": task_id,
+            "execution_generation": generation,
+            "request_id": request_id,
+            "choice": choice,
+        },
+        timeout=timeout, home=home,
+    )
+    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    return {"approved": found.get("approved") is not False, "choice": choice}
+
+
+def stop_room(
+    room_id: str, cancel_id: Optional[str] = None, *,
+    timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """``groups.stop``: the round's work cancelled, so every member's turn ends where it is.
+
+    The Host writes what it stopped into the room's own log, which is what the transcript reads; the
+    note here is only so the devices with the room on screen hear it at once.
+    """
+    params: Dict[str, Any] = {"room_id": room_id}
+    if cancel_id:
+        params["cancel_id"] = cancel_id
+    found = call("groups.stop", params, timeout=timeout, home=home)
+    # A Stop its questions were waiting on is over too: the turns they belonged to are cancelled.
+    with _questions_lock:
+        for one in [one for one in _questions.values() if one["roomId"] == room_id]:
+            _questions.pop(one["questionId"], None)
+    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    cancelled = found.get("cancelled")
+    return {"cancelled": cancelled if type(cancelled) is int else 0}
+
+
+def _asked_a_question(payload: Dict[str, Any]) -> bool:
+    """Whether one activity frame is a member's clarify prompt opening, rather than its approval.
+
+    A Host that projects questions says so in the frame's own kind; an approval's frame says
+    ``approval``, and every other frame is a turn moving and asks nothing.
+    """
+    kind = payload.get("kind") or payload.get("prompt_kind")
+    return isinstance(kind, str) and kind == "clarify" and isinstance(payload.get("questions"), list)
+
+
 def methods(home: Any = None, *, timeout: float = CALL_TIMEOUT) -> Tuple[str, ...]:
     """This Host's room methods, kept for a breath: the answer a read needs and nothing else.
 
@@ -493,6 +749,7 @@ def read_room(
         since = max(0, reached - LOG_WINDOW) if type(reached) is int else 0
     events, cursor, latest, more = _log_pages(room_id, since, left, home)
     driver = found.get("driver_status")
+    known = methods(home, timeout=left())
     return {
         "room": {
             "id": room_id,
@@ -509,9 +766,13 @@ def read_room(
         "hasMore": more,
         "working": isinstance(driver, dict) and driver.get("working") is True,
         "activity": _activity(driver),
+        # What stops the room and answers a member's turn waits on is the Host's to declare: a card
+        # or a control it never offered is one the app would draw and could never work.
+        "waiting": waiting(driver, known, room_id),
+        "canStop": "groups.stop" in known,
         # A Host's driver can stop after `info` said it was running: a room it isn't working takes a
         # message and never answers it, so the composer goes rather than the message with it.
-        "canSend": "groups.send" in methods(home, timeout=left())
+        "canSend": "groups.send" in known
         and not (isinstance(driver, dict) and driver.get("running") is False),
     }
 
@@ -542,15 +803,26 @@ def send_message(
 def on_member_activity(**kwargs: Any) -> None:
     """The Host's ``on_room_member_activity`` hook: a member's turn moved, so its room changed.
 
-    The hook fires per frame — a tool starting, a delta, an approval opening — and the app re-reads
-    the room it has on screen when it hears one. A room's own window is a second, wider than
-    ``events``'s quarter: a stream that noted four times a second would make the screen read four
-    times a second, to draw one working line that cannot say more than "someone is answering".
+    The hook fires per frame — a tool starting, a delta, an approval opening, and (on a Host that
+    projects it) the question a member's turn is waiting on. A question is kept before the note
+    window, because it is state and not a change: the card the user answers is read from it later.
+    Everything else is only news, and a room's own window is a second, wider than ``events``'s
+    quarter: a stream that noted four times a second would make the screen read four times a second,
+    to draw one working line that cannot say more than "someone is answering".
     """
     room_id = kwargs.get("room_id")
     if not isinstance(room_id, str) or not room_id.strip():
         return
     room_id = room_id.strip()
+    payload = kwargs.get("payload") if isinstance(kwargs.get("payload"), dict) else {}
+    if kwargs.get("kind") == "request.opened" and _asked_a_question(payload):
+        hold_question(
+            room_id,
+            kwargs.get("member_id"),
+            payload.get("request_id"),
+            payload.get("questions"),
+            task_id=kwargs.get("task_id"),
+        )
     now = time.monotonic()
     with _notes_lock:
         last = _noted.get(room_id, 0.0)
@@ -730,18 +1002,25 @@ def available(home: Any = None) -> Optional[str]:
 
 
 def advertised(home: Any = None) -> List[str]:
-    """The `info` rows this Host's rooms earn: ``rooms``, and ``rooms_write`` where it can be written.
+    """The `info` rows this Host's rooms earn: `rooms`, `rooms_questions`, and `rooms_write`.
 
-    One ask answers both, because `info` is read on every app open and a second probe would double
-    what a Host that can't answer already costs. The write row is separate from the read's for the
-    reason every family here splits them: a Host can list its rooms and not be able to make, rename
-    or disband one, and a New room drawn there is a tap that can only come back refused.
+    One ask answers them all, because `info` is read on every app open and a second probe would
+    double what a Host that can't answer already costs. The write row is separate from the read's for
+    the reason every family here splits them: a Host can list its rooms and not be able to make,
+    rename or disband one, and a New room drawn there is a tap that can only come back refused. The
+    question row is advertised apart for the same reason (the plan's own rule): a Host that never
+    projects a member's question has nothing for the plugin to hold, so a room there draws no
+    question card and its own timeout answers — where the row is absent the app knows not to offer
+    one at all.
     """
     found, why = _probe(home)
     if found is None:
         logger.debug("gots: no rooms on this host: %s", why)
         return []
     answered = found.get("methods") or ()
+    rows = ["rooms"]
+    if QUESTION_FEATURE in (found.get("features") or ()):
+        rows.append("rooms_questions")
     if any(name not in answered for name in WRITES):
-        return ["rooms"]
-    return ["rooms", "rooms_write"]
+        return rows
+    return [*rows, "rooms_write"]
