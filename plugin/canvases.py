@@ -224,22 +224,6 @@ def listing(path: Path) -> List[Dict[str, Any]]:
     return [_row(row) for row in rows]
 
 
-def version_of(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
-    """The current version's document and the tools it declared, or None before the first write.
-
-    The current version is the one the record points at, not the newest stored one: an undo moves
-    that pointer back, and the versions above it stay stored but unreachable.
-    """
-    if not canvas_id or not path.exists():
-        return None
-    conn = connect(path)
-    try:
-        found = _record(conn, canvas_id)
-        return _version(conn, canvas_id, found["version"]) if found else None
-    finally:
-        conn.close()
-
-
 def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[Dict[str, Any]]:
     """One version's document and the tools it declared, over a connection the caller holds."""
     row = conn.execute(
@@ -406,12 +390,14 @@ def _commit(
             document = _apply(pointer["html"], edits)
             declared = _tools(tools) if tools is not None else json.dumps(pointer["tools"])
         scan(document)
-        # One above the highest stored version rather than the pointer's: an undo leaves the versions
-        # above the pointer stored, and a write must never land on top of one of them.
-        highest = conn.execute(
-            "SELECT MAX(version) FROM canvas_versions WHERE canvas_id = ?", (canvas_id,)
-        ).fetchone()[0]
-        number = (highest or 0) + 1
+        # The version above the one the record points at. An undo left the versions it walked off
+        # stored and unreachable — there is no redo — and a write replaces that history rather than
+        # sitting on top of it: otherwise a later undo would land on the page the user rejected.
+        conn.execute(
+            "DELETE FROM canvas_versions WHERE canvas_id = ? AND version > ?",
+            (canvas_id, found["version"]),
+        )
+        number = found["version"] + 1
         conn.execute(
             """INSERT INTO canvas_versions (canvas_id, version, html, tools, at)
                VALUES (?, ?, ?, ?, ?)""",

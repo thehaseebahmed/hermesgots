@@ -96,10 +96,14 @@ function put(canvas: Canvas) {
   const next = index === -1 ? [listed, ...rows] : rows.map((row) => (row.id === canvas.id ? listed : row))
   const missing = { ...state.missing }
   delete missing[canvas.id]
+  // A read served before an undo can land after the undo's own answer: the record's clock is what
+  // says which of the two the host wrote last, so an older document never replaces a newer one.
+  const held = state.details[canvas.id]
+  const stale = html !== undefined && held !== undefined && held.at > canvas.at
   store.set({
     ...state,
     lists: { ...state.lists, [canvas.profileId]: next },
-    details: html === undefined ? state.details : { [canvas.id]: canvas },
+    details: html === undefined || stale ? state.details : { [canvas.id]: canvas },
     missing,
   })
 }
@@ -173,10 +177,6 @@ async function botHolding(id: string): Promise<string | null> {
   return found ?? null
 }
 
-/**
- * One canvas, read by a call of the caller's choosing and kept as the app now has it: the guard for
- * a canvas no bot holds, the bot that does, its config, and the record the read answered.
- */
 async function readInto(
   id: string,
   read: (profile: Profile, id: string) => Promise<Record<string, unknown> | null | undefined>,
@@ -188,19 +188,23 @@ async function readInto(
   if (raw) put(toCanvas(raw, profileId))
 }
 
-// One read in flight per canvas: a screen's poll, a turn's end and a change heard together are one
-// GET, and the answer lands once — the same rule the list's own sweep keeps below.
+// One read in flight per canvas, and one more owed to whatever asked while it ran: a screen's poll,
+// a turn's end and a change heard together cost one GET, and a change that lands mid-read still ends
+// with a read that saw it — the same rule the list's sweep keeps below.
 const reading = new Map<string, Promise<void>>()
+const owed = new Set<string>()
 
 /** Reads one canvas with the document its record points at, which is what its screen draws. */
-export function refreshCanvas(id: string, signal?: AbortSignal) {
+export function refreshCanvas(id: string) {
   const running = reading.get(id)
-  if (running) return running
-  const read = readInto(id, (profile, canvasId) => getCanvas(profile, canvasId, signal)).finally(
-    () => {
-      reading.delete(id)
-    },
-  )
+  if (running) {
+    owed.add(id)
+    return running
+  }
+  const read = readInto(id, (profile, canvasId) => getCanvas(profile, canvasId)).finally(() => {
+    reading.delete(id)
+    if (owed.delete(id)) void refreshCanvas(id).catch(() => undefined)
+  })
   reading.set(id, read)
   return read
 }
@@ -240,7 +244,7 @@ export function useCanvas(id: string) {
   const live = useLive(profile)
   const changes = useChanges("canvas", profile)
   usePoll(
-    (signal) => void refreshCanvas(id, signal).catch(() => undefined),
+    () => void refreshCanvas(id).catch(() => undefined),
     live ? SAFETY_MS : LIST_MS,
     [id, changes, live],
   )

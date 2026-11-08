@@ -378,7 +378,7 @@ class EditTest(unittest.TestCase):
         self.assertIn("<title>Split</title>", edited["html"])
         self.assertIn("<h1>Split the bill</h1>", edited["html"])
         self.assertEqual(edited["tools"], second["tools"])
-        self.assertEqual(canvases.version_of(self.path, self.canvas["id"])["version"], 3)
+        self.assertEqual(canvases.current(self.path, self.canvas["id"])["version"], 3)
 
         restored = canvases.undo(self.path, self.canvas["id"])
         self.assertEqual((restored["version"], restored["html"]), (second["version"], second["html"]))
@@ -388,7 +388,6 @@ class EditTest(unittest.TestCase):
         self.assertIs(restored["can_undo"], True)
         self.assertIs(canvases.current(self.path, self.canvas["id"])["can_undo"], True)
 
-        # A second undo works, and a canvas at its first version has nothing left to undo.
         back = canvases.undo(self.path, self.canvas["id"])
         self.assertEqual((back["version"], back["html"]), (first["version"], first["html"]))
         self.assertIs(back["can_undo"], False)
@@ -396,12 +395,13 @@ class EditTest(unittest.TestCase):
             canvases.undo(self.path, self.canvas["id"])
         self.assertEqual(refused.exception.status, 409)
 
-        # A write after an undo takes a number above the highest stored version, so it never lands
-        # on a version the undo left behind.
+        # A write lands on the version the user is looking at: the history the undo walked off is
+        # replaced rather than kept above it.
         written = canvases.write(
             self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>Again</h1>")
         )
-        self.assertEqual(written["version"], edited["version"] + 1)
+        self.assertEqual(written["version"], first["version"] + 1)
+        self.assertEqual(self.stored_versions(), [first["version"], written["version"]])
 
     def test_an_edit_whose_second_pair_matches_twice_writes_nothing(self) -> None:
         twice = DOCUMENT.replace(
@@ -422,9 +422,8 @@ class EditTest(unittest.TestCase):
         self.assertIn("2 of 2", message)
         self.assertIn('"Save"', message)
         self.assertIn("2 times", message)
-        # The first pair matched, and nothing at all was written.
         self.assertEqual(canvases.record(self.path, self.canvas["id"])["version"], written["version"])
-        self.assertEqual(canvases.version_of(self.path, self.canvas["id"])["html"], twice)
+        self.assertEqual(canvases.current(self.path, self.canvas["id"])["html"], twice)
 
     def test_after_an_undo_canvas_read_answers_the_restored_version(self) -> None:
         kept = canvases.write(self.path, self.canvas["id"], DOCUMENT)
@@ -437,13 +436,11 @@ class EditTest(unittest.TestCase):
         # The agent reads what the user is looking at, not the version the undo walked off.
         self.assertEqual((read["version"], read["html"]), (kept["version"], kept["html"]))
 
-    def test_an_edit_after_an_undo_builds_on_the_restored_version(self) -> None:
-        # True of the code before an edit took the write lock too, and kept as the pin on the order it
-        # now guarantees: the pairs are applied to the version the record points at, read on the
-        # connection that writes them, so an undo landing between that read and that write can't be
-        # reverted by an edit built from the version it walked off. The race itself needs two writers,
-        # which a single-threaded test cannot stage — so what this holds is that the edit builds on
-        # the restored version and stores it as the version above the highest.
+    def test_an_edit_after_an_undo_builds_on_the_restored_text(self) -> None:
+        # What it holds: the pairs are applied to the version the record points at, and that version
+        # is read on the connection the write takes, so an undo cannot be reverted by an edit built
+        # from the version it walked off. The race needs two writers, which a single-threaded case
+        # cannot stage.
         first = canvases.write(
             self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>First</h1>")
         )
@@ -457,12 +454,32 @@ class EditTest(unittest.TestCase):
             self.canvas["id"],
             [{"find": "<h1>First</h1>", "replace": "<h1>Restored</h1>"}],
         )
-        # Version 3, since an edit lands above the highest stored version, and built on the text the
-        # undo restored rather than the version it walked off.
-        self.assertEqual(edited["version"], 3)
+        # One above the restored version, built on the text the undo put back.
+        self.assertEqual(edited["version"], first["version"] + 1)
         self.assertIn("<h1>Restored</h1>", edited["html"])
         self.assertNotIn("<h1>Second</h1>", edited["html"])
-        self.assertEqual(canvases.version_of(self.path, self.canvas["id"])["version"], 3)
+        self.assertEqual(canvases.current(self.path, self.canvas["id"])["version"], 2)
+
+    def test_after_a_write_the_undo_goes_back_to_what_the_write_replaced(self) -> None:
+        one = canvases.write(
+            self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>One</h1>")
+        )
+        two = canvases.write(
+            self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>Two</h1>")
+        )
+        canvases.write(
+            self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>Three</h1>")
+        )
+        self.assertEqual(canvases.undo(self.path, self.canvas["id"])["version"], two["version"])
+        # The write lands on the version the user is looking at, replacing the history they walked
+        # off — so the undo after it goes back to that version, never into the abandoned one.
+        four = canvases.write(
+            self.path, self.canvas["id"], DOCUMENT.replace("<h1>Tip</h1>", "<h1>Four</h1>")
+        )
+        self.assertEqual(four["version"], two["version"] + 1)
+        back = canvases.undo(self.path, self.canvas["id"])
+        self.assertEqual((back["version"], back["html"]), (two["version"], two["html"]))
+        self.assertGreater(one["version"], 0)
 
 
 class RouteTest(unittest.TestCase):

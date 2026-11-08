@@ -95,14 +95,11 @@ test("the page reports its scroll to the app and starts where it was told", () =
   const html = canvasDocument(PAGE, { mode: "light", tokens: LIGHT, scroll: 420 })
   // The head script is the page's only way to say where it is: it names the message the app reads.
   assert.ok(html.includes(SCROLL_MESSAGE), "the document carries the message's name")
-  // The position rides the script as a number, and the page scrolls to it once it has loaded.
   assert.match(html, /var at=420/, "it starts at the position it was told")
   assert.match(html, /scrollTo\(0,at\)/)
   assert.match(html, /addEventListener\("load"/)
-  // After the policy, the theme and the WebRTC removal, so none of it runs before them.
   assert.ok(html.indexOf("Content-Security-Policy") < html.indexOf(SCROLL_MESSAGE))
   assert.ok(html.indexOf("RTCPeerConnection") < html.indexOf(SCROLL_MESSAGE))
-  // A page built with no position starts at the top, as a first draw should.
   const top = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
   assert.match(top, /var at=0/)
   assert.ok(!/var at=[1-9]/.test(top))

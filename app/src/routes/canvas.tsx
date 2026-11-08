@@ -19,7 +19,6 @@ import { attempt } from "@/lib/attempt"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { refreshCanvas, startCanvas, undoCanvas, useCanvas, useCanvases } from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
-import { isLive } from "@/lib/live"
 import { useLarge } from "@/lib/media"
 import { useDark } from "@/lib/theme"
 import { formatRelative } from "@/lib/format"
@@ -144,7 +143,6 @@ export function CanvasPage() {
   )
 }
 
-/** Where the canvas's chat comes to rest on a phone: half the screen, or all of it. */
 const SNAPS = [0.5, 1]
 
 /** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
@@ -221,9 +219,9 @@ export function CanvasView() {
           start={undefined}
           limit={limit}
           afterSettled={() => {
-            // The plugin notes a `canvas` change on every write, so a live stream has already redrawn
-            // this page: reading it here as well would make one edit cost two GETs.
-            if (isLive(profile)) return
+            // Every turn's end re-reads the page: a stream can be open and silent (a buffering
+            // proxy), so the event is never the only news. A read already in flight is joined and
+            // one more is owed, so the edit's event and this cost one GET between them.
             void refreshCanvas(id).catch(() => undefined)
           }}
         />
@@ -249,16 +247,18 @@ export function CanvasView() {
             <span className="shrink-0 text-xs text-muted-foreground">v{canvas.version}</span>
           ) : null}
         </div>
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          aria-label="Undo"
-          disabled={!canvas?.canUndo || undoing}
-          onClick={() => void undo()}
-        >
-          <Undo2Icon />
-        </Button>
+        {canvas?.canUndo ? (
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 rounded-full"
+            aria-label="Undo"
+            disabled={undoing}
+            onClick={() => void undo()}
+          >
+            <Undo2Icon />
+          </Button>
+        ) : null}
         {profile && <Bot id={profile.id} className="size-7 shrink-0" />}
       </header>
 

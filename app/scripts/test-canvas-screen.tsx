@@ -76,7 +76,6 @@ const canvasAt = (version: number, id = CANVAS.id) => ({
   can_undo: version > 1,
 })
 
-/** What the host holds while a case runs: the version its bot has written, and the undos asked for. */
 interface Host {
   version: number
   undos: number
@@ -216,10 +215,20 @@ test(
       async () => {
         await until(() => drawn().includes("<h1>Tip</h1>"), "the version on screen")
         assert.ok(find("[data-canvas-edit-pill]"), "a phone raises the canvas's chat from a pill")
-        // The bot wrote version 4, and its plugin noted the change on the canvas's own session.
+        // The page says where the reader is, as its own frame; the next version opens there.
+        const frame = find("iframe[data-canvas-frame]")!
+        await act(async () => {
+          window.dispatchEvent(
+            new window.MessageEvent("message", {
+              data: { type: SCROLL_MESSAGE, scroll: 450 },
+              source: frame.contentWindow,
+            }),
+          )
+        })
         host.version = 4
         await act(async () => noteChange(connectionKey(bot), "canvas"))
         await until(() => drawn().includes("<h1>Tip, newest</h1>"), "the change to redraw the canvas")
+        assert.match(drawn(), /var at=450/, "the redrawn page opens where the reader was")
         await click(find('button[aria-label="Undo"]'))
         await until(() => host.undos === 1, "the host to be asked for the undo")
         await until(() => drawn().includes("<h1>Tip</h1>"), "the version before it to be drawn")

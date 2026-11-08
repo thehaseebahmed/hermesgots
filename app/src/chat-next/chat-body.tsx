@@ -151,7 +151,6 @@ export function ChatBody({
           // What the plugin holds beside the transcript — the title, the context, the todos, a
           // session's workspace, pull requests and library — read as every chat reads it, and then
           // whatever the container reads of its own: a canvas re-reads the page its session edited.
-          // That one runs even when this read fails, since it is a read of something else.
           onSettled={(reason, thread) => {
             const read =
               reason === "turn" ? readAfterTurn(id, { turn: thread.turns }) : refreshChatDetails(id)

@@ -71,7 +71,6 @@ export function Popup({
               open={open}
               onOpenChange={(next) => onOpenChange?.(next)}
               onOpenChangeComplete={onOpenChangeComplete}
-              // A snapped sheet is a surface over a page that is still the one being read.
               modal={snapped ? false : undefined}
               snapPoints={snapped}
               defaultSnapPoint={snapped?.[0]}
@@ -114,7 +113,6 @@ export function PopupDescription(props: ComponentProps<typeof SheetDescription>)
 }
 
 const Anchor = createContext<RefObject<HTMLElement | null> | undefined>(undefined)
-/** A sheet's snap stops, which only a non-modal sheet given them has. */
 const SnapPoints = createContext<number[] | undefined>(undefined)
 const HeaderSeen = createContext<() => void>(() => {})
 
@@ -212,11 +210,7 @@ const MENU_SIZE: Record<PopupSize, string> = {
 const STACK_LIFT =
   "[--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)]"
 
-/**
- * How a sheet leaves and how it drags, whichever way it rests: the transform that takes it off the
- * bottom, scaled by how hard it was swiped, the transform it starts at, and a drag that doesn't
- * animate or select anything. Both sheets extend this, so a sheet leaves the same way in both.
- */
+/** Both sheets extend this, so a sheet leaves and drags the same way in either. */
 const SHEET_MOTION =
   "data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0"
 
