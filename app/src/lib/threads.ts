@@ -499,7 +499,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     const found = await db.conversations.get(chat)
     return {
       chat,
-      found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
+      found: found ? { profileId: rowOwner(found), projectId: found.projectId } : null,
     }
   }, [chat, main])
   const found = owner && owner.chat === chat ? owner.found : undefined
@@ -509,7 +509,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   if (main) {
     profileId = main
   } else if (found && listsAsChat(found)) {
-    profileId = rowOwner(found)
+    profileId = found.profileId
     thread = chat
   } else if (found === undefined && hint) {
     // Still loading: go by what the link said.

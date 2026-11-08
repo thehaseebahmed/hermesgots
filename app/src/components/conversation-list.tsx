@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
-import { rowBot, rowOwner } from "@/lib/chat-row"
+import { rowAnswers, rowBot, rowOwner } from "@/lib/chat-row"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { presence } from "@/lib/registry"
 import type { Message } from "@/lib/db"
@@ -102,7 +102,7 @@ function Recents({
     const chats = await db.conversations
       .orderBy("updatedAt")
       .reverse()
-      .filter((c) => listsAsChat(c) && Boolean(rowBot(c, bots)))
+      .filter((c) => listsAsChat(c) && rowAnswers(c, bots))
       .limit(RECENTS)
       .toArray()
     // This device's own unanswered approval or question, which a keyless bot or one without the
