@@ -7,6 +7,7 @@ import { db, mainThreadId } from "@/lib/db"
 import { markRead, readMark } from "@/lib/read-marks"
 import { ChatPage } from "@/routes/chat"
 import {
+  absent,
   botProfile,
   chatScreen,
   click,
@@ -29,7 +30,7 @@ const MAIN = mainThreadId(bot.id)
  * thread's own clock is `thread.at`, so a case can put its activity either side of a read mark.
  */
 async function seed(thread: { id: string; at: number; sessionAt?: number }) {
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id })
+  await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
@@ -171,7 +172,8 @@ test("a thread's render writes its mark, which is the moment the row measures ag
 })
 
 test("with the switch off the sidebar lists chats, and no bot row is drawn", async () => {
-  await seedSettings({ developer: true, botThreads: false, activeProfileId: bot.id })
+  // The legacy layout is the opt-out now (`legacyChat`), not the bots layout's on-switch (#110).
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.conversations.clear()
@@ -179,6 +181,8 @@ test("with the switch off the sidebar lists chats, and no bot row is drawn", asy
   globalThis.fetch = async () => json({})
   await mount(screen("/"), async () => {
     await until(async () => findAll("nav").length > 0, "the sidebar")
-    assert.equal(find(`a[href="/c/${MAIN}"]`), null, "no bots layout, no bot row")
+    // `absent`, not `assert.equal` against null: a DOM element compared to null builds a diff of the
+    // whole element, and a run that should have said one sentence instead ate the machine.
+    absent(`a[href="/c/${MAIN}"]`, "no bots layout, no bot row")
   })
 })
