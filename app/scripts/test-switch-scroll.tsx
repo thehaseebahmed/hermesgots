@@ -22,8 +22,8 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const first = botProfile("switch-scroll-first", { id: "bot-1", name: "First" })
-const second = botProfile("switch-scroll-second", { id: "bot-2", name: "Second" })
+const first = botProfile("switch-scroll-first", { id: "bot-1", name: "First", apiKey: undefined })
+const second = botProfile("switch-scroll-second", { id: "bot-2", name: "Second", apiKey: undefined })
 const MAIN_A = mainThreadId(first.id)
 const MAIN_B = mainThreadId(second.id)
 
@@ -78,7 +78,7 @@ const seed = () =>
         messages: [{ id: "tb-1", content: "the other bot's thread", at: at(3) }],
       },
     ],
-    { bots: [first, second], active: first.id, botThreads: true },
+    { bots: [first, second], active: first.id },
   )
 
 const VIEWPORT = 720

@@ -22,7 +22,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("bot-chrome", { id: "bot-1", name: "Chrome" })
+const bot = botProfile("bot-chrome", { id: "bot-1", name: "Chrome", apiKey: undefined })
 const other = botProfile("bot-other", { id: "bot-2", name: "Other" })
 const MAIN = mainThreadId(bot.id)
 const HOUR = 3_600_000
@@ -36,7 +36,7 @@ const msg = (
 ): Message => ({ id, conversationId, role, content, status: "done", createdAt })
 
 async function seedMain() {
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id })
+  await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
@@ -129,7 +129,7 @@ test("Bot settings from Main's menu opens the bots screen", async () => {
 
 async function seedSidebar() {
   const now = Date.now()
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id })
+  await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot, other])
   await db.messages.clear()

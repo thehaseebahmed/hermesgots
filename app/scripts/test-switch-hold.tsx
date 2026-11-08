@@ -28,7 +28,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("switch-hold", { id: "bot-1", name: "Switcher" })
+const bot = botProfile("switch-hold", { id: "bot-1", name: "Switcher", apiKey: undefined })
 const other = botProfile("switch-hold-other", { id: "bot-2", name: "Otherly" })
 const MAIN = mainThreadId(bot.id)
 
@@ -174,7 +174,7 @@ test(
         { id: "t-a", title: "Thread t-a", messages: ["alpha one"] },
         { id: "t-b", title: "Thread t-b", messages: ["beta one"] },
       ],
-      { bots: [bot, other], active: bot.id, botThreads: true },
+      { bots: [bot, other], active: bot.id },
     )
     await ensureMainThread(bot.id)
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
@@ -510,7 +510,6 @@ test("a thread list asked for another bot is unknown, never no threads", async (
   await seedChats([{ id: "t-a", title: "Thread t-a", messages: ["alpha one"] }], {
     bots: [bot, other],
     active: bot.id,
-    botThreads: true,
   })
   await mount(<Asked first={other.id} then={bot.id} />, async () => {
     await until(async () => find("[data-answer]")?.textContent === "0", "a bot with no threads")

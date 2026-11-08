@@ -21,8 +21,8 @@ import {
   SlidersHorizontalIcon,
   TerminalIcon,
   DatabaseIcon,
+  EyeOffIcon,
   MenuIcon,
-  MessageSquareDashedIcon,
   MessagesSquareIcon,
   MessageSquareTextIcon,
   PaletteIcon,
@@ -372,7 +372,6 @@ function MenuScreen({
       </Group>
       <Group>
         <CommunityRow />
-        <ReferenceRow />
         <FeedbackRow />
       </Group>
       <Group>
@@ -641,13 +640,12 @@ export function DeveloperSettings() {
     <>
       <Group>
         <SwitchRow
-          id="bot-threads"
+          id="legacy-chat"
           icon={MessagesSquareIcon}
-          title="Bot threads"
-          experimental
-          subtitle="Bots in the sidebar, chats as threads"
-          checked={Boolean(settings?.botThreads)}
-          onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
+          title="Enable legacy chat UX"
+          subtitle="Recents in the sidebar, chats in one list"
+          checked={Boolean(settings?.legacyChat)}
+          onCheckedChange={(checked) => saveSettings({ legacyChat: checked })}
         />
         <SwitchRow
           id="show-progress-reminders"
@@ -657,15 +655,6 @@ export function DeveloperSettings() {
           subtitle="Each reminder a thread hides, as a row of its own"
           checked={Boolean(settings?.showProgressReminders)}
           onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
-        />
-        <SwitchRow
-          id="chat-next"
-          icon={MessageSquareDashedIcon}
-          title="New chat screen"
-          experimental
-          subtitle="Chats read straight from Hermes 0.22.5 or newer"
-          checked={Boolean(settings?.chatNext)}
-          onCheckedChange={(checked) => saveSettings({ chatNext: checked })}
         />
         <SwitchRow
           id="meetings"
@@ -680,6 +669,7 @@ export function DeveloperSettings() {
       {isNative && pushAvailable() && <TestPushRow />}
       <Group>
         <SyncServerRow />
+        <DeviceStateRow />
       </Group>
       <Group>
         <SwitchRow
@@ -705,9 +695,19 @@ export function DeveloperSettings() {
         ))}
       </Group>
       <Group>
-        <DeviceStateRow />
+        <LinkRow
+          to="/docs/open-ui"
+          leading={<BookOpenCheckIcon className="size-5 shrink-0 text-muted-foreground" />}
+          title="Component reference"
+          subtitle="The blocks a bot can draw"
+        />
       </Group>
-      <Button variant="outline" onClick={() => saveSettings({ developer: false, netLog: false })}>
+      <Button
+        variant="ghost"
+        className="h-11 rounded-full"
+        onClick={() => saveSettings({ developer: false, netLog: false })}
+      >
+        <EyeOffIcon data-icon="inline-start" />
         Hide developer settings
       </Button>
     </>
@@ -822,17 +822,6 @@ function Row({
 
 function FeedbackRow() {
   return <SheetRow icon={MessageSquareTextIcon} title="Send feedback" sheet={FeedbackSheet} />
-}
-
-function ReferenceRow() {
-  return (
-    <LinkRow
-      to="/docs/open-ui"
-      leading={<BookOpenCheckIcon className="size-5 shrink-0 text-muted-foreground" />}
-      title="Component reference"
-      subtitle="The blocks a bot can draw"
-    />
-  )
 }
 
 /**

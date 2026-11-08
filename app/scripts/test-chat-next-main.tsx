@@ -51,7 +51,7 @@ const screen = (id: string) => (
   </MemoryRouter>
 )
 
-/** A bot with its Main and one thread, on chat-next, with bot threads on. */
+/** A bot with its Main and one thread, on chat-next, its bot callable. */
 async function seedMain(name: string) {
   const bot = botProfile(name, { name: "Tri", baseUrl: `http://${name}.test/v1` })
   const main = mainThreadId(bot.id)
@@ -60,7 +60,7 @@ async function seedMain(name: string) {
       { id: main, title: "Main", main: true, at: 1 },
       { id: `${name}-t1`, title: "Trip to Lisbon", at: 2 },
     ],
-    { bots: [bot], botThreads: true, settings: { chatNext: true } },
+    { bots: [bot] },
   )
   // The thread has been sent in, as one triage or a /thread made would have: the message that opened
   // it is what its card says, so this device is given that row too.

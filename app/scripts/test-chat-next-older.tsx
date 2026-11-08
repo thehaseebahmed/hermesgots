@@ -198,6 +198,31 @@ test("a page that fails leaves the thread as drawn, and is read again only when 
   })
 })
 
+test("a page answered with no page at all fails the read, and the chat drawn is kept whole", async () => {
+  // The body a proxy's envelope or an older route sends: a 200 with no rows in it. It is a failed
+  // read that offers the retry, not the start of the chat — a thread drawn short would be a thread
+  // whose older words are gone with nothing saying so.
+  const host = fakeHost("gots-pageless")
+  host.seed(LONG)
+  const blank = host.pageless(2 * PAGE)
+  await withDevice(openDevice(host), async (device) => {
+    await eventually(() => assert.equal(device.older(), "failed"), "the failure is said")
+    await wait(100)
+    const drawn = device.turns()
+    assert.ok(drawn.length > 8 && drawn.length < 30, "what was read is still drawn")
+    assert.equal(host.offsets.filter((at) => at === 2 * PAGE).length, 1, "not read by itself")
+    await wait(200)
+    assert.equal(device.older(), "failed", "and it says so until the reader asks again")
+    assert.deepEqual(device.turns(), drawn, "with the chat as it was")
+    assert.equal(document.querySelector('[role="alert"]'), null, "the chat itself is not failed")
+
+    blank.fix()
+    await device.retryOlder()
+    await showsEverything(device, host, "the whole chat, once the page is a page again")
+    await eventually(() => assert.equal(device.older(), undefined), "and the retry gone")
+  })
+})
+
 test("a page that fails while the chat is held back does not stop the newest page being drawn", async () => {
   const host = fakeHost("gots-fail-first-ok")
   host.seed(LONG)
@@ -214,7 +239,6 @@ test("a page that fails while the chat is held back does not stop the newest pag
 test("the app's rows keep their ids while older turns are added above, which is what holds the reader's place", async () => {
   await seedChats([{ id: "c-older", title: "Long chat" }], {
     bots: [{ ...botProfile("hermes"), baseUrl: "http://c-older.test/v1" }],
-    settings: { chatNext: true },
   })
   const host = fakeHost("gots-c-older")
   host.seed(LONG)

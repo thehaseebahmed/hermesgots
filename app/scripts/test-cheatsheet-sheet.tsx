@@ -21,9 +21,9 @@ import {
 } from "./component-kit.tsx"
 
 const CHAT = "cheat-1"
-const bot = botProfile("cheatsheet", { id: "bot-1", name: "Cheatsy" })
-const OFF = ["Composer", "Slash menu", "Chat", "While something's open"]
-const ON = ["Composer", "Slash menu", "Chat", "Navigation", "While something's open"]
+const bot = botProfile("cheatsheet", { id: "bot-1", name: "Cheatsy", apiKey: undefined })
+const OFF = ["Composer", "Slash menu", "Chat", "Bot threads", "While something's open"]
+const ON = ["Composer", "Slash menu", "Chat", "Bot threads", "Navigation", "While something's open"]
 
 const seed = (patch: Partial<Omit<Settings, "id">> = {}) =>
   seedChat({ id: CHAT, profile: bot, settings: { activeProfileId: bot.id, ...patch } })
@@ -148,8 +148,8 @@ test("with navigation shortcuts on, the sheet opened afterwards names Alt+1…9"
   })
 })
 
-test("with bot threads on, the sheet names the two keys of the thread beside Main", async () => {
-  await seed({ developer: true, botThreads: true })
+test("the sheet names the two keys of the thread beside Main", async () => {
+  await seed()
   host()
   await mount(chatScreen(CHAT), async () => {
     await until(async () => Boolean(composerField()), "the composer")

@@ -601,10 +601,6 @@ await flow(
     const mainId = `main-${profileId}`
     const mainPath = `/c/${mainId}`
 
-    await page.evaluate(async () => {
-      const { db } = await import("/src/lib/db.ts")
-      await db.settings.update("settings", { developer: true, botThreads: true })
-    })
     await page.goto(`${app}/`)
     await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
     pass("the bot opens its Main thread")

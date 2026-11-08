@@ -119,7 +119,7 @@ async function seed(
   extra: { main?: boolean; bot?: Partial<Profile>; keepMessages?: boolean } = { main: true },
 ) {
   const bot = botProfile(name, extra.bot)
-  await seedSettings({ developer: true, botThreads: true })
+  await seedSettings({ developer: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   if (!extra.keepMessages) await db.messages.clear()

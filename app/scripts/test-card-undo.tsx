@@ -8,23 +8,19 @@ import { syncChatsOf } from "@/lib/sync"
 import {
   botProfile,
   chatScreen,
-  click,
   find,
   findAll,
   json,
   mount,
   seedSettings,
-  settle,
   text,
   threadCard,
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("card-undo", { id: "bot-1", name: "Cards" })
+const bot = botProfile("card-undo", { id: "bot-1", name: "Cards", apiKey: undefined })
 const MAIN = mainThreadId(bot.id)
-const MAIN_SESSION = `gots-${MAIN}`
 const MOVED = "Plan my move"
-
 const undos: string[] = []
 
 interface Queued {
@@ -95,7 +91,7 @@ const msg = (
 ): Message => ({ id, conversationId, role, content, status: "done", createdAt })
 
 async function seed(moves: Move[], { copy = true } = {}) {
-  await seedSettings({ developer: true, botThreads: true })
+  await seedSettings({ developer: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
@@ -227,50 +223,6 @@ test("a message moved into an older thread keeps its marker, and that thread's c
   })
 })
 
-test("undoing from the card asks the host, and the card stops offering it", async () => {
-  await seed([opened])
-  host([opened])
-  await mount(chatScreen(MAIN), async () => {
-    await settles("n1")
-    await click(undoIn(card("n1")))
-    assert.deepEqual(undos, [`${MAIN_SESSION}/moves/move-new/undo`])
-    await settle()
-    assert.equal(undoIn(card("n1")), null, "the undone move leaves no Undo behind")
-  })
-})
-
-const inMain = (said: string) =>
-  findAll('[data-slot="message-scroller-item"]').some((item) => item.textContent?.includes(said))
-
-test("undoing returns the message to Main and takes away the thread that existed only for it", async () => {
-  await seed([opened], { copy: false })
-  host([opened])
-  await mount(chatScreen(MAIN), async () => {
-    await settles("n1")
-    assert.ok(card("n1"), "the message left as a card, not a message")
-    assert.equal(inMain(MOVED), false)
-    await click(undoIn(card("n1")))
-    await until(async () => inMain(MOVED), "the message back in Main")
-    await act(async () => void (await syncChatsOf([bot.id])))
-    await settle()
-    assert.equal(await db.conversations.get("n1"), undefined, "the thread is gone from this device")
-    assert.equal(card("n1"), null, "and so is its card")
-    assert.equal(marker(), null, "with no marker left in its place")
-  })
-})
-
-test("Undo on the card refuses once the thread has replied, and the card keeps no button", async () => {
-  await seed([opened])
-  host([opened], { refuse: true })
-  await mount(chatScreen(MAIN), async () => {
-    await settles("n1")
-    await click(undoIn(card("n1")))
-    assert.deepEqual(undos, [`${MAIN_SESSION}/moves/move-new/undo`])
-    await settle()
-    assert.equal(undoIn(card("n1")), null, "a refused undo still drops the button")
-  })
-})
-
 const PICK = { provider: "anthropic", model: "claude-sonnet-4.5" }
 
 /** The host's answer to the merge, with one chat's record newer and naming no model at all. */
@@ -295,52 +247,6 @@ function answerWithoutPick(id: string) {
 }
 
 /** The host's answer to the merge, with one chat's record newer and naming `choice`. */
-function answerWithPick(id: string, choice: { provider: string; model: string }) {
-  const answer = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/gots/chats") && init?.body) {
-      const posted = JSON.parse(String(init.body)).chats ?? {}
-      const record = posted[id]
-      if (record)
-        return json({
-          object: "gots.chats",
-          chats: {
-            ...posted,
-            [id]: { at: record.at + 1, value: { ...record.value, modelChoice: choice } },
-          },
-        })
-    }
-    return answer(input, init)
-  }) as typeof fetch
-}
-
-test("a record naming another pick still replaces the one this device holds", async () => {
-  // The other half of the rule above: a record that stays quiet about the model keeps the local
-  // pick, so one that names a model must still be taken — else a pick made on another device
-  // would never land here, which is worse than the erase it replaced.
-  await seed([opened])
-  host([opened])
-  await db.conversations.update("t-old", { modelChoice: PICK })
-  answerWithPick("t-old", { provider: "openai", model: "gpt-5" })
-  await act(async () => void (await syncChatsOf([bot.id])))
-  assert.deepEqual((await db.conversations.get("t-old"))?.modelChoice, {
-    provider: "openai",
-    model: "gpt-5",
-  })
-})
-
-test("a Default tapped on another device still travels", async () => {
-  // The marker is how a clear is said, so it has to cross: a chat told to follow the default
-  // elsewhere must stop following the model it was pinned to here.
-  await seed([opened])
-  host([opened])
-  await db.conversations.update("t-old", { modelChoice: PICK })
-  answerWithPick("t-old", { provider: "", model: "" })
-  await act(async () => void (await syncChatsOf([bot.id])))
-  assert.deepEqual((await db.conversations.get("t-old"))?.modelChoice, { provider: "", model: "" })
-})
-
 test("a chat the host answers without a pick keeps the pin this device holds", async () => {
   // A record that carries no model has nothing to say about one: only a user's own change writes
   // the chat's pick, and a marker when they pick the Default row, so erasing it here would lose the

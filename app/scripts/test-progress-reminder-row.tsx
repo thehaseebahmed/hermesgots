@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { MemoryRouter } from "react-router"
 
 import { streamHandlers, type Turn } from "@/lib/chat"
 import { db, type Message } from "@/lib/db"
@@ -89,85 +90,35 @@ test("the Developer switch is off until it is turned on, keeps the pick, and ask
   }) as typeof fetch
   // The switch root sits inside Base UI's label: the bare id belongs to a clipped hidden input.
   const row = () => find("#show-progress-reminders-label [data-slot='switch']")
-  await mount(<DeveloperSettings />, async () => {
-    assert.equal(checkedOf(row()), false, "off until it is turned on")
-    await click(row())
-    assert.equal(checkedOf(row()), true, "and on once it is")
-  })
+  await mount(
+    <MemoryRouter>
+      <DeveloperSettings />
+    </MemoryRouter>,
+    async () => {
+      assert.equal(checkedOf(row()), false, "off until it is turned on")
+      await click(row())
+      assert.equal(checkedOf(row()), true, "and on once it is")
+    },
+  )
   assert.deepEqual(asked, [], "the switch is the device's: nothing was asked of a host")
   assert.equal(
     (await db.settings.get("settings"))?.showProgressReminders,
     true,
     "the device kept it",
   )
-  await mount(<DeveloperSettings />, async () => {
+  await mount(
+    <MemoryRouter>
+      <DeveloperSettings />
+    </MemoryRouter>,
+    async () => {
     assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
   })
 })
 
-test("with it on, the current chat screen draws the row where the call was and opens the note", async () => {
-  await seedChats([{ id: "c-reminder", title: "Sky colours" }], {
-    bots: [botProfile("hermes")],
-    settings: { showProgressReminders: true },
-  })
-  // A chat that moved since it was made catches its transcript up when it opens.
-  await db.conversations.update("c-reminder", { updatedAt: 99 })
-  serveTranscript(transcript())
-  await mount(chatScreen("c-reminder"), async () => {
-    await until(
-      async () => Boolean(find('[data-slot="progress-reminder"]')),
-      "the reminder row is drawn",
-    )
-    assert.equal(
-      findAll('[data-slot="progress-reminder"]').length,
-      1,
-      "one row for the one refusal",
-    )
-    assert.ok(standsBeforeTheGroup(), "it stands where the refused call was")
-    assert.equal(groupLabel(), "Read a file", "the group counts only the call that ran")
-    await click(find('[data-slot="progress-reminder"]'))
-    assert.equal(noteOf(), NOTE, "the sheet opens the note exactly as the host wrote it")
-    assert.match(noteOf(), /^Progress reminder:/, "its pinned opening first")
-  })
-})
-
-test("the row survives a reopen, drawn from the transcript the host still serves", async () => {
-  await seedChats([{ id: "c-reload", title: "Sky colours" }], {
-    bots: [botProfile("hermes")],
-    settings: { showProgressReminders: true },
-  })
-  await db.conversations.update("c-reload", { updatedAt: 99 })
-  serveTranscript(transcript())
-  await mount(chatScreen("c-reload"), async () => {
-    await until(
-      async () => Boolean(find('[data-slot="progress-reminder"]')),
-      "the reminder row is drawn",
-    )
-  })
-  await settle()
-  await mount(chatScreen("c-reload"), async () => {
-    await until(
-      async () => Boolean(find('[data-slot="progress-reminder"]')),
-      "the reminder row is drawn again",
-    )
-    await click(find('[data-slot="progress-reminder"]'))
-    assert.equal(noteOf(), NOTE, "the same note, from what the device folded")
-  })
-})
-
-test("with it off, the current chat screen draws nothing new", async () => {
-  await seedChats([{ id: "c-hidden", title: "Sky colours" }], { bots: [botProfile("hermes")] })
-  await db.conversations.update("c-hidden", { updatedAt: 99 })
-  serveTranscript(transcript())
-  await mount(chatScreen("c-hidden"), async () => {
-    await until(async () => Boolean(find('[data-slot="tool-group"]')), "the reply is drawn")
-    assert.equal(findAll('[data-slot="progress-reminder"]').length, 0, "no row is drawn")
-    assert.equal(groupLabel(), "Read a file", "and the group is exactly as it was")
-  })
-})
-
 test("a reply already folded with the row draws nothing once the switch is off", async () => {
-  await seedChats([{ id: "c-gate", title: "Sky colours" }], { bots: [botProfile("hermes")] })
+  await seedChats([{ id: "c-gate", title: "Sky colours" }], {
+    bots: [botProfile("hermes", { apiKey: undefined })],
+  })
   await db.messages.bulkPut([
     {
       id: "c-gate-u",
@@ -196,7 +147,7 @@ test("a reply already folded with the row draws nothing once the switch is off",
 
 test("a reply the live stream folded draws the row and the note over a seeded device", async () => {
   await seedChats([{ id: "c-live", title: "Sky colours" }], {
-    bots: [botProfile("hermes")],
+    bots: [botProfile("hermes", { apiKey: undefined })],
     settings: { showProgressReminders: true },
   })
   const draft: Message = {
@@ -245,40 +196,10 @@ test("a reply the live stream folded draws the row and the note over a seeded de
   })
 })
 
-test("with it on and no reminder in the turn, nothing extra is drawn", async () => {
-  await seedChats([{ id: "c-quiet", title: "Sky colours" }], {
-    bots: [botProfile("hermes")],
-    settings: { showProgressReminders: true },
-  })
-  await db.conversations.update("c-quiet", { updatedAt: 99 })
-  serveTranscript([
-    { id: 1, role: "user", content: "Read the parser", timestamp: 1 },
-    {
-      id: 2,
-      role: "assistant",
-      content: null,
-      timestamp: 2,
-      tool_calls: [
-        {
-          id: "call-1",
-          type: "function",
-          function: { name: "read_file", arguments: '{"path":"a.ts"}' },
-        },
-      ],
-    },
-    { id: 3, role: "tool", content: "export const a = 1", tool_call_id: "call-1", timestamp: 3 },
-    { id: 4, role: "assistant", content: "Done.", timestamp: 4, finish_reason: "stop" },
-  ])
-  await mount(chatScreen("c-quiet"), async () => {
-    await until(async () => Boolean(find('[data-slot="tool-group"]')), "the reply is drawn")
-    assert.equal(findAll('[data-slot="progress-reminder"]').length, 0, "no row appears")
-  })
-})
-
 test("with it on, the new chat screen draws the same row and the same sheet", async () => {
   await seedChats([{ id: "c-next-reminder", title: "Sky colours" }], {
     bots: [botProfile("hermes")],
-    settings: { chatNext: true, showProgressReminders: true },
+    settings: { showProgressReminders: true },
   })
   serveTranscript(transcript())
   await mount(chatScreen("c-next-reminder"), async () => {
@@ -301,7 +222,6 @@ test("with it on, the new chat screen draws the same row and the same sheet", as
 test("with it off, the new chat screen drops the refusal as it does today", async () => {
   await seedChats([{ id: "c-next-hidden", title: "Sky colours" }], {
     bots: [botProfile("hermes")],
-    settings: { chatNext: true },
   })
   serveTranscript(transcript())
   await mount(chatScreen("c-next-hidden"), async () => {

@@ -5,10 +5,9 @@ import { Link, MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
-import { sendMessage } from "@/lib/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { SPLIT_KEY } from "@/lib/split"
-import { handOver, lastThreadKey, rememberThread, takeHandover } from "@/lib/threads"
+import { lastThreadKey, rememberThread } from "@/lib/threads"
 import {
   atWidth,
   botProfile,
@@ -29,15 +28,16 @@ import {
   until,
 } from "./component-kit.tsx"
 import { FakeRecorder, dictationHost, installFakeMedia } from "./fake-dictation.ts"
+import { fakeHost } from "./chat-next-host.ts"
 
-const bot = botProfile("bot-pane", { id: "bot-1", name: "Mainly" })
+const bot = botProfile("bot-pane", { id: "bot-1", name: "Mainly", apiKey: undefined })
 const other = botProfile("bot-other", { id: "bot-2", name: "Otherly" })
 const MAIN = mainThreadId(bot.id)
 /** What a run writes into a thread whose pane the reader closed mid-reply. */
 const LANDED = "Landed while the pane was away."
 
-async function seed(threads: string[] = [], patch: { botThreads?: boolean } = {}) {
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id, ...patch })
+async function seed(threads: string[] = [], patch: { legacyChat?: boolean } = {}) {
+  await seedSettings({ developer: true, activeProfileId: bot.id, ...patch })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot, other])
   await db.messages.clear()
@@ -67,6 +67,31 @@ async function seed(threads: string[] = [], patch: { botThreads?: boolean } = {}
   )
   await ensureMainThread(bot.id)
   globalThis.fetch = async () => json({})
+}
+
+/**
+ * A thread a bot owns, as opening it wrote it: the record the bot's lane lists and the message that
+ * opened it, which is what its card says it is about.
+ */
+async function openThread(id: string, profileId: string, at: number) {
+  await db.conversations.put({
+    id,
+    profileId,
+    title: `Thread ${id}`,
+    titleEdited: true,
+    hermesSessionId: `gots-${id}`,
+    createdAt: at,
+    updatedAt: at,
+    changedAt: 10,
+  })
+  await db.messages.put({
+    id: `${id}-open`,
+    conversationId: id,
+    role: "user",
+    content: `Opened ${id}`,
+    status: "done",
+    createdAt: at + 1,
+  })
 }
 
 const screen = (entry: string) => (
@@ -125,15 +150,15 @@ const titles = () =>
 /** The card of the thread the pane is showing: the only one that says it is here. */
 const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
-/** The thread's own card in Main, wherever it was placed in the flow. */
-const threadCard = (id: string) => `[data-slot="thread-card"][data-thread="${id}"]`
+/** The thread's own card in Main, wherever it was placed in the flow, as a selector. */
+const cardSelector = (id: string) => `[data-slot="thread-card"][data-thread="${id}"]`
 const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
 /**
  * A thread this device remembers, written the way the app writes it. Storage on its own leaves the
  * lane's store holding the row it loaded earlier, so a close would move nothing and tell nobody —
  * which is a state no visit can produce.
  */
-const remembers = (thread: string) => rememberThread(bot.id, thread)
+const remembers = (thread: string, profileId = bot.id) => rememberThread(profileId, thread)
 /**
  * One Escape, as a reader's key arrives at the page: it bubbles and it can be claimed, which is what
  * a sheet or a menu answering the key does before the lane ever hears it.
@@ -253,41 +278,6 @@ function holdThreadCount() {
 }
 
 test(
-  "a message Main handed a thread is taken by that thread's screen, once, and never by Main",
-  laptop(async () => {
-    localStorage.clear()
-    await seed(["t-a"])
-    // What `/thread` leaves behind: a message for a thread that has just been made (ADR 0096).
-    handOver("t-a", { text: "Plan the move", attachments: [] })
-    const runs: string[] = []
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(String(input instanceof Request ? input.url : input))
-      if (url.pathname.endsWith("/v1/runs") && init?.method === "POST") {
-        runs.push(String(JSON.parse(String(init.body)).session_id))
-        return json({ error: { message: "stopped here" } }, 500)
-      }
-      if (url.pathname.endsWith("/capabilities"))
-        return json({ features: { run_submission: true, run_events_sse: true } })
-      if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["queue", "moves"] })
-      if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
-      return json({})
-    }) as typeof fetch
-    await mount(screen(`/c/${MAIN}`), async () => {
-      // Main is drawn beside the thread the address names, and its screen reads the same handover:
-      // it must leave it alone, or the reader is sent back to Main and the message is lost.
-      await until(async () => titles().includes("Mainly"), "Main's own pane")
-      await settle()
-      assert.deepEqual(runs, [], "Main took nothing: the handover is the thread's, by its id")
-      await click(find("[data-to-thread]"))
-      await until(async () => path() === "/c/t-a", "the thread's own address")
-      await until(async () => runs.length === 1, "the thread's first turn, posted once")
-      assert.equal(runs[0], "gots-t-a", "on the thread's own session")
-      assert.equal(takeHandover("t-a"), undefined, "and taken, so a remount sends nothing again")
-    })
-  }),
-)
-
-test(
   "a thread opened for a bot is the one its pane keeps",
   laptop(async () => {
     localStorage.clear()
@@ -393,24 +383,7 @@ test(
     await seed(["t-a"])
     // The other bot has a thread of its own, and this device remembers opening it.
     await ensureMainThread(other.id)
-    await db.conversations.put({
-      id: "t-b",
-      profileId: other.id,
-      title: "Thread t-b",
-      titleEdited: true,
-      hermesSessionId: "gots-t-b",
-      createdAt: 20,
-      updatedAt: 20,
-      changedAt: 20,
-    })
-    await db.messages.put({
-      id: "t-b-open",
-      conversationId: "t-b",
-      role: "user",
-      content: "Opened t-b",
-      status: "done",
-      createdAt: 21,
-    })
+    await openThread("t-b", other.id, 20)
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     localStorage.setItem(lastThreadKey(other.id), "t-b")
     await mount(screen(`/c/${MAIN}`), async () => {
@@ -467,25 +440,7 @@ test(
     await seed(["t-a", "t-b"])
     // The bot the reader switches to: its own thread is the one this device remembers, and its
     // thread count is what the lane waits on.
-    await ensureMainThread(other.id)
-    await db.conversations.put({
-      id: "t-o",
-      profileId: other.id,
-      title: "Thread t-o",
-      titleEdited: true,
-      hermesSessionId: "gots-t-o",
-      createdAt: 20,
-      updatedAt: 20,
-      changedAt: 20,
-    })
-    await db.messages.put({
-      id: "t-o-open",
-      conversationId: "t-o",
-      role: "user",
-      content: "Opened t-o",
-      status: "done",
-      createdAt: 21,
-    })
+    await openThread("t-o", other.id, 20)
     localStorage.setItem(lastThreadKey(other.id), "t-o")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => text().includes("2 threads"), "this bot's threads to load")
@@ -516,6 +471,7 @@ test(
           "the new bot's thread beside its Main",
         )
       } finally {
+        count.release()
         observer.disconnect()
         count.restore()
       }
@@ -531,10 +487,10 @@ test(
 )
 
 test(
-  "with the switch off a bot is one screen, as it was",
+  "with the legacy layout a bot is one screen, as it was",
   laptop(async () => {
     localStorage.clear()
-    await seed(["t-a", "t-b"], { botThreads: false })
+    await seed(["t-a", "t-b"], { legacyChat: true })
     localStorage.setItem(lastThreadKey(bot.id), "t-b")
     await mount(screen("/c/t-a"), async () => {
       await until(async () => titles().length === 1, "one screen")
@@ -650,112 +606,43 @@ test(
   }),
 )
 
-/**
- * A run in flight over a thread a reader closes: the host's answer to the send, its live-runs ledger,
- * and one event stream the test pushes into, so what lands while the pane is away is the host's own
- * stream and not a row this test wrote into the store. Every request is recorded, which is what
- * "the close posted nothing to stop it" is read from — a silence proves nothing.
- */
-function liveRunInThread() {
-  const encoder = new TextEncoder()
-  const requests: { method: string; path: string }[] = []
-  let push = (_event: unknown) => {}
-  const events = new ReadableStream<Uint8Array>({
-    start(controller) {
-      push = (event) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
-    },
-  })
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    const method = (init?.method ?? "GET").toUpperCase()
-    requests.push({ method, path: url.pathname })
-    if (url.pathname.endsWith("/capabilities"))
-      return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: [] })
-    if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
-    // The host's own account of the run, which is what a card's spinner stands on: the pane being
-    // closed says nothing about it.
-    if (url.pathname.endsWith("/plugins/gots/runs/live"))
-      return json({ sessions: { "gots-t-a": "running" }, run_ids: { "gots-t-a": "run-1" } })
-    if (url.pathname.endsWith("/v1/runs/run-1/events"))
-      return new Response(events, { headers: { "content-type": "text/event-stream" } })
-    if (url.pathname.endsWith("/v1/runs/run-1"))
-      return json({ status: "running", created_at: 1, output: "", usage: {} })
-    if (url.pathname.endsWith("/v1/runs") && method === "POST") return json({ run_id: "run-1" })
-    return json({})
-  }) as typeof fetch
-  return { requests, push }
-}
-
-/**
- * The reply a run is writing in a thread: this device's own copy, which the screen being closed
- * neither finishes nor stops writing.
- */
-async function replyOf(thread: string) {
-  const rows = await db.messages.where("conversationId").equals(thread).toArray()
-  return rows.filter((row) => row.role === "assistant").at(-1)
-}
-
 test(
   "a thread closed while it streams keeps running, and its card in Main still spins",
   laptop(async () => {
     localStorage.clear()
-    await seed(["t-a"])
-    remembers("t-a")
-    const host = liveRunInThread()
-    await mount(screen(`/c/${MAIN}`), async () => {
-      await until(async () => titles().join("|") === "Mainly|Thread t-a", "the thread beside Main")
-      // The send the thread's own composer makes, over a host that answers with a run.
-      void sendMessage("t-a", "Write the long answer").catch(() => undefined)
-      await until(
-        async () => host.requests.some((r) => r.method === "POST" && r.path.endsWith("/v1/runs")),
-        "the run's POST",
-      )
-      await until(
-        async () => host.requests.some((r) => r.path.endsWith("/v1/runs/run-1/events")),
-        "the run's events being followed",
-      )
-      await until(async () => (await replyOf("t-a"))?.status === "streaming", "the reply streaming")
+    await seed()
+    // The bot whose thread this is: a server to call and a key to call it with, so the thread is
+    // chat-next's and the run is the one its own screen starts and follows.
+    await openThread("t-s", other.id, 10)
+    remembers("t-s", other.id)
+    // The host the thread's send runs on: the run is the fake host's, and the host's own ledger is
+    // what a card's spinner stands on while nothing draws the thread.
+    const host = fakeHost("gots-t-s", { plugin: true })
+    await mount(screen(`/c/${mainThreadId(other.id)}`), async () => {
+      await until(async () => titles().join("|") === "Otherly|Thread t-s", "the thread beside Main")
+      await type(threadComposer(), "Write the long answer")
+      await click(find('[data-pane="thread"] button[aria-label="Send"]'))
+      await until(async () => host.asked.runs === 1, "the thread's turn posted")
+      host.latest.run.say("Thinking it over")
 
       // The reader puts the surface away mid-reply.
       await click(find('[aria-label="Close thread"]'))
-      await until(async () => titles().join("|") === "Mainly", "Main alone")
+      await until(async () => titles().join("|") === "Otherly", "Main alone")
 
-      assert.deepEqual(
-        host.requests.filter((r) => r.path.endsWith("/stop")),
-        [],
-        "nothing was posted to stop the run the reader put away",
-      )
-      assert.ok(
-        host.requests.some((r) => r.path.endsWith("/plugins/gots/runs/live")),
-        "the host still reports the run, which is what a card's spinner stands on",
-      )
-      assert.equal(
-        (await replyOf("t-a"))?.status,
-        "streaming",
-        "and this device's copy of the reply is still being written",
-      )
+      assert.equal(host.asked.stops, 0, "nothing was posted to stop the run the reader put away")
       await until(
-        async () => Boolean(find(`${threadCard("t-a")} [data-slot="spinner"]`)),
+        async () => Boolean(find(`${cardSelector("t-s")} [data-slot="spinner"]`)),
         "the closed thread's card still spinning",
       )
 
-      // The run goes on at the host: a row lands while nothing draws the thread.
-      host.push({ event: "message.delta", delta: LANDED, seq: 1 })
-      await until(
-        async () => Boolean((await replyOf("t-a"))?.content.includes(LANDED)),
-        "the row to land in the thread's store",
-      )
+      // The run goes on at the host, and its reply is written there while nothing draws the thread.
+      host.latest.run.finish(LANDED)
 
-      // The thread again, from its card in Main.
-      await click(cardLink("t-a"))
-      await until(async () => path() === "/c/t-a", "the address to name the thread")
+      // The thread again, from its card in Main: the words the host wrote while it was away.
+      await click(cardLink("t-s"))
+      await until(async () => path() === "/c/t-s", "the address to name the thread")
       await until(async () => text().includes(LANDED), "the rows that landed while it was closed")
-      assert.deepEqual(
-        host.requests.filter((r) => r.path.endsWith("/stop")),
-        [],
-        "and opening it again posts no stop either",
-      )
+      assert.equal(host.asked.stops, 0, "and opening it again posts no stop either")
     })
   }),
 )
@@ -1124,6 +1011,63 @@ test(
       } finally {
         animator.restore()
       }
+    })
+  }),
+)
+
+test(
+  "a callable bot's Main is chat-next's, and the lane beside it is the same split",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    // The bot whose Main chat-next draws: a server to call and a key to call it with.
+    await openThread("t-o", other.id, 20)
+    remembers("t-o", other.id)
+    await mount(screen(`/c/${mainThreadId(other.id)}`), async () => {
+      await until(
+        async () => titles().join("|") === "Otherly|Thread t-o",
+        "the remembered thread beside chat-next's Main",
+      )
+      await until(async () => text().includes("1 thread"), "Main's own count of its threads")
+      assert.ok(
+        find('[data-pane="main"][data-chat-next]'),
+        "the bot's Main is the screen chat-next draws",
+      )
+      assert.ok(
+        find('[data-pane="thread"][data-chat-next]'),
+        "and so is the thread beside it",
+      )
+      assert.equal(listShare(), 50, "the two share the row in half")
+      assert.equal(splitEdge()?.getAttribute("aria-valuenow"), "50", "with the handle between them")
+
+      const [main, thread] = findAll('[data-slot="header-row"]')
+      assert.ok(main?.querySelector('[role="img"]'), "Main keeps the bot's picture beside its name")
+      assert.equal(main?.querySelector('[aria-label="Close thread"]'), null, "and no close cross")
+      assert.ok(
+        thread?.querySelector('[aria-label="Close thread"]'),
+        "the thread beside it carries the cross",
+      )
+      assert.equal(
+        thread?.querySelector('[aria-label^="Back to"]'),
+        null,
+        "and no way back, which it doesn't need where its bot is on screen",
+      )
+      assert.equal(openCards()[0]?.getAttribute("href"), "/c/t-o", "Main marks the thread it holds")
+
+      await click(find('[aria-label="Close thread"]'))
+      await until(async () => titles().join("|") === "Otherly", "Main alone")
+      assert.ok(
+        listLane().includes("w-full"),
+        `and chat-next's Main takes the row's whole width (the lane took ${listLane().join(" ")})`,
+      )
+      assert.equal(remembered(other.id), null, "the thread it closed is forgotten")
+
+      await reopen()
+      await until(async () => titles().join("|") === "Otherly|Thread t-o", "the thread, back")
+      assert.equal(remembered(other.id), "t-o", "and the lane holds it again")
+
+      await escape()
+      await until(async () => titles().join("|") === "Otherly", "Escape's close, on chat-next's Main")
     })
   }),
 )

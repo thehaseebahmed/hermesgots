@@ -1,7 +1,7 @@
 /**
- * chat-next on the app's own routes (ADR 0065): with its Developer switch on, a plain chat at
- * `/c/<id>` opens on chat-next, read from the chat's own bot and session; with it off, or for a chat
- * chat-next can't run yet, the current screen draws it as before.
+ * chat-next on the app's own routes (ADR 0065): a chat at `/c/<id>` opens on chat-next when its bot
+ * can be called, read from the chat's own bot and session; a chat whose bot has no address or no
+ * key — or one chat-next can't run yet — the current screen draws as before.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -58,10 +58,9 @@ async function until(check: () => boolean | Promise<boolean>, what: string) {
 
 const writing = (words: string) => BUSY_WORDS.writing.some((word) => words.includes(`${word}…`))
 
-test("with the switch on, a plain chat opens on chat-next, read from its bot and its session", async () => {
+test("a plain chat opens on chat-next, read from its bot and its session", async () => {
   await seedChats([{ id: "c-next", title: "Sky colours", messages: ["held by the old screen"] }], {
     bots: [bot],
-    settings: { chatNext: true },
   })
   const host = fakeHost("gots-c-next")
   host.seed([{ user: "Why is the sky blue?", reply: "Rayleigh scattering.", tools: 1 }])
@@ -80,9 +79,9 @@ test("with the switch on, a plain chat opens on chat-next, read from its bot and
   })
 })
 
-test("with the switch off, the same chat stays on the current screen", async () => {
+test("a chat whose bot has no key stays on the current screen", async () => {
   await seedChats([{ id: "c-off", title: "Sky colours", messages: ["held by the old screen"] }], {
-    bots: [bot],
+    bots: [{ ...bot, apiKey: "" }],
   })
   await mount(chatScreen("c-off"), async () => {
     await until(
@@ -127,7 +126,7 @@ async function onChatNext(
   await seedChats([{ id, title: "Sky colours" }], {
     // An address of the chat's own: what a host's plugin offers is remembered per address.
     bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: defaultPick, ...patch }],
-    settings: { chatNext: true, ...settings },
+    settings,
   })
   return { host: fakeHost(`gots-${id}`, { ...hostOptions, plugin }), defaultPick }
 }

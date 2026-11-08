@@ -276,13 +276,13 @@ export async function addBot(page, { name, messages, hour = 3_600_000 }) {
 }
 
 /**
- * A chat of its own on the new chat screen (chat-next), which two Developer switches turn on: seeded,
- * drawn, and ready for a send.
+ * A chat of its own on the new chat screen (chat-next), which a callable bot opens: seeded, drawn,
+ * and ready for a send.
  */
 export async function openChatNext({ page, seed }, { id, title }) {
   await page.evaluate(async () => {
     const { saveSettings } = await import("/src/lib/db.ts")
-    await saveSettings({ developer: true, chatNext: true })
+    await saveSettings({ developer: true })
   })
   const chat = `${id}-${runId()}`
   await seed([{ id: chat, title }])

@@ -131,7 +131,6 @@ const device = () => ({
   schema: 25,
   developer: true,
   botThreads: true,
-  chatNext: false,
   bots: [],
 })
 

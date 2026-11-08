@@ -2,8 +2,15 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { readNewest, readRun, readTranscript } from "../src/chat-next/api.ts"
-import { overlay } from "../src/chat-next/pages.ts"
+import {
+  HostNoPage,
+  HostStuck,
+  readNewest,
+  readPage,
+  readRun,
+  readTranscript,
+} from "../src/chat-next/api.ts"
+import { overlay, PAGE } from "../src/chat-next/pages.ts"
 import { promptFrom } from "../src/lib/run-prompt.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
@@ -67,6 +74,76 @@ test("a transcript whose newest rows are not the held ones is read on to the sta
   assert.equal(rows.length, 120)
   assert.equal(rows[0].id, 1)
   assert.deepEqual(asked, [0, 50, 100])
+})
+
+/**
+ * A host that answers the transcript with JSON carrying no page at all, as an error envelope or an
+ * older route does. It returns the offsets it was asked for, and refuses the sixth, so a read that
+ * never ended fails on that refusal rather than running the process out of memory.
+ */
+function pageLessHost() {
+  const asked = []
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    asked.push(Number(url.searchParams.get("offset")))
+    if (asked.length > 5) throw new Error(`the read asked for page ${asked.length} of five`)
+    return new Response(JSON.stringify({ object: "list" }), { status: 200 })
+  }
+  return asked
+}
+
+test("an answer with no page is a failed read, not a chat drawn short", async () => {
+  const asked = pageLessHost()
+  await assert.rejects(
+    () => readPage(connection, "s", 0),
+    HostNoPage,
+    "a page the host cannot give is said so, never answered with no rows",
+  )
+  // The one answer that is no failure: a chat this device holds nothing of, read from its start.
+  const fresh = await readNewest(connection, "s")
+  assert.deepEqual(fresh.rows, [], "a chat with nothing held of it is empty")
+  assert.equal(fresh.more, false, "with nothing older to ask for")
+  // Everything else keeps what it has and says the read failed, as a refused page does.
+  await assert.rejects(
+    () => readNewest(connection, "s", undefined, [row(1)]),
+    HostNoPage,
+    "a thread with rows drawn keeps them rather than blanking",
+  )
+  await assert.rejects(
+    () => readTranscript(connection, "s"),
+    HostNoPage,
+    "and a whole transcript is never returned cut short",
+  )
+  assert.deepEqual([...new Set(asked)], [0], "every ask was the newest page, and none was retried")
+})
+
+/**
+ * A host that answers every page with the same one, as a host that clamps `offset`, ignores it, or
+ * a proxy serving one cached answer does. It refuses a sixth ask, so a read with no guard fails on
+ * the refusal instead of reading the same page until the process runs out of memory.
+ */
+function stuckHost(count = PAGE) {
+  const asked = []
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    asked.push(Number(url.searchParams.get("offset")))
+    if (asked.length > 5) throw new Error(`the read asked for page ${asked.length} of five`)
+    const newest = Array.from({ length: count }, (_, at) => row(count - at))
+    return new Response(JSON.stringify({ data: newest }), { status: 200 })
+  }
+  return asked
+}
+
+test("a host that will not page on stops the read instead of answering it for ever", async () => {
+  const held = [row(1), row(2)]
+  stuckHost()
+  await assert.rejects(
+    () => readNewest(connection, "s", undefined, held),
+    HostStuck,
+    "a page the host has already answered is no page the read can go back through",
+  )
+  stuckHost()
+  await assert.rejects(() => readTranscript(connection, "s"), HostStuck, "and the whole read too")
 })
 
 /** A host answering one run's status with the body given, as `GET /v1/runs/{id}` does. */

@@ -23,7 +23,9 @@ import {
   text,
 } from "./component-kit.tsx"
 
-const bot = botProfile("cluster", { name: "Cluster" })
+/** A bot with no key keeps the current screen, whose thread is this device's own rows — which is
+ * what every reply here is drawn from. */
+const bot = botProfile("cluster", { name: "Cluster", apiKey: undefined })
 
 const ASK = "Where does the parser read a reply?"
 const FIRST = "I read the parser first."
@@ -86,11 +88,6 @@ const loaders = () => reply().querySelectorAll("[data-slot=spinner]").length
 
 const thinkingRow = () => reply().querySelector("[data-slot=thinking-line]")?.firstElementChild
 const statusLine = () => reply().querySelector("[data-slot=status-line]")
-const count = () =>
-  [...reply().querySelectorAll("button")].find((one) =>
-    /subagents? running/.test(one.textContent ?? ""),
-  )
-
 async function draw(messages: Message[], body: () => Promise<void>) {
   await seedChat({ id: "chat-1", messages, profile: bot })
   await mount(chatScreen("chat-1"), body)

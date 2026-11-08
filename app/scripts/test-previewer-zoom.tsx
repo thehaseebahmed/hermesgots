@@ -74,7 +74,7 @@ const open = async (name: string) => {
 }
 
 test("a double tap magnifies the photo at the point tapped, and the next one puts it back", async () => {
-  const profile = botProfile("zoom-double-tap")
+  const profile = botProfile("zoom-double-tap", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo("cat.png", "cat")])] })
   mediaHost({ host: "zoom-double-tap" })
   await mount(chatScreen("c1"), async () => {
@@ -92,7 +92,7 @@ test("a double tap magnifies the photo at the point tapped, and the next one put
 })
 
 test("a pinch magnifies the photo by the fingers' own spread", async () => {
-  const profile = botProfile("zoom-pinch")
+  const profile = botProfile("zoom-pinch", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo("cat.png", "cat")])] })
   mediaHost({ host: "zoom-pinch" })
   await mount(chatScreen("c1"), async () => {
@@ -112,7 +112,7 @@ test("a pinch magnifies the photo by the fingers' own spread", async () => {
 })
 
 test("stepping to another photo starts it at its own shape", async () => {
-  const profile = botProfile("zoom-step")
+  const profile = botProfile("zoom-step", { apiKey: undefined })
   await seedChat({
     id: "c1",
     profile,
@@ -131,7 +131,7 @@ test("stepping to another photo starts it at its own shape", async () => {
 })
 
 test("closing the Previewer and opening it again starts at its own shape", async () => {
-  const profile = botProfile("zoom-reopen")
+  const profile = botProfile("zoom-reopen", { apiKey: undefined })
   await seedChat({ id: "c1", profile, messages: [message([photo("cat.png", "cat")])] })
   mediaHost({ host: "zoom-reopen" })
   await mount(chatScreen("c1"), async () => {

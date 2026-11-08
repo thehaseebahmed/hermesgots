@@ -20,7 +20,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("main-cards", { id: "bot-1", name: "Cards" })
+const bot = botProfile("main-cards", { id: "bot-1", name: "Cards", apiKey: undefined })
 const HOUR = 3_600_000
 const DAY = 86_400_000
 const MIDNIGHT = new Date().setHours(0, 0, 0, 0)
@@ -44,7 +44,7 @@ const msg = (
 ): Message => ({ id, conversationId, role, content, status: "done", createdAt })
 
 async function reset() {
-  await seedSettings({ developer: true, botThreads: true })
+  await seedSettings({ developer: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()

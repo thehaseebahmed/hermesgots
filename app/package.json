@@ -15,7 +15,7 @@
     "format": "prettier --write src",
     "test": "pnpm test:unit && pnpm test:component",
     "test:unit": "node --experimental-strip-types --test --test-concurrency=3 \"scripts/test-*.mjs\"",
-    "test:component": "node --test --test-concurrency=3 --test-force-exit --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
+    "test:component": "node --test --test-concurrency=2 --test-force-exit --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
     "mock": "node scripts/mock-hermes.mjs",
     "e2e": "node scripts/e2e/cli.mjs"
   },

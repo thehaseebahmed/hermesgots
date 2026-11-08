@@ -18,10 +18,10 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("main-thread", { id: "bot-1", name: "Mainly" })
+const bot = botProfile("main-thread", { id: "bot-1", name: "Mainly", apiKey: undefined })
 
 async function seed(chats: { id: string; projectId?: string }[] = []) {
-  await seedSettings({ developer: true, botThreads: true })
+  await seedSettings({ developer: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()

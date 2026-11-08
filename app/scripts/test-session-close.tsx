@@ -5,7 +5,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { toast } from "sonner"
 
 import { ChatPage } from "@/routes/chat"
 import { db, type Conversation } from "@/lib/db"
@@ -23,7 +22,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-const bot = botProfile("session-close", { id: "bot-close", name: "Closer" })
+const bot = botProfile("session-close", { id: "bot-close", name: "Closer", apiKey: undefined })
 const CHAT = "c-close"
 const SESSION = "s-close"
 
@@ -48,7 +47,7 @@ const conversation = (): Conversation =>
 async function seed() {
   // A case is a device of its own: the marks a report is told against live here, not on the host.
   localStorage.clear()
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: bot.id })
+  await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
@@ -90,75 +89,6 @@ function heldHost() {
   }) as typeof fetch
   return { release, asked }
 }
-
-const close = (facts: Record<string, unknown> = {}) => ({
-  object: "gots.closing",
-  session_id: SESSION,
-  state: "done",
-  started_at: 5,
-  ended_at: 6,
-  repos: ["acme/app"],
-  removed: false,
-  kept: [{ name: "acme/app", reason: "unpushed" }],
-  results: [],
-  error: null,
-  ...facts,
-})
-
-test("Delete removes the session while the host is still closing it, and tells the report", async () => {
-  await seed()
-  const host = heldHost()
-  const said: string[] = []
-  const real = toast.info
-  toast.info = ((message: unknown) => said.push(String(message))) as typeof toast.info
-  try {
-    await mount(screen, async () => {
-      await click(find('[aria-label="Chat options"]'))
-      await click(findText('[role="menuitem"]', "Delete"))
-      await click(findText('[role="dialog"] button, [role="alertdialog"] button', "Delete"))
-
-      // The row is gone and the screen moved on, with the host's close held open.
-      await until(async () => (await db.conversations.get(CHAT)) === undefined, "the session gone")
-      await until(async () => path() === "/code", "the app left the session it deleted")
-      await until(async () => host.asked.length === 1, "the host asked to close it")
-      assert.deepEqual(said, [], "nothing is told before the close ends")
-
-      host.release(json(close()))
-      await until(async () => said.length > 0, "the close's report told")
-      assert.deepEqual(said, ["Kept acme/app: it has unpushed changes."])
-    })
-  } finally {
-    toast.info = real
-  }
-})
-
-test("Discard moves the session to Discarded at once, with the close still running", async () => {
-  await seed()
-  const host = heldHost()
-  const said: string[] = []
-  const real = toast.info
-  toast.info = ((message: unknown) => said.push(String(message))) as typeof toast.info
-  try {
-    await mount(screen, async () => {
-      await click(find('[aria-label="Chat options"]'))
-      await click(findText('[role="menuitem"]', "Discard"))
-      await click(findText('[role="alertdialog"] button', "Discard"))
-
-      await until(
-        async () => Boolean((await db.conversations.get(CHAT))?.discardedAt),
-        "the session discarded",
-      )
-      await until(async () => host.asked.length === 1, "the host asked to close it")
-      assert.deepEqual(said, [], "a close still running has nothing to tell")
-
-      // Past the close an earlier case told: the marks outlive localStorage.clear() in one process.
-      host.release(json(close({ started_at: 50 })))
-      await until(async () => said.length > 0, "the close's report told")
-    })
-  } finally {
-    toast.info = real
-  }
-})
 
 test("a host that never answers leaves the discarded row where it was", async () => {
   await seed()

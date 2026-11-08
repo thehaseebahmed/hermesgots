@@ -97,6 +97,15 @@ async function seed(messages: Message[], profile: Profile = bot) {
 
 const screen = () => chatScreen("chat-1")
 
+/**
+ * The current screen draws a chat whose bot cannot be called, off this device's own row — which is
+ * where the label a measured run carries is read. The turn itself was written first, by the live
+ * client, as every turn is; the key is taken away only once it has landed.
+ */
+// A key can be removed after a turn has synced: that is the state this mounts, not a seam built to
+// keep the current screen reachable.
+const reopenKeyless = () => db.profiles.toCollection().modify({ apiKey: "" })
+
 const assistant = async () =>
   (await db.messages.toArray()).filter((message) => message.role === "assistant").at(-1)
 
@@ -120,6 +129,7 @@ test("a turn this device watched keeps its span on the reply's own run", async (
   assert.equal(reply.reasoning, undefined, "the pre-runs string is no longer written")
   assert.equal(typeof reply.stats?.durationMs, "number", "the turn's duration stays in its stats")
 
+  await reopenKeyless()
   await mount(screen(), async () => {
     const line = onlyThinkingLine()
     assert.match(
@@ -173,6 +183,7 @@ test("a turn picked up mid-thought reads Thought it through", async () => {
     "a resumed turn's first delta is mid-thought, not its first",
   )
 
+  await reopenKeyless()
   await mount(screen(), async () => {
     const line = onlyThinkingLine()
     assert.equal(
@@ -206,6 +217,7 @@ test("a fresh turn on a host with runs measures the run's reasoning block", asyn
     "a span was measured for the run's reasoning.available block and its first message.delta",
   )
 
+  await reopenKeyless()
   await mount(screen(), async () => {
     const line = onlyThinkingLine()
     assert.match(

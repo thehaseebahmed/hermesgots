@@ -26,7 +26,7 @@ import {
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
 import { resumeTrace } from "@/lib/resume-trace"
-import { lastOpened } from "@/lib/threads"
+import { botThreadsOn, lastOpened } from "@/lib/threads"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 /** The newest chats each bot's state names, so a busy bot can't make the dump unbounded. */
@@ -94,8 +94,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     route: window.location.pathname,
     schema: db.verno,
     developer: Boolean(settings?.developer),
-    botThreads: Boolean(settings?.botThreads),
-    chatNext: Boolean(settings?.chatNext),
+    botThreads: botThreadsOn(settings),
     ...(trace ? { resume: diagResume(trace) } : {}),
     bots,
   }

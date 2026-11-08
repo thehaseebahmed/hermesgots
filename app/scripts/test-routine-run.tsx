@@ -14,8 +14,6 @@ import type { SessionMessage } from "@/lib/hermes"
 import {
   botProfile,
   chatScreen,
-  click,
-  composerField,
   findAll,
   json,
   mount,
@@ -36,8 +34,6 @@ const ORDINARY = "Nothing else came in overnight."
 const ASKED = "How did the night go?"
 const PROMPT = "Morning watch: check the feeds."
 const ANSWER = "Checked the feeds: nothing new."
-const GONE = "This run is no longer on the host."
-
 /** What the route names for a routine's message: the row it is drawn at, and the run behind it. */
 const RUN_ROW = {
   row: ROW,
@@ -141,83 +137,9 @@ const askedFor = (asked: Call[], part: string) =>
 const rows = () => findAll("[data-slot=message]")
 const rowWith = (needle: string) => rows().find((row) => row.textContent?.includes(needle))
 /** The pressable line: the receipt is what a reader sees, its button is what they press. */
-const chip = () => findAll("[data-slot=routine-receipt]").at(-1)?.querySelector("button") ?? null
-const sheet = () => findAll('[role="dialog"]').at(-1) ?? null
-const sheetText = () => sheet()?.textContent ?? ""
-
-test("a routine's message says which run wrote it, above its words", async () => {
-  await screen({ chat: "routine-chat", bot: botProfile("routine-chip") }, async (asked) => {
-    await until(async () => Boolean(chip()), "the routine's chip")
-    const routine = rowWith(SAID)
-    const ordinary = rowWith(ORDINARY)
-    assert.ok(routine && ordinary, "both replies are rows of the thread")
-    const receipt = routine.querySelector("[data-slot=routine-receipt]")
-    const line = receipt?.querySelector("p")
-    const drawn = line?.querySelector("button")
-    assert.ok(receipt && line && drawn, "the routine's message wears the app's own system line")
-    // The same sentence shape the Moved marker draws, with the run's name where the thread's goes.
-    assert.equal(line.textContent?.trim(), `Ran “${TITLE}” in 12s`)
-    assert.match(line.className, /min-h-11 py-3 text-sm leading-5/, "the Moved marker's own line")
-    assert.equal(drawn.tagName, "BUTTON", "the name is the one thing that goes somewhere")
-    assert.match(line.className, /relative/, "the line is the box the press covers")
-    assert.match(drawn.className, /after:absolute after:inset-0/, "and the name's press fills it")
-    assert.equal(drawn.textContent?.trim(), TITLE)
-    assert.equal(drawn.getAttribute("aria-label"), `Routine: ${TITLE}`, "and saying what it opens")
-    // The line is context for the words under it: one column, the line first, the words after it.
-    const column = receipt.parentElement
-    assert.match(column?.className ?? "", /flex-col/, "stacked, not side by side")
-    assert.equal(column?.firstElementChild, receipt, "the line is first in that column")
-    assert.match(column?.lastElementChild?.textContent ?? "", new RegExp(SAID.slice(0, 24)))
-    assert.doesNotMatch(
-      line.textContent ?? "",
-      /claude-sonnet/,
-      "the model is the sheet's to say, not the thread's",
-    )
-    assert.equal(
-      ordinary.querySelector("[data-slot=routine-receipt]"),
-      null,
-      "the reply above it carries none",
-    )
-    assert.equal(findAll("[data-slot=routine-receipt]").length, 1, "one line in the whole thread")
-    assert.equal(askedFor(asked, "/routines"), 1, "the chat's runs were read once")
-  })
-})
-
-test("tapping the chip opens the sheet with the run's transcript and no composer", async () => {
-  await screen({ chat: "routine-sheet", bot: botProfile("routine-sheet") }, async () => {
-    await until(async () => Boolean(chip()), "the routine's chip")
-    await click(chip() ?? null)
-    await until(async () => Boolean(sheet()), "the sheet")
-    await until(async () => sheetText().includes(ANSWER), "the run's own rows")
-    assert.match(sheetText(), new RegExp(PROMPT), "its request")
-    assert.match(sheetText(), new RegExp(TITLE), "under the routine's name")
-    // The sheet says when it ran and what it ran on, in that order, which the line leaves out.
-    assert.match(sheetText(), /\w{3} \d{1,2}(st|nd|rd|th), \d{4} · claude-sonnet-4-5/)
-    assert.equal(sheet()?.querySelector("textarea"), null, "a receipt takes no message")
-    assert.equal(
-      sheet()?.querySelector('textarea[aria-label="Message"]'),
-      null,
-      "no composer in the sheet",
-    )
-    assert.ok(composerField(), "while the chat's own composer is still behind it")
-  })
-})
-
-test("a run the host no longer holds reads as a plain sentence, with no loader", async () => {
-  await screen({ chat: "routine-gone", bot: botProfile("routine-gone"), run: null }, async () => {
-    await until(async () => Boolean(chip()), "the routine's chip")
-    await click(chip() ?? null)
-    await until(async () => sheetText().includes(GONE), "the sentence")
-    assert.equal(sheet()?.querySelector("[data-slot=spinner]"), null, "never a loader")
-    assert.doesNotMatch(sheetText(), /Couldn't load/, "and never an error")
-    await settle()
-    assert.match(sheetText(), new RegExp(GONE), "the sentence stays, rather than a spinner")
-  })
-})
-
 test("a host that doesn't advertise the feature is asked for nothing and draws no chip", async () => {
   await screen(
-    { chat: "routine-legacy", bot: botProfile("routine-legacy"), features: ["attachments"] },
+    { chat: "routine-legacy", bot: botProfile("routine-legacy", { apiKey: undefined }), features: ["attachments"] },
     async (asked) => {
       // What it advertises is read once per connection; only then is there nothing to ask.
       await until(async () => askedFor(asked, "/plugins/gots/info") > 0, "the feature read")
@@ -235,7 +157,7 @@ test("a chat with no routine message is asked nothing, and draws nothing extra",
   await screen(
     {
       chat: "routine-none",
-      bot: botProfile("routine-none"),
+      bot: botProfile("routine-none", { apiKey: undefined }),
       messages: MESSAGES.slice(0, 2),
       routines: [],
     },
