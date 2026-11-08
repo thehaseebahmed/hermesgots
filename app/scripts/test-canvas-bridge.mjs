@@ -6,9 +6,11 @@ import {
   BRIDGE_MESSAGE,
   BRIDGE_METHODS,
   BRIDGE_SCRIPT,
+  CANVAS_CONSENT_REQUIRED,
   answerRead,
   applyWrite,
   bridgeHandler,
+  mergeGrants,
   readCall,
 } from "../src/lib/canvas-bridge.ts"
 
@@ -157,6 +159,37 @@ test("readCall takes a call the page sent and answerRead answers it from the cop
   assert.equal(answerRead({ call: 9, method: "get", collection: "items", id: "zzz" }, COPY), null)
 })
 
+test("mergeGrants keeps the later answer to each tool and both sides' tools", () => {
+  const held = [
+    { tool: "files.search", allowed: true, at: 30 },
+    { tool: "notes.list", allowed: true, at: 10 },
+  ]
+  // A read that began before the reader's answer landed answers without it: the held row wins.
+  assert.deepEqual(mergeGrants(held, []), held)
+  assert.deepEqual(mergeGrants(held, [{ tool: "files.search", allowed: false, at: 20 }]), held)
+  assert.deepEqual(mergeGrants(held, undefined), held)
+  // An answer the host stamped later is the answer, whatever the list it arrived in.
+  assert.deepEqual(mergeGrants(held, [{ tool: "files.search", allowed: false, at: 40 }]), [
+    { tool: "files.search", allowed: false, at: 40 },
+    { tool: "notes.list", allowed: true, at: 10 },
+  ])
+  // A tool only one side holds survives, and the answer is ordered by tool as the host orders it.
+  assert.deepEqual(
+    mergeGrants(
+      [{ tool: "b.two", allowed: false, at: 5 }],
+      [
+        { tool: "a.one", allowed: true, at: 1 },
+        { tool: "b.two", allowed: false, at: 4 },
+      ],
+    ),
+    [
+      { tool: "a.one", allowed: true, at: 1 },
+      { tool: "b.two", allowed: false, at: 5 },
+    ],
+  )
+  assert.deepEqual(mergeGrants(undefined, undefined), [])
+})
+
 test("applyWrite replaces, inserts and removes in the host's order", () => {
   const replaced = applyWrite(COPY, { call: 1, method: "put", collection: "items", id: "a" }, doc("items", "a", { n: 9 }, 40))
   assert.deepEqual(replaced, [
@@ -254,7 +287,7 @@ test("a host read and a tool call reach the host, and a tool is asked about once
       // The host refuses until the reader allows the tool, as the plugin does.
       if (!allow) {
         const refusal = new Error("Allow this canvas to use files.search?")
-        refusal.code = "consent_required"
+        refusal.code = CANVAS_CONSENT_REQUIRED
         throw refusal
       }
       return { hits: [{ title: "A hit" }] }

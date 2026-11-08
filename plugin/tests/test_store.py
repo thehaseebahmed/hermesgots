@@ -129,14 +129,14 @@ class ACanvasKeepsItsGrants(unittest.TestCase):
             conn.close()
 
         # The answer the user gives is the canvas's, and it is on disk: a reopen still reads it.
+        answered = canvases.grant(path, "c1", "files.search", True)
         self.assertEqual(
-            canvases.grant(path, "c1", "files.search", True),
+            {field: answered["grant"][field] for field in ("tool", "allowed")},
             {"tool": "files.search", "allowed": True},
         )
-        conn = connect(path)
-        conn.close()
+        self.assertEqual(answered["grants"], [answered["grant"]])
         self.assertEqual(
-            canvases.grants(path, "c1"), [{"tool": "files.search", "allowed": True}]
+            canvases.current(path, "c1")["grants"], [answered["grant"]]
         )
 
 

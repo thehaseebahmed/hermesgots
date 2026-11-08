@@ -31,8 +31,7 @@ import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
 import {
-  callCanvasRead,
-  callCanvasTool,
+  callCanvasCall,
   canvasData,
   grantCanvasTool,
   refreshCanvas,
@@ -43,10 +42,12 @@ import {
   writeCanvasData,
 } from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
+import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { useOnline } from "@/lib/online"
 import { useDark } from "@/lib/theme"
 import { formatRelative } from "@/lib/format"
+import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 
 /**
@@ -261,16 +262,19 @@ export function CanvasView() {
 
   // The reader's answer about a tool is kept on the host, and the host's canvas replaces the copy
   // this screen draws. A grant that couldn't be posted answers no, so the page's own promise hears
-  // the refusal rather than being retried on a permission the host never recorded.
+  // the refusal rather than being retried on a permission the host never recorded — but a host that
+  // answered and refused said why, and that is not the reader saying no: its words are said, and the
+  // page still hears no.
   const grant = async (tool: string, allow: boolean) => {
     try {
       await grantCanvasTool(id, tool, allow)
       return allow
-    } catch {
+    } catch (failure) {
+      if (hostAnswered(failure)) tell.error(failure.message)
       return false
     }
   }
-  const consent = useCanvasConsent(canvas?.title ?? "Canvas", grant)
+  const consent = useCanvasConsent(grant)
   // The bridge is registered once per canvas, so the ask is read through a ref: a new ask must not
   // re-register the listener under a running page. The device's copy is read at call time from the
   // store, so a read landing never re-registers it either.
@@ -285,10 +289,7 @@ export function CanvasView() {
       frame: () => frame.current?.contentWindow ?? null,
       copy: () => canvasData(id),
       write: (call) => writeCanvasData(id, call),
-      call: (call) =>
-        call.method === "read"
-          ? callCanvasRead(id, call.shape, call.args)
-          : callCanvasTool(id, call),
+      call: (call) => callCanvasCall(id, call),
       consent: (tool) => askRef.current(tool),
     })
     window.addEventListener("message", hear)
@@ -438,9 +439,8 @@ export function CanvasView() {
         </Popup>
       )}
       <CanvasConsentDialog
-        canvasTitle={consent.canvasTitle}
+        canvasTitle={canvas?.title ?? "Canvas"}
         ask={consent.current}
-        position={consent.position}
         total={consent.total}
         onAnswer={(allow) => void consent.answer(allow)}
       />

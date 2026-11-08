@@ -4189,13 +4189,12 @@ http
           json,
           readBody,
           noteEvent,
-          // What a canvas's free `sessions` read answers: the mock's chats, newest first.
+          // What a canvas's free `sessions` read answers: the mock's chats, newest first, as the
+          // host projects them — an id, a title and the clock they changed at.
           sessions: () =>
-            [...pluginChats.entries()].map(([id, { value }]) => ({
-              id,
-              title: value.title,
-              updated_at: value.updatedAt,
-            })),
+            [...pluginChats.entries()]
+              .map(([id, { value }]) => ({ id, title: value.title ?? "", at: value.updatedAt ?? 0 }))
+              .sort((one, two) => two.at - one.at),
         },
         CANVASES,
       ))

@@ -3,9 +3,10 @@
  * options that list what this version declared so an answer can be changed later. The page never
  * reads either — the bridge holds its call until the dialog answers — so this is only the surface.
  */
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Group, SwitchRow } from "@/components/settings-chrome"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Switch } from "@/components/ui/switch"
 import type { Canvas } from "@/lib/canvases"
 
 /** One tool waiting for an answer, where it stands among the asks, and the call held on it. */
@@ -27,18 +27,12 @@ export interface ConsentAsk {
 }
 
 /**
- * The asks a page's tool calls are waiting on, one shown at a time, for a canvas with this title.
- * `ask` never settles until the reader answers; `answer` hands the tool to `onAnswer`, which posts
- * the grant, and resolves with what the host's write settled on — Allow true, Don't allow false.
+ * The asks a page's tool calls are waiting on, one shown at a time. `ask` never settles until the
+ * reader answers; `answer` hands the tool to `onAnswer`, which posts the grant, and resolves the
+ * page's promise with what that write settled on — Allow true, Don't allow false.
  */
-export function useCanvasConsent(
-  canvasTitle: string,
-  onAnswer: (tool: string, allow: boolean) => Promise<boolean>,
-) {
+export function useCanvasConsent(onAnswer: (tool: string, allow: boolean) => Promise<boolean>) {
   const [queue, setQueue] = useState<ConsentAsk[]>([])
-  // A dialog dismissed by Escape answers Don't allow as the Cancel button does: one press must not
-  // resolve the same ask twice, since the grant write and the page's retry both hang off it.
-  const answering = useRef(false)
 
   const ask = useCallback(
     (tool: string) =>
@@ -60,43 +54,42 @@ export function useCanvasConsent(
   const answer = useCallback(
     async (allow: boolean) => {
       const current = queue[0]
-      if (answering.current || !current) return
-      answering.current = true
+      if (!current) return
+      // Out of the queue before the write is asked for, so the dialog is gone and the next ask draws
+      // at once rather than the reader answering a question that is still on screen.
+      setQueue((waiting) => waiting.filter((one) => one !== current))
+      let answered = false
       try {
-        current.resolve(await onAnswer(current.tool, allow))
-        setQueue((waiting) => waiting.filter((one) => one !== current))
-      } finally {
-        answering.current = false
+        answered = await onAnswer(current.tool, allow)
+      } catch {
+        // A write that threw is no answer to tell the page yes to, and the promise has to settle
+        // either way: a page waiting on a dialog that has gone would wait for ever.
+        answered = false
       }
+      current.resolve(answered)
     },
     [queue, onAnswer],
   )
 
   const total = queue.reduce((last, one) => Math.max(last, one.position), 0)
-  return {
-    canvasTitle,
-    current: queue[0] ?? null,
-    position: queue[0]?.position ?? 1,
-    total,
-    ask,
-    answer,
-  }
+  return { current: queue[0] ?? null, total, ask, answer }
 }
 
 /**
  * The question a page's tool call waits on: an Android-style centred dialog naming the canvas and
  * the tool, Allow or Don't allow, and — while more than one tool waits — which ask this is.
+ *
+ * Don't allow is the dialog's own dismissal rather than a button's handler: the cancel button, Escape
+ * and a tap outside are one path, so one press can only ever answer once.
  */
 export function CanvasConsentDialog({
   canvasTitle,
   ask,
-  position,
   total,
   onAnswer,
 }: {
   canvasTitle: string
   ask: ConsentAsk | null
-  position: number
   total: number
   onAnswer: (allow: boolean) => void
 }) {
@@ -115,14 +108,12 @@ export function CanvasConsentDialog({
           </AlertDialogTitle>
           {total > 1 && (
             <AlertDialogDescription>
-              {position} of {total}
+              {ask.position} of {total}
             </AlertDialogDescription>
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel data-consent="deny" onClick={() => onAnswer(false)}>
-            Don't allow
-          </AlertDialogCancel>
+          <AlertDialogCancel data-consent="deny">Don't allow</AlertDialogCancel>
           <AlertDialogAction data-consent="allow" onClick={() => onAnswer(true)}>
             Allow
           </AlertDialogAction>
@@ -136,6 +127,9 @@ export function CanvasConsentDialog({
  * The answers a canvas's version carries, changed after the fact: one row per declared tool, its
  * Switch on where the user allowed it, and a line saying which of not asked and not allowed the off
  * state is. A tool the host never answered for reads as not asked.
+ *
+ * The row is the Settings switch row, so the switch is named by the row's own label — the tool and
+ * its state — rather than by an aria-label no other switch in the app wears.
  */
 export function CanvasOptions({
   open,
@@ -166,35 +160,34 @@ export function CanvasOptions({
         <PopupHeader>
           <PopupTitle>{canvas?.title ?? "Canvas"} options</PopupTitle>
         </PopupHeader>
-        <div data-canvas-options className="flex flex-col gap-1 px-4 pb-4">
+        <div data-canvas-options className="px-4 pb-4">
           {tools.length === 0 ? (
             <p className="py-2 text-sm text-muted-foreground">
               This version doesn't call any of the bot's tools.
             </p>
           ) : (
-            tools.map((tool) => {
-              const answer = (canvas?.grants ?? []).find((row) => row.tool === tool)?.allowed
-              return (
-                <div key={tool} className="flex min-h-11 items-center gap-3">
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm">{tool}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {answer === true
+            <Group>
+              {tools.map((tool) => {
+                const answer = (canvas?.grants ?? []).find((row) => row.tool === tool)?.allowed
+                return (
+                  <SwitchRow
+                    key={tool}
+                    id={`canvas-tool-${tool}`}
+                    title={tool}
+                    subtitle={
+                      answer === true
                         ? "Allowed"
                         : answer === false
                           ? "Not allowed"
-                          : "Not asked yet"}
-                    </span>
-                  </span>
-                  <Switch
-                    aria-label={`Allow ${tool}`}
+                          : "Not asked yet"
+                    }
                     checked={answer === true}
                     disabled={saving === tool}
                     onCheckedChange={(checked) => void change(tool, checked)}
                   />
-                </div>
-              )
-            })
+                )
+              })}
+            </Group>
           )}
         </div>
       </PopupContent>

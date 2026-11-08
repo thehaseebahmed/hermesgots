@@ -32,8 +32,9 @@ NOT_DECLARED = "not_declared"
 Read = Callable[[Dict[str, Any]], Awaitable[Any]]
 # A canvas's own data: one store write, taken off the loop, whose ValueError is a refusal.
 Write = Callable[[Dict[str, Any]], Any]
-# ``may_call(tool, write)``: one of the verdicts above, and a ValueError is a refusal of its own.
-MayCall = Callable[[str, bool], str]
+# ``may_call(tool)``: one of the verdicts above, and a ValueError is a refusal of its own. An answer
+# is the user's for a tool and not for a verb, so the predicate is asked the tool alone.
+MayCall = Callable[[str], str]
 
 _REFUSALS = {
     NOT_DECLARED: (
@@ -72,10 +73,10 @@ async def answer(
 ) -> Any:
     """The value for a call body ``{shape, args, write}``, or a ``CallRefused``.
 
-    ``reads`` maps each host shape to its read; ``may_call(tool, write)`` is the consent predicate
-    and may block, so it runs off the loop. ``locks`` is the caller's table of per-server act locks,
-    one per wiring: a lock binds to the loop that first contends on it, so the table must not
-    outlive the server it was made for.
+    ``reads`` maps each host shape to its read; ``may_call(tool)`` is the consent predicate and may
+    block, so it runs off the loop. ``locks`` is the caller's table of per-server act locks, one per
+    wiring: a lock binds to the loop that first contends on it, so the table must not outlive the
+    server it was made for.
 
     ``writes`` maps the canvas's own shapes to their writes. A page owns its canvas's data, so one
     of those is answered without asking anybody: no consent to agree to, and no act lock, since the
@@ -107,24 +108,30 @@ async def answer(
         return await _answer_read(read, shape, args)
     if may_call is None:
         raise CallRefused(f"This host cannot call {shape!r}.", 501)
-    if not isinstance(shape, str) or "." not in shape:
+    if not isinstance(shape, str):
         raise CallRefused(f"A tool call is named <server>.<tool>; {shape!r} is not one.", 400)
-    verdict = await _verdict(may_call, shape, write)
+    try:
+        # One rule for what a tool's name is, wherever a name is checked: a name this refuses is
+        # refused here, before the reader is asked anything about it.
+        server, _tool = mcp_call.split(shape)
+    except mcp.McpError as error:
+        raise CallRefused(str(error), 400)
+    verdict = await _verdict(may_call, shape)
     if verdict != ALLOWED:
         refused = _REFUSALS.get(verdict, "This host cannot call {shape!r}.")
         raise CallRefused(refused.format(shape=shape), 403, verdict)
     read = functools.partial(mcp_call.call_async, profile, shape)
     if write:
         table = locks if locks is not None else {}
-        async with table.setdefault(shape.split(".")[0], asyncio.Lock()):
+        async with table.setdefault(server, asyncio.Lock()):
             return await _answer_read(read, shape, args)
     return await _answer_read(read, shape, args)
 
 
-async def _verdict(may_call: MayCall, shape: str, write: bool) -> str:
+async def _verdict(may_call: MayCall, shape: str) -> str:
     """What the predicate says about one tool, its own ValueError read as the status it names."""
     try:
-        return await asyncio.to_thread(may_call, shape, write)
+        return await asyncio.to_thread(may_call, shape)
     except ValueError as error:
         raise CallRefused(str(error), getattr(error, "status", 400))
 

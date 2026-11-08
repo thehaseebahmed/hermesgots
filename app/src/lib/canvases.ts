@@ -3,10 +3,13 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import {
   applyWrite,
+  mergeGrants,
   storedDoc,
+  type BridgeHostCall,
   type BridgeToolCall,
   type BridgeWriteCall,
   type CanvasDoc,
+  type CanvasGrant,
   type CanvasReadShape,
 } from "@/lib/canvas-bridge"
 import {
@@ -48,15 +51,6 @@ import { tell } from "@/lib/tell"
  * closed. The app is the view: it lists what the host holds and draws the version its record points
  * at.
  */
-
-/**
- * The user's answer about one tool: `allowed` says which way it went. The host keeps them as a list
- * because they are the canvas's rather than a version's, ordered by tool name.
- */
-export interface CanvasGrant {
-  tool: string
-  allowed: boolean
-}
 
 export interface Canvas {
   id: string
@@ -153,20 +147,19 @@ const AWAY_BOT = "This bot didn't answer."
  */
 export const CANVAS_AWAY = "This canvas can't save while its bot is away."
 
-function refuseAway(cause?: unknown): never {
-  tell.error(CANVAS_AWAY)
-  throw new Error(CANVAS_AWAY, { cause })
-}
-
 /**
  * What a page's host read or tool call is told with its bot away, and what the reader's toast
  * says. Neither is a save, so neither is refused in the words a write is.
  */
 export const CANVAS_UNREACHABLE = "This canvas can't reach its bot right now."
 
-function refuseUnreachable(cause?: unknown): never {
-  tell.error(CANVAS_UNREACHABLE)
-  throw new Error(CANVAS_UNREACHABLE, { cause })
+/**
+ * The one way a page's promise hears that the host couldn't be reached: the reader is told in the
+ * same words the page gets, and the failure rides along as the cause.
+ */
+function refuse(message: string, cause?: unknown): never {
+  tell.error(message)
+  throw new Error(message, { cause })
 }
 
 /**
@@ -181,17 +174,17 @@ function docsOf(raw: unknown): CanvasDoc[] | undefined {
 
 /**
  * The answers the host holds about a canvas's declared tools: one row per tool, `allowed` saying
- * which way it went. A tool with no row was never asked, which is how the options tell "not asked"
- * from "not allowed".
+ * which way it went and `at` when it was given. A tool with no row was never asked, which is how the
+ * options tell "not asked" from "not allowed".
  */
 function grantsOf(raw: unknown): CanvasGrant[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const kept: CanvasGrant[] = []
   for (const row of raw) {
     if (!row || typeof row !== "object") continue
-    const { tool, allowed } = row as Record<string, unknown>
-    if (typeof tool === "string" && tool && typeof allowed === "boolean") {
-      kept.push({ tool, allowed })
+    const { tool, allowed, at } = row as Record<string, unknown>
+    if (typeof tool === "string" && tool && typeof allowed === "boolean" && typeof at === "number") {
+      kept.push({ tool, allowed, at })
     }
   }
   return kept
@@ -238,7 +231,10 @@ function put(profile: Profile, canvas: Canvas, started: number) {
   // its record is no more the canvas's than its document is, so the list keeps the held one.
   const held = state.details[canvas.id]
   const stale = html !== undefined && held !== undefined && held.at > canvas.at
-  const current = stale && held ? held : canvas
+  // The reader's answers are merged rather than replaced: a read that began before a grant landed
+  // answers without it, and that answer must not walk the reader's own answer back.
+  const grants = mergeGrants(held?.grants, canvas.grants)
+  const current: Canvas = stale && held ? held : { ...canvas, grants }
   const record = recordOf(current)
   const next = upsert(state.lists[canvas.profileId] ?? [], record)
   const missing = { ...state.missing }
@@ -251,7 +247,7 @@ function put(profile: Profile, canvas: Canvas, started: number) {
     html === undefined || stale
       ? undefined
       : {
-          ...canvas,
+          ...current,
           ...(kept ? { data: kept } : {}),
           ...(superseded && held?.dataWrites ? { dataWrites: held.dataWrites } : {}),
         }
@@ -449,7 +445,7 @@ export async function writeCanvasData(id: string, call: BridgeWriteCall) {
   // A device with no network at all can't reach the host, so the write is refused without asking;
   // otherwise the host is asked, since it may be back — and a write it answers is a write saved.
   // Nothing is ever queued for the host to collect.
-  if (!onlineNow()) refuseAway()
+  if (!onlineNow()) refuse(CANVAS_AWAY)
   const profileId = await botHolding(id)
   if (!profileId) throw new Error("There is no such canvas.")
   const profile = await configOf(profileId)
@@ -473,7 +469,7 @@ export async function writeCanvasData(id: string, call: BridgeWriteCall) {
     // never landed — a failed one, or one this device timed out — leaves the canvas read-only.
     if (hostAnswered(failure)) throw failure
     markAway(id)
-    refuseAway(failure)
+    refuse(CANVAS_AWAY, failure)
   } finally {
     if (writing.get(id) === asked) writing.delete(id)
   }
@@ -536,33 +532,55 @@ async function hosting(id: string) {
   return configOf(profileId)
 }
 
-/** A host read or a tool call: the host's answer, or the refusal the page's promise gets. */
+/**
+ * The host's answer to anything a page asked it for, or the refusal its promise gets.
+ *
+ * One rule for reaching the bot, so a read, a tool call and a grant all fail the same way: with no
+ * network at all the call is refused without asking, and a request that never landed leaves the
+ * canvas unreachable. A host that answered and refused keeps its own words — that is the page's own
+ * answer, and the bridge reads a consent hold off it — and is never toasted as the bot being away.
+ */
 async function callHost(
   id: string,
-  ask: (profile: Profile) => Promise<unknown>,
+  task: (profile: Profile) => Promise<unknown>,
+  refusal: string,
 ): Promise<unknown> {
-  // A device with no network at all can't reach the host, so the call is refused without asking.
-  if (!onlineNow()) refuseUnreachable()
+  if (!onlineNow()) refuse(refusal)
   const profile = await hosting(id)
   try {
-    return await ask(profile)
+    return await task(profile)
   } catch (failure) {
-    // A host that answered and refused said why, and that is the page's own answer — the bridge
-    // reads `consent_required` off it. A request that never landed leaves the canvas unreachable.
     if (hostAnswered(failure)) throw failure
     markAway(id)
-    refuseUnreachable(failure)
+    refuse(refusal, failure)
   }
 }
 
+/**
+ * How long a declared tool is given. The host runs the call on its own MCP client with a 30 s budget
+ * (`plugin/mcp_call.py`'s `TIMEOUT`), so a phone that gave up sooner would report a call that landed
+ * as unreachable, and the header would say the bot was away.
+ */
+const TOOL_TIMEOUT_MS = 45_000
+
 /** One of the host's four free reads, straight to its route. */
 export function callCanvasRead(id: string, shape: CanvasReadShape, args: Record<string, unknown>) {
-  return callHost(id, (profile) => callCanvas(profile, id, shape, args))
+  return callHost(id, (profile) => callCanvas(profile, id, shape, args), CANVAS_UNREACHABLE)
 }
 
 /** A declared tool the page called, as `write` so two calls on one server are taken one at a time. */
 export function callCanvasTool(id: string, call: BridgeToolCall) {
-  return callHost(id, (profile) => callCanvas(profile, id, call.tool, call.args, true))
+  return callHost(
+    id,
+    (profile) =>
+      callCanvas(profile, id, call.tool, call.args, { write: true, timeout: TOOL_TIMEOUT_MS }),
+    CANVAS_UNREACHABLE,
+  )
+}
+
+/** Whatever a page asked its host for: a free read, or a tool call it was allowed to make. */
+export function callCanvasCall(id: string, call: BridgeHostCall) {
+  return call.method === "read" ? callCanvasRead(id, call.shape, call.args) : callCanvasTool(id, call)
 }
 
 /**
@@ -571,29 +589,25 @@ export function callCanvasTool(id: string, call: BridgeToolCall) {
  * answers no list still moves this device's copy, so the switch just flipped doesn't jump back.
  */
 export async function grantCanvasTool(id: string, tool: string, allow: boolean) {
-  if (!onlineNow()) refuseUnreachable()
-  const profileId = await botHolding(id)
-  if (!profileId) throw new Error("There is no such canvas.")
-  const profile = await configOf(profileId)
-  let answer: Record<string, unknown> | undefined
-  try {
-    answer = await grantCanvasToolOnHost(profile, id, tool, allow)
-  } catch (failure) {
-    if (hostAnswered(failure)) throw failure
-    markAway(id)
-    refuseUnreachable(failure)
-  }
+  const answer = (await callHost(
+    id,
+    (profile) => grantCanvasToolOnHost(profile, id, tool, allow),
+    CANVAS_UNREACHABLE,
+  )) as Record<string, unknown> | undefined
   const state = store.get()
   const held = state.details[id]
   if (!held) return answer
   const answered = grantsOf(answer?.grants)
-  const grants = answered ?? [
-    ...(held.grants ?? []).filter((row) => row.tool !== tool),
-    { tool, allowed: allow },
-  ]
+  // Merged, not replaced: an answer that named only this tool still leaves the rest as they were,
+  // and the clock keeps the newer of two answers to the same tool.
+  const grants = mergeGrants(
+    held.grants,
+    answered ?? [{ tool, allowed: allow, at: Date.now() }],
+  )
   const next = { ...held, grants }
   store.set({ ...state, details: { ...state.details, [id]: next } })
-  keepCanvas(profile, next)
+  const profile = await db.profiles.get(held.profileId)
+  if (profile) keepCanvas(profile, next)
   return answer
 }
 

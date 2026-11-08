@@ -44,18 +44,23 @@ export const upsert = <T extends { id: string }>(rows: T[], row: T) =>
 const newestData = (data?: Canvas["data"]) =>
   data?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0
 
-/** A canvas's answers as one string, so a grants-only change is still a change worth keeping. */
-const grantsText = (canvas: Canvas) => JSON.stringify(canvas.grants ?? [])
+/** The host's clock for the newest answer the user gave about a canvas's tools. */
+const newestGrant = (grants?: Canvas["grants"]) =>
+  grants?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0
 
 /**
  * Whether `one` is newer than `other`: the record's clock first, then the version it points at, then
- * the clock of the newest document. A read and a write's answer can arrive in either order, so the
- * row keeps the newer of the two rather than the later to land.
+ * the clock of the newest document, and last the clock of the newest answer about a tool. A read and
+ * a write's answer can arrive in either order, so the row keeps the newer of the two rather than the
+ * later to land — and an answer about a tool moves neither clock nor version, so its own clock is
+ * what says whether the copy that carries it is the newer one.
  */
 function newer(one: Canvas, other: Canvas) {
   if (one.at !== other.at) return one.at > other.at
   if (one.version !== other.version) return one.version > other.version
-  return newestData(one.data) > newestData(other.data)
+  if (newestData(one.data) !== newestData(other.data))
+    return newestData(one.data) > newestData(other.data)
+  return newestGrant(one.grants) > newestGrant(other.grants)
 }
 
 /**
@@ -117,13 +122,10 @@ export function keepCanvas(profile: Profile, canvas: Canvas) {
   void db
     .transaction("rw", db.canvasCache, async () => {
       const held = (await db.canvasCache.get(key))?.canvas
-      // A grants write moves no clock and no version, so an answer whose record sits still is still
-      // the newer one — but a record older than the copy held never replaces it.
-      if (held && !newer(canvas, held)) {
-        const stale =
-          held.at > canvas.at || (held.at === canvas.at && held.version > canvas.version)
-        if (stale || grantsText(canvas) === grantsText(held)) return
-      }
+      // A copy older than the one held never replaces it: a slow read can land after a newer one,
+      // and the cache would carry the older copy across a restart. What "newer" means is its own
+      // rule (`newer`), the answer about a tool's clock included.
+      if (held && !newer(canvas, held)) return
       await db.canvasCache.put({
         key,
         connection: connectionKey(profile),

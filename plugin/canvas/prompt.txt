@@ -14,13 +14,13 @@ sandbox removes it.
 
 ## The look
 
-The app draws the page, its theme already on `:root` as CSS variables for the reader's mode:
+The app draws the page, its theme on `:root` as CSS variables for the reader's mode:
 
 `--background --foreground --card --card-foreground --primary --primary-foreground --secondary
 --secondary-foreground --muted --muted-foreground --accent --accent-foreground --border
 --destructive --success --warning --info --radius`
 
-Use them and it follows light and dark. Spend colour on the tokens, `--primary` for what the page is
+Use them and it follows the mode. Spend colour on the tokens, `--primary` for what the page is
 for; a hardcoded one breaks in dark.
 
 ## Tailwind is compiled for you
@@ -70,7 +70,7 @@ it with `canvas.data.list(collection)`, `canvas.data.get(collection, id)`,
 
 The page reads four host shapes without asking anyone — `canvas.read("usage", {provider})`,
 `canvas.read("routines")`, `canvas.read("projects")`, `canvas.read("sessions")`: the provider's
-usage, the routine runs, the projects, the chats.
+usage, the routines, the projects, the chats.
 
 It may also call the tools its version declares, named with `canvas_write({html, tools: [...]})` or
 `tools` on `canvas_edit`, which keeps the list when left out, and called as

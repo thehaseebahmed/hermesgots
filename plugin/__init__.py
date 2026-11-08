@@ -122,6 +122,8 @@ def _chain_pool() -> concurrent.futures.ThreadPoolExecutor:
 # Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
+# What one of a canvas's free host reads answers with, at most: a page draws a list, not a store.
+CANVAS_READS_MAX = 50
 # What each shape a project AFK write names is written with: one writer per shape, named once, so
 # `afk.write_from`'s answer is handed to the writer that takes it and no shape can fall through to
 # another (`afk.py`). `on` also takes the project's folders and whether it is archived, which the
@@ -173,6 +175,26 @@ def _runs_by_job(job_id: str | None, per_job: int) -> Dict[str, List[Dict[str, A
         ]
         for jid in job_ids
     }
+
+
+def _routine_summaries() -> List[Dict[str, Any]]:
+    """The routines a page may list, as it draws them: a name, whether it is on, and when it runs.
+
+    Never a run ledger. ``_runs_by_job`` answers every job's newest runs by opening a connection per
+    job, which is a page's whole budget for a shape it would draw as one row each; the app's own
+    routines screen asks for runs where it shows them.
+    """
+    from cron.jobs import list_jobs
+
+    return [
+        {
+            "id": job.get("id"),
+            "name": job.get("name"),
+            "enabled": bool(job.get("enabled", True)),
+            "schedule": job.get("schedule"),
+        }
+        for job in list_jobs(include_disabled=True)[:CANVAS_READS_MAX]
+    ]
 
 
 def _error(web: Any, message: str, status: int, code: str | None = None):
@@ -3305,6 +3327,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         drawn from declares it and the user allowed it (ADR 0114): ``canvases.may_call`` reads both
         off the store, and a refusal's verdict rides back as the error's ``code``. The tab is told
         nothing it could call for any other canvas, since the id is this route's and not the body's.
+
+        Each read answers the shape the app's own screens draw, and no more. ``sessions`` is this
+        bot's chat list — flat, newest first, tombstones dropped — and not the Host's rooms: a room
+        is the Host's own, shared with the dashboard, and not one of this bot's chats. ``routines``
+        is each job's name, state and schedule, never its run ledger: a page that drew one row per
+        routine would otherwise cost one SQLite connection per job, on every call.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -3324,27 +3352,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return await read_usage(provider)
 
         async def read_routines_shape(args: Dict[str, Any]) -> Dict[str, Any]:
-            return {"jobs": await asyncio.to_thread(_runs_by_job, None, DEFAULT_PER_JOB)}
+            return {"routines": await asyncio.to_thread(_routine_summaries)}
 
         async def read_projects_shape(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"projects": await read_projects()}
 
         async def read_sessions_shape(args: Dict[str, Any]) -> Dict[str, Any]:
-            return {"sessions": await asyncio.to_thread(chats.read, path)}
+            return {"sessions": await asyncio.to_thread(chats.summaries, path, CANVAS_READS_MAX)}
 
         writes = {
             "data.put": lambda args: canvases.put_call(path, canvas_id, args),
             "data.remove": lambda args: canvases.remove_call(path, canvas_id, args),
         }
+        # The four names have one home (`page_calls.HOST_SHAPES`): a fifth there with no read here
+        # is a KeyError rather than a shape the guide promises and the page can never read.
+        readers = {
+            "usage": read_usage_shape,
+            "routines": read_routines_shape,
+            "projects": read_projects_shape,
+            "sessions": read_sessions_shape,
+        }
         try:
             result = await page_calls.answer(
                 body,
-                reads={
-                    "usage": read_usage_shape,
-                    "routines": read_routines_shape,
-                    "projects": read_projects_shape,
-                    "sessions": read_sessions_shape,
-                },
+                reads={shape: readers[shape] for shape in page_calls.HOST_SHAPES},
                 writes=writes,
                 may_call=partial(canvases.may_call, path, canvas_id),
                 profile=_request_profile(),
@@ -3374,11 +3405,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             found = await asyncio.to_thread(
                 canvases.grant, path, canvas_id, body.get("tool"), body.get("allow")
             )
-            rows = await asyncio.to_thread(canvases.grants, path, canvas_id)
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)
         return web.json_response(
-            {"object": "gots.canvas.grant", "grant": found, "grants": rows}
+            {
+                "object": "gots.canvas.grant",
+                "grant": found["grant"],
+                "grants": found["grants"],
+            }
         )
 
     async def list_research(request: "web.Request") -> "web.Response":

@@ -82,6 +82,27 @@ def tools_registered():
         yield
 
 
+@contextmanager
+def cron_modules(jobs: list):
+    """Hermes's cron package, answering ``jobs`` and a run ledger no canvas read may open.
+
+    ``list_executions`` is the trap: a routines read that still walked every job's runs would open
+    one SQLite connection per job, per call, so the mock raises if it is reached at all.
+    """
+    executions = ModuleType("cron.executions")
+    runs = mock.Mock(side_effect=AssertionError("a routines read opened the run ledger"))
+    executions.list_executions = runs  # type: ignore[attr-defined]
+    entries = ModuleType("cron.jobs")
+    entries.list_jobs = lambda include_disabled=False: list(jobs)  # type: ignore[attr-defined]
+    package = ModuleType("cron")
+    package.jobs = entries  # type: ignore[attr-defined]
+    package.executions = executions  # type: ignore[attr-defined]
+    with mock.patch.dict(
+        sys.modules, {"cron": package, "cron.jobs": entries, "cron.executions": executions}
+    ):
+        yield runs
+
+
 def sessions_db(home: Path, rows: list) -> None:
     """Hermes's own ``state.db``, with the sessions a lineage walk reads."""
     conn = sqlite3.connect(home / "state.db")
@@ -158,9 +179,9 @@ class WriteTest(unittest.TestCase):
         self.canvas = make_canvas(self.path)
 
     def test_a_write_is_the_next_version(self) -> None:
-        first = canvases.write(self.path, self.canvas["id"], DOCUMENT, tools=["todo_list"])
+        first = canvases.write(self.path, self.canvas["id"], DOCUMENT, tools=["tasks.todo_list"])
         self.assertEqual((first["version"], first["html"]), (1, DOCUMENT))
-        self.assertEqual(first["tools"], ["todo_list"])
+        self.assertEqual(first["tools"], ["tasks.todo_list"])
         second = canvases.write(self.path, self.canvas["id"], DOCUMENT.replace("Tip", "Split"))
         self.assertEqual(second["version"], 2)
         self.assertEqual(canvases.listing(self.path)[0]["version"], 2)
@@ -422,12 +443,12 @@ class EditTest(unittest.TestCase):
             conn.close()
 
     def test_edit_versions_and_undo_restores(self) -> None:
-        first = canvases.write(self.path, self.canvas["id"], DOCUMENT, tools=["todo_list"])
+        first = canvases.write(self.path, self.canvas["id"], DOCUMENT, tools=["tasks.todo_list"])
         second = canvases.write(
             self.path,
             self.canvas["id"],
             DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split</h1>"),
-            tools=["todo_list", "media_url"],
+            tools=["tasks.todo_list", "media.url"],
         )
         edited = canvases.edit(
             self.path,
@@ -870,14 +891,19 @@ class RouteTest(unittest.TestCase):
             )
             self.assertEqual(allowed["status"], 200)
             self.assertEqual(allowed["payload"]["object"], "gots.canvas.grant")
+            # The row is the answer and the host's clock for it: the device compares clocks, so an
+            # answer that began before this one can't walk it back.
+            grant = allowed["payload"]["grant"]
             self.assertEqual(
-                allowed["payload"]["grant"], {"tool": "files.search", "allowed": True}
+                {field: grant[field] for field in ("tool", "allowed")},
+                {"tool": "files.search", "allowed": True},
             )
+            self.assertIsInstance(grant["at"], int)
+            # The row is answered with the canvas's answers after it, in one write's answer.
+            self.assertEqual(allowed["payload"]["grants"], [grant])
             # The answer is the canvas's, so every one-canvas read carries it.
             read = self.call("/canvases/{canvas_id}", canvas_id=canvas_id)
-            self.assertEqual(
-                read["payload"]["canvas"]["grants"], [{"tool": "files.search", "allowed": True}]
-            )
+            self.assertEqual(read["payload"]["canvas"]["grants"], [grant])
 
             answered = self.call("/canvases/{canvas_id}/call", "POST", body, canvas_id=canvas_id)
             self.assertEqual(answered["status"], 200)
@@ -906,13 +932,30 @@ class RouteTest(unittest.TestCase):
 
     def test_the_four_host_reads_answer_without_a_tool_or_a_grant(self) -> None:
         canvas_id = self.make()
-        chats.merge(self.path, {"chat-1": {"at": 5, "value": {"title": "Groceries"}}})
+        # The chats a page may list are this bot's own, newest first, and a chat the user deleted is
+        # no chat at all: the flat projection is what a page draws, not the sync envelope.
+        chats.merge(
+            self.path,
+            {
+                "chat-1": {"at": 5, "value": {"title": "Groceries"}},
+                "chat-2": {"at": 9, "deleted": True},
+                "chat-3": {"at": 7, "value": {"title": "Trip"}},
+            },
+        )
         sessions = self.call(
             "/canvases/{canvas_id}/call", "POST", {"shape": "sessions"}, canvas_id=canvas_id
         )
         self.assertEqual(sessions["status"], 200)
+        # The canvas's own chat is one of the bot's chats and rides the list too; the seeded ones
+        # answer newest first, and the deleted chat is no chat at all.
+        own = canvases.page(self.path, canvas_id)["chat_id"]
+        listed = [row for row in sessions["payload"]["result"]["sessions"] if row["id"] != own]
         self.assertEqual(
-            sessions["payload"]["result"]["sessions"]["chat-1"]["value"]["title"], "Groceries"
+            listed,
+            [
+                {"id": "chat-3", "title": "Trip", "at": 7},
+                {"id": "chat-1", "title": "Groceries", "at": 5},
+            ],
         )
         # The host's read keeps its own argument rule: usage is read for one provider.
         unnamed = self.call(
@@ -920,6 +963,72 @@ class RouteTest(unittest.TestCase):
         )
         self.assertEqual(unnamed["status"], 400)
         self.assertIn("provider", unnamed["payload"]["error"]["message"])
+
+    def test_the_routines_read_projects_the_hosts_jobs_and_reads_no_run(self) -> None:
+        # A page draws a routine's name, whether it is on and when it runs — not every run of every
+        # job, which was one SQLite connection per job, per call.
+        canvas_id = self.make()
+        jobs = [
+            {"id": "j1", "name": "Morning brief", "schedule": "0 8 * * *", "enabled": False},
+            {"id": "j2", "name": "Nightly", "schedule": "0 2 * * *", "enabled": True},
+        ]
+        with cron_modules(jobs) as runs:
+            routine = self.call(
+                "/canvases/{canvas_id}/call", "POST", {"shape": "routines"}, canvas_id=canvas_id
+            )
+            self.assertEqual(routine["status"], 200)
+            self.assertEqual(
+                routine["payload"]["result"],
+                {
+                    "routines": [
+                        {
+                            "id": "j1",
+                            "name": "Morning brief",
+                            "enabled": False,
+                            "schedule": "0 8 * * *",
+                        },
+                        {"id": "j2", "name": "Nightly", "enabled": True, "schedule": "0 2 * * *"},
+                    ]
+                },
+            )
+            self.assertEqual(runs.call_count, 0, "a routines read never opens the run ledger")
+            # At most fifty, in the host's own order: a page draws a list, not a ledger.
+            many = [{"id": f"j{index}", "name": f"Job {index}", "schedule": "* * * * *"} for index in range(60)]
+            with cron_modules(many):
+                capped = self.call(
+                    "/canvases/{canvas_id}/call",
+                    "POST",
+                    {"shape": "routines"},
+                    canvas_id=canvas_id,
+                )
+            self.assertEqual(
+                [row["id"] for row in capped["payload"]["result"]["routines"]],
+                [f"j{index}" for index in range(50)],
+            )
+
+    def test_a_declared_tool_is_named_server_and_tool_and_so_is_a_grant(self) -> None:
+        # A name that isn't `<server>.<tool>` would be a row nothing can ever use: a version that
+        # declares one gets no option row, no dialog, and a grant that can never be called.
+        canvas_id = self.make()
+        for tools, named in ((["search"], "search"), (["files."], "files."), (["ok.tool", ".search"], ".search")):
+            with self.subTest(tools=tools):
+                with self.assertRaises(canvases.CanvasError) as caught:
+                    canvases.write(self.path, canvas_id, DOCUMENT, tools=tools)
+                self.assertEqual(caught.exception.status, 400)
+                self.assertIn(named, str(caught.exception))
+                self.assertIn("<server>.<tool>", str(caught.exception))
+        # Nothing was written, so the canvas still declares nothing at all.
+        self.assertEqual(canvases.page(self.path, canvas_id)["version"], 0)
+
+        canvases.write(self.path, canvas_id, DOCUMENT, tools=["files.search"])
+        for tool in ("search", "files.", ".search", ""):
+            with self.subTest(tool=tool):
+                with self.assertRaises(canvases.CanvasError) as caught:
+                    canvases.grant(self.path, canvas_id, tool, True)
+                self.assertEqual(caught.exception.status, 400)
+                self.assertIn("<server>.<tool>", str(caught.exception))
+                if tool:
+                    self.assertIn(tool, str(caught.exception))
 
     def test_a_grant_names_a_declared_tool_of_a_canvas_that_is_there(self) -> None:
         canvas_id = self.make()

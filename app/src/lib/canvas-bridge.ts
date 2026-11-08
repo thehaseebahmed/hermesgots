@@ -29,6 +29,45 @@ export const CANVAS_READS = ["usage", "routines", "projects", "sessions"] as con
 
 export type CanvasReadShape = (typeof CANVAS_READS)[number]
 
+/**
+ * The `code` a host's refusal carries when a page's tool was never allowed: the bridge asks the
+ * reader about exactly this answer, and nothing else it refuses is a question for them.
+ */
+export const CANVAS_CONSENT_REQUIRED = "consent_required"
+
+/**
+ * The user's answer about one tool a canvas's page declared, as the host keeps it: `allowed` says
+ * which way it went, and `at` is the host's clock for that answer. The clock is what lets a device
+ * tell which of two answers it holds is the later one without comparing whole lists — a read that
+ * began before a grant landed can't retract it.
+ */
+export interface CanvasGrant {
+  tool: string
+  allowed: boolean
+  at: number
+}
+
+/**
+ * Two copies of a canvas's answers as one: per tool the row the host stamped later, every tool
+ * either side names, ordered by tool as the host orders them.
+ *
+ * The merge is what keeps a slow read from undoing the reader's answer: a read that began before
+ * the grant was written answers without it, and its answer must not walk the answer back.
+ */
+export function mergeGrants(
+  held: CanvasGrant[] | undefined,
+  answer: CanvasGrant[] | undefined,
+): CanvasGrant[] {
+  const merged = new Map<string, CanvasGrant>()
+  for (const row of [...(held ?? []), ...(answer ?? [])]) {
+    const kept = merged.get(row.tool)
+    if (!kept || row.at > kept.at) merged.set(row.tool, row)
+  }
+  return [...merged.values()].sort((one, other) =>
+    one.tool < other.tool ? -1 : one.tool > other.tool ? 1 : 0,
+  )
+}
+
 /** One document of a canvas's own data, as the host answers it: a collection, an id and a clock. */
 export interface CanvasDoc {
   collection: string
@@ -264,7 +303,7 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
     try {
       return await host.call(call)
     } catch (error) {
-      if (codeOf(error) !== "consent_required") throw error
+      if (codeOf(error) !== CANVAS_CONSENT_REQUIRED) throw error
       if (!(await permission(call.tool))) {
         throw new Error(`You didn't allow this canvas to use ${call.tool}.`)
       }

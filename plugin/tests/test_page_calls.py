@@ -13,7 +13,7 @@ from plugin import mcp, page_calls
 ALLOWED = page_calls.ALLOWED
 
 
-def run(sent, reads=None, writes=None, may_call=lambda tool, write: ALLOWED, profile="p"):
+def run(sent, reads=None, writes=None, may_call=lambda tool: ALLOWED, profile="p"):
     return asyncio.run(
         page_calls.answer(
             sent, reads=reads or {}, writes=writes, may_call=may_call, profile=profile, locks={}
@@ -108,9 +108,9 @@ class CanvasData(unittest.TestCase):
             run(
                 {"shape": "home.light"},
                 writes={"data.put": lambda args: 1},
-                may_call=lambda tool, write: asked.append((tool, write)) or ALLOWED,
+                may_call=lambda tool: asked.append(tool) or ALLOWED,
             )
-        self.assertEqual(asked, [("home.light", False)])
+        self.assertEqual(asked, ["home.light"])
 
 
 class Tools(unittest.TestCase):
@@ -122,7 +122,7 @@ class Tools(unittest.TestCase):
         ):
             with self.subTest(verdict=verdict):
                 with self.assertRaises(page_calls.CallRefused) as caught:
-                    run({"shape": "files.search"}, may_call=lambda tool, write: verdict)
+                    run({"shape": "files.search"}, may_call=lambda tool: verdict)
                 self.assertEqual((caught.exception.status, caught.exception.reason), (403, verdict))
                 self.assertIn("files.search", str(caught.exception))
                 self.assertIn(words, str(caught.exception))
@@ -130,37 +130,41 @@ class Tools(unittest.TestCase):
     def test_a_verdict_the_module_does_not_know_is_refused_whole(self) -> None:
         # Something other than a verdict is no consent to call anything.
         with self.assertRaises(page_calls.CallRefused) as caught:
-            run({"shape": "files.search"}, may_call=lambda tool, write: "perhaps")
+            run({"shape": "files.search"}, may_call=lambda tool: "perhaps")
         self.assertEqual(caught.exception.status, 403)
 
-    def test_the_predicate_is_asked_with_the_tool_and_whether_it_writes(self) -> None:
+    def test_the_predicate_is_asked_with_the_tool_alone(self) -> None:
+        # An answer is the user's for a tool, not a verb: the write flag takes the act lock and is
+        # never part of the question.
         asked = []
         with mock.patch.object(page_calls.mcp_call, "call_async", mock.AsyncMock(return_value=1)):
             run(
                 {"shape": "home.switch", "write": True},
-                may_call=lambda tool, write: asked.append((tool, write)) or ALLOWED,
+                may_call=lambda tool: asked.append(tool) or ALLOWED,
             )
-        self.assertEqual(asked, [("home.switch", True)])
+        self.assertEqual(asked, ["home.switch"])
 
     def test_an_allowed_tool_reaches_the_mcp_client_with_its_args(self) -> None:
         call = mock.AsyncMock(return_value={"on": True})
         with mock.patch.object(page_calls.mcp_call, "call_async", call):
             value = run(
                 {"shape": "home.light", "args": {"room": "hall"}},
-                may_call=lambda tool, write: ALLOWED,
+                may_call=lambda tool: ALLOWED,
                 profile="bot",
             )
         self.assertEqual(value, {"on": True})
         call.assert_awaited_once_with("bot", "home.light", {"room": "hall"})
 
     def test_a_name_without_a_server_is_a_400_naming_the_shape_it_needs(self) -> None:
-        for shape in ("ghost", None, 3, ""):
+        # "files." reads as a tool with no name, which the one rule that owns the name refuses
+        # before the reader is asked anything about it.
+        for shape in ("ghost", "files.", None, 3, ""):
             with self.subTest(shape=shape):
                 asked = []
                 with self.assertRaises(page_calls.CallRefused) as caught:
                     run(
                         {"shape": shape},
-                        may_call=lambda tool, write: asked.append(tool) or ALLOWED,
+                        may_call=lambda tool: asked.append(tool) or ALLOWED,
                     )
                 self.assertEqual(caught.exception.status, 400)
                 self.assertIn("<server>.<tool>", str(caught.exception))
@@ -182,7 +186,7 @@ class Tools(unittest.TestCase):
         ):
             with self.subTest(status=status):
 
-                def may_call(tool, write, raised=raised):
+                def may_call(tool, raised=raised):
                     raise raised
 
                 with self.assertRaises(page_calls.CallRefused) as caught:
@@ -216,7 +220,7 @@ class Tools(unittest.TestCase):
             ask = lambda shape, write: page_calls.answer(
                 {"shape": shape, "write": write},
                 reads={},
-                may_call=lambda tool, verb: ALLOWED,
+                may_call=lambda tool: ALLOWED,
                 profile=None,
                 locks=locks,
             )
@@ -238,7 +242,7 @@ class Tools(unittest.TestCase):
             ask = lambda: page_calls.answer(
                 {"shape": "srv.a", "write": True},
                 reads={},
-                may_call=lambda tool, verb: ALLOWED,
+                may_call=lambda tool: ALLOWED,
                 profile=None,
                 locks=locks,
             )

@@ -79,6 +79,32 @@ def read(path: Path) -> Dict[str, Dict[str, Any]]:
         conn.close()
 
 
+def summaries(path: Path, limit: int) -> list[Dict[str, Any]]:
+    """The chats a list draws, newest first: an id, its title and the clock it changed at.
+
+    A projection and not ``read``, which answers the whole sync envelope — a value per chat, 3.6 MB
+    on three hundred of them — for a canvas' page drawing a list of names. The title is read off the
+    value in SQL, tombstones are no chat at all, and the limit is the caller's: a page draws a list.
+    """
+    if not path.exists():
+        return []
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            """SELECT id, at, json_extract(value, '$.title') FROM chats
+               WHERE deleted = 0
+               ORDER BY at DESC, id
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {"id": chat_id, "title": title if isinstance(title, str) else "", "at": at}
+        for chat_id, at, title in rows
+    ]
+
+
 def one(path: Path, chat_id: str) -> Optional[Dict[str, Any]]:
     """One chat's record, read by its id: asking about a single session doesn't cost the whole list."""
     if not chat_id or not path.exists():

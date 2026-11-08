@@ -84,7 +84,8 @@ export function createCanvasStore() {
   }
 
   // A listing carries the record and no document, so no `can_undo`: only the one-canvas answer does,
-  // as the plugin's own `listing` answers. The reader's answers about the version's tools ride it.
+  // as the plugin's own `listing` answers — and no grants either, since the plugin's listing answers
+  // a record alone. The answers ride the one-canvas answer, which is what a screen draws.
   const summary = (c) => ({
     id: c.id,
     title: c.title,
@@ -95,7 +96,6 @@ export function createCanvasStore() {
     hidden: c.hidden,
     at: c.at,
     created_at: c.created_at,
-    grants: c.grants ?? [],
   })
 
   // The pointer's version, not the newest stored one: an undo moves the pointer back and leaves the
@@ -108,6 +108,8 @@ export function createCanvasStore() {
       ...summary(c),
       html: current?.html ?? "",
       tools: current?.tools ?? [],
+      // The reader's answers ride the one-canvas answer: a record the list carries has no room for
+      // them, and the options read the canvas they change.
       grants: c.grants ?? [],
       written_at: current?.at ?? c.at,
       can_undo: earlier !== null,
@@ -162,19 +164,23 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
     const args = body.args && typeof body.args === "object" ? body.args : {}
     // The host's four free reads (ADR 0114): no declaration and no consent, answered from what the
     // mock holds, with a stub account and one routine so a page has something to draw.
+    // Each read answers the shape the app's own screens draw: a provider's usage, a routine per job
+    // as the host projects one, the projects, and this bot's chats newest first.
     const reads = {
       usage: () => ({
+        provider: "anthropic",
         plan: "Pro",
         windows: [
           { label: "Session", used_percent: 12, resets_at: null, detail: null, scope: "account" },
         ],
-        deciding: null,
       }),
-      routines: () => [
-        { id: "r_morning", title: "Morning brief", schedule: "0 8 * * *", enabled: true },
-      ],
-      projects: () => [],
-      sessions: () => (sessions ? sessions() : []),
+      routines: () => ({
+        routines: [
+          { id: "r_morning", name: "Morning brief", schedule: "0 8 * * *", enabled: true },
+        ],
+      }),
+      projects: () => ({ projects: [] }),
+      sessions: () => ({ sessions: (sessions ? sessions() : []).slice(0, 50) }),
     }
     const read =
       typeof shape === "string" && Object.hasOwn(reads, shape) ? reads[shape] : undefined
@@ -297,15 +303,12 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
       fail(403, `This canvas never declared ${body.tool}.`, "not_declared")
       return true
     }
+    const granted = { tool: body.tool, allowed: Boolean(body.allow), at: Date.now() }
     canvas.grants = [
       ...(canvas.grants ?? []).filter((row) => row.tool !== body.tool),
-      { tool: body.tool, allowed: Boolean(body.allow) },
+      granted,
     ].sort((one, two) => (one.tool < two.tool ? -1 : 1))
-    json(res, 200, {
-      object: "gots.canvas.grant",
-      grant: { tool: body.tool, allowed: Boolean(body.allow) },
-      grants: canvas.grants,
-    })
+    json(res, 200, { object: "gots.canvas.grant", grant: granted, grants: canvas.grants })
     return true
   }
 

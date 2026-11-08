@@ -2361,23 +2361,27 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 /**
  * A call a canvas's page makes, through the app: one of the host's free reads, or a declared tool,
  * or the canvas's own data put or removed on the host. A tool call rides `write`, so two calls on
- * one server are taken one at a time. The answer is what the host kept or read, read as the
- * bridge's own rule reads it.
+ * one server are taken one at a time.
+ *
+ * `timeout` is the caller's budget. A tool call's work happens on the host, which gives it its own
+ * longer budget (`plugin/mcp_call.py`'s `TIMEOUT`), so the page's caller passes a deadline that
+ * outlasts that rather than the read's — a call that landed must not be reported unreachable.
  */
 export async function callCanvas(
   config: HermesConfig,
   id: string,
   shape: string,
   args: Record<string, unknown>,
-  write = false,
+  options: { write?: boolean; timeout?: number } = {},
 ) {
+  const { write = false, timeout } = options
   const response = await request(`${canvasRoot(config, id)}/call`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(write ? { shape, args, write: true } : { shape, args }),
     // A call the host never answers is refused on this device's clock rather than leaving the
     // page's promise waiting on a socket timeout.
-    signal: AbortSignal.timeout(write ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeout ?? (write ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS)),
   })
   return (await response.json())?.result as unknown
 }

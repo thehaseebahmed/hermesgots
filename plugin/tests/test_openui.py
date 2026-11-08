@@ -92,6 +92,12 @@ class AdvertisementTest(SectionState):
 
 
 class ArtifactTest(unittest.TestCase):
+    def test_both_artifacts_fit_the_hosts_section_cap(self) -> None:
+        # A section over the cap is dropped whole, so an artifact that outgrows it takes its
+        # feature with it — the canvas guide did once, and the host said nothing about why.
+        self.assertLessEqual(len(openui.TEXT), openui.LIMIT)
+        self.assertLessEqual(len(openui.CANVAS_TEXT), openui.LIMIT)
+
     def test_a_missing_artifact_does_not_break_the_import(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             copy = Path(folder) / "openui.py"
