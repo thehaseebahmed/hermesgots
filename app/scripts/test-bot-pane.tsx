@@ -662,7 +662,7 @@ test(
         "the closed thread's card still spinning",
       )
 
-      // The run goes on at the host: its reply lands while nothing draws the thread.
+      // The run goes on at the host, and its reply is written there while nothing draws the thread.
       host.latest.run.finish(LANDED)
 
       // The thread again, from its card in Main: the words the host wrote while it was away.

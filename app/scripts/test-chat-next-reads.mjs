@@ -70,9 +70,9 @@ test("a transcript whose newest rows are not the held ones is read on to the sta
 })
 
 /**
- * A host that answers the transcript with a body carrying no page at all, as a proxy, an error
- * envelope or an older route does. It counts the pages asked for and refuses a sixth, so a read that
- * never ends fails the test rather than running the process out of memory.
+ * A host that answers the transcript with JSON carrying no page at all, as an error envelope or an
+ * older route does. It counts the pages asked for and refuses a sixth, so a read that never ends
+ * fails the test rather than running the process out of memory.
  */
 function pageLessHost() {
   const asked = []
