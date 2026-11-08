@@ -6,6 +6,7 @@
 - **G2** The lane — split share, drag handle, close cross, Escape, Cmd+\ to reopen, no slide — is proven with Main drawn by chat-next, not only by the current screen.
 - **G3** A thread closed while its reply streams keeps running on chat-next: nothing is posted to stop it, its card in Main still spins, and the words are there when it is opened again.
 - **G4** The current screen keeps its behaviour for a keyless bot and for a chat this device is missing.
+- **G5** A bot's row in the sidebar stops dotting once its thread has been read, whether chat-next or the current screen drew it.
 
 ## Non-goals
 
@@ -70,7 +71,8 @@ sequenceDiagram
 2. **The lane's own test runs unskipped, with its probe gone.** The unskipped switch test passes, and the file's other cases still do, including the one that hung its process out of memory before. Goals: G1, G4. After: 1. Layers: bot pane, chat-next Main. Check: the command the request names, red (it never returns) then green. Done.
 3. **The lane is proven where Main is chat-next.** A callable bot's Main, beside the thread this device remembers for it: the bot's name and thread count, the thread's pane in half the row, the handle, Main's header with its picture and no close cross, the thread's with the cross and no back, the card marked open, and the cross closing it — the thread forgotten and Main taking the whole row, as `Escape` and the chord do. Goals: G2. After: 1. Layers: bot pane, chat-next Main. Check: the new case is red before step 1 (the read never ends) and green after. Done.
 4. **The run outlives the pane on chat-next.** The mid-stream close is driven by chat-next's own composer and host, and asserts nothing was posted to stop the run, the card in Main still spins, and the words are there on reopening. It replaces `"a thread closed while it streams keeps running, and its card in Main still spins"` as written for a keyless bot on the current screen, which can no longer send: a callable bot's thread is chat-next's. Goals: G3. After: 1. Layers: chat-next Main, chat-next thread. Check: the case fails before the rewrite (`waited for the run's POST`) and passes after. Done.
-5. **Every suite the request names, and the tier at three.** The named files, `pnpm typecheck`, `pnpm build`, `pnpm test:unit`, and the component tier at `--test-concurrency=3`, which is retried and left at 2 only if it still runs out of memory, said so in the pull request. Goals: G1–G4. After: 1–4. Layers: all. Check: each command's own output.
+5. **Every suite the request names, and the tier at three.** The named files, `pnpm typecheck`, `pnpm build`, `pnpm test:unit`, and the component tier at `--test-concurrency=3`, which is retried and left at 2 only if it still runs out of memory, said so in the pull request: it does, a worker reaching SIGKILL, so the tier stays at 2 and the pull request names it. Goals: G1–G4. After: 1–4. Layers: all. Check: each command's own output.
+6. **A chat-next chat writes its own read mark.** The sidebar's bot row reads the marks of the bot's threads (ADR 0110), so a thread drawn by chat-next writes the mark its own render has seen, as the current screen does for every chat — not only for a coding session, which is all chat-next wrote before it drew a bot's thread. Goals: G5. After: none. Layers: chat-next Main and its thread screen. Check: `scripts/test-bot-rows.tsx`, its two mark cases red (`waited for the dot to clear once the thread renders`, `waited for the mark the thread's own render wrote`) then green. Done.
 
 ## Decisions
 
