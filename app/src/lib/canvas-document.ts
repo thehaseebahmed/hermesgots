@@ -107,21 +107,58 @@ export function themeVariables(tokens: Record<string, string>, mode: CanvasMode)
 
 /**
  * A page's ask for a library, as the guide writes it: an empty script naming one. Other attributes
- * may ride the tag, and both quote styles count — a bot writes markup, not a spec.
+ * may ride the tag — quoted values included — and both quote styles count, since a bot writes
+ * markup, not a spec.
  */
-const LIBRARY_TAG = /<script\b[^>]*\bdata-canvas-lib\s*=\s*["']([^"']*)["'][^>]*>\s*<\/script>/gi
+const LIBRARY_TAG =
+  /<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/script>/gi
 
 /**
- * Every ask taken out, the ones the app can answer replaced by the library's own source. A name it
- * doesn't know, and a known one the caller gave no source for, leave nothing behind: the page draws
- * without the library rather than carrying a tag for one it never got.
+ * Every ask taken out, the ones the app can answer replaced by the library's own source where the
+ * page put it. A name it doesn't know, a known one the caller gave no source for, and a second ask
+ * for one already inlined, leave nothing behind: the page draws without the library rather than
+ * carrying a tag for one it never got, or the same source twice.
  */
 function inlineLibraries(html: string, libraries: Partial<Record<CanvasLibrary, string>>): string {
+  const placed = new Set<string>()
   return html.replace(LIBRARY_TAG, (_tag, name: string) => {
     const known = (LIBRARIES as readonly string[]).includes(name)
     const source = known ? libraries[name as CanvasLibrary] : undefined
-    return source ? `<script>${source}</script>` : ""
+    if (!source || placed.has(name)) return ""
+    placed.add(name)
+    // `</script` inside the source would end the element it is in; the escape spells the same string.
+    return `<script>${source.replace(/<\/script/gi, "<\\/script")}</script>`
   })
+}
+
+/**
+ * The reader's mode, as a class on the page's `html`: `dark:` in a compiled class follows the app
+ * rather than the phone's own setting, which is the only way a variant and the tokens agree.
+ */
+function withMode(html: string, mode: CanvasMode): string {
+  if (mode !== "dark") return html
+  const open = /<html\b([^>]*)>/i.exec(html)
+  if (!open) return html
+  const attributes = open[1]
+  const declared = /\bclass\s*=\s*("([^"]*)"|'([^']*)')/i.exec(attributes)
+  const tag = (rest: string) => `<html${rest}>`
+  const after = html.slice(open.index + open[0].length)
+  if (!declared) return html.slice(0, open.index) + tag(`${attributes} class="dark"`) + after
+  const held = declared[2] ?? declared[3] ?? ""
+  if (/\bdark\b/.test(held)) return html
+  const quote = declared[0].includes('"') ? '"' : "'"
+  const value = `class=${quote}${held}${held ? " " : ""}dark${quote}`
+  const rest = attributes.slice(0, declared.index) + value + attributes.slice(declared.index + declared[0].length)
+  return html.slice(0, open.index) + tag(rest) + after
+}
+
+/**
+ * Compiled CSS, made safe for the `<style>` it rides in: a class whose compiled value spells
+ * `</style>` — `before:content-['</style>']` does — would end the element and spill the rest of the
+ * utilities into the page as text. `<\/style` is the same CSS, since a CSS string reads `\/` as `/`.
+ */
+function escapeStyle(css: string): string {
+  return css.replace(/<\/style/gi, "<\\/style")
 }
 
 /**
@@ -149,14 +186,14 @@ export function canvasDocument(
     css?: string
   },
 ): string {
-  const page = inlineLibraries(html, libraries)
+  const page = withMode(inlineLibraries(html, libraries), mode)
   const head = findHead(page)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
   const at = head.index + head.length
   const prefix =
     `<meta http-equiv="Content-Security-Policy" content="${CANVAS_CSP}">` +
     `<style>${themeVariables(tokens, mode)}</style>` +
-    (css ? `<style>${css}</style>` : "") +
+    (css ? `<style>${escapeStyle(css)}</style>` : "") +
     `<script>${NO_PEER}</script>` +
     `<script>${scrollBridge(scroll)}</script>` +
     `<script>${BRIDGE_SCRIPT}</script>`

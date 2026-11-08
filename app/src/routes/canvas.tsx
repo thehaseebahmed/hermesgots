@@ -335,7 +335,7 @@ export function CanvasView() {
             />
           ) : (
             <p className="p-4 text-center text-sm text-muted-foreground">
-              {loaded ? "Your bot is building it…" : "Reading the canvas…"}
+              {loaded && !html ? "Your bot is building it…" : "Reading the canvas…"}
             </p>
           )}
           {/* A phone has room for the page or its chat, not both: the chat is raised over the page

@@ -181,6 +181,25 @@ test("a named library is inlined and an unknown one dropped", () => {
     false,
     "a known name with no source is dropped too",
   )
+  // A second ask for a library already inlined adds nothing: its global is defined by the first.
+  const twice = canvasDocument(
+    PAGE.replace(
+      "<title>Tip</title>",
+      '<title>Tip</title>\n    <script data-canvas-lib="chart"></script>' +
+        '<script data-canvas-lib="chart"></script>',
+    ),
+    { mode: "light", tokens: LIGHT, libraries: { chart: "window.Chart=function(){}" } },
+  )
+  assert.equal(twice.split("window.Chart=function").length - 1, 1, "the source is inlined once")
+  // An ask whose other attributes carry a `>` is still an ask: the tag is read, not its bytes.
+  const quoted = canvasDocument(
+    PAGE.replace(
+      "<title>Tip</title>",
+      '<title>Tip</title>\n    <script data-x="a>b" data-canvas-lib="date"></script>',
+    ),
+    { mode: "light", tokens: LIGHT, libraries: { date: "window.dayjs=function(){}" } },
+  )
+  assert.match(quoted, /<script>window\.dayjs=function\(\)\{\}<\/script>/, "a quoted `>` doesn't hide the ask")
 })
 
 test("bg-primary compiles to the token's variable", async () => {
@@ -203,6 +222,32 @@ test("bg-primary compiles to the token's variable", async () => {
   assert.match(ruleFor("rounded-lg"), /border-radius: var\(--radius\)/)
 })
 
+test("dark: classes follow the app's mode, not the phone's", async () => {
+  // The page's tokens are set for the reader's mode, so a `dark:` utility has to answer the same
+  // question. Tailwind's own variant asks the operating system, which can disagree with the app.
+  const dark = canvasDocument(PAGE, { mode: "dark", tokens: DARK })
+  const light = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
+  assert.match(dark, /<html lang="en" class="dark">/, "the dark page says so on its html")
+  assert.equal(/<html[^>]*class="[^"]*\bdark\b/.test(light), false, "the light page doesn't")
+  const base = readFileSync(new URL("../node_modules/tailwindcss/index.css", import.meta.url), "utf8")
+  const css = await compileCanvasCss(base, ["dark:bg-card"])
+  assert.match(css, /:where\(\.dark, \.dark \*\)/, "the variant is the page's own class")
+  assert.equal(css.includes("prefers-color-scheme"), false, "and not the phone's setting")
+})
+
+test("compiled CSS can't end the style element it rides in", () => {
+  // `before:content-['</style>']` compiles to a raw close tag: unescaped, the style element ends and
+  // the rest of the utilities spill into the page as text.
+  const page = PAGE.replace("<h1>Tip</h1>", '<h1 class="before:content-[\'x\']">Tip</h1>')
+  const html = canvasDocument(page, {
+    mode: "light",
+    tokens: LIGHT,
+    css: `p::before{content:'</style>'}`,
+  })
+  assert.equal((html.match(/<style>/g) ?? []).length, (html.match(/<\/style>/g) ?? []).length)
+  assert.match(html, /content:'<\\\/style>'/, "the close tag is escaped, not spelled")
+})
+
 test("the radius steps a canvas gets are the app's own", () => {
   // The canvas copies the app's four radius steps rather than Tailwind's defaults, and a copy is
   // only as good as the thing holding it to the original: a step the app changes is a step the
@@ -220,12 +265,25 @@ test("the radius steps a canvas gets are the app's own", () => {
 
 test("the classes compiled are the ones the page's class attributes name", () => {
   // Only what is in the markup is compiled (`classes` in the guide): the reader takes both quote
-  // styles, keeps each name once, and is not fooled by an attribute or a script that looks like one.
+  // styles, keeps each name once, and is not fooled by a script or a style block that looks like
+  // one. The three ways HTML may write the attribute all count, and so does a space spelled as an
+  // entity — the browser reads them all as classes, so the compiler has to as well.
   const page = `<div class="p-4  bg-card bg-card" data-x="p-4"></div>
     <span class='text-foreground md:mt-2'></span>
+    <p CLASS="gap-2"></p>
+    <p class=bg-primary></p>
+    <p class="p-4&#32;bg-muted"></p>
     <script>var prose = 'class="nope"'</script>
     <style>.nope{color:red}</style>`
-  assert.deepEqual(canvasClasses(page), ["bg-card", "md:mt-2", "p-4", "text-foreground"])
+  assert.deepEqual(canvasClasses(page), [
+    "bg-card",
+    "bg-muted",
+    "bg-primary",
+    "gap-2",
+    "md:mt-2",
+    "p-4",
+    "text-foreground",
+  ])
 })
 
 test("the canvas section names exactly the libraries and bridge methods the app has", () => {

@@ -16,7 +16,14 @@ host is the only door out of it:
   ran. Safari is unchecked.
 - **Libraries:** a vetted set (a chart library, a date library, icons and Tailwind) ships in the app
   bundle and is inlined at render, so the page needs no CDN. This also keeps minified third-party code
-  out of `plugin/`, which Hermes's install scanner reads file by file.
+  out of `plugin/`, which Hermes's install scanner reads file by file. Chart.js, Day.js and lucide
+  answer an empty `<script data-canvas-lib="NAME">`; a name the app doesn't carry is dropped. Tailwind
+  is not inlined as a runtime: the page's classes are compiled in the app with Tailwind v4's own
+  `compile()`, over the app's tokens as the theme, and the result is injected as plain CSS. The base
+  is Tailwind's own stylesheet, preflight included, so a canvas that uses utilities behaves as a
+  Tailwind page does — and an existing version, whose markup never changes, draws with the app's
+  current base rather than the one it was written against. `dark:` is the app's mode, put on the
+  page's `html` as a class, not the operating system's.
 - **The bridge:** the page reaches anything only through a `postMessage` bridge. The parent answers
   only its own frame. A read of the canvas's data is answered from the device's copy
   ([ADR 0113](0113-a-canvas-is-its-bots-record-edited-only-through-its-own-session.md)); a write, and
