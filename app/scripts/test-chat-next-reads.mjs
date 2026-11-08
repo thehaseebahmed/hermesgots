@@ -2,7 +2,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { HostStuck, readNewest, readPage, readRun, readTranscript } from "../src/chat-next/api.ts"
+import {
+  HostNoPage,
+  HostStuck,
+  readNewest,
+  readPage,
+  readRun,
+  readTranscript,
+} from "../src/chat-next/api.ts"
 import { overlay, PAGE } from "../src/chat-next/pages.ts"
 import { promptFrom } from "../src/lib/run-prompt.ts"
 import { recorded } from "./chat-next-fixtures.ts"
@@ -85,13 +92,29 @@ function pageLessHost() {
   return asked
 }
 
-test("an answer with no page is no rows, and the read ends on it", async () => {
+test("an answer with no page is a failed read, not a chat drawn short", async () => {
   const asked = pageLessHost()
-  assert.deepEqual(await readPage(connection, "s", 0), [], "a page the host cannot give is no rows")
-  const read = await readNewest(connection, "s", undefined, [row(1)])
-  assert.deepEqual(read.rows, [], "and the read that asked for it holds no rows")
-  assert.equal(read.more, false, "with nothing older left to read")
-  assert.deepEqual(asked, [0, 0], "one page each, never a second offset asked for")
+  await assert.rejects(
+    () => readPage(connection, "s", 0),
+    HostNoPage,
+    "a page the host cannot give is said so, never answered with no rows",
+  )
+  // The one answer that is no failure: a chat this device holds nothing of, read from its start.
+  const fresh = await readNewest(connection, "s")
+  assert.deepEqual(fresh.rows, [], "a chat with nothing held of it is empty")
+  assert.equal(fresh.more, false, "with nothing older to ask for")
+  // Everything else keeps what it has and says the read failed, as a refused page does.
+  await assert.rejects(
+    () => readNewest(connection, "s", undefined, [row(1)]),
+    HostNoPage,
+    "a thread with rows drawn keeps them rather than blanking",
+  )
+  await assert.rejects(
+    () => readTranscript(connection, "s"),
+    HostNoPage,
+    "and a whole transcript is never returned cut short",
+  )
+  assert.deepEqual([...new Set(asked)], [0], "every ask was the newest page, and none was retried")
 })
 
 /**

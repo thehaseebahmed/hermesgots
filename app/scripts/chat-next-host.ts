@@ -221,6 +221,8 @@ export function fakeHost(
   /** Pages the host holds back until released, and pages it fails with a 500, by offset. */
   const gates = new Map<number, { wait: Promise<void>; release: () => void }>()
   const failing = new Set<number>()
+  /** Pages answered with a 200 that carries no page at all, as an older route or a proxy does. */
+  const pageless = new Set<number>()
   const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
   /** A project session's record on the plugin: its mode, a plan waiting, and why it can't send. */
   const workspace = {
@@ -634,6 +636,7 @@ export function fakeHost(
       if (latency) await new Promise((resolve) => setTimeout(resolve, latency))
       await gates.get(at)?.wait
       if (failing.has(at)) return reply({ error: { message: "The host failed." } }, 500)
+      if (pageless.has(at)) return reply({ object: "list", session_id: session })
       if (!rows.length)
         return reply(
           { error: { message: `Session not found: ${session}`, code: "session_not_found" } },
@@ -1062,6 +1065,13 @@ export function fakeHost(
     return { fix: () => failing.delete(offset) }
   }
 
+  /** The page at `offset` is answered 200 with no `data` at all: the body a read must not mistake
+   * for the start of the chat. */
+  function pagelessPage(offset: number) {
+    pageless.add(offset)
+    return { fix: () => pageless.delete(offset) }
+  }
+
   /**
    * The children a cooperative stop asked for reach their boundary and end, closed the way core
    * closes a stopped child: `agent_close` on its own row, whatever the turn went on to do.
@@ -1083,6 +1093,7 @@ export function fakeHost(
     hold,
     holdRuns,
     fail,
+    pageless: pagelessPage,
     expected,
     view,
     compact,

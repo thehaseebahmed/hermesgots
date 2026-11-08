@@ -95,10 +95,17 @@ const refusal = async (response: Response): Promise<string | undefined> => {
 }
 
 /**
+ * An answer that carried no page at all: a JSON body with no `data` array, as an error envelope or
+ * an older route sends. It is no rows, never a page a read asks for again — and never a page a walk
+ * may mistake for the start of the chat, unless this device holds nothing and nothing was read.
+ */
+export class HostNoPage extends Error {}
+
+/**
  * One page of a session's transcript: the `PAGE` rows that end `offset` rows before the newest,
- * oldest first. A session the host has not heard of yet is an empty chat, not a failure, and so is
- * an answer carrying no `data` array at all — no rows is the end of a read, never a page to ask for
- * again.
+ * oldest first. A session the host has not heard of yet is an empty chat, not a failure; an answer
+ * carrying no page raises `HostNoPage`, so a walk that has rows to keep says the read failed instead
+ * of drawing the chat short.
  */
 export async function readPage(
   connection: Connection,
@@ -121,10 +128,9 @@ export async function readPage(
     if (code === "session_not_found") return []
   }
   ensure(response)
-  // An answer with no page in it is no rows, never a page the read must ask for again: a body that
-  // carries no `data` array would otherwise keep `readNewest` reading for ever.
   const { data } = (await response.json()) as { data?: Row[] }
-  return Array.isArray(data) ? data : []
+  if (!Array.isArray(data)) throw new HostNoPage("The host answered no page.")
+  return data
 }
 
 /**
@@ -168,7 +174,17 @@ export async function readNewest(
 ): Promise<{ rows: Row[]; more: boolean | undefined; joined: boolean }> {
   const pages: Row[][] = []
   for (let offset = 0; ; offset += PAGE) {
-    const page = await readPage(connection, session, offset, signal)
+    let page: Row[]
+    try {
+      page = await readPage(connection, session, offset, signal)
+    } catch (error) {
+      // A chat this device holds nothing of, whose first page the host cannot give, is a chat with no
+      // rows: there is nothing to keep and nothing older to ask for. With rows held, or on a page
+      // after the first, the answer is a failed read — what is drawn stays, and it is read again —
+      // rather than a chat declared whole and drawn short.
+      if (!(error instanceof HostNoPage) || offset > 0 || held?.length) throw error
+      return { rows: [], more: false, joined: false }
+    }
     // A host that answered this page already is not paging any further: asking again would read the
     // same rows for ever, which is no read at all.
     if (repeats(page, pages[0])) throw new HostStuck(`The host answered offset ${offset} again.`)
