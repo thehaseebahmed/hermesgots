@@ -321,6 +321,26 @@ export interface RoomMember {
   displayName?: string
 }
 
+/**
+ * One row of a room's log, in the words the plugin's seam hands over (`plugin/rooms.py`) and in the
+ * words the device keeps: the Host's own sequence, who spoke, and the little a room's screen draws.
+ * The Host's coordinates never reach here — a room is a conversation, not a session — and `reason`
+ * rides the row only for the notices that say why a round ended (`room-log.ts` reads it).
+ */
+export interface RoomEvent {
+  seq: number
+  eventId: string
+  kind: string
+  text?: string
+  /** The member the row is about: a reply's speaker, or the member a turn's row belongs to. */
+  memberId?: string
+  /** The label the log was written with, which outlives a roster that changed after it. */
+  name?: string
+  status?: string
+  reason?: string
+  error?: string
+}
+
 /** How much a project session may do without asking. */
 export type SessionMode = "accept_edits" | "auto" | "plan"
 
@@ -976,6 +996,17 @@ export interface NetRequest {
   words?: number
 }
 
+/**
+ * One row of a room's log as this device read it (ADR 0116): the row the seam handed over, and the
+ * room it belongs to. The Host's own sequence is the key's second part, so a delta merges by
+ * sequence and a page read again writes nothing new, and a reload draws what it drew before without
+ * asking the Host for it. A room's words are never synced — the Host's log is the only copy — so
+ * this is this device's page of it, bounded and dropped with the room.
+ */
+export interface RoomLogRow extends RoomEvent {
+  roomId: string
+}
+
 export const db = new Dexie("gots") as Dexie & {
   settings: EntityTable<Settings, "id">
   profiles: EntityTable<Profile, "id">
@@ -998,6 +1029,7 @@ export const db = new Dexie("gots") as Dexie & {
   mediaCache: EntityTable<MediaCacheRow, "key">
   speechCache: EntityTable<SpeechCacheRow, "key">
   netLog: EntityTable<NetRequest, "id">
+  roomLog: Table<RoomLogRow, [string, number]>
 }
 
 /** The messages store as this device declares it, so a test can stand a database up at an old version. */
@@ -1372,6 +1404,17 @@ db.version(35).upgrade(async (tx) => {
 
 db.version(36).stores({ appCache: null })
 
+// v37: a room's transcript, as this device read it from its Host (ADR 0116). A new table: a room's
+// page is read from the Host and kept once drawn, so nothing older has to be moved into it.
+db.version(37).stores({ roomLog: "[roomId+seq], roomId" })
+
+/**
+ * How many rows of one room's log this device keeps: the page a reader can scroll back through.
+ * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
+ * more — without a bound, every fold and every read mark would pay for the room's whole history.
+ */
+export const ROOM_LOG_ROWS = 500
+
 db.on("populate", (tx) => seedProfile(tx))
 
 /**
@@ -1521,6 +1564,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.mediaCache,
     db.speechCache,
     db.netLog,
+    db.roomLog,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -1533,6 +1577,9 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     await db.drafts.bulkDelete(keys)
     await db.dictations.bulkDelete(keys)
     await db.meetingRecordings.filter((recording) => recording.profileId === id).delete()
+    // A room's page is keyed by the room, which is the conversation's id: the rows of the chats this
+    // bot carried go with them, and a room another of the Host's bots still lists is read again.
+    if (ids.length) await db.roomLog.where("roomId").anyOf(ids).delete()
     // The bot's own device state, keyed by its server: a twin bot sharing the connection refills it.
     // Its dictations go with it (ADR 0060) — what its host holds outlives the link, so adding the
     // bot again restores them. The media it drew is the same shape: filed under its server, and
@@ -1639,6 +1686,7 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     db.sessionRows,
     db.sessionStates,
     db.sentFiles,
+    db.roomLog,
   ]
   const dropped = await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
@@ -1648,6 +1696,9 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     if (conversation?.hermesSessionId) await forgetSession(db, conversation.hermesSessionId)
     await db.drafts.delete(`c:${id}`)
     await db.dictations.delete(`c:${id}`)
+    // A room's page is held under the room's own id, so a record that goes takes its words with it:
+    // a disbanded room would otherwise leave text on a device for a room nothing owns.
+    await db.roomLog.where("roomId").equals(id).delete()
     await db.conversations.delete(id)
     if (conversation && !remote) {
       await db.tombstones.put({
@@ -1696,6 +1747,7 @@ export async function clearAllData() {
     db.mediaCache,
     db.speechCache,
     db.netLog,
+    db.roomLog,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

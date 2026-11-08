@@ -46,6 +46,11 @@ export const FLOWS = {
     script: "e2e/chat-message.mjs",
     about: "Start a new chat, send a message, get the whole reply and find it in Recents",
   },
+  rooms: {
+    script: "e2e/rooms.mjs",
+    about:
+      "A room of two bots of one Host: its row in the sidebar, a message sent into it running the members' rounds with no client attached, each reply drawn with its member's name and picture, the who-is-working line while a turn runs, the third round's bound, a member that passes as nothing, and a reload landing on the same transcript",
+  },
   "routine-message": {
     script: "e2e/routine-message.mjs",
     about:

@@ -25,13 +25,18 @@ import itertools
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+
+from . import events
+from .store import db_path
 
 logger = logging.getLogger(__name__)
 
-# What this module needs the Host to answer before a room is offered: the read the gate asks, and the
-# list a device's chat list is projected from.
-NEEDED: Tuple[str, ...] = ("groups.capabilities", "groups.list")
+# What this module needs the Host to answer before a room is offered: the read the gate asks, the
+# list a device's chat list is projected from, and the two a room's own screen reads. A Host that
+# lists rooms it cannot show would put a row on every device and an error banner behind it.
+NEEDED: Tuple[str, ...] = ("groups.capabilities", "groups.list", "groups.state", "groups.log")
 
 # What a room is made, renamed and disbanded with. A Host can serve the read and not these, and a
 # control that can't work is worse than one that isn't drawn, so they are advertised apart.
@@ -53,6 +58,17 @@ PROJECTION_FAILURE_TTL = 5.0
 # never ends its cursor costs a handful of reads instead of the merge's whole budget.
 ROOM_PAGE = 200
 MAX_ROOM_PAGES = 5
+# A room's read follows its own log pages, so the app asks once and gets a whole round: the Host
+# bounds a page by count and bytes, and one read carrying a few is nothing beside the round trip the
+# app would pay for each. A read that stops at the cap says there is more.
+MAX_LOG_PAGES = 5
+# How far back a device that has never read a room starts: its newest window, as a chat opens on
+# its newest page. A room's log is ordered by one sequence and read by it, so "from the beginning"
+# is only the right answer for a room nobody has spoken in for a while.
+LOG_WINDOW = 500
+# How long one Host's methods are worth keeping: they change when its gateway restarts, and a read
+# that asked every time would spend a third of its Host calls on an answer that cannot have moved.
+METHODS_TTL = 30.0
 
 _ids = itertools.count(1)
 _ids_lock = threading.Lock()
@@ -65,6 +81,13 @@ class Projection(NamedTuple):
     records: Dict[str, Dict[str, Any]]
     ttl: float
 
+
+# One Host's methods, by its home, and when they were read.
+_methods: Dict[str, Tuple[float, Tuple[str, ...]]] = {}
+# How often one room's activity is noted, and when each room last was.
+NOTE_SECONDS = 1.0
+_noted: Dict[str, float] = {}
+_notes_lock = threading.Lock()
 
 # One Host's last projection, by its home, and the lock one home's read holds while it asks.
 _projections: Dict[str, Projection] = {}
@@ -331,6 +354,212 @@ def disband_room(
     if cancel_id:
         params["cancel_id"] = cancel_id
     return _asked("groups.disband", "tombstone", params, timeout=timeout, home=home)
+
+
+def _event(row: Any) -> Optional[Dict[str, Any]]:
+    """One row of the Host's room log in the app's words: its sequence, who spoke, and one line.
+
+    The Host's coordinates — the thread, the turn, the task and the round — end at this seam: the
+    app draws a conversation, not a session (Q7), so a rider of the log's routing would be drawn by
+    nothing. What is kept is exactly what a bubble and a notice read, since a field carried to a
+    screen that never draws it is a field every caller after has to keep true: the words, whose they
+    are, and the Host's own reason where one is needed. A turn that settled — passed or answered —
+    is silence either way, so the flag that tells those apart never leaves the Host.
+    """
+    if not isinstance(row, dict):
+        return None
+    seq, kind = row.get("seq"), row.get("kind")
+    if isinstance(seq, bool) or not isinstance(seq, int) or not isinstance(kind, str):
+        return None
+    actor = row.get("actor") if isinstance(row.get("actor"), dict) else {}
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    event_id = row.get("event_id")
+    drawn: Dict[str, Any] = {
+        "seq": seq,
+        "eventId": event_id if isinstance(event_id, str) and event_id else str(seq),
+        "kind": kind,
+    }
+    text = payload.get("text")
+    if isinstance(text, str):
+        drawn["text"] = text
+    # A member's message names itself on its actor; a turn's own rows name the member they belong to.
+    member = actor.get("id") if actor.get("kind") == "member" else payload.get("member_id")
+    if isinstance(member, str) and member:
+        drawn["memberId"] = member
+    # The label the log was written with, so a reply keeps its speaker's name after a roster change.
+    name = actor.get("display_name")
+    if isinstance(name, str) and name:
+        drawn["name"] = name
+    status = payload.get("status")
+    if isinstance(status, str):
+        drawn["status"] = status
+    reason = payload.get("reason") or payload.get("reason_code")
+    if isinstance(reason, str):
+        drawn["reason"] = reason
+    error = payload.get("error")
+    if isinstance(error, str):
+        drawn["error"] = error
+    return drawn
+
+
+def _activity(driver: Any) -> List[Dict[str, Any]]:
+    """Who the Host has at work, in its own admission order, in the app's words."""
+    if not isinstance(driver, dict):
+        return []
+    drawn = []
+    for row in driver.get("member_activity") or ():
+        if not isinstance(row, dict):
+            continue
+        member, status = row.get("member_id"), row.get("status")
+        if isinstance(member, str) and isinstance(status, str):
+            drawn.append({"memberId": member, "status": status})
+    return drawn
+
+
+def methods(home: Any = None, *, timeout: float = CALL_TIMEOUT) -> Tuple[str, ...]:
+    """This Host's room methods, kept for a breath: the answer a read needs and nothing else.
+
+    A gateway's method list changes when its gateway restarts, which is not a thing that happens
+    between two polls of one room's screen — so a read that asked every time would spend a third of
+    its Host calls on an answer that cannot have moved. A failed ask is not kept.
+    """
+    key = str(home)
+    with _projections_lock:
+        held = _methods.get(key)
+    if held is not None and time.monotonic() - held[0] < METHODS_TTL:
+        return held[1]
+    answered = capabilities(timeout=timeout, home=home)
+    found = tuple(name for name in (answered.get("methods") or ()) if isinstance(name, str))
+    with _projections_lock:
+        _methods[key] = (time.monotonic(), found)
+    return found
+
+
+def _log_pages(
+    room_id: str, since_seq: Optional[int], left: Any, home: Any
+) -> Tuple[List[Dict[str, Any]], int, int, bool]:
+    """A room's log from ``since_seq``, up to this read's page cap, in the app's words.
+
+    The Host bounds a page by count and bytes, so the pages are followed here rather than by the
+    app: one answer carries a whole round. The flag returned last says a page was left behind, which
+    is what the app answers by reading again.
+    """
+    events: List[Dict[str, Any]] = []
+    cursor = since_seq if isinstance(since_seq, int) else 0
+    latest = 0
+    more = False
+    for page_number in range(MAX_LOG_PAGES):
+        page = call(
+            "groups.log", {"room_id": room_id, "since_seq": cursor}, timeout=left(), home=home
+        )
+        events.extend(one for one in (_event(row) for row in page.get("events") or ()) if one)
+        # A sequence the Host didn't give as a number leaves the cursor where it was.
+        cursor = page.get("cursor") if type(page.get("cursor")) is int else cursor
+        latest = page.get("latest_seq") if type(page.get("latest_seq")) is int else latest
+        more = page.get("has_more") is True
+        if not more or page_number == MAX_LOG_PAGES - 1:
+            break
+    return events, cursor, latest, more
+
+
+def read_room(
+    room_id: str, since_seq: Optional[int] = None, *,
+    timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """One room: the log's delta, its live state, and whether it can be written to.
+
+    Three reads on the Host and one answer, because a screen that asked three times would poll the
+    same object three ways (ADR 0116): what a device hasn't got, who is working, and — from the Host's own
+    methods rather than from a guess — whether a composer may send. The whole answer spends one
+    ``timeout``: it is one screen's read, so a Host that is quiet must not cost three waits.
+    """
+    deadline = time.monotonic() + timeout
+
+    def left() -> float:
+        spare = deadline - time.monotonic()
+        if spare <= 0:
+            raise RoomError("This host took too long to answer about its rooms.")
+        return spare
+
+    found = call("groups.state", {"room_id": room_id}, timeout=left(), home=home)
+    room = found.get("room")
+    if not isinstance(room, dict) or room.get("room_id") != room_id:
+        raise RoomError("This host answered with no room.")
+    # A device with no page yet starts at the room's newest window rather than at its first words:
+    # the Host reports where its log has got to, and a room a year old is not read from its start.
+    since = since_seq
+    if since is None:
+        reached = room.get("latest_seq")
+        since = max(0, reached - LOG_WINDOW) if type(reached) is int else 0
+    events, cursor, latest, more = _log_pages(room_id, since, left, home)
+    driver = found.get("driver_status")
+    return {
+        "room": {
+            "id": room_id,
+            "name": room.get("name") if isinstance(room.get("name"), str) else "",
+            "members": [
+                one for one in (_member(row) for row in room.get("members") or ()) if one
+            ],
+        },
+        "events": events,
+        "cursor": cursor,
+        "latestSeq": latest,
+        # The loop leaves only when a page said there was no more, or at this read's own cap: so a
+        # true here is exactly "the app should ask again".
+        "hasMore": more,
+        "working": isinstance(driver, dict) and driver.get("working") is True,
+        "activity": _activity(driver),
+        # A Host's driver can stop after `info` said it was running: a room it isn't working takes a
+        # message and never answers it, so the composer goes rather than the message with it.
+        "canSend": "groups.send" in methods(home, timeout=left())
+        and not (isinstance(driver, dict) and driver.get("running") is False),
+    }
+
+
+def send_message(
+    room_id: str, event_id: str, text: str, *,
+    timeout: float = CALL_TIMEOUT, home: Any = None,
+) -> Dict[str, Any]:
+    """``groups.send``: one message into the room, as ``{event}``.
+
+    The append is inert — the Host's driver does the work once it has the event — and idempotent on
+    ``event_id``, so a send retried after a dropped answer is the same message rather than a second
+    one. The event's own id is the thread the Host opens for it, which is how the desktop sends: one
+    message is one discussion. A send notes the room's change, so every other device hears it.
+    """
+    found = call(
+        "groups.send",
+        {"room_id": room_id, "event_id": event_id, "payload": {"text": text, "thread_id": event_id}},
+        timeout=timeout, home=home,
+    )
+    sent = _event(found.get("event"))
+    if sent is None:
+        raise RoomError("This host answered groups.send with no message.")
+    events.note("room", room_id, db_path(Path(home)) if home else None, force=True)
+    return {"event": sent}
+
+
+def on_member_activity(**kwargs: Any) -> None:
+    """The Host's ``on_room_member_activity`` hook: a member's turn moved, so its room changed.
+
+    The hook fires per frame — a tool starting, a delta, an approval opening — and the app re-reads
+    the room it has on screen when it hears one. A room's own window is a second, wider than
+    ``events``'s quarter: a stream that noted four times a second would make the screen read four
+    times a second, to draw one working line that cannot say more than "someone is answering".
+    """
+    room_id = kwargs.get("room_id")
+    if not isinstance(room_id, str) or not room_id.strip():
+        return
+    room_id = room_id.strip()
+    now = time.monotonic()
+    with _notes_lock:
+        last = _noted.get(room_id, 0.0)
+        if now - last < NOTE_SECONDS:
+            return
+        _noted[room_id] = now
+        if len(_noted) > 128:
+            _noted.clear()
+    events.note("room", room_id)
 
 
 def _probe(

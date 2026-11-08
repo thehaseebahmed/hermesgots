@@ -741,6 +741,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "gots.fallbacks", "fallbacks": fallbacks})
 
+    def since_cursor(request: "web.Request") -> Optional[int]:
+        """The `?since=` a reader starts from: the sequence it has already read, or None for all.
+
+        Two routes take it — a room's read and the change stream — and a value neither of them can
+        read is refused rather than guessed at, since a wrong cursor would silently skip changes.
+        """
+        asked = request.query.get("since")
+        if not asked:
+            return None
+        try:
+            return max(0, int(asked))
+        except (TypeError, ValueError):
+            raise ValueError("since must be a number")
+
     def minted(value: Any) -> Optional[str]:
         """An id the app minted, as the string it is, or None where it isn't one.
 
@@ -1181,6 +1195,55 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except rooms.RoomError as error:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.room.tombstone", **found})
+
+    async def read_room(request: "web.Request") -> "web.Response":
+        """One room: the log's delta, its live state and whether it can be written to (rooms.py).
+
+        One read, because a screen asking three times would poll the same Host object three ways;
+        `since` is the newest sequence this device drew, so a reload asks only for what it missed.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            since_seq = since_cursor(request)
+        except ValueError:
+            return _error(web, "The since must be the sequence this device has read to.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.read_room, request.match_info["room_id"].strip(), since_seq, home=home
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room", **found})
+
+    async def send_room_message(request: "web.Request") -> "web.Response":
+        """One message into the room, under the event id the app minted for it (rooms.py)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        event_id = minted(body.get("event_id"))
+        if event_id is None:
+            return _error(web, "A message needs the event_id the app minted for it.", 400)
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return _error(web, "A message needs words to send.", 400)
+        home = profile_home()
+        try:
+            found = await asyncio.to_thread(
+                rooms.send_message,
+                request.match_info["room_id"].strip(),
+                event_id,
+                text.strip(),
+                home=home,
+            )
+        except rooms.RoomError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.room.sent", **found})
 
     async def session_context(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1994,9 +2057,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        since = request.query.get("since")
         try:
-            cursor = int(since) if since else None
+            cursor = since_cursor(request)
         except ValueError:
             return _error(web, "since must be a number", 400)
         path = store_path()
@@ -2051,7 +2113,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
     app.router.add_post(f"{PREFIX}/rooms", create_room)
+    app.router.add_get(f"{PREFIX}/rooms/{{room_id}}", read_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}", rename_room)
+    app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/send", send_room_message)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}/disband", disband_room)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)
@@ -3387,6 +3451,9 @@ def register(ctx) -> None:
         # again rather than waiting out its tick.
         register_hook("subagent_start", delegation.started)
         register_hook("on_session_end", lambda **_kwargs: delegation.wake())
+        # A room member's turn, tool or approval, so a device with the room on screen hears it: the
+        # Host runs the rounds with no client attached (rooms.py, ADR 0117).
+        register_hook("on_room_member_activity", rooms.on_member_activity)
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(

@@ -233,6 +233,8 @@ function LoadOlderWindow({
 const loadChatNext = () => import("@/chat-next/app-view")
 const loadBlankChat = () => import("@/chat-next/blank")
 const ChatNextBlank = lazy(() => loadBlankChat().then((m) => ({ default: m.ChatNextBlank })))
+const loadRoomChat = () => import("@/components/room/room-chat")
+const RoomChat = lazy(() => loadRoomChat().then((m) => ({ default: m.RoomChat })))
 
 interface ChatPageProps {
   chatId?: string
@@ -259,6 +261,12 @@ export function ChatPage(props: ChatPageProps) {
     const chat = id ? await db.conversations.get(id) : undefined
     // A canvas's chat is no chat: its address opens the canvas it belongs to (ADR 0113).
     if (chat?.canvasId) return `canvas\n${chat.canvasId}`
+    // A room is no bot's chat either: its own screen reads the Host's log, and its address is the
+    // chat's because back, deep links and the sidebar's highlight already work there (ADR 0116).
+    if (chat?.room) {
+      void loadRoomChat()
+      return `room\n${id}`
+    }
     const bot = chat
       ? await db.profiles.get(chat.profileId)
       : id
@@ -288,6 +296,10 @@ export function ChatPage(props: ChatPageProps) {
       // Keyed by the bot it draws: another bot's new chat is a fresh surface, with its own pick.
       <Suspense fallback={null}>
         <ChatNextBlank key={subjectId} botId={subjectId} slot={props.slot} />
+      </Suspense>
+    ) : screenKind === "room" && verdict === `room\n${id}` && id ? (
+      <Suspense fallback={null}>
+        <RoomChat key={id} id={id} slot={props.slot} />
       </Suspense>
     ) : screenKind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat

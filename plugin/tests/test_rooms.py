@@ -26,7 +26,7 @@ from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 import plugin
-from plugin import rooms
+from plugin import events, rooms, store
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 
@@ -38,11 +38,14 @@ class Host:
         listed=(),
         driver=True,
         methods=("groups.capabilities", "groups.list", "groups.create", "groups.rename",
-                 "groups.disband"),
+                 "groups.disband", "groups.state", "groups.log", "groups.send"),
         refuse=None,
         refusal=None,
         inline=False,
         page=None,
+        events=(),
+        driver_status=None,
+        states=None,
     ):
         self.listed = list(listed)
         self.driver = driver
@@ -54,6 +57,44 @@ class Host:
         # The most rooms one `groups.list` answer carries, where the Host pages its list.
         self.page = page
         self.requests = []
+        # The room's own conversation: its log, the driver's live status, and the rooms `groups.state`
+        # answers for. A send appends to the log, as the Host's does.
+        self.events = list(events)
+        self.driver_status = driver_status or {
+            "running": True, "working": False, "blocked": False, "counts": {},
+            "pending_actions": [], "member_activity": [], "peer_routes": [],
+        }
+        self.states = dict(states or {})
+        self.sends = []
+
+    def log_page(self, params):
+        """One `groups.log` page: what the device hasn't got, bounded by the limit it asked for."""
+        since = int(params.get("since_seq") or 0)
+        limit = params.get("limit")
+        held = [one for one in self.events if int(one["seq"]) > since]
+        page = held[:limit] if isinstance(limit, int) else held
+        cursor = int(page[-1]["seq"]) if page else since
+        return {
+            "events": page,
+            "cursor": cursor,
+            "latest_seq": int(self.events[-1]["seq"]) if self.events else 0,
+            "has_more": len(held) > len(page),
+            "authority": {"gateway_id": "gw-1", "epoch": 1},
+        }
+
+    def sent(self, params):
+        """One `groups.send`: the Host appends the message its client named and wakes the driver."""
+        self.sends.append(params)
+        event = {
+            "room_id": params["room_id"], "seq": (int(self.events[-1]["seq"]) if self.events else 0) + 1,
+            "event_id": params["event_id"], "kind": "message.user",
+            "actor": {"kind": "user", "id": "user"},
+            "payload": {"text": params["payload"]["text"], "thread_id": params["payload"]["thread_id"]},
+            "created_at": 1_760_002_000.0, "idempotent": False,
+        }
+        self.events.append(event)
+        return {"event": event, "client_event_id": params["event_id"], "accepted": True,
+                "driver_started": True}
 
     def answer(self, method, params=None):
         params = params or {}
@@ -83,6 +124,13 @@ class Host:
         if method == "groups.disband":
             return {"tombstone": {"room_id": params.get("room_id"), "disbanded_at": 1_760_000_000.0,
                                   "idempotent": False}}
+        if method == "groups.state":
+            return {"room": self.states.get(params.get("room_id")) or ROOM,
+                    "driver_status": self.driver_status}
+        if method == "groups.log":
+            return self.log_page(params)
+        if method == "groups.send":
+            return self.sent(params)
         raise AssertionError(f"the seam asked for {method}")
 
     def dispatch(self, request, transport=None):
@@ -289,7 +337,7 @@ class RoomsSeam(unittest.TestCase):
         self.assertEqual(client.methods, [], "an inline refusal is an answer, so nothing is retried")
 
     def test_no_room_writes_where_the_host_declares_only_the_read(self):
-        host = Host(methods=["groups.capabilities", "groups.list"])
+        host = Host(methods=["groups.capabilities", "groups.list", "groups.state", "groups.log"])
         with dispatcher(host), no_loopback():
             features = self.features()
         self.assertIn("rooms", features)
@@ -305,6 +353,14 @@ class RoomsSeam(unittest.TestCase):
         with dispatcher(host), no_loopback():
             self.assertNotIn("rooms", self.features())
             self.assertIn("driver", rooms.available())
+
+    def test_a_host_that_cannot_show_a_room_advertises_none(self):
+        # The read asks `groups.state` and `groups.log`, so a Host that lists rooms and can't show
+        # one would put a row on every device and an error banner behind every tap.
+        host = Host(methods=["groups.capabilities", "groups.list"])
+        with dispatcher(host), no_loopback():
+            self.assertNotIn("rooms", self.features())
+            self.assertIn("groups.state", rooms.available())
 
     def test_no_rooms_where_the_host_declares_no_room_list(self):
         host = Host(methods=["groups.capabilities"])
@@ -359,10 +415,11 @@ ROSTER = [
 ]
 
 
-def asked_route(case, path, *, method=None, room_id=None, body=None, unreadable=False):
+def asked_route(case, path, *, method=None, room_id=None, body=None, unreadable=False, query=None):
     request = FakeWeb.Request()
     request.headers = {}
     request.match_info = {"room_id": room_id} if room_id is not None else {}
+    request.query = query or {}
     sent = "{not json" if unreadable else ("" if body is None else json.dumps(body))
 
     async def read():
@@ -385,8 +442,10 @@ class RoomRoutes(unittest.TestCase):
     def setUp(self):
         self.home = temp_hermes_home(self)
 
-    def asked(self, path, *, room_id=None, body=None, unreadable=False):
-        return asked_route(self, path, room_id=room_id, body=body, unreadable=unreadable)
+    def asked(self, path, *, room_id=None, body=None, unreadable=False, method=None):
+        return asked_route(
+            self, path, method=method, room_id=room_id, body=body, unreadable=unreadable
+        )
 
     def created(self, members=ROSTER, **extra):
         return self.asked(plugin.PREFIX + "/rooms", body={"room_id": "room-1", "name": "Planning", "members": members, **extra})
@@ -468,7 +527,8 @@ class RoomRoutes(unittest.TestCase):
         host = Host()
         with dispatcher(host), no_loopback():
             answer = self.asked(
-                plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", body={"event_id": "e1", "name": "Planning 2"}
+                plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="POST",
+                body={"event_id": "e1", "name": "Planning 2"},
             )
         self.assertEqual(answer["status"], 200)
         self.assertEqual(answer["payload"]["room"]["name"], "Planning 2")
@@ -480,7 +540,8 @@ class RoomRoutes(unittest.TestCase):
         host = Host()
         with dispatcher(host), no_loopback():
             answer = self.asked(
-                plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", body={"name": "Planning 2"}
+                plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="POST",
+                body={"name": "Planning 2"},
             )
         self.assertEqual(answer["status"], 400)
         self.assertIn("event_id", answer["payload"]["error"]["message"])
@@ -697,6 +758,259 @@ class RoomInTheChatList(unittest.TestCase):
         many = [{**ROOM, "room_id": f"room-{n}", "name": f"Room {n}"} for n in range(3)]
         chats = self.chats(host=Host(listed=many, page=2))
         self.assertEqual(sorted(chats), ["room-0", "room-1", "room-2"], "every page is a row")
+
+
+def event(seq, kind, actor, payload, at=1_760_000_100.0):
+    """One row of the Host's room log, in the Host's own shape."""
+    return {"room_id": "room-1", "seq": seq, "event_id": f"e{seq}", "kind": kind, "actor": actor,
+            "payload": payload, "created_at": at, "idempotent": False}
+
+
+USER = {"kind": "user", "id": "user"}
+MEMBER = {"kind": "member", "id": "m1", "profile": "default", "display_name": "Hermes"}
+
+CONVERSATION = [
+    event(1, "message.user", USER, {"text": "who is free?", "thread_id": "e1"}),
+    event(2, "message.member", MEMBER, {
+        "text": "me", "member_id": "m1", "member_index": 0, "round_index": 0, "task_id": "t1",
+        "thread_id": "e1", "turn_id": "d1.r0.p0.s1.m1", "discussion_event_id": "e1"}),
+    event(3, "turn.settled", {"kind": "gateway", "id": "gw-1"}, {
+        "member_id": "m2", "member_index": 1, "round_index": 0, "task_id": "t2", "thread_id": "e1",
+        "turn_id": "d1.r0.p1.s1.m2", "discussion_event_id": "e1", "seen_through_seq": 2,
+        "message_event_id": None, "passed": True}),
+    event(4, "room.activity", {"kind": "gateway", "id": "gw-1"}, {
+        "status": "bounded", "reason_code": "max_rounds", "thread_id": "e1",
+        "discussion_event_id": "e1"}),
+]
+
+
+class RoomConversation(unittest.TestCase):
+    """A message sent into the room, read back as the Host's log and live state (ADR 0115-0117).
+
+    The app is never in the loop the Host works in: a send is one idempotent append, the members'
+    rounds run on the Host with no client attached, and the app reads the log afterwards. One read
+    answers the delta, the room's live state and whether it can be written to at all.
+    """
+
+    def setUp(self):
+        self.home = temp_hermes_home(self)
+
+    def asked(self, path, *, room_id=None, body=None, query=None, unreadable=False, method="POST"):
+        return asked_route(
+            self, path, method=method, room_id=room_id, body=body, unreadable=unreadable,
+            query=query,
+        )
+
+    def read_room(self, *, room_id="room-1", query=None):
+        return self.asked(plugin.PREFIX + "/rooms/{room_id}", room_id=room_id, query=query,
+                          method="GET")
+
+    def send(self, body=None, *, room_id="room-1", unreadable=False):
+        return self.asked(
+            plugin.PREFIX + "/rooms/{room_id}/send", room_id=room_id,
+            body={"event_id": "e9", "text": "second thoughts"} if body is None else body,
+            unreadable=unreadable,
+        )
+
+    def test_one_read_answers_the_log_the_live_state_and_whether_it_can_be_written_to(self):
+        host = Host(events=CONVERSATION, driver_status={
+            "running": True, "working": True, "blocked": False, "counts": {"queued": 0},
+            "pending_actions": [],
+            "member_activity": [{"member_id": "m1", "status": "running"}], "peer_routes": [],
+        })
+        with dispatcher(host), no_loopback():
+            answer = self.read_room()
+        self.assertEqual(answer["status"], 200)
+        payload = answer["payload"]
+        self.assertEqual(payload["object"], "gots.room")
+        self.assertEqual(payload["room"]["id"], "room-1")
+        self.assertEqual(payload["room"]["name"], "Planning")
+        self.assertEqual([one["memberId"] for one in payload["room"]["members"]], ["m1", "m2"])
+        self.assertEqual(payload["latestSeq"], 4)
+        self.assertEqual(payload["cursor"], 4)
+        self.assertFalse(payload["hasMore"])
+        self.assertTrue(payload["working"])
+        self.assertEqual(payload["activity"], [{"memberId": "m1", "status": "running"}])
+        self.assertTrue(payload["canSend"])
+        self.assertEqual(
+            payload["events"],
+            [
+                {"seq": 1, "eventId": "e1", "kind": "message.user", "text": "who is free?"},
+                {"seq": 2, "eventId": "e2", "kind": "message.member", "text": "me",
+                 "memberId": "m1", "name": "Hermes"},
+                {"seq": 3, "eventId": "e3", "kind": "turn.settled", "memberId": "m2"},
+                {"seq": 4, "eventId": "e4", "kind": "room.activity", "status": "bounded",
+                 "reason": "max_rounds"},
+            ],
+            "the log in the app's own words: no actor routing, no thread coordinates to draw, and "
+            "nothing the screen does not draw",
+        )
+
+    def test_the_read_asks_the_host_only_for_what_the_device_has_not_got(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            self.read_room(query={"since": "2"})
+        logs = [one for one in host.requests if one["method"] == "groups.log"]
+        self.assertEqual([one["params"] for one in logs],
+                         [{"room_id": "room-1", "since_seq": 2}],
+                         "the log is asked for what the device has not got, and once")
+
+    def test_a_since_that_is_not_a_sequence_is_a_400_and_the_host_is_not_asked(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.read_room(query={"since": "yesterday"})
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("since", answer["payload"]["error"]["message"])
+        self.assertEqual(host.requests, [])
+
+    def test_a_read_says_no_send_where_the_host_will_not_take_one(self):
+        host = Host(events=CONVERSATION,
+                    methods=["groups.capabilities", "groups.list", "groups.state", "groups.log"])
+        with dispatcher(host), no_loopback():
+            answer = self.read_room()
+        self.assertFalse(answer["payload"]["canSend"], "a composer there could only come back refused")
+
+    def test_a_host_that_is_not_working_its_rooms_takes_no_send(self):
+        # Its driver can stop after `info` said it was running: a message there is accepted and
+        # never answered, which reads to the user as bots ignoring them.
+        host = Host(events=CONVERSATION, driver_status={
+            "running": False, "working": False, "blocked": False, "counts": {},
+            "pending_actions": [], "member_activity": [], "peer_routes": [],
+        })
+        with dispatcher(host), no_loopback():
+            answer = self.read_room()
+        self.assertFalse(answer["payload"]["canSend"])
+
+    def test_a_device_with_no_page_starts_at_the_rooms_newest_window(self):
+        many = [event(n, "message.member", MEMBER, {"text": f"line {n}", "member_id": "m1"})
+                for n in range(1, 4)]
+        room = {**ROOM, "latest_seq": 900}
+        host = Host(events=many, states={"room-1": room})
+        with dispatcher(host), no_loopback():
+            self.read_room()
+        asked = [one for one in host.requests if one["method"] == "groups.log"][0]
+        self.assertEqual(asked["params"]["since_seq"], 400,
+                         "500 back from the Host's newest, not the room's first words")
+
+    def test_a_send_carries_the_event_id_the_app_minted_and_the_words(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.send({"event_id": "e9", "text": "  second thoughts  "})
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.room.sent")
+        self.assertEqual(answer["payload"]["event"]["seq"], 5)
+        self.assertEqual(answer["payload"]["event"]["text"], "second thoughts")
+        self.assertEqual(
+            host.sends,
+            [{"room_id": "room-1", "event_id": "e9",
+              "payload": {"text": "second thoughts", "thread_id": "e9"}}],
+            "the message's own id is the thread the Host opens for it, as the desktop sends",
+        )
+
+    def test_a_send_with_no_words_is_a_400_and_the_host_is_not_asked(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.send({"event_id": "e9", "text": "   "})
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("words", answer["payload"]["error"]["message"])
+        self.assertEqual(host.sends, [])
+
+    def test_a_send_without_the_event_id_is_a_400_and_the_host_is_not_asked(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.send({"text": "second thoughts"})
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("event_id", answer["payload"]["error"]["message"])
+        self.assertEqual(host.sends, [])
+
+    def test_a_send_whose_body_cannot_be_read_is_a_400(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            answer = self.send(unreadable=True)
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(answer["payload"], {"error": {"message": "Body must be JSON"}})
+        self.assertEqual(host.sends, [])
+
+    def test_a_send_notes_a_room_change_so_every_device_hears_it(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            self.send()
+        rows, _more = events.read_since(store.current_path(), 0)
+        self.assertEqual([(row["kind"], row["session_id"]) for row in rows], [("room", "room-1")],
+                         "the device that sent it isn't the only one watching")
+
+    def test_a_hosts_refusal_to_send_is_the_apps_400_in_the_hosts_words(self):
+        host = Host(events=CONVERSATION, refuse="groups.send",
+                    refusal=(4111, "This Group Chat reached its history limit."))
+        with dispatcher(host), loopback(Loopback(host)) as client:
+            answer = self.send()
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(
+            answer["payload"], {"error": {"message": "This Group Chat reached its history limit."}}
+        )
+        self.assertEqual(client.methods, [], "a refusal is an answer, so it is never repeated")
+
+    def test_a_room_this_bot_cannot_reach_is_a_502_in_its_own_words(self):
+        with no_dispatcher(), no_loopback():
+            answer = self.read_room()
+        self.assertEqual(answer["status"], 502)
+        self.assertEqual(answer["payload"], {"error": {"message": "This host can't reach its rooms."}})
+
+    def test_a_host_that_answers_a_read_without_a_room_is_a_502(self):
+        class Mute(Host):
+            def answer(self, method, params=None):
+                return {}
+
+        with dispatcher(Mute()), no_loopback():
+            answer = self.read_room()
+        self.assertEqual(answer["status"], 502)
+        self.assertIn("no room", answer["payload"]["error"]["message"])
+
+    def test_the_hosts_methods_are_asked_once_and_kept(self):
+        host = Host(events=CONVERSATION)
+        with dispatcher(host), no_loopback():
+            self.read_room()
+            self.read_room()
+        asked = [one["method"] for one in host.requests].count("groups.capabilities")
+        self.assertEqual(asked, 1, "a method list cannot change between two polls of one room")
+
+    def test_a_read_follows_the_logs_own_pages_and_says_what_it_left(self):
+        # The Host bounds a page by count and bytes; a read that stopped at the first would hand the
+        # app half a round and make it ask again for the rest.
+        many = [event(n, "message.member", MEMBER, {"text": f"line {n}", "member_id": "m1"})
+                for n in range(1, 6)]
+        host = Host(events=many)
+
+        class Paged(Host):
+            def log_page(self, params):
+                page = super().log_page({**params, "limit": 2})
+                page["has_more"] = len(self.events) > (page["cursor"] or 0)
+                return page
+
+        with dispatcher(Paged(events=many)), no_loopback():
+            answer = self.read_room()
+        payload = answer["payload"]
+        self.assertEqual([one["seq"] for one in payload["events"]], [1, 2, 3, 4, 5],
+                         "every page of the delta is one answer")
+        self.assertEqual(payload["cursor"], 5)
+        self.assertFalse(payload["hasMore"], "and the cap was not reached")
+
+    def test_a_members_activity_notes_its_room_once_a_tick(self):
+        # The Host's own `on_room_member_activity` hook: a member's turn running, its tools and the
+        # approval it raised. A room of six members would otherwise note a change per frame.
+        path = store.current_path()
+        before = events.latest(path)
+        rooms.on_member_activity(room_id="room-1", kind="tool.started", payload={})
+        rooms.on_member_activity(room_id="room-1", kind="message.delta", payload={})
+        rows, _more = events.read_since(path, before)
+        self.assertEqual([(row["kind"], row["session_id"]) for row in rows], [("room", "room-1")],
+                         "one change per room per tick")
+        rooms.on_member_activity(kind="tool.started", payload={})
+        self.assertEqual(
+            [(row["kind"], row["session_id"]) for row in events.read_since(path, before)[0]],
+            [("room", "room-1")],
+            "an activity frame that names no room notes nothing",
+        )
 
 
 if __name__ == "__main__":
