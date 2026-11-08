@@ -182,3 +182,39 @@ test("with the switch off the sidebar lists chats, and no bot row is drawn", asy
     assert.equal(find(`a[href="/c/${MAIN}"]`), null, "no bots layout, no bot row")
   })
 })
+
+test("a bot turned off in Gots takes its chats out of Recents", async () => {
+  const gone = botProfile("bot-gone", { id: "bot-2", name: "Gone", disabled: true })
+  await seedSettings({ developer: true, botThreads: false, activeProfileId: bot.id })
+  await db.profiles.clear()
+  await db.profiles.bulkPut([bot, gone])
+  await db.messages.clear()
+  await db.conversations.clear()
+  await db.conversations.bulkPut([
+    {
+      id: "kept",
+      profileId: bot.id,
+      title: "Kept",
+      hermesSessionId: "gots-kept",
+      createdAt: 1,
+      updatedAt: 2,
+      changedAt: 1,
+    },
+    {
+      id: "off",
+      profileId: gone.id,
+      title: "Turned off",
+      hermesSessionId: "gots-off",
+      createdAt: 2,
+      updatedAt: 3,
+      changedAt: 2,
+    },
+  ])
+  globalThis.fetch = async () => json({})
+  let off: Element | null = null
+  await mount(screen("/"), async () => {
+    await until(async () => Boolean(find('a[href="/c/kept"]')), "the kept chat's row")
+    off = find('a[href="/c/off"]')
+  })
+  assert.equal(off, null, "a turned-off bot's row is not in Recents")
+})

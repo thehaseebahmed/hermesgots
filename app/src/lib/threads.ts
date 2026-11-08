@@ -17,6 +17,7 @@ import {
   type Unsent,
 } from "@/lib/db"
 import { listsAsChat, listsAsThread } from "@/lib/lists-as-chat"
+import { chatOwner, type ChatRow } from "@/lib/chat-owner"
 import { useXLarge } from "@/lib/media"
 import { createStore } from "@/lib/store"
 import { byName } from "@/lib/compare"
@@ -421,9 +422,6 @@ export async function lastOpened(profileId: string): Promise<LastOpened> {
 
 type LaneAnswer = LastOpened & { profileId: string }
 
-/** What a chat's row says about who owns it: its bot, and whether it is a project session. */
-type ChatOwner = Pick<Conversation, "profileId" | "projectId">
-
 /**
  * What a bot's third pane is, as one answer: closed, so Main has the row's whole width; open at a
  * thread; open for a bot with no thread yet, where it says so; or not answered, while the bot's
@@ -492,7 +490,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const hint = (state as { bot?: string } | null)?.bot
   // A Main id names its own bot, so only a thread's id costs a row read. The query answers with
   // the address it ran for, so an answer for the one before it can't pass for this one's.
-  const owner = useLiveQuery(async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
+  const owner = useLiveQuery(async (): Promise<{ chat?: string; found?: ChatRow | null }> => {
     if (!chat) return { found: null }
     if (main) return { chat, found: { profileId: main } }
     const found = await db.conversations.get(chat)
@@ -507,9 +505,10 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   let thread: string | undefined
   if (main) {
     profileId = main
-  } else if (found && listsAsChat(found)) {
-    profileId = found.profileId
-    thread = chat
+  } else if (found) {
+    const owner = chatOwner(found)
+    profileId = owner.answerer
+    thread = owner.listed ? chat : undefined
   } else if (found === undefined && hint) {
     // Still loading: go by what the link said.
     profileId = hint
