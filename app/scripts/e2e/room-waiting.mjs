@@ -15,9 +15,9 @@ const NEEDS_YOU = "That one is yours to call, @user."
 const HOLD = "hold a while"
 const STOPPED = "The room was stopped."
 
-/** Waits for one of the room's cards, and answers it the way the user would. */
-async function card(page, slot) {
-  const found = page.locator(`[data-slot="${slot}"]`)
+/** Waits for the card a room's wait holds the composer's place with, and answers it there. */
+async function card(page, kind) {
+  const found = page.locator(`[data-slot="room-card"][data-card="${kind}"]`)
   await found.waitFor({ timeout: 20_000 })
   return found
 }
@@ -42,15 +42,16 @@ await flow("room-waiting", async ({ page, until, shot }) => {
   await row.waitFor({ timeout: 20_000 })
   await row.click()
   await page.waitForURL("**/c/room-planning", { timeout: 15_000 })
-  const field = page.getByLabel("Message the room", { exact: true })
+  const field = page.getByLabel("Message", { exact: true })
   await field.waitFor({ timeout: 15_000 })
 
   // An approval: the member's turn opens one and waits, the room draws it with the Host's own
   // command, and Once answers it through the Host's own approve.
   await field.fill(CLEAN)
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  const approval = await card(page, "room-approval")
-  assert.match(await approval.innerText(), /Hermes needs an approval/, "the card names the member")
+  const approval = await card(page, "approval")
+  assert.match(await approval.innerText(), /Approval needed/, "the chat's own approval card")
+  assert.match(await approval.innerText(), /Hermes/, "and it names the member asking")
   assert.match(await approval.innerText(), /rm -rf build/, "and the command it asks about")
   assert.equal(
     await approval.getByRole("button", { name: "Always allow" }).count(),
@@ -58,14 +59,18 @@ await flow("room-waiting", async ({ page, until, shot }) => {
     "the card offers the two answers the Host's approve takes, and no third",
   )
   await shot("approval")
-  await approval.getByRole("button", { name: "Once", exact: true }).click()
+  await approval.getByRole("button", { name: "Allow once", exact: true }).click()
   await page.getByText(APPROVED).first().waitFor({ timeout: 20_000 })
-  await until(async () => ((await page.locator('[data-slot="room-approval"]').count()) === 0), 20_000, "the approval card to go")
+  await until(
+    async () => ((await page.locator('[data-slot="room-card"]').count()) === 0),
+    20_000,
+    "the approval card to go",
+  )
 
   // The same approval, denied: the Host stops that member's turn, and the transcript says so.
   await field.fill(CLEAN)
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  const again = await card(page, "room-approval")
+  const again = await card(page, "approval")
   await again.getByRole("button", { name: "Deny", exact: true }).click()
   await page.getByText(DENIED).first().waitFor({ timeout: 20_000 })
   await shot("denied")
@@ -73,12 +78,13 @@ await flow("room-waiting", async ({ page, until, shot }) => {
   // A question: the member asks it with two choices, and the user picks one there.
   await field.fill(ASK)
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  const question = await card(page, "room-question")
-  assert.match(await question.innerText(), /Coder asks/, "the card names the member asking")
+  const question = await card(page, "question")
+  assert.match(await question.innerText(), /Question/, "the chat's own question card")
+  assert.match(await question.innerText(), /Coder/, "naming the member asking")
   assert.match(await question.innerText(), /Which database\?/, "and asks the Host's question")
 
-  // The card is the room's own and takes the reading column's box at either width: its place above
-  // the composer and its width are geometry no DOM without layout measures.
+  // The card holds the composer's place and takes the reading column's box at either width: that it
+  // is at the foot, and no wider than the column, is geometry no DOM without layout measures.
   for (const { width, height } of [
     { width: 390, height: 844 },
     { width: 1024, height: 900 },
@@ -86,11 +92,14 @@ await flow("room-waiting", async ({ page, until, shot }) => {
     await page.setViewportSize({ width, height })
     await settled(page)
     const box = await page.evaluate(() => {
-      const card = document.querySelector('[data-slot="room-question"]')?.getBoundingClientRect()
-      const field = document.querySelector('[aria-label="Message the room"]')?.getBoundingClientRect()
+      const card = document.querySelector('[data-slot="room-card"] > *')?.getBoundingClientRect()
+      const field = document.querySelector('[aria-label="Message"]')?.getBoundingClientRect()
       return {
         viewport: window.innerWidth,
-        card: card ? { left: card.left, right: card.right, width: card.width } : null,
+        height: window.innerHeight,
+        card: card
+          ? { left: card.left, right: card.right, width: card.width, bottom: card.bottom }
+          : null,
         field: field ? { left: field.left, right: field.right } : null,
         overflow: document.documentElement.scrollWidth > window.innerWidth,
       }
@@ -98,17 +107,22 @@ await flow("room-waiting", async ({ page, until, shot }) => {
     assert.ok(box.card, `the question card is drawn at ${width}px`)
     assert.ok(box.card.width <= 672 + 1, `it takes the reading column at ${width}px (${box.card.width}px)`)
     assert.ok(box.card.left >= -1 && box.card.right <= box.viewport + 1, `it stays on screen at ${width}px`)
-    assert.ok(box.card.right - box.card.left < box.viewport, `it leaves the composer its own row at ${width}px`)
-    assert.ok(box.field && box.field.right <= box.viewport + 1, `the composer stays on screen at ${width}px`)
+    assert.equal(box.field, null, `the card holds the composer's place at ${width}px`)
+    assert.ok(box.card.bottom <= box.height + 1, `it sits at the foot of the room at ${width}px`)
     assert.ok(!box.overflow, `nothing scrolls sideways at ${width}px`)
     await shot(`question-${width}`)
   }
   await page.setViewportSize({ width: 1440, height: 900 })
   await settled(page)
-  await question.getByRole("button", { name: "Postgres", exact: true }).click()
+  await question.getByRole("button", { name: /Postgres/ }).click()
   await question.getByRole("button", { name: "Send", exact: true }).click()
   await page.getByText(ANSWERED).first().waitFor({ timeout: 20_000 })
-  await until(async () => ((await page.locator('[data-slot="room-question"]').count()) === 0), 20_000, "the question card to go")
+  await until(
+    async () => ((await page.locator('[data-slot="room-card"]').count()) === 0),
+    20_000,
+    "the question card to go",
+  )
+  await page.getByLabel("Message", { exact: true }).waitFor({ timeout: 15_000 })
 
   // A reply addressed to @user: the round settles on it, and the room asks for the user.
   await field.fill(HANDOFF)

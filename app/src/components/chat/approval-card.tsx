@@ -28,9 +28,12 @@ const RESOLVED: Record<string, string> = {
 
 export function ApprovalCard({
   message,
+  from,
   onAnswer = (choice) => answerApproval(message, choice),
 }: {
   message: Message
+  /** Who asks — a room's member — where the screen drawing the card knows and a chat's row doesn't. */
+  from?: string
   /** Where an answer goes; the chat's own engine unless the screen drawing the card answers itself. */
   onAnswer?: (choice: ApprovalChoice) => Promise<void>
 }) {
@@ -66,6 +69,7 @@ export function ApprovalCard({
         <CardTitle className="flex items-center gap-2 text-base text-warning">
           <ShieldAlertIcon className="size-5" />
           {resolved ? RESOLVED[resolved] : "Approval needed"}
+          {from && <span className="text-sm font-normal text-muted-foreground">{from}</span>}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">

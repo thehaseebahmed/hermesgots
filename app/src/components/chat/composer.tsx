@@ -121,6 +121,8 @@ export function Composer({
   onSteer,
   notice,
   main = false,
+  plain = false,
+  placeholder,
 }: {
   busy: boolean
   /** Whether a message sent while a reply runs steers it unless it starts with `/queue`. */
@@ -172,10 +174,17 @@ export function Composer({
   runId?: string
   /** How many subagents the session has at work: with the turn over, Stop is still the session's. */
   subagentsRunning?: number
-  onCommand: (
+  onCommand?: (
     command: LocalCommand,
     message?: { text: string; attachments: Attachment[] },
   ) => Promise<void> | void
+  /**
+   * A surface that carries words only — a room's, where nothing runs and no file is sent: no `/`
+   * menu, no attached files, no command carried out. The pill is the caller's to pass or leave out.
+   */
+  plain?: boolean
+  /** The field's placeholder; a chat's is `Message <bot>…`. */
+  placeholder?: string
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -315,17 +324,18 @@ export function Composer({
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
-  const skills = useSkills(connection, Boolean(token) && !disabled)
+  const skills = useSkills(connection, !plain && Boolean(token) && !disabled)
   const skillItems: SlashItem[] =
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
-  const items = token
-    ? rankSlashItems([...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
-    : []
+  const items =
+    plain || !token
+      ? []
+      : rankSlashItems([...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
   // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
   const menuOpen =
-    token !== null && !dismissed && !disabled && (items.length > 0 || skills.status !== "ok")
+    !plain && token !== null && !dismissed && !disabled && (items.length > 0 || skills.status !== "ok")
   const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
   // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
   // value — a restored draft, dictation, a message handed back after a failed send — leaves it
@@ -349,7 +359,7 @@ export function Composer({
     const carried = carriesMessage(command) ? attachments : []
     setValue("")
     if (carried.length) setAttachments([])
-    void Promise.resolve(onCommand(command, { text, attachments: carried })).catch(() => {
+    void Promise.resolve(onCommand?.(command, { text, attachments: carried })).catch(() => {
       setValue((current) => current || `/${command}${text ? ` ${text}` : ""}`)
       setAttachments((current) => (current.length ? current : carried))
     })
@@ -374,10 +384,10 @@ export function Composer({
   }
 
   const submitText = (raw: string) => {
-    const text = sendMode(raw)?.text ?? raw
+    const text = plain ? raw : (sendMode(raw)?.text ?? raw)
     if (!text.trim() && !attachments.length) return
     const sent = attachments
-    const steer = steersNow(raw, sent)
+    const steer = !plain && steersNow(raw, sent)
     setValue("")
     setAttachments([])
     const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(text, sent))
@@ -417,6 +427,7 @@ export function Composer({
 
   // A pasted photo or file is the same intake as a picked one, and never a send.
   const pasted = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (plain) return
     const data = event.clipboardData
     // `files` and `items` can each carry a file, and the same one twice; `fresh` takes it once.
     const files = [...(data?.files ?? [])]
@@ -431,12 +442,13 @@ export function Composer({
   }
 
   const dragging = (event: DragEvent<HTMLFormElement>) => {
-    if (!Array.from(event.dataTransfer?.types ?? []).includes("Files")) return
+    if (plain || !Array.from(event.dataTransfer?.types ?? []).includes("Files")) return
     event.preventDefault()
     setOver(true)
   }
 
   const dropped = (event: DragEvent<HTMLFormElement>) => {
+    if (plain) return
     const files = [...(event.dataTransfer?.files ?? [])]
     // Text dragged into the field is the field's own drop; only files are taken here.
     if (!files.length) return
@@ -493,7 +505,7 @@ export function Composer({
     refresh(owner, stagedNow.current.map(staged))
   }, [owner, stagedKeys, refresh])
 
-  const attach = (
+  const attach = plain ? null : (
     <AttachMenu
       disabled={disabled}
       filesFeature={filesFeature}
@@ -505,7 +517,7 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
-    const command = localCommand(value, main)
+    const command = plain ? null : localCommand(value, main)
     if (command && !disabled) return runCommand(command.command, command.text)
     if (!canSend) return
     submitText(value)
@@ -768,13 +780,14 @@ export function Composer({
             menuOpen && items.length ? optionId(listId, activeIndex) : undefined
           }
           placeholder={
-            disabled
+            placeholder ??
+            (disabled
               ? "Connect to Hermes in Settings first"
               : busy
                 ? steering
                   ? "Steer the response…"
                   : "Queue a message…"
-                : `Message ${botName}…`
+                : `Message ${botName}…`)
           }
           disabled={disabled}
           rows={1}

@@ -1,10 +1,11 @@
 /**
  * A room that needs the user, at a phone's width and a tablet's (F4).
  *
- * The Host holds an approval and a member asks a question; the room draws each as its own card above
- * the composer — the member's name, the command, the choices — and answers them where they are. A
- * reply addressed to `@user` is read out of the log as the room's needs-you mark, and Stop ends the
- * round through the Host's own route. The cards are the room's, so nothing here is a session's card.
+ * The Host holds an approval and a member asks a question; the room draws each in the composer's
+ * place, with the chat's own card — the member's name, the command, the choices — and answers it
+ * where it is. A reply addressed to `@user` is read out of the log as the room's needs-you mark, and
+ * Stop is the composer's own control, held while a round runs. At rest the room draws the chat's
+ * composer: words, Send, and neither a model pill nor a file to attach.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -17,7 +18,6 @@ import {
   botProfile,
   click,
   find,
-  findAll,
   json,
   mount,
   seedSettings,
@@ -41,7 +41,7 @@ const bot: Profile = botProfile("room-waiting", {
   id: BOT,
   name: "Hermes",
   baseUrl: HOST,
-  apiKey: "key",
+  apiKey: "test-key",
   hermesProfile: "default",
 })
 
@@ -56,6 +56,7 @@ let waiting: unknown[] = []
 /** The connection whose Host never declares `rooms_questions`, so its room draws no question card. */
 const NO_QUESTIONS = "http://room-waiting-off.test/v1"
 let canStop = true
+let answering = false
 let log: { seq: number; eventId: string; kind: string; text?: string; memberId?: string; name?: string }[] = []
 const calls: Call[] = []
 
@@ -67,7 +68,7 @@ function read() {
     cursor: log.at(-1)?.seq ?? 0,
     latestSeq: log.at(-1)?.seq ?? 0,
     hasMore: false,
-    working: false,
+    working: answering,
     activity: [],
     waiting,
     canStop,
@@ -87,10 +88,20 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ name: "gots", features })
   }
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`) && method === "GET") return json(read())
+  if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}/send`)) {
+    calls.push({ method, path: url.pathname, body })
+    return json({
+      object: "gots.room.event",
+      event: { seq: 1, eventId: "e1", kind: "message.user", text: "hello" },
+    })
+  }
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}/approve`)) {
     calls.push({ method, path: url.pathname, body })
     waiting = waiting.filter((one) => (one as { kind: string }).kind !== "approval")
-    log = [...log, { seq: log.length + 1, eventId: "e9", kind: "message.member", text: "On it.", memberId: "m1", name: "Hermes" }]
+    log = [
+      ...log,
+      { seq: log.length + 1, eventId: "e9", kind: "message.member", text: "On it.", memberId: "m1", name: "Hermes" },
+    ]
     return json({ object: "gots.room.approved", approved: true })
   }
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}/answer`)) {
@@ -100,6 +111,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}/stop`)) {
     calls.push({ method, path: url.pathname, body })
+    answering = false
     log = [
       ...log,
       { seq: log.length + 1, eventId: "e10", kind: "room.stop_requested" },
@@ -132,11 +144,12 @@ const QUESTION = {
 async function fresh(wake: unknown[] = [], events = log, host = HOST) {
   waiting = wake
   canStop = true
+  answering = false
   log = events
   calls.length = 0
   await seedSettings({ onboarded: true })
   await db.profiles.clear()
-  await db.profiles.put({ ...bot, ...(host === HOST ? {} : { baseUrl: host, apiKey: "key" }) })
+  await db.profiles.put({ ...bot, ...(host === HOST ? {} : { baseUrl: host, apiKey: "test-key" }) })
   await db.conversations.clear()
   await db.roomLog.clear()
   await db.conversations.put({
@@ -159,7 +172,7 @@ const screen = () => (
   </MemoryRouter>
 )
 
-const shown = (slot: string) => findAll(`[data-slot="${slot}"]`)
+const composerField = () => find('textarea[aria-label="Message"]')
 
 /** A control by its exact words, among the cards the room drew. */
 function button(label: string): HTMLButtonElement | undefined {
@@ -168,19 +181,34 @@ function button(label: string): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined
 }
 
-test("the approval card names its member and answers Once or Deny at a phone's width",
+/** A question's choice: the chat's row carries the label and, on the first, a recommended badge. */
+function choice(label: string): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll("button")].find(
+    (one) => wordsOf(one).includes(label),
+  ) as HTMLButtonElement | undefined
+}
+
+/** The composer's Stop is an icon, so it is named by its label rather than its words. */
+const stopButton = () => document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement | null
+
+test("the approval takes the composer's place, with the chat's own card, at a phone's width",
   atWidth(390, async () => {
     await fresh([APPROVAL])
     await mount(screen(), async () => {
-      await until(async () => Boolean(find('[data-slot="room-approval"]')), "the approval card")
-      const card = find('[data-slot="room-approval"]')!
-      assert.match(wordsOf(card), /Hermes needs an approval/, "the card names the member asking")
+      await until(
+        async () => Boolean(find('[data-slot="room-card"][data-card="approval"]')),
+        "the approval card",
+      )
+      const card = find('[data-slot="room-card"][data-card="approval"]')!
+      assert.match(wordsOf(card), /Approval needed/, "the chat's own approval card")
+      assert.match(wordsOf(card), /Hermes/, "and it names the member asking")
       assert.match(wordsOf(card), /Clear the build/, "and says what it is for")
       assert.match(wordsOf(card), /rm -rf build/, "the command is drawn whole")
-      assert.ok(button("Once") && button("Deny"), "Once and Deny are the card's two answers")
+      assert.ok(button("Allow once") && button("Deny"), "the card's two answers")
       assert.equal(button("Always allow"), undefined, "the Host takes no third answer")
+      assert.equal(composerField(), null, "the card holds the composer's place")
 
-      await click(button("Once")!)
+      await click(button("Allow once")!)
       await until(async () => calls.length > 0, "the answer to reach the Host")
       assert.deepEqual(
         calls[0],
@@ -197,7 +225,7 @@ test("the approval card names its member and answers Once or Deny at a phone's w
         },
         "the Host's own coordinates, and the one answer the card offered",
       )
-      await until(async () => !find('[data-slot="room-approval"]'), "the card to go once answered")
+      await until(async () => !find('[data-slot="room-card"]'), "the card to go once answered")
     })
   }))
 
@@ -205,13 +233,14 @@ test("the same card is drawn, and Deny answered, at a tablet's width",
   atWidth(1024, async () => {
     await fresh([APPROVAL])
     await mount(screen(), async () => {
-      await until(async () => Boolean(find('[data-slot="room-approval"]')), "the approval card")
-      const card = find('[data-slot="room-approval"]')!
-      assert.match(wordsOf(card), /Hermes needs an approval/)
-      // The room's own box: an in-chat card never passes the reading column's 672px (ADR 0047).
+      await until(
+        async () => Boolean(find('[data-slot="room-card"][data-card="approval"]')),
+        "the approval card",
+      )
+      // The chat's card: an in-chat card never passes the reading column's 672px (ADR 0047).
       assert.ok(
-        find('[data-slot="room-waiting"]')!.className.includes("max-w-[672px]"),
-        "the cards take the reading column's box at a tablet's width",
+        find('[data-slot="room-card"]')!.firstElementChild!.className.includes("max-w-[672px]"),
+        "the card takes the reading column's box at a tablet's width",
       )
       await click(button("Deny")!)
       await until(async () => calls.length > 0, "the answer to reach the Host")
@@ -223,17 +252,22 @@ test("the same card is drawn, and Deny answered, at a tablet's width",
     })
   }))
 
-test("a question card offers the Host's choices and sends the picked one",
+test("a question takes the composer's place too, offering the Host's own choices",
   atWidth(390, async () => {
     await fresh([QUESTION])
     await mount(screen(), async () => {
-      await until(async () => Boolean(find('[data-slot="room-question"]')), "the question card")
-      const card = find('[data-slot="room-question"]')!
-      assert.match(wordsOf(card), /Coder asks/, "the card names the member who asked")
-      assert.match(wordsOf(card), /Which database\?/, "and asks what it asks")
-      assert.ok(button("Postgres") && button("SQLite"), "each choice is a control of its own")
+      await until(
+        async () => Boolean(find('[data-slot="room-card"][data-card="question"]')),
+        "the question card",
+      )
+      const card = find('[data-slot="room-card"][data-card="question"]')!
+      assert.match(wordsOf(card), /Question/, "the chat's own question card")
+      assert.match(wordsOf(card), /Coder/, "naming the member who asked")
+      assert.match(wordsOf(card), /Which database\?/, "and asking what it asks")
+      assert.ok(choice("Postgres") && choice("SQLite"), "each choice is a control of its own")
+      assert.equal(composerField(), null, "the card holds the composer's place")
 
-      await click(button("Postgres")!)
+      await click(choice("Postgres")!)
       await click(button("Send")!)
       await until(async () => calls.length > 0, "the answer to reach the Host")
       assert.deepEqual(
@@ -268,16 +302,32 @@ test("a reply addressed to @user draws the room's needs-you mark",
     })
   }))
 
-test("Stop ends the round through the Host's own route",
+test("at rest the room draws the chat's composer, without a model pill or a file to attach",
   atWidth(390, async () => {
-    await fresh([APPROVAL])
+    await fresh([], [{ seq: 1, eventId: "e1", kind: "message.user", text: "who is free?" }])
     await mount(screen(), async () => {
-      await until(async () => Boolean(button("Stop")), "the Stop control")
-      await click(button("Stop")!)
+      await until(composerField, "the room's composer")
+      assert.equal(composerField()!.getAttribute("placeholder"), "Message the room…")
+      assert.equal(button("Add context"), undefined, "a room's message carries no file")
+      assert.equal(find('[data-slot="room-card"]'), null, "and nothing holds its place")
+      assert.equal(document.querySelector('[aria-label^="Model"]'), null, "and no model pill")
+    })
+  }))
+
+test("Stop is the composer's, while a round runs, and ends it through the Host's route",
+  atWidth(390, async () => {
+    await fresh([], [{ seq: 1, eventId: "e1", kind: "message.user", text: "go" }])
+    answering = true
+    await mount(screen(), async () => {
+      await until(async () => Boolean(stopButton()), "the composer's Stop")
+      await click(stopButton()!)
       await until(async () => calls.length > 0, "the stop to reach the Host")
       assert.equal(calls[0].path, `/api/plugins/gots/rooms/${ROOM}/stop`)
-      assert.match(String((calls[0].body as Record<string, unknown>).cancel_id), /./,
-        "the stop carries an id of this device's own")
+      assert.match(
+        String((calls[0].body as Record<string, unknown>).cancel_id),
+        /./,
+        "the stop carries an id of this device's own",
+      )
       await until(
         async () => Boolean(find('[data-slot="room-row"][data-kind="notice"]')),
         "the transcript to say the round stopped",
@@ -291,7 +341,8 @@ test("a room at rest offers no Stop, since there is no round to end",
     await fresh([], [{ seq: 1, eventId: "e1", kind: "message.user", text: "who is free?" }])
     await mount(screen(), async () => {
       await until(async () => Boolean(find('[data-slot="room-row"]')), "the room's own row")
-      assert.equal(button("Stop"), undefined, "a Stop at rest could only cancel nothing")
+      assert.equal(stopButton(), null, "a Stop at rest could only cancel nothing")
+      assert.ok(composerField(), "the composer keeps its place")
     })
   }))
 
@@ -299,7 +350,7 @@ test("a host that never declares rooms_questions draws no question card",
   atWidth(390, async () => {
     await fresh([QUESTION], [], NO_QUESTIONS)
     await mount(screen(), async () => {
-      await until(async () => Boolean(find('textarea[aria-label="Message the room"]')), "the room to draw")
-      assert.equal(find('[data-slot="room-question"]'), null, "no card the Host never offered")
+      await until(async () => Boolean(composerField()), "the composer to draw")
+      assert.equal(find('[data-slot="room-card"]'), null, "no card the Host never offered")
     })
   }))

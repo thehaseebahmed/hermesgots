@@ -33,7 +33,7 @@ await flow("rooms", async ({ page, until, shot }) => {
   await row.click()
   await page.waitForURL("**/c/room-planning", { timeout: 15_000 })
 
-  const field = page.getByLabel("Message the room", { exact: true })
+  const field = page.getByLabel("Message", { exact: true })
   await field.waitFor({ timeout: 15_000 })
   await field.fill(SENT)
   await page.getByRole("button", { name: "Send", exact: true }).click()
@@ -124,7 +124,7 @@ await flow("rooms", async ({ page, until, shot }) => {
         return {
           viewport: window.innerWidth,
           rows: rows.map(box),
-          field: box(document.querySelector('[aria-label="Message the room"]')),
+          field: box(document.querySelector('[aria-label="Message"]')),
           send: box(document.querySelector('button[aria-label="Send"]')),
           room: (() => {
             const at = document.querySelector('[aria-label="Room messages"]')

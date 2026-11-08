@@ -192,11 +192,14 @@ const HALF_SCREEN = "max-h-[50dvh]"
 export function QuestionCard({
   message,
   askedId,
+  from,
   onAnswer = (answers) => answerClarify(message, answers),
 }: {
   message: Message
   /** The question the host waits on; absent where the call's questions are answered at once. */
   askedId?: string
+  /** Who asks — a room's member — where the screen drawing the card knows and a chat's row doesn't. */
+  from?: string
   /** Where the answers go; the chat's own engine unless the screen drawing the card answers itself. */
   onAnswer?: (answers: ClarifyAnswers) => Promise<void>
 }) {
@@ -313,6 +316,9 @@ export function QuestionCard({
         <CardTitle className="flex items-center gap-2 text-base text-primary">
           <MessageCircleQuestionIcon className="size-5 shrink-0" />
           {paged ? "Questions" : "Question"}
+          {from && (
+            <span className="text-sm font-normal text-muted-foreground">{from}</span>
+          )}
           {paged && (
             <div className="ml-auto flex items-center gap-1">
               <span

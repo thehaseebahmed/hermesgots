@@ -45,6 +45,13 @@ reads the newest message row instead: a member's reply mentioning `@user` (on a 
 it. The screen draws the mark where no card already asks, since a card is the user's move drawn in
 full and the mark only says what a card can't.
 
+**The wait takes the composer's place, with the chat's own cards.** A room draws a wait exactly as a
+chat does: the approval and question cards are the same components the chat's thread uses, carrying
+the member's name in their header, and they hold the slot the composer would have. Stop is the
+composer's own control, offered while a round runs and the field is empty. The room's composer is the
+chat's composer in `plain` mode — words only, so no `/` menu, no attached files, and no model pill —
+because a room's message is an append and nothing in it runs.
+
 **Departure from the plan's wording.** The plan said a question "goes through the plugin's own
 holding for that member's run" without naming how a plan-side Host would fill it. The Host as it
 stands projects approvals only, so the plugin advertises `rooms_questions` solely where a Host

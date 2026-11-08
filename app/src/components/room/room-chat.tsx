@@ -3,10 +3,10 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { Composer } from "@/components/chat/composer"
 import { Markdown } from "@/components/chat/markdown"
 import { SystemLine } from "@/components/chat/system-line"
 import { UserBubble } from "@/components/chat/user-bubble"
-import { RoomComposer } from "@/components/room/room-composer"
 import { RoomWaiting } from "@/components/room/room-waiting"
 import { Banner } from "@/components/banner"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { chatOwner } from "@/lib/chat-owner"
+import { serverConfig } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { DEFAULT_SETTINGS, db, getSettings, type Profile, type RoomMember } from "@/lib/db"
 import { COLUMN_BOX } from "@/lib/layout"
@@ -52,6 +53,12 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     [chat, seated],
   )
   const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
+  const connection = useMemo(() => serverConfig(answerer), [answerer])
+  // A refused send goes back into the field, the way a chat's does: what the Host would not take is
+  // the user's words, and the banner beside the room says why in the Host's own words.
+  const write = async (text: string) => {
+    if (!(await send(text))) throw new Error("The room didn't take that message.")
+  }
   // A question card is drawn only where the Host declares it can be answered: `rooms_questions` is
   // the row whose absence says the pairing can't be made (rooms.py, ADR 0118).
   const asksQuestions = usePluginFeatureOn(answerer, "rooms_questions")
@@ -115,23 +122,35 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         </div>
       )}
       <RoomWaiting
+        roomId={id}
         members={live.members}
         waiting={asksQuestions ? live.waiting : live.waiting.filter((one) => one.kind === "approval")}
         asking={live.asking}
-        canStop={answerer ? (live.canStop ?? false) : false}
-        working={Boolean(live.working)}
-        busy={live.acting}
         onApprove={approve}
         onAnswer={answer}
-        onStop={stop}
-      />
-      <RoomComposer
-        onSend={send}
-        // No answerer, no send: a room whose members this device holds no bot for still draws, and
-        // every message to it could only come back refused (ADR 0115).
-        canSend={answerer ? live.canSend : false}
-        sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
-        sending={live.sending}
+        composer={
+          <Composer
+            plain
+            // Stop takes Send's place while a round runs and the field is empty, which is the one
+            // place a room's Stop can be: the Host's own control, with nothing typed over it.
+            busy={Boolean(live.working) && Boolean(answerer && live.canStop)}
+            connection={connection}
+            botName={answerer?.name ?? "Hermes"}
+            draftKey={`room-${id}`}
+            // No answerer, no send: a room whose members this device holds no bot for still draws,
+            // and every message to it could only come back refused (ADR 0115).
+            disabled={!answerer || live.canSend === false}
+            filesFeature="no"
+            imagesAvailable={false}
+            placeholder={
+              answerer && live.canSend !== false ? "Message the room…" : "This room can't be written to"
+            }
+            sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
+            onSend={write}
+            onQueue={write}
+            onStop={stop}
+          />
+        }
       />
     </div>
   )
