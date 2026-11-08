@@ -84,7 +84,7 @@ export function createCanvasStore() {
   }
 
   // A listing carries the record and no document, so no `can_undo`: only the one-canvas answer does,
-  // as the plugin's own `listing` answers.
+  // as the plugin's own `listing` answers. The reader's answers about the version's tools ride it.
   const summary = (c) => ({
     id: c.id,
     title: c.title,
@@ -95,6 +95,7 @@ export function createCanvasStore() {
     hidden: c.hidden,
     at: c.at,
     created_at: c.created_at,
+    grants: c.grants ?? [],
   })
 
   // The pointer's version, not the newest stored one: an undo moves the pointer back and leaves the
@@ -107,6 +108,7 @@ export function createCanvasStore() {
       ...summary(c),
       html: current?.html ?? "",
       tools: current?.tools ?? [],
+      grants: c.grants ?? [],
       written_at: current?.at ?? c.at,
       can_undo: earlier !== null,
       data: inOrder(c.docs),
@@ -116,10 +118,16 @@ export function createCanvasStore() {
   return { canvases, summary, full, below }
 }
 
-export async function handleCanvas(req, res, path, { json, readBody, noteEvent }, store) {
+export async function handleCanvas(req, res, path, { json, readBody, noteEvent, sessions }, store) {
   if (!path.startsWith("/api/plugins/gots/canvases")) return false
   const { canvases, summary, full, below } = store
-  const fail = (status, message) => json(res, status, { error: { message } })
+  const fail = (status, message, code) =>
+    json(res, status, { error: { message, ...(code ? { code } : {}) } })
+  /** The tool the pointer's version declared, or a refusal the caller is answered with. */
+  const declared = (canvas, tool) => {
+    const current = canvas.versions.find((v) => v.version === canvas.version)
+    return (current?.tools ?? []).includes(tool)
+  }
 
   // A collection and a document id are names the page sends, as the plugin checks them: 1 to 64
   // characters, with no control character.
@@ -152,6 +160,55 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent }
     const body = (await readBody(req)) ?? {}
     const shape = body.shape
     const args = body.args && typeof body.args === "object" ? body.args : {}
+    // The host's four free reads (ADR 0114): no declaration and no consent, answered from what the
+    // mock holds, with a stub account and one routine so a page has something to draw.
+    const reads = {
+      usage: () => ({
+        plan: "Pro",
+        windows: [
+          { label: "Session", used_percent: 12, resets_at: null, detail: null, scope: "account" },
+        ],
+        deciding: null,
+      }),
+      routines: () => [
+        { id: "r_morning", title: "Morning brief", schedule: "0 8 * * *", enabled: true },
+      ],
+      projects: () => [],
+      sessions: () => (sessions ? sessions() : []),
+    }
+    const read =
+      typeof shape === "string" && Object.hasOwn(reads, shape) ? reads[shape] : undefined
+    if (read) {
+      json(res, 200, { object: "gots.canvas.call", result: read() })
+      return true
+    }
+    // A declared tool: refused undeclared, then asked about, then refused or called as the reader
+    // answered. The codes match the plugin's, so the app's consent hold is exercised by the mock.
+    if (typeof shape === "string" && shape.includes(".") && !shape.startsWith("data.")) {
+      const tool = shape
+      if (!declared(canvas, tool)) {
+        fail(403, `This canvas never declared ${tool}.`, "not_declared")
+        return true
+      }
+      const answer = (canvas.grants ?? []).find((row) => row.tool === tool)
+      if (!answer) {
+        fail(
+          403,
+          `This canvas's page was never allowed to call ${tool}: its first call is the user's to answer.`,
+          "consent_required",
+        )
+        return true
+      }
+      if (!answer.allowed) {
+        fail(403, `The user did not allow this canvas's page to call ${tool}.`, "denied")
+        return true
+      }
+      json(res, 200, {
+        object: "gots.canvas.call",
+        result: { tool, query: typeof args.q === "string" ? args.q : null, hits: [] },
+      })
+      return true
+    }
     if (shape !== "data.put" && shape !== "data.remove") {
       fail(501, `This host cannot call ${JSON.stringify(shape)} for a canvas.`)
       return true
@@ -218,6 +275,40 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent }
     return true
   }
 
+  // The reader's answer about a declared tool, kept on the canvas for every device, as the plugin's
+  // own grants route does. The answer is the canvas as it now is, so the options redraw at once.
+  const grants = /^\/api\/plugins\/gots\/canvases\/([^/]+)\/grants$/.exec(path)
+  if (grants) {
+    const canvas = canvases.get(decodeURIComponent(grants[1]))
+    if (!canvas) {
+      fail(404, "There is no such canvas.")
+      return true
+    }
+    if (req.method !== "POST") {
+      fail(405, "A grant is a POST.")
+      return true
+    }
+    const body = (await readBody(req)) ?? {}
+    if (typeof body.tool !== "string" || !body.tool) {
+      fail(400, "A grant names the tool it answers for.")
+      return true
+    }
+    if (!declared(canvas, body.tool)) {
+      fail(403, `This canvas never declared ${body.tool}.`, "not_declared")
+      return true
+    }
+    canvas.grants = [
+      ...(canvas.grants ?? []).filter((row) => row.tool !== body.tool),
+      { tool: body.tool, allowed: Boolean(body.allow) },
+    ].sort((one, two) => (one.tool < two.tool ? -1 : 1))
+    json(res, 200, {
+      object: "gots.canvas.grant",
+      grant: { tool: body.tool, allowed: Boolean(body.allow) },
+      grants: canvas.grants,
+    })
+    return true
+  }
+
   if (path === "/api/plugins/gots/canvases") {
     if (req.method === "GET") {
       const list = [...canvases.values()].sort((a, b) => b.at - a.at).map(summary)
@@ -242,6 +333,10 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent }
         created_at: now,
         versions: [],
         docs: [],
+        // One declared tool, so the canvas's options have a row and a page that calls it (from a
+        // devtools console, or a canvas someone edits) meets the consent dialog.
+        tools: ["files.search"],
+        grants: [],
         prompt,
       }
       canvases.set(canvas.id, canvas)
@@ -250,7 +345,11 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent }
       setTimeout(() => {
         canvas.version += 1
         canvas.at = Date.now()
-        canvas.versions.push({ version: canvas.version, html: page(prompt, title, canvas.version), tools: [] })
+        canvas.versions.push({
+          version: canvas.version,
+          html: page(prompt, title, canvas.version),
+          tools: canvas.tools,
+        })
         if (canvas.versions.length > KEEP) canvas.versions.shift()
         noteEvent("canvas", canvas.session_id)
       }, 1500)

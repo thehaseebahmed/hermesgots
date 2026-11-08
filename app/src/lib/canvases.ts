@@ -1,7 +1,14 @@
 import { useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { applyWrite, storedDoc, type BridgeWriteCall, type CanvasDoc } from "@/lib/canvas-bridge"
+import {
+  applyWrite,
+  storedDoc,
+  type BridgeToolCall,
+  type BridgeWriteCall,
+  type CanvasDoc,
+  type CanvasReadShape,
+} from "@/lib/canvas-bridge"
 import {
   cachedCanvas,
   cachedList,
@@ -21,6 +28,7 @@ import {
   createCanvas,
   getCanvas,
   getPluginFeatures,
+  grantCanvasTool as grantCanvasToolOnHost,
   HermesError,
   hostAnswered,
   listCanvases,
@@ -40,6 +48,15 @@ import { tell } from "@/lib/tell"
  * closed. The app is the view: it lists what the host holds and draws the version its record points
  * at.
  */
+
+/**
+ * The user's answer about one tool: `allowed` says which way it went. The host keeps them as a list
+ * because they are the canvas's rather than a version's, ordered by tool name.
+ */
+export interface CanvasGrant {
+  tool: string
+  allowed: boolean
+}
 
 export interface Canvas {
   id: string
@@ -63,6 +80,8 @@ export interface Canvas {
   html?: string
   /** The host tools that version's page declared. */
   tools?: string[]
+  /** The user's answers about those tools, one per tool; a missing tool was never asked. */
+  grants?: CanvasGrant[]
   /** The canvas's own data, as the last read answered it. Only the canvas on screen keeps it. */
   data?: CanvasDoc[]
   /**
@@ -140,6 +159,17 @@ function refuseAway(cause?: unknown): never {
 }
 
 /**
+ * What a page's host read or tool call is told with its bot away, and what the reader's toast
+ * says. Neither is a save, so neither is refused in the words a write is.
+ */
+export const CANVAS_UNREACHABLE = "This canvas can't reach its bot right now."
+
+function refuseUnreachable(cause?: unknown): never {
+  tell.error(CANVAS_UNREACHABLE)
+  throw new Error(CANVAS_UNREACHABLE, { cause })
+}
+
+/**
  * The documents a canvas's answer carries, or nothing for an answer that carries none — a host from
  * before a canvas had data answers without it. Each row is read by the bridge's own rule, so the
  * copy and a write's answer agree on what a document is.
@@ -149,8 +179,27 @@ function docsOf(raw: unknown): CanvasDoc[] | undefined {
   return raw.map(storedDoc).filter((row): row is CanvasDoc => row !== null)
 }
 
+/**
+ * The answers the host holds about a canvas's declared tools: one row per tool, `allowed` saying
+ * which way it went. A tool with no row was never asked, which is how the options tell "not asked"
+ * from "not allowed".
+ */
+function grantsOf(raw: unknown): CanvasGrant[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const kept: CanvasGrant[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue
+    const { tool, allowed } = row as Record<string, unknown>
+    if (typeof tool === "string" && tool && typeof allowed === "boolean") {
+      kept.push({ tool, allowed })
+    }
+  }
+  return kept
+}
+
 function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
   const data = docsOf(raw.data)
+  const grants = grantsOf(raw.grants)
   return {
     id: String(raw.id ?? ""),
     profileId,
@@ -164,6 +213,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     chatId: String(raw.chat_id ?? ""),
     canUndo: Boolean(raw.can_undo),
     ...(data ? { data } : {}),
+    ...(grants ? { grants } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),
     ...(Array.isArray(raw.tools) ? { tools: raw.tools.filter((t): t is string => typeof t === "string") } : {}),
   }
@@ -477,6 +527,74 @@ export function useCanvas(id: string) {
     away: Boolean(state.missedAt[id]),
     loaded: state.loaded || Boolean(canvas),
   }
+}
+
+/** The bot holding a canvas and the connection to call it with, or the refusal a page hears. */
+async function hosting(id: string) {
+  const profileId = await botHolding(id)
+  if (!profileId) throw new Error("There is no such canvas.")
+  return configOf(profileId)
+}
+
+/** A host read or a tool call: the host's answer, or the refusal the page's promise gets. */
+async function callHost(
+  id: string,
+  ask: (profile: Profile) => Promise<unknown>,
+): Promise<unknown> {
+  // A device with no network at all can't reach the host, so the call is refused without asking.
+  if (!onlineNow()) refuseUnreachable()
+  const profile = await hosting(id)
+  try {
+    return await ask(profile)
+  } catch (failure) {
+    // A host that answered and refused said why, and that is the page's own answer — the bridge
+    // reads `consent_required` off it. A request that never landed leaves the canvas unreachable.
+    if (hostAnswered(failure)) throw failure
+    markAway(id)
+    refuseUnreachable(failure)
+  }
+}
+
+/** One of the host's four free reads, straight to its route. */
+export function callCanvasRead(id: string, shape: CanvasReadShape, args: Record<string, unknown>) {
+  return callHost(id, (profile) => callCanvas(profile, id, shape, args))
+}
+
+/** A declared tool the page called, as `write` so two calls on one server are taken one at a time. */
+export function callCanvasTool(id: string, call: BridgeToolCall) {
+  return callHost(id, (profile) => callCanvas(profile, id, call.tool, call.args, true))
+}
+
+/**
+ * The reader's answer about one declared tool, kept on the host. The host answers the row it wrote
+ * and the canvas's answers after it, and those replace the copy the options draw; a host that
+ * answers no list still moves this device's copy, so the switch just flipped doesn't jump back.
+ */
+export async function grantCanvasTool(id: string, tool: string, allow: boolean) {
+  if (!onlineNow()) refuseUnreachable()
+  const profileId = await botHolding(id)
+  if (!profileId) throw new Error("There is no such canvas.")
+  const profile = await configOf(profileId)
+  let answer: Record<string, unknown> | undefined
+  try {
+    answer = await grantCanvasToolOnHost(profile, id, tool, allow)
+  } catch (failure) {
+    if (hostAnswered(failure)) throw failure
+    markAway(id)
+    refuseUnreachable(failure)
+  }
+  const state = store.get()
+  const held = state.details[id]
+  if (!held) return answer
+  const answered = grantsOf(answer?.grants)
+  const grants = answered ?? [
+    ...(held.grants ?? []).filter((row) => row.tool !== tool),
+    { tool, allowed: allow },
+  ]
+  const next = { ...held, grants }
+  store.set({ ...state, details: { ...state.details, [id]: next } })
+  keepCanvas(profile, next)
+  return answer
 }
 
 /** A canvas from a prompt: the plugin writes it and queues the run that builds it. */

@@ -20,6 +20,15 @@ export const BRIDGE_MESSAGE = "gots:canvas-data"
  */
 export const BRIDGE_METHODS = ["list", "get", "put", "remove"] as const
 
+/**
+ * The host's own reads a page may make without declaring anything (ADR 0114): what its bot's
+ * account is using, the routines it keeps, its projects and the chats it holds. They read the
+ * user's own things, which the user chose to leave open to every canvas the bot draws.
+ */
+export const CANVAS_READS = ["usage", "routines", "projects", "sessions"] as const
+
+export type CanvasReadShape = (typeof CANVAS_READS)[number]
+
 /** One document of a canvas's own data, as the host answers it: a collection, an id and a clock. */
 export interface CanvasDoc {
   collection: string
@@ -41,13 +50,41 @@ export type BridgeCall =
   | (BridgeCallBase & { method: "get"; collection: string; id: string })
   | (BridgeCallBase & { method: "put"; collection: string; id: string; doc: unknown })
   | (BridgeCallBase & { method: "remove"; collection: string; id: string })
+  | (BridgeCallBase & { method: "read"; shape: CanvasReadShape; args: Record<string, unknown> })
+  | (BridgeCallBase & { method: "tool"; tool: string; args: Record<string, unknown> })
 
-/** A call the host answers: a read is the device's copy's, and never reaches it. */
+/** A call answered from this device's copy of the canvas's data: no other method reads it. */
+export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "put" | "remove" }>
+
+/** A call the host answers: a read of the device's copy, and never reaches it. */
 export type BridgeWriteCall = Extract<BridgeCall, { method: "put" | "remove" }>
+
+/** A call that reaches the host: one of its free reads, or a declared tool the page calls. */
+export type BridgeHostCall = Extract<BridgeCall, { method: "read" | "tool" }>
+
+/** A host read's arguments: a named shape and whatever that shape takes. */
+export type BridgeReadCall = Extract<BridgeCall, { method: "read" }>
+
+/** A call to one of the bot's tools, as the version declared it. */
+export type BridgeToolCall = Extract<BridgeCall, { method: "tool" }>
+
+/** A tool's name is `<server>.<tool>`, and both halves have to be there. */
+function namesTool(value: unknown): value is string {
+  if (typeof value !== "string" || /\s/.test(value)) return false
+  const dot = value.indexOf(".")
+  return dot > 0 && dot < value.length - 1
+}
+
+/** A call's arguments: an object the method takes, or nothing at all. */
+function argsOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
 
 /**
  * A call the page sent, or null for anything else. Another window's idea of the message is not a
- * call: the type, the number, the collection and the fields each method needs all have to be here.
+ * call: the type, the number, the method and the fields each method needs all have to be here.
  */
 export function readCall(data: unknown): BridgeCall | null {
   if (!data || typeof data !== "object") return null
@@ -56,6 +93,22 @@ export function readCall(data: unknown): BridgeCall | null {
   if (typeof raw.call !== "number" || !Number.isInteger(raw.call) || raw.call <= 0) return null
   const epoch = typeof raw.epoch === "string" && raw.epoch ? { epoch: raw.epoch } : {}
   const method = raw.method
+  if (method === "read") {
+    if (typeof raw.shape !== "string" || !CANVAS_READS.includes(raw.shape as CanvasReadShape)) {
+      return null
+    }
+    return {
+      ...epoch,
+      call: raw.call,
+      method,
+      shape: raw.shape as CanvasReadShape,
+      args: argsOf(raw.args),
+    }
+  }
+  if (method === "tool") {
+    if (!namesTool(raw.tool)) return null
+    return { ...epoch, call: raw.call, method, tool: raw.tool, args: argsOf(raw.args) }
+  }
   if (method !== "list" && method !== "get" && method !== "put" && method !== "remove") return null
   if (typeof raw.collection !== "string" || !raw.collection) return null
   if (method === "list") return { ...epoch, call: raw.call, method, collection: raw.collection }
@@ -72,9 +125,11 @@ export function readCall(data: unknown): BridgeCall | null {
  * What a read answers, from the device's copy alone: the collection's documents in copy order, or
  * the one document, or null. No read reaches the host.
  */
-export function answerRead(call: BridgeCall, copy: CanvasDoc[]): unknown {
+export function answerRead(call: BridgeDataCall, copy: CanvasDoc[]): unknown {
   if (call.method === "list") return copy.filter((row) => row.collection === call.collection)
-  return copy.find((row) => row.collection === call.collection && row.id === call.id) ?? null
+  if (call.method === "get")
+    return copy.find((row) => row.collection === call.collection && row.id === call.id) ?? null
+  return null
 }
 
 /** A document the host answered with, or null when the answer isn't the shape it documents. */
@@ -139,15 +194,17 @@ export function applyWrite(
 
 /**
  * The page's half, put in the head ahead of the page's own scripts: `window.canvas.data` with
- * `list`, `get`, `put` and `remove`, each posting the call to the parent and settling on the reply
- * that names it. Every message carries this document's own epoch, so a reply meant for the page
- * drawn before this one can never settle a promise here. ES5, like the scroll bridge beside it: it
- * runs before the page's own scripts and asks nothing of the page.
+ * `list`, `get`, `put` and `remove`, `window.canvas.read(shape, args)` for the host's four free
+ * reads, and `window.canvas.tool.call(name, args)` for a tool the version declared. Each posts the
+ * call to the parent and settles on the reply that names it — a tool call waits on the reader's
+ * answer, which the app keeps for it. Every message carries this document's own epoch, so a reply
+ * meant for the page drawn before this one can never settle a promise here. ES5, like the scroll
+ * bridge beside it: it runs before the page's own scripts and asks nothing of the page.
  */
 export const BRIDGE_SCRIPT =
   `(function(){var TYPE="` +
   BRIDGE_MESSAGE +
-  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var send=function(method,collection,id,doc){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call,method:method,collection:collection};if(id!==undefined){message.id=id}if(method==="put"){message.doc=doc}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's data didn't answer."))}});window.canvas={data:{list:function(collection){return send("list",collection)},get:function(collection,id){return send("get",collection,id)},put:function(collection,id,doc){return send("put",collection,id,doc)},remove:function(collection,id){return send("remove",collection,id)}}}})()`
+  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()`
 
 /** What the parent's listener may ask of its world, so the rule itself holds no window or store. */
 export interface BridgeHost {
@@ -157,20 +214,66 @@ export interface BridgeHost {
   copy(): CanvasDoc[]
   /** A write through the host's route; its answer, or its error, is what the page is told. */
   write(call: BridgeWriteCall): Promise<unknown>
+  /** A host read or a tool call; its answer, or its error, is what the page is told. */
+  call(call: BridgeHostCall): Promise<unknown>
+  /** Asks the reader whether the canvas may use one tool, and answers what they chose. */
+  consent(tool: string): Promise<boolean>
 }
 
 function wordsOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** The `code` a refusal carries, where it carries one: a consent hold is decided by it. */
+function codeOf(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? code : undefined
+}
+
 /**
- * The parent's listener: a read is answered at once from the device's copy, and a write is the
- * host's, its answer posted when it settles. Nothing from another window is answered or posted —
- * a message is the canvas talking only when it comes from this screen's own frame — and a call this
- * rule cannot read is answered with the reason rather than dropped, since the page's promise is
- * waiting on it.
+ * The parent's listener: a read of the canvas's data is answered at once from the device's copy, a
+ * write is the host's, and a host read or a tool call is the host's too — a tool call held until the
+ * reader allows it. Nothing from another window is answered or posted — a message is the canvas
+ * talking only when it comes from this screen's own frame — and a call this rule cannot read is
+ * answered with the reason rather than dropped, since the page's promise is waiting on it.
+ *
+ * A tool refused for consent is asked about once, however many calls are waiting on it: the second
+ * call waits on the same answer rather than opening a second dialog. Allow retries the call once and
+ * settles with that answer; Don't allow rejects the page's promise with a plain sentence. Any other
+ * refusal is the host's own words, and is not something the reader can answer.
  */
 export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
+  // One ask per tool, from the first refusal to the reader's answer: a call that arrives while the
+  // dialog is up waits on it instead of asking again.
+  const asking = new Map<string, Promise<boolean>>()
+
+  const permission = (tool: string): Promise<boolean> => {
+    const owed = asking.get(tool)
+    if (owed) return owed
+    const answer = host.consent(tool)
+    asking.set(tool, answer)
+    const clear = () => {
+      if (asking.get(tool) === answer) asking.delete(tool)
+    }
+    void answer.then(clear, clear)
+    return answer
+  }
+
+  const callTool = async (call: BridgeToolCall): Promise<unknown> => {
+    try {
+      return await host.call(call)
+    } catch (error) {
+      if (codeOf(error) !== "consent_required") throw error
+      if (!(await permission(call.tool))) {
+        throw new Error(`You didn't allow this canvas to use ${call.tool}.`)
+      }
+      // The reader said yes, so the grant is on the host now: the same call goes once more, and
+      // that answer is the page's. A refusal here is the host's, not another dialog.
+      return host.call(call)
+    }
+  }
+
   return (event) => {
     const frame = host.frame()
     if (!frame || event.source !== frame) return
@@ -191,7 +294,7 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
     if (!call) {
       if (typeof raw.call === "number" && Number.isInteger(raw.call) && raw.call > 0) {
         reply(raw.call, false, {
-          error: "A canvas's data call names a collection, and a document's id to read or write one.",
+          error: "A canvas's call names a method, and the fields that method needs.",
         })
       }
       return
@@ -200,7 +303,15 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
       reply(call.call, true, { value: answerRead(call, host.copy()) })
       return
     }
-    void host.write(call).then(
+    if (call.method === "put" || call.method === "remove") {
+      void host.write(call).then(
+        (value) => reply(call.call, true, { value }),
+        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
+      )
+      return
+    }
+    const asked = call.method === "tool" ? callTool(call) : host.call(call)
+    void asked.then(
       (value) => reply(call.call, true, { value }),
       (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
     )

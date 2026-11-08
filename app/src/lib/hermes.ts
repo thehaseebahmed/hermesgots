@@ -2359,24 +2359,47 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 }
 
 /**
- * A call a canvas's page makes, through the app: the canvas's own data, put or removed on the host.
- * The answer is what the host kept, read as the bridge's own rule reads it.
+ * A call a canvas's page makes, through the app: one of the host's free reads, or a declared tool,
+ * or the canvas's own data put or removed on the host. A tool call rides `write`, so two calls on
+ * one server are taken one at a time. The answer is what the host kept or read, read as the
+ * bridge's own rule reads it.
  */
 export async function callCanvas(
   config: HermesConfig,
   id: string,
-  shape: "data.put" | "data.remove",
+  shape: string,
   args: Record<string, unknown>,
+  write = false,
 ) {
   const response = await request(`${canvasRoot(config, id)}/call`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ shape, args }),
-    // A write the host never answers is refused on this device's clock rather than leaving the
+    body: JSON.stringify(write ? { shape, args, write: true } : { shape, args }),
+    // A call the host never answers is refused on this device's clock rather than leaving the
     // page's promise waiting on a socket timeout.
-    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(write ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS),
   })
   return (await response.json())?.result as unknown
+}
+
+/**
+ * The reader's answer about one declared tool, kept on the host for every device (`canvases.py`).
+ * The host answers the row it wrote and the canvas's answers after it, so a caller never has to
+ * read the canvas again to draw them.
+ */
+export async function grantCanvasTool(
+  config: HermesConfig,
+  id: string,
+  tool: string,
+  allow: boolean,
+) {
+  const response = await request(`${canvasRoot(config, id)}/grants`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ tool, allow }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json()) as Record<string, unknown> | undefined
 }
 
 /**

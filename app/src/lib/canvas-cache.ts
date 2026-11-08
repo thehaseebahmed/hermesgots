@@ -44,6 +44,9 @@ export const upsert = <T extends { id: string }>(rows: T[], row: T) =>
 const newestData = (data?: Canvas["data"]) =>
   data?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0
 
+/** A canvas's answers as one string, so a grants-only change is still a change worth keeping. */
+const grantsText = (canvas: Canvas) => JSON.stringify(canvas.grants ?? [])
+
 /**
  * Whether `one` is newer than `other`: the record's clock first, then the version it points at, then
  * the clock of the newest document. A read and a write's answer can arrive in either order, so the
@@ -114,7 +117,13 @@ export function keepCanvas(profile: Profile, canvas: Canvas) {
   void db
     .transaction("rw", db.canvasCache, async () => {
       const held = (await db.canvasCache.get(key))?.canvas
-      if (held && !newer(canvas, held)) return
+      // A grants write moves no clock and no version, so an answer whose record sits still is still
+      // the newer one — but a record older than the copy held never replaces it.
+      if (held && !newer(canvas, held)) {
+        const stale =
+          held.at > canvas.at || (held.at === canvas.at && held.version > canvas.version)
+        if (stale || grantsText(canvas) === grantsText(held)) return
+      }
       await db.canvasCache.put({
         key,
         connection: connectionKey(profile),

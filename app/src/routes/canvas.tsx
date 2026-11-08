@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ArrowLeftIcon, FrameIcon, MenuIcon, PencilIcon, PlusIcon, Undo2Icon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  EllipsisIcon,
+  FrameIcon,
+  MenuIcon,
+  PencilIcon,
+  PlusIcon,
+  Undo2Icon,
+} from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { Bot } from "@/components/bot"
+import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
@@ -22,7 +31,10 @@ import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
 import {
+  callCanvasRead,
+  callCanvasTool,
   canvasData,
+  grantCanvasTool,
   refreshCanvas,
   startCanvas,
   undoCanvas,
@@ -174,6 +186,7 @@ export function CanvasView() {
   const [editing, setEditing] = useState(false)
   const [undoing, setUndoing] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
   // Where the frame's page last said it was, and which canvas said it. Read when the document is
   // built, never per scroll: a scroll is news for the next draw, not a reason to draw again. The id
@@ -246,15 +259,37 @@ export function CanvasView() {
     return () => window.removeEventListener("message", hear)
   }, [id])
 
-  // The page's own data, through the app: a read is answered from the copy this device holds and a
-  // write goes to the host's one route, so the page keeps its state with the host away and the host
-  // is still what every device reads (ADR 0113). The copy is read from the store when a call
-  // arrives, so a read landing never re-registers the listener.
+  // The reader's answer about a tool is kept on the host, and the host's canvas replaces the copy
+  // this screen draws. A grant that couldn't be posted answers no, so the page's own promise hears
+  // the refusal rather than being retried on a permission the host never recorded.
+  const grant = async (tool: string, allow: boolean) => {
+    try {
+      await grantCanvasTool(id, tool, allow)
+      return allow
+    } catch {
+      return false
+    }
+  }
+  const consent = useCanvasConsent(canvas?.title ?? "Canvas", grant)
+  // The bridge is registered once per canvas, so the ask is read through a ref: a new ask must not
+  // re-register the listener under a running page. The device's copy is read at call time from the
+  // store, so a read landing never re-registers it either.
+  const askRef = useRef(consent.ask)
+  askRef.current = consent.ask
+
+  // The page's own data and its calls through the app: a data read is answered from the copy this
+  // device holds and a data write goes to the host's one route (ADR 0113); the host's four reads
+  // are asked freely, and a declared tool's call waits here while the reader is asked (ADR 0114).
   useEffect(() => {
     const hear = bridgeHandler({
       frame: () => frame.current?.contentWindow ?? null,
       copy: () => canvasData(id),
       write: (call) => writeCanvasData(id, call),
+      call: (call) =>
+        call.method === "read"
+          ? callCanvasRead(id, call.shape, call.args)
+          : callCanvasTool(id, call),
+      consent: (tool) => askRef.current(tool),
     })
     window.addEventListener("message", hear)
     return () => window.removeEventListener("message", hear)
@@ -316,6 +351,17 @@ export function CanvasView() {
             </span>
           ) : null}
         </div>
+        {canvas ? (
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 rounded-full"
+            aria-label="Canvas options"
+            onClick={() => setOptionsOpen(true)}
+          >
+            <EllipsisIcon />
+          </Button>
+        ) : null}
         {canvas?.canUndo && !awayNow ? (
           <Button
             variant="ghost"
@@ -391,6 +437,19 @@ export function CanvasView() {
           </PopupContent>
         </Popup>
       )}
+      <CanvasConsentDialog
+        canvasTitle={consent.canvasTitle}
+        ask={consent.current}
+        position={consent.position}
+        total={consent.total}
+        onAnswer={(allow) => void consent.answer(allow)}
+      />
+      <CanvasOptions
+        open={optionsOpen}
+        onOpenChange={setOptionsOpen}
+        canvas={canvas}
+        onGrant={grant}
+      />
       <UsageSheet
         open={usageOpen}
         onOpenChange={setUsageOpen}

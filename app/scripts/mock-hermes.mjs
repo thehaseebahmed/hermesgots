@@ -4181,7 +4181,24 @@ http
       PLUGIN &&
       CANVAS &&
       !profile &&
-      (await handleCanvas(req, res, url.pathname, { json, readBody, noteEvent }, CANVASES))
+      (await handleCanvas(
+        req,
+        res,
+        url.pathname,
+        {
+          json,
+          readBody,
+          noteEvent,
+          // What a canvas's free `sessions` read answers: the mock's chats, newest first.
+          sessions: () =>
+            [...pluginChats.entries()].map(([id, { value }]) => ({
+              id,
+              title: value.title,
+              updated_at: value.updatedAt,
+            })),
+        },
+        CANVASES,
+      ))
     )
       return
     if (

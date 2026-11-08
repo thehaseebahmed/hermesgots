@@ -213,6 +213,129 @@ test("applyWrite replaces, inserts and removes in the host's order", () => {
   }
 })
 
+test("readCall takes a host read and a declared tool, and nothing malformed", () => {
+  assert.deepEqual(
+    readCall({ type: BRIDGE_MESSAGE, call: 1, method: "read", shape: "usage", args: { month: "now" } }),
+    { call: 1, method: "read", shape: "usage", args: { month: "now" } },
+  )
+  // Arguments are the call's own; none at all is an empty object rather than a refusal.
+  assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 2, method: "read", shape: "sessions" }), {
+    call: 2,
+    method: "read",
+    shape: "sessions",
+    args: {},
+  })
+  assert.deepEqual(
+    readCall({ type: BRIDGE_MESSAGE, call: 3, method: "tool", tool: "files.search", args: { q: "x" } }),
+    { call: 3, method: "tool", tool: "files.search", args: { q: "x" } },
+  )
+  // A shape the app doesn't serve, and a tool that isn't `<server>.<tool>`.
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "read", shape: "secrets" }), null)
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "tool", tool: "search" }), null)
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "tool", tool: ".search" }), null)
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "tool", tool: "files." }), null)
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "tool", tool: "a b.c" }), null)
+})
+
+test("a host read and a tool call reach the host, and a tool is asked about once", async () => {
+  const frame = fakeFrame()
+  const consents = []
+  const calls = []
+  let allow = false
+  const hear = bridgeHandler({
+    frame: () => frame,
+    copy: () => COPY,
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+    call: async (call) => {
+      calls.push(call)
+      if (call.method === "read") return { windows: [] }
+      // The host refuses until the reader allows the tool, as the plugin does.
+      if (!allow) {
+        const refusal = new Error("Allow this canvas to use files.search?")
+        refusal.code = "consent_required"
+        throw refusal
+      }
+      return { hits: [{ title: "A hit" }] }
+    },
+    consent: async (tool) => {
+      consents.push(tool)
+      allow = true
+      return true
+    },
+  })
+
+  // A free read is the host's, and its answer settles the page's promise.
+  hear({ source: frame, data: { type: BRIDGE_MESSAGE, call: 1, method: "read", shape: "usage", args: {} } })
+  await settled()
+  assert.deepEqual(frame.posted[0], {
+    type: BRIDGE_MESSAGE,
+    reply: 1,
+    ok: true,
+    value: { windows: [] },
+  })
+
+  // One refusal opens one ask, and every call waiting on that tool rides the same answer: the two
+  // calls below are both refused before the reader has answered, and only one consent is asked.
+  hear({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 2, method: "tool", tool: "files.search", args: { q: "a" } },
+  })
+  hear({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 3, method: "tool", tool: "files.search", args: { q: "b" } },
+  })
+  await settled()
+  assert.deepEqual(consents, ["files.search"])
+  assert.deepEqual(
+    frame.posted.slice(1).map((reply) => [reply.reply, reply.ok]),
+    [
+      [2, true],
+      [3, true],
+    ],
+  )
+  // Each call asked the host once before the answer, then again after it; the retry is the page's
+  // answer, and nothing asks for the reader's consent a second time.
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["read", "tool", "tool", "tool", "tool"],
+  )
+  assert.deepEqual(
+    frame.posted.slice(1).map((reply) => reply.value),
+    [{ hits: [{ title: "A hit" }] }, { hits: [{ title: "A hit" }] }],
+  )
+})
+
+test("a tool the host refuses for any other reason is not put to the reader", async () => {
+  const frame = fakeFrame()
+  let asked = 0
+  const hear = bridgeHandler({
+    frame: () => frame,
+    copy: () => COPY,
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+    call: async () => {
+      const refusal = new Error("This canvas never declared files.delete.")
+      refusal.code = "not_declared"
+      throw refusal
+    },
+    consent: async () => {
+      asked += 1
+      return true
+    },
+  })
+  hear({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 1, method: "tool", tool: "files.delete", args: {} },
+  })
+  await settled()
+  assert.equal(asked, 0, "the reader is asked nothing")
+  assert.equal(frame.posted[0].ok, false)
+  assert.match(frame.posted[0].error, /never declared/)
+})
+
 test("the page's half posts the call it was asked for and settles on the reply", async () => {
   const listeners = []
   const posted = []
@@ -275,6 +398,38 @@ test("the page's half posts the call it was asked for and settles on the reply",
   reply({ type: BRIDGE_MESSAGE, epoch, reply: 4, ok: false })
   // The page's own Error is its realm's, so the message is what the test reads.
   await assert.rejects(silent, (error) => typeof error.message === "string" && error.message.length > 0)
+
+  // A host read and a tool call ride the same table: the tool's promise settles only on the answer
+  // the app posts after the reader has allowed or refused it.
+  const read = context.window.canvas.read("usage")
+  assert.deepEqual(plain(posted[4]), {
+    type: BRIDGE_MESSAGE,
+    epoch,
+    call: 5,
+    method: "read",
+    shape: "usage",
+    args: {},
+  })
+  reply({ type: BRIDGE_MESSAGE, epoch, reply: 5, ok: true, value: { windows: [] } })
+  assert.deepEqual(await read, { windows: [] })
+
+  const tool = context.window.canvas.tool.call("files.search", { q: "x" })
+  assert.deepEqual(plain(posted[5]), {
+    type: BRIDGE_MESSAGE,
+    epoch,
+    call: 6,
+    method: "tool",
+    tool: "files.search",
+    args: { q: "x" },
+  })
+  reply({
+    type: BRIDGE_MESSAGE,
+    epoch,
+    reply: 6,
+    ok: false,
+    error: "You didn't allow this canvas to use files.search.",
+  })
+  await assert.rejects(tool, /didn't allow/)
 })
 
 test("a call the app cannot read is answered rather than dropped", async () => {
