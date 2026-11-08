@@ -189,7 +189,7 @@ test("with the switch off the sidebar lists chats, and no bot row is drawn", asy
 
 test("a bot turned off in Gots takes its chats out of Recents", async () => {
   const gone = botProfile("bot-gone", { id: "bot-2", name: "Gone", disabled: true })
-  await seedSettings({ developer: true, botThreads: false, activeProfileId: bot.id })
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot, gone])
   await db.messages.clear()
@@ -215,10 +215,8 @@ test("a bot turned off in Gots takes its chats out of Recents", async () => {
     },
   ])
   globalThis.fetch = async () => json({})
-  let off: Element | null = null
   await mount(screen("/"), async () => {
     await until(async () => Boolean(find('a[href="/c/kept"]')), "the kept chat's row")
-    off = find('a[href="/c/off"]')
+    absent('a[href="/c/off"]', "a turned-off bot's row is not in Recents")
   })
-  assert.equal(off, null, "a turned-off bot's row is not in Recents")
 })
