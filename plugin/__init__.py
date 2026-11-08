@@ -29,6 +29,7 @@ from . import (
     alerts,
     approvals,
     attachments,
+    canvases,
     chats,
     clarify,
     cleanup,
@@ -388,6 +389,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     library.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
     research.wire(adapter)
+    # A canvas's session writes and reads its own page, and no other session does; see canvases.py.
+    canvases.wire(adapter)
     meetings.wire(adapter)
 
     async def daily_cleanup(_app: Any):
@@ -635,6 +638,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # (openui.py). Advertised only where this host took it: a host that can't add a
                     # section says nothing, rather than offering a vocabulary never told.
                     *([openui.FEATURE] if openui_info else []),
+                    # A canvas is a page its bot writes and the app draws (canvases.py, ADR 0113).
+                    # Advertised only where a canvas's session is told the design guide: a canvas
+                    # built without its guide is a page written to no rules, and an app that
+                    # predates the feature draws no row for it.
+                    *(["canvas"] if openui.canvas_ready() else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # A routine's answer delivered into a chat as the bot's own message, and the
@@ -2910,6 +2918,56 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.research.mission", "mission": found})
 
+    async def list_canvases(request: "web.Request") -> "web.Response":
+        """Every canvas this bot has, drawn from its own record (canvases.py, ADR 0113)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        rows = await asyncio.to_thread(canvases.listing, store_path())
+        return web.json_response({"object": "gots.canvases", "canvases": rows})
+
+    async def create_canvas(request: "web.Request") -> "web.Response":
+        """A canvas from a prompt: the record, its chat, and the run that builds it, queued."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        path = store_path()
+        try:
+            found = await asyncio.to_thread(
+                canvases.create,
+                path,
+                _request_profile(),
+                body.get("profile_id"),
+                body.get("prompt"),
+                body.get("body"),
+                body.get("at"),
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        # The run is the queue's to start, and the request that made the canvas follows it so the
+        # first turn runs with the app closed; a failure here is not the canvas's.
+        try:
+            follow_queue(request, found["session_id"], path)
+        except Exception:
+            logger.debug("gots: couldn't follow a new canvas's queue", exc_info=True)
+        return web.json_response({"object": "gots.canvas", "canvas": found}, status=202)
+
+    async def get_canvas(request: "web.Request") -> "web.Response":
+        """One canvas with the newest version's document, which is what the app draws."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                canvases.current, store_path(), request.match_info["canvas_id"]
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas", "canvas": found})
+
     async def list_research(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -3256,6 +3314,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/remove", remove_meeting)
     app.router.add_get(f"{PREFIX}/research", list_research)
     app.router.add_post(f"{PREFIX}/research", create_research)
+    app.router.add_get(f"{PREFIX}/canvases", list_canvases)
+    app.router.add_post(f"{PREFIX}/canvases", create_canvas)
+    app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
     app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/brief", research_brief)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/edit", research_edit)
@@ -3286,6 +3347,8 @@ def register(ctx) -> None:
         register_hook("pre_llm_call", progress.turn_started)
         register_hook("pre_tool_call", sessions.before_tool)
         register_hook("pre_tool_call", research.before_tool)
+        # A canvas's session changes the canvas and nothing that leaves the host; see canvases.py.
+        register_hook("pre_tool_call", canvases.before_tool)
         # A routine created in this chat names where it delivers, unless the model said so itself;
         # see platform_gots.py.
         register_hook("pre_tool_call", platform_gots.fill_deliver)
@@ -3325,6 +3388,7 @@ def register(ctx) -> None:
     ship.register(ctx)
     library.register(ctx)
     research.register(ctx)
+    canvases.register(ctx)
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
     openui.register(ctx)

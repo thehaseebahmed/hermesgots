@@ -6,6 +6,7 @@
     { "name": "Main", "chat": { "hermesSessionId": "a", "main": true }, "app": false, "plugin": false },
     { "name": "a project session flagged Main", "chat": { "hermesSessionId": "a", "projectId": "p", "main": true }, "app": false, "plugin": false },
     { "name": "an empty project id is no project", "chat": { "hermesSessionId": "a", "projectId": "" }, "app": true, "plugin": true },
+    { "name": "a canvas's chat", "chat": { "hermesSessionId": "a", "canvasId": "c" }, "app": false, "plugin": false },
     {
       "name": "discarded",
       "chat": { "hermesSessionId": "a", "discardedAt": 3 },

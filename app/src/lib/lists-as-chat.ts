@@ -1,7 +1,7 @@
-type Listable = { projectId?: string; main?: boolean }
+type Listable = { projectId?: string; main?: boolean; canvasId?: string }
 
-export function listsAsChat(chat: Pick<Listable, "projectId">): boolean {
-  return !chat.projectId
+export function listsAsChat(chat: Pick<Listable, "projectId" | "canvasId">): boolean {
+  return !chat.projectId && !chat.canvasId
 }
 
 export function listsAsThread(chat: Listable): boolean {

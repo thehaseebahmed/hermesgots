@@ -1,0 +1,83 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import {
+  CANVAS_CSP,
+  canvasDocument,
+  themeTokens,
+  themeVariables,
+} from "../src/lib/canvas-document.ts"
+
+const PAGE = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Tip</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head>
+  <body>
+    <h1>Tip</h1>
+    <script>document.title = "ran"</script>
+  </body>
+</html>`
+
+const LIGHT = { background: "oklch(1 0 0)", foreground: "oklch(0.145 0 0)", primary: "#2f7d32" }
+const DARK = { background: "oklch(0.145 0 0)", foreground: "oklch(0.985 0 0)", primary: "#3f8f43" }
+
+const headOf = (html) => html.slice(html.indexOf("<head"), html.indexOf("</head>"))
+
+test("CSP is the first head element and allows no connection or frame", () => {
+  const html = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
+  const head = headOf(html)
+  const first = head.slice(head.indexOf(">") + 1).trimStart()
+  assert.ok(first.startsWith("<meta http-equiv=\"Content-Security-Policy\""), first.slice(0, 80))
+  assert.match(first, /default-src 'none'/)
+  assert.match(first, /connect-src 'none'/)
+  assert.match(first, /frame-src 'none'/)
+  assert.match(first, /form-action 'none'/)
+  assert.match(first, /script-src 'unsafe-inline'/)
+  // The page's own policy is the only one: nothing later in the head may loosen it.
+  assert.equal(head.match(/Content-Security-Policy/g).length, 1)
+  assert.equal(CANVAS_CSP, first.slice(first.indexOf('content="') + 9, first.indexOf('"', first.indexOf('content="') + 9)))
+})
+
+test("RTCPeerConnection is gone before the page's scripts", () => {
+  const html = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
+  const removal = html.indexOf("RTCPeerConnection")
+  const pageScript = html.indexOf('document.title = "ran"')
+  assert.ok(removal > -1, "the removal script is in the document")
+  assert.ok(removal < pageScript, "and it runs first")
+  for (const name of ["webkitRTCPeerConnection", "mozRTCPeerConnection"]) {
+    assert.ok(html.includes(name), `${name} is removed too`)
+  }
+  // Only the page's own script is left for the page: the removal rides the head, not the body.
+  assert.equal(html.slice(html.indexOf("<body")).includes("RTCPeerConnection"), false)
+})
+
+test("theme variables follow the mode", () => {
+  const light = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
+  const dark = canvasDocument(PAGE, { mode: "dark", tokens: DARK })
+  assert.match(themeVariables(LIGHT, "light"), /color-scheme: light/)
+  assert.match(themeVariables(DARK, "dark"), /color-scheme: dark/)
+  assert.ok(light.includes("--background: oklch(1 0 0)"))
+  assert.ok(dark.includes("--background: oklch(0.145 0 0)"))
+  assert.ok(light.includes("--primary: #2f7d32"))
+  assert.ok(!light.includes("--primary: #3f8f43"))
+  assert.ok(light.indexOf("--background") < light.indexOf("<body"))
+})
+
+test("a document with no head is refused rather than drawn unstyled", () => {
+  assert.throws(() => canvasDocument("<html><body>hi</body></html>", { mode: "light", tokens: LIGHT }), /head/)
+})
+
+test("the tokens are read off the app's own theme, only the ones a canvas is told", () => {
+  const styles = new Map([
+    ["--background", "oklch(1 0 0)"],
+    ["--foreground", "oklch(0.145 0 0)"],
+    ["--radius", "0.625rem"],
+    ["--syntax-keyword", "red"],
+  ])
+  const read = (name) => styles.get(name) ?? ""
+  const tokens = themeTokens(read)
+  assert.deepEqual(tokens, { background: "oklch(1 0 0)", foreground: "oklch(0.145 0 0)", radius: "0.625rem" })
+})

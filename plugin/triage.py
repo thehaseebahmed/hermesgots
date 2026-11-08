@@ -115,7 +115,7 @@ def _rows(
 
 
 def is_plain_thread(value: Dict[str, Any]) -> bool:
-    if value.get("main") or value.get("projectId"):
+    if value.get("main") or value.get("projectId") or value.get("canvasId"):
         return False
     if not isinstance(value.get("hermesSessionId"), str):
         return False
@@ -271,14 +271,18 @@ def open_thread(
     *,
     opener: Optional[str] = None,
     opener_at: Optional[int] = None,
+    title: Optional[str] = None,
+    canvas_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
     The id is the app's own kind (a UUID) and the session is ``gots-<id>``, so every device and
-    the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs.
-    ``opener`` is the message that began the thread and ``opener_at`` when the reader sent it: with
-    them on the record, a device that never opens the thread still draws its card's bubble and
-    stands the card at that message's time (ADR 0090).
+    the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs,
+    unless one is given: a canvas's chat is named after the canvas and marked ``titleEdited``, so
+    Hermes's auto-title never replaces it, and carries ``canvasId``, which is what keeps it out of
+    every list and out of Main's cards. ``opener`` is the message that began the thread and
+    ``opener_at`` when the reader sent it: with them on the record, a device that never opens the
+    thread still draws its card's bubble and stands the card at that message's time (ADR 0090).
     """
     chat_id = str(uuid.uuid4())
     session_id = f"{GOTS_ID_PREFIX}{chat_id}"
@@ -286,13 +290,15 @@ def open_thread(
     value = {
         "id": chat_id,
         "profileId": profile_id,
-        "title": "New chat",
+        "title": title or "New chat",
         "hermesSessionId": session_id,
         "createdAt": now,
         # Past createdAt, so the daily cleanup doesn't read a thread whose first message is still
         # waiting in the queue as one nothing happened in.
         "updatedAt": now + 1,
         "changedAt": now,
+        **({"titleEdited": True} if title else {}),
+        **({"canvasId": canvas_id} if canvas_id else {}),
         **(
             {"opener": _line(opener, MAX_TEXT), **({"openerAt": opener_at} if opener_at else {})}
             if opener

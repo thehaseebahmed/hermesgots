@@ -224,13 +224,26 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(found[0]["id"], "t19")
         self.assertEqual(found[-1]["id"], "t5")
 
-    def test_carries_title_last_line_and_activity(self):
+    def test_carries_title_last_line_and_activity(self) -> None:
         records = {MAIN: chat(main=True), "t": chat(hermesSessionId="s", title="Lisbon", updatedAt=7)}
         with mock.patch.object(
             triage, "_rows", return_value={"s": [{"role": "user", "text": "hi\nthere"}]}
         ):
             found = triage.candidates(records, MAIN, Path("."))
         self.assertEqual(found, [{"id": "t", "title": "Lisbon", "last": "hi there", "active": 7}])
+
+    def test_a_canvas_chat_is_never_a_candidate(self) -> None:
+        # A canvas's chat is an ordinary record so a device lists it as nothing at all (ADR 0113);
+        # triage must not offer it as a thread a message could continue, nor let it take a real
+        # thread's place among the fifteen.
+        records = {
+            MAIN: chat(main=True, hermesSessionId="m"),
+            "canvas-chat": chat(hermesSessionId="gots-c", canvasId="c", updatedAt=9),
+            "t": chat(hermesSessionId="s", updatedAt=7),
+        }
+        with mock.patch.object(triage, "_rows", return_value={}):
+            found = triage.candidates(records, MAIN, Path("."))
+        self.assertEqual([row["id"] for row in found], ["t"])
 
 
 class RowsTests(unittest.TestCase):

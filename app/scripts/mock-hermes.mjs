@@ -174,6 +174,7 @@ import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
+import { createCanvasStore, handleCanvas } from "./mock-canvas.mjs"
 import { handleResearch } from "./mock-research.mjs"
 import { durableUserRow } from "./host-row.mjs"
 
@@ -531,6 +532,10 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 // MOCK_RESEARCH_WRITERS=off a host that doesn't let a mission be rewritten with another model.
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
+// Canvases (mock-canvas.mjs); MOCK_CANVAS=0 serves a plugin from before them, so their routes 404
+// and `canvas` is missing from the features.
+const CANVAS = process.env.MOCK_CANVAS !== "0"
+const CANVASES = createCanvasStore()
 // The meetings feature (mock-meetings.mjs); MOCK_MEETINGS=0 serves a plugin from before it.
 const MEETINGS = process.env.MOCK_MEETINGS !== "0"
 // The dictation log (plugin/dictations.py): MOCK_DICTATIONS=0 is a plugin from before it, so its
@@ -4116,6 +4121,7 @@ http
           ...(RESEARCH
             ? ["research", "research_followup", "research_rewrite", "research_compare"]
             : []),
+          ...(CANVAS ? ["canvas"] : []),
           ...(MEETINGS ? ["meetings", "meetings_ask"] : []),
           ...(MCPS
             ? [
@@ -4162,6 +4168,13 @@ http
       RESEARCH &&
       !profile &&
       (await handleResearch(req, res, url.pathname, { json, readBody, noteEvent }))
+    )
+      return
+    if (
+      PLUGIN &&
+      CANVAS &&
+      !profile &&
+      (await handleCanvas(req, res, url.pathname, { json, readBody, noteEvent }, CANVASES))
     )
       return
     if (

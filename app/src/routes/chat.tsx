@@ -10,7 +10,7 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { XIcon } from "lucide-react"
-import { matchPath, useLocation, useNavigate, useParams } from "react-router"
+import { matchPath, Navigate, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import {
@@ -257,6 +257,8 @@ export function ChatPage(props: ChatPageProps) {
   const id = props.chatId ?? params.id
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
+    // A canvas's chat is no chat: its address opens the canvas it belongs to (ADR 0113).
+    if (chat?.canvasId) return `canvas\n${chat.canvasId}`
     const bot = chat
       ? await db.profiles.get(chat.profileId)
       : id
@@ -280,7 +282,9 @@ export function ChatPage(props: ChatPageProps) {
   // The screen this chat opens on, wrapped once: the one Previewer a screen mounts is the same
   // instance whichever screen drew the thread.
   const screen =
-    screenKind === "blank" && subjectId ? (
+    screenKind === "canvas" && subjectId ? (
+      <Navigate to={`/canvas/${subjectId}`} replace />
+    ) : screenKind === "blank" && subjectId ? (
       // Keyed by the bot it draws: another bot's new chat is a fresh surface, with its own pick.
       <Suspense fallback={null}>
         <ChatNextBlank key={subjectId} botId={subjectId} slot={props.slot} />

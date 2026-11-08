@@ -101,6 +101,7 @@ const CHAT_FIELDS = [
   "muted",
   "pinned",
   "main",
+  "canvasId",
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 

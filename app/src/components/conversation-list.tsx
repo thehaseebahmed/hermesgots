@@ -7,6 +7,7 @@ import {
   CodeXmlIcon,
   FolderKanbanIcon,
   ListChecksIcon,
+  FrameIcon,
   MessageCircleQuestionMarkIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -482,6 +483,15 @@ export function ConversationList({
           >
             <CodeXmlIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Code"}
+          </RootLink>
+          <RootLink
+            to="/canvas"
+            onClick={onNavigate}
+            aria-label={collapsed ? "Canvas" : undefined}
+            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+          >
+            <FrameIcon className="size-5 text-muted-foreground" />
+            {!collapsed && "Canvas"}
           </RootLink>
           <RootLink
             to="/research"
