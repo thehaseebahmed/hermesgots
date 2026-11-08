@@ -1246,11 +1246,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.room.sent", **found})
 
     async def approve_room(request: "web.Request") -> "web.Response":
-        """The approval a room's member waits on, answered Once or Deny (rooms.py).
-
-        The four coordinates are the Host's own: its approve resolves exactly the request they name,
-        so a card the user read is the request that is answered and no other.
-        """
+        """The approval a room's member waits on, answered Once or Deny (rooms.py)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1299,7 +1295,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         question_id = minted(body.get("question_id"))
         if question_id is None:
             return _error(web, "An answer needs the question_id it answers.", 400)
-        member_id = minted(body.get("member_id")) or ""
+        member_id = minted(body.get("member_id"))
         answers = body.get("answers")
         if not isinstance(answers, dict) or not answers:
             return _error(web, "An answer needs the answer to each question.", 400)

@@ -21,6 +21,7 @@ answer as the one sentence a caller can show.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import itertools
 import logging
 import threading
@@ -62,6 +63,9 @@ QUESTION_FEATURE = "room_member_questions"
 # How many questions one room may have in hand: a member asks one at a time, and a room of six
 # members cannot hold more than six without something having gone wrong.
 MAX_QUESTIONS = 8
+# How long a held question is worth drawing. The Host's own clarify wait gives up after an hour, so
+# a card outliving that is one whose turn has moved on and whose tap could only be refused.
+QUESTION_TTL = 1800.0
 
 # How long one Host's projected chat list is worth keeping, and how long one that couldn't answer is
 # left alone.
@@ -440,14 +444,16 @@ def _activity(driver: Any) -> List[Dict[str, Any]]:
 def _questions_of(raw: Any) -> List[Dict[str, Any]]:
     """The questions one clarify prompt asks, in the app's words: what to ask and what it offers.
 
-    A question with no id or no words names nothing a screen can answer, so it is dropped rather
-    than drawn blank; the choices are the Host's own labels and stay as it wrote them.
+    The Host's own server request names a question `qid`, its text `question` and its choices bare
+    strings; a question with no id or no words asks nothing a screen could answer, so it is dropped
+    rather than drawn blank.
     """
     drawn: List[Dict[str, Any]] = []
     for row in raw if isinstance(raw, (list, tuple)) else ():
         if not isinstance(row, dict):
             continue
-        qid, question = row.get("id"), row.get("question")
+        qid = row.get("id") or row.get("qid")
+        question = row.get("question")
         if not isinstance(qid, str) or not qid or not isinstance(question, str) or not question:
             continue
         one: Dict[str, Any] = {"id": qid, "question": question}
@@ -459,15 +465,12 @@ def _questions_of(raw: Any) -> List[Dict[str, Any]]:
     return drawn
 
 
-def hold_question(
-    room_id: Any, member_id: Any, request_id: Any, questions: Any, *, task_id: Any = None
-) -> bool:
+def hold_question(room_id: Any, member_id: Any, request_id: Any, questions: Any) -> bool:
     """Keeps one member's question until the user answers it here; False when there is none to keep.
 
-    A room's question is not on the Host's state: a member's turn runs as a hidden session, and the
-    prompt it waits on is that session's own server request. The Host's activity hook names the
-    request it opened, so the answer can be written back to exactly that wait and nowhere else. What
-    is kept is the little a card draws — the words, the choices, and who asked.
+    The request id is the one the Host's own clarify prompt waits with, and the answer is written
+    back to it — so a frame that names no request holds nothing rather than a card whose tap would
+    find no waiter.
     """
     if not (isinstance(room_id, str) and room_id.strip()):
         return False
@@ -487,19 +490,30 @@ def hold_question(
     }
     with _questions_lock:
         _questions[held["questionId"]] = held
-        if len(_questions) > MAX_QUESTIONS:
-            # A room whose questions were never answered keeps its newest: the older ones have been
-            # timed out by the Host's own wait, and a card over one could not be answered anyway.
-            oldest = sorted(_questions.values(), key=lambda one: one["at"])[: len(_questions) - MAX_QUESTIONS]
-            for one in oldest:
-                _questions.pop(one["questionId"], None)
+        # The bound is one room's, so a room asking a ninth question drops its own oldest and never
+        # another room's card.
+        mine = sorted(
+            (one for one in _questions.values() if one["roomId"] == held["roomId"]),
+            key=lambda one: one["at"],
+        )
+        for one in mine[: max(0, len(mine) - MAX_QUESTIONS)]:
+            _questions.pop(one["questionId"], None)
     return True
 
 
 def _held_questions(room_id: str) -> List[Dict[str, Any]]:
-    """The questions this room is waiting on, oldest first, in the words a card draws."""
+    """The questions this room is waiting on, oldest first, in the words a card draws.
+
+    One the Host's own wait has outlived is dropped rather than drawn: its member's turn has moved
+    on, so a tap on it could only be refused (the Host's clarify wait defaults to an hour).
+    """
+    now = time.time()
     with _questions_lock:
-        held = [one for one in _questions.values() if one["roomId"] == room_id]
+        mine = [one for one in _questions.values() if one["roomId"] == room_id]
+        fresh = [one for one in mine if now - one["at"] <= QUESTION_TTL]
+        for one in mine:
+            if one not in fresh:
+                _questions.pop(one["questionId"], None)
     return [
         {
             "kind": "question",
@@ -507,7 +521,7 @@ def _held_questions(room_id: str) -> List[Dict[str, Any]]:
             "questionId": one["questionId"],
             "questions": one["questions"],
         }
-        for one in sorted(held, key=lambda row: row["at"])
+        for one in sorted(fresh, key=lambda row: row["at"])
     ]
 
 
@@ -541,15 +555,10 @@ def _approval(row: Any) -> Optional[Dict[str, Any]]:
     return drawn
 
 
-def waiting(driver: Any, methods: Tuple[str, ...], room_id: str) -> List[Dict[str, Any]]:
-    """What this room waits on the user for: the approvals it can be answered about, and questions.
-
-    An approval the Host declares no approve for is not drawn: a card whose tap could only come
-    back refused is worse than the Host's own timeout answering it. A question is drawn only where
-    the plugin is holding one, which is only where the Host projected it.
-    """
+def waiting(driver: Any, declared: Tuple[str, ...], room_id: str) -> List[Dict[str, Any]]:
+    """What this room waits on the user for: the approvals it can be answered about, and questions."""
     found: List[Dict[str, Any]] = []
-    if "groups.approve" in methods:
+    if "groups.approve" in declared:
         for row in (driver or {}).get("pending_actions") or ():
             drawn = _approval(row)
             if drawn is not None:
@@ -565,8 +574,6 @@ def _resolve(request_id: str, answers: Dict[str, Any]) -> bool:
     Host's own registry rather than to a copy of it: the member's turn carries on in the same run.
     """
     try:
-        import importlib
-
         server_requests = importlib.import_module("tui_gateway.server_requests")
     except ImportError as error:
         raise RoomError("This host can't take an answer to that question.", 501) from error
@@ -585,8 +592,8 @@ def _resolve(request_id: str, answers: Dict[str, Any]) -> bool:
 
 
 def answer_question(
-    room_id: str, member_id: str, question_id: str, answers: Any,
-    *, timeout: float = CALL_TIMEOUT, home: Any = None,
+    room_id: str, member_id: Optional[str], question_id: str, answers: Any,
+    *, home: Any = None,
 ) -> Dict[str, Any]:
     """Answers the question a member's turn is waiting on, and forgets it once the Host has it.
 
@@ -666,14 +673,14 @@ def stop_room(
     return {"cancelled": cancelled if type(cancelled) is int else 0}
 
 
-def _asked_a_question(payload: Dict[str, Any]) -> bool:
-    """Whether one activity frame is a member's clarify prompt opening, rather than its approval.
+def _asked_a_question(payload: Dict[str, Any], request_id: Any) -> bool:
+    """Whether one activity frame is a member's question, rather than its approval moving on.
 
-    A Host that projects questions says so in the frame's own kind; an approval's frame says
-    ``approval``, and every other frame is a turn moving and asks nothing.
+    The Host's clarify request carries the questions it asks and no `kind` of its own — an approval
+    frame carries none either — so the questions are the tell, and the request id is the frame's own
+    envelope id, which a Host must forward for the answer to have a waiter to reach.
     """
-    kind = payload.get("kind") or payload.get("prompt_kind")
-    return isinstance(kind, str) and kind == "clarify" and isinstance(payload.get("questions"), list)
+    return isinstance(request_id, str) and bool(request_id) and isinstance(payload.get("questions"), list)
 
 
 def methods(home: Any = None, *, timeout: float = CALL_TIMEOUT) -> Tuple[str, ...]:
@@ -819,14 +826,9 @@ def on_member_activity(**kwargs: Any) -> None:
         return
     room_id = room_id.strip()
     payload = kwargs.get("payload") if isinstance(kwargs.get("payload"), dict) else {}
-    if kwargs.get("kind") == "request.opened" and _asked_a_question(payload):
-        hold_question(
-            room_id,
-            kwargs.get("member_id"),
-            payload.get("request_id"),
-            payload.get("questions"),
-            task_id=kwargs.get("task_id"),
-        )
+    request_id = payload.get("request_id") or kwargs.get("request_id")
+    if _asked_a_question(payload, request_id):
+        hold_question(room_id, kwargs.get("member_id"), request_id, payload.get("questions"))
     now = time.monotonic()
     with _notes_lock:
         last = _noted.get(room_id, 0.0)
@@ -1011,11 +1013,7 @@ def advertised(home: Any = None) -> List[str]:
     One ask answers them all, because `info` is read on every app open and a second probe would
     double what a Host that can't answer already costs. The write row is separate from the read's for
     the reason every family here splits them: a Host can list its rooms and not be able to make,
-    rename or disband one, and a New room drawn there is a tap that can only come back refused. The
-    question row is advertised apart for the same reason (the plan's own rule): a Host that never
-    projects a member's question has nothing for the plugin to hold, so a room there draws no
-    question card and its own timeout answers — where the row is absent the app knows not to offer
-    one at all.
+    rename or disband one, and a New room drawn there is a tap that can only come back refused.
     """
     found, why = _probe(home)
     if found is None:

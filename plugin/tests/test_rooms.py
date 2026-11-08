@@ -1213,6 +1213,54 @@ class RoomWaiting(unittest.TestCase):
             "the question, the choices it offers, and the request the Host waits on",
         )
 
+    def test_the_hosts_own_frame_is_read_where_it_forwards_the_request_id(self):
+        # The Host's clarify request carries `questions` keyed `qid` and no `kind` of its own; the
+        # request it waits with is its envelope id, so a frame that forwards it is what is held.
+        host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
+        with dispatcher(host), no_loopback():
+            rooms.on_member_activity(
+                room_id="room-1", member_id="m1", request_id="srq-9", kind="request.opened",
+                payload={"questions": [{"qid": "q0", "question": "Which database?",
+                                        "choices": ["Postgres", "SQLite"]}], "answers": {}},
+            )
+            waiting = self.read_room()["payload"]["waiting"]
+        self.assertEqual([one["questionId"] for one in waiting], ["srq-9"])
+        self.assertEqual(waiting[0]["questions"][0]["id"], "q0", "a qid is a question's id")
+
+    def test_a_frame_that_forwards_no_request_id_holds_nothing(self):
+        # Today's Host projects approvals only, and forwards neither a kind nor the request id: the
+        # plugin must not invent a card whose tap would find no waiter.
+        with dispatcher(Host(events=CONVERSATION)), no_loopback():
+            rooms.on_member_activity(
+                room_id="room-1", member_id="m1", kind="request.opened",
+                payload={"questions": [{"qid": "q0", "question": "Which database?"}]},
+            )
+            self.assertEqual(self.read_room()["payload"]["waiting"], [])
+
+    def test_a_question_the_hosts_wait_outlived_is_not_drawn(self):
+        host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
+        with dispatcher(host), no_loopback():
+            rooms.on_member_activity(
+                room_id="room-1", member_id="m1", kind="request.opened", request_id="srq-1",
+                payload={"questions": [QUESTION]},
+            )
+            with mock.patch.object(rooms, "QUESTION_TTL", 0.0):
+                self.assertEqual(self.read_room()["payload"]["waiting"], [])
+            with rooms._questions_lock:
+                rooms._questions.clear()
+
+    def test_the_question_bound_is_one_rooms_and_never_anothers(self):
+        with rooms._questions_lock:
+            rooms._questions.clear()
+        for n in range(rooms.MAX_QUESTIONS + 1):
+            rooms.hold_question("room-1", "m1", f"srq-{n}", [QUESTION])
+        rooms.hold_question("room-2", "m2", "srq-other", [QUESTION])
+        with rooms._questions_lock:
+            held = [one for one in rooms._questions.values() if one["roomId"] == "room-1"]
+            other = [one for one in rooms._questions.values() if one["roomId"] == "room-2"]
+        self.assertEqual(len(held), rooms.MAX_QUESTIONS, "a room keeps its own bound")
+        self.assertEqual(len(other), 1, "and asks nothing of another room's")
+
     def test_a_question_is_answered_with_its_choice(self):
         host = Host(events=CONVERSATION, features=[rooms.QUESTION_FEATURE])
         with dispatcher(host), no_loopback():
