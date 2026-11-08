@@ -5,7 +5,7 @@ import type { Queued } from "@/chat-next/api"
 import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { carriesPart } from "@/lib/attachment-caps"
-import type { Canvas } from "@/lib/canvases"
+import type { Canvas, CanvasRecord } from "@/lib/canvases"
 import { connectionKey, hasServer } from "@/lib/connection"
 import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
@@ -1035,8 +1035,9 @@ export interface CanvasCacheRow {
    * list row.
    */
   canvasId?: string
-  /** The list's records, as the host answered them: no page and no data, which a listing omits. */
-  canvases?: Canvas[]
+  /** The list's records, as the host answered them: no page, no tools and no data, which a listing
+   * omits — the shape a list keeps (`CanvasRecord`). */
+  canvases?: CanvasRecord[]
   /** One canvas with the page, the tools and the data its last read or write left. */
   canvas?: Canvas
 }

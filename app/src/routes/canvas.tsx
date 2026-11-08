@@ -16,6 +16,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { attempt } from "@/lib/attempt"
+import { awayLine } from "@/lib/away"
 import { bridgeHandler } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
@@ -31,6 +32,7 @@ import {
 } from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
 import { useLarge } from "@/lib/media"
+import { useOnline } from "@/lib/online"
 import { useDark } from "@/lib/theme"
 import { formatRelative } from "@/lib/format"
 import { useNow } from "@/lib/threads"
@@ -160,6 +162,10 @@ const SNAPS = [0.5, 1]
 export function CanvasView() {
   const { id = "" } = useParams()
   const { canvas, missing, loaded, offline } = useCanvas(id)
+  const online = useOnline()
+  // What a screen says while its host can't be reached, in the chat header's own words (ADR 0071):
+  // a device with no network is told so, rather than being told its bot is down.
+  const away = offline ? awayLine(true, online) : undefined
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -300,13 +306,13 @@ export function CanvasView() {
             <span className="shrink-0 text-xs text-muted-foreground">v{canvas.version}</span>
           ) : null}
           {/* The bot isn't answering, so what is drawn is this device's copy (F5, D5). */}
-          {offline ? (
+          {away ? (
             <span
               role="status"
               data-canvas-offline
               className="shrink-0 text-xs text-muted-foreground"
             >
-              Offline
+              {away}
             </span>
           ) : null}
         </div>
@@ -345,7 +351,7 @@ export function CanvasView() {
             />
           ) : (
             <p className="p-4 text-center text-sm text-muted-foreground">
-              {offline && !canvas
+              {offline && !html
                 ? "This canvas isn't on this device, and its bot isn't answering."
                 : loaded && !html
                   ? "Your bot is building it…"

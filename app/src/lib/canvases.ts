@@ -1,15 +1,26 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { toast } from "sonner"
 
 import { applyWrite, storedDoc, type BridgeWriteCall, type CanvasDoc } from "@/lib/canvas-bridge"
-import { connectionKey, hostTargets } from "@/lib/connection"
+import {
+  cachedCanvas,
+  cachedList,
+  forgetCanvas,
+  keepCanvas,
+  keepList,
+  keepRecord,
+  keptBot,
+  recordOf,
+  upsert,
+} from "@/lib/canvas-cache"
+import { hostTargets } from "@/lib/connection"
 import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
+  answered,
   callCanvas,
   createCanvas,
   getCanvas,
-  hasPluginFeature,
+  getPluginFeatureList,
   HermesError,
   listCanvases,
   runRequest,
@@ -17,8 +28,8 @@ import {
 } from "@/lib/hermes"
 import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
-import { quietly } from "@/lib/report"
 import { createStore } from "@/lib/store"
+import { tell } from "@/lib/tell"
 
 /**
  * Canvases live on each bot's Gots plugin (`canvases.py`, ADR 0113), which keeps the record, the
@@ -58,6 +69,12 @@ export interface Canvas {
   dataWrites?: number
 }
 
+/**
+ * A canvas as a list keeps it: its record, and not the page it points at. The cache keeps this same
+ * shape for its list row (`canvas-cache.ts`), so a record and the page are never one object.
+ */
+export type CanvasRecord = Omit<Canvas, "html" | "data" | "tools" | "dataWrites">
+
 interface CanvasState {
   lists: Record<string, Canvas[]>
   /** The canvas on screen, with its document. */
@@ -67,8 +84,12 @@ interface CanvasState {
   loaded: boolean
   /** By bot: why it can't be read — a plugin from before canvases, or one that didn't answer. */
   unsupported: Record<string, string>
-  /** Canvases whose last read got no answer: what their screen draws is this device's copy. */
-  offline: Record<string, true>
+  /**
+   * By canvas: when its last read got no answer, so what its screen draws is this device's copy. The
+   * clock is what a write reads to refuse at once — a miss that is a minute old is no proof the host
+   * is still away, and a flag that never expired would keep a canvas read-only after it came back.
+   */
+  offline: Record<string, number>
 }
 
 const store = createStore<CanvasState>({
@@ -80,123 +101,44 @@ const store = createStore<CanvasState>({
   offline: {},
 })
 
-/** The row a bot's list of canvases is kept under on this device. */
-const listKey = (profile: Profile) => `${connectionKey(profile)}\ncanvases`
-/** The row one canvas is kept under: the page its record points at, its tools and its data. */
-const canvasKey = (profile: Profile, id: string) => `${connectionKey(profile)}\n${id}`
-
-/** A canvas without the fields a row doesn't keep. */
-function without(canvas: Canvas, ...drop: (keyof Canvas)[]): Canvas {
-  const copy: Partial<Canvas> = { ...canvas }
-  for (const field of drop) delete copy[field]
-  return copy as Canvas
-}
-
-/** A canvas as a list keeps it: its record, and not the page it points at. */
-const listed = (canvas: Canvas) => without(canvas, "html", "data", "dataWrites")
-
-/**
- * A canvas as this device's copy keeps it: the page, the tools and the data, and not the count of
- * writes this session has taken — that counts reads against writes on one device's memory, so a copy
- * carrying an old count would look newer than the host's next answer.
- */
-const copyOf = (canvas: Canvas) => without(canvas, "dataWrites")
-
-/**
- * Keeps the whole list a bot's host answered, and drops the copies of canvases it no longer names, so
- * a canvas deleted on the host isn't drawn offline from this device's copy. Only a listing knows the
- * whole list, so this is the one place that prunes: a single canvas's read keeps its own record
- * beside the rest rather than narrowing the list to the one it drew.
- */
-function cacheList(profile: Profile, canvases: Canvas[]) {
-  const connection = connectionKey(profile)
-  const named = new Set([listKey(profile), ...canvases.map((one) => canvasKey(profile, one.id))])
-  void db
-    .transaction("rw", db.canvasCache, async () => {
-      await db.canvasCache.put({
-        key: listKey(profile),
-        connection,
-        canvases: canvases.map(listed),
-      })
-      // Keys alone: a page can be 256 KB, and a row that is no longer named is one this device has no
-      // reason to read back before it goes.
-      const stale = (
-        await db.canvasCache.where("connection").equals(connection).primaryKeys()
-      ).filter((key) => !named.has(key))
-      if (stale.length) await db.canvasCache.bulkDelete(stale)
-    })
-    .catch(quietly("Keeping a bot's canvases"))
-}
-
-/** Puts one canvas's record in the kept list, without narrowing the list to it. */
-function cacheRecord(profile: Profile, canvas: Canvas) {
-  const record = listed(canvas)
-  void db
-    .transaction("rw", db.canvasCache, async () => {
-      const key = listKey(profile)
-      const rows = (await db.canvasCache.get(key))?.canvases ?? []
-      const next = rows.some((one) => one.id === record.id)
-        ? rows.map((one) => (one.id === record.id ? record : one))
-        : [record, ...rows]
-      await db.canvasCache.put({ key, connection: connectionKey(profile), canvases: next })
-    })
-    .catch(quietly("Keeping a bot's canvases"))
-}
-
-/** Keeps one canvas with the page it points at, its tools and its data. */
-function cacheCanvas(profile: Profile, canvas: Canvas) {
-  void db.canvasCache
-    .put({
-      key: canvasKey(profile, canvas.id),
-      connection: connectionKey(profile),
-      canvasId: canvas.id,
-      canvas: copyOf(canvas),
-    })
-    .catch(quietly("Keeping a canvas's copy"))
-}
-
-/** The list a bot's host last answered, as this device kept it. */
-async function cachedList(profile: Profile) {
-  return (await db.canvasCache.get(listKey(profile)))?.canvases ?? []
-}
-
 /**
  * Puts this device's copy where the screen draws from, before the host is asked, so a canvas opens at
- * once and its page reads its own data with the host away (D5). A canvas the store already draws is
- * left alone: every read and write writes the copy from it, so the copy is never the fresher of two.
+ * once and its page reads its own data with the host away (F5, D5). A canvas the store already draws
+ * is left alone: every read and write keeps the copy from it, so the copy is never the fresher of two.
  */
 async function drawCopy(profile: Profile, id: string) {
   if (store.get().details[id]?.html !== undefined) return
-  const copy = (await db.canvasCache.get(canvasKey(profile, id)))?.canvas
+  const copy = await cachedCanvas(profile, id)
   if (!copy) return
-  const state = store.get()
-  const missing = { ...state.missing }
-  delete missing[id]
-  store.set({ ...state, details: { ...state.details, [id]: copy }, missing })
+  // One page at a time, as a read's answer keeps it: a page can be 256 KB, and the canvas drawn
+  // before this one is no longer on screen.
+  store.set({ ...store.get(), details: { [id]: copy } })
 }
 
 /** The host didn't answer: the screen draws this device's copy, and its header says so. */
 function markOffline(id: string) {
   const state = store.get()
-  store.set({ ...state, offline: { ...state.offline, [id]: true } })
+  if (state.offline[id]) return
+  store.set({ ...state, offline: { ...state.offline, [id]: Date.now() } })
 }
 
-/** Drops a copy the host says it no longer holds, so a deleted canvas isn't drawn for ever. */
-async function forgetCopy(profile: Profile, id: string) {
-  await db.canvasCache
-    .delete(canvasKey(profile, id))
-    .catch(quietly("Letting a canvas's copy go"))
+/** The canvas is gone from its host: nothing of it is drawn, and its address says so. */
+function forgetDrawn(id: string) {
+  const state = store.get()
+  const details = { ...state.details }
+  delete details[id]
+  store.set({ ...state, details, missing: { ...state.missing, [id]: true } })
 }
 
 /**
  * What a page's write is told with the host away, and what the reader's toast says. There is no queue
- * (B6): the write is refused here, and the copy the page reads back is the one the host last kept.
+ * (B6): the write is refused, and the copy the page reads back is the one the host last kept.
  */
 export const CANVAS_AWAY = "This canvas can't save while its bot is away."
 
-function refuseAway(): never {
-  toast.error(CANVAS_AWAY)
-  throw new Error(CANVAS_AWAY)
+function refuseAway(cause?: unknown): never {
+  tell.error(CANVAS_AWAY)
+  throw new Error(CANVAS_AWAY, { cause })
 }
 
 /**
@@ -243,10 +185,8 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
 function put(profile: Profile, canvas: Canvas, started: number) {
   const state = store.get()
   const { html, data } = canvas
-  const record = listed(canvas)
-  const rows = state.lists[canvas.profileId] ?? []
-  const index = rows.findIndex((row) => row.id === canvas.id)
-  const next = index === -1 ? [record, ...rows] : rows.map((row) => (row.id === canvas.id ? record : row))
+  const record = recordOf(canvas)
+  const next = upsert(state.lists[canvas.profileId] ?? [], record)
   const missing = { ...state.missing }
   delete missing[canvas.id]
   const offline = { ...state.offline }
@@ -274,8 +214,8 @@ function put(profile: Profile, canvas: Canvas, started: number) {
   })
   // What the host answered is what this device keeps: the record in the list, and the page with the
   // tools and the data it points at (D5).
-  cacheRecord(profile, canvas)
-  if (drawn) cacheCanvas(profile, drawn)
+  keepRecord(profile, canvas)
+  if (drawn) keepCanvas(profile, drawn)
 }
 
 /** How many writes this device has taken into a copy: a read begun before one is older than it. */
@@ -288,7 +228,7 @@ function keepCopy(profile: Profile, id: string, copy: CanvasDoc[]) {
   if (!held) return
   const next = { ...held, data: copy, dataWrites: (writes += 1) }
   store.set({ ...state, details: { ...state.details, [id]: next } })
-  cacheCanvas(profile, next)
+  keepCanvas(profile, next)
 }
 
 /** The device's copy of a canvas's data, as the last read or write left it. */
@@ -307,36 +247,54 @@ function profileOf(id: string) {
   )
 }
 
-async function readAll() {
+/**
+ * Reads every bot's list. The answer says whether every bot answered: a sweep one bot couldn't answer
+ * is no evidence about a canvas it didn't name, which is what `botHolding` needs before it calls one
+ * gone.
+ */
+async function readAll(): Promise<boolean> {
   // Bots on one server and profile share one list, and the first of them keeps it.
   const profiles = await hostTargets(await listEnabledProfiles())
   const lists: Record<string, Canvas[]> = {}
   const unsupported = { ...store.get().unsupported }
+  let complete = true
   await Promise.all(
     profiles.map(async (profile) => {
+      // `null` is a host that didn't answer, which is not a plugin without canvases: the copy this
+      // device holds is what a screen draws then, and saying the bot can't hold canvases would be a
+      // different, false answer.
+      const features = await getPluginFeatureList(profile)
+      if (features === null) {
+        complete = false
+        unsupported[profile.id] = "This bot didn't answer."
+        lists[profile.id] = store.get().lists[profile.id] ?? (await cachedList(profile))
+        return
+      }
+      if (!features.includes("canvas")) {
+        unsupported[profile.id] = "This bot's plugin can't hold canvases yet."
+        lists[profile.id] = []
+        return
+      }
+      delete unsupported[profile.id]
       try {
-        if (!(await hasPluginFeature(profile, "canvas"))) {
-          unsupported[profile.id] = "This bot's plugin can't hold canvases yet."
-          lists[profile.id] = []
-          return
-        }
-        delete unsupported[profile.id]
         lists[profile.id] = (await listCanvases(profile)).map((raw) => toCanvas(raw, profile.id))
-        cacheList(profile, lists[profile.id])
+        keepList(profile, lists[profile.id])
       } catch {
         // A bot that couldn't answer keeps the list it last gave rather than looking empty, and says
         // so: an empty list is a bot with no canvases, which is a different thing to tell a reader.
+        complete = false
         unsupported[profile.id] = "This bot didn't answer."
         lists[profile.id] = store.get().lists[profile.id] ?? (await cachedList(profile))
       }
     }),
   )
   store.set({ ...store.get(), lists, unsupported, loaded: true })
+  return complete
 }
 
 // One sweep at a time: the list's poll and a screen's own read would otherwise run the whole per-bot
 // fan-out twice and race each other's answer into the store.
-let listing: Promise<void> | null = null
+let listing: Promise<boolean> | null = null
 
 /** Reads every bot's canvases; a bot that can't hold them is remembered with its reason. */
 export function refreshCanvases() {
@@ -355,19 +313,22 @@ async function configOf(profileId: string): Promise<Profile> {
 /**
  * The bot holding a canvas, as this device knows it. An id it has never seen is looked for by one
  * sweep, and a canvas no bot holds is remembered rather than looked for again — a stale link costs
- * one read rather than a fan-out on every tick.
+ * one read rather than a fan-out on every tick. Only a sweep every bot answered says that, though: a
+ * host that was away is no evidence the canvas is gone, and a canvas called gone stays gone until the
+ * app is opened again.
  */
 async function botHolding(id: string): Promise<string | null> {
   const known = profileOf(id)
   if (known) return known
   // A canvas this device read before names its bot in the copy it kept, so an open with the host away
   // finds the bot without a sweep that a host which isn't answering could never finish.
-  const kept = (await db.canvasCache.where("canvasId").equals(id).first())?.canvas?.profileId
+  const kept = await keptBot(id)
   if (kept) return kept
-  await refreshCanvases()
+  const complete = await refreshCanvases()
   const found = profileOf(id)
-  if (!found) store.set({ ...store.get(), missing: { ...store.get().missing, [id]: true } })
-  return found ?? null
+  if (found) return found
+  if (complete) store.set({ ...store.get(), missing: { ...store.get().missing, [id]: true } })
+  return null
 }
 
 async function readInto(
@@ -378,22 +339,27 @@ async function readInto(
   const profileId = await botHolding(id)
   if (!profileId) return
   const profile = await configOf(profileId)
-  // The copy draws before the host is asked, so the page is on screen at once and reads its own data
-  // with the host away (F5, D5).
-  await drawCopy(profile, id)
   const started = writes
-  let raw: Record<string, unknown> | null | undefined
-  try {
-    raw = await read(profile, id)
-  } catch (failure) {
-    // A canvas the host says it no longer holds is gone: its copy goes rather than being drawn for
-    // ever. Any other failure is a host that didn't answer: what this device holds is what there is,
-    // and the header says so whether or not it holds anything.
+  // The host is asked and the copy is drawn while that answer is out, so the page is on screen at
+  // once and reads its own data with the host away (F5, D5) — and the request is not held behind a
+  // read of this device's own database. The answer is taken as a value either way, so a request that
+  // fails while the copy is being read is no unhandled rejection.
+  const answer = read(profile, id).then(
+    (raw) => ({ raw, failure: undefined }),
+    (failure: unknown) => ({ raw: undefined, failure }),
+  )
+  await drawCopy(profile, id)
+  const { raw, failure } = await answer
+  if (failure) {
     if (failure instanceof HermesError && failure.status === 404) {
-      await forgetCopy(profile, id)
+      // The host says it no longer holds this canvas: the copy goes, and so does the page on screen.
+      await forgetCanvas(profile, id)
+      forgetDrawn(id)
       throw failure
     }
-    markOffline(id)
+    // A host that answered and refused — an undo past the first version, a key it won't take — said
+    // what it thinks of this request; only one that never landed leaves the canvas read-only.
+    if (!answered(failure)) markOffline(id)
     throw failure
   }
   if (raw) put(profile, toCanvas(raw, profileId), started)
@@ -430,31 +396,39 @@ export async function undoCanvas(id: string) {
 }
 
 /**
+ * How long a read that got no answer stands for a write's fast refusal. A miss a minute old is no
+ * proof the host is still away, so a write after that asks the host rather than staying refused on a
+ * flag nothing would ever clear — the canvas's poll is off while the screen is hidden.
+ */
+const MISS_MS = 60_000
+
+/**
  * A page's write, through the host's one route: the host stores (or removes) the document and the
  * answer replaces the copy this device keeps, so the page reads back what the host kept rather than
  * what it sent. A refusal is thrown, which is the sentence the page's promise gets.
  */
 export async function writeCanvasData(id: string, call: BridgeWriteCall) {
+  // There is no queue (B6): a write made while the host is away is refused here, the reader is told,
+  // and the page's promise gets the same words. A copy is not a write waiting for the host to return.
+  const missed = store.get().offline[id]
+  if (missed && Date.now() - missed < MISS_MS) refuseAway()
   const profileId = await botHolding(id)
   if (!profileId) throw new Error("There is no such canvas.")
   const profile = await configOf(profileId)
-  // There is no queue (B6): with the host away the write is refused here, the reader is told, and the
-  // page's promise gets the same words. A copy is not a write waiting for the host to come back.
-  if (store.get().offline[id]) refuseAway()
   const args =
     call.method === "put"
       ? { collection: call.collection, id: call.id, doc: call.doc }
       : { collection: call.collection, id: call.id }
-  const answer = await callCanvas(profile, id, `data.${call.method}`, args).catch(
-    (failure: unknown) => {
-      // A host that answered and refused said why, and that is the page's own answer. A host that
-      // didn't answer at all — a failed request, or one this device timed out — leaves the canvas
-      // read-only until it does.
-      if (failure instanceof HermesError && failure.status !== undefined) throw failure
-      markOffline(id)
-      refuseAway()
-    },
-  )
+  let answer: unknown
+  try {
+    answer = await callCanvas(profile, id, `data.${call.method}`, args)
+  } catch (failure) {
+    // A host that answered and refused said why, and that is the page's own answer. A request that
+    // never landed — a failed one, or one this device timed out — leaves the canvas read-only.
+    if (answered(failure)) throw failure
+    markOffline(id)
+    refuseAway(failure)
+  }
   const copy = applyWrite(canvasData(id), call, answer)
   // An answer the bridge can't read applied nothing: the page's promise is refused rather than told
   // a write landed that this device holds no evidence of.

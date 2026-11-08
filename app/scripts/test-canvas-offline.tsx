@@ -10,10 +10,12 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { toast } from "sonner"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
+import { awayLine } from "@/lib/away"
+import { canvasCacheKey, canvasListKey, recordOf } from "@/lib/canvas-cache"
 import { CANVAS_AWAY } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
-import { db, deleteProfile, type Profile } from "@/lib/db"
-import { CanvasView } from "@/routes/canvas"
+import { db, deleteProfile } from "@/lib/db"
+import { CanvasPage, CanvasView } from "@/routes/canvas"
 
 import { atWidth, botProfile, find, json, mount, seedSettings, settle, until } from "./component-kit.tsx"
 
@@ -46,10 +48,6 @@ const KEPT = {
   tools: ["files.search"],
   data: [DOC],
 }
-
-/** The row a canvas's copy lives under, as the client names it. */
-const canvasKey = (bot: Profile, id: string) => `${connectionKey(bot)}\n${id}`
-const listKey = (bot: Profile) => `${connectionKey(bot)}\ncanvases`
 
 /** The bot, its canvas's chat, and no copy left over from another case. */
 async function seedCanvasChat(name: string) {
@@ -151,7 +149,7 @@ test(
     const bot = await seedCanvasChat("canvas-away")
     // The copy a previous session left on this device, and a host that answers nothing.
     await db.canvasCache.put({
-      key: canvasKey(bot, KEPT.id),
+      key: canvasCacheKey(bot, KEPT.id),
       connection: connectionKey(bot),
       canvasId: KEPT.id,
       canvas: KEPT,
@@ -162,9 +160,9 @@ test(
       // The copy draws although every request to the host has failed.
       await until(() => drawn().includes("<h1>Tip</h1>"), "the device's copy to draw")
       assert.ok(asked.length > 0, "the host was asked, and answered nothing")
-      // The read that got no answer is said in the header.
-      await until(() => Boolean(find("[data-canvas-offline]")), "the header to say offline")
-      assert.match(find("[data-canvas-offline]")!.textContent ?? "", /offline/i)
+      // The read that got no answer is said in the header, in the chat header's own words.
+      await until(() => Boolean(find("[data-canvas-offline]")), "the header to say the bot is away")
+      assert.equal(find("[data-canvas-offline]")!.textContent, awayLine(true, true))
 
       // A write the page makes is refused: nothing is asked of the host, the reader is told, and the
       // page's own promise is rejected — a copy is not a write waiting for the host to come back.
@@ -193,12 +191,12 @@ test(
       assert.equal(posted[0].error, CANVAS_AWAY, "with the reason it was refused")
       assert.deepEqual(said, [CANVAS_AWAY], "the reader is told once")
       assert.equal(
-        asked.filter((url) => url.includes("/call")).length,
+        asked.filter((url) => new URL(url).pathname.endsWith("/call")).length,
         0,
         "a refused write is never queued for the host",
       )
       assert.deepEqual(
-        (await db.canvasCache.get(canvasKey(bot, KEPT.id)))?.canvas?.data,
+        (await db.canvasCache.get(canvasCacheKey(bot, KEPT.id)))?.canvas?.data,
         [DOC],
         "the copy still holds what the host last answered",
       )
@@ -215,22 +213,23 @@ test(
     await mount(screen, async () => {
       await until(() => drawn().includes("<h1>Tip</h1>"), "the canvas to draw")
       await until(
-        async () => Boolean(await db.canvasCache.get(canvasKey(bot, KEPT.id))),
+        async () => Boolean(await db.canvasCache.get(canvasCacheKey(bot, KEPT.id))),
         "the canvas to be kept",
       )
-      const kept = (await db.canvasCache.get(canvasKey(bot, KEPT.id)))!.canvas!
+      const kept = (await db.canvasCache.get(canvasCacheKey(bot, KEPT.id)))!.canvas!
       assert.equal(kept.version, 3)
       assert.match(kept.html ?? "", /<h1>Tip<\/h1>/, "the page its record points at")
       assert.deepEqual(kept.tools, ["files.search"], "the tools it declared")
       assert.deepEqual(kept.data, [DOC], "and its own data")
 
       // The list keeps the record and not the page: a listing answers records alone.
-      const list = (await db.canvasCache.get(listKey(bot)))!.canvases!
+      const list = (await db.canvasCache.get(canvasListKey(bot)))!.canvases!
       assert.deepEqual(
         list.map((row) => row.id),
         [KEPT.id],
       )
       assert.equal(list[0].html, undefined, "a list row carries no page")
+      assert.equal(list[0].tools, undefined, "nor the tools a version declared")
 
       // A write the host answers is kept too, so the page reads back what it stored with the host away.
       const posted: { reply: number; ok: boolean; error?: string }[] = []
@@ -247,11 +246,44 @@ test(
       const stored = { collection: "items", id: "one", doc: { n: 7 }, at: 100 }
       await until(
         async () =>
-          JSON.stringify((await db.canvasCache.get(canvasKey(bot, KEPT.id)))?.canvas?.data) ===
+          JSON.stringify((await db.canvasCache.get(canvasCacheKey(bot, KEPT.id)))?.canvas?.data) ===
           JSON.stringify([stored]),
         "the write to be kept",
       )
     })
+  }),
+)
+
+test(
+  "the list a host answered draws with the host away",
+  atWidth(390, async () => {
+    // A host that answers nothing is not a plugin without canvases: the list this device kept is what
+    // the screen draws, and the bot is said to be away rather than unable to hold canvases.
+    const bot = await seedCanvasChat("canvas-listed")
+    await db.canvasCache.put({
+      key: canvasListKey(bot),
+      connection: connectionKey(bot),
+      canvases: [recordOf(KEPT)],
+    })
+    const asked: string[] = []
+    serveNothing(asked)
+    await mount(
+      <MemoryRouter initialEntries={["/canvas"]}>
+        <Routes>
+          <Route path="/canvas" element={<CanvasPage />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(
+          () => (document.body.textContent ?? "").includes(KEPT.title),
+          "the kept list to draw",
+        )
+        const words = document.body.textContent ?? ""
+        assert.match(words, /didn't answer/, "the bot is said to be away")
+        assert.doesNotMatch(words, /can't hold canvases yet/, "which is not the same as unable")
+        assert.ok(asked.length > 0, "the host was asked, and answered nothing")
+      },
+    )
   }),
 )
 
@@ -261,17 +293,17 @@ test("a bot that goes takes its canvas copies with it", async () => {
   const twin = (await db.profiles.get("bot-2"))!
   for (const one of [bot, twin]) {
     await db.canvasCache.put({
-      key: canvasKey(one, KEPT.id),
+      key: canvasCacheKey(one, KEPT.id),
       connection: connectionKey(one),
       canvasId: KEPT.id,
       canvas: { ...KEPT, profileId: one.id },
     })
     await db.canvasCache.put({
-      key: listKey(one),
+      key: canvasListKey(one),
       connection: connectionKey(one),
       canvases: [{ ...KEPT, profileId: one.id }],
     })
   }
   assert.equal(await deleteProfile(bot.id), true, "the bot goes")
-  assert.deepEqual(await db.canvasCache.toCollection().primaryKeys(), [canvasKey(twin, KEPT.id), listKey(twin)], "its copy goes with it, and a twin's stays")
+  assert.deepEqual(await db.canvasCache.toCollection().primaryKeys(), [canvasCacheKey(twin, KEPT.id), canvasListKey(twin)], "its copy goes with it, and a twin's stays")
 })

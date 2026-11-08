@@ -152,6 +152,15 @@ export class HermesError extends Error {
   }
 }
 
+/**
+ * Whether a failure is the host's own answer — the request reached Hermes and was refused — rather
+ * than one that never landed. `request` is the one place that builds these: a transport failure is
+ * rethrown without a status, and a refusal carries the one the host sent, so a caller that must tell
+ * "away" from "said no" asks here rather than reading `status` itself.
+ */
+export const answered = (failure: unknown): failure is HermesError =>
+  failure instanceof HermesError && failure.status !== undefined
+
 function endpoint(baseUrl: string, path: string) {
   return `${baseUrl.trim().replace(/\/+$/, "")}${path}`
 }
@@ -2211,14 +2220,22 @@ function canvasRoot(config: HermesConfig, id?: string) {
 
 /** The bot's canvases on the plugin (`canvases.py`), newest first, without their documents. */
 export async function listCanvases(config: HermesConfig, signal?: AbortSignal) {
-  const response = await request(canvasRoot(config), { headers: headers(config), signal })
+  const response = await request(canvasRoot(config), {
+    headers: headers(config),
+    // A host that never answers is a canvas this device opens from its copy, so the read is given a
+    // deadline rather than waiting on a socket the browser may hold open for minutes.
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
   const body = await response.json()
   return Array.isArray(body?.canvases) ? (body.canvases as Record<string, unknown>[]) : []
 }
 
 /** One canvas with the document its record points at, which is what the screen draws. */
 export async function getCanvas(config: HermesConfig, id: string, signal?: AbortSignal) {
-  const response = await request(canvasRoot(config, id), { headers: headers(config), signal })
+  const response = await request(canvasRoot(config, id), {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
   return (await response.json())?.canvas as Record<string, unknown> | undefined
 }
 
@@ -2230,6 +2247,7 @@ export async function undoCanvas(config: HermesConfig, id: string) {
   const response = await request(`${canvasRoot(config, id)}/undo`, {
     method: "POST",
     headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return (await response.json())?.canvas as Record<string, unknown> | undefined
 }
@@ -2267,6 +2285,7 @@ export async function createCanvas(
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ prompt: input.prompt, profile_id: input.profileId, body: input.body }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return (await response.json())?.canvas as Record<string, unknown> | undefined
 }
