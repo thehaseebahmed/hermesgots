@@ -19,6 +19,9 @@ export const bubbleAnswer = {
 /** What the page told the Bubble to dictate with, one entry per `configure`, in order. */
 export const bubbleConfigured: { profileId: string; root: string }[] = []
 
+/** How often the page told the phone no bot is left to hear a take: the mirror is withdrawn. */
+export const bubbleCleared = { times: 0 }
+
 /** The takes the phone is holding for the log: read until the page says it has written them. */
 export const bubbleKept: unknown[] = []
 
@@ -35,6 +38,7 @@ const headers = [
     name: "Bubble",
     methods: [
       { name: "configure", rtype: "promise" },
+      { name: "clear", rtype: "promise" },
       { name: "requestMicrophone", rtype: "promise" },
       { name: "enable", rtype: "promise" },
       { name: "disable", rtype: "promise" },
@@ -63,6 +67,10 @@ Object.defineProperty(globalThis, "Capacitor", {
       // enabling without the draw-over grant starts nothing.
       if (method === "configure") {
         bubbleConfigured.push(options as { profileId: string; root: string })
+        return Promise.resolve()
+      }
+      if (method === "clear") {
+        bubbleCleared.times += 1
         return Promise.resolve()
       }
       if (method === "state") return Promise.resolve({ ...bubbleAnswer })

@@ -105,6 +105,19 @@ object BubbleConfig {
             .apply()
     }
 
+    /** The page found no bot left to hear a take: the block goes, so the notice stops naming one. */
+    fun clear(context: Context) {
+        prefs(context).edit()
+            .remove(PROFILE)
+            .remove(ROOT)
+            .remove(KEY)
+            .remove(NAME)
+            .remove(WORDS)
+            .remove(WAIT)
+            .remove(CLOUD)
+            .apply()
+    }
+
     /** Keeps a take whose words found no field, so the page can log it rather than losing it. */
     fun keep(context: Context, take: Kept) {
         val held = kept(context) + take

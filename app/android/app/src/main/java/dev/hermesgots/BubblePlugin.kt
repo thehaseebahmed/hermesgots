@@ -58,6 +58,17 @@ class BubblePlugin : Plugin() {
     }
 
     /**
+     * No bot is left to hear a take: the phone forgets the one it held, so a notice that named it
+     * says *Choose a bot in Gots* instead, and the service stays on with nothing to dictate to.
+     */
+    @PluginMethod
+    fun clear(call: PluginCall) {
+        BubbleConfig.clear(context)
+        if (BubbleConfig.enabled(context)) BubbleService.refresh(context)
+        call.resolve()
+    }
+
+    /**
      * The microphone is a runtime permission, so it is asked for before anything starts: a service of
      * the microphone type cannot even be started without it, and a phone that has never dictated in
      * Gots has never been asked.

@@ -3,13 +3,14 @@
  * and the phone must go on dictating with the bot it was given, not follow the selection to a bot
  * that may have no speech-to-text.
  */
-import { bubbleConfigured } from "./android-bridge.ts"
+import { bubbleCleared, bubbleConfigured } from "./android-bridge.ts"
 import assert from "node:assert/strict"
 import test from "node:test"
 
 const { mirrorBubble, useBubbleMirror } = await import("@/lib/bubble")
 const {
   db,
+  deleteProfile,
   getActiveProfile,
   getBubbleProfile,
   pinBubbleProfile,
@@ -24,6 +25,7 @@ async function seed(settings: { bubbleProfileId?: string } = {}) {
   await db.profiles.put(botProfile("One", { id: "bot-1", name: "One", apiKey: "k1" }))
   await db.profiles.put(botProfile("Two", { id: "bot-2", name: "Two", apiKey: "k2" }))
   bubbleConfigured.length = 0
+  bubbleCleared.times = 0
 }
 
 test("opening another bot's Main chat does not move the Bubble", async () => {
@@ -88,4 +90,28 @@ test("pinning never writes over a pick", async () => {
   await seed({ bubbleProfileId: "bot-2" })
   await pinBubbleProfile("bot-1")
   assert.equal((await db.settings.get("settings"))?.bubbleProfileId, "bot-2")
+})
+
+test("a renamed bot is written to the phone again", async () => {
+  await seed()
+  await mount(<Shell />, async () => {
+    await until(async () => bubbleConfigured.at(-1)?.profileId === "bot-1", "the bot mirrored")
+    await db.profiles.update("bot-1", { name: "Renamed" })
+    await until(
+      async () => (bubbleConfigured.at(-1) as { name?: string } | undefined)?.name === "Renamed",
+      "the renamed bot mirrored",
+    )
+  })
+})
+
+test("the last bot going takes the phone's copy with it", async () => {
+  await seed()
+  await mount(<Shell />, async () => {
+    await until(async () => bubbleConfigured.length > 0, "the first bot mirrored")
+    // The way the app deletes one: the last leaves a placeholder with no host or key, not an empty store.
+    await deleteProfile("bot-1")
+    await deleteProfile("bot-2", { last: true })
+    await settle()
+    await until(async () => bubbleCleared.times === 1, "the phone told no bot is left")
+  })
 })

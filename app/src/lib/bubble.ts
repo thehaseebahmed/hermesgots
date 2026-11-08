@@ -10,7 +10,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useEffect } from "react"
 
-import { serverConfig } from "@/lib/connection"
+import { hasServer, serverConfig } from "@/lib/connection"
 import {
   getBubbleProfile,
   listEnabledProfiles,
@@ -68,6 +68,7 @@ interface BubblePlugin {
     waitMs: number
     cloud: boolean
   }): Promise<void>
+  clear(): Promise<void>
   requestMicrophone(): Promise<{ granted: boolean }>
   enable(): Promise<{ started: boolean; reason?: string }>
   disable(): Promise<void>
@@ -105,7 +106,9 @@ export async function bubbleState(): Promise<BubbleState | undefined> {
 export async function mirrorBubble(profile?: Profile) {
   if (!bubbleAvailable()) return
   const bot = profile ?? (await getBubbleProfile())
-  if (!bot) return
+  // A bot with no host or key cannot hear a take, and the last bot deleted leaves exactly that: the
+  // notice must not name a bot that never will.
+  if (!bot || !hasServer(bot)) return forgetBubble()
   const wait = dictationWaitMs(bot)
   const block = {
     profileId: bot.id,
@@ -124,6 +127,21 @@ export async function mirrorBubble(profile?: Profile) {
       return
     } catch (error) {
       if (attempt === 2) quietly("mirroring the Bubble's bot")(error)
+    }
+  }
+}
+
+/**
+ * The phone is told no bot is left to hear a take, so its block goes and the notice stops naming one
+ * that is gone. A write that fails is tried again and then said in the log, as a mirror is.
+ */
+async function forgetBubble() {
+  for (const attempt of [1, 2]) {
+    try {
+      await Bubble.clear()
+      return
+    } catch (error) {
+      if (attempt === 2) quietly("withdrawing the Bubble's bot")(error)
     }
   }
 }
@@ -174,12 +192,18 @@ export function useBubbleMirror() {
   useEffect(() => {
     if (baseUrl && apiKey) primeDictationInfo({ baseUrl, apiKey })
   }, [baseUrl, apiKey])
-  const mirror = [active?.id ?? "", baseUrl, apiKey, (active?.vocabulary ?? []).join(","), String(wait)].join(
-    "\u0000",
-  )
-  // `mirror` is the fields a take is heard with, and `mirrorBubble` reads the bot itself: a profile
-  // object is replaced on every database write, and depending on the whole of it would rewrite the
-  // same block for a change in none.
+  const mirror = [
+    active?.id ?? "",
+    baseUrl,
+    apiKey,
+    (active?.vocabulary ?? []).join(","),
+    String(wait),
+    // The name is on the notice, so a rename has to reach the phone as surely as a connection does.
+    active?.name ?? "",
+  ].join("\u0000")
+  // `mirror` is the fields the notice and a take are told with, and `mirrorBubble` reads the bot
+  // itself: a profile object is replaced on every database write, and depending on the whole of it
+  // would rewrite the same block for a change in none.
   useEffect(() => {
     if (!mirror) return
     void mirrorBubble()

@@ -159,7 +159,10 @@ as long as the app stayed open, and give up on a cloud bot's take while the host
 The Confirm is bounded by the host's number plus five seconds where there is one, and by 45 s where no
 host has said; *no host has been asked* is `-1`, never a zero that reads like an answer. A mirror that
 fails is tried again and said in the log: a phone left on the last bot it was told about would dictate
-to another host, with another key and another vocabulary.
+to another host, with another key and another vocabulary. With no bot left that can be called — the
+last one deleted leaves a placeholder with no host or key — the page says so (`Bubble.clear`), and the
+phone forgets the one it held, so its notice says *Choose a bot in Gots* rather than naming a bot that
+was deleted; the Bubble itself stays on, with nothing to dictate to.
 
 **Only a missing bot or a missing grant refuses a take.** No mirrored bot says *Choose a bot in Gots*,
 and accessibility off says *Turn on accessibility to insert text*; a field is not needed to start, only
