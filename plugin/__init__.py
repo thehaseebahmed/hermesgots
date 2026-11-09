@@ -177,6 +177,19 @@ def _runs_by_job(job_id: str | None, per_job: int) -> Dict[str, List[Dict[str, A
     }
 
 
+def _schedule_display(job: Dict[str, Any]) -> str:
+    """When a routine runs, in one line, by the same fallback the app's routines screen reads.
+
+    A page draws a routine as a row with a name and when it runs, so the schedule arrives as the
+    words for it — the job's own display, else the schedule's, else its expression, else nothing —
+    rather than as the object the host keeps.
+    """
+    schedule = job.get("schedule")
+    spec = schedule if isinstance(schedule, dict) else {}
+    display = job.get("schedule_display") or spec.get("display") or spec.get("expr") or ""
+    return display if isinstance(display, str) else ""
+
+
 def _routine_summaries() -> List[Dict[str, Any]]:
     """The routines a page may list, as it draws them: a name, whether it is on, and when it runs.
 
@@ -191,7 +204,7 @@ def _routine_summaries() -> List[Dict[str, Any]]:
             "id": job.get("id"),
             "name": job.get("name"),
             "enabled": bool(job.get("enabled", True)),
-            "schedule": job.get("schedule"),
+            "schedule_display": _schedule_display(job),
         }
         for job in list_jobs(include_disabled=True)[:CANVAS_READS_MAX]
     ]
@@ -3314,9 +3327,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
         return await canvas_view(request, canvases.undo)
 
-    # One table of act locks per wiring: a lock binds to the loop that first contends on it, so it
-    # can't outlive the server this table was made for.
-    canvas_locks: Dict[str, asyncio.Lock] = {}
+    # One table of act locks per wiring: a lock is one server's, held in the thread the call runs
+    # on, and a table made for a server this app no longer serves is nobody's to hold.
+    canvas_locks: Dict[str, threading.Lock] = {}
 
     async def call_canvas(request: "web.Request") -> "web.Response":
         """A call a canvas's page makes: its own data, the four host reads, or a declared tool.
@@ -3329,10 +3342,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         nothing it could call for any other canvas, since the id is this route's and not the body's.
 
         Each read answers the shape the app's own screens draw, and no more. ``sessions`` is this
-        bot's chat list — flat, newest first, tombstones dropped — and not the Host's rooms: a room
-        is the Host's own, shared with the dashboard, and not one of this bot's chats. ``routines``
-        is each job's name, state and schedule, never its run ledger: a page that drew one row per
-        routine would otherwise cost one SQLite connection per job, on every call.
+        bot's chat list — flat, newest first, tombstones dropped — and not the Host's rooms, a
+        project session or a canvas's own chat: each of those is its own screen's row, and the app's
+        own rule (``listsAsChat``) is what the answer holds to. ``routines`` is each job's name, state
+        and schedule in words, never its run ledger: a page that drew one row per routine would
+        otherwise cost one SQLite connection per job, on every call.
+
+        A canvas this store doesn't hold — one deleted since, whose tab may still be open — is a 404
+        for every shape, read before anything is dispatched.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -3342,6 +3359,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
         path = store_path()
+
+        # One read of the record before anything is dispatched. A tab left open on a canvas the
+        # user deleted would otherwise keep answering its four free reads — the user's own chats
+        # among them — while every write to it is a 404.
+        if await asyncio.to_thread(canvases.record, path, canvas_id) is None:
+            return _error(web, "There is no such canvas.", 404)
 
         async def read_usage_shape(args: Dict[str, Any]) -> Dict[str, Any]:
             provider = str(args.get("provider") or "").strip().lower()

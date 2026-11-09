@@ -73,9 +73,9 @@ def tools_registered():
     """Hermes's tool registry, answering that the plugin's tools are in it."""
     registry = SimpleNamespace(get_entry=lambda name: object())
     module = ModuleType("tools.registry")
-    module.registry = registry  # type: ignore[attr-defined]
+    setattr(module, "registry", registry)
     package = ModuleType("tools")
-    package.registry = module  # type: ignore[attr-defined]
+    setattr(package, "registry", module)
     with mock.patch.dict(
         sys.modules, {"tools": package, "tools.registry": module}
     ):
@@ -91,12 +91,12 @@ def cron_modules(jobs: list):
     """
     executions = ModuleType("cron.executions")
     runs = mock.Mock(side_effect=AssertionError("a routines read opened the run ledger"))
-    executions.list_executions = runs  # type: ignore[attr-defined]
+    setattr(executions, "list_executions", runs)
     entries = ModuleType("cron.jobs")
-    entries.list_jobs = lambda include_disabled=False: list(jobs)  # type: ignore[attr-defined]
+    setattr(entries, "list_jobs", lambda include_disabled=False: list(jobs))
     package = ModuleType("cron")
-    package.jobs = entries  # type: ignore[attr-defined]
-    package.executions = executions  # type: ignore[attr-defined]
+    setattr(package, "jobs", entries)
+    setattr(package, "executions", executions)
     with mock.patch.dict(
         sys.modules, {"cron": package, "cron.jobs": entries, "cron.executions": executions}
     ):
@@ -271,6 +271,75 @@ class WriteTest(unittest.TestCase):
     def test_a_link_the_reader_could_tap_is_not_a_resource(self) -> None:
         html = DOCUMENT.replace("<body>", '<body><a href="https://example.com">Read more</a>')
         self.assertEqual(canvases.write(self.path, self.canvas["id"], html)["version"], 1)
+
+    def test_a_version_cannot_declare_the_canvases_own_data_as_a_tool(self) -> None:
+        # The call route answers `data.put` and `data.remove` as the page's own write before consent
+        # is consulted, so a version that declared one would make a tool the user denied write.
+        canvas_id = self.canvas["id"]
+        for name in ("data.put", "data.remove"):
+            with self.subTest(name=name):
+                with self.assertRaises(canvases.CanvasError) as refused:
+                    canvases.write(self.path, canvas_id, DOCUMENT, tools=[name])
+                self.assertEqual(refused.exception.status, 400)
+                self.assertIn("canvas.data.*", str(refused.exception))
+                self.assertIn(name, str(refused.exception))
+        # Refused whole: a list holding one is no declaration at all.
+        self.assertEqual(canvases.record(self.path, canvas_id)["version"], 0)
+
+        # A store an earlier build wrote one into can't be granted it either: the row is refused
+        # where a grant is written, so the answer is never asked about a name that isn't a tool.
+        conn = connect(self.path)
+        try:
+            conn.execute(
+                "INSERT INTO canvas_versions (canvas_id, version, html, tools, at) VALUES (?, 1, ?, ?, 1)",
+                (canvas_id, DOCUMENT, json.dumps(["data.put"])),
+            )
+            conn.execute("UPDATE canvases SET version = 1 WHERE id = ?", (canvas_id,))
+        finally:
+            conn.close()
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.grant(self.path, canvas_id, "data.put", True)
+        self.assertEqual(refused.exception.status, 400)
+        self.assertIn("canvas.data.*", str(refused.exception))
+
+    def test_a_name_with_whitespace_or_a_control_character_is_refused_where_it_is_written(self) -> None:
+        # The bridge refuses a name with whitespace, so one stored here is a row nothing can call:
+        # `mcp_call.split` is the one rule, and a declaration holding one is refused whole.
+        for tools, named in (
+            (["files. search"], "files. search"),
+            ([" files.search"], " files.search"),
+            (["files.search\n"], "files.search\n"),
+            (["files.search\x00"], "files.search\x00"),
+        ):
+            with self.subTest(named=named):
+                with self.assertRaises(canvases.CanvasError) as refused:
+                    canvases.write(self.path, self.canvas["id"], DOCUMENT, tools=tools)
+                self.assertEqual(refused.exception.status, 400)
+                self.assertIn("<server>.<tool>", str(refused.exception))
+                self.assertIn(repr(named), str(refused.exception))
+        self.assertEqual(canvases.record(self.path, self.canvas["id"])["version"], 0)
+
+    def test_a_declaration_is_at_most_fifty_tools_and_sixty_four_characters_a_name(self) -> None:
+        # Every declared tool is an option row and a consent dialog: twenty thousand of them is a
+        # canvas answer nothing can draw, so the cap is the whole declaration or nothing.
+        canvas_id = self.canvas["id"]
+        many = [f"srv.tool{index}" for index in range(canvases.TOOLS_MAX)]
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, canvas_id, DOCUMENT, tools=many + ["srv.one.more"])
+        self.assertEqual(refused.exception.status, 400)
+        self.assertIn(str(canvases.TOOLS_MAX), str(refused.exception))
+        self.assertEqual(canvases.record(self.path, canvas_id)["version"], 0)
+
+        long_name = "srv." + "t" * canvases.TOOL_NAME_CHARS
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, canvas_id, DOCUMENT, tools=[long_name])
+        self.assertEqual(refused.exception.status, 400)
+        self.assertIn(str(canvases.TOOL_NAME_CHARS), str(refused.exception))
+        self.assertEqual(canvases.record(self.path, canvas_id)["version"], 0)
+
+        # The cap is a bound, not a rule: the fiftieth is a row a sheet can draw.
+        written = canvases.write(self.path, canvas_id, DOCUMENT, tools=many)
+        self.assertEqual(len(written["tools"]), canvases.TOOLS_MAX)
 
 
 class SessionTest(unittest.TestCase):
@@ -865,15 +934,15 @@ class RouteTest(unittest.TestCase):
         # A page calls the tools its own version declared, and the user's answer for each is kept on
         # the host: refused before the user is asked, asked once, and called forever after.
         canvas_id = self.make()
-        ask = mock.AsyncMock(return_value={"matches": ["notes.md"]})
+        ask = mock.Mock(return_value={"matches": ["notes.md"]})
         body = {"shape": "files.search", "args": {"query": "notes"}}
-        with mock.patch.object(page_calls.mcp_call, "call_async", ask):
+        with mock.patch.object(page_calls.mcp_call, "call", ask):
             undeclared = self.call(
                 "/canvases/{canvas_id}/call", "POST", body, canvas_id=canvas_id
             )
             self.assertEqual(undeclared["status"], 403)
             self.assertEqual(undeclared["payload"]["error"]["code"], "not_declared")
-            self.assertEqual(ask.await_count, 0)
+            self.assertEqual(ask.call_count, 0)
 
             # The bot writes a version declaring two tools: the page may ask for either, and the
             # first call of one is the user's to answer.
@@ -881,7 +950,7 @@ class RouteTest(unittest.TestCase):
             asking = self.call("/canvases/{canvas_id}/call", "POST", body, canvas_id=canvas_id)
             self.assertEqual(asking["status"], 403)
             self.assertEqual(asking["payload"]["error"]["code"], "consent_required")
-            self.assertEqual(ask.await_count, 0)
+            self.assertEqual(ask.call_count, 0)
 
             allowed = self.call(
                 "/canvases/{canvas_id}/grants",
@@ -909,8 +978,8 @@ class RouteTest(unittest.TestCase):
             self.assertEqual(answered["status"], 200)
             self.assertEqual(answered["payload"]["object"], "gots.canvas.call")
             self.assertEqual(answered["payload"]["result"], {"matches": ["notes.md"]})
-            self.assertEqual(ask.await_count, 1)
-            self.assertEqual(ask.await_args.args[1:], ("files.search", {"query": "notes"}))
+            self.assertEqual(ask.call_count, 1)
+            self.assertEqual(ask.call_args.args[1:], ("files.search", {"query": "notes"}))
 
             # The other tool is not the one that was allowed: a refusal of its own, and no call.
             refused = self.call(
@@ -928,7 +997,7 @@ class RouteTest(unittest.TestCase):
             )
             self.assertEqual(denied["status"], 403)
             self.assertEqual(denied["payload"]["error"]["code"], "denied")
-            self.assertEqual(ask.await_count, 1)
+            self.assertEqual(ask.call_count, 1)
 
     def test_the_four_host_reads_answer_without_a_tool_or_a_grant(self) -> None:
         canvas_id = self.make()
@@ -946,12 +1015,8 @@ class RouteTest(unittest.TestCase):
             "/canvases/{canvas_id}/call", "POST", {"shape": "sessions"}, canvas_id=canvas_id
         )
         self.assertEqual(sessions["status"], 200)
-        # The canvas's own chat is one of the bot's chats and rides the list too; the seeded ones
-        # answer newest first, and the deleted chat is no chat at all.
-        own = canvases.page(self.path, canvas_id)["chat_id"]
-        listed = [row for row in sessions["payload"]["result"]["sessions"] if row["id"] != own]
         self.assertEqual(
-            listed,
+            sessions["payload"]["result"]["sessions"],
             [
                 {"id": "chat-3", "title": "Trip", "at": 7},
                 {"id": "chat-1", "title": "Groceries", "at": 5},
@@ -964,19 +1029,86 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(unnamed["status"], 400)
         self.assertIn("provider", unnamed["payload"]["error"]["message"])
 
+    def test_the_sessions_read_lists_only_this_bots_own_chats(self) -> None:
+        # The route says it answers this bot's chats, so a room, a project session and a canvas's
+        # own chat are absent: the app's listsAsChat rule, held where the page's call reaches it.
+        canvas_id = self.make()
+        own = canvases.page(self.path, canvas_id)["chat_id"]
+        chats.merge(
+            self.path,
+            {
+                "plain": {"at": 5, "value": {"title": "Groceries"}},
+                "room": {"at": 6, "value": {"title": "The crew", "room": "r1"}},
+                "project": {"at": 7, "value": {"title": "Ship it", "projectId": "p1"}},
+                "canvas": {"at": 8, "value": {"title": "Tip", "canvasId": "c9"}},
+                # An empty string is no room, no project and no canvas: the app's rule reads it so.
+                "emptied": {
+                    "at": 9,
+                    "value": {"title": "Back to chats", "room": "", "projectId": "", "canvasId": ""},
+                },
+                "main": {"at": 10, "value": {"title": "Main", "main": True}},
+            },
+        )
+        listed = self.call(
+            "/canvases/{canvas_id}/call", "POST", {"shape": "sessions"}, canvas_id=canvas_id
+        )["payload"]["result"]["sessions"]
+        self.assertEqual([row["id"] for row in listed], ["main", "emptied", "plain"])
+        self.assertNotIn(own, [row["id"] for row in listed])
+
+    def test_every_shape_is_a_404_for_a_canvas_that_is_not_there(self) -> None:
+        # A tab left open on a deleted canvas must not keep reading the user's chats while every
+        # write of it is a 404: the record is read once, before anything is dispatched.
+        for shape in page_calls.HOST_SHAPES:
+            with self.subTest(shape=shape):
+                refused = self.call(
+                    "/canvases/{canvas_id}/call", "POST", {"shape": shape}, canvas_id="ghost"
+                )
+                self.assertEqual(refused["status"], 404)
+                self.assertIn("no such canvas", refused["payload"]["error"]["message"])
+        # And a canvas its own creation took back is as absent as one that never was.
+        made = self.make()
+        canvases._drop(self.path, made)
+        for shape in page_calls.HOST_SHAPES:
+            with self.subTest(shape=shape):
+                dropped = self.call(
+                    "/canvases/{canvas_id}/call", "POST", {"shape": shape}, canvas_id=made
+                )
+                self.assertEqual(dropped["status"], 404)
+        tool = self.call(
+            "/canvases/{canvas_id}/call",
+            "POST",
+            {"shape": "data.put", "args": {"collection": "notes", "id": "a", "doc": {}}},
+            canvas_id="ghost",
+        )
+        self.assertEqual(tool["status"], 404)
+
     def test_the_routines_read_projects_the_hosts_jobs_and_reads_no_run(self) -> None:
         # A page draws a routine's name, whether it is on and when it runs — not every run of every
-        # job, which was one SQLite connection per job, per call.
+        # job, which was one SQLite connection per job, per call, and not the host's schedule object.
         canvas_id = self.make()
         jobs = [
-            {"id": "j1", "name": "Morning brief", "schedule": "0 8 * * *", "enabled": False},
-            {"id": "j2", "name": "Nightly", "schedule": "0 2 * * *", "enabled": True},
+            {
+                "id": "j1",
+                "name": "Morning brief",
+                "schedule": {"kind": "cron", "expr": "0 8 * * *", "display": "Every day at 8"},
+                "enabled": False,
+            },
+            {"id": "j2", "name": "Nightly", "schedule": {"kind": "cron", "expr": "0 2 * * *"}},
+            {
+                "id": "j3",
+                "name": "Said by the job",
+                "schedule": {"expr": "1 1 * * *", "display": "Not this one"},
+                "schedule_display": "Every hour",
+            },
+            {"id": "j4", "name": "No schedule", "schedule": {}},
         ]
         with cron_modules(jobs) as runs:
             routine = self.call(
                 "/canvases/{canvas_id}/call", "POST", {"shape": "routines"}, canvas_id=canvas_id
             )
             self.assertEqual(routine["status"], 200)
+            # The display is the same fallback the app's own routines screen reads: the job's, the
+            # schedule's, its expression, else nothing — never the schedule object itself.
             self.assertEqual(
                 routine["payload"]["result"],
                 {
@@ -985,15 +1117,35 @@ class RouteTest(unittest.TestCase):
                             "id": "j1",
                             "name": "Morning brief",
                             "enabled": False,
-                            "schedule": "0 8 * * *",
+                            "schedule_display": "Every day at 8",
                         },
-                        {"id": "j2", "name": "Nightly", "enabled": True, "schedule": "0 2 * * *"},
+                        {
+                            "id": "j2",
+                            "name": "Nightly",
+                            "enabled": True,
+                            "schedule_display": "0 2 * * *",
+                        },
+                        {
+                            "id": "j3",
+                            "name": "Said by the job",
+                            "enabled": True,
+                            "schedule_display": "Every hour",
+                        },
+                        {
+                            "id": "j4",
+                            "name": "No schedule",
+                            "enabled": True,
+                            "schedule_display": "",
+                        },
                     ]
                 },
             )
             self.assertEqual(runs.call_count, 0, "a routines read never opens the run ledger")
-            # At most fifty, in the host's own order: a page draws a list, not a ledger.
-            many = [{"id": f"j{index}", "name": f"Job {index}", "schedule": "* * * * *"} for index in range(60)]
+            # At most the read's cap, in the host's own order: a page draws a list, not a ledger.
+            many = [
+                {"id": f"j{index}", "name": f"Job {index}", "schedule": {"expr": "* * * * *"}}
+                for index in range(plugin.CANVAS_READS_MAX + 10)
+            ]
             with cron_modules(many):
                 capped = self.call(
                     "/canvases/{canvas_id}/call",
@@ -1003,7 +1155,7 @@ class RouteTest(unittest.TestCase):
                 )
             self.assertEqual(
                 [row["id"] for row in capped["payload"]["result"]["routines"]],
-                [f"j{index}" for index in range(50)],
+                [f"j{index}" for index in range(plugin.CANVAS_READS_MAX)],
             )
 
     def test_a_declared_tool_is_named_server_and_tool_and_so_is_a_grant(self) -> None:
@@ -1050,6 +1202,40 @@ class RouteTest(unittest.TestCase):
             canvas_id="nope",
         )
         self.assertEqual(gone["status"], 404)
+
+    def test_a_grant_for_a_tool_the_version_dropped_can_be_changed(self) -> None:
+        # The options list the union of what this version declares and what the host holds an answer
+        # for, so an answer outlives the version that asked: one already recorded can be changed —
+        # at least revoked — while a brand-new answer for an undeclared tool is still refused.
+        canvas_id = self.make()
+        canvases.write(self.path, canvas_id, DOCUMENT, tools=["files.search"])
+        granted = self.call(
+            "/canvases/{canvas_id}/grants",
+            "POST",
+            {"tool": "files.search", "allow": True},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(granted["status"], 200)
+        # A later version stops declaring it, and the row stays on the host.
+        canvases.write(self.path, canvas_id, DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split</h1>"))
+        self.assertEqual(canvases.page(self.path, canvas_id)["tools"], [])
+        revoked = self.call(
+            "/canvases/{canvas_id}/grants",
+            "POST",
+            {"tool": "files.search", "allow": False},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(revoked["status"], 200)
+        self.assertIs(revoked["payload"]["grant"]["allowed"], False)
+        # A tool with no row and no declaration is a question this version never asked.
+        refused = self.call(
+            "/canvases/{canvas_id}/grants",
+            "POST",
+            {"tool": "mail.send", "allow": True},
+            canvas_id=canvas_id,
+        )
+        self.assertEqual(refused["status"], 400)
+        self.assertIn("mail.send", refused["payload"]["error"]["message"])
 
     def test_info_advertises_canvas_only_where_it_can_be_worked(self) -> None:
         # The tools have to reach a canvas's session and that session has to be told its guide: a

@@ -442,13 +442,6 @@ export async function undoCanvas(id: string) {
 const writing = new Map<string, Promise<unknown>>()
 
 export async function writeCanvasData(id: string, call: BridgeWriteCall) {
-  // A device with no network at all can't reach the host, so the write is refused without asking;
-  // otherwise the host is asked, since it may be back — and a write it answers is a write saved.
-  // Nothing is ever queued for the host to collect.
-  if (!onlineNow()) refuse(CANVAS_AWAY)
-  const profileId = await botHolding(id)
-  if (!profileId) throw new Error("There is no such canvas.")
-  const profile = await configOf(profileId)
   const args =
     call.method === "put"
       ? { collection: call.collection, id: call.id, doc: call.doc }
@@ -457,28 +450,19 @@ export async function writeCanvasData(id: string, call: BridgeWriteCall) {
   // come back in that order; two in flight could apply a remove before a put the host handled first,
   // and the copy would hold a document the host doesn't — or lose one it does.
   const previous = writing.get(id) ?? Promise.resolve()
-  const asked = previous
-    .catch(() => undefined)
-    .then(() => callCanvas(profile, id, `data.${call.method}`, args))
+  const asked = previous.catch(() => undefined).then(() =>
+    withHost(id, (profile) => callCanvas(profile, id, `data.${call.method}`, args), CANVAS_AWAY),
+  )
   writing.set(id, asked)
-  let answer: unknown
-  try {
-    answer = await asked
-  } catch (failure) {
-    // A host that answered and refused said why, and that is the page's own answer. A request that
-    // never landed — a failed one, or one this device timed out — leaves the canvas read-only.
-    if (hostAnswered(failure)) throw failure
-    markAway(id)
-    refuse(CANVAS_AWAY, failure)
-  } finally {
+  const answer = await asked.finally(() => {
     if (writing.get(id) === asked) writing.delete(id)
-  }
-  const copy = applyWrite(canvasData(id), call, answer)
+  })
+  const copy = applyWrite(canvasData(id), call, answer.value)
   // An answer the bridge can't read applied nothing: the page's promise is refused rather than told
   // a write landed that this device holds no evidence of.
   if (!copy) throw new Error("The host answered a write the app couldn't read.")
-  keepCopy(profile, id, copy)
-  return answer
+  keepCopy(answer.profile, id, copy)
+  return answer.value
 }
 
 /** Every bot's canvases, newest first, kept fresh while a screen draws them. */
@@ -533,22 +517,25 @@ async function hosting(id: string) {
 }
 
 /**
- * The host's answer to anything a page asked it for, or the refusal its promise gets.
+ * The host's answer to anything a page asked it for, and the bot it came from, or the refusal the
+ * page's promise gets.
  *
- * One rule for reaching the bot, so a read, a tool call and a grant all fail the same way: with no
- * network at all the call is refused without asking, and a request that never landed leaves the
- * canvas unreachable. A host that answered and refused keeps its own words — that is the page's own
- * answer, and the bridge reads a consent hold off it — and is never toasted as the bot being away.
+ * One rule for reaching the bot, so a data write, a read, a tool call and a grant all fail the
+ * same way: with no network at all the call is refused without asking, and a request that never
+ * landed leaves the canvas unreachable. A host that answered and refused keeps its own words —
+ * that is the page's own answer, and the bridge reads a consent hold off it — and is never
+ * toasted as the bot being away. The bot comes back with the answer because some answers are kept
+ * against it: a write leaves a copy to keep, a grant a row.
  */
-async function callHost(
+async function withHost<T>(
   id: string,
-  task: (profile: Profile) => Promise<unknown>,
+  task: (profile: Profile) => Promise<T>,
   refusal: string,
-): Promise<unknown> {
+): Promise<{ profile: Profile; value: T }> {
   if (!onlineNow()) refuse(refusal)
   const profile = await hosting(id)
   try {
-    return await task(profile)
+    return { profile, value: await task(profile) }
   } catch (failure) {
     if (hostAnswered(failure)) throw failure
     markAway(id)
@@ -564,18 +551,28 @@ async function callHost(
 const TOOL_TIMEOUT_MS = 45_000
 
 /** One of the host's four free reads, straight to its route. */
-export function callCanvasRead(id: string, shape: CanvasReadShape, args: Record<string, unknown>) {
-  return callHost(id, (profile) => callCanvas(profile, id, shape, args), CANVAS_UNREACHABLE)
+export async function callCanvasRead(
+  id: string,
+  shape: CanvasReadShape,
+  args: Record<string, unknown>,
+) {
+  const answer = await withHost(
+    id,
+    (profile) => callCanvas(profile, id, shape, args),
+    CANVAS_UNREACHABLE,
+  )
+  return answer.value
 }
 
 /** A declared tool the page called, as `write` so two calls on one server are taken one at a time. */
-export function callCanvasTool(id: string, call: BridgeToolCall) {
-  return callHost(
+export async function callCanvasTool(id: string, call: BridgeToolCall) {
+  const answer = await withHost(
     id,
     (profile) =>
       callCanvas(profile, id, call.tool, call.args, { write: true, timeout: TOOL_TIMEOUT_MS }),
     CANVAS_UNREACHABLE,
   )
+  return answer.value
 }
 
 /** Whatever a page asked its host for: a free read, or a tool call it was allowed to make. */
@@ -585,29 +582,28 @@ export function callCanvasCall(id: string, call: BridgeHostCall) {
 
 /**
  * The reader's answer about one declared tool, kept on the host. The host answers the row it wrote
- * and the canvas's answers after it, and those replace the copy the options draw; a host that
- * answers no list still moves this device's copy, so the switch just flipped doesn't jump back.
+ * and the canvas's answers after it, and those replace the copy the options draw. An answer that
+ * carries no list this device can read moves nothing: a row stamped with this device's clock would
+ * outrank every answer the host gives afterwards, since the merge keeps the later clock.
  */
 export async function grantCanvasTool(id: string, tool: string, allow: boolean) {
-  const answer = (await callHost(
+  const { profile, value } = await withHost(
     id,
-    (profile) => grantCanvasToolOnHost(profile, id, tool, allow),
+    (bot) => grantCanvasToolOnHost(bot, id, tool, allow),
     CANVAS_UNREACHABLE,
-  )) as Record<string, unknown> | undefined
+  )
+  const answer = value as Record<string, unknown> | undefined
   const state = store.get()
   const held = state.details[id]
   if (!held) return answer
   const answered = grantsOf(answer?.grants)
+  if (!answered) return answer
   // Merged, not replaced: an answer that named only this tool still leaves the rest as they were,
   // and the clock keeps the newer of two answers to the same tool.
-  const grants = mergeGrants(
-    held.grants,
-    answered ?? [{ tool, allowed: allow, at: Date.now() }],
-  )
+  const grants = mergeGrants(held.grants, answered)
   const next = { ...held, grants }
   store.set({ ...state, details: { ...state.details, [id]: next } })
-  const profile = await db.profiles.get(held.profileId)
-  if (profile) keepCanvas(profile, next)
+  keepCanvas(profile, next)
   return answer
 }
 

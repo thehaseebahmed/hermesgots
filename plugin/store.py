@@ -41,7 +41,8 @@ logger = logging.getLogger(__name__)
 # written has to move. 61 adds the documents a canvas keeps, one row per collection and id
 # (`canvases.py`'s data, ADR 0113): one new table, so nothing already written has to move, and no
 # version or undo touches it. 62 adds the answers a canvas's page got for the tools its version
-# declared (`canvases.py`'s grants, ADR 0114): one new table, so nothing already written has to move.
+# declared (`canvases.py`'s grants, ADR 0114) — one new table, and a pass over the names an earlier
+# build stored in `canvas_versions.tools` to drop the ones the rule refuses now.
 SCHEMA_VERSION = 62
 
 
@@ -990,4 +991,36 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (canvas_id, tool)
                )"""
         )
+        if version < 62:
+            _drop_uncallable_tools(conn)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _drop_uncallable_tools(conn: sqlite3.Connection) -> None:
+    """v62's pass over the tool names an earlier build stored in ``canvas_versions.tools``.
+
+    A declared name is an option row the sheet draws and a grant the host accepts, and the rule for
+    one tightened (``canvases._tool_name``): a name kept from before it — ``todo_list``, with no
+    server half — is a declaration nothing can call, so the sheet would offer a switch that can
+    never be set and ``may_call`` would ask for a call that can never be made. A name the rule
+    refuses is no declaration, so each row keeps only the names it accepts, in their order.
+    """
+    # By path, since canvases imports this module: the rule is asked where it lives rather than
+    # restated here, where the two copies would drift.
+    from . import canvases
+
+    for canvas_id, number, tools in conn.execute(
+        "SELECT canvas_id, version, tools FROM canvas_versions WHERE tools IS NOT NULL"
+    ).fetchall():
+        try:
+            declared = json.loads(tools)
+        except ValueError:
+            declared = []
+        if not isinstance(declared, list):
+            declared = []
+        kept = [name for name in declared if canvases.declarable(name)]
+        if kept != declared:
+            conn.execute(
+                "UPDATE canvas_versions SET tools = ? WHERE canvas_id = ? AND version = ?",
+                (json.dumps(kept), canvas_id, number),
+            )

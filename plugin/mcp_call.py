@@ -26,16 +26,21 @@ TIMEOUT = 30.0
 
 
 def split(name: str) -> Tuple[str, str]:
-    """``<server>.<tool>`` as its two halves, or a 400 for a name that is not one."""
+    """``<server>.<tool>`` as its two halves, or a 400 for a name that is not one.
+
+    The one rule for what a tool's name is, wherever a name is checked: the bridge refuses a name
+    holding whitespace, and a server's parts are read from a config block's keys, which hold no
+    control character either. A name this refuses is one nothing could call, so it is refused where
+    it is written rather than stored as a row that can never answer.
+    """
     server, _, tool = name.partition(".")
-    if not server or not tool:
+    if (
+        not server
+        or not tool
+        or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in name)
+    ):
         raise McpError(f"{name!r} is not a tool on a server; name it <server>.<tool>.", 400)
     return server, tool
-
-
-async def call_async(profile: Optional[str], name: str, args: Dict[str, Any]) -> Any:
-    """``call`` on a worker thread, so a slow server never holds the event loop."""
-    return await asyncio.to_thread(call, profile, name, args)
 
 
 def call(profile: Optional[str], name: str, args: Dict[str, Any], timeout: float = TIMEOUT) -> Any:

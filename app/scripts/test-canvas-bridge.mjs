@@ -190,6 +190,16 @@ test("mergeGrants keeps the later answer to each tool and both sides' tools", ()
   assert.deepEqual(mergeGrants(undefined, undefined), [])
 })
 
+test("mergeGrants orders tools by code point, as the host does", () => {
+  // `ORDER BY tool` compares UTF-8 bytes, which is code-point order, while JavaScript's `<` compares
+  // UTF-16 units: a name outside the BMP would otherwise sort on the wrong side of a BMP one.
+  const ordered = mergeGrants(
+    [{ tool: "\u{1F600}.z", allowed: true, at: 1 }],
+    [{ tool: "\uFFFD.a", allowed: true, at: 2 }],
+  ).map((row) => row.tool)
+  assert.deepEqual(ordered, ["\uFFFD.a", "\u{1F600}.z"])
+})
+
 test("applyWrite replaces, inserts and removes in the host's order", () => {
   const replaced = applyWrite(COPY, { call: 1, method: "put", collection: "items", id: "a" }, doc("items", "a", { n: 9 }, 40))
   assert.deepEqual(replaced, [

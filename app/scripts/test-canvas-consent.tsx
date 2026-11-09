@@ -44,18 +44,24 @@ const TITLE = "A tip calculator"
 interface Host {
   /** The tools this version declared. */
   tools: string[]
-  /** What the reader answered for each declared tool; a missing one was never asked. */
-  grants: Record<string, boolean>
+  /** What the reader answered for each declared tool, and the host's clock when it did. */
+  grants: Record<string, { allowed: boolean; at: number }>
+  /** The host's clock: every answer it records takes the next moment, so no two share one. */
+  clock: number
   /** Every call the app made, in the order it landed. */
   calls: { shape: string; args: Record<string, unknown>; write?: boolean }[]
   /** Every grant the app posted. */
   answers: { tool: string; allow: boolean }[]
+  /** A grant route that answers no list at all, as a host from before the row carried a clock. */
+  silentGrants?: boolean
 }
 
+/** The host's next moment: an answer's `at`, never a list's position. */
+const stamp = (host: Host) => (host.clock += 1)
+
 /**
- * The canvas as its host answers it: the version's page, the tools it declared and their answers.
- * Each answer carries the host's clock for it, so a read that began before one landed can be told
- * apart from the answer it must not walk back.
+ * The canvas as its host answers it: the version's page, the tools it declared and their answers,
+ * each with the host's own clock for it.
  */
 const canvas = (host: Host, id: string) => ({
   id,
@@ -70,7 +76,7 @@ const canvas = (host: Host, id: string) => ({
   can_undo: true,
   html: PAGE,
   tools: host.tools,
-  grants: Object.entries(host.grants).map(([tool, allowed], at) => ({ tool, allowed, at: at + 1 })),
+  grants: Object.entries(host.grants).map(([tool, answer]) => ({ tool, ...answer })),
   data: [],
 })
 
@@ -101,16 +107,22 @@ function serve(host: Host, id: string): { gate: Gate } {
       assert.equal(init?.method, "POST", "a grant is asked for with a POST")
       const body = JSON.parse(String(init?.body)) as { tool: string; allow: boolean }
       host.answers.push(body)
-      host.grants = { ...host.grants, [body.tool]: body.allow }
-      const grants = Object.entries(host.grants).map(([tool, allowed], at) => ({
-        tool,
-        allowed,
-        at: at + 1,
-      }))
+      // A version rewritten while the dialog was up no longer declares the tool, and one the host
+      // never answered about is a question it never asked: the answer is refused, as the plugin's
+      // own grant route refuses it.
+      if (!host.tools.includes(body.tool) && !host.grants[body.tool]) {
+        return refusal(
+          "not_declared",
+          `The version this canvas shows does not declare ${JSON.stringify(body.tool)}, so there is nothing to allow.`,
+        )
+      }
+      host.grants = { ...host.grants, [body.tool]: { allowed: body.allow, at: stamp(host) } }
+      if (host.silentGrants) return json({ object: "gots.canvas.grant" })
+      const rows = Object.entries(host.grants).map(([tool, answer]) => ({ tool, ...answer }))
       return json({
         object: "gots.canvas.grant",
-        grant: grants.find((row) => row.tool === body.tool),
-        grants,
+        grant: rows.find((row) => row.tool === body.tool),
+        grants: rows,
       })
     }
     const call = /\/canvases\/([^/]+)\/call$/.exec(url.pathname)
@@ -130,7 +142,7 @@ function serve(host: Host, id: string): { gate: Gate } {
         if (host.grants[tool] === undefined) {
           return refusal(CANVAS_CONSENT_REQUIRED, `Allow this canvas to use ${tool}?`)
         }
-        if (!host.grants[tool]) return refusal("denied", `The user refused this canvas ${tool}.`)
+        if (!host.grants[tool].allowed) return refusal("denied", `The user refused this canvas ${tool}.`)
         return json({
           object: "gots.canvas.call",
           result: { tool, query: body.args.q ?? null, hits: [{ title: "A hit" }] },
@@ -236,7 +248,7 @@ function latch() {
 test(
   "test_canvas_consent_asks_once_per_tool_and_a_denial_refuses",
   atWidth(390, async () => {
-    const host: Host = { tools: ["files.search", "notes.list"], grants: {}, calls: [], answers: [] }
+    const host: Host = { tools: ["files.search", "notes.list"], grants: {}, clock: 0, calls: [], answers: [] }
     serve(host, "c1")
     await seedCanvas()
     await mount(screen("c1"), async () => {
@@ -322,7 +334,7 @@ test(
 test(
   "two tools waiting at once say where the reader is",
   atWidth(390, async () => {
-    const host: Host = { tools: ["files.search", "notes.list"], grants: {}, calls: [], answers: [] }
+    const host: Host = { tools: ["files.search", "notes.list"], grants: {}, clock: 0, calls: [], answers: [] }
     serve(host, "c2")
     await seedCanvas()
     await mount(screen("c2"), async () => {
@@ -349,7 +361,9 @@ test(
 
       await answer("allow")
       await until(() => consentWords().includes("notes.list"), "the second tool's dialog")
-      assert.match(consentWords(), /2 of 2/, "the second ask says where it stands")
+      // One question is left waiting, so there is no count: the reader already answered the other,
+      // and numbering it 2 of 2 would count a question that is no longer on screen.
+      assert.doesNotMatch(consentWords(), /of \d/, "a lone ask says no place")
       await answer("deny")
       await until(() => page.posted.length === 2, "both promises to settle")
       assert.deepEqual(
@@ -361,11 +375,51 @@ test(
 )
 
 test(
+  "the count of waiting asks follows the queue, not the last place an ask took",
+  atWidth(390, async () => {
+    // Two ask, one is answered, and a third call arrives while the second still waits: the count is
+    // the queue's own, so the two waiting read 1 of 2 — never 3 of 3 for two questions.
+    const host: Host = {
+      tools: ["a.one", "b.two", "c.three"],
+      grants: {},
+      clock: 0,
+      calls: [],
+      answers: [],
+    }
+    serve(host, "c7")
+    await seedCanvas()
+    await mount(screen("c7"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      const page = speak()
+      const call = (call: number, tool: string) =>
+        page.say({ type: BRIDGE_MESSAGE, call, method: "tool", tool, args: {} })
+
+      await call(1, "a.one")
+      await call(2, "b.two")
+      await until(() => consentDialog() !== null, "the first dialog")
+      assert.match(consentWords(), /1 of 2/)
+      await answer("allow")
+      await until(() => consentWords().includes("b.two"), "the second tool's dialog")
+
+      await call(3, "c.three")
+      await until(() => consentWords().includes("1 of 2"), "the two waiting said as one of two")
+      assert.match(consentWords(), /b\.two/, "the ask on screen is still the first waiting one")
+      assert.doesNotMatch(consentWords(), /of 3/, "no ask is counted by where it once stood")
+      await answer("deny")
+      await until(() => consentWords().includes("c.three"), "the third tool's dialog")
+      await answer("deny")
+      await until(() => consentDialog() === null, "the queue to drain")
+      await settle()
+    })
+  }),
+)
+
+test(
   "a canvas read that lands after the answer does not revert it",
   atWidth(390, async () => {
     // A read the screen had out answers with the answers as they were when it was asked. The reader
     // answers a tool before it lands, and that answer must survive the older list.
-    const host: Host = { tools: ["files.search"], grants: {}, calls: [], answers: [] }
+    const host: Host = { tools: ["files.search"], grants: {}, clock: 0, calls: [], answers: [] }
     const { gate } = serve(host, "c3")
     await seedCanvas()
     await mount(screen("c3"), async () => {
@@ -410,7 +464,7 @@ test(
 test(
   "the canvas's options change a declared tool's answer",
   atWidth(390, async () => {
-    const host: Host = { tools: ["files.search"], grants: {}, calls: [], answers: [] }
+    const host: Host = { tools: ["files.search"], grants: {}, clock: 0, calls: [], answers: [] }
     serve(host, "c4")
     await seedCanvas()
     await mount(screen("c4"), async () => {
@@ -439,6 +493,119 @@ test(
           ) === true,
         "the answer to be kept",
       )
+    })
+  }),
+)
+
+test(
+  "a grant the host refuses is the page's refusal, in the host's words",
+  atWidth(390, async () => {
+    // The bot writes a version that no longer declares the tool while the dialog is up, so the host
+    // answers the grant with a refusal of its own. It is not the reader saying no: the page hears
+    // what the host said, and the reader is told in the same words.
+    const host: Host = { tools: ["files.search"], grants: {}, clock: 0, calls: [], answers: [] }
+    serve(host, "c5")
+    await seedCanvas()
+    await mount(screen("c5"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      const page = speak()
+      await page.say({
+        type: BRIDGE_MESSAGE,
+        call: 1,
+        method: "tool",
+        tool: "files.search",
+        args: {},
+      })
+      await until(() => consentDialog() !== null, "the consent dialog")
+
+      host.tools = []
+      await answer("allow")
+      await until(() => host.answers.length === 1, "the grant to be posted")
+      await until(() => page.posted.length === 1, "the page's answer")
+      assert.equal(page.posted[0].ok, false)
+      assert.match(page.posted[0].error ?? "", /does not declare/, "the host's own words")
+      assert.doesNotMatch(
+        page.posted[0].error ?? "",
+        /didn't allow/,
+        "the reader's refusal is not invented",
+      )
+      assert.equal(
+        host.calls.filter((one) => one.shape === "files.search").length,
+        1,
+        "a grant the host refused retries nothing",
+      )
+    })
+  }),
+)
+
+test(
+  "the options list a grant the version dropped, and can turn it off",
+  atWidth(390, async () => {
+    // An answer outlives the version that asked: the sheet draws every declared tool and every tool
+    // the host holds an answer for, so one no version declares now can still be revoked.
+    const host: Host = {
+      tools: ["files.search"],
+      grants: { "notes.list": { allowed: true, at: 4 } },
+      clock: 4,
+      calls: [],
+      answers: [],
+    }
+    serve(host, "c6")
+    await seedCanvas()
+    await mount(screen("c6"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find('button[aria-label="Canvas options"]'))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+      const words = wordsOf(find("[data-canvas-options]"))
+      assert.match(words, /files\.search/, "the version's declared tool is listed")
+      assert.match(words, /notes\.list/, "the tool the host holds an answer for is listed")
+      assert.match(words, /Not declared by this version/, "and said to be undeclared now")
+
+      const switches = findAll('[data-canvas-options] [role="switch"]')
+      assert.equal(switches.length, 2, "one row per tool of the union")
+      await click(switches[1])
+      await until(() => host.answers.length === 1, "the answer to be posted")
+      assert.deepEqual(host.answers[0], { tool: "notes.list", allow: false })
+      await until(
+        () =>
+          findAll('[data-canvas-options] [role="switch"]')[1]?.getAttribute("aria-checked") ===
+          "false",
+        "the row to read as off",
+      )
+      assert.match(
+        wordsOf(find("[data-canvas-options]")),
+        /Not declared by this version/,
+        "the row is still drawn, with the answer the host now holds",
+      )
+    })
+  }),
+)
+
+test(
+  "a grant answer with no list leaves the copy as it is",
+  atWidth(390, async () => {
+    // The merge keeps the later of two answers by the host's clock, so a row this device stamped
+    // would outrank every answer the host gives afterwards. An answer with no list moves nothing.
+    const host: Host = {
+      tools: ["files.search"],
+      grants: {},
+      clock: 0,
+      calls: [],
+      answers: [],
+      silentGrants: true,
+    }
+    serve(host, "c8")
+    await seedCanvas()
+    await mount(screen("c8"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find('button[aria-label="Canvas options"]'))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+      await click(findAll('[data-canvas-options] [role="switch"]')[0])
+      await until(() => host.answers.length === 1, "the answer to be posted")
+      await settle()
+      const bot = (await db.profiles.get("bot-1"))!
+      const kept = await cachedCanvas(bot, "c8")
+      assert.deepEqual(kept?.grants ?? [], [], "no row is invented from this device's clock")
     })
   }),
 )

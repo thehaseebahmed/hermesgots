@@ -9,15 +9,18 @@ current version does not declare the tool, nobody was asked about it yet, the us
 The verdicts are named here because they are the contract between the two ends — the store that
 keeps the answers names them, and a refusal the route hands a page names them.
 
-Writes to one server are taken one at a time, so two acts on a device never interleave. The
-predicate, the host's reads and the canvas's writes are arguments, so this module knows nothing of
-who gave the consent or where the reads and writes come from.
+Writes to one server are taken one at a time, each under a lock the thread that runs the call holds,
+so two acts on a device never interleave. The predicate, the host's reads and the canvas's writes
+are arguments, so this module knows nothing of who gave the consent or where the reads and writes
+come from.
 """
 
 from __future__ import annotations
 
 import asyncio
 import functools
+import threading
+from contextlib import nullcontext
 from typing import Any, Awaitable, Callable, Dict
 
 from . import mcp, mcp_call
@@ -69,14 +72,14 @@ async def answer(
     writes: Dict[str, Write] | None = None,
     may_call: MayCall | None = None,
     profile: Any = None,
-    locks: Dict[str, asyncio.Lock] | None = None,
+    locks: Dict[str, threading.Lock] | None = None,
 ) -> Any:
     """The value for a call body ``{shape, args, write}``, or a ``CallRefused``.
 
     ``reads`` maps each host shape to its read; ``may_call(tool)`` is the consent predicate and may
     block, so it runs off the loop. ``locks`` is the caller's table of per-server act locks, one per
-    wiring: a lock binds to the loop that first contends on it, so the table must not outlive the
-    server it was made for.
+    wiring: they are threads' locks, taken in the thread the call runs on, so a request cancelled
+    while its call is out can't release one that is still doing the work.
 
     ``writes`` maps the canvas's own shapes to their writes. A page owns its canvas's data, so one
     of those is answered without asking anybody: no consent to agree to, and no act lock, since the
@@ -89,6 +92,10 @@ async def answer(
     is not a ``<server>.<tool>`` is refused here: a route that takes no tools says so once.
     """
     shape = sent.get("shape")
+    if "write" in sent and not isinstance(sent["write"], bool):
+        # `write` is what takes the act lock: a string that reads as on would either take none or
+        # take one nobody meant, so a body that names it at all names true or false.
+        raise CallRefused(f"A call's write is true or false; {sent['write']!r} is neither.", 400)
     write = sent.get("write") is True
     args = sent.get("args")
     args = args if isinstance(args, dict) else {}
@@ -118,14 +125,34 @@ async def answer(
         raise CallRefused(str(error), 400)
     verdict = await _verdict(may_call, shape)
     if verdict != ALLOWED:
-        refused = _REFUSALS.get(verdict, "This host cannot call {shape!r}.")
-        raise CallRefused(refused.format(shape=shape), 403, verdict)
-    read = functools.partial(mcp_call.call_async, profile, shape)
-    if write:
-        table = locks if locks is not None else {}
-        async with table.setdefault(server, asyncio.Lock()):
-            return await _answer_read(read, shape, args)
-    return await _answer_read(read, shape, args)
+        # Only a verdict this module names rides back as the error's `code`: anything else is a
+        # refusal with no code, so a page's consent hold can't be opened by a string nobody defined.
+        known = verdict in _REFUSALS
+        words = _REFUSALS[verdict] if known else "This host cannot call {shape!r}."
+        raise CallRefused(words.format(shape=shape), 403, verdict if known else None)
+    table = locks if locks is not None else {}
+    lock = table.setdefault(server, threading.Lock()) if write else None
+    return await _answer_read(functools.partial(_call, lock, profile, shape), shape, args)
+
+
+async def _call(
+    lock: threading.Lock | None, profile: Any, shape: str, args: Dict[str, Any]
+) -> Any:
+    """``mcp_call``'s answer for one tool, on a worker thread, under ``lock`` when it takes one."""
+    return await asyncio.to_thread(_serialised, lock, profile, shape, args)
+
+
+def _serialised(
+    lock: threading.Lock | None, profile: Any, shape: str, args: Dict[str, Any]
+) -> Any:
+    """The call itself, in the thread that runs it, holding the act lock until it answers.
+
+    Taken here rather than around the ``await`` because cancelling a request doesn't stop the
+    thread its call is already on: a lock the waiting coroutine released would let a second call
+    start acting on the server while the first was still out.
+    """
+    with lock if lock is not None else nullcontext():
+        return mcp_call.call(profile, shape, args)
 
 
 async def _verdict(may_call: MayCall, shape: str) -> str:

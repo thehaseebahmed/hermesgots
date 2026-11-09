@@ -85,6 +85,11 @@ def summaries(path: Path, limit: int) -> list[Dict[str, Any]]:
     A projection and not ``read``, which answers the whole sync envelope — a value per chat, 3.6 MB
     on three hundred of them — for a canvas' page drawing a list of names. The title is read off the
     value in SQL, tombstones are no chat at all, and the limit is the caller's: a page draws a list.
+
+    Only this bot's own chats are a chat here, by the app's own rule (``listsAsChat``): a Host room,
+    a project session and a canvas's chat are each drawn by their own screen, so they are absent
+    from the answer rather than listed as chats. An empty string is no room, no project and no
+    canvas, which is how the app reads one, so the comparison is against the empty string too.
     """
     if not path.exists():
         return []
@@ -93,6 +98,9 @@ def summaries(path: Path, limit: int) -> list[Dict[str, Any]]:
         rows = conn.execute(
             """SELECT id, at, json_extract(value, '$.title') FROM chats
                WHERE deleted = 0
+                 AND COALESCE(json_extract(value, '$.room'), '') = ''
+                 AND COALESCE(json_extract(value, '$.projectId'), '') = ''
+                 AND COALESCE(json_extract(value, '$.canvasId'), '') = ''
                ORDER BY at DESC, id
                LIMIT ?""",
             (limit,),

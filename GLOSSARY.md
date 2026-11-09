@@ -715,7 +715,7 @@ The tools a version of a canvas says it may call, named by its bot when it write
 _Avoid_: permissions, agreed tools, scopes
 
 **Host shape**:
-One of the four reads a canvas may make of its own bot — usage, routines, projects or sessions — answered from the routes the plugin already serves, without being declared or asked about.
+One of the four reads a canvas may make of its own bot — usage, routines, projects or sessions — answered where the page's call arrives, each a projection of what this bot already holds, without being declared or asked about.
 _Avoid_: data source, tool, endpoint
 
 ## Notifications

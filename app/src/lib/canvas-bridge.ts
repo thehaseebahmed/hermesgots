@@ -63,9 +63,7 @@ export function mergeGrants(
     const kept = merged.get(row.tool)
     if (!kept || row.at > kept.at) merged.set(row.tool, row)
   }
-  return [...merged.values()].sort((one, other) =>
-    one.tool < other.tool ? -1 : one.tool > other.tool ? 1 : 0,
-  )
+  return [...merged.values()].sort((one, other) => byCodePoint(one.tool, other.tool))
 }
 
 /** One document of a canvas's own data, as the host answers it: a collection, an id and a clock. */
@@ -95,7 +93,7 @@ export type BridgeCall =
 /** A call answered from this device's copy of the canvas's data: no other method reads it. */
 export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "put" | "remove" }>
 
-/** A call the host answers: a read of the device's copy, and never reaches it. */
+/** A call the host answers: the canvas's own data, written through the host's one route. */
 export type BridgeWriteCall = Extract<BridgeCall, { method: "put" | "remove" }>
 
 /** A call that reaches the host: one of its free reads, or a declared tool the page calls. */
@@ -161,8 +159,8 @@ export function readCall(data: unknown): BridgeCall | null {
 }
 
 /**
- * What a read answers, from the device's copy alone: the collection's documents in copy order, or
- * the one document, or null. No read reaches the host.
+ * What a data read answers, from the device's copy alone: the collection's documents in copy order,
+ * or the one document, or null. No data read reaches the host.
  */
 export function answerRead(call: BridgeDataCall, copy: CanvasDoc[]): unknown {
   if (call.method === "list") return copy.filter((row) => row.collection === call.collection)
@@ -271,6 +269,27 @@ function codeOf(error: unknown): string | undefined {
 }
 
 /**
+ * One ask per tool: the answer already out for `tool`, or a fresh one kept in `asking` until it
+ * settles. A call that arrives while the dialog is up joins that answer instead of opening a
+ * second dialog, and the entry goes when its own promise settles — never a later one's.
+ */
+function once(
+  asking: Map<string, Promise<boolean>>,
+  tool: string,
+  ask: () => Promise<boolean>,
+): Promise<boolean> {
+  const owed = asking.get(tool)
+  if (owed) return owed
+  const answer = ask()
+  asking.set(tool, answer)
+  const clear = () => {
+    if (asking.get(tool) === answer) asking.delete(tool)
+  }
+  void answer.then(clear, clear)
+  return answer
+}
+
+/**
  * The parent's listener: a read of the canvas's data is answered at once from the device's copy, a
  * write is the host's, and a host read or a tool call is the host's too — a tool call held until the
  * reader allows it. Nothing from another window is answered or posted — a message is the canvas
@@ -283,21 +302,8 @@ function codeOf(error: unknown): string | undefined {
  * refusal is the host's own words, and is not something the reader can answer.
  */
 export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
-  // One ask per tool, from the first refusal to the reader's answer: a call that arrives while the
-  // dialog is up waits on it instead of asking again.
   const asking = new Map<string, Promise<boolean>>()
-
-  const permission = (tool: string): Promise<boolean> => {
-    const owed = asking.get(tool)
-    if (owed) return owed
-    const answer = host.consent(tool)
-    asking.set(tool, answer)
-    const clear = () => {
-      if (asking.get(tool) === answer) asking.delete(tool)
-    }
-    void answer.then(clear, clear)
-    return answer
-  }
+  const permission = (tool: string) => once(asking, tool, () => host.consent(tool))
 
   const callTool = async (call: BridgeToolCall): Promise<unknown> => {
     try {

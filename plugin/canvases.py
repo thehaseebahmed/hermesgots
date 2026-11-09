@@ -63,6 +63,11 @@ DOC_BYTES = 64
 # A collection and a document id are names the page sends, so they stay short and readable: what a
 # key and a URL can carry without becoming a page of their own.
 NAME_CHARS = 64
+# A version's declared tools are the options sheet's rows: every one is a switch, so a version that
+# declared thousands would be a list nobody could read and a dialog nobody could answer.
+TOOLS_MAX = 50
+# A tool's name rides a stored grant, an option row and a dialog's title, so it stays a name.
+TOOL_NAME_CHARS = 64
 
 TOOL_WRITE = "canvas_write"
 TOOL_EDIT = "canvas_edit"
@@ -375,29 +380,53 @@ def _tool_name(name: Any) -> str:
     """``name`` as a tool the store may keep, or a 400 naming it.
 
     A declared name is an option row, a consent dialog and a grant, so a name that isn't a tool on a
-    server would be a page's row nothing can ever call: it is refused where it is written, by the one
-    rule that says what a tool's name is (``mcp_call.split``).
+    server would be a page's row nothing can ever call: it is refused where it is written, by the
+    one rule that says what a tool's name is (``mcp_call.split``), and so is the canvas's own data,
+    which the call route answers before consent is consulted.
     """
     if not isinstance(name, str) or not name:
         raise CanvasError("A tool is named <server>.<tool>; this one is not a name at all.")
     try:
-        mcp_call.split(name)
+        server, _tool = mcp_call.split(name)
     except mcp.McpError:
         raise CanvasError(f"A tool is named <server>.<tool>; {name!r} is not one.")
+    if server == "data":
+        raise CanvasError(
+            f"The canvas's own data is reached with canvas.data.*, not a tool; {name!r} is not "
+            "something a version declares."
+        )
+    if len(name) > TOOL_NAME_CHARS:
+        raise CanvasError(
+            f"A tool's name is at most {TOOL_NAME_CHARS} characters; {name!r} is {len(name)}."
+        )
     return name
+
+
+def declarable(name: Any) -> bool:
+    """Whether a version may declare ``name``: ``_tool_name``'s rule, asked as a question."""
+    try:
+        _tool_name(name)
+    except CanvasError:
+        return False
+    return True
 
 
 def _tools(raw: Any) -> Optional[str]:
     """A declared consent list as it is stored: names, deduplicated, in the order they were asked.
 
-    Every name is held to the one rule for a tool's name: a version's list is what its page may call,
-    and each name becomes an option row, a dialog and a grant, so a name nothing could ever call is
-    refused here rather than stored as a promise the app can't keep.
+    Every name is held to the one rule for a tool's name, and the list to ``TOOLS_MAX``: a version's
+    list is what its page may call, and each name becomes an option row, a dialog and a grant, so a
+    name nothing could ever call — or a list no sheet could draw — is refused here rather than
+    stored as a promise the app can't keep.
     """
     if raw is None:
         return None
     if not isinstance(raw, list):
         raise CanvasError("tools must be a list of tool names.")
+    if len(raw) > TOOLS_MAX:
+        raise CanvasError(
+            f"A version declares at most {TOOLS_MAX} tools; this one declares {len(raw)}."
+        )
     return json.dumps(list(dict.fromkeys(_tool_name(name) for name in raw)))
 
 
@@ -842,11 +871,15 @@ def may_call(path: Path, canvas_id: str, tool: str) -> str:
 def grant(path: Path, canvas_id: str, tool: Any, allow: Any) -> Dict[str, Any]:
     """Records the user's answer for one tool a canvas's page declares, and answers what it holds.
 
-    A name that is not one, and a tool the version the user is looking at does not declare, are both
-    refused: an answer belongs to a question that version asked, and a name no page could ever call
-    is no question at all. The row outlives the version, so a page written again keeps the answers it
-    was given, and the version's list is what still decides what may be called — a later version that
-    stops declaring a tool can't call it, granted or not.
+    A name that is not one is refused, and so is an answer for a tool this canvas never answered
+    about and the version the user is looking at does not declare: an answer belongs to a question
+    that version asked, and a name no page could ever call is no question at all. A row already
+    recorded is another matter — the options list every answer the host holds, so a grant can be
+    changed (at least revoked) after a later version stopped declaring its tool.
+
+    The row outlives the version, so a page written again keeps the answers it was given, and the
+    version's list is what still decides what may be called — a later version that stops declaring a
+    tool can't call it, granted or not.
 
     The row comes back with every answer the canvas holds: the screen that asked draws the switch it
     flipped and the rest of its options without another read, and both are read in the one write's
@@ -861,7 +894,10 @@ def grant(path: Path, canvas_id: str, tool: Any, allow: Any) -> Dict[str, Any]:
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
-        if not declares(_tools_of(conn, canvas_id, found["version"]), tool):
+        answered = conn.execute(
+            "SELECT 1 FROM canvas_grants WHERE canvas_id = ? AND tool = ?", (canvas_id, tool)
+        ).fetchone()
+        if answered is None and not declares(_tools_of(conn, canvas_id, found["version"]), tool):
             raise CanvasError(
                 f"The version this canvas shows does not declare {tool!r}, so there is nothing to "
                 "allow. Ask the bot to write a version that declares it."
@@ -1048,8 +1084,9 @@ WRITE_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "The host tools this version's page may call. A write replaces the page whole, "
-                    "so leaving this out declares none — the list a page had does not carry over."
+                    "The host tools this version's page may call, each named <server>.<tool>. A "
+                    "write replaces the page whole, so leaving this out declares none — the list a "
+                    "page had does not carry over."
                 ),
             },
         },
@@ -1099,8 +1136,9 @@ EDIT_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "The host tools this version's page may call. An edit changes the page rather "
-                    "than replacing it, so leaving this out keeps the list the page already had."
+                    "The host tools this version's page may call, each named <server>.<tool>. An "
+                    "edit changes the page rather than replacing it, so leaving this out keeps the "
+                    "list the page already had."
                 ),
             },
         },

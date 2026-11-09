@@ -261,17 +261,19 @@ export function CanvasView() {
   }, [id])
 
   // The reader's answer about a tool is kept on the host, and the host's canvas replaces the copy
-  // this screen draws. A grant that couldn't be posted answers no, so the page's own promise hears
-  // the refusal rather than being retried on a permission the host never recorded — but a host that
-  // answered and refused said why, and that is not the reader saying no: its words are said, and the
-  // page still hears no.
+  // this screen draws. A grant that couldn't be posted answers no — the page's own promise hears the
+  // refusal rather than being retried on a permission the host never recorded. A host that answered
+  // and refused said why (a version rewritten while the dialog was up no longer declares the tool),
+  // and that is the page's answer in the host's own words, said to the reader too; only a host that
+  // never landed answers no.
   const grant = async (tool: string, allow: boolean) => {
     try {
       await grantCanvasTool(id, tool, allow)
       return allow
     } catch (failure) {
-      if (hostAnswered(failure)) tell.error(failure.message)
-      return false
+      if (!hostAnswered(failure)) return false
+      tell.error(failure.message)
+      throw failure
     }
   }
   const consent = useCanvasConsent(grant)

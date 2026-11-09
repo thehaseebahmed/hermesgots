@@ -19,34 +19,37 @@ import {
 } from "@/components/ui/alert-dialog"
 import type { Canvas } from "@/lib/canvases"
 
-/** One tool waiting for an answer, where it stands among the asks, and the call held on it. */
+/** One tool waiting for an answer, and the two ways the call held on it can settle. */
 export interface ConsentAsk {
   tool: string
-  position: number
+  /** The page's answer: what the reader chose, and what the host said to it. */
   resolve: (allow: boolean) => void
+  /** The host's own refusal of the grant — a version rewritten while the dialog was up — which is
+   * neither the reader's yes nor their no. */
+  fail: (error: unknown) => void
+}
+
+/**
+ * The ask on screen, and where it stands among the ones still waiting: the queue's own index, so a
+ * batch reads 1 of 2 and the question that follows it is counted afresh.
+ */
+export interface ShownAsk extends ConsentAsk {
+  position: number
 }
 
 /**
  * The asks a page's tool calls are waiting on, one shown at a time. `ask` never settles until the
  * reader answers; `answer` hands the tool to `onAnswer`, which posts the grant, and resolves the
- * page's promise with what that write settled on — Allow true, Don't allow false.
+ * page's promise with what that write settled on — Allow true, Don't allow false. A write the host
+ * refused rejects it with the host's own failure, so the page is never told the reader said no.
  */
 export function useCanvasConsent(onAnswer: (tool: string, allow: boolean) => Promise<boolean>) {
   const [queue, setQueue] = useState<ConsentAsk[]>([])
 
   const ask = useCallback(
     (tool: string) =>
-      new Promise<boolean>((resolve) => {
-        setQueue((waiting) => [
-          ...waiting,
-          // Where this ask stands: one more than the last waiting one, so a batch of questions
-          // reads 1 of 2 and then 2 of 2 rather than starting over as each is answered.
-          {
-            tool,
-            position: waiting.reduce((last, one) => Math.max(last, one.position), 0) + 1,
-            resolve,
-          },
-        ])
+      new Promise<boolean>((resolve, reject) => {
+        setQueue((waiting) => [...waiting, { tool, resolve, fail: reject }])
       }),
     [],
   )
@@ -55,24 +58,24 @@ export function useCanvasConsent(onAnswer: (tool: string, allow: boolean) => Pro
     async (allow: boolean) => {
       const current = queue[0]
       if (!current) return
-      // Out of the queue before the write is asked for, so the dialog is gone and the next ask draws
-      // at once rather than the reader answering a question that is still on screen.
-      setQueue((waiting) => waiting.filter((one) => one !== current))
-      let answered = false
       try {
-        answered = await onAnswer(current.tool, allow)
-      } catch {
-        // A write that threw is no answer to tell the page yes to, and the promise has to settle
-        // either way: a page waiting on a dialog that has gone would wait for ever.
-        answered = false
+        current.resolve(await onAnswer(current.tool, allow))
+      } catch (error) {
+        current.fail(error)
+      } finally {
+        // Out of the queue however the write went: a page waiting on a dialog that has gone would
+        // wait for ever, and the next ask draws at once rather than behind an answered one.
+        setQueue((waiting) => waiting.filter((one) => one !== current))
       }
-      current.resolve(answered)
     },
     [queue, onAnswer],
   )
 
-  const total = queue.reduce((last, one) => Math.max(last, one.position), 0)
-  return { current: queue[0] ?? null, total, ask, answer }
+  // Counted from the queue itself, never from the place an ask took when it arrived: a question
+  // answered long ago must not leave the next one reading 3 of 3. One waiting is no count at all.
+  const head = queue[0]
+  const current = head ? { ...head, position: queue.indexOf(head) + 1 } : null
+  return { current, total: queue.length, ask, answer }
 }
 
 /**
@@ -89,7 +92,7 @@ export function CanvasConsentDialog({
   onAnswer,
 }: {
   canvasTitle: string
-  ask: ConsentAsk | null
+  ask: ShownAsk | null
   total: number
   onAnswer: (allow: boolean) => void
 }) {
@@ -124,9 +127,10 @@ export function CanvasConsentDialog({
 }
 
 /**
- * The answers a canvas's version carries, changed after the fact: one row per declared tool, its
- * Switch on where the user allowed it, and a line saying which of not asked and not allowed the off
- * state is. A tool the host never answered for reads as not asked.
+ * The answers a canvas's version carries, changed after the fact: one row per tool of the union —
+ * every tool this version declares, and every tool the host holds an answer for that this version no
+ * longer declares, which is still the reader's to revoke. Its Switch is on where the user allowed it,
+ * and a line says which of not asked, not allowed or undeclared the off state is.
  *
  * The row is the Settings switch row, so the switch is named by the row's own label — the tool and
  * its state — rather than by an aria-label no other switch in the app wears.
@@ -143,12 +147,22 @@ export function CanvasOptions({
   onGrant: (tool: string, allow: boolean) => Promise<boolean>
 }) {
   const [saving, setSaving] = useState<string | null>(null)
-  const tools = canvas?.tools ?? []
+  const declared = canvas?.tools ?? []
+  const held = canvas?.grants ?? []
+  const rows = [
+    ...declared.map((tool) => ({ tool, declared: true })),
+    ...held
+      .filter((row) => !declared.includes(row.tool))
+      .map((row) => ({ tool: row.tool, declared: false })),
+  ]
 
   const change = async (tool: string, allow: boolean) => {
     setSaving(tool)
     try {
       await onGrant(tool, allow)
+    } catch {
+      // A refusal the host answered with was said where it was read, and the switch goes back to
+      // what the host holds: a grant that never landed is not an answer this sheet keeps.
     } finally {
       setSaving(null)
     }
@@ -161,25 +175,27 @@ export function CanvasOptions({
           <PopupTitle>{canvas?.title ?? "Canvas"} options</PopupTitle>
         </PopupHeader>
         <div data-canvas-options className="px-4 pb-4">
-          {tools.length === 0 ? (
+          {rows.length === 0 ? (
             <p className="py-2 text-sm text-muted-foreground">
               This version doesn't call any of the bot's tools.
             </p>
           ) : (
             <Group>
-              {tools.map((tool) => {
-                const answer = (canvas?.grants ?? []).find((row) => row.tool === tool)?.allowed
+              {rows.map(({ tool, declared: current }) => {
+                const answer = held.find((row) => row.tool === tool)?.allowed
                 return (
                   <SwitchRow
                     key={tool}
                     id={`canvas-tool-${tool}`}
                     title={tool}
                     subtitle={
-                      answer === true
-                        ? "Allowed"
-                        : answer === false
-                          ? "Not allowed"
-                          : "Not asked yet"
+                      !current
+                        ? "Not declared by this version"
+                        : answer === true
+                          ? "Allowed"
+                          : answer === false
+                            ? "Not allowed"
+                            : "Not asked yet"
                     }
                     checked={answer === true}
                     disabled={saving === tool}

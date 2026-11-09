@@ -125,7 +125,7 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
   const { canvases, summary, full, below } = store
   const fail = (status, message, code) =>
     json(res, status, { error: { message, ...(code ? { code } : {}) } })
-  /** The tool the pointer's version declared, or a refusal the caller is answered with. */
+  /** Whether the version the pointer names declared ``tool``. */
   const declared = (canvas, tool) => {
     const current = canvas.versions.find((v) => v.version === canvas.version)
     return (current?.tools ?? []).includes(tool)
@@ -176,7 +176,12 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
       }),
       routines: () => ({
         routines: [
-          { id: "r_morning", name: "Morning brief", schedule: "0 8 * * *", enabled: true },
+          {
+            id: "r_morning",
+            name: "Morning brief",
+            enabled: true,
+            schedule_display: "Every day at 8",
+          },
         ],
       }),
       projects: () => ({ projects: [] }),
@@ -299,7 +304,7 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
       fail(400, "A grant names the tool it answers for.")
       return true
     }
-    if (!declared(canvas, body.tool)) {
+    if (!declared(canvas, body.tool) && !(canvas.grants ?? []).some((row) => row.tool === body.tool)) {
       fail(403, `This canvas never declared ${body.tool}.`, "not_declared")
       return true
     }
