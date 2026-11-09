@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
@@ -15,7 +16,7 @@ import { Screen } from "@/components/settings-chrome"
 import { botPageOf } from "@/lib/bot-tabs"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
-import { db } from "@/lib/db"
+import { db, saveSettings } from "@/lib/db"
 import {
   Path,
   absent,
@@ -124,11 +125,17 @@ function host({
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch, chain: () => chain }
 }
 
-/** A bot of this test's own: its connection names a host, so no other test's answers are read. */
-async function seed(name: string, options: Parameters<typeof host>[0] = {}, patch = {}) {
-  await seedSettings()
+/** A bot of this test's own: its connection names a host, so no other test's answers are read. These
+ * cases are the account with chat threads on, since the Gots triage row exists only there; the two
+ * that prove the switch off seed it off (ADR 0120). */
+async function seed(
+  name: string,
+  options: Parameters<typeof host>[0] = {},
+  { chatThreads = true }: { chatThreads?: boolean } = {},
+) {
+  await seedSettings({ chatThreads })
   await db.profiles.clear()
-  await db.profiles.put(botProfile(name, patch))
+  await db.profiles.put(botProfile(name))
   const server = host(options)
   globalThis.fetch = server.fetch
   return server.calls
@@ -328,6 +335,32 @@ test("a host without the triage route draws no Gots caption, and its Hermes card
     assert.ok(caption("Hermes"), "the Hermes card is the page's own")
     absent('[data-setting="triage-model"]', "and no triage row")
     assert.deepEqual(rows(), ["model"], "and the model a chat runs is still there")
+  })
+})
+
+test("with chat threads off, no Gots section is drawn and the Hermes models still are", async () => {
+  // The shipped default: with chat threads off the triage model is a setting nowhere, so the page is
+  // its Hermes card alone (ADR 0120) — and the bot's own models are not a thread's to lose.
+  await seed("chat-threads-off", {}, { chatThreads: false })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.ok(!caption("Gots"), "no caption over a card with no row in it")
+    absent('[data-setting="triage-model"]', "and no triage row")
+    assert.equal(caption("Hermes")?.textContent?.trim(), "Hermes", "the Hermes card is still drawn")
+    assert.deepEqual(rows(), ["model"], "with the model a chat runs")
+  })
+})
+
+test("turning chat threads on draws the Gots section again, holding the host's pick", async () => {
+  await seed(
+    "chat-threads-flip",
+    { triage: { provider: "openrouter", model: "cheap-model" } },
+    { chatThreads: false },
+  )
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.ok(!row("triage-model"), "off, no triage row")
+    await act(async () => saveSettings({ chatThreads: true }))
+    await until(async () => Boolean(row("triage-model")), "the Gots row")
+    assert.equal(accent("triage-model"), "openrouter/cheap-model", "holding the pick the host kept")
   })
 })
 

@@ -224,7 +224,8 @@ sequenceDiagram
    Triage-model read, Bot's Models page. Check: `scripts/test-triage-model.tsx` — with the default
    off nothing is drawn and the host is not read; with the switch on the field returns holding the
    pick the host kept; `scripts/test-bot-models-and-chain.tsx` — no Gots section off, and the
-   Hermes models still drawn.
+   Hermes models still drawn. Both files' cases that mean the row seed `chatThreads: true`, since
+   they describe it. Done.
 
 ## Decisions
 

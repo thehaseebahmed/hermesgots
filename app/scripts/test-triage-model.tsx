@@ -1,14 +1,17 @@
 /**
  * A bot's Triage model on its Chat page: the field a plugin that offers the route shows, a pick
  * the host refuses (its words in a toast, nothing changed), the permission the host withholds, and
- * the plugin that lacks the route and shows nothing.
+ * the plugin that lacks the route and shows nothing. These cases are the account with chat threads
+ * on, since the field exists only there (ADR 0120); the two cases after them prove it.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 
 import { toast } from "sonner"
 
 import { TriageModelSetting } from "@/components/chat/model-picker"
+import { saveSettings } from "@/lib/db"
 import {
   botProfile,
   click,
@@ -36,9 +39,10 @@ function host({
   allowed?: boolean
   refuse?: string
 } = {}) {
-  const state = { held, writes: [] as unknown[] }
+  const state = { held, writes: [] as unknown[], calls: [] as string[] }
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
+    state.calls.push(path)
     if (path.endsWith("/api/plugins/gots/info"))
       return json({ features, research: { writers: { model: allowed, provider: allowed } } })
     if (path.endsWith("/api/plugins/gots/triage-model")) {
@@ -82,7 +86,7 @@ async function pickCheap() {
 }
 
 test("a plugin that lacks the route shows no field", async () => {
-  await seedSettings()
+  await seedSettings({ chatThreads: true })
   const fake = host({ features: ["triage"] })
   globalThis.fetch = fake.fetch
   await mount(<TriageModelSetting profile={botProfile("triage-old")} />, async () => {
@@ -92,7 +96,7 @@ test("a plugin that lacks the route shows no field", async () => {
 })
 
 test("unset reads as the default model, and a pick is written and shown", async () => {
-  await seedSettings()
+  await seedSettings({ chatThreads: true })
   const fake = host()
   globalThis.fetch = fake.fetch
   const profile = botProfile("triage-pick")
@@ -108,7 +112,7 @@ test("unset reads as the default model, and a pick is written and shown", async 
 })
 
 test("a held pick is shown, and the host's refusal reaches a toast", async () => {
-  await seedSettings()
+  await seedSettings({ chatThreads: true })
   const fake = host({
     held: { provider: "openrouter", model: "own-model" },
     refuse: "Unknown model 'cheap-model'.",
@@ -131,7 +135,7 @@ test("a held pick is shown, and the host's refusal reaches a toast", async () =>
 })
 
 test("a host that withholds the override says so", async () => {
-  await seedSettings()
+  await seedSettings({ chatThreads: true })
   globalThis.fetch = host({ allowed: false }).fetch
   await mount(<TriageModelSetting profile={botProfile("triage-withheld")} />, async () => {
     assert.match(text(), /doesn't let Gots pick the model/)
@@ -139,7 +143,7 @@ test("a host that withholds the override says so", async () => {
 })
 
 test("the row says what the model is for, with no info icon any more", async () => {
-  await seedSettings()
+  await seedSettings({ chatThreads: true })
   globalThis.fetch = host().fetch
   await mount(<TriageModelSetting profile={botProfile("triage-hint")} />, async () => {
     assert.equal(
@@ -152,10 +156,40 @@ test("the row says what the model is for, with no info icon any more", async () 
 })
 
 test("a host that allows it shows no warning", async () => {
-  await seedSettings()
+  await seedSettings({ chatThreads: true })
   globalThis.fetch = host().fetch
   await mount(<TriageModelSetting profile={botProfile("triage-allowed")} />, async () => {
     assert.ok(opener())
     assert.doesNotMatch(text(), /doesn't let Gots pick the model/)
+  })
+})
+
+test("with chat threads off, the field draws nothing and the host is not asked", async () => {
+  // The shipped defaults — the bot layout with chat threads off — where the triage model is a
+  // setting nowhere, so the host is not asked for the route, its features or the model (ADR 0120).
+  await seedSettings()
+  const fake = host({ held: { provider: "openrouter", model: "own-model" } })
+  globalThis.fetch = fake.fetch
+  await mount(<TriageModelSetting profile={botProfile("triage-off")} />, async () => {
+    await settle()
+    assert.ok(!find("#triage-model"), "nothing is drawn")
+    assert.doesNotMatch(text(), /Triage model/)
+    assert.deepEqual(fake.state.calls, [], "the host is asked nothing at all")
+  })
+})
+
+test("turning chat threads on gives the field back, holding the pick the host kept", async () => {
+  await seedSettings()
+  const fake = host({ held: { provider: "openrouter", model: "own-model" } })
+  globalThis.fetch = fake.fetch
+  await mount(<TriageModelSetting profile={botProfile("triage-flipped")} />, async () => {
+    assert.ok(!find("#triage-model"), "off, nothing is drawn")
+    await act(async () => saveSettings({ chatThreads: true }))
+    await until(async () => Boolean(opener()), "the field, once the switch is on")
+    assert.match(opener()?.textContent ?? "", /own-model/, "holding the pick the host kept")
+    assert.ok(
+      fake.state.calls.some((path) => path.endsWith("/triage-model")),
+      "and the host was asked once it may be",
+    )
   })
 })
