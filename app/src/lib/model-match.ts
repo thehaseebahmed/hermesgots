@@ -74,6 +74,13 @@ const aliasFamily = (id: string) =>
     )
     .join("/")
 
+// BenchLM writes a Kimi version without the k: `kimi-3-1-pro` for the catalog's `kimi-k3.1-pro`.
+const kimiFamily = (id: string) =>
+  id
+    .split("/")
+    .map((segment) => segment.replace(/^kimi-k(?=\d)/, "kimi-"))
+    .join("/")
+
 /**
  * Ids a catalog spelling might be stored under, most specific first. A lookup takes the first
  * candidate that has a BenchLM row, so an exact row always beats a looser reading.
@@ -98,7 +105,8 @@ export function benchCandidates(id: string): string[] {
   }
   const bare = lastSegment(base)
   const aliased = [...out, bare].map(aliasFamily)
-  const candidates = [...new Set([...out, bare, ...aliased])]
+  const kimied = [...out, bare].map(kimiFamily)
+  const candidates = [...new Set([...out, bare, ...aliased, ...kimied])]
   candidateCache.set(id, candidates)
   return candidates
 }
