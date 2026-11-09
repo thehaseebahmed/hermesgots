@@ -49,6 +49,7 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    naming its own file instead of the OOM killer taking its neighbours. Goals: G1 G2. After: 1.
    Layers: test tier. Check: a deliberate runaway in a scratch file dies with a heap error while the file
    beside it still reports green; the tier's own peak stays under 1 GB of anonymous memory.
+   Done.
 
 ## Decisions
 - **Confirmed: the kill is a failing assertion's diff, not the app and not the concurrency.** Run
