@@ -10,7 +10,7 @@ components with no styling input and no data of their own, so they couldn't take
 a ticked box. Their builds were also parsed and saved by the device, so closing the app lost a build,
 which breaks the Plugin first rule. A canvas reverses all three.
 
-**The host owns everything a canvas is.** That is its record (title, pinned, archived), its versions,
+**The host owns everything a canvas is.** That is its record (title, pinned, archived, and the picture its tile draws), its versions,
 its data and its tool grants. The device keeps a copy of each, so a canvas opens and reads with the
 host away. Writes are refused while the host is away rather than queued.
 

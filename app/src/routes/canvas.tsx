@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  ArrowUpIcon,
   EllipsisIcon,
   FrameIcon,
   MenuIcon,
   PencilIcon,
-  PlusIcon,
   Undo2Icon,
 } from "lucide-react"
-import { useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
-import { Bot } from "@/components/bot"
 import {
   CanvasConsentDialog,
   CanvasOptions,
@@ -25,12 +24,18 @@ import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
-import { ItemGroup, ItemRow } from "@/components/item-list"
+import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/spinner"
 import { attempt } from "@/lib/attempt"
 import { awayLine } from "@/lib/away"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
@@ -67,16 +72,42 @@ import { useNow } from "@/lib/threads"
  * `/canvas/:id` draws one page in a sandboxed frame (ADR 0114).
  */
 
-function CanvasRow({ canvas, now }: { canvas: Canvas; now: number }) {
+/** How the tiles are laid out: a phone holds two, a tablet three, a desktop four. */
+const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
+
+/**
+ * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
+ * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
+ * whole of what tells two canvases apart at a glance.
+ */
+function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
+  const line = canvas.version > 0 ? `Version ${canvas.version}` : "Building it…"
   return (
-    <ItemRow
-      icon={<FrameIcon />}
-      botId={canvas.profileId}
-      title={canvas.title}
-      when={canvas.at ? formatRelative(canvas.at, now) : undefined}
-      line={canvas.version > 0 ? `Version ${canvas.version}` : "Your bot is building it…"}
-      link={{ to: `/canvas/${canvas.id}` }}
-    />
+    <Link
+      to={`/canvas/${canvas.id}`}
+      data-canvas-tile
+      className="group flex min-w-0 flex-col gap-2 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+    >
+      <div
+        data-canvas-tile-image={canvas.image ? "picture" : "mark"}
+        className="relative aspect-[4/3] overflow-hidden rounded-2xl border bg-muted/40"
+      >
+        {canvas.image ? (
+          <img src={canvas.image} alt="" className="size-full object-cover" loading="lazy" />
+        ) : (
+          <span className="flex size-full items-center justify-center text-muted-foreground">
+            <FrameIcon className="size-7" aria-hidden />
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 px-0.5">
+        <p className="truncate text-sm font-medium">{canvas.title}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {line}
+          {canvas.at ? ` · ${formatRelative(canvas.at, now)}` : ""}
+        </p>
+      </div>
+    </Link>
   )
 }
 
@@ -140,49 +171,64 @@ export function CanvasPage() {
                 <BotPicker profile={profile} />
               </div>
             )}
-            <Textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  void create()
-                }
-              }}
-              rows={3}
-              placeholder="A tip calculator for a restaurant bill, in the app's own colours"
-              aria-label="What the canvas should be"
-              className="min-h-24 resize-none rounded-3xl bg-background shadow-lg shadow-black/5 dark:bg-input/30"
-            />
-            <Button
-              type="submit"
-              size="lg"
-              className="self-end rounded-full"
-              disabled={!profile || !prompt.trim() || starting}
-            >
-              <PlusIcon />
-              {starting ? "Starting…" : "Make it"}
-            </Button>
+            {/* The prompt and its send are one field, as Research asks its own: the button sits in
+                the box's corner rather than under it, so the words and the press are one thing. */}
+            <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
+              <InputGroupTextarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault()
+                    void create()
+                  }
+                }}
+                rows={3}
+                placeholder="A tip calculator for a restaurant bill, in the app's own colours"
+                aria-label="What the canvas should be"
+                className="max-h-48 min-h-20 px-5 pt-4 pb-2 text-base md:text-[15px]"
+              />
+              <InputGroupAddon align="block-end" className="px-2.5 pt-0 pb-1.5">
+                <span className="flex-1" />
+                <InputGroupButton
+                  type="submit"
+                  variant="default"
+                  size="icon-sm"
+                  className="size-11 rounded-full"
+                  disabled={!profile || !prompt.trim() || starting}
+                  aria-label="Make it"
+                >
+                  {starting ? <Spinner /> : <ArrowUpIcon />}
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
             {blocked && <p className="text-sm text-muted-foreground">{blocked}</p>}
           </form>
         </section>
 
-        <section className="flex flex-col gap-2">
+        <section className="flex flex-col gap-4">
           {loaded && visible.length === 0 && archived.length === 0 && !blocked && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No canvases yet. Ask for one above and your bot builds it.
             </p>
           )}
-          {visible.map((canvas) => (
-            <CanvasRow key={canvas.id} canvas={canvas} now={now} />
-          ))}
+          {visible.length > 0 && (
+            <ul className={TILES} aria-label="Canvases">
+              {visible.map((canvas) => (
+                <li key={canvas.id} className="min-w-0">
+                  <CanvasTile canvas={canvas} now={now} />
+                </li>
+              ))}
+            </ul>
+          )}
           {archived.length > 0 && (
             <ItemGroup
               group={{ key: "archived", label: "Archived", items: archived, folded: true }}
+              listClassName={TILES}
             >
               {archived.map((canvas) => (
-                <li key={canvas.id}>
-                  <CanvasRow canvas={canvas} now={now} />
+                <li key={canvas.id} className="min-w-0">
+                  <CanvasTile canvas={canvas} now={now} />
                 </li>
               ))}
             </ItemGroup>
@@ -466,32 +512,28 @@ export function CanvasView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
         <BackButton label="All canvases" variant="ghost" onClick={() => up("/canvas")} />
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
-          {canvas?.version ? (
-            <span className="shrink-0 text-xs text-muted-foreground">v{canvas.version}</span>
-          ) : null}
-          {awayWords ? (
-            <span
-              role="status"
-              data-canvas-offline
-              className="shrink-0 text-xs text-muted-foreground"
-            >
-              {awayWords}
-            </span>
-          ) : null}
+          {/* A place's header, as a coding session's is: the name over the one line that says where
+              the reader is — whose canvas it is, and which version of it. */}
+          <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
+            {profile && <span className="truncate">{profile.name}</span>}
+            {canvas?.version ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="shrink-0">v{canvas.version}</span>
+              </>
+            ) : null}
+            {awayWords ? (
+              <>
+                <span aria-hidden>·</span>
+                <span role="status" data-canvas-offline className="shrink-0">
+                  {awayWords}
+                </span>
+              </>
+            ) : null}
+          </p>
         </div>
-        {canvas ? (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            aria-label="Canvas options"
-            onClick={() => setOptionsOpen(true)}
-          >
-            <EllipsisIcon />
-          </Button>
-        ) : null}
         {canvas?.canUndo && !awayNow ? (
           <Button
             variant="ghost"
@@ -504,7 +546,19 @@ export function CanvasView() {
             <Undo2Icon />
           </Button>
         ) : null}
-        {profile && <Bot id={profile.id} className="size-7 shrink-0" />}
+        {/* The menu is the row's last control, so the one button that opens a sheet is always where a
+            hand reaches for it, whatever else the canvas offers today. */}
+        {canvas ? (
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 rounded-full"
+            aria-label="Canvas options"
+            onClick={() => setOptionsOpen(true)}
+          >
+            <EllipsisIcon />
+          </Button>
+        ) : null}
       </header>
 
       <div className="flex min-h-0 flex-1">

@@ -22,10 +22,13 @@ import { cn } from "@/lib/utils"
 export function ItemGroup({
   group,
   sticky,
+  listClassName,
   children,
 }: {
   group: ListGroup
   sticky?: boolean
+  /** The list's own arrangement, where its rows are drawn as something else than a column. */
+  listClassName?: string
   children: ReactNode
 }) {
   const heading = (
@@ -42,7 +45,7 @@ export function ItemGroup({
     </>
   )
   const stickyClass = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
-  const list = <ul className="flex flex-col">{children}</ul>
+  const list = <ul className={cn("flex flex-col", listClassName)}>{children}</ul>
   if (!group.folded)
     return (
       <section className="flex flex-col gap-1" aria-label={group.label}>

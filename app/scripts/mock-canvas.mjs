@@ -147,6 +147,7 @@ export function createCanvasStore() {
     version: c.version,
     pinned: c.pinned,
     archived: c.archived,
+    image: c.image ?? null,
     at: c.at,
     created_at: c.created_at,
   })
@@ -178,6 +179,15 @@ export function createCanvasStore() {
 }
 
 /**
+ * The picture a canvas's tile draws, as the plugin keeps one: a single inline image, made here from
+ * the canvas's own name and version, so a tile is visibly that canvas's rather than a shared mark.
+ */
+function picture(canvas) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240"><rect width="320" height="240" fill="#0d2b22"/><rect x="24" y="28" width="272" height="120" rx="12" fill="#123d2f"/><circle cx="72" cy="188" r="10" fill="#2f7d5f"/><text x="96" y="194" fill="#7ee2b8" font-family="ui-sans-serif, sans-serif" font-size="20">${escapeHtml(canvas.title).slice(0, 24)}</text></svg>`
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+}
+
+/**
  * Writes the canvas's next version, as `canvases.py`'s `_commit` does: the history above the record's
  * pointer goes first, so an undo leaves no redo and the pointer's version is the only row at its
  * number, then the page is built from what the version was asked to say. The canvas's data — the
@@ -188,6 +198,7 @@ function writeVersion(canvas, words) {
   canvas.at = Date.now()
   canvas.versions = canvas.versions.filter((one) => one.version < canvas.version)
   const edited = typeof words === "string" ? words.replace(/\s+/g, " ").trim().slice(0, 200) : ""
+  canvas.image = picture(canvas)
   canvas.versions.push({
     version: canvas.version,
     html: page(canvas.prompt, canvas.title, canvas.version, edited),
@@ -434,6 +445,8 @@ export async function handleCanvas(
         version: 0,
         pinned: false,
         archived: false,
+        // Nothing until a version is written: a canvas still being built draws its own mark.
+        image: null,
         at: now,
         created_at: now,
         versions: [],
@@ -499,8 +512,8 @@ export async function handleCanvas(
 
   if (req.method === "POST") {
     const body = (await readBody(req)) ?? {}
-    if (!["title", "pinned", "archived"].some((field) => field in body)) {
-      fail(400, "A canvas's update names what changes: a title, pinned, or archived.")
+    if (!["title", "pinned", "archived", "image"].some((field) => field in body)) {
+      fail(400, "A canvas's update names what changes: a title, pinned, archived, or image.")
       return true
     }
     if ("title" in body) {
@@ -518,6 +531,13 @@ export async function handleCanvas(
         return true
       }
       canvas[field] = body[field]
+    }
+    if ("image" in body) {
+      if (typeof body.image !== "string" || (body.image && !body.image.startsWith("data:image/"))) {
+        fail(400, "A canvas's image is an inline picture, as a data URL.")
+        return true
+      }
+      canvas.image = body.image || null
     }
     canvas.at = Date.now()
     noteEvent("canvas", canvas.session_id)

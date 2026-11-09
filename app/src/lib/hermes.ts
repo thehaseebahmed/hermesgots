@@ -2481,7 +2481,12 @@ export async function undoCanvas(config: HermesConfig, id: string) {
  * also renames the chat the canvas is edited in. The host answers the record as it now is: the page
  * is no part of this change, and a screen that made it already holds the version it draws.
  */
-export type CanvasChanges = { title?: string; pinned?: boolean; archived?: boolean }
+export type CanvasChanges = {
+  title?: string
+  pinned?: boolean
+  archived?: boolean
+  image?: string
+}
 
 export async function updateCanvas(
   config: HermesConfig,

@@ -2,7 +2,9 @@
 has to pass before it becomes one (ADR 0113).
 
 The host owns everything a canvas is. Its record lives in ``canvases`` (title, the session it is
-is edited in, the chat that session belongs to, its current version and its placement) and every
+is edited in, the chat that session belongs to, its current version, its placement and the picture
+its tile draws — a write may name one, which is what the list shows in place of the canvas's mark)
+and every
 write is a row of ``canvas_versions``, the newest ``KEEP_VERSIONS`` kept. A canvas is changed only
 from its own session: ``canvas_write``, ``canvas_edit`` and ``canvas_read`` are equipped there and
 nowhere else, and the canvas is found from a run's session by walking the chat's compression lineage
@@ -85,6 +87,10 @@ NAME_CHARS = 64
 TOOLS_MAX = 50
 # A tool's name rides a stored grant, an option row and a dialog's title, so it stays a name.
 TOOL_NAME_CHARS = 64
+# The picture a canvas's tile draws. It rides every device's list as the page rides one screen, so it
+# is one inline image — never a URL, since a list that fetched one would be a list reaching outside
+# itself — and a picture past the cap is refused rather than trimmed.
+IMAGE_CHARS = 192 * 1024
 
 TOOL_WRITE = "canvas_write"
 TOOL_EDIT = "canvas_edit"
@@ -233,7 +239,18 @@ def scan(html: Any) -> None:
 
 # --- the record ----------------------------------------------------------------------------------
 
-_COLUMNS = ("id", "title", "session_id", "chat_id", "version", "pinned", "archived", "at", "created_at")
+_COLUMNS = (
+    "id",
+    "title",
+    "session_id",
+    "chat_id",
+    "version",
+    "pinned",
+    "archived",
+    "image",
+    "at",
+    "created_at",
+)
 _RECORD = ", ".join(_COLUMNS)
 
 
@@ -422,6 +439,26 @@ def _tool_name(name: Any) -> str:
     return name
 
 
+def _image(raw: Any) -> str:
+    """``raw`` as the picture a canvas's tile draws, or a 400 naming why.
+
+    A picture is a data URL — an inline image the list already holds, never something a device has to
+    fetch — and an empty string clears it, which is how a canvas goes back to its own mark.
+    """
+    if not isinstance(raw, str):
+        raise CanvasError("A canvas's image is an inline picture, as a data URL.")
+    if not raw:
+        return ""
+    if len(raw) > IMAGE_CHARS:
+        raise CanvasError(
+            f"A canvas's image is at most {IMAGE_CHARS // 1024} KB; this one is "
+            f"{(len(raw) + 1023) // 1024} KB."
+        )
+    if not raw.startswith("data:image/") or ";base64," not in raw:
+        raise CanvasError("A canvas's image is an inline picture, as a data URL.")
+    return raw
+
+
 def declarable(name: Any) -> bool:
     """Whether a version may declare ``name``: ``_tool_name``'s rule, asked as a question."""
     try:
@@ -484,15 +521,18 @@ def write(
     html: Any,
     title: Optional[Any] = None,
     tools: Any = None,
+    image: Any = None,
 ) -> Dict[str, Any]:
     """Stores a write as the canvas's next version, and answers the canvas as it now is.
 
     A write is one version: the whole document, scanned, stored, and the record's version moved on
     in the same transaction. Only the newest ``KEEP_VERSIONS`` are kept, and an older one going is
     the oldest version's row — never the one the record points at, which is what a canvas is. A title
-    writes the canvas's and its chat's together, so a rename is one name.
+    writes the canvas's and its chat's together, so a rename is one name. A picture is the record's
+    rather than the version's — it is what the list draws — and a write that names none leaves the
+    one it had.
     """
-    return _commit(path, canvas_id, html=html, title=title, tools=tools)
+    return _commit(path, canvas_id, html=html, title=title, tools=tools, image=image)
 
 
 def edit(path: Path, canvas_id: str, edits: Any, tools: Any = None) -> Dict[str, Any]:
@@ -516,6 +556,7 @@ def _commit(
     edits: Optional[List[Any]] = None,
     title: Optional[Any] = None,
     tools: Any = None,
+    image: Any = None,
 ) -> Dict[str, Any]:
     """One version, written under the store's write lock, and the canvas as it now is.
 
@@ -524,6 +565,7 @@ def _commit(
     shape ``current`` does but for its ``data``: a version never touches a canvas's data.
     """
     named = title_of(title) if isinstance(title, str) and title.strip() else None
+    pictured = _image(image) if image is not None else None
     with _writing(path) as conn:
         now = int(time.time() * 1000)
         # Read under the write lock: two writers racing here would otherwise both take the same
@@ -557,9 +599,10 @@ def _commit(
             (canvas_id, number, document, declared, now),
         )
         conn.execute(
-            """UPDATE canvases SET version = ?, at = ?, title = COALESCE(?, title)
+            """UPDATE canvases SET version = ?, at = ?, title = COALESCE(?, title),
+                                 image = COALESCE(?, image)
                WHERE id = ?""",
-            (number, now, named, canvas_id),
+            (number, now, named, pictured, canvas_id),
         )
         conn.execute(
             """DELETE FROM canvas_versions
@@ -570,7 +613,13 @@ def _commit(
         can_undo = _greatest_below(conn, canvas_id, number) is not None
         answer = _answer(
             conn,
-            {**found, "title": named or found["title"], "version": number, "at": now},
+            {
+                **found,
+                "title": named or found["title"],
+                "version": number,
+                "at": now,
+                **({"image": pictured} if pictured is not None else {}),
+            },
             {
                 "version": number,
                 "html": document,
@@ -643,8 +692,8 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     than a refusal it can show. The record's clock moves on the host's, taken under the write lock
     like every other write here, since the list is ordered by it.
     """
-    if not any(field in body for field in ("title", "pinned", "archived")):
-        raise CanvasError("A canvas's update names what changes: a title, pinned, or archived.")
+    if not any(field in body for field in ("title", "pinned", "archived", "image")):
+        raise CanvasError("A canvas's update names what changes: a title, pinned, archived, or image.")
     changes: Dict[str, Any] = {}
     if "title" in body:
         if not isinstance(body["title"], str) or not body["title"].strip():
@@ -653,6 +702,8 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     for field in ("pinned", "archived"):
         if field in body:
             changes[field] = _flag(body[field], field)
+    if "image" in body:
+        changes["image"] = _image(body["image"])
     with _writing(path) as conn:
         found = _record(conn, canvas_id)
         if found is None:
@@ -662,9 +713,16 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
         conn.execute(
             """UPDATE canvases
                SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
-                   archived = COALESCE(?, archived), at = ?
+                   archived = COALESCE(?, archived), image = COALESCE(?, image), at = ?
                WHERE id = ?""",
-            (changes.get("title"), changes.get("pinned"), changes.get("archived"), now, canvas_id),
+            (
+                changes.get("title"),
+                changes.get("pinned"),
+                changes.get("archived"),
+                changes.get("image"),
+                now,
+                canvas_id,
+            ),
         )
         answer = _record(conn, canvas_id) or found
         # Whether a version sits under the drawn one rides the answer: the record alone would read as
@@ -1200,6 +1258,14 @@ WRITE_SCHEMA = {
                     "page had does not carry over."
                 ),
             },
+            "image": {
+                "type": "string",
+                "description": (
+                    "A picture of the page for the canvas's tile in the list, as a data URL "
+                    "(data:image/png;base64,...) — one inline image, at most 192 KB. Leave it out to "
+                    "keep the one the canvas has; send an empty string to go back to its mark."
+                ),
+            },
         },
         "required": ["html"],
     },
@@ -1330,7 +1396,12 @@ def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[
         task_id,
         session_id,
         lambda path, canvas_id: write(
-            path, canvas_id, args.get("html"), args.get("title"), args.get("tools")
+            path,
+            canvas_id,
+            args.get("html"),
+            args.get("title"),
+            args.get("tools"),
+            args.get("image"),
         ),
         lambda found: {
             "id": found["id"],

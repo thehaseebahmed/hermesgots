@@ -65,6 +65,11 @@ export interface Canvas {
   version: number
   pinned: boolean
   archived: boolean
+  /**
+   * The picture the list's tile draws, as the host keeps it: one inline image the bot wrote with a
+   * version, or nothing, which the tile draws as the canvas's own mark.
+   */
+  image?: string
   /** The record's change clock. */
   at: number
   createdAt: number
@@ -224,6 +229,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     sessionId: String(raw.session_id ?? ""),
     chatId: String(raw.chat_id ?? ""),
     canUndo: Boolean(raw.can_undo),
+    ...(typeof raw.image === "string" && raw.image ? { image: raw.image } : {}),
     ...(data ? { data } : {}),
     ...(grants ? { grants } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),

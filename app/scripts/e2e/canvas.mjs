@@ -8,14 +8,17 @@ import { app, assert, flow, pass, SEND_CHORD, swipeBy } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
 const EDIT = "Make it say the deck is done."
-const SHEET = "[data-popup-form=sheet]"
+// The chat's own sheet, by the name it carries: the `+` menu is a sheet too, and this is the one
+// conversation the page is edited in.
+const SHEET = /^Edit with/
+
 const FRAME = "iframe[data-canvas-frame]"
 
 await flow(
   "canvas",
   async ({ page, until, shot }) => {
     const frame = () => page.frameLocator(FRAME)
-    const sheet = () => page.locator(SHEET)
+    const sheet = () => page.getByRole("dialog", { name: SHEET })
     const { width, height } = page.viewportSize()
     /** What a press at a point of the screen reaches: the page, or what stands over it. */
     const at = (x, y) =>
@@ -157,7 +160,9 @@ await flow(
     pass("Undo draws the first version with the box still ticked")
 
     // The chip is the composer's, and the element tapped stands above the sheet's top edge.
-    await sheet().getByRole("button", { name: "Point", exact: true }).click()
+    // Pointing is asked for in the composer's `+` sheet, where the other ways to add context are.
+    await sheet().getByRole("button", { name: "Add context", exact: true }).click()
+    await page.getByRole("button", { name: "Point at the page", exact: true }).click()
     const heading = await frame().locator("h1").boundingBox()
     assert.ok(heading, "the page's heading has a box")
     assert.ok(

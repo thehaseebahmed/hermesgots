@@ -110,6 +110,16 @@ async function until(check: () => boolean, what: string) {
   assert.ok(check(), what)
 }
 
+/**
+ * Pointing is asked for in the `+` sheet, where the other ways to add context are: the press opens
+ * it and the row inside it arms the page, which is the same two presses the reader makes.
+ */
+async function armPoint() {
+  await click(find('button[aria-label="Add context"]'))
+  await until(() => Boolean(find('button[aria-label="Point at the page"]')), "the + sheet to offer Point")
+  await click(find('button[aria-label="Point at the page"]'))
+}
+
 const frame = () => find("iframe[data-canvas-frame]") as HTMLIFrameElement | null
 const page = () => frame()?.contentWindow as (Window & { postMessage: unknown }) | null
 
@@ -133,7 +143,7 @@ test(
         inside.postMessage = (data: { type?: string; watch?: boolean }) => told.push(data)
 
         // The composer offers Point, and pressing it asks the page to highlight under the finger.
-        await click(find('button[aria-label="Point"]'))
+        await armPoint()
         await until(
           () => told.some((one) => one.type === POINT_MESSAGE && one.watch === true),
           "the page to be told a point is armed",
@@ -221,7 +231,7 @@ test(
       async () => {
         await until(() => Boolean(frame() && composerField()), "the page and its chat to draw")
         page()!.postMessage = (data: { type?: string; watch?: boolean }) => told.push(data)
-        await click(find('button[aria-label="Point"]'))
+        await armPoint()
         await until(
           () => told.filter((one) => one.watch === true).length === 1,
           "the page to be told a point is armed",
@@ -287,7 +297,7 @@ test(
       async () => {
         await until(() => Boolean(frame() && composerField()), "the page and its chat to draw")
         page()!.postMessage = (data: { type?: string; watch?: boolean }) => told.push(data)
-        await click(find('button[aria-label="Point"]'))
+        await armPoint()
         await until(
           () => told.some((one) => one.watch === true),
           "the page to be told a point is armed",
@@ -302,9 +312,9 @@ test(
           "the page to be let go by the send",
         )
         assert.equal(
-          find('button[aria-label="Point"]')?.getAttribute("aria-pressed"),
-          "false",
-          "and the button stops saying it is armed",
+          find('button[aria-label="Add context, pointing at the page"]'),
+          null,
+          "and the + stops saying it is armed",
         )
       },
     )
@@ -335,7 +345,17 @@ test(
       </MemoryRouter>,
       async () => {
         await until(() => Boolean(composerField()), "the composer to draw")
-        assert.ok(missing('button[aria-label="Point"]'), "a plain chat offers no Point")
+        // Point is asked for in the + sheet now, so the sheet is opened on a plain chat and the row
+        // that would be there is what is looked for.
+        await click(find('button[aria-label="Add context"]'))
+        await until(
+          () => Boolean(document.body.textContent?.includes("Camera")),
+          "the + sheet to draw",
+        )
+        assert.ok(
+          missing('button[aria-label="Point at the page"]'),
+          "a plain chat offers no Point",
+        )
       },
     )
   }),

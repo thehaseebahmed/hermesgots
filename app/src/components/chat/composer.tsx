@@ -10,7 +10,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowUpIcon, CrosshairIcon, MicIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
@@ -594,6 +594,14 @@ export function Composer({
     refresh(owner, stagedNow.current.map(staged))
   }, [owner, stagedKeys, refresh])
 
+  // Only a chat drawn beside a canvas's page offers this: the press arms the page, and the chip it
+  // answers with rides the next message. It is asked for in the `+` sheet, where the other ways to
+  // add context are, rather than as a fourth control on the toolbar's own row.
+  const point =
+    pointAt && !disabled
+      ? { armed: pointing, onArm: () => setPointing((was) => !was) }
+      : undefined
+
   const attach = files ? (
     <AttachMenu
       disabled={disabled}
@@ -601,26 +609,9 @@ export function Composer({
       imagesAvailable={imagesAvailable}
       onAdd={(picked) => void addFiles(picked, true)}
       session={session}
+      point={point}
     />
   ) : null
-
-  // Only a chat drawn beside a canvas's page offers this: the press arms the page, and the chip it
-  // answers with rides the next message.
-  const pointButton =
-    pointAt && !disabled ? (
-      <InputGroupButton
-        type="button"
-        variant={pointing ? "secondary" : "ghost"}
-        size="icon-sm"
-        className="size-11 rounded-full"
-        aria-label="Point"
-        aria-pressed={pointing}
-        title={pointing ? "Tap an element on the page" : "Point at an element of the page"}
-        onClick={() => setPointing((was) => !was)}
-      >
-        <CrosshairIcon />
-      </InputGroupButton>
-    ) : null
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
@@ -920,7 +911,6 @@ export function Composer({
           }}
         >
           {attach}
-          {pointButton}
           {model}
           <span className="flex-1" />
           {controls}

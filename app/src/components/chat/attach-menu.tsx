@@ -1,5 +1,12 @@
 import { useRef, useState, type ChangeEvent } from "react"
-import { CameraIcon, FileUpIcon, ImageIcon, PlusIcon, type LucideIcon } from "lucide-react"
+import {
+  CameraIcon,
+  CrosshairIcon,
+  FileUpIcon,
+  ImageIcon,
+  PlusIcon,
+  type LucideIcon,
+} from "lucide-react"
 
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -19,13 +26,19 @@ const SOURCES: { id: Source; label: string; icon: LucideIcon }[] = [
   { id: "files", label: "Files", icon: FileUpIcon },
 ]
 
-/** The composer's `+` button: photos, clips and files to add to the message, and a session's mode. */
+/**
+ * The composer's `+` button: photos, clips and files to add to the message, a session's mode, and —
+ * on a canvas's screen — pointing at an element of the page. Pointing is a way to add context, as a
+ * picture is, so it is asked for where the other ways are: the toolbar has room for the field, the
+ * model and the send, and a fourth control beside them crowded all three.
+ */
 export function AttachMenu({
   disabled,
   filesFeature,
   imagesAvailable,
   onAdd,
   session,
+  point,
 }: {
   disabled?: boolean
   /** A project session's permission mode, picked in the same sheet. */
@@ -34,6 +47,8 @@ export function AttachMenu({
   /** Whether the model takes images, which decides whether a picture rides inline or as a file. */
   imagesAvailable: boolean
   onAdd: (files: File[]) => void
+  /** A canvas's page: arming it waits for one tap on an element, which rides the next message. */
+  point?: { armed: boolean; onArm: () => void }
 }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
@@ -69,6 +84,11 @@ export function AttachMenu({
     session.onMode(mode)
   }
 
+  const pickPoint = () => {
+    setOpen(false)
+    point?.onArm()
+  }
+
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
 
@@ -80,16 +100,26 @@ export function AttachMenu({
         variant="ghost"
         size="icon-lg"
         className="relative size-11 shrink-0 rounded-full text-muted-foreground"
-        aria-label={flagged ? `Add context, mode: ${MODE_LABELS[session.mode]}` : "Add context"}
+        aria-label={
+          point?.armed
+            ? "Add context, pointing at the page"
+            : flagged
+              ? `Add context, mode: ${MODE_LABELS[session.mode]}`
+              : "Add context"
+        }
         disabled={disabled}
         onClick={() => setOpen(true)}
       >
         <PlusIcon />
-        {flagged && (
+        {flagged || point?.armed ? (
           <span className="absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-background">
-            <ModeIcon mode={session.mode} className="size-2.5!" />
+            {flagged ? (
+              <ModeIcon mode={session.mode} className="size-2.5!" />
+            ) : (
+              <CrosshairIcon className="size-2.5!" />
+            )}
           </span>
-        )}
+        ) : null}
       </Button>
       <input
         ref={(el) => void (inputs.current.camera = el)}
@@ -150,6 +180,29 @@ export function AttachMenu({
               )
             })}
           </div>
+          {point && (
+            <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
+              <h3 className="px-1 text-sm text-muted-foreground">Page</h3>
+              <Button
+                type="button"
+                variant={point.armed ? "secondary" : "outline"}
+                className="h-auto justify-start gap-3 rounded-2xl px-4 py-3 text-left text-[15px] font-normal"
+                aria-pressed={point.armed}
+                aria-label={point.armed ? "Tap an element on the page" : "Point at the page"}
+                onClick={pickPoint}
+              >
+                <CrosshairIcon className="size-5! shrink-0" />
+                <span className="flex flex-col">
+                  <span>{point.armed ? "Tap an element on the page" : "Point at the page"}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {point.armed
+                      ? "Waiting for your tap."
+                      : "Adds the element you tap to your message."}
+                  </span>
+                </span>
+              </Button>
+            </section>
+          )}
           {session && (
             <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
               <h3 className="px-1 text-sm text-muted-foreground">Mode</h3>

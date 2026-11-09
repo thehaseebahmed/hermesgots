@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # version or undo touches it. 62 adds the answers a canvas's page got for the tools its version
 # declared (`canvases.py`'s grants, ADR 0114) — one new table, and a pass over the names an earlier
 # build stored in `canvas_versions.tools` to drop the ones the rule refuses now.
-SCHEMA_VERSION = 63
+SCHEMA_VERSION = 64
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -951,6 +951,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    created_at INTEGER NOT NULL
                )"""
         )
+        # v64: the picture a canvas's tile draws (canvases.py, #934). It is the canvas's, not a
+        # version's, so a record written before one keeps drawing its mark until a write names one.
+        if version < 64:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "image" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN image TEXT")
         # v63: the record's folded-away flag is the reader's "Archived" (canvases.py, #933). A store
         # written before the name carries the first one, and the state is the same state under it.
         if version < 63:

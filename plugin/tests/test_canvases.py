@@ -203,6 +203,36 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(len(kept), canvases.KEEP_VERSIONS)
         self.assertEqual(kept[-1], canvases.KEEP_VERSIONS + 2)
 
+    def test_a_write_can_name_the_picture_its_tile_draws(self) -> None:
+        picture = "data:image/png;base64," + "A" * 32
+        written = canvases.write(self.path, self.canvas["id"], DOCUMENT, image=picture)
+        self.assertEqual(written["image"], picture)
+        # It is the record's rather than the version's, so the list carries it and a later write that
+        # names none leaves it where it was.
+        self.assertEqual(canvases.listing(self.path)[0]["image"], picture)
+        canvases.write(self.path, self.canvas["id"], DOCUMENT.replace("Tip", "Split"))
+        self.assertEqual(canvases.record(self.path, self.canvas["id"])["image"], picture)
+
+    def test_a_picture_that_is_no_inline_image_is_refused_whole(self) -> None:
+        for named, refused in (
+            ("https://example.com/shot.png", "data URL"),
+            ("data:text/html;base64,PGI+", "data URL"),
+            ("data:image/png;base64," + "A" * (canvases.IMAGE_CHARS + 1), "192 KB"),
+        ):
+            with self.subTest(named=named[:32]):
+                with self.assertRaises(canvases.CanvasError) as why:
+                    canvases.write(self.path, self.canvas["id"], DOCUMENT, image=named)
+                self.assertIn(refused, str(why.exception))
+        # Refused whole: the canvas keeps the version it had, and no picture.
+        self.assertEqual(canvases.record(self.path, self.canvas["id"])["version"], 0)
+        self.assertIsNone(canvases.record(self.path, self.canvas["id"])["image"])
+
+    def test_an_empty_picture_goes_back_to_the_canvas_mark(self) -> None:
+        picture = "data:image/png;base64," + "A" * 32
+        canvases.write(self.path, self.canvas["id"], DOCUMENT, image=picture)
+        canvases.update(self.path, self.canvas["id"], {"image": ""})
+        self.assertEqual(canvases.record(self.path, self.canvas["id"])["image"], "")
+
     def test_a_write_past_256_kb_is_refused_naming_the_cap(self) -> None:
         huge = DOCUMENT.replace("<h1>Tip</h1>", "<p>" + "x" * (canvases.MAX_BYTES + 1) + "</p>")
         with self.assertRaises(canvases.CanvasError) as refused:

@@ -722,6 +722,12 @@ _Avoid_: state, storage, store, database
 Tapping an element of a canvas while editing it, so the message you send names that element.
 _Avoid_: select, pick, inspect, element picker
 
+**Canvas picture**:
+The one inline image a canvas's tile draws in the list, written with a version by the bot that made
+the page, so the thing the reader picks from looks like the page. A canvas that never named one
+draws its own frame mark.
+_Avoid_: thumbnail, preview, cover
+
 **Pinned canvas**:
 A canvas that has its own row in the sidebar, on every device.
 _Avoid_: favourite, starred, shortcut
