@@ -35,7 +35,7 @@ export function ChatHeader({
   muted?: boolean
   showBot?: boolean
   centered?: boolean
-  subtitle?: string
+  subtitle?: ReactNode
   leading?: ReactNode
   actions?: ReactNode
   className?: string

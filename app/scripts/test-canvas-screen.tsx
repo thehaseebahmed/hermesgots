@@ -221,6 +221,49 @@ test(
 )
 
 test(
+  "the canvas's top bar is Project's top bar",
+  // A canvas is a place, as a project is: the reader is somewhere, so its bar is the shared header's
+  // one row — the title, a back control, and the same outline, blurred, round buttons a Project's
+  // menu is — rather than a copy of that row the screen keeps and drifts from.
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat("c1")
+    await mount(
+      <MemoryRouter initialEntries={["/canvas/c1"]}>
+        <Routes>
+          <Route path="/canvas/:id" element={<CanvasView />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(
+          () => find('[data-slot="header-title"]')?.textContent === CANVAS.title,
+          "the canvas's title in the shared header",
+        )
+        const row = find('[data-slot="header-row"]')
+        assert.ok(row, "the header's one row")
+        assert.ok(
+          row.contains(find('[aria-label="All canvases"]')),
+          "the back control sits in the row",
+        )
+        await until(() => Boolean(find('button[aria-label="Undo"]')), "the Undo the version offers")
+        const actions = find('[data-slot="header-actions"]')
+        assert.ok(actions, "the row's actions")
+        for (const label of ["Undo", "Canvas options"]) {
+          const button = actions.querySelector(`button[aria-label="${label}"]`)
+          assert.ok(button, `${label} is one of the row's actions`)
+          for (const look of ["bg-background/80", "backdrop-blur", "rounded-full"]) {
+            assert.ok(
+              button.className.includes(look),
+              `${label} wears the Project's ${look}`,
+            )
+          }
+        }
+      },
+    )
+  }),
+)
+
+test(
   "a canvas's chat is in no list and its address opens the canvas",
   atWidth(390, async () => {
     serveCanvases({ version: 3, undos: 0 })

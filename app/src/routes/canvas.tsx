@@ -18,6 +18,7 @@ import {
   useCanvasConsent,
 } from "@/components/canvas-consent"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
@@ -513,13 +514,16 @@ export function CanvasView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-        <BackButton label="All canvases" variant="ghost" onClick={() => up("/canvas")} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
-          {/* A place's header, as a coding session's is: the name over the one line that says where
-              the reader is — whose canvas it is, and which version of it. */}
-          <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
+      {/* The bar is a Project's, drawn once by the shared header: a canvas is a place the reader is in,
+          and a second copy of that row here would drift from the one Projects › Project draws. */}
+      <ChatHeader
+        className="relative pb-2"
+        title={canvas?.title ?? "Canvas"}
+        // A place's line, as a coding session's is: whose canvas it is, which version of it, and —
+        // while the host hasn't answered — that the page on screen is this device's copy. The away
+        // words stay their own element, which is what the reader's assistive tech hears move.
+        subtitle={
+          <span className="flex min-w-0 items-center gap-1.5">
             {profile && <span className="truncate">{profile.name}</span>}
             {canvas?.version ? (
               <>
@@ -535,34 +539,40 @@ export function CanvasView() {
                 </span>
               </>
             ) : null}
-          </p>
-        </div>
-        {canvas?.canUndo && !awayNow ? (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            aria-label="Undo"
-            disabled={undoing}
-            onClick={() => void undo()}
-          >
-            <Undo2Icon />
-          </Button>
-        ) : null}
-        {/* The menu is the row's last control, so the one button that opens a sheet is always where a
-            hand reaches for it, whatever else the canvas offers today. */}
-        {canvas ? (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            aria-label="Canvas options"
-            onClick={() => setOptionsOpen(true)}
-          >
-            <EllipsisIcon />
-          </Button>
-        ) : null}
-      </header>
+          </span>
+        }
+        showBot={false}
+        leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
+        actions={
+          <>
+            {canvas?.canUndo && !awayNow ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                aria-label="Undo"
+                disabled={undoing}
+                onClick={() => void undo()}
+              >
+                <Undo2Icon />
+              </Button>
+            ) : null}
+            {/* The menu is the row's last control, so the one button that opens a sheet is always where
+                a hand reaches for it, whatever else the canvas offers today. */}
+            {canvas ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                aria-label="Canvas options"
+                onClick={() => setOptionsOpen(true)}
+              >
+                <EllipsisIcon />
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 flex-1 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
