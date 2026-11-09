@@ -30,6 +30,7 @@ import {
 const ROOM = "room-1"
 const REFUSED_NAME = "Reserved"
 const REFUSAL = "A room's name cannot be \"Reserved\"."
+const NO_DISBAND = "The room's round is still running."
 /** One Host that can write rooms, and one that cannot: features are remembered per connection. */
 const OPEN = "room-actions.test"
 const CLOSED = "room-actions-closed.test"
@@ -42,7 +43,7 @@ const members = [
 /** The writes the app posted, in the order it made them. */
 const posted: { path: string; body: Record<string, unknown> }[] = []
 /** The room as the Host holds it now. */
-const held = { name: "Planning", gone: false }
+const held = { name: "Planning", gone: false, refuseDisband: false }
 
 function read() {
   return {
@@ -78,6 +79,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}/disband`)) {
     posted.push({ path: url.pathname, body })
+    if (held.refuseDisband) return json({ error: { message: NO_DISBAND } }, 400)
     held.gone = true
     return json({ object: "gots.room.record", at: Date.now(), deleted: true })
   }
@@ -87,6 +89,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 async function fresh(host: string) {
   held.name = "Planning"
   held.gone = false
+  held.refuseDisband = false
   posted.length = 0
   const bot: Profile = botProfile(host, {
     id: `${host}-bot`,
@@ -196,5 +199,20 @@ test("a room open on a device leaves when its row goes", async () => {
     // A disband on another device reaches this one as the record's deletion: the row goes.
     await db.conversations.delete(ROOM)
     await until(async () => where() === "/", "the screen to leave rather than draw a gone chat")
+  })
+})
+
+test("a refused disband says why, and the room stays", async () => {
+  await fresh(OPEN)
+  held.refuseDisband = true
+  await mount(screen(), async () => {
+    await openMenu()
+    await click(findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Disband")) ?? null)
+    await until(async () => text().includes("Disband this room?"), "the question")
+    await click(findAll("button").find((one) => one.textContent?.trim() === "Disband") ?? null)
+
+    await until(async () => text().includes(NO_DISBAND), "the Host's refusal")
+    assert.ok((await db.conversations.get(ROOM))?.room, "the room is still on this device")
+    assert.ok(text().includes("Disband this room?"), "and the question is still standing")
   })
 })

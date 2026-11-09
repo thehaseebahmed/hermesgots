@@ -618,7 +618,7 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
     // A room's record is a row of its own kind: its clock, its name and its roster are the Host's,
     // and the rest of the row is this device's (ADR 0121, ADR 0123), so it goes through the one
     // writer that knows which fields a record may say.
-    if (existing?.room ?? (!entry.deleted && entry.value?.room)) {
+    if (existing?.room ?? entry.value?.room) {
       await writeRoomRow(id, entry, profileId)
       continue
     }
@@ -633,8 +633,6 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
       // the pin, and the next merge would carry the loss back to the plugin as well.
       if (value.modelChoice === undefined) delete synced.modelChoice
       if (!carriesSavedDraft(value)) delete synced.draftText
-      // A room is projected unchanged on every read: writing it again would wake every live query
-      // over a chat list for news that nothing happened.
       if (!existing || !sameChat(existing, synced, entry.at))
         await db.transaction("rw", db.conversations, db.tombstones, async () => {
           await db.conversations.put({

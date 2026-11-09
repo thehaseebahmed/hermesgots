@@ -1,5 +1,5 @@
 import { serverConfig } from "./connection.ts"
-import { createRoom, disbandRoom, renameRoom } from "./hermes.ts"
+import { createRoom, disbandRoom, renameRoom, type RoomCreate } from "./hermes.ts"
 import { memberLabel } from "./room-log.ts"
 import { randomId } from "./utils.ts"
 import { writeRoomRow, type Profile, type Room, type RoomMember } from "./db.ts"
@@ -12,13 +12,6 @@ import { writeRoomRow, type Profile, type Room, type RoomMember } from "./db.ts"
  * id, the disband's cancel id. The Host is idempotent on each, so a retry after a dropped answer is
  * the same room, the same rename and the same stop rather than a second one of any of them.
  */
-
-/** A room the app is about to make: the name, and the seats the user picked, in the app's spelling. */
-export interface NewRoom {
-  roomId: string
-  name: string
-  members: RoomMember[]
-}
 
 /**
  * The seats a set of bots would make, one per bot: the member id this app minted for it, its handle
@@ -38,13 +31,8 @@ export function roomSeats(bots: Profile[]): RoomMember[] {
   }))
 }
 
-/** The id a room is made under, minted once for one attempt so a retry is the same room. */
-export function newRoomId(): string {
-  return randomId()
-}
-
 /** A room made on its Host, and its row written from the record the Host answered. */
-export async function startRoom(bot: Profile, room: NewRoom): Promise<void> {
+export async function startRoom(bot: Profile, room: RoomCreate): Promise<void> {
   const config = serverConfig(bot)
   if (!config) throw new Error("This bot has no address to make a room on.")
   const record = await createRoom(config, room)

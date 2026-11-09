@@ -1859,19 +1859,7 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
   if (dropped) forgetRead(id)
 }
 
-/**
- * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
- *
- * A room's record carries the Host's own clock, its name and its roster, and nothing else: no chat's
- * field is its to say, so the row keeps this device's own — its pin (ADR 0121), what its log this
- * device holds ends asking for, and the newest sequence it has drawn. A record that is a deletion is
- * the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no chat
- * tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion for a
- * row the plugin's store never had.
- *
- * One writer, because two would drift: the chat-list merge and a lifecycle write's answer are the same
- * record, so they must leave the same row.
- */
+/** The record a room's merge or write answers, as the chat list carries it (ADR 0123). */
 export interface RoomRecord {
   /** The Host's own clock for the record, in the milliseconds the app counts in. */
   at: number
@@ -1887,6 +1875,19 @@ export interface RoomRecord {
 /** The fields a room's record is allowed to say; every other field on the row is this device's. */
 const ROOM_FIELDS = ["title", "createdAt", "updatedAt", "room"] as const
 
+/**
+ * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
+ *
+ * A room's record carries the Host's own clock, its name and its roster, and nothing else: no chat's
+ * field is its to say, so the row keeps this device's own — its pin (ADR 0121), what its log this
+ * device holds ends asking for, and the newest sequence it has drawn. A record that is a deletion is
+ * the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no chat
+ * tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion for a
+ * row the plugin's store never had.
+ *
+ * One writer, because two would drift: the chat-list merge and a lifecycle write's answer are the same
+ * record, so they must leave the same row.
+ */
 export async function writeRoomRow(id: string, record: RoomRecord, profileId: string) {
   const existing = await db.conversations.get(id)
   if (record.deleted) {

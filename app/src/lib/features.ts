@@ -96,10 +96,3 @@ export function usePluginFeatureByServer(
   for (const key of keys) if (key) answers[key] = answer(held.get(key), feature)
   return answers
 }
-
-/** That feature across several servers: `yes` when any answers it, `no` when none of those that answered does. */
-export function useAnyPluginFeature(servers: PluginServer[], feature: string): PluginFeatureAnswer {
-  const answers = Object.values(usePluginFeatureByServer(servers, feature))
-  if (answers.includes("yes")) return "yes"
-  return answers.length > 0 && answers.every((one) => one === "no") ? "no" : "unknown"
-}

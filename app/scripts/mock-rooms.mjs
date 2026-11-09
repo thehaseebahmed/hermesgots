@@ -181,7 +181,10 @@ export function createRoomStore() {
   }
 }
 
-/** One room as the chat list carries it: what a device merges, and nothing of its transcript. */
+/**
+ * One room as the chat list carries it: what a device merges, and nothing of its transcript. A room
+ * the Host has disbanded is the row's deletion, which is what the plugin projects for one.
+ */
 function record(room) {
   if (room.disbanded_at) return { at: room.disbanded_at, deleted: true }
   return {

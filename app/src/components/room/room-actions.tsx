@@ -39,7 +39,6 @@ export function RoomActions({
   const canWrite = usePluginFeatureOn(answerer, "rooms_write")
   const [renaming, setRenaming] = useState(false)
   const [disbanding, setDisbanding] = useState(false)
-  const [pending, setPending] = useState(false)
   if (!canWrite || !answerer) return null
   return (
     <>
@@ -84,15 +83,7 @@ export function RoomActions({
         title="Disband this room?"
         description="Its work stops, and the room is gone for every device. This can't be undone."
         confirm="Disband"
-        pending={pending}
-        onConfirm={async () => {
-          setPending(true)
-          try {
-            await disbandRoomNow(answerer, roomId)
-          } finally {
-            setPending(false)
-          }
-        }}
+        onConfirm={() => disbandRoomNow(answerer, roomId)}
       />
     </>
   )

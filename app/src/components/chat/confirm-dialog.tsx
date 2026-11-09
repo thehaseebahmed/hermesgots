@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 
 import {
   AlertDialog,
@@ -16,9 +16,10 @@ import { Spinner } from "@/components/ui/spinner"
  * The question an action that cannot be taken back asks first: a title, what it will do, and the one
  * button that does it.
  *
- * The dialog closes itself once the action's promise settles, so a caller says what happens and not
- * when the ask ends. `pending` is for the actions that wait on another machine — a room's disband
- * waits on its Host — and holds the button in its own colour while it does.
+ * The dialog is the action's own: it holds the button while the promise runs, closes once it settles,
+ * and keeps itself open with the reason when it rejects — which is what a room's disband needs, since
+ * the Host's refusal is its answer and the words are the Host's (ADR 0122). A caller says what happens
+ * and nothing about when.
  */
 export function ConfirmDialog({
   open,
@@ -26,7 +27,6 @@ export function ConfirmDialog({
   title,
   description,
   confirm,
-  pending = false,
   onConfirm,
 }: {
   open: boolean
@@ -35,27 +35,48 @@ export function ConfirmDialog({
   description: ReactNode
   /** The action's own word: "Delete", "Discard", "Disband". */
   confirm: string
-  pending?: boolean
+  /** Does it. A rejection leaves the dialog open with its message shown. */
   onConfirm: () => Promise<void> | void
 }) {
+  const [running, setRunning] = useState(false)
+  const [failure, setFailure] = useState<string>()
+
+  const run = async () => {
+    if (running) return
+    setRunning(true)
+    setFailure(undefined)
+    try {
+      await onConfirm()
+      onOpenChange(false)
+    } catch (error) {
+      setFailure(error instanceof Error && error.message ? error.message : "That didn't work.")
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        setFailure(undefined)
+        onOpenChange(next)
+      }}
+    >
       <AlertDialogContent size="sm">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {failure && (
+          <p role="alert" className="text-sm text-destructive">
+            {failure}
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={pending}
-            onClick={async () => {
-              await onConfirm()
-              onOpenChange(false)
-            }}
-          >
-            {pending ? <Spinner /> : confirm}
+          <AlertDialogAction variant="destructive" disabled={running} onClick={() => void run()}>
+            {running ? <Spinner /> : confirm}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

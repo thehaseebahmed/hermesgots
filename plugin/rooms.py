@@ -453,7 +453,7 @@ def _answer_record(
     return record
 
 
-def _deletion(tombstone: Any, *, room_id: str) -> Dict[str, Any]:
+def _deletion(tombstone: Any) -> Dict[str, Any]:
     """One disband's answer as the room's row going: the Host's disband time, or now where it gave none."""
     held = tombstone if isinstance(tombstone, dict) else {}
     at = _millis(held.get("disbanded_at")) or _millis(held.get("at"))
@@ -505,7 +505,7 @@ def disband_room(
         params["cancel_id"] = cancel_id
     found = _asked("groups.disband", "tombstone", params, timeout=timeout, home=home)
     _forget_projection(home)
-    return _deletion(found.get("tombstone"), room_id=room_id)
+    return _deletion(found.get("tombstone"))
 
 
 def _event(row: Any) -> Optional[Dict[str, Any]]:

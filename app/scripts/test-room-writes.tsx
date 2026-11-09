@@ -10,7 +10,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { db, type Profile } from "@/lib/db"
-import { newRoomId, disbandRoomNow, renameRoomTo, roomSeats, startRoom } from "@/lib/rooms"
+import { disbandRoomNow, renameRoomTo, roomSeats, startRoom } from "@/lib/rooms"
+import { randomId } from "@/lib/utils"
 import { botProfile, json, settle } from "./component-kit.tsx"
 
 const HOST = "http://writes.test/v1"
@@ -37,8 +38,8 @@ const sent: { path: string; method?: string; body: Record<string, unknown> }[] =
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input))
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
-  sent.push({ path: url.pathname, method: init?.method, body })
   if (init?.method !== "POST") return json({}, 404)
+  sent.push({ path: url.pathname, method: init?.method, body })
   if (url.pathname.endsWith("/disband"))
     return json({ object: "gots.room.record", at: AT_GONE, deleted: true })
   if (url.pathname.endsWith("/rooms"))
@@ -73,7 +74,7 @@ async function fresh() {
 
 test("a create's answer is written as the room's row, and a retry is the same room", async () => {
   await fresh()
-  const room = { roomId: newRoomId(), name: "Planning", members: roomSeats(bots) }
+  const room = { roomId: randomId(), name: "Planning", members: roomSeats(bots) }
 
   await startRoom(bots[0], room)
   await settle()
@@ -113,7 +114,7 @@ test("a create's answer is written as the room's row, and a retry is the same ro
 
 test("a rename takes the Host's name and keeps the roster this device holds", async () => {
   await fresh()
-  const room = { roomId: newRoomId(), name: "Planning", members: roomSeats(bots) }
+  const room = { roomId: randomId(), name: "Planning", members: roomSeats(bots) }
   await startRoom(bots[0], room)
   await settle()
 
@@ -137,7 +138,7 @@ test("a rename takes the Host's name and keeps the roster this device holds", as
 
 test("a disband's answer takes the row and its page, and writes no chat tombstone", async () => {
   await fresh()
-  const room = { roomId: newRoomId(), name: "Planning", members: roomSeats(bots) }
+  const room = { roomId: randomId(), name: "Planning", members: roomSeats(bots) }
   await startRoom(bots[0], room)
   await db.roomLog.put({
     roomId: room.roomId,

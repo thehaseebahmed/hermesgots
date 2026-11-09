@@ -11,8 +11,8 @@ import { connectionKey } from "@/lib/connection"
 import { db, type Profile, type RoomMember } from "@/lib/db"
 import { usePluginFeatureByServer } from "@/lib/features"
 import { useNav } from "@/lib/nav"
-import { newRoomId, roomSeats, startRoom } from "@/lib/rooms"
-import { cn } from "@/lib/utils"
+import { roomSeats, startRoom } from "@/lib/rooms"
+import { cn, randomId } from "@/lib/utils"
 
 /** The fewest and most seats a room may hold: the Host's rule, said before it can be broken. */
 const LEAST = 2
@@ -101,8 +101,8 @@ function NewRoomSheet({
   onCreated: (roomId: string) => void
 }) {
   const hosts = [...new Set(writers.map((bot) => connectionKey(bot)))]
-  const [host, setHost] = useState<string>("")
-  const seated = writers.filter((bot) => connectionKey(bot) === (host || hosts[0]))
+  const [host, setHost] = useState<string>(hosts[0] ?? "")
+  const seated = writers.filter((bot) => connectionKey(bot) === host)
   const [name, setName] = useState("")
   const [picked, setPicked] = useState<string[]>([])
   const [seats, setSeats] = useState<Record<string, RoomMember>>({})
@@ -118,12 +118,19 @@ function NewRoomSheet({
     setPicked([])
     setFailure(undefined)
     setHost(hosts[0] ?? "")
-    setRoomId(newRoomId())
+    setRoomId(randomId())
     setSeats(Object.fromEntries(writers.map((bot) => [bot.id, roomSeats([bot])[0]])))
   }, [open])
 
   const chosen = seated.filter((bot) => picked.includes(bot.id))
-  const ready = name.trim().length > 0 && chosen.length >= LEAST && chosen.length <= MOST
+  // A seat's id is minted when the sheet opens, so a bot picked before that map was built is not a
+  // seat yet: the create waits for one rather than posting a member with no id.
+  const members = chosen.map((bot) => seats[bot.id]).filter((one): one is RoomMember => Boolean(one))
+  const ready =
+    name.trim().length > 0 &&
+    members.length === chosen.length &&
+    chosen.length >= LEAST &&
+    chosen.length <= MOST
 
   const create = async () => {
     if (!ready || saving) return
@@ -133,7 +140,7 @@ function NewRoomSheet({
       await startRoom(chosen[0], {
         roomId,
         name: name.trim(),
-        members: chosen.map((bot) => seats[bot.id]),
+        members,
       })
       onCreated(roomId)
     } catch (error) {
@@ -165,7 +172,7 @@ function NewRoomSheet({
                   <Button
                     key={key}
                     size="sm"
-                    variant={key === (host || hosts[0]) ? "default" : "outline"}
+                    variant={key === host ? "default" : "outline"}
                     onClick={() => {
                       setHost(key)
                       setPicked([])
@@ -209,8 +216,8 @@ function NewRoomSheet({
               })}
             </ul>
             <p className="text-xs text-muted-foreground">
-              Two to six bots of one Host. Who a room holds is fixed when it is made: changing its
-              members means making a new room.
+              {`${LEAST} to ${MOST} bots of one Host. Who a room holds is fixed when it is made:`}{" "}
+              changing its members means making a new room.
             </p>
           </div>
           {failure && <Banner tone="error">{failure}</Banner>}
