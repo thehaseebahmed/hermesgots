@@ -41,7 +41,7 @@ sequenceDiagram
    unprefixed child walks to its `gots-` root. Done.
 2. **Gate `notify` on Gots's own sessions.** Goals: G1. After: 1. Layers: push delivery, approval
    hook, clarify tool. Check: that command green, plus `plugin.tests.test_push_kinds` and
-   `plugin.tests.test_approval_notice`.
+   `plugin.tests.test_approval_notice`. Done.
 
 ## Decisions
 

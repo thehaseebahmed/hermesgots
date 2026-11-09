@@ -453,6 +453,15 @@ def clear(path: Path, key: str) -> None:
         conn.close()
 
 
+def _gots_chat(path: Path, session_id: str) -> bool:
+    """Whether a session is a Gots chat's own: the app minted its id, or compression moved the chat on
+    to a child that carries no prefix — ``sessions.chat_session`` walks to that root and stops at a
+    delegation fork, so a subagent's session is not its parent chat's."""
+    from . import sessions
+
+    return sessions.chat_session(home_of(path), session_id).startswith(sessions.ID_PREFIXES)
+
+
 def notify(
     kind: str,
     session_id: Optional[str],
@@ -463,16 +472,19 @@ def notify(
     kinds that aren't about one the routine's job id (``routine_failed``), the project's id
     (``clone_failed``), the research mission's id (``research_*``) or the room's id
     (``room_input``); it only picks what a tap opens. ``title`` names what it is about when that
-    isn't a session (whose chat title is looked up). Answers whether a push will be sent — a device
-    exists that asked for this category, and one of this kind for this id wasn't told a moment ago —
-    so a caller that remembers what it has told the user doesn't remember a push that was dropped.
-    Never raises: it runs inside Hermes's hooks."""
+    isn't a session (whose chat title is looked up). A kind about a session (``SESSION_KINDS``) is
+    only pushed for a session that is one of Gots's chats; another surface's session is no device's
+    news. Answers whether a push will be sent — a device exists that asked for this category, and one
+    of this kind for this id wasn't told a moment ago — so a caller that remembers what it has told
+    the user doesn't remember a push that was dropped. Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return False
         if path is None:
             # Hooks run inside the turn's profile scope, so this is that profile's store.
             path = current_path()
+        if kind in SESSION_KINDS and not _gots_chat(path, session_id):
+            return False
         now = time.monotonic()
         key = (str(path), kind, session_id)
         with _lock:
