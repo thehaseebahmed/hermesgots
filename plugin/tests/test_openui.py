@@ -24,7 +24,11 @@ UNREGISTERED = openui._refusal_reason
 
 
 class FakeCtx:
-    """The one part of Hermes's plugin context a section needs, and what it was handed."""
+    """The one part of Hermes's plugin context a section needs, and what it was handed.
+
+    Its lack of `register_skill` is deliberate: this is the host the plugin ships ahead of, which
+    takes its sections and has never heard of a bundled skill.
+    """
 
     def __init__(self, *, refuses: bool = False) -> None:
         self.calls = []
@@ -35,6 +39,18 @@ class FakeCtx:
             raise ValueError("this Hermes refuses a section")
         self.calls.append({"id": section_id, "content": content, **kwargs})
         return object()
+
+
+class SkillCtx(FakeCtx):
+    """That context with the skill API beside it, recording each skill Hermes was handed."""
+
+    def __init__(self, *, refuses: bool = False) -> None:
+        super().__init__(refuses=refuses)
+        self.skills = []
+
+    def register_skill(self, name, path, description="", frontmatter=None):
+        self.skills.append({"name": name, "path": Path(path), "description": description})
+        return True
 
 
 class SectionState(unittest.TestCase):
@@ -74,6 +90,62 @@ class RegistrationTest(SectionState):
         with self.assertLogs("plugin.openui", level="WARNING"):
             self.assertFalse(openui.register(FakeCtx(refuses=True)))
         self.assertIsNone(openui.advertised())
+
+
+class SkillRegistrationTest(SectionState):
+    """The three design skills the canvas guide names, handed to a host that can hold them."""
+
+    def test_the_three_skills_are_registered_with_the_files_that_carry_them(self) -> None:
+        ctx = SkillCtx()
+        openui.register(ctx)
+        self.assertEqual(
+            [skill["name"] for skill in ctx.skills],
+            ["impeccable", "web-design-guidelines", "transitions-dev"],
+        )
+        self.assertEqual(tuple(openui.SKILLS), tuple(skill["name"] for skill in ctx.skills))
+        for skill in ctx.skills:
+            # A path the host can't read is a skill that doesn't load, so it is the file that is
+            # checked here rather than the name it was handed under.
+            self.assertTrue(
+                skill["path"].is_file(),
+                f"{skill['name']} was registered with {skill['path']}, which isn't a file.",
+            )
+            self.assertEqual(skill["path"].name, "SKILL.md")
+            self.assertEqual(skill["path"].parent.name, skill["name"])
+
+    def test_each_skill_is_listed_by_its_own_description(self) -> None:
+        # Hermes lists a skill by what it was registered with, not by what its file says: a name
+        # handed over bare is a row with nothing under it, and this guide sends a session to that
+        # listing to choose between the three.
+        ctx = SkillCtx()
+        openui.register(ctx)
+        for skill in ctx.skills:
+            said = skill["description"]
+            self.assertTrue(said, f"{skill['name']} was registered with no description")
+            self.assertIn(said, skill["path"].read_text(encoding="utf-8"))
+            self.assertNotIn("\n", said)
+
+    def test_a_host_without_the_skill_api_still_loads(self) -> None:
+        # The plugin ships ahead of the host it runs on: this Hermes takes both sections, has no
+        # `register_skill`, and must still load with every route it serves.
+        ctx = FakeCtx()
+        self.assertTrue(openui.register(ctx))
+        self.assertEqual([call["id"] for call in ctx.calls], ["openui", "canvas"])
+        self.assertFalse(hasattr(ctx, "register_skill"))
+
+    def test_a_missing_folder_logs_and_the_others_still_register(self) -> None:
+        # A skill removed from an install doesn't fail: it says so in the log and the other two are
+        # handed over, since the guide names three and one folder is not the plugin.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ("impeccable", "transitions-dev"):
+                (root / name).mkdir()
+                (root / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+            ctx = SkillCtx()
+            with mock.patch.object(openui, "SKILLS_ROOT", root):
+                with self.assertLogs("plugin.openui", level="WARNING"):
+                    openui.register(ctx)
+        self.assertEqual([skill["name"] for skill in ctx.skills], ["impeccable", "transitions-dev"])
 
 
 class AdvertisementTest(SectionState):

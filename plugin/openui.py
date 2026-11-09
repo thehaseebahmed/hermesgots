@@ -8,6 +8,10 @@ nothing, so the next chat isn't told the library.
 ``canvas/prompt.txt`` is the canvas's guide (ADR 0113), told only to a canvas's session: a canvas is
 written as plain HTML, so the library's vocabulary would be a language its page can't speak, and a
 canvas's session is told the guide instead of the library.
+
+The three design skills under ``skills/`` are registered in the same ``register`` call, so a canvas's
+session loads one with ``skill_view`` and the guide that names them is telling it about skills the
+host really holds.
 """
 
 from __future__ import annotations
@@ -24,6 +28,13 @@ SECTION = "openui"
 POSITION = "after_memory"
 CANVAS_SECTION = "canvas"
 CANVAS_ARTIFACT = Path(__file__).parent / "canvas" / "prompt.txt"
+# The design skills a canvas's session may load, bundled under `plugin/skills/` and registered with
+# Hermes so `skill_view` finds them. The guide names these three, so the names here are the names it
+# names: renaming one is renaming it in both places.
+SKILLS = ("impeccable", "web-design-guidelines", "transitions-dev")
+SKILLS_ROOT = Path(__file__).parent / "skills"
+# A skill's own description, as its frontmatter writes it — the line Hermes lists it by.
+_DESCRIPTION = re.compile(r"^description:\s*(.+)$", re.M)
 # The key the switch is kept under in the profile's `host_settings` (store.py). Absent means on, so
 # only an off ever writes a row.
 SETTING = "openui"
@@ -229,6 +240,52 @@ def _register_section(
     return None
 
 
+def _skill_description(path: Path) -> str:
+    """A bundled skill's own description, read from its frontmatter for the host's listing.
+
+    Hermes lists a registered skill by what it was registered with rather than by what its file
+    says, so a name handed over without a description is a row with nothing under it — and this
+    guide points a session at these three by name, so that listing is where it first meets them.
+    The frontmatter's own line is enough: these are the plugin's files, not a stranger's.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return ""
+    found = _DESCRIPTION.search(parts[1])
+    return found.group(1).strip().strip("\"'") if found else ""
+
+
+def _register_skills(ctx: Any) -> list:
+    """Hands each bundled design skill to this Hermes, and answers the names it took.
+
+    This Hermes may predate `register_skill` (the plugin ships ahead of the host it runs on), and a
+    folder may be missing from an install that pruned it, so every call stands on its own: the skill
+    that can't be registered is logged, and the others — and every route — carry on. A skill is
+    registered by the folder's own name, since that is the name the canvas guide tells a session to
+    load.
+    """
+    register_skill = getattr(ctx, "register_skill", None)
+    if not callable(register_skill):
+        return []
+    took = []
+    for name in SKILLS:
+        path = SKILLS_ROOT / name / "SKILL.md"
+        if not path.is_file():
+            logger.warning("gots: the %s skill is missing from %s", name, SKILLS_ROOT)
+            continue
+        try:
+            register_skill(name, str(path), description=_skill_description(path))
+        except Exception:
+            logger.warning("gots: couldn't register the %s skill", name, exc_info=True)
+            continue
+        took.append(name)
+    return took
+
+
 def register(ctx: Any) -> bool:
     """Registers the chat's section with this Hermes, or leaves the plugin running without it."""
     global _refusal_reason
@@ -237,6 +294,9 @@ def register(ctx: Any) -> bool:
         logger.info("gots: telling the model the component library (%s)", VERSION)
     if _canvas_refusal is None:
         logger.info("gots: telling a canvas the design guide")
+    took = _register_skills(ctx)
+    if took:
+        logger.info("gots: bundled the %s skills", ", ".join(took))
     return _refusal_reason is None
 
 
