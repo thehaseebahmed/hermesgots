@@ -324,7 +324,7 @@ test(
           () => Boolean(document.body.textContent?.includes("keeps trying to leave")),
           "the page that keeps leaving to be said so",
         )
-        assert.equal(find("iframe[data-canvas-frame]"), null, "the frame is not drawn again")
+        assert.ok(missing("iframe[data-canvas-frame]"), "the frame is not drawn again")
       },
     )
   }),

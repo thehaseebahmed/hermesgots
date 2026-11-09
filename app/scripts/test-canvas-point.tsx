@@ -311,9 +311,8 @@ test(
           () => told.some((one) => one.watch === false),
           "the page to be let go by the send",
         )
-        assert.equal(
-          find('button[aria-label="Add context, pointing at the page"]'),
-          null,
+        assert.ok(
+          missing('button[aria-label="Add context, pointing at the page"]'),
           "and the + stops saying it is armed",
         )
       },
