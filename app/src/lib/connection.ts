@@ -6,9 +6,9 @@ export const connectionKey = (server: { baseUrl: string; apiKey: string }) =>
 
 /**
  * The Host a bot answers at: the origin of its base URL, whatever key or path reaches it by.
- * `connectionKey` folds the key and the path in, which is what a shared stream and cache want and what
- * split one gateway into three Hosts on screen; a room's roster is one gateway's profiles (ADR 0115),
- * so this is the identity it is held to. A base URL that doesn't parse is its own trimmed self.
+ * `connectionKey` folds the key and the path in, which is what a shared stream and cache want; a
+ * room's roster is one gateway's profiles (ADR 0115), so this is the identity it is held to. A base
+ * URL that doesn't parse is its own trimmed self.
  */
 export const hostKey = (server: { baseUrl: string }) => {
   const baseUrl = server.baseUrl.trim()

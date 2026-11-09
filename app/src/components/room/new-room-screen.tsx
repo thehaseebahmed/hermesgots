@@ -28,11 +28,13 @@ import { startRoom } from "@/lib/room-writes"
 import { tell } from "@/lib/tell"
 import { cn, randomId } from "@/lib/utils"
 
+/** Why a row refuses a seat: a full room says nothing, another Host says what to do about it. */
+type Refusal = { kind: "full" } | { kind: "host"; say: string }
+
 /** The fewest and most seats a room may hold: the Host's rule, said before it can be broken. */
 const LEAST = 2
 const MOST = 6
 
-/** What a press on another Host's row says, since a row that greys and then does nothing reads broken. */
 const OTHER_HOST = "A room holds one Host's bots. Unpick the first bot to change Host."
 
 /**
@@ -71,27 +73,16 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   const chosen = writers.filter((bot) => picked.includes(bot.id))
   const ready = chosen.length >= LEAST && chosen.length <= MOST
 
-  // The Host is named by the first bot the room holds, and only by a bot it still holds: a room's
-  // roster is one gateway's profiles (ADR 0115), and every bot that answers at another address greys
-  // out while one is seated. Reading it off `chosen` is what keeps the lock on a bot this device can
-  // still seat, rather than on an id that may have left the list.
   const lockedHost = chosen[0] ? hostKey(chosen[0]) : null
 
-  /**
-   * Why a bot cannot take a seat right now, or null when it can: one rule for what the row draws and
-   * what a press answers, so the two cannot drift apart.
-   */
-  const blockedFor = (bot: Profile): "full" | "host" | null => {
+  const refusalFor = (bot: Profile): Refusal | null => {
     if (picked.includes(bot.id)) return null
-    if (picked.length >= MOST) return "full"
-    return lockedHost && hostKey(bot) !== lockedHost ? "host" : null
+    if (picked.length >= MOST) return { kind: "full" }
+    return lockedHost && hostKey(bot) !== lockedHost
+      ? { kind: "host", say: OTHER_HOST }
+      : null
   }
 
-  /**
-   * A seat toggles on and off. Another Host's bot stays pressable and answers with the one sentence
-   * saying how to change Host, since a row that greys out and then does nothing reads as a broken app;
-   * the seventh tap keeps the silence it always had.
-   */
   const toggle = (id: string) => {
     if (picked.includes(id)) {
       setPicked((held) => held.filter((one) => one !== id))
@@ -99,11 +90,11 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
     }
     const bot = writers.find((one) => one.id === id)
     if (!bot) return
-    if (blockedFor(bot) === "host") {
-      tell.info(OTHER_HOST)
+    const refusal = refusalFor(bot)
+    if (refusal) {
+      if (refusal.kind === "host") tell.info(refusal.say)
       return
     }
-    if (blockedFor(bot)) return
     // The guards inside the updater too: a press that lands twice in one batch seats one bot once.
     setPicked((held) =>
       held.includes(id) || held.length >= MOST ? held : [...held, id],
@@ -214,7 +205,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         open={picking}
         onOpenChange={setPicking}
         writers={writers}
-        blockedFor={blockedFor}
+        refusalFor={refusalFor}
         picked={picked}
         onToggle={toggle}
       />
@@ -222,28 +213,19 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   )
 }
 
-/**
- * The seats a room is made of: every bot this device may seat, a check per seat, and the rule the Host
- * keeps.
- *
- * One Host at a time, because a roster is one Host's profiles (ADR 0115), and no Host picker: the
- * first bot seated names the Host, and until one is seated every row is a choice. The most is a
- * ceiling rather than a refusal — the seventh tap does nothing — so the rule is felt while picking
- * and not only said after.
- */
+/** No Host picker: a roster is one Host's profiles (ADR 0115), so the first seat names the Host. */
 function SeatsPicker({
   open,
   onOpenChange,
   writers,
-  blockedFor,
+  refusalFor,
   picked,
   onToggle,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   writers: Profile[]
-  /** Why a row cannot take a seat, from the screen's one rule: `full`, `host`, or null for a seat. */
-  blockedFor: (bot: Profile) => "full" | "host" | null
+  refusalFor: (bot: Profile) => Refusal | null
   picked: string[]
   onToggle: (id: string) => void
 }) {
@@ -266,7 +248,7 @@ function SeatsPicker({
                 key={bot.id}
                 bot={bot}
                 checked={picked.includes(bot.id)}
-                blocked={blockedFor(bot)}
+                refusal={refusalFor(bot)}
                 onToggle={() => onToggle(bot.id)}
               />
             ))}
@@ -286,39 +268,34 @@ function SeatsPicker({
  *
  * The subtitle is where Settings' dictation list says what a host does about speech; here it says
  * what the bot answers with, because that is what decides what a room of these bots produces.
- *
- * A row greys for one of two reasons: the room already holds the most it may, or the bot answers at
- * another Host than the one its first seat named. Only the second still hears the press: a full room's
- * seventh tap has always done nothing, and keeps doing it.
  */
 function SeatRow({
   bot,
   checked,
-  blocked,
+  refusal,
   onToggle,
 }: {
   bot: Profile
   checked: boolean
-  /** Why this row cannot take a seat, from the screen's one rule. */
-  blocked: "full" | "host" | null
+  refusal: Refusal | null
   onToggle: () => void
 }) {
   // A row that can never be seated this time reads no model: its Host would be asked for one nothing
   // on this screen can use.
-  const info = useModelInfo(blocked === "host" ? null : bot)
+  const info = useModelInfo(refusal?.kind === "host" ? null : bot)
   const choice = botModel(bot, info)
   return (
     <button
       type="button"
       aria-pressed={checked}
       // Never `disabled` for another Host's row: that would swallow the press the sentence answers.
-      aria-disabled={blocked ? "true" : undefined}
+      aria-disabled={refusal ? "true" : undefined}
       data-bot={bot.id}
-      disabled={blocked === "full"}
+      disabled={refusal?.kind === "full"}
       onClick={onToggle}
       className={cn(
         linkRowClass,
-        blocked && "cursor-not-allowed opacity-40",
+        refusal && "cursor-not-allowed opacity-40",
         checked && "bg-muted",
       )}
     >

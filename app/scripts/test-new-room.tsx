@@ -118,7 +118,6 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
   return bots
 }
 
-/** What every case starts from: no calls made, no room held, and these bots the only rows on the device. */
 async function resetRoom(bots: Profile[]) {
   posted.length = 0
   held.id = undefined
@@ -132,10 +131,6 @@ async function resetRoom(bots: Profile[]) {
   await settle()
 }
 
-/**
- * Three bots across two Hosts on one device: what a seat is locked to only shows across Hosts, and a
- * picker that answers for one Host at a time cannot draw this list at all.
- */
 async function freshAcross() {
   const [alpha, beta] = ["alpha", "beta"]
   offers.set(`${alpha}.test`, WRITABLE)
@@ -144,8 +139,7 @@ async function freshAcross() {
     botProfile(alpha, { id: "alpha-ada", name: "Ada", hermesProfile: "ada", botId: "alpha-ada" }),
     botProfile(alpha, { id: "alpha-bo", name: "Bo", hermesProfile: "bo", botId: "alpha-bo" }),
     botProfile(beta, { id: "beta-cy", name: "Cy", hermesProfile: "cy", botId: "beta-cy" }),
-    // The same Host reached by another key and no version path: the address is what makes it one
-    // Host, which is the pill that used to print this address three times and split its bots.
+    // The same Host reached by another key and no version path: the address is what makes it one Host.
     botProfile(alpha, {
       id: "alpha-dee",
       name: "Dee",
@@ -159,11 +153,9 @@ async function freshAcross() {
   return bots
 }
 
-/** The seats rows, in the order the sheet draws them. */
 const seats = () => findAll("[data-bot]")
 const seat = (id: string) => find(`[data-bot="${id}"]`) as HTMLButtonElement | null
 
-/** Opens the seats sheet, the way the pill above the composer does. */
 async function openSeats() {
   await until(async () => Boolean(find('[data-slot="seats-pill"]')), "the blank room")
   await click(find('[data-slot="seats-pill"]'))
