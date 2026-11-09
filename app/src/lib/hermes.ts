@@ -1598,10 +1598,15 @@ export interface CronExecutionRun extends CronExecution {
 
 export { pluginRoot }
 
-/** What one read of the plugin's `info` answered: its version and features, or nulls. */
+/** What one read of the plugin's `info` answered: its version, features and the seats it holds. */
 export interface PluginInfo {
   version: string | null
   features: string[] | null
+  /**
+   * The profiles this connection may seat in a room, or null where the Host named none — an older
+   * Host, whose picker filters nothing (ADR 0128).
+   */
+  rooms: { seatable: string[] | null }
 }
 
 async function pluginInfoBody(config: HermesConfig, signal?: AbortSignal): Promise<PluginInfo> {
@@ -1611,11 +1616,17 @@ async function pluginInfoBody(config: HermesConfig, signal?: AbortSignal): Promi
   })
   const body = await response.json()
   const features: unknown = body?.features
+  const seatable: unknown = body?.rooms?.seatable
   return {
     version: typeof body?.version === "string" && body.version ? body.version : null,
     features: Array.isArray(features)
       ? features.filter((feature): feature is string => typeof feature === "string")
       : null,
+    rooms: {
+      seatable: Array.isArray(seatable)
+        ? seatable.filter((profile): profile is string => typeof profile === "string")
+        : null,
+    },
   }
 }
 
@@ -1638,24 +1649,33 @@ export function getPluginVersion(config: HermesConfig): Promise<string | null> {
     .catch(() => null)
 }
 
-const pluginFeatures = new Map<string, Promise<string[] | null>>()
+const pluginAnswers = new Map<string, Promise<PluginInfo | null>>()
 
 /**
- * The features the Gots plugin on the bot's server advertises (`info`'s `features`), asked once per
- * server and key. **null** is the Host not answering — a different answer from a plugin that
- * answered without the feature — and a failed ask is dropped, so the next caller asks again.
+ * That `info` answer kept whole, asked once per server and key: the features a control is gated on
+ * and the seats a room may take come from the same read, so asking after both costs the Host one
+ * call. **null** is the Host not answering, and a failed ask is dropped, so the next caller asks
+ * again; so is an answer with no feature list, which says nothing about the plugin's features.
  */
-export function getPluginFeatureList(config: HermesConfig): Promise<string[] | null> {
+export function getPluginAnswer(config: HermesConfig): Promise<PluginInfo | null> {
   const key = connectionKey(config)
-  let pending = pluginFeatures.get(key)
+  let pending = pluginAnswers.get(key)
   if (!pending) {
-    pending = getPluginInfo(config)
-      .then((info) => info.features)
-      .catch(() => null)
-    pluginFeatures.set(key, pending)
-    void pending.then((found) => found || pluginFeatures.delete(key))
+    pending = getPluginInfo(config).catch(() => null)
+    pluginAnswers.set(key, pending)
+    void pending.then((found) => {
+      if (!found?.features) pluginAnswers.delete(key)
+    })
   }
   return pending
+}
+
+/**
+ * The features the Gots plugin on the bot's server advertises (`info`'s `features`). **null** is the
+ * Host not answering — a different answer from a plugin that answered without the feature.
+ */
+export function getPluginFeatureList(config: HermesConfig): Promise<string[] | null> {
+  return getPluginAnswer(config).then((info) => info?.features ?? null)
 }
 
 /** `getPluginFeatureList`, for one feature. */

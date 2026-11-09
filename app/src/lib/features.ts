@@ -1,11 +1,12 @@
 /**
- * What a Bot's Host answered about the Gots plugin's features (`info`'s `features`), for every
- * screen that gates a control on one. An answer is remembered for its connection, so a screen
- * opened again doesn't wait on the same read; only a real answer is kept, so a Host that was away
- * is asked again the next time a screen needs it.
+ * What a Bot's Host answered about the Gots plugin's features (`info`'s `features`) and the profiles
+ * its connection seats in a room (`info`'s `rooms`), for every screen that gates a control on one or
+ * offers a bot as a seat. An answer is remembered for its connection, so a screen opened again
+ * doesn't wait on the same read; only a real answer is kept, so a Host that was away is asked again
+ * the next time a screen needs it.
  */
 import { connectionKey, serverConfig } from "@/lib/connection"
-import { getPluginFeatureList, type HermesConfig } from "@/lib/hermes"
+import { getPluginAnswer, type HermesConfig } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { createStore } from "@/lib/store"
 
@@ -20,22 +21,33 @@ export type PluginFeatureAnswer = "unknown" | "yes" | "no"
 /** A bot's server as these hooks take it: a profile, or a plugin beside one, or nothing yet. */
 export type PluginServer = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
 
-// The features each connection's plugin answered; only a real answer is remembered, and the map is
-// replaced rather than mutated so a subscriber is handed a new value.
-const answered = createStore<ReadonlyMap<string, readonly string[]>>(new Map())
-
-async function readFeatures(config: HermesConfig) {
-  const key = connectionKey(config)
-  if (answered.get().has(key)) return
-  const features = await getPluginFeatureList(config)
-  // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
-  if (!features) return
-  answered.set(new Map(answered.get()).set(key, features))
+/**
+ * One connection's `info` answer, as this module remembers it: the feature names, and the profiles
+ * the connection may seat in a room — null where the Host named none (ADR 0128).
+ */
+type ConnectionAnswer = {
+  features: readonly string[]
+  seatable: string[] | null
 }
 
-function answer(known: readonly string[] | undefined, feature: string): PluginFeatureAnswer {
+// What each connection's plugin answered; only a real answer is remembered, and the map is replaced
+// rather than mutated so a subscriber is handed a new value.
+const answered = createStore<ReadonlyMap<string, ConnectionAnswer>>(new Map())
+
+async function readAnswer(config: HermesConfig) {
+  const key = connectionKey(config)
+  if (answered.get().has(key)) return
+  const info = await getPluginAnswer(config)
+  // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
+  if (!info?.features) return
+  answered.set(
+    new Map(answered.get()).set(key, { features: info.features, seatable: info.rooms.seatable }),
+  )
+}
+
+function answer(known: ConnectionAnswer | undefined, feature: string): PluginFeatureAnswer {
   if (known === undefined) return "unknown"
-  return known.includes(feature) ? "yes" : "no"
+  return known.features.includes(feature) ? "yes" : "no"
 }
 
 /**
@@ -51,7 +63,7 @@ export function usePluginFeatureAnswers<K extends string>(
   const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
   const known = answered.use().get(key)
-  usePoll(() => void readFeatures(config), false, [baseUrl, apiKey], {
+  usePoll(() => void readAnswer(config), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
@@ -71,6 +83,24 @@ export function usePluginFeatureOn(server: PluginServer, feature: string): boole
 }
 
 /**
+ * The profiles a bot's connection may seat in a room (`info`'s `rooms.seatable`), or **null** where
+ * its Host named none — an older Host, whose picker filters nothing — and **undefined** while the
+ * read is still owed, so no bot is held out before the answer lands (ADR 0128). It rides the same
+ * remembered answer as the features, keyed by the same connection: one read answers both.
+ */
+export function useRoomSeatable(server: PluginServer): string[] | null | undefined {
+  const config = serverConfig(server)
+  const { baseUrl, apiKey } = config
+  const key = baseUrl && apiKey ? connectionKey(config) : ""
+  const known = answered.use().get(key)
+  usePoll(() => void readAnswer(config), false, [baseUrl, apiKey], {
+    active: Boolean(key),
+    onShow: false,
+  })
+  return known?.seatable
+}
+
+/**
  * One feature across several bots' servers, keyed by connection: every connection the device holds is
  * asked, because a control about something no bot owns — the app's New room is every Host's, not one
  * bot's (ADR 0115) — has to know which Host answers it. A hook cannot be called in a loop, so this is
@@ -86,7 +116,7 @@ export function usePluginFeatureByServer(
   const live = keys.filter(Boolean)
   usePoll(
     () => {
-      for (const config of configs) if (config.baseUrl && config.apiKey) void readFeatures(config)
+      for (const config of configs) if (config.baseUrl && config.apiKey) void readAnswer(config)
     },
     false,
     [live.join(" ")],

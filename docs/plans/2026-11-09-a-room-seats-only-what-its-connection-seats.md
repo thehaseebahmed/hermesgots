@@ -70,7 +70,7 @@ Host's refusal still comes back in the Host's own words for anything the picker 
    whose profile the first pick's connection does not seat, saying so on a press. Goals: G1. After: 1.
    Layers: app client, app plugin answers, app room seats rule, app New room screen. Check:
    `node --test --import ./scripts/component-hooks.mjs scripts/test-new-room.tsx` — red now, green after,
-   with `scripts/test-room-seats.mjs` pinning the rule itself.
+   with `scripts/test-room-seats.mjs` pinning the rule itself. Done.
 
 ## Decisions
 

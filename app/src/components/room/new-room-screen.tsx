@@ -20,22 +20,28 @@ import {
   type Profile,
   type RoomMember,
 } from "@/lib/db"
-import { usePluginFeatureByServer } from "@/lib/features"
+import { usePluginFeatureByServer, useRoomSeatable } from "@/lib/features"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { FACES, roomSeats } from "@/lib/rooms"
+import { seatsProfile } from "@/lib/room-seats"
 import { startRoom } from "@/lib/room-writes"
 import { tell } from "@/lib/tell"
 import { cn, randomId } from "@/lib/utils"
 
-/** Why a row refuses a seat: a full room says nothing, another Host says what to do about it. */
-type Refusal = { kind: "full" } | { kind: "host"; say: string }
+/**
+ * Why a row refuses a seat: a full room says nothing, another Host and a connection that can't seat
+ * the bot each say what to do about it.
+ */
+type Refusal = { kind: "full" } | { kind: "host"; say: string } | { kind: "seatable"; say: string }
 
 /** The fewest and most seats a room may hold: the Host's rule, said before it can be broken. */
 const LEAST = 2
 const MOST = 6
 
 const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Host."
+const UNSEATABLE =
+  "Only the bots this Host's connection seats can join its room. Unpick every bot to change connection."
 
 /**
  * A room that does not exist yet, drawn the way a new chat is (ADR 0096, ADR 0125): no record, no
@@ -74,11 +80,16 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   const ready = chosen.length >= LEAST && chosen.length <= MOST
 
   const lockedHost = chosen[0] ? hostKey(chosen[0]) : null
+  // The roster belongs to the connection the room is made from, so it is the first pick's; until
+  // there is one, no connection is named and nothing is held out (ADR 0128).
+  const seatable = useRoomSeatable(chosen[0] ?? null)
 
   const refusalFor = (bot: Profile): Refusal | null => {
     if (picked.includes(bot.id)) return null
     // Another Host before the ceiling: at six seats its row must still say the thing a press can act on.
     if (lockedHost && hostKey(bot) !== lockedHost) return { kind: "host", say: OTHER_HOST }
+    // Then the seats it holds: a bot this connection can't seat is refused by the Host at the create.
+    if (!seatsProfile(seatable, bot.hermesProfile)) return { kind: "seatable", say: UNSEATABLE }
     return picked.length >= MOST ? { kind: "full" } : null
   }
 
@@ -91,7 +102,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
     if (!bot) return
     const refusal = refusalFor(bot)
     if (refusal) {
-      if (refusal.kind === "host") tell.info(refusal.say)
+      if (refusal.kind !== "full") tell.info(refusal.say)
       return
     }
     // The guards inside the updater too: a press that lands twice in one batch seats one bot once.
@@ -280,14 +291,15 @@ function SeatRow({
   onToggle: () => void
 }) {
   // A row that can never be seated this time reads no model: its Host would be asked for one nothing
-  // on this screen can use.
-  const info = useModelInfo(refusal?.kind === "host" ? null : bot)
+  // on this screen can use. Another Host's and a connection's own refusal are both such rows.
+  const greyed = refusal?.kind === "host" || refusal?.kind === "seatable"
+  const info = useModelInfo(greyed ? null : bot)
   const choice = botModel(bot, info)
   return (
     <button
       type="button"
       aria-pressed={checked}
-      // Never `disabled` for another Host's row: that would swallow the press the sentence answers.
+      // Never `disabled` for a greyed row: that would swallow the press the sentence answers.
       aria-disabled={refusal ? "true" : undefined}
       data-bot={bot.id}
       disabled={refusal?.kind === "full"}
@@ -296,7 +308,7 @@ function SeatRow({
         linkRowClass,
         refusal?.kind === "full" && "cursor-not-allowed",
         // A row that still answers a press keeps the pointer, so cursor and press tell one story.
-        refusal?.kind === "host" && "cursor-pointer",
+        greyed && "cursor-pointer",
         refusal && "opacity-40",
         checked && "bg-muted",
       )}

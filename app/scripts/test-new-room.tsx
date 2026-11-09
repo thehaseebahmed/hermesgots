@@ -41,6 +41,8 @@ const WRITABLE = ["chats", "rooms", "rooms_write"]
 const posted: { path: string; body: Record<string, unknown> }[] = []
 /** What each Host's plugin advertises, by the host name a test gave it. */
 const offers = new Map<string, string[]>()
+/** The profiles each Host's connection seats, by the host name a test gave it. */
+const seatable = new Map<string, string[]>()
 
 const members = [
   { memberId: "m1", profile: "default", handle: "default", displayName: "Test bot" },
@@ -55,7 +57,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const method = (init?.method ?? "GET").toUpperCase()
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
   if (url.pathname.endsWith("/plugins/gots/info"))
-    return json({ name: "gots", features: offers.get(url.host) ?? ["chats"] })
+    return json({
+      name: "gots",
+      features: offers.get(url.host) ?? ["chats"],
+      ...(seatable.has(url.host) ? { rooms: { seatable: seatable.get(url.host) } } : {}),
+    })
   if (url.pathname.endsWith("/plugins/gots/chats")) return json({ object: "gots.chats", chats: {} })
   if (url.pathname.endsWith("/plugins/gots/rooms") && method === "POST") {
     posted.push({ path: url.pathname, body })
@@ -122,6 +128,7 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
 
 async function resetRoom(bots: Profile[]) {
   posted.length = 0
+  seatable.clear()
   held.id = undefined
   held.name = ""
   await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
@@ -347,6 +354,49 @@ test("the first bot picked chooses the Host, and another Host's bots grey out", 
   } finally {
     tell.info = real
   }
+})
+
+test("a bot this Host's connection can't seat is not a pick", async () => {
+  const bots = await fresh("blank-room-seats.test")
+  // The Host names the profiles the connection the room is made from seats: the writer's is not one.
+  seatable.set("blank-room-seats.test", ["coder"])
+  const said: unknown[] = []
+  const real = tell.info
+  tell.info = ((message: unknown) => said.push(message)) as typeof tell.info
+  try {
+    await mount(screen(), async () => {
+      await openSeats()
+      await click(seat(bots[0].id))
+      await until(
+        async () => seat(bots[1].id)?.getAttribute("aria-disabled") === "true",
+        "the writer greyed where the connection can't seat it",
+      )
+      assert.equal(seat(bots[1].id)?.disabled, false, "still pressable, so it can say why")
+      await click(seat(bots[1].id))
+      assert.deepEqual(
+        said,
+        ["Only the bots this Host's connection seats can join its room. Unpick every bot to change connection."],
+        "a greyed row answers a press with why it is greyed",
+      )
+      assert.match(find('[data-slot="seats-pill"]')?.textContent ?? "", /1 of 6/, "and seats nothing")
+      assert.equal(posted.length, 0, "and the Host is never asked for a room it would refuse")
+    })
+  } finally {
+    tell.info = real
+  }
+})
+
+test("a Host that names no seats offers every bot, as an older one does", async () => {
+  const bots = await fresh("blank-room-unseated.test")
+  await mount(screen(), async () => {
+    await openSeats()
+    await click(seat(bots[0].id))
+    assert.equal(
+      seat(bots[1].id)?.getAttribute("aria-disabled"),
+      null,
+      "no roster read is no roster rule: the picker offers what it always did",
+    )
+  })
 })
 
 test("the seats sheet heads its body the way every drawer does", async () => {
