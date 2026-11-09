@@ -66,20 +66,17 @@ const BENCHLM_KEY_BY_FAMILY: Record<string, string> = {
   beam: "reflection-beam",
 }
 
+const rewriteSegments = (id: string, rewrite: (segment: string) => string) =>
+  id.split("/").map(rewrite).join("/")
+
 const aliasFamily = (id: string) =>
-  id
-    .split("/")
-    .map((segment) =>
-      segment.replace(/^([a-z0-9]+)/, (token) => BENCHLM_KEY_BY_FAMILY[token] ?? token),
-    )
-    .join("/")
+  rewriteSegments(id, (segment) =>
+    segment.replace(/^([a-z0-9]+)/, (token) => BENCHLM_KEY_BY_FAMILY[token] ?? token),
+  )
 
 // BenchLM writes a Kimi version without the k: `kimi-3-1-pro` for the catalog's `kimi-k3.1-pro`.
 const kimiFamily = (id: string) =>
-  id
-    .split("/")
-    .map((segment) => segment.replace(/^kimi-k(?=\d)/, "kimi-"))
-    .join("/")
+  rewriteSegments(id, (segment) => segment.replace(/^kimi-k(?=\d)/, "kimi-"))
 
 /**
  * Ids a catalog spelling might be stored under, most specific first. A lookup takes the first
@@ -104,9 +101,10 @@ export function benchCandidates(id: string): string[] {
     }
   }
   const bare = lastSegment(base)
-  const aliased = [...out, bare].map(aliasFamily)
-  const kimied = [...out, bare].map(kimiFamily)
-  const candidates = [...new Set([...out, bare, ...aliased, ...kimied])]
+  const derived = [...out, bare]
+  const aliased = derived.map(aliasFamily)
+  const kimiSpelled = derived.map(kimiFamily)
+  const candidates = [...new Set([...derived, ...aliased, ...kimiSpelled])]
   candidateCache.set(id, candidates)
   return candidates
 }
