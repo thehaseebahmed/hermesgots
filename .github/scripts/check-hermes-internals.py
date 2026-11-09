@@ -88,7 +88,7 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("gateway/session_api.py",), "def restore_api_session"),
     (("gateway/session_authorities.py",), "def authority_for_home"),
     # The Host's rooms, as `plugin/rooms.py` reaches them (ADR 0117): the dispatcher the seam hands a
-    # request to in process, the two contract entries it calls and the two fields it reads out of
+    # request to in process, the two contract entries it calls and the three fields it reads out of
     # `groups.capabilities`, and the loopback client it falls back to when neither the import nor the
     # call answers.
     (("tui_gateway/rpc_dispatch.py",), "def dispatch(req: dict"),
@@ -114,6 +114,13 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     ),
     (("tui_gateway/contracts/groups_bot_relay.py",), "class GroupsCapabilitiesResult(Result):"),
     (("tui_gateway/contracts/groups_bot_relay.py",), "    driver: bool"),
+    # The roster this connection may seat in a new room, which rooms.py reads out of the same
+    # answer: the app holds a New room picker to it, so a renamed field would offer profiles the
+    # Host refuses and the picker could never explain.
+    (
+        ("tui_gateway/contracts/groups_bot_relay.py",),
+        "    seatable_profiles: list[str] | None = None",
+    ),
     (("hermes_cli/gateway_client.py",), "async def connect_gateway"),
     (("hermes_cli/gateway_runtime.py",), "def discover_gateway_endpoint"),
     (("hermes_cli/gateway_runtime.py",), "def attachable"),

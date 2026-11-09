@@ -573,7 +573,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # no control that would only come back refused. The home is read here, on the loop, so the
         # gate's Host RPC asks the gateway of the profile this request is for (see store_path); a
         # host that can't name one still answers this read, with the gate asking where it stands.
-        rooms_features = await asyncio.to_thread(rooms.advertised, rooms_home())
+        rooms_features, seatable = await asyncio.to_thread(rooms.offered, rooms_home())
         return web.json_response(
             {
                 "name": "gots",
@@ -694,6 +694,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
+                # The profiles this connection may seat in a new room, as the Host names them on
+                # `groups.capabilities` (rooms.py): the app's New room picker holds a bot to this
+                # roster, since a profile it leaves out could only come back refused. None is a
+                # Host older than the field, where the picker filters nothing and the Host's own
+                # refusal at create still says why (ADR 0115).
+                "rooms": {"seatable": seatable},
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),

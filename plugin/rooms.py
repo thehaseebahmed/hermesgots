@@ -12,10 +12,12 @@ has spent the call's whole budget, and the request is not asked twice (a quiet H
 timeout, not two). A refusal the Host sent is its answer and is never repeated either: repeating a
 request it already read is how a write lands twice.
 
-`advertised` is the row `info` asks, and it asks the Host rather than the imports: a Host whose room
-driver isn't running accepts a room and never answers it, which is worse than a row that isn't there.
-A Host that answers neither way has no rooms in Gots and no error either; `available` is the same
-answer as the one sentence a caller can show.
+`offered` is what `info` asks, and it asks the Host rather than the imports: a Host whose room driver
+isn't running accepts a room and never answers it, which is worse than a row that isn't there. It
+answers the rows this Host's rooms earn and the profiles this connection may seat in one of them, from
+the same capabilities answer, so the app's New room picker can hold a bot to the Host's own roster. A
+Host that answers neither way has no rooms in Gots and no error either; `available` is the same answer
+as the one sentence a caller can show.
 
 A room's file is the Host's too: the bytes go up against an upload id the app minted, ride the
 message as a manifest of ids and bounded metadata, and come back down bound to the event they were
@@ -1368,22 +1370,35 @@ def available(home: Any = None) -> Optional[str]:
     return _probe(home)[1]
 
 
-def advertised(home: Any = None) -> List[str]:
-    """The `info` rows this Host's rooms earn: `rooms`, `rooms_questions`, `room_media` and
-    `rooms_write`.
+def offered(home: Any = None) -> Tuple[List[str], Optional[List[str]]]:
+    """The `info` rows this Host's rooms earn, and the profiles this connection may seat.
 
-    One ask answers them all, because `info` is read on every app open and a second probe would
-    double what a Host that can't answer already costs. The write row is separate from the read's for
-    the reason every family here splits them: a Host can list its rooms and not be able to make,
-    rename or disband one, and a New room drawn there is a tap that can only come back refused. The
-    file row is the read's too, and stricter still: it takes both of the Host's attachment methods,
-    since a Host that takes an upload and can't hand the bytes back has stored a file no screen can
-    draw — the app draws only what comes back through the address this plugin mints.
+    The rows are `rooms`, `rooms_questions`, `room_media` and `rooms_write`. One ask answers them
+    all, because `info` is read on every app open and a second probe would double what a Host that
+    can't answer already costs. The write row is separate from the read's for the reason every
+    family here splits them: a Host can list its rooms and not be able to make, rename or disband
+    one, and a New room drawn there is a tap that can only come back refused. The file row is the
+    read's too, and stricter still: it takes both of the Host's attachment methods, since a Host
+    that takes an upload and can't hand the bytes back has stored a file no screen can draw — the
+    app draws only what comes back through the address this plugin mints.
+
+    The seatable profiles are the ones this connection may put in a new room, which the Host
+    answers as `seatable_profiles` (#141178): it seats per connection, so a profile served on
+    another of its connections is not one a room made here can hold. `None` is a Host older than
+    the field, and means the roster is the app's to know nothing about, not that it seats nothing —
+    an empty list says that. Read from the same answer as the rows, since `info` already spends
+    this one ask on it.
     """
     found, why = _probe(home)
     if found is None:
         logger.debug("gots: no rooms on this host: %s", why)
-        return []
+        return [], None
+    named = found.get("seatable_profiles")
+    seatable = (
+        [one for one in named if isinstance(one, str)]
+        if isinstance(named, (list, tuple))
+        else None
+    )
     answered = found.get("methods") or ()
     rows = ["rooms"]
     if QUESTION_FEATURE in (found.get("features") or ()):
@@ -1391,8 +1406,8 @@ def advertised(home: Any = None) -> List[str]:
     if all(name in answered for name in ATTACHMENT_METHODS):
         rows.append(MEDIA_FEATURE)
     if any(name not in answered for name in WRITES):
-        return rows
-    return [*rows, "rooms_write"]
+        return rows, seatable
+    return [*rows, "rooms_write"], seatable
 
 
 # -- The watcher --------------------------------------------------------------

@@ -52,6 +52,7 @@ class Host:
         driver_status=None,
         states=None,
         features=None,
+        seatable_profiles=("default",),
     ):
         self.listed = list(listed)
         self.driver = driver
@@ -59,6 +60,11 @@ class Host:
         # What the Host declares it can do beyond the methods: today a Host that projects a room
         # member's questions names it here, which is what earns `rooms_questions` (rooms.py).
         self.features = list(features or [])
+        # The profiles this caller's connection may seat in a new group, named beside its methods
+        # (#141178). None is a Host older than the field, which answers without it at all.
+        self.seatable_profiles = (
+            list(seatable_profiles) if seatable_profiles is not None else None
+        )
         self.approvals = []
         self.stops = []
         self.refuse = refuse
@@ -150,8 +156,15 @@ class Host:
     def answer(self, method, params=None):
         params = params or {}
         if method == "groups.capabilities":
+            # A Host that predates the roster answers every other field and no `seatable_profiles`
+            # at all, which is what an older gateway does — never an empty list.
+            named = (
+                {"seatable_profiles": list(self.seatable_profiles)}
+                if self.seatable_profiles is not None
+                else {}
+            )
             return {"protocol_version": 1, "driver": self.driver, "methods": self.methods,
-                    "features": self.features}
+                    "features": self.features, **named}
         if method == "groups.list":
             # The Host's own reader: a room that has been disbanded answers only when it is asked
             # for, which is what makes a tombstone reachable at all.
@@ -358,14 +371,18 @@ class RoomsSeam(unittest.TestCase):
     def setUp(self):
         temp_hermes_home(self)
 
-    def features(self):
-        """`info`'s feature names, read through the route a device reads them through."""
+    def info(self):
+        """`info`'s whole answer, read through the route a device reads it through."""
         app = wire(self, RouteAdapter())
         request = FakeWeb.Request()
         request.match_info, request.headers = {}, {}
         answer = asyncio.run(route(app, plugin.PREFIX + "/info")(request))
         self.assertEqual(answer["status"], 200)
-        return answer["payload"]["features"]
+        return answer
+
+    def features(self):
+        """`info`'s feature names, read through the route a device reads them through."""
+        return self.info()["payload"]["features"]
 
     def test_no_rooms_where_the_host_has_no_dispatcher_to_ask(self):
         with no_dispatcher(), no_loopback():
@@ -411,6 +428,24 @@ class RoomsSeam(unittest.TestCase):
         with dispatcher(Host()), no_loopback():
             features = self.features()
         self.assertEqual([one for one in features if one.startswith("rooms")], ["rooms", "rooms_write"])
+
+    def test_the_profiles_this_connection_seats_answer_through_info(self):
+        # The Host seats per connection, so its own roster is what a New room picker can hold a bot
+        # to: a profile named here can be made a room with, and one it omits can only be refused.
+        host = Host(seatable_profiles=("gotsfather", "ops"))
+        with dispatcher(host), no_loopback():
+            answer = self.info()
+        self.assertIn("rooms", answer["payload"]["features"])
+        self.assertEqual(answer["payload"]["rooms"], {"seatable": ["gotsfather", "ops"]})
+
+    def test_a_host_that_names_no_seats_answers_none_so_the_app_filters_nothing(self):
+        # `seatable_profiles` is a newer field: a Host from before it keeps the picker it had, and
+        # its own refusal at create is still what a room its connection can't seat comes back as.
+        host = Host(seatable_profiles=None)
+        with dispatcher(host), no_loopback():
+            answer = self.info()
+        self.assertIn("rooms", answer["payload"]["features"])
+        self.assertEqual(answer["payload"]["rooms"], {"seatable": None})
 
     def test_no_rooms_where_the_driver_is_not_running(self):
         host = Host(driver=False)
