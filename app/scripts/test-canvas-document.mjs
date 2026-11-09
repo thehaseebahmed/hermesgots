@@ -1,12 +1,14 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
+import vm from "node:vm"
 
 import { BRIDGE_METHODS } from "../src/lib/canvas-bridge.ts"
 import {
   CANVAS_CSP,
   LIBRARIES,
   SCROLL_MESSAGE,
+  SUBMIT_IN_PLACE,
   TOKENS,
   canvasDocument,
   readScroll,
@@ -59,6 +61,75 @@ test("RTCPeerConnection is gone before the page's scripts", () => {
   }
   // Only the page's own script is left for the page: the removal rides the head, not the body.
   assert.equal(html.slice(html.indexOf("<body")).includes("RTCPeerConnection"), false)
+})
+
+test("a form submits in place", () => {
+  // The guard is a head script of its own, so it is on the page before the page's own scripts are:
+  // its listener runs after every handler the page put on the form, a field or the window, and it
+  // cancels the navigation only where none of them did.
+  const listeners = []
+  const prevented = []
+  const seen = []
+  const context = {
+    addEventListener: (type, fn, capture) => listeners.push({ type, fn, capture }),
+    seen,
+    prevented,
+  }
+  context.window = context
+  vm.createContext(context)
+  // The page's own handler, registered first: a submit bubbling up reaches this before the guard.
+  vm.runInContext(
+    `addEventListener("submit", function () { seen.push(prevented.length) })`,
+    context,
+  )
+  vm.runInContext(SUBMIT_IN_PLACE, context)
+  assert.deepEqual(
+    listeners.map((one) => one.type),
+    ["submit", "submit"],
+  )
+  assert.equal(listeners[1].capture, false, "the guard listens in the bubble phase")
+
+  const event = {
+    defaultPrevented: false,
+    preventDefault() {
+      prevented.push(true)
+      this.defaultPrevented = true
+    },
+  }
+  for (const listener of listeners) listener.fn(event)
+  assert.deepEqual(seen, [0], "the page's handler ran, and nothing had cancelled anything yet")
+  assert.equal(prevented.length, 1, "the guard cancelled the navigation, once")
+  assert.equal(event.defaultPrevented, true)
+
+  // A page that prevented the submit itself is left alone: its decision is not cancelled twice.
+  const stopped = []
+  const second = { addEventListener: (type, fn) => stopped.push({ type, fn }) }
+  second.window = second
+  vm.createContext(second)
+  vm.runInContext(
+    `addEventListener("submit", function (event) { event.preventDefault() })`,
+    second,
+  )
+  vm.runInContext(SUBMIT_IN_PLACE, second)
+  const cancelled = []
+  const own = {
+    defaultPrevented: false,
+    preventDefault() {
+      cancelled.push(true)
+      this.defaultPrevented = true
+    },
+  }
+  for (const listener of stopped) listener.fn(own)
+  assert.equal(cancelled.length, 1, "only the page's own preventDefault ran")
+
+  // Its script is in the drawn head, ahead of the page's own, and the policy still refuses a form.
+  const html = canvasDocument(PAGE, { mode: "light", tokens: LIGHT })
+  assert.ok(html.includes(SUBMIT_IN_PLACE), "the guard rides the document's head")
+  assert.ok(
+    html.indexOf(SUBMIT_IN_PLACE) < html.indexOf('document.title = "ran"'),
+    "ahead of the page's own script",
+  )
+  assert.match(html, /form-action 'none'/, "the navigation policy is unchanged")
 })
 
 test("theme variables follow the mode", () => {
