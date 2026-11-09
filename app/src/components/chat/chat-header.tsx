@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils"
  * A session is a place in a project and a thread open beside Main is already somewhere, so both pass
  * `showBot={false}`: the picture stays a caller's decision, and the arrangement doesn't second-guess
  * it.
+ * `heading` draws the title as the screen's `<h1>` rather than a conversation's span, for a screen
+ * whose whole page is one thing — a canvas — while every other caller keeps the span.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -26,6 +28,7 @@ export function ChatHeader({
   muted,
   showBot = true,
   centered = false,
+  heading = false,
   leading,
   actions,
   className,
@@ -35,6 +38,7 @@ export function ChatHeader({
   muted?: boolean
   showBot?: boolean
   centered?: boolean
+  heading?: boolean
   subtitle?: ReactNode
   leading?: ReactNode
   actions?: ReactNode
@@ -44,6 +48,7 @@ export function ChatHeader({
   const mark = muted && (
     <BellOffIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" />
   )
+  const titleClass = cn("min-w-0 truncate text-sm font-semibold", centered && "max-w-full")
 
   return (
     <header
@@ -89,14 +94,16 @@ export function ChatHeader({
           )}
         >
           <div className={cn("flex min-w-0 flex-col", centered && "items-center")}>
-            {title && (
-              <span
-                data-slot="header-title"
-                className={cn("min-w-0 truncate text-sm font-semibold", centered && "max-w-full")}
-              >
-                {title}
-              </span>
-            )}
+            {title &&
+              (heading ? (
+                <h1 data-slot="header-title" className={titleClass}>
+                  {title}
+                </h1>
+              ) : (
+                <span data-slot="header-title" className={titleClass}>
+                  {title}
+                </span>
+              ))}
             {subtitle && (
               <span
                 data-slot="header-line"

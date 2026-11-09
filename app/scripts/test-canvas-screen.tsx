@@ -236,6 +236,12 @@ test(
           () => find('[data-slot="header-title"]')?.textContent === CANVAS.title,
           "the canvas's title in the shared header",
         )
+        // The canvas's title is the screen's heading, not a span like a conversation's title.
+        assert.equal(
+          find('[data-slot="header-title"]')?.tagName,
+          "H1",
+          "the canvas's title is the screen's heading",
+        )
         const row = find('[data-slot="header-row"]')
         assert.ok(row, "the header's one row")
         assert.ok(

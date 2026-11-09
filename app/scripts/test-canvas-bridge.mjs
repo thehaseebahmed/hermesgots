@@ -48,6 +48,10 @@ function pageHarness() {
   const listeners = []
   const posted = []
   const context = {
+    // The page's own realm has these: `URL` is how its half reads a scheme, and `setTimeout` is
+    // how a link the page has just asked for stops being the tap's.
+    URL,
+    setTimeout,
     parent: { postMessage: (data) => posted.push(data) },
     addEventListener: (type, fn) => listeners.push({ type, fn }),
   }
@@ -643,11 +647,67 @@ test("a page's own window.open asks the app once, and only for http(s)", () => {
     url: "https://example.com/kept?n=1",
   })
 
-  for (const url of ["javascript:alert(1)", "/kept", "about:blank"]) {
+  // A scheme is an address, not a prefix: the page half reads the URL the way the app does, so a
+  // string the app would refuse never reaches the page's "opened" path.
+  for (const url of [
+    "javascript:alert(1)",
+    "/kept",
+    "about:blank",
+    "https://",
+    "https:// x",
+    "https://exa mple.com",
+  ]) {
     assert.equal(context.window.open(url), null, url)
   }
   assert.equal(context.window.open(), null, "no argument at all")
+
+  // A `_self` open is the page navigating itself, which the frame refuses: it is no link to open
+  // elsewhere, and asks nothing.
+  assert.equal(context.window.open("https://example.com/x", "_self"), null, "_self")
+  assert.equal(context.window.open("https://example.com/x", "_SELF"), null, "whatever its case")
   assert.equal(askedIn(posted).length, 1, "and nothing is posted")
+})
+
+test("a tap whose page opens the same link asks once", async () => {
+  // A page's own handler can answer the tap and call `window.open` itself. The bridge's click
+  // listener then runs over a click nobody prevented and would ask for the same URL again: the tap
+  // is one ask, and the click is still cancelled so the frame never navigates.
+  const { context, posted, fire } = pageHarness()
+  const url = "https://example.com/kept?n=1"
+  assert.ok(context.window.open(url, "_blank"), "the page's own open asks the app")
+  assert.equal(askedIn(posted).length, 1, "once for the page's own call")
+
+  const link = {
+    tagName: "A",
+    nodeType: 1,
+    href: url,
+    getAttribute: (name) => (name === "href" ? url : null),
+    parentNode: null,
+  }
+  const tap = () => {
+    const event = {
+      target: link,
+      isTrusted: true,
+      defaultPrevented: false,
+      cancels: 0,
+      preventDefault() {
+        this.cancels += 1
+        this.defaultPrevented = true
+      },
+    }
+    fire("click", event)
+    return event
+  }
+
+  const event = tap()
+  assert.equal(askedIn(posted).length, 1, "one open call for the tap, not two")
+  assert.equal(event.cancels, 1, "the click is cancelled, so the frame doesn't try to leave")
+
+  // The page's ask is the tap's only once: the next tap on the same link asks again.
+  await settled()
+  const later = tap()
+  assert.equal(askedIn(posted).length, 2, "a later tap asks again")
+  assert.equal(later.cancels, 1)
 })
 
 test("a call the app cannot read is answered rather than dropped", async () => {

@@ -539,6 +539,7 @@ export function CanvasView() {
           </span>
         }
         showBot={false}
+        heading
         leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
         actions={
           <>
