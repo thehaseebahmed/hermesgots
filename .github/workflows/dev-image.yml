@@ -123,6 +123,23 @@ jobs:
           # image itself has already been built.
           cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
 
+      # What the image promises is on PATH for the shell that will call it: Debian's /etc/profile
+      # rebuilds PATH for login shells, so `gh`, `pnpm`, `python3`, `playwright` and `reticle` are
+      # looked up again here rather than assumed from the layer that installed them. An image the
+      # sandbox keeps is one whose `gh` resolves; this is the cheapest place to prove it.
+      - name: Verify the image's tools
+        if: github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'
+        run: |
+          docker run --rm "${{ steps.subject.outputs.tag }}" bash -lc '
+            set -e
+            for tool in gh pnpm python3 playwright reticle; do
+              command -v "$tool" > /dev/null || { echo "missing from PATH: $tool"; exit 1; }
+            done
+            gh --version | head -1
+            pnpm --version
+            python3 -c "import cryptography"
+          '
+
       # The app's gates, the plugin's tests and the website's build, run inside the image against the
       # checkout: an image that cannot run them is not worth publishing. `.github/scripts/checks.sh`
       # owns that set and `tests.yml` runs the same script, so a gate added for the runner reaches

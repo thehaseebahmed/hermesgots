@@ -66,6 +66,8 @@ sequenceDiagram
    missing, naming it. Goals: G2. After: none. Check: the same command in this container — a stale build of the same
    image — reports `missing from PATH: gh` and `reticle`, which is the failure it has to catch, while the image CI
    builds must exit 0.
+
+   Done.
 4. **`CONTRIBUTING.md` says what the image carries and what a refused pull means.** Goals: G1 G2. After: none. Check:
    read-through — the tool list names the GitHub CLI, and the pull section says the package is public and links the
    settings where that was changed.
