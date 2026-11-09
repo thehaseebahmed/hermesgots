@@ -78,12 +78,12 @@ const aliasFamily = (id: string) =>
 const kimiFamily = (id: string) =>
   rewriteSegments(id, (segment) => segment.replace(/^kimi-k(?=\d)/, "kimi-"))
 
+const candidateCache = new Map<string, string[]>()
+
 /**
  * Ids a catalog spelling might be stored under, most specific first. A lookup takes the first
  * candidate that has a BenchLM row, so an exact row always beats a looser reading.
  */
-const candidateCache = new Map<string, string[]>()
-
 export function benchCandidates(id: string): string[] {
   // Built once per id: a lookup runs for every row, and again for every keystroke while the
   // picker's search is typed.
