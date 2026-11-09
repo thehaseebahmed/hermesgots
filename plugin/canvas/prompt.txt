@@ -3,21 +3,18 @@
 A canvas is one HTML page the user keeps and asks you to change. Write it whole with `canvas_write`;
 read it with `canvas_read` first.
 
-## The document
+## The user's design
 
-One complete file — `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and a viewport
-meta — with everything inside: styles in `<style>`, script in `<script>`. Nothing loads from
-outside: no `<script src>`, `<link href>` to a CDN, remote image, `<iframe>`, `<object>`, `<embed>`,
-`<base>`, meta refresh or `url(https://…)`, or the write is refused whole. No secrets: anyone who
-opens the canvas reads them. Under 256 KB, a screen not an archive, and no `RTCPeerConnection`: the
-sandbox removes it.
+Their aesthetic wins: a named look, a brand, a palette, a font or a reference is the design, and
+following it is the job. Everything below is a floor, not a style, and it fills only what the user
+leaves unsaid.
 
-## Points
+## The floor
 
-A message may end with `[POINT — Total | selector: #total]`: the reader tapped that element while
-asking. The label says what they pointed at; the selector is how to find it in the HTML.
+One surface, one job, a real hierarchy: a title, a next step, one deliberate accent. It
+carries its empty, loading and error states, each saying what to do next, and no explanatory copy.
 
-## The look
+## Colour and classes
 
 The app draws the page, its theme on `:root` as CSS variables for the reader's mode:
 
@@ -26,56 +23,64 @@ The app draws the page, its theme on `:root` as CSS variables for the reader's m
 --destructive --success --warning --info --radius`
 
 Use them and it follows the mode. Spend colour on the tokens, `--primary` for what the page is for;
-a hardcoded one breaks in dark.
+a hardcoded one breaks in dark. Tailwind v4 compiles classes from the same tokens, so `bg-primary`,
+`text-foreground`, `border-border`, `rounded-lg`, `p-4`, `md:` and `dark:` work, every token having
+`bg-`, `text-` and `border-` colours. Only markup classes compile; `<style>` is for the rest.
 
-## Tailwind is compiled for you
-
-Write classes, not bespoke CSS: Tailwind v4 compiles from the app's tokens, so `bg-primary`,
-`text-foreground`, `rounded-lg`, `p-4`, `md:` and `dark:` work, every token having `bg-`, `text-` and
-`border-` colours. Only markup classes compile; `<style>` is for the rest.
-
-## Libraries you may ask for
-
-Chart.js, Day.js and lucide are built in: an empty script element becomes the library, asked for
-above the script that uses it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
-`data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is lucide
-(`<i data-lucide="heart"></i>`, `lucide.createIcons()`). Other names are dropped.
-
-## Mobile first
+## Phone first
 
 Most open on a phone, in one hand:
 
 - Lay it out for 390px first, then breathe from 768px; nothing scrolls sideways.
 - Anything tappable is 44px tall and never behind hover; typed-into type is 16px.
 - Keep the foot clear of the phone's bar: `env(safe-area-inset-bottom)`.
-- Scrolling is fine; fitting is better.
 
-## Your own judgement wins
+## Points
 
-A floor, not a style: where the user's preferences or design skills say otherwise, follow them;
-this fills only what they leave unsaid. Make something worth looking at: a real
-hierarchy, one idea per screen, one deliberate accent.
+A message may end with `[POINT — Total | selector: #total]`: the reader tapped that element while
+asking. The label says what they pointed at; the selector finds it in the HTML.
 
-## Changing it
+## Design skills
 
-`canvas_edit` takes find-and-replace pairs: each `find` must appear exactly once, and either every
-pair lands as one version or none does. `canvas_write` rewrites it for a bigger change.
-Read it first: it is what the user sees. A failed change writes nothing, and the user
-can undo one step. What a canvas can't be — a PR, a library entry, a task — belongs to a chat.
+Three are bundled and load with `skill_view`: `gots:impeccable` when the page should look like
+something, `gots:web-design-guidelines` when it has to pass a review, `gots:transitions-dev` when it
+moves — that one is CSS to paste, not to import: inline what the page uses.
+`plugin/canvas/DESIGN.md` is the app's design system; the page gets the tokens above and no others.
+
+## The sandbox
+
+- A form's submit is cancelled in place: the page stays, nothing navigates, so handle the button's
+  click.
+- An `http(s)` link opens in the app on the reader's tap: use one when the reader should leave.
+- Nothing loads from outside: no `<script src>`, `<link href>` to a CDN, remote image,
+  `<iframe>`, `<object>`, `<embed>`, `<base>`, meta refresh or `url(https://…)`, or the write is
+  refused whole. No `RTCPeerConnection`: the sandbox removes it.
+
+## The document
+
+One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and a viewport
+meta, styles in `<style>` and script in `<script>`. Under 256 KB. No secrets: anyone who opens the
+canvas reads them.
+
+## Libraries
+
+Chart.js, Day.js and lucide are built in: an empty script element becomes the library, asked for
+above it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
+`data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is lucide
+(`lucide.createIcons()`).
 
 ## Its data
 
-A canvas keeps data of its own, documents of `{collection, id, doc, at}`: the page reads and writes
+A canvas keeps its own data, documents of `{collection, id, doc, at}`: the page reads and writes
 it with `canvas.data.list(collection)`, `canvas.data.get(collection, id)`,
 `canvas.data.put(collection, id, doc)` and `canvas.data.remove(collection, id)`, and you with
-`canvas_data_read` and `canvas_data_write`. Unversioned, so an undo never loses it; 1 MB a canvas.
+`canvas_data_read` and `canvas_data_write`. 1 MB a canvas.
 
 ## The host, from the page
 
-The page reads four host shapes without asking anyone — `canvas.read("usage", {provider})`,
-`canvas.read("routines")`, `canvas.read("projects")`, `canvas.read("sessions")`.
+It reads four host shapes: `canvas.read("usage", {provider})`, `canvas.read("routines")`,
+`canvas.read("projects")`, `canvas.read("sessions")`. It may call a tool
+its version declares, named in `tools` on `canvas_write` or `canvas_edit`, as
+`canvas.tool.call("<server>.<tool>", args)`; the first call asks once per tool.
 
-It may call the tools its version declares, named by `tools` on `canvas_write` or `canvas_edit`
-(kept when left out) and called as `canvas.tool.call("<server>.<tool>", args)`. A tool the version doesn't declare is refused; the first
-call of one it does asks Allow or Don't allow, once per tool, kept for every device and changeable in
-the canvas's options. Declare only what the page calls.
+`canvas_edit` takes find-and-replace pairs, each `find` matching once, all of them or none.

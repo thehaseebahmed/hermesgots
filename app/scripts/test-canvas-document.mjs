@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import test from "node:test"
 import vm from "node:vm"
 
@@ -366,6 +366,22 @@ test("the canvas section names exactly the libraries and bridge methods the app 
   assert.deepEqual(named(/data-canvas-lib="([a-z]+)"/g).sort(), [...LIBRARIES].sort())
   assert.deepEqual(named(/canvas\.data\.([a-z]+)/g).sort(), [...BRIDGE_METHODS].sort())
   assert.ok(guide.length <= 4_000, `the guide is ${guide.length} characters, under the host's 4,000`)
+})
+
+test("the canvas section names the skills it can load", () => {
+  // A canvas's session only hears of these three from the guide, and a name it can't load is a dead
+  // end: each one has to be a folder the plugin really ships, sharing it with the skill's own name.
+  const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
+  for (const name of ["impeccable", "web-design-guidelines", "transitions-dev"]) {
+    assert.ok(guide.includes(`gots:${name}`), `the guide names gots:${name}`)
+    const skill = new URL(`../../plugin/skills/${name}/SKILL.md`, import.meta.url)
+    assert.ok(existsSync(skill), `plugin/skills/${name}/SKILL.md exists`)
+    assert.match(readFileSync(skill, "utf8"), new RegExp(`^name: ${name}$`, "m"), "the folder is its name")
+  }
+  assert.match(guide, /DESIGN\.md/, "the guide points at the app's own design system")
+  // The two traps the sandbox leaves a page: its submit goes nowhere, and a link's target is the app.
+  assert.match(guide, /submit is cancelled in place/, "the guide says a form's submit is cancelled")
+  assert.match(guide, /`http\(s\)` link opens in the app/, "and that a link opens in the app")
 })
 
 test("the app's own policy keeps a canvas's frame from navigating itself away", () => {
