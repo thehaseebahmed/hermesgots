@@ -156,7 +156,7 @@ export function AttachMenu({
           <div
             className={cn(
               "grid grid-cols-3 gap-4 px-4 sm:gap-5 sm:px-6",
-              session ? "pb-2" : "pb-24 md:pb-2",
+              session || point ? "pb-2" : "pb-24 md:pb-2",
             )}
           >
             {SOURCES.map(({ id, label, icon: Icon }) => {
@@ -181,8 +181,7 @@ export function AttachMenu({
             })}
           </div>
           {point && (
-            <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
-              <h3 className="px-1 text-sm text-muted-foreground">Page</h3>
+            <section className={cn("px-4 pt-2 sm:px-6", session ? "pb-2" : "pb-24 md:pb-2")}>
               <Button
                 type="button"
                 variant={point.armed ? "secondary" : "outline"}
@@ -204,7 +203,7 @@ export function AttachMenu({
             </section>
           )}
           {session && (
-            <section className="flex flex-col gap-2 px-4 pt-4 pb-24 sm:px-6 md:pb-2">
+            <section className="flex flex-col gap-2 px-4 pt-2 pb-24 sm:px-6 md:pb-2">
               <h3 className="px-1 text-sm text-muted-foreground">Mode</h3>
               <ModeOptions
                 mode={session.mode}

@@ -209,7 +209,7 @@ export function CanvasPage() {
         <section className="flex flex-col gap-4">
           {loaded && visible.length === 0 && archived.length === 0 && !blocked && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No canvases yet. Ask for one above and your bot builds it.
+              No canvases yet.
             </p>
           )}
           {visible.length > 0 && (
