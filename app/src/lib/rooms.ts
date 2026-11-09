@@ -47,6 +47,33 @@ export function roomAnswerer(
   return undefined
 }
 
+/** How many pictures a room's row holds before it counts the rest. */
+export const FACES = 4
+
+/**
+ * The pictures a room's row draws: one per member whose bot this device holds, up to four, and how
+ * many members the row could not show.
+ *
+ * A row is one line tall, so the cluster is bounded rather than scrolled: four faces at a 20px size
+ * with an 8px overlap, and a `+N` for the rest (ADR 0125). A member whose bot this device does not
+ * hold has no picture to draw — it is still counted, so a room of two shows nothing extra for a
+ * member that happens to be unlinked here.
+ */
+export function roomFaces(
+  room: Room,
+  bots: Iterable<Profile>,
+  host?: string,
+): { shown: string[]; more: number } {
+  const seated = botsByProfile(bots, host)
+  const shown: string[] = []
+  for (const member of room.members) {
+    if (shown.length === FACES) break
+    const bot = member.profile ? seated.get(member.profile) : undefined
+    if (bot?.botId) shown.push(bot.botId)
+  }
+  return { shown, more: Math.max(0, room.members.length - shown.length) }
+}
+
 /** A room's members as its row names them: what each is called, in the order the Host seats them. */
 export function roomMembersLine(room: Room): string {
   return room.members.map(memberLabel).filter(Boolean).join(", ")

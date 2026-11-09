@@ -30,6 +30,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { onChanges, useChanges } from "@/lib/live"
+import { roomFaces } from "@/lib/rooms"
 import { usePoll } from "@/lib/poll"
 import { AttachmentError } from "@/lib/send-turn"
 import { randomId } from "@/lib/utils"
@@ -205,6 +206,8 @@ async function readNeeds({ chat, bot }: RoomNeedsRow, { paced }: { paced: boolea
 export interface RoomNeedsRow {
   chat: Conversation
   bot?: Profile
+  /** The members' pictures the row draws, and how many it could not draw (ADR 0125). */
+  faces: { shown: string[]; more: number }
   /** The record's clock this device last read the room's page at, or nothing before it has. */
   read?: number
 }
@@ -229,6 +232,9 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
       .map((chat) => ({
         chat,
         bot: chatOwner(chat, bots).bot,
+        faces: chat.room
+          ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId)?.hostId)
+          : { shown: [], more: 0 },
         read: chat.roomNeeds?.at,
       }))
   }, [])

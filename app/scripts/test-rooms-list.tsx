@@ -544,3 +544,44 @@ test("the Host saying a room moved marks its row though the record never moved",
     )
   })
 })
+
+test("a room's row draws its members' pictures, four at most, and counts the rest", async () => {
+  await fresh()
+  // A room of five, each a profile this device holds a bot for: the row shows four and a count.
+  const seats = ["one", "two", "three", "four", "five"]
+  await db.profiles.bulkPut(
+    seats.map((profile, at) =>
+      botProfile("rooms", {
+        id: `bot-${profile}`,
+        name: profile,
+        baseUrl: "http://faces.test/v1",
+        hermesProfile: profile,
+        botId: ["gem", "hex", "orbi", "penny", "stella"][at],
+      }),
+    ),
+  )
+  await db.conversations.put({
+    id: "room-five",
+    profileId: CARRIER,
+    title: "Planning",
+    room: {
+      id: "room-five",
+      members: seats.map((profile, at) => ({ memberId: `m${at}`, profile, handle: profile })),
+    },
+    createdAt: LAST_AT,
+    updatedAt: LAST_AT,
+    changedAt: LAST_AT,
+  })
+  await settle()
+  await mount(screen("/"), async () => {
+    await until(async () => Boolean(find('[data-room-faces]')), "the room's faces")
+    const faces = findAll("[data-room-faces] img")
+    assert.equal(faces.length, 4, "four pictures, and no more")
+    assert.deepEqual(
+      faces.map((one) => one.getAttribute("src")),
+      ["/bots/gem.png", "/bots/hex.png", "/bots/orbi.png", "/bots/penny.png"],
+      "the seats in the Host's order",
+    )
+    assert.equal(find("[data-room-faces-more]")?.textContent, "+1", "and the fifth counted")
+  })
+})

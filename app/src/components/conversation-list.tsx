@@ -23,6 +23,7 @@ import {
 
 import { Bot } from "@/components/bot"
 import { NewRoomButton } from "@/components/room/new-room"
+import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -35,7 +36,7 @@ import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
-import { needsYouLine, roomMembersLine } from "@/lib/rooms"
+import { needsYouLine, roomFaces, roomMembersLine } from "@/lib/rooms"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
@@ -126,6 +127,7 @@ function roomNeedsText(chat: Conversation): string | undefined {
 function ChatRow({
   chat,
   bot,
+  faces,
   reason,
   now,
   collapsed,
@@ -133,6 +135,8 @@ function ChatRow({
 }: {
   chat: Conversation
   bot?: Profile
+  /** A room's members, as pictures: what the row draws instead of the one bot a chat is (ADR 0125). */
+  faces?: { shown: string[]; more: number }
   /** What waits on the user, in words the screen reader hears: a chat's, or the room's own reading. */
   reason?: string
   now: number
@@ -148,7 +152,11 @@ function ChatRow({
       aria-label={collapsed ? (reason ? `${chat.title}. ${reason}` : chat.title) : undefined}
       className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
     >
-      <Bot id={bot?.botId} className="size-5" />
+      {faces ? (
+        <RoomFaces shown={faces.shown} more={faces.more} collapsed={collapsed} />
+      ) : (
+        <Bot id={bot?.botId} className="size-5" />
+      )}
       {!collapsed && (
         <>
           <span className="min-w-0 flex-1">
@@ -297,6 +305,11 @@ function Recents({
     return chats.map((chat) => ({
       chat,
       bot: chatOwner(chat, bots).bot,
+      // A room's faces: its members' bots on the Host that carries the record, which is the same seat
+      // the room's screen draws its pictures from (ADR 0115, ADR 0125).
+      faces: chat.room
+        ? roomFaces(chat.room, profiles, bots.get(chat.profileId)?.hostId)
+        : undefined,
       reason: chat.room ? roomNeedsText(chat) : undefined,
       local: local.get(chat.id),
     }))
@@ -306,11 +319,12 @@ function Recents({
   const rest = recents?.filter((one) => !one.chat.pinned) ?? []
 
   const rows = (band: typeof rest) =>
-    band.map(({ chat, bot, reason, local }) => (
+    band.map(({ chat, bot, faces, reason, local }) => (
       <li key={chat.id}>
         <ChatRow
           chat={chat}
           bot={bot}
+          faces={faces}
           now={now}
           collapsed={collapsed}
           onNavigate={onNavigate}
@@ -471,11 +485,12 @@ function Bots({
             </li>
           )
         })}
-        {listed.map(({ chat, bot }) => (
+        {listed.map(({ chat, bot, faces }) => (
           <li key={chat.id}>
             <ChatRow
               chat={chat}
               bot={bot}
+              faces={faces}
               reason={roomNeedsText(chat)}
               now={now}
               collapsed={collapsed}

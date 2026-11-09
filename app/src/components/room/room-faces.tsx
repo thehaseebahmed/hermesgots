@@ -1,0 +1,59 @@
+import { Bot } from "@/components/bot"
+import { cn } from "@/lib/utils"
+
+/**
+ * A room's row, drawn as its members: up to four of their bots' pictures, overlapped by 8px so the
+ * cluster reads as one thing, and a count for the members it could not show (ADR 0125).
+ *
+ * The overlap is the whole trick: each picture's own transparency is what separates it from the one
+ * under it, so the cluster needs no ring or backing disc — the app draws bots as their art everywhere
+ * else, and a circle behind a character that is not round would be a second shape to explain.
+ *
+ * The pictures are decoration beside the row's own words: the row still names the room, and a screen
+ * reader hears the members from that name and its line, so the cluster is hidden from it rather than
+ * read out as a list of images.
+ */
+export function RoomFaces({
+  shown,
+  more,
+  collapsed = false,
+  className,
+}: {
+  /** The bots to draw, in the order the Host seats them. Only the first four are ever handed over. */
+  shown: string[]
+  /** How many members the row could not draw a picture for. */
+  more: number
+  /** A rail draws no room for a cluster: it shows the member a room is most likely to answer as. */
+  collapsed?: boolean
+  className?: string
+}) {
+  if (!shown.length && !more) return null
+  if (collapsed) return <Bot id={shown[0]} className={cn("size-5", className)} />
+  return (
+    <span
+      aria-hidden
+      data-room-faces
+      className={cn("flex shrink-0 items-center", className)}
+    >
+      {shown.map((id, at) => (
+        // The first face sits above the ones it overlaps, so the cluster reads left to right.
+        <span
+          key={`${id}-${at}`}
+          className={cn("relative flex shrink-0", at > 0 && "-ml-2")}
+          style={{ zIndex: shown.length - at }}
+        >
+          <Bot id={id} className="size-5" />
+        </span>
+      ))}
+      {more > 0 && (
+        <span
+          data-room-faces-more
+          className="relative -ml-2 flex size-5 items-center justify-center rounded-full bg-muted text-[10px] leading-none font-semibold text-muted-foreground tabular-nums"
+          style={{ zIndex: 0 }}
+        >
+          +{more}
+        </span>
+      )}
+    </span>
+  )
+}
