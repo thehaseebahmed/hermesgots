@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **92 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 92 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **93 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 93 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 37 |
+| stay | 38 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **92** |
+| **total** | **93** |
 
-Of those 92, 86 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 85 distinct files) and 6 point at the older
+Of those 93, 87 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 86 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -185,7 +185,7 @@ only place the app is asked, and it fails at the base commit on the button alone
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the thirty-seven fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the thirty-eight fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
@@ -196,7 +196,7 @@ grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 37
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 92 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 93 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
