@@ -12,7 +12,9 @@ The Android app has no Push API, so for it the plugin asks the Gots registry (``
 through Firebase, since the service account key can't live on every host: the message is the same, so
 the registry and Firebase see the title, never what was asked.
 
-A device that has the app open (it holds an ``events`` stream) is skipped: it already knows.
+A device that has the app open (it holds an ``events`` stream) is skipped: it already knows. A
+session another surface started is no device's news at all: only a chat's own session, or the child
+compression moved that chat onto, is pushed.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
 Hermes.
 """
@@ -459,6 +461,10 @@ def _gots_chat(path: Path, session_id: str) -> bool:
     delegation fork, so a subagent's session is not its parent chat's."""
     from . import sessions
 
+    if session_id.startswith(sessions.ID_PREFIXES):
+        # The common case, and the profile's store stays unopened: this runs on the thread that had
+        # the news, before the push it may start.
+        return True
     return sessions.chat_session(home_of(path), session_id).startswith(sessions.ID_PREFIXES)
 
 
