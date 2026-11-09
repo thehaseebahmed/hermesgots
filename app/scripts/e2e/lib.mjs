@@ -279,6 +279,20 @@ export async function startRun(sessionId, input) {
   return (await res.json()).run_id
 }
 
+/**
+ * Writes a session's transcript on a host, as Hermes's own session DB holds it. A screen that reads
+ * the host draws these rows, so a seed aimed at one writes here rather than into the device's copy.
+ * `timestamp` is Hermes's unit, seconds since the epoch.
+ */
+export async function writeTranscript(host, sessionId, rows) {
+  const res = await fetch(`${host}/__mock/transcript`, {
+    method: "POST",
+    headers: hostAuth,
+    body: JSON.stringify({ session_id: sessionId, rows }),
+  })
+  assert.equal(res.status, 200, `the host takes ${rows.length} rows for ${sessionId}`)
+}
+
 export async function runStatus(id) {
   const res = await fetch(`${mock}/v1/runs/${id}`, { headers: hostAuth })
   return (await res.json()).status
@@ -895,8 +909,10 @@ const centre = (box) => box.x + box.width / 2
  * row's centres, the line on the title's, and the actions ending on the row's right edge. One set
  * for both flows and every width they measure, so the gates cannot drift apart between them.
  */
-export const centred = (boxes, look) => {
-  assert.ok(boxes.line, `the header draws its line (${look})`)
+export const centred = (boxes, look, { line = true } = {}) => {
+  // A bot's thread carries its name alone: the line under Main's is the bot's thread count, and a
+  // project session's is its repos, so a header without one is asked to be centred as it is drawn.
+  if (line) assert.ok(boxes.line, `the header draws its line (${look})`)
   assert.ok(
     boxes.marginLeft >= 8 && boxes.marginRight >= 8,
     `the header keeps its margins on both sides at ${look} (${Math.round(boxes.marginLeft)}px left, ${Math.round(boxes.marginRight)}px right)`,
@@ -909,10 +925,11 @@ export const centred = (boxes, look) => {
     Math.abs(centre(boxes.title) - centre(boxes.middle)) <= 2,
     `the title is centred in that room at ${look}`,
   )
-  assert.ok(
-    Math.abs(centre(boxes.line) - centre(boxes.title)) <= 2,
-    `the line is centred under the title at ${look}`,
-  )
+  if (line)
+    assert.ok(
+      Math.abs(centre(boxes.line) - centre(boxes.title)) <= 2,
+      `the line is centred under the title at ${look}`,
+    )
   assert.ok(
     Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
     `the title is centred on the row at ${look} (${Math.round(centre(boxes.title))} against ${Math.round(centre(boxes.row))})`,

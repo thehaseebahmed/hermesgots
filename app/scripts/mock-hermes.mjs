@@ -5981,6 +5981,18 @@ http
       wakeDelayMs = Number(delay) || 0
       return json(res, 200, { ok: true, delay: wakeDelayMs })
     }
+    // Dev only: POST { session_id, rows } writes a session's transcript, the way Hermes's session DB
+    // holds one — what a screen reading the host draws, and what a seed must write instead of the
+    // device's own copy. `timestamp` is Hermes's own unit, seconds.
+    if (url.pathname === "/__mock/transcript" && req.method === "POST") {
+      const { session_id: sessionId, rows = [] } = await readBody(req)
+      if (!sessionId) return json(res, 400, { error: { message: "session_id is required" } })
+      transcripts.set(
+        sessionId,
+        rows.map((row) => ({ id: ++lastRowId, session_id: sessionId, ...row })),
+      )
+      return json(res, 200, { session_id: sessionId, rows: rows.length })
+    }
     // Dev only: POST { session, text?, queued? } makes a session's queue look like one a restart
     // lost — the lost turn and the inputs fenced behind it (`plugin/pending.py`) — or { session,
     // reset: true } clears it again, since the mock keeps its state between flows.

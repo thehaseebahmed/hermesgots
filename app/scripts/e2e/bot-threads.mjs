@@ -11,11 +11,13 @@ import {
   pass,
   readHeader,
   settled,
+  writeTranscript,
 } from "./lib.mjs"
 import { SPLIT_KEY } from "../../src/lib/split.ts"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
+const HOST = process.env.MOCK_URL
 
 const HOUR = 3_600_000
 const DAY = 86_400_000
@@ -69,9 +71,22 @@ function sequence(page) {
   }, MESSAGES)
 }
 
+/**
+ * The rows the seeded chats are drawn from, by session: every screen reads its host's transcript
+ * (ADR 0111), so a seed writes here rather than into this device's rows — and writes again for each
+ * host the flow switches to, since a transcript is the host's own.
+ */
+let seeded = []
+
+/** Writes the seeded transcripts to one host. */
+async function seedHost(host) {
+  for (const { session, rows } of seeded) await writeTranscript(host, session, rows)
+}
+
 function seed(
   page,
   {
+    profileId,
     threads = THREADS,
     messages = MESSAGES,
     hour = HOUR,
@@ -80,8 +95,32 @@ function seed(
     note = LONG_NOTE,
   } = {},
 ) {
+  const now = Date.now()
+  const began = now - 2.5 * day + 2
+  const at = (ms) => ms / 1000
+  const said = (text, when) => ({ role: "user", content: text, timestamp: at(when) })
+  const times = [now - 3 * day, now - 2 * day, now - 2 * hour]
+  const mainId = `main-${profileId}`
+  // Every screen draws a chat from its host's transcript (ADR 0111), so the seed writes the rows
+  // there — and this device's copy of them too, which is the chat a device that has read it once
+  // holds: the one it draws without waiting on a read mid-switch.
+  seeded = [
+    { session: `gots-${mainId}`, rows: messages.map((text, index) => said(text, times[index])) },
+    {
+      session: `gots-${threads[0].id}`,
+      rows: [
+        said(threads[0].opener, now - 2.5 * day + 1),
+        ...Array.from({ length: long }, (_, index) => ({
+          role: index % 2 ? "assistant" : "user",
+          content: index === 12 ? note : `Greenhouse note ${index + 1}`,
+          timestamp: at(began + index * 1000),
+        })),
+      ],
+    },
+    { session: `gots-${threads[1].id}`, rows: [said(threads[1].opener, now - hour + 1)] },
+  ]
   return page.evaluate(
-    async ({ threads, messages, hour, day, long, note }) => {
+    async ({ threads, now, hour, day, seeded }) => {
       const { db, ensureMainThread, mainThreadId, saveSettings } = await import("/src/lib/db.ts")
       await saveSettings({ chatThreads: true })
       const profile = (await db.profiles.toArray())[0]
@@ -90,20 +129,9 @@ function seed(
       // "exactly these" untrue, on a run that happens to sync first.
       await db.messages.clear()
       await db.conversations.clear()
+      await db.sessionRows.clear()
       await ensureMainThread(profile.id)
       const mainId = mainThreadId(profile.id)
-      const now = Date.now()
-      const times = [now - 3 * day, now - 2 * day, now - 2 * hour]
-      await db.messages.bulkPut(
-        messages.map((content, index) => ({
-          id: `e2e-main-${index}`,
-          conversationId: mainId,
-          role: "user",
-          content,
-          status: "done",
-          createdAt: times[index],
-        })),
-      )
       await db.conversations.bulkPut(
         threads.map(({ id, title }, index) => ({
           id,
@@ -116,6 +144,8 @@ function seed(
           changedAt: now,
         })),
       )
+      // The card's own words: the message that opened each thread, which the card draws before its
+      // screen has read anything.
       await db.messages.bulkPut(
         threads.map(({ id, opener }, index) => ({
           id: `${id}-open`,
@@ -126,21 +156,42 @@ function seed(
           createdAt: (index === 0 ? now - 2.5 * day : now - hour) + 1,
         })),
       )
-      const began = now - 2.5 * day + 2
-      await db.messages.bulkPut(
-        Array.from({ length: long }, (_, index) => ({
-          id: `${threads[0].id}-${index}`,
-          conversationId: threads[0].id,
-          role: index % 2 ? "assistant" : "user",
-          content: index === 12 ? note : `Greenhouse note ${index + 1}`,
-          status: "done",
-          createdAt: began + index * 1000,
-        })),
-      )
+      // This device's copy of each transcript, in the shape the app keeps them: the rows it holds
+      // for a chat it has read, so opening one draws it rather than reading it again.
+      for (const { session, rows } of seeded)
+        await db.sessionRows.bulkPut(
+          rows.map((row, index) => ({
+            session,
+            set: "live",
+            id: index + 1,
+            pos: index,
+            row: { id: index + 1, session_id: session, ...row },
+          })),
+        )
       await db.conversations.update(mainId, { createdAt: now - 4 * day })
       return mainId
     },
-    { threads, messages, hour, day, long, note },
+    { threads, now, hour, day, seeded },
+  )
+}
+
+/** A chat this device has read once: its rows on the host, and this device's copy of them. */
+async function seedChat(page, session, rows) {
+  await writeTranscript(HOST, session, rows)
+  await page.evaluate(
+    async ({ session, rows }) => {
+      const { db } = await import("/src/lib/db.ts")
+      await db.sessionRows.bulkPut(
+        rows.map((row, index) => ({
+          session,
+          set: "live",
+          id: index + 1,
+          pos: index,
+          row: { id: index + 1, session_id: session, ...row },
+        })),
+      )
+    },
+    { session, rows },
   )
 }
 
@@ -175,11 +226,14 @@ function watchFrames(page, { lanes }) {
         const viewport = root.querySelector('[data-slot="message-scroller-viewport"]')
         const content = root.querySelector('[data-slot="message-scroller-content"]')
         const mine = rowsIn(content)
-        // The chat being left is known by its words; the one asked for by its title over rows of its
-        // own, since it draws its newest rows first and the words may be in the ones that follow.
-        const match = chats.findIndex(
-          (chat, index) =>
-            title === chat.title && (index === 0 ? text.includes(chat.says) : mine.length > 0),
+        // The chat being left is known by its words. The one asked for is known by its name, which
+        // the screen draws before the rows it reads back from the host: a pane carrying the right
+        // title and no rows yet is that chat arriving, not a third one — `whole` is what says it
+        // landed, and every frame after the switch is waited on for it.
+        const match = chats.findIndex((chat, index) =>
+          index === 0
+            ? title === chat.title && text.includes(chat.says)
+            : title === chat.title,
         )
         const whole = match >= 0 && text.includes(chats[match].says)
         // The pane waiting on the chat asked for: inert, untitled, and carrying neither chat.
@@ -378,7 +432,11 @@ function assertSwitchFrames(frames, { what }) {
     [],
     `${what}: once a frame has left the chat, it is never drawn again`,
   )
-  const landed = frames.findIndex((frame) => frame.match === 1 && !frame.held)
+  // The chat's name is drawn a beat before the rows it reads: the frames that matter start at the
+  // first one holding content, which is where "placed at the end of it" first means anything.
+  const landed = frames.findIndex(
+    (frame) => frame.match === 1 && frame.count > 0 && !frame.held,
+  )
   assert.ok(landed > 0, `${what}: the chat asked for lands after the one left`)
   assert.equal(frames.at(-1).match, 1, `${what}: and it is still the one on screen`)
   assert.ok(frames.at(-1).whole, `${what}: and drawn whole once the switch settles`)
@@ -388,18 +446,27 @@ function assertSwitchFrames(frames, { what }) {
     [],
     `${what}: the chat asked for never goes back into its hold once it is on screen`,
   )
-  const ends = after.filter((frame) => !frame.atEnd)
+  // A chat reads its transcript back a page at a time, so its content grows until the last page
+  // lands and the end it is placed at moves with it. The frames that must be at the end are the
+  // ones drawn whole — the same frames the drift check below reads — not the ones still arriving.
+  const settledHeight = after.at(-1)?.height
+  const steady = after.filter((frame) => frame.height === settledHeight)
+  // The chat arrives at the end the first time it is placed there; from that frame on, it stays.
+  const placed = steady.findIndex((frame) => frame.atEnd)
+  assert.ok(placed >= 0, `${what}: the chat asked for is placed at the end of its content`)
+  // Placed is where the chat's own claim starts: the frames before it are the ones it spent
+  // arriving, which is the read's business and not the switch's.
+  const set = steady.slice(placed)
+  const ends = set.filter((frame) => !frame.atEnd)
   assert.equal(
     ends.length,
     0,
-    `${what}: every frame from the first content one is placed at the end of its content (${ends
-      .map((frame) => `${frame.scrollTop} of ${frame.count}`)
-      .join(", ")})`,
+    `${what}: every frame drawn whole is placed at the end of its content (${ends
+      .map((frame) => `${frame.scrollTop} of ${frame.count} h${frame.height}`)
+      .join(", ")} among ${after.map((frame) => `${frame.scrollTop}/${frame.count}/${frame.height}/${frame.atEnd ? "end" : "off"}`).join(" ")})`,
   )
-  const settledHeight = after.at(-1)?.height
-  const steady = after.filter((frame) => frame.height === settledHeight)
-  assert.ok(steady.length > 1, `${what}: the settled chat was sampled more than once`)
-  const bottoms = steady.map((frame) => frame.bottom)
+  assert.ok(set.length > 1, `${what}: the settled chat was sampled more than once`)
+  const bottoms = set.map((frame) => frame.bottom)
   const drift = Math.max(...bottoms) - Math.min(...bottoms)
   assert.ok(
     drift <= 1,
@@ -494,6 +561,9 @@ async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] 
 }
 
 async function useMock(page, profileId, mock, mainId) {
+  // The host the flow is leaving behind holds Main's rows; the one it is switching to must too, or
+  // Main opens with its cards and none of the messages they were written between.
+  await seedHost(mock)
   await page.evaluate(
     async ([id, baseUrl]) => {
       const { db } = await import("/src/lib/db.ts")
@@ -606,7 +676,16 @@ await flow(
     await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
     pass("the bot opens its Main thread")
 
-    await seed(page)
+    await seed(page, { profileId })
+    await seedHost(HOST)
+    // Main draws the host's transcript, so the seed lands there and the screen reads it: a reload is
+    // this device opening the chat for the first time, not a merge of a copy it already held.
+    await page.reload()
+    await until(
+      async () => (await sequence(page)).length === MESSAGES.length + THREADS.length,
+      20_000,
+      "Main's messages and its cards",
+    )
     await until(
       async () => (await count(page, '[data-slot="thread-card"]')) === 2,
       15_000,
@@ -686,6 +765,15 @@ await flow(
       async () => (await count(page, '[data-slot="thread-card"]')) === 3,
       15_000,
       "the started thread's card",
+    )
+    // A turn the thread it started is running draws its own line in Main until it lands; the cards'
+    // places are read once it has, which is the flow a reader keeps.
+    await until(
+      async () =>
+        (await sequence(page)).filter((entry) => entry.startsWith("message:")).length ===
+        MESSAGES.length,
+      30_000,
+      "Main's live line, once the new thread's turn has landed",
     )
     const after = await sequence(page)
     assert.deepEqual(
@@ -1001,7 +1089,7 @@ await flow(
       "Main keeps the bot's picture, and the thread beside it carries none",
     )
     const boxes = await readHeader(page.locator('[data-slot="header-row"]').nth(1))
-    centred(boxes, "the thread beside Main")
+    centred(boxes, "the thread beside Main", { line: false })
     await ready(page, "the laptop in light mode", "main")
     await shot("laptop")
     pass(
@@ -1444,8 +1532,23 @@ await flow(
 
     const secondBot = await addBot(page, { name: SECOND_BOT, messages: SECOND_MESSAGES })
     const secondMain = `/c/main-${secondBot}`
+    // The second bot's Main is a chat with a past, as the first bot's is: the rows it is drawn from
+    // are the host's, and this device has read them once.
+    const secondAt = Date.now()
+    await seedChat(
+      page,
+      `gots-main-${secondBot}`,
+      SECOND_MESSAGES.map((said, index) => ({
+        role: "user",
+        content: said,
+        timestamp: (secondAt - (3 - index) * HOUR) / 1000,
+      })),
+    )
     // The second bot keeps a thread beside its Main too, so the switch has two lanes to read.
     await threadFor(page, secondBot, { ...SECOND_THREAD, says: SECOND_THREAD_SAY })
+    await seedChat(page, `gots-${SECOND_THREAD.id}`, [
+      { role: "user", content: SECOND_THREAD_SAY, timestamp: (secondAt - 2 * HOUR) / 1000 },
+    ])
     const secondRow = page.locator(`aside a[href="${secondMain}"]`).first()
     await secondRow.waitFor({ timeout: 15_000 })
     await until(
