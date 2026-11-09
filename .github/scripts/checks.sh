@@ -13,6 +13,8 @@ set -euo pipefail
 
 # Every gate reports its start and finish here (see `start_gate`), so a killed step leaves a trail.
 exec 3>&1
+# How often a running gate says it is still running. Under the shortest silence a runner tolerates.
+BEAT_SECONDS=${BEAT_SECONDS:-30}
 
 for dir in app plugin website; do
   if [ ! -d "$dir" ]; then
@@ -96,7 +98,17 @@ start_gate() {
   printf 'gate %s: started\n' "$name" >&3
   (
     local started=$SECONDS status=0
+    # A gate's own log is replayed only at the end, so a long one says nothing to the step for minutes
+    # at a time — and a step that says nothing can be stopped for it. The beat is what tells a reader,
+    # and the runner, that the work is moving rather than wedged.
+    (
+      while sleep "$BEAT_SECONDS"; do
+        printf 'gate %s: still running (%ss)\n' "$name" "$((SECONDS - started))" >&3
+      done
+    ) &
+    local beat=$!
     "$@" || status=$?
+    kill "$beat" 2>/dev/null || true
     echo "$((SECONDS - started))" > "$LOGS/$name.seconds"
     printf 'gate %s: finished in %ss (exit %s)\n' "$name" "$((SECONDS - started))" "$status" >&3
     exit $status
