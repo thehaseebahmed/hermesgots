@@ -135,6 +135,30 @@ await flow(
     )
     pass("a box ticked on the page above the sheet is kept by the host")
 
+    // A page that asks to leave: it sets `location` to an outside URL, and neither the app nor the
+    // page goes anywhere — the app's own `frame-src 'self'` is what holds it.
+    const asked = []
+    page.on("request", (request) => {
+      if (request.url().startsWith("https://example.com")) asked.push(request.url())
+    })
+    const before = page.url()
+    await frame().locator("#leave").click()
+    await page.waitForTimeout(1_000)
+    assert.equal(asked.length, 0, "the browser never fetched the outside URL")
+    assert.equal(page.url(), before, "the app stayed on the canvas's own address")
+    // The browser refuses the navigation and leaves the frame on its error page; the app draws the
+    // canvas's own version there again, so the page the reader had is the page still on screen.
+    await frame().locator("h1").waitFor({ timeout: 10_000 })
+    assert.equal(await sheet().isVisible(), true, "the sheet is where it was")
+    const frames = page.frames().filter((one) => one !== page.mainFrame())
+    assert.deepEqual(
+      frames.map((one) => one.url()),
+      ["about:srcdoc"],
+      "the frame is the canvas's own document again",
+    )
+    await shot("held")
+    pass("a page that sets location to an outside URL stays put, and the app with it")
+
     // An edit sent from the sheet lands as the host's next version, drawn under the sheet with the
     // box still ticked: the data is the canvas's, not a version's.
     await field.fill(EDIT)
@@ -170,27 +194,6 @@ await flow(
     assert.equal(await sheet().isVisible(), true, "the sheet stayed up through the point")
     await shot("pointed")
     pass("a point tagged on the page over the open sheet reaches the composer's chip")
-
-    // A page that asks to leave: it sets `location` to an outside URL, and neither the app nor the
-    // page goes anywhere — the app's own `frame-src 'self'` is what holds it.
-    const asked = []
-    page.on("request", (request) => {
-      if (request.url().startsWith("https://example.com")) asked.push(request.url())
-    })
-    const before = page.url()
-    await frame().locator("#leave").click()
-    await page.waitForTimeout(1_000)
-    assert.equal(asked.length, 0, "the browser never fetched the outside URL")
-    assert.equal(page.url(), before, "the app stayed on the canvas's own address")
-    assert.equal(await frame().locator("h1").isVisible(), true, "the page is still the canvas's")
-    const frames = page.frames().filter((one) => one !== page.mainFrame())
-    assert.deepEqual(
-      frames.map((one) => one.url()),
-      ["about:srcdoc"],
-      "the frame never left its document",
-    )
-    await shot("held")
-    pass("a page that sets location to an outside URL stays put, and the app with it")
 
     // Swipe the sheet down from its handle: the page is left in view, whole.
     const handle = await sheet().locator("[aria-label=Close]").boundingBox()

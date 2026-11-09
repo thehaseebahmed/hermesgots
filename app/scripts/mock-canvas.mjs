@@ -1,6 +1,8 @@
 // The Gots plugin's canvases (canvases.py), for the mock Hermes server. MOCK_CANVAS=0 serves a
 // plugin from before them — no routes, no `canvas` feature.
 
+import { randomUUID } from "node:crypto"
+
 import { inOrder } from "../src/lib/canvas-bridge.ts"
 
 const KEEP = 20
@@ -16,7 +18,9 @@ function titleOf(text) {
 
 /**
  * What the mock's bot writes: a page in the app's own theme tokens, as a canvas's guide asks. Its
- * count is the canvas's own data, kept through the page's bridge the way a real canvas keeps state.
+ * count and its box are the canvas's own data, kept through the page's bridge the way a real canvas
+ * keeps state, and its Leave button is a page that asks to go to an outside URL — the sandbox holds
+ * it, which is what the flow drives.
  */
 function page(prompt, title, version) {
   const escaped = String(prompt)
@@ -36,7 +40,11 @@ function page(prompt, title, version) {
       p { margin: 0 0 16px; color: var(--muted-foreground); }
       .card { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius);
               background: var(--card); }
+      .card + .card { margin-top: 12px; }
       .value { font-size: 40px; font-weight: 600; color: var(--primary); font-variant-numeric: tabular-nums; }
+      .row { display: flex; align-items: center; gap: 12px; }
+      .row label { display: flex; min-height: 44px; flex: 1; align-items: center; gap: 10px; font-size: 16px; }
+      .row input { width: 22px; height: 22px; accent-color: var(--primary); }
       button { min-height: 44px; padding: 0 20px; border: 0; border-radius: 999px;
                background: var(--primary); color: var(--primary-foreground); font-size: 16px; }
     </style>
@@ -44,6 +52,10 @@ function page(prompt, title, version) {
   <body>
     <h1>${title}</h1>
     <p>${escaped}</p>
+    <div class="card row">
+      <label><input type="checkbox" id="done"> Done</label>
+      <button id="leave">Leave</button>
+    </div>
     <div class="card">
       <div class="value" id="value">0</div>
       <p>Version ${version} of this canvas, drawn from what its bot wrote.</p>
@@ -75,6 +87,25 @@ function page(prompt, title, version) {
           store.put("counter", "value", { n: n }).catch(function (error) {
             console.error("canvas data:", error);
           });
+        });
+        // The box is the canvas's too, so it opens ticked after a version the bot wrote over it.
+        var box = document.getElementById("done");
+        store.list("checks").then(function (rows) {
+          for (var i = 0; i < rows.length; i += 1) {
+            if (rows[i].id === "done" && rows[i].doc && rows[i].doc.done === true) {
+              box.checked = true;
+            }
+          }
+        }).catch(function () {});
+        box.addEventListener("change", function () {
+          store.put("checks", "done", { done: box.checked }).catch(function (error) {
+            console.error("canvas data:", error);
+          });
+        });
+        // A page that asks to leave for an outside URL: the app's own policy is what holds it there,
+        // and the flow reads both the app's address and this document after the tap.
+        document.getElementById("leave").addEventListener("click", function () {
+          location.href = "https://example.com/gone";
         });
         // The page's one declared tool: its first call is the reader's to answer, and the answer is
         // kept on the host, so the second search never asks again.
@@ -146,7 +177,13 @@ export function createCanvasStore() {
   return { canvases, summary, record, full, below }
 }
 
-export async function handleCanvas(req, res, path, { json, readBody, noteEvent, sessions }, store) {
+export async function handleCanvas(
+  req,
+  res,
+  path,
+  { json, readBody, noteEvent, sessions, openChat },
+  store,
+) {
   if (!path.startsWith("/api/plugins/gots/canvases")) return false
   const { canvases, summary, full, below } = store
   const fail = (status, message, code) =>
@@ -355,11 +392,15 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
       if (!prompt) return fail(400, "A canvas needs a prompt to build it from."), true
       const now = Date.now()
       const title = titleOf(prompt)
+      // The chat the canvas is edited in is the one `triage.open_thread` makes: an app-kind id, a
+      // session named for it, the canvas's own name marked `titleEdited`, and `canvasId` so no list
+      // or card ever draws it (canvases.py's `create`).
+      const chatId = randomUUID()
       const canvas = {
-        id: `c_${Math.random().toString(16).slice(2, 18)}`,
+        id: `c_${randomUUID().slice(0, 8)}`,
         title,
-        session_id: `gots-${Math.random().toString(16).slice(2, 18)}`,
-        chat_id: Math.random().toString(16).slice(2, 18),
+        session_id: `gots-${chatId}`,
+        chat_id: chatId,
         version: 0,
         pinned: false,
         archived: false,
@@ -374,6 +415,14 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
         prompt,
       }
       canvases.set(canvas.id, canvas)
+      openChat?.({
+        chatId,
+        sessionId: canvas.session_id,
+        title,
+        canvasId: canvas.id,
+        opener: prompt,
+        at: now,
+      })
       // The gap is what lets the screen draw version 0 — "your bot is building it" — before the
       // page lands.
       setTimeout(() => {

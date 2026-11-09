@@ -67,7 +67,7 @@ sequenceDiagram
    merges the chat record `triage.open_thread` would (id, profile, session, `canvasId`, title marked
    `titleEdited`), the mock page keeps a ticked box in the canvas's data through the bridge, and a
    `Leave` button sets `location` to an outside URL. Goals: G6. After: 1. Layers: Mock Hermes.
-   Check: `pnpm e2e canvas` green through the box and the location leg.
+   Check: `pnpm e2e canvas` green through the box and the location leg. Done.
 3. **Mock Hermes edits the canvas when its chat is sent to.** A turn on a canvas's session writes
    version 2 of the page (the mock's stand-in for `canvas_edit`) and notes the canvas event, so the
    sheet's send redraws the page under it with the box still ticked; Undo walks the pointer back.

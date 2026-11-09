@@ -4198,6 +4198,31 @@ http
               .filter(([, { value }]) => !value.room && !value.projectId && !value.canvasId)
               .map(([id, { value }]) => ({ id, title: value.title ?? "", at: value.updatedAt ?? 0 }))
               .sort((one, two) => two.at - one.at),
+          // The chat a canvas is edited in, made as `triage.open_thread` makes one (canvases.py's
+          // `create`): its own id and a session named for it, the canvas's name marked
+          // `titleEdited`, and `canvasId` so no list or card ever draws it.
+          openChat: ({ chatId, sessionId, title, canvasId, opener, at }) => {
+            const key = pluginProfile ?? ""
+            if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
+            ;(pluginChatLists.get(key) ?? pluginChats).set(chatId, {
+              at,
+              value: {
+                id: chatId,
+                title,
+                hermesSessionId: sessionId,
+                createdAt: at,
+                // Past createdAt, as the plugin writes it, so the daily cleanup doesn't read a
+                // thread whose first message is still waiting as one nothing happened in.
+                updatedAt: at + 1,
+                changedAt: at,
+                titleEdited: true,
+                canvasId,
+                opener,
+                openerAt: at,
+              },
+            })
+            noteEvent("chats", chatId, key)
+          },
         },
         CANVASES,
       ))

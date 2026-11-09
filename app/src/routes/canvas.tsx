@@ -343,6 +343,24 @@ export function CanvasView() {
     if (answers.current.size) tellPage(true)
   }
 
+  // A document that leaves the version it was drawn from — a page that sets `location` to an outside
+  // URL, or one that reloads itself — is refused by the app's own `frame-src 'self'`, and the browser
+  // leaves the frame on its error page. The canvas is drawn again from the same version rather than
+  // left blank: the refusal is the boundary, and this is what keeps the reader on their page inside
+  // it. Counted per drawn document, since React draws a new frame for each version and mode: its
+  // first load is the one React gave it, and any load after that is the page's own doing.
+  const frameKey = `${canvas?.id}:${canvas?.version}:${mode}`
+  const loads = useRef<{ key: string; count: number }>({ key: "", count: 0 })
+  const frameLoaded = () => {
+    if (loads.current.key !== frameKey) loads.current = { key: frameKey, count: 1 }
+    else loads.current.count += 1
+    if (loads.current.count > 1 && frame.current && drawn?.document) {
+      // The redraw's own load is the first of a fresh count, so drawing again never draws again.
+      loads.current = { key: frameKey, count: 0 }
+      frame.current.srcdoc = drawn.document
+    }
+  }
+
   // The page's own data and its calls through the app: a data read is answered from the copy this
   // device holds and a data write goes to the host's one route (ADR 0113); the host's four reads
   // are asked freely, and a declared tool's call waits here while the reader is asked (ADR 0114).
@@ -478,6 +496,7 @@ export function CanvasView() {
               title={canvas?.title ?? "Canvas"}
               sandbox="allow-scripts"
               srcDoc={drawn.document}
+              onLoad={frameLoaded}
               className="size-full rounded-2xl border bg-background"
               data-canvas-frame
             />
