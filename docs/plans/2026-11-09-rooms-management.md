@@ -174,6 +174,8 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    "a second merge of an unchanged record writes nothing" and "a room the Host disbands leaves the
    device that merged it" — green before and after.
 
+   Done.
+
 2. **Preparatory refactor: the one-field rename dialog and the permanent-action confirm leave
    `ChatActions`.** `ChatActions` owns both shells welded to a chat, a profile and the usage sheet; a
    room's menu needs the same two shells and none of the chat. Reshape: the rename dialog and the

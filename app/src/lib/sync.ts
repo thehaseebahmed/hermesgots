@@ -35,6 +35,7 @@ import {
   getSettings,
   promptTombstones,
   saveSettings,
+  writeRoomRow,
   type Appearance,
   type Conversation,
   type Profile,
@@ -614,6 +615,13 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
     // that first merged the row may be turned off, and the Host's rename or disband still has to
     // land through another (ADR 0115).
     if (existing && !existing.room && existing.profileId !== profileId) continue
+    // A room's record is a row of its own kind: its clock, its name and its roster are the Host's,
+    // and the rest of the row is this device's (ADR 0121, ADR 0123), so it goes through the one
+    // writer that knows which fields a record may say.
+    if (existing?.room ?? (!entry.deleted && entry.value?.room)) {
+      await writeRoomRow(id, entry, profileId)
+      continue
+    }
     if (entry.deleted) {
       if (existing) await deleteConversation(id, { remote: true })
     } else if (entry.value) {
@@ -625,9 +633,6 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
       // the pin, and the next merge would carry the loss back to the plugin as well.
       if (value.modelChoice === undefined) delete synced.modelChoice
       if (!carriesSavedDraft(value)) delete synced.draftText
-      // A room's record carries no pin — the Host's room has none to project (ADR 0116) — so this
-      // device's own pin on a room stands, where a chat's is the record's to say.
-      if (existing?.room && value.pinned === undefined) delete synced.pinned
       // A room is projected unchanged on every read: writing it again would wake every live query
       // over a chat list for news that nothing happened.
       if (!existing || !sameChat(existing, synced, entry.at))

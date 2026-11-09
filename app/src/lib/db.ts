@@ -7,6 +7,7 @@ import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { carriesPart } from "@/lib/attachment-caps"
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
 import { connectionKey, hasServer } from "@/lib/connection"
+import { equal } from "@/lib/equal"
 import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
@@ -1856,6 +1857,62 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     return true
   })
   if (dropped) forgetRead(id)
+}
+
+/**
+ * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
+ *
+ * A room's record carries the Host's own clock, its name and its roster, and nothing else: no chat's
+ * field is its to say, so the row keeps this device's own — its pin (ADR 0121), what its log this
+ * device holds ends asking for, and the newest sequence it has drawn. A record that is a deletion is
+ * the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no chat
+ * tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion for a
+ * row the plugin's store never had.
+ *
+ * One writer, because two would drift: the chat-list merge and a lifecycle write's answer are the same
+ * record, so they must leave the same row.
+ */
+export interface RoomRecord {
+  /** The Host's own clock for the record, in the milliseconds the app counts in. */
+  at: number
+  deleted?: boolean
+  value?: {
+    title?: string
+    createdAt?: number
+    updatedAt?: number
+    room?: Room
+  }
+}
+
+/** The fields a room's record is allowed to say; every other field on the row is this device's. */
+const ROOM_FIELDS = ["title", "createdAt", "updatedAt", "room"] as const
+
+export async function writeRoomRow(id: string, record: RoomRecord, profileId: string) {
+  const existing = await db.conversations.get(id)
+  if (record.deleted) {
+    if (existing) await deleteConversation(id, { remote: true })
+    return
+  }
+  const value = record.value
+  if (!value) return
+  const patch = Object.fromEntries(ROOM_FIELDS.map((field) => [field, value[field]]))
+  // A room is projected unchanged on every read: writing it again would wake every live query over a
+  // chat list for news that nothing happened.
+  const same =
+    existing !== undefined &&
+    existing.changedAt === record.at &&
+    ROOM_FIELDS.every((field) => equal(existing[field], patch[field]))
+  if (same) return
+  await db.transaction("rw", db.conversations, db.tombstones, async () => {
+    await db.conversations.put({
+      ...(await db.conversations.get(id)),
+      ...patch,
+      id,
+      profileId,
+      changedAt: record.at,
+    } as Conversation)
+    await db.tombstones.delete(`chat:${id}`)
+  })
 }
 
 /** Drops what chat-next keeps of a session: both reads of its rows and its state. */
