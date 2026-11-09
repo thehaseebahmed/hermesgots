@@ -159,7 +159,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         <div className={cn(COLUMN_BOX, "pb-2")}>
           <Button
             variant="outline"
-            className="h-10 rounded-full"
+            className="h-11 rounded-full"
             aria-label="Pick the room's bots"
             data-slot="seats-pill"
             onClick={() => setPicking(true)}

@@ -574,13 +574,14 @@ test("the Host saying a room moved marks its row though the record never moved",
 test("a room's row draws its members' pictures, four at most, and counts the rest", async () => {
   await fresh()
   // A room of five, each a profile this device holds a bot for: the row shows four and a count.
+  // They answer at the room's own Host, as every member of a room does (ADR 0115).
   const seats = ["one", "two", "three", "four", "five"]
   await db.profiles.bulkPut(
     seats.map((profile, at) =>
       botProfile("rooms", {
         id: `bot-${profile}`,
         name: profile,
-        baseUrl: "http://faces.test/v1",
+        baseUrl: HOST,
         hermesProfile: profile,
         botId: ["gem", "hex", "orbi", "penny", "stella"][at],
       }),

@@ -23,7 +23,7 @@ export function chatOwner(
   bots?: Map<string, Profile>,
 ): { bot: Profile | undefined; listed: boolean; answerer: string | undefined } {
   if (row.room) {
-    const answerer = roomAnswerer(row.room, bots, bots?.get(row.profileId)?.hostId)
+    const answerer = roomAnswerer(row.room, bots, bots?.get(row.profileId))
     return { bot: answerer, listed: true, answerer: answerer?.id }
   }
   const bot = bots?.get(row.profileId)

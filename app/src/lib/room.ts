@@ -233,7 +233,7 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
         chat,
         bot: chatOwner(chat, bots).bot,
         faces: chat.room
-          ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId)?.hostId)
+          ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId))
           : { shown: [], more: 0 },
         read: chat.roomNeeds?.at,
       }))

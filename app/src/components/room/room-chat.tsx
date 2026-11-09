@@ -114,7 +114,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   // A member's picture is the bot seated at its profile on the room's own Host, which is the same
   // seat the answerer came from: a profile name is unique on its Host, not across a device's bots.
   const pictures = useMemo(
-    () => botsByProfile(bots ?? [], chat ? seated.get(chat.profileId)?.hostId : undefined),
+    () => botsByProfile(bots ?? [], chat ? seated.get(chat.profileId) : undefined),
     [bots, chat, seated],
   )
   const byMember = useMemo(

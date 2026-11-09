@@ -311,7 +311,7 @@ function Recents({
       // A room's faces: its members' bots on the Host that carries the record, which is the same seat
       // the room's screen draws its pictures from (ADR 0115, ADR 0126).
       faces: chat.room
-        ? roomFaces(chat.room, profiles, bots.get(chat.profileId)?.hostId)
+        ? roomFaces(chat.room, profiles, bots.get(chat.profileId))
         : undefined,
       reason: chat.room ? roomNeedsText(chat) : undefined,
       local: local.get(chat.id),

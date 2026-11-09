@@ -3,7 +3,10 @@ import test from "node:test"
 
 import { chatOwner } from "../src/lib/chat-owner.ts"
 
-const on = { id: "on", name: "On" }
+/** The address every bot below answers at, unless a case gives its own. */
+const URL_ONE = "http://one.test/v1"
+
+const on = { id: "on", name: "On", baseUrl: URL_ONE }
 const off = { ...on, id: "off", disabled: true }
 const bots = new Map([
   [on.id, on],
@@ -55,8 +58,14 @@ test("a screen that names no bots lists the row where its chat is a chat", () =>
   assert.equal(chatOwner({ profileId: "gone", projectId: "project-1" }).listed, false)
 })
 
-const coder = { id: "coder", name: "Coder", hermesProfile: "coder" }
-const writer = { id: "writer", name: "Writer", hermesProfile: "writer", disabled: true }
+const coder = { id: "coder", name: "Coder", hermesProfile: "coder", baseUrl: URL_ONE }
+const writer = {
+  id: "writer",
+  name: "Writer",
+  hermesProfile: "writer",
+  baseUrl: URL_ONE,
+  disabled: true,
+}
 const roomBots = new Map([
   [on.id, on],
   [coder.id, coder],
@@ -91,9 +100,14 @@ test("a room's member turned off in Gots answers nothing, and the room still lis
 })
 
 test("a room's answerer is the Host's bot, never another server's of the same profile", () => {
-  const here = { id: "here", name: "Coder here", hermesProfile: "coder", hostId: "host-a" }
-  const elsewhere = { id: "there", name: "Coder there", hermesProfile: "coder", hostId: "host-b" }
-  const carrier = { id: "carrier", name: "Carrier", hermesProfile: "default", hostId: "host-a" }
+  const here = { id: "here", name: "Coder here", hermesProfile: "coder", baseUrl: URL_ONE }
+  const elsewhere = {
+    id: "there",
+    name: "Coder there",
+    hermesProfile: "coder",
+    baseUrl: "http://two.test/v1",
+  }
+  const carrier = { id: "carrier", name: "Carrier", hermesProfile: "default", baseUrl: URL_ONE }
   const both = new Map([
     [elsewhere.id, elsewhere],
     [here.id, here],
