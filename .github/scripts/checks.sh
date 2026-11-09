@@ -11,6 +11,9 @@
 # layers — so this script calls the tools and never installs them.
 set -euo pipefail
 
+# Every gate reports its start and finish here (see `start_gate`), so a killed step leaves a trail.
+exec 3>&1
+
 for dir in app plugin website; do
   if [ ! -d "$dir" ]; then
     echo "checks.sh: run from the repository root (no $dir/ here)" >&2
@@ -87,10 +90,15 @@ start_gate() {
   shift
   [ "${1:-}" = "--" ] && shift
   GATE_NAMES+=("$name")
+  # The step's own output says a gate started and what it cost, on the descriptor the caller owns (3)
+  # rather than the gate's log: a step that is killed mid-way — a runner that stops the job — replays
+  # nothing, so without these two lines a dead step cannot even say which gate it died in.
+  printf 'gate %s: started\n' "$name" >&3
   (
     local started=$SECONDS status=0
     "$@" || status=$?
     echo "$((SECONDS - started))" > "$LOGS/$name.seconds"
+    printf 'gate %s: finished in %ss (exit %s)\n' "$name" "$((SECONDS - started))" "$status" >&3
     exit $status
   ) > "$LOGS/$name.log" 2>&1 &
   GATE_PIDS+=($!)
