@@ -101,8 +101,10 @@ Host's refusal still comes back in the Host's own words for anything the picker 
   connection. The screen will show one seat and grey the rest; the remedy is the Host's — a
   `hosted_rooms.profiles` entry naming `ops`, or a host-scoped connection, which the Desktop holds and
   Gots does not.
-- **The roster is remembered for the page's life**, as every feature answer is, so a profile parked on the
-  Host after the read still shows as seatable. The Host's refusal at create is unchanged and still says so.
+- **The roster is remembered until a create the Host refuses.** It is read once per connection, as every
+  feature answer is, so a profile parked on the Host after the read still shows as seatable. The Host's
+  refusal at create is unchanged and still says so, and it forgets the roster, so the next look at the
+  seats reads the Host again rather than repeating the create.
 
 ## Not now
 

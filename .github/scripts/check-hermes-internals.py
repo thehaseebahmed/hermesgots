@@ -88,9 +88,9 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("gateway/session_api.py",), "def restore_api_session"),
     (("gateway/session_authorities.py",), "def authority_for_home"),
     # The Host's rooms, as `plugin/rooms.py` reaches them (ADR 0117): the dispatcher the seam hands a
-    # request to in process, the two contract entries it calls and the three fields it reads out of
-    # `groups.capabilities`, and the loopback client it falls back to when neither the import nor the
-    # call answers.
+    # request to in process, the two contract entries it calls and the `groups.capabilities` fields
+    # it reads (`driver`, `methods`, `features`, `seatable_profiles`), and the loopback client it
+    # falls back to when neither the import nor the call answers.
     (("tui_gateway/rpc_dispatch.py",), "def dispatch(req: dict"),
     (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.capabilities"'),
     (("tui_gateway/contracts/groups_bot_relay.py",), 'method("groups.list"'),

@@ -21,8 +21,14 @@ the create still speaks in its own words (ADR 0115).
 
 **The roster is the connection's, not the Host's.** Two bots at one address may reach it by different
 keys, which are different grants with different rosters; the create is made as the first bot picked,
-so it is that bot's roster the other rows are held to. Nothing is decided before the first pick, since
-until then there is no connection to ask about.
+so it is that bot's connection the rows are held to, and every pick is held to it again before the
+send goes out. Nothing is decided before the first pick, since until then there is no connection to
+ask about.
+
+**A create the Host refuses forgets the roster.** The Host's refusal is the one word on whether a
+connection seats a profile, so an answer it contradicts is dropped and read again the next time the
+seats are looked at: the picker stops offering what the Host has taken away instead of repeating a
+create it will refuse.
 
 **What this does not fix.** Where a connection seats one profile, a room of two is not possible, and
 the screen will offer one bot and grey the rest. That is the Host's limit: making that room means an

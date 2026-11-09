@@ -4,14 +4,15 @@
  * bot outside that roster would be refused at the create and is greyed in the picker first.
  *
  * No roster is no rule: a Host older than the field names none, and a connection that has not
- * answered yet says nothing, so every bot stays a seat. A bot with no profile of its own has none to
- * hold out, so it stays one too. Only a roster that names profiles and leaves this one out says no.
+ * answered yet says nothing, so every bot stays a seat. Where a roster is named, a bot with no
+ * profile of its own has none a roster could hold, and the create would name it with nothing — so it
+ * is no seat either. Only a roster that names profiles and leaves this one out says no.
  * Import-free, so `scripts/test-room-seats.mjs` drives it as a pure rule.
  */
 export function seatsProfile(
   seatable: readonly string[] | null | undefined,
   profile: string | null | undefined,
 ): boolean {
-  if (!seatable || !profile) return true
-  return seatable.includes(profile)
+  if (!seatable) return true
+  return profile ? seatable.includes(profile) : false
 }

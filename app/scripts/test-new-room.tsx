@@ -16,6 +16,7 @@ import { ConversationList } from "@/components/conversation-list"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { RoomChat } from "@/components/room/room-chat"
 import { db, type Profile } from "@/lib/db"
+import { pluginRoot } from "@/lib/host-url"
 import { COMPOSER_SLOT } from "@/lib/layout"
 import {
   Path,
@@ -38,11 +39,19 @@ import {
 const WRITABLE = ["chats", "rooms", "rooms_write"]
 
 /** Every call the screen made, so the create and the first send can be read back in order. */
-const posted: { path: string; body: Record<string, unknown> }[] = []
-/** What each Host's plugin advertises, by the host name a test gave it. */
+const posted: { path: string; auth: string; body: Record<string, unknown> }[] = []
+/** What each connection's plugin advertises, by the name `connectionAt` gives it. */
 const offers = new Map<string, string[]>()
-/** The profiles each Host's connection seats, by the host name a test gave it. */
+/** The profiles each connection seats, by the name `connectionAt` gives it. */
 const seatable = new Map<string, string[]>()
+
+/**
+ * The connection a bot's reads arrive on, as this fixture names it: the path its `info` is read at and
+ * the key it carries. Two bots at one address on two keys are two connections with two rosters
+ * (ADR 0128), so a fixture keyed by host could not express the case the rule exists for.
+ */
+const connectionAt = (bot: Profile) =>
+  `${new URL(pluginRoot(bot.baseUrl)).pathname}/info|Bearer ${bot.apiKey}`
 
 const members = [
   { memberId: "m1", profile: "default", handle: "default", displayName: "Test bot" },
@@ -56,15 +65,17 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input))
   const method = (init?.method ?? "GET").toUpperCase()
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
+  const auth = new Headers(init?.headers).get("Authorization") ?? ""
+  const onThis = `${url.pathname}|${auth}`
   if (url.pathname.endsWith("/plugins/gots/info"))
     return json({
       name: "gots",
-      features: offers.get(url.host) ?? ["chats"],
-      ...(seatable.has(url.host) ? { rooms: { seatable: seatable.get(url.host) } } : {}),
+      features: offers.get(onThis) ?? ["chats"],
+      ...(seatable.has(onThis) ? { rooms: { seatable: seatable.get(onThis) } } : {}),
     })
   if (url.pathname.endsWith("/plugins/gots/chats")) return json({ object: "gots.chats", chats: {} })
   if (url.pathname.endsWith("/plugins/gots/rooms") && method === "POST") {
-    posted.push({ path: url.pathname, body })
+    posted.push({ path: url.pathname, auth, body })
     const id = String(body.room_id)
     held.id = id
     held.name = String(body.name)
@@ -81,7 +92,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     })
   }
   if (url.pathname.endsWith("/send")) {
-    posted.push({ path: url.pathname, body })
+    posted.push({ path: url.pathname, auth, body })
     return json({
       object: "gots.room.event",
       event: { seq: 1, eventId: "e1", kind: "message.user", text: body.text },
@@ -106,7 +117,6 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch
 
 async function fresh(host: string, { writable = true }: { writable?: boolean } = {}) {
-  offers.set(host, writable ? WRITABLE : ["chats", "rooms"])
   const bots: Profile[] = [
     botProfile(host, {
       id: `${host}-coder`,
@@ -123,6 +133,7 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
     }),
   ]
   await resetRoom(bots)
+  offers.set(connectionAt(bots[0]), writable ? WRITABLE : ["chats", "rooms"])
   return bots
 }
 
@@ -142,8 +153,6 @@ async function resetRoom(bots: Profile[]) {
 
 async function freshAcross() {
   const [alpha, beta] = ["alpha", "beta"]
-  offers.set(`${alpha}.test`, WRITABLE)
-  offers.set(`${beta}.test`, WRITABLE)
   const bots: Profile[] = [
     botProfile(alpha, { id: "alpha-ada", name: "Ada", hermesProfile: "ada", botId: "alpha-ada" }),
     botProfile(alpha, { id: "alpha-bo", name: "Bo", hermesProfile: "bo", botId: "alpha-bo" }),
@@ -162,6 +171,40 @@ async function freshAcross() {
     }),
   ]
   await resetRoom(bots)
+  offers.set(connectionAt(bots[0]), WRITABLE)
+  offers.set(connectionAt(bots[2]), WRITABLE)
+  offers.set(connectionAt(bots[6]), WRITABLE)
+  return bots
+}
+
+/**
+ * Two bots at one address reaching it by two keys: two connections with two rosters (ADR 0128). Ada's
+ * seats only Zed's profile; Zed's seats both. Ada is first in name order, so a room made as "the first
+ * of the chosen" would be made on the poorer connection.
+ */
+async function freshSeats() {
+  const address = "seats-one.test"
+  const bots: Profile[] = [
+    botProfile(address, {
+      id: "poor-ada",
+      name: "Ada",
+      hermesProfile: "ada",
+      apiKey: "key-ada",
+      botId: "poor-ada",
+    }),
+    botProfile(address, {
+      id: "rich-zed",
+      name: "Zed",
+      hermesProfile: "zed",
+      apiKey: "key-zed",
+      botId: "rich-zed",
+    }),
+  ]
+  await resetRoom(bots)
+  offers.set(connectionAt(bots[0]), WRITABLE)
+  offers.set(connectionAt(bots[1]), WRITABLE)
+  seatable.set(connectionAt(bots[0]), ["zed"])
+  seatable.set(connectionAt(bots[1]), ["ada", "zed"])
   return bots
 }
 
@@ -359,7 +402,7 @@ test("the first bot picked chooses the Host, and another Host's bots grey out", 
 test("a bot this Host's connection can't seat is not a pick", async () => {
   const bots = await fresh("blank-room-seats.test")
   // The Host names the profiles the connection the room is made from seats: the writer's is not one.
-  seatable.set("blank-room-seats.test", ["coder"])
+  seatable.set(connectionAt(bots[0]), ["coder"])
   const said: unknown[] = []
   const real = tell.info
   tell.info = ((message: unknown) => said.push(message)) as typeof tell.info
@@ -384,6 +427,58 @@ test("a bot this Host's connection can't seat is not a pick", async () => {
   } finally {
     tell.info = real
   }
+})
+
+test("a room is made as the bot picked first, on that bot's connection", async () => {
+  const bots = await freshSeats()
+  const [ada, zed] = bots
+  await mount(screen(), async () => {
+    await openSeats()
+    // Zed's roster is the richer one and Zed is later in name order: picking it first is what names
+    // the connection the room is made on.
+    await click(seat(zed.id))
+    await click(seat(ada.id))
+    await until(
+      async () => (find('[data-slot="seats-pill"]')?.textContent ?? "").includes("2 of 6"),
+      "two seats",
+    )
+
+    await type(composerField(), "Plan the next release.")
+    await click(find('button[aria-label="Send"]'))
+    await until(async () => posted.length >= 2, "the create and its first message")
+
+    const [create] = posted
+    assert.equal(create.auth, "Bearer key-zed", "the create is made on the first pick's connection")
+    assert.deepEqual(
+      (create.body.members as { handle?: string }[]).map((one) => one.handle),
+      ["ada", "zed"],
+      "and holds every pick",
+    )
+    assert.equal(create.body.name, "Ada, Zed", "named by its seats, in name order")
+  })
+})
+
+test("a room the first pick's connection cannot seat is never sent", async () => {
+  const bots = await freshSeats()
+  const [ada, zed] = bots
+  await mount(screen(), async () => {
+    await openSeats()
+    // Ada first: its roster names Zed and not Ada, so the picker takes both and the connection the
+    // room would be made on cannot seat one of them.
+    await click(seat(ada.id))
+    await click(seat(zed.id))
+    await until(
+      async () => (find('[data-slot="seats-pill"]')?.textContent ?? "").includes("2 of 6"),
+      "two seats",
+    )
+
+    await type(composerField(), "Plan the next release.")
+    const sendButton = find('button[aria-label="Send"]') as HTMLButtonElement | null
+    assert.equal(sendButton?.disabled, true, "Send is held while a pick has no seat")
+    await click(sendButton)
+    await settle()
+    assert.equal(posted.length, 0, "and the Host is never asked for a room it would refuse")
+  })
 })
 
 test("a Host that names no seats offers every bot, as an older one does", async () => {

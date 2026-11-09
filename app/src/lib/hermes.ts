@@ -1609,24 +1609,25 @@ export interface PluginInfo {
   rooms: { seatable: string[] | null }
 }
 
+/**
+ * A list a Host may name in its `info` answer: the strings it holds, or null where it named none.
+ * Its lists ride one answer, so each is read the same way.
+ */
+function namedList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  return value.filter((one): one is string => typeof one === "string")
+}
+
 async function pluginInfoBody(config: HermesConfig, signal?: AbortSignal): Promise<PluginInfo> {
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, {
     headers: headers(config),
     signal,
   })
   const body = await response.json()
-  const features: unknown = body?.features
-  const seatable: unknown = body?.rooms?.seatable
   return {
     version: typeof body?.version === "string" && body.version ? body.version : null,
-    features: Array.isArray(features)
-      ? features.filter((feature): feature is string => typeof feature === "string")
-      : null,
-    rooms: {
-      seatable: Array.isArray(seatable)
-        ? seatable.filter((profile): profile is string => typeof profile === "string")
-        : null,
-    },
+    features: namedList(body?.features),
+    rooms: { seatable: namedList(body?.rooms?.seatable) },
   }
 }
 
@@ -1655,7 +1656,8 @@ const pluginAnswers = new Map<string, Promise<PluginInfo | null>>()
  * That `info` answer kept whole, asked once per server and key: the features a control is gated on
  * and the seats a room may take come from the same read, so asking after both costs the Host one
  * call. **null** is the Host not answering, and a failed ask is dropped, so the next caller asks
- * again; so is an answer with no feature list, which says nothing about the plugin's features.
+ * again. An answer without a feature list is still an answer: a Host's roster stands on its own
+ * (ADR 0128), so only a read that returned nothing is forgotten.
  */
 export function getPluginAnswer(config: HermesConfig): Promise<PluginInfo | null> {
   const key = connectionKey(config)
@@ -1664,10 +1666,18 @@ export function getPluginAnswer(config: HermesConfig): Promise<PluginInfo | null
     pending = getPluginInfo(config).catch(() => null)
     pluginAnswers.set(key, pending)
     void pending.then((found) => {
-      if (!found?.features) pluginAnswers.delete(key)
+      if (!found) pluginAnswers.delete(key)
     })
   }
   return pending
+}
+
+/**
+ * Forgets the answer that connection gave, so the next ask reads the Host again: the roster it
+ * named was wrong, and a create it refused is what said so (ADR 0128).
+ */
+export function forgetPluginAnswer(config: HermesConfig) {
+  pluginAnswers.delete(connectionKey(config))
 }
 
 /**

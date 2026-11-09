@@ -6,7 +6,7 @@
  * the next time a screen needs it.
  */
 import { connectionKey, serverConfig } from "@/lib/connection"
-import { getPluginAnswer, type HermesConfig } from "@/lib/hermes"
+import { forgetPluginAnswer, getPluginAnswer, type HermesConfig, type PluginInfo } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { createStore } from "@/lib/store"
 
@@ -17,37 +17,57 @@ import { createStore } from "@/lib/store"
  */
 export type PluginFeatureAnswer = "unknown" | "yes" | "no"
 
-/** A bot's server as a read of its features takes it. */
 /** A bot's server as these hooks take it: a profile, or a plugin beside one, or nothing yet. */
 export type PluginServer = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
 
-/**
- * One connection's `info` answer, as this module remembers it: the feature names, and the profiles
- * the connection may seat in a room — null where the Host named none (ADR 0128).
- */
-type ConnectionAnswer = {
-  features: readonly string[]
-  seatable: string[] | null
-}
-
-// What each connection's plugin answered; only a real answer is remembered, and the map is replaced
-// rather than mutated so a subscriber is handed a new value.
-const answered = createStore<ReadonlyMap<string, ConnectionAnswer>>(new Map())
+// What each connection's plugin answered, whole: its feature names and the profiles it may seat in
+// a room (ADR 0128). Only a real answer is remembered, and the map is replaced rather than mutated
+// so a subscriber is handed a new value.
+const answered = createStore<ReadonlyMap<string, PluginInfo>>(new Map())
 
 async function readAnswer(config: HermesConfig) {
   const key = connectionKey(config)
   if (answered.get().has(key)) return
   const info = await getPluginAnswer(config)
   // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
-  if (!info?.features) return
-  answered.set(
-    new Map(answered.get()).set(key, { features: info.features, seatable: info.rooms.seatable }),
-  )
+  if (!info) return
+  answered.set(new Map(answered.get()).set(key, info))
 }
 
-function answer(known: ConnectionAnswer | undefined, feature: string): PluginFeatureAnswer {
-  if (known === undefined) return "unknown"
+/** Forgets what a connection answered, so its next read asks the Host again (ADR 0128). */
+export function forgetAnswer(server: PluginServer) {
+  const config = serverConfig(server)
+  const key = connectionKey(config)
+  // Both halves go, whatever the order they were filled in: a memo left behind would answer the
+  // next read with the roster the Host just refused.
+  forgetPluginAnswer(config)
+  const held = answered.get()
+  if (!held.has(key)) return
+  const next = new Map(held)
+  next.delete(key)
+  answered.set(next)
+}
+
+function answer(known: PluginInfo | undefined, feature: string): PluginFeatureAnswer {
+  // An answer that names no features says nothing about any of them, as no answer would.
+  if (!known?.features) return "unknown"
   return known.features.includes(feature) ? "yes" : "no"
+}
+
+/**
+ * What one connection answered, in one place: the guard on the key, the remembered value and the
+ * poll that asks for it, so every question about a connection reads that one answer.
+ */
+function useConnectionAnswer(server: PluginServer): PluginInfo | undefined {
+  const config = serverConfig(server)
+  const { baseUrl, apiKey } = config
+  const key = baseUrl && apiKey ? connectionKey(config) : ""
+  const known = answered.use().get(key)
+  usePoll(() => void readAnswer(config), false, [baseUrl, apiKey], {
+    active: Boolean(key),
+    onShow: false,
+  })
+  return known
 }
 
 /**
@@ -59,14 +79,7 @@ export function usePluginFeatureAnswers<K extends string>(
   server: PluginServer,
   features: Record<K, string>,
 ): Record<K, PluginFeatureAnswer> {
-  const config = serverConfig(server)
-  const { baseUrl, apiKey } = config
-  const key = baseUrl && apiKey ? connectionKey(config) : ""
-  const known = answered.use().get(key)
-  usePoll(() => void readAnswer(config), false, [baseUrl, apiKey], {
-    active: Boolean(key),
-    onShow: false,
-  })
+  const known = useConnectionAnswer(server)
   return Object.fromEntries(
     (Object.keys(features) as K[]).map((name) => [name, answer(known, features[name])]),
   ) as Record<K, PluginFeatureAnswer>
@@ -89,15 +102,8 @@ export function usePluginFeatureOn(server: PluginServer, feature: string): boole
  * remembered answer as the features, keyed by the same connection: one read answers both.
  */
 export function useRoomSeatable(server: PluginServer): string[] | null | undefined {
-  const config = serverConfig(server)
-  const { baseUrl, apiKey } = config
-  const key = baseUrl && apiKey ? connectionKey(config) : ""
-  const known = answered.use().get(key)
-  usePoll(() => void readAnswer(config), false, [baseUrl, apiKey], {
-    active: Boolean(key),
-    onShow: false,
-  })
-  return known?.seatable
+  const known = useConnectionAnswer(server)
+  return known === undefined ? undefined : known.rooms.seatable
 }
 
 /**
