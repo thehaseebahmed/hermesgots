@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { Home } from "@/App"
 import { ConversationList } from "@/components/conversation-list"
@@ -9,6 +9,7 @@ import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 
 import {
+  Nav,
   botProfile,
   click,
   find,
@@ -16,6 +17,7 @@ import {
   findText,
   json,
   mount,
+  nav,
   seedSettings,
   until,
 } from "./component-kit.tsx"
@@ -79,8 +81,6 @@ const staleScreen = (
   </MemoryRouter>
 )
 
-const Nav = () => <p data-nav>{`${useNavigationType()}:${useLocation().pathname}`}</p>
-const nav = () => find("[data-nav]")?.textContent ?? ""
 
 const paneScreen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>

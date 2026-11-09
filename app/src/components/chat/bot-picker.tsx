@@ -1,6 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon, PlusIcon } from "lucide-react"
-
 import { useNavigate } from "react-router"
 
 import { Bot } from "@/components/bot"

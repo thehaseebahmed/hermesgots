@@ -13,6 +13,7 @@ import { pressBack, setBackGuard } from "@/lib/native"
 import { SettingsPage } from "@/routes/settings"
 
 import {
+  atDepth,
   atWidth,
   botProfile,
   GENERAL,
@@ -27,22 +28,6 @@ function Stepping({ to }: { to: string }) {
   const { step } = useNav()
   useEffect(() => setBackGuard(step(to)), [step, to])
   return null
-}
-
-/** The depth the app's own history is at, and the steps its `back()` is asked for, since a memory
- * router has no window history of its own to walk. */
-function atDepth(steps: number) {
-  const real = window.history.back.bind(window.history)
-  const backs: number[] = []
-  window.history.replaceState({ idx: steps, key: "test" }, "")
-  window.history.back = () => void backs.push(steps)
-  return {
-    backs,
-    restore() {
-      window.history.back = real
-      window.history.replaceState(null, "")
-    },
-  }
 }
 
 test("a screen a list pushed steps up to the list behind it", async () => {

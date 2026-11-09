@@ -1,18 +1,20 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
 import { BotThreadsPage } from "@/routes/bot-threads"
 import { db, deleteConversation, ensureMainThread, mainThreadId } from "@/lib/db"
 import { useThreads } from "@/lib/threads"
 import {
+  Nav,
   botProfile,
   click,
   find,
   findAll,
   json,
   mount,
+  nav,
   seedSettings,
   settle,
   until,
@@ -144,8 +146,6 @@ test("Main has no Delete or Discard, in its menu or in the data layer", async ()
   assert.equal(await db.conversations.get(id), undefined, "another device's delete still applies")
 })
 
-const Nav = () => <p data-nav>{`${useNavigationType()}:${useLocation().pathname}`}</p>
-const nav = () => find("[data-nav]")?.textContent ?? ""
 
 test("the chat's Bot settings is a step in, so back returns to the chat", async () => {
   await seed()

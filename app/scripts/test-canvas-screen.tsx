@@ -6,25 +6,28 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { Link, MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router"
+import { Link, MemoryRouter, Route, Routes } from "react-router"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
 import { refreshCanvas } from "@/lib/canvases"
-import { pressBack } from "@/lib/native"
 import { db } from "@/lib/db"
+import { pressBack } from "@/lib/native"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { connectionKey, noteChange } from "@/lib/live"
 import { CanvasView } from "@/routes/canvas"
 import { ChatPage } from "@/routes/chat"
 
 import {
+  Nav,
+  atDepth,
   atWidth,
   botProfile,
   click,
   find,
   json,
   mount,
+  nav,
   seedSettings,
   settle,
   until,
@@ -484,9 +487,6 @@ test(
   }),
 )
 
-const Nav = () => <p data-nav>{`${useNavigationType()}:${useLocation().pathname}`}</p>
-const nav = () => document.querySelector("[data-nav]")?.textContent ?? ""
-
 test(
   "the canvas's header control steps back to the list rather than pushing it again",
   atWidth(390, async () => {
@@ -495,7 +495,6 @@ test(
     await mount(
       <MemoryRouter initialEntries={["/canvas/c1"]}>
         <Routes>
-          <Route path="/canvas" element={<Nav />} />
           <Route path="/canvas/:id" element={<CanvasView />} />
         </Routes>
         <Nav />
@@ -516,16 +515,12 @@ test(
 )
 
 test(
-  "a canvas the list opened takes the press back to the list, and one the menu opened leaves it",
+  "a canvas the list opened steps back to the list",
   atWidth(390, async () => {
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat("c1")
-    const real = window.history.back.bind(window.history)
-    const backs: number[] = []
-    window.history.back = () => void backs.push(1)
+    const history = atDepth(1)
     try {
-      // One step in: the Canvas list pushed it, so the press goes up to the list.
-      window.history.replaceState({ idx: 1, key: "pushed" }, "")
       await mount(
         <MemoryRouter initialEntries={["/canvas/c1"]}>
           <Routes>
@@ -538,11 +533,22 @@ test(
             "the canvas to draw",
           )
           assert.equal(pressBack(), "screen", "the canvas takes the press")
-          assert.deepEqual(backs, [1], "and steps back to the list behind it")
+          assert.deepEqual(history.backs, [1], "and steps back to the list behind it")
         },
       )
-      // The only entry: a pinned canvas opened from the drawer, where back leaves the app.
-      window.history.replaceState({ idx: 0, key: "root" }, "")
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "a canvas the menu opened leaves the press to the app",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat("c1")
+    const history = atDepth(0)
+    try {
       await mount(
         <MemoryRouter initialEntries={["/canvas/c1"]}>
           <Routes>
@@ -552,15 +558,14 @@ test(
         async () => {
           await until(
             () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
-            "the canvas to draw again",
+            "the canvas to draw",
           )
           assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
-          assert.deepEqual(backs, [1], "and nothing more goes up")
+          assert.deepEqual(history.backs, [], "nothing goes up")
         },
       )
     } finally {
-      window.history.back = real
-      window.history.replaceState(null, "")
+      history.restore()
     }
   }),
 )

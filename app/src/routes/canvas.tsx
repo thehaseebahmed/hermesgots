@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
-  ArrowLeftIcon,
   EllipsisIcon,
   FrameIcon,
   MenuIcon,
@@ -12,6 +11,7 @@ import {
 import { useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
+import { BackButton } from "@/components/back-button"
 import { Bot } from "@/components/bot"
 import {
   CanvasConsentDialog,
@@ -199,8 +199,6 @@ const SNAPS = [0.5, 1]
 export function CanvasView() {
   const { id = "" } = useParams()
   const { up, step } = useNav()
-  // The list pushes a canvas and the drawer's pinned row opens it as a top-level screen, so the
-  // press steps back to the list where it was pushed and is the app's where the menu opened it.
   useEffect(() => setBackGuard(step("/canvas")), [step])
   const { canvas, missing, loaded, away } = useCanvas(id)
   const online = useOnline()
@@ -423,15 +421,7 @@ export function CanvasView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          aria-label="All canvases"
-          onClick={() => up("/canvas")}
-        >
-          <ArrowLeftIcon />
-        </Button>
+        <BackButton label="All canvases" variant="ghost" onClick={() => up("/canvas")} />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
           {canvas?.version ? (

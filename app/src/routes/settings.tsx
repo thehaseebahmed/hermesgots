@@ -165,7 +165,9 @@ export function SettingsPage() {
   useEffect(() => {
     // A bot's own page on a phone publishes the guard itself — it is the screen that can ask about
     // unsaved changes — so this one would only compete with it.
-    if ((separate && botScreen && botTab) || !(separate || botScreen)) return
+    if (separate && botScreen && botTab) return
+    // Nothing that isn't a step in publishes a guard: the menu, on either layout, is the first entry.
+    if (!separate && !botScreen) return
     const back = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
@@ -194,11 +196,10 @@ export function SettingsPage() {
     return <Navigate to={botSubPath(botId!, botTab!, botSub.id)} replace />
   if (sub && !botTab) return <Navigate to={botId ? botPath(botId) : "/settings"} replace />
   // A botId that isn't one of this device's bots is the menu, and nothing of a bot's screen.
-  if (section === "bots" && botId && !bot)
-    return profiles === undefined ? null : <Navigate to="/settings" replace />
+  if (botScreen && !bot) return profiles === undefined ? null : <Navigate to="/settings" replace />
 
   if (!large) {
-    if (section === "bots" && botId) {
+    if (botScreen) {
       if (!bot) return null
       return page ? (
         <BotPageScreen profile={bot} page={page} sub={botSub} />
@@ -210,7 +211,7 @@ export function SettingsPage() {
   }
 
   // A bot's settings is two panes of its own: the list where the menu was, the page beside it.
-  if (section === "bots" && botId) {
+  if (botScreen) {
     if (!bot) return null
     return (
       <div className="flex min-h-0 flex-1">

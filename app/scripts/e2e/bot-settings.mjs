@@ -155,8 +155,6 @@ const wide = async ({ page, profileId, shot }) => {
   assert.ok(same(before, after), "the list's box did not move while the pane beside it swapped")
   await shot("models")
 
-  // A page opened from a Settings section comes back to that section, not to the menu: AI Dictation's
-  // Bots tab opens a bot's page, and its back control lands on AI Dictation again.
   await page.goto(`${app}/settings/dictation`)
   await page.getByRole("tab", { name: "Bots" }).waitFor({ timeout: 15_000 })
   await page.getByRole("tab", { name: "Bots" }).click()

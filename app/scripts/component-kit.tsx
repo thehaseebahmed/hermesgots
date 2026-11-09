@@ -7,7 +7,7 @@
 import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router"
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
@@ -595,6 +595,28 @@ export const sendPress = () => pressEnter({ ctrlKey: true })
 /** The address on screen, drawn beside the router so a test can read it without asking one. */
 export const Path = () => <p data-path>{useLocation().pathname}</p>
 export const path = () => find("[data-path]")?.textContent ?? ""
+
+/** The address on screen and the move that landed it, so a test reads a push from a replace. */
+export const Nav = () => <p data-nav>{`${useNavigationType()}:${useLocation().pathname}`}</p>
+export const nav = () => find("[data-nav]")?.textContent ?? ""
+
+/**
+ * Puts the app's own history at `steps` deep and records the steps its `back()` is asked for, so a
+ * screen's guard can be read without a browser history to walk. `restore()` puts both back.
+ */
+export function atDepth(steps: number) {
+  const real = window.history.back.bind(window.history)
+  const backs: number[] = []
+  window.history.replaceState({ idx: steps, key: "test" }, "")
+  window.history.back = () => void backs.push(steps)
+  return {
+    backs,
+    restore() {
+      window.history.back = real
+      window.history.replaceState(null, "")
+    },
+  }
+}
 
 /** A reply's thinking rows in the order drawn — the row itself, button or status row alike. */
 export const thinkingLines = () =>
