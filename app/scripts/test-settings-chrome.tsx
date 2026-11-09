@@ -277,9 +277,8 @@ test("a page offers its action in the header of the Screen that holds it", async
     async () => {
       const action = named("button", "Add a server")
       assert.ok(action, "the page's own control is on screen")
-      assert.equal(
-        action.closest("header"),
-        find("header"),
+      assert.ok(
+        action.closest("header") === find("header"),
         "in that Screen's header, not down among the page's settings",
       )
       await click(action)

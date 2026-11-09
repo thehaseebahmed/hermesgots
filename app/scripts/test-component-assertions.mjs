@@ -1,3 +1,10 @@
+/**
+ * The style gate over the component tier's assertions. What keeps a red assertion cheap is the shim
+ * the loader maps both assert specifiers to (`assert-hooks.cjs`), which scrubs an element before Node
+ * inspects it; this reads the spellings the suite writes, so the suite also reads as though the shim
+ * were not there. An imported helper and an element bound to a variable are outside what a file can
+ * be read for, and those are the shim's alone.
+ */
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
@@ -12,6 +19,13 @@ const EQUALITY = new Set([
   "deepStrictEqual",
   "notEqual",
   "notDeepEqual",
+])
+
+/** An expression that answers one side or the other, so an element on either side is an element. */
+const FALLBACKS = new Set([
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.AmpersandAmpersandToken,
 ])
 
 const ELEMENT_FUNCTIONS = new Set([
@@ -48,6 +62,12 @@ function calleeName(call) {
 
 function elementValued(expression, helpers) {
   const node = unwrap(expression)
+  // `a ?? b`, `a || b`, `a && b`: the value is one side's, so an element on either side is the
+  // assertion's. Any other operator builds a new value (a comparison, a string), never the element.
+  if (ts.isBinaryExpression(node)) {
+    if (!FALLBACKS.has(node.operatorToken.kind)) return false
+    return elementValued(node.left, helpers) || elementValued(node.right, helpers)
+  }
   if (!ts.isCallExpression(node)) return false
   const name = calleeName(node)
   if (name === null) return false
@@ -128,11 +148,14 @@ function offendersIn(source, file = "<source>") {
   const sites = []
   const visit = (node) => {
     if (ts.isCallExpression(node) && assertionName(node) !== null) {
-      const [first] = node.arguments
-      if (first && elementValued(first, helpers)) {
+      // Both arguments are read: Node inspects the expected value as thoroughly as the actual one.
+      const offending = node.arguments
+        .slice(0, 2)
+        .filter((argument) => elementValued(argument, helpers))
+      if (offending.length > 0) {
         sites.push({
           line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
-          argument: first.getText(sourceFile),
+          argument: offending.map((argument) => argument.getText(sourceFile)).join(", "),
         })
       }
     }
@@ -172,6 +195,10 @@ const FLAGGED = {
     "const two = () => one()",
     "assert.equal(two(), null)",
   ].join("\n"),
+  "an element as the expected value": 'assert.equal(null, find(sel), "nothing drew")',
+  "a list as the expected value": "assert.deepEqual([], findAll(sel))",
+  "an element behind a nullish fallback": "assert.equal(find(one) ?? find(two), null)",
+  "an element behind a logical fallback": "assert.equal(composerField() || null, null)",
 }
 
 const ALLOWED = {
@@ -183,6 +210,9 @@ const ALLOWED = {
   "a local helper that answers a property":
     'const marker = () => find("[data-marker]")\nconst markerText = () => marker()?.textContent ?? null\nassert.equal(markerText(), null)',
   "a value found before the assertion": 'const row = find(sel)\nassert.equal(row?.textContent, "3")',
+  "a property behind a nullish fallback": "assert.equal(find(sel)?.textContent ?? null, null)",
+  "a comparison of an element": 'assert.equal(find(sel) === null, true, "the row went")',
+  "a second argument that is no element": 'assert.equal(1, 2, "one is not two")',
 }
 
 function componentTests() {

@@ -20,7 +20,9 @@
 | Component harness (`scripts/component-kit.tsx`) | changed | G2 | a presence helper beside `find` |
 | Component tests (`scripts/test-*.tsx`) | changed | G1 G2 | `scripts/test-rooms-list.tsx`'s "a room whose row moved is read again" and the sweep's own guard |
 | Test tier (`app/package.json`) | changed | G1 | `pnpm test:component`'s own run |
-| Unit tier (`scripts/test-*.mjs`) | new | G2 | a guard that reads every component test's assertions |
+| Unit tier (`scripts/test-*.mjs`) | new | G2 | a guard that reads every component test's assertions, both sides of each |
+| Assert shim (`scripts/assert-hooks.cjs`, `scripts/assert-hooks-strict.cjs`) | new | G2 | `scripts/test-assert-shim.tsx` |
+| Component loader (`scripts/component-loader.mjs`) | changed | G2 | the same file's two import spellings |
 
 No flow crosses layers: every participant is the test tier, and no app layer changes.
 
@@ -42,23 +44,41 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    prints its message and returns in milliseconds, where the element form climbs to ~5 GB and is
    SIGKILLed.
    Done.
-3. **A guard keeps the pattern out.** A unit test reads every `scripts/test-*.tsx` with the TypeScript
-   parser and fails on an assertion that hands `equal`/`strictEqual`/`deepEqual`/`deepStrictEqual`/
-   `notEqual`/`notDeepEqual` a `find`/`findAll`/`findText`/`labelled`/`composerField`/`threadCard` or
-   `document.querySelector*` call, or a local function that answers one. An element bound to a
-   variable first (`const row = find(sel); assert.equal(row, null)`) is still outside it, which Risks
-   records. Goals: G2. After: 2. Layers: unit tier. Check: red on
-   `9ab58e34`'s tests — 171 sites, 90 of them on the tree the first sweep left — and green after the
-   sweep, with a fixture for each spelling and an unparsable file failing rather than skipped.
+3. **A guard keeps the pattern out of the spellings a test writes.** A unit test reads every
+   `scripts/test-*.tsx` with the TypeScript parser and fails on an assertion that hands
+   `equal`/`strictEqual`/`deepEqual`/`deepStrictEqual`/`notEqual`/`notDeepEqual` — on either side,
+   since Node inspects both — a `find`/`findAll`/`findText`/`labelled`/`composerField`/`threadCard` or
+   `document.querySelector*` call, or a local function that answers one, seen through a `??`/`||`/`&&`
+   fallback. It is the style gate, not the guarantee: an element bound to a variable first, or one an
+   imported helper answers, is outside what a file can be read for, and step 5 is what covers those.
+   Goals: G2. After: 2. Layers: unit tier. Check: red on `9ab58e34`'s tests — 171 sites, 90 of them on
+   the tree the first sweep left — and green after the sweep, with a fixture for each spelling and an
+   unparsable file failing rather than skipped; reading the second argument and the fallbacks found
+   `test-settings-chrome.tsx`'s `assert.equal(action.closest("header"), find("header"))`, which now
+   asks `===` of the two.
    Done.
 4. **A worker that grows the JS heap dies at 1.5 GB, naming itself.** The tier starts each file's
    process with `--max-old-space-size=1536`, about three times the largest worker measured at 570 MB,
    so a heap-shaped runaway fails as a red file instead of taking its neighbours with it. It does not
-   bound the growth this plan is about — the inspect-shaped one lives outside V8's old space and is
-   bounded by steps 1–3 alone (see Risks). Goals: G1 G2. After: 1.
+   bound the growth this plan is about — the inspect-shaped one lives outside V8's old space, and step
+   5 is what bounds it (see Risks). Goals: G1 G2. After: 1.
    Layers: test tier. Check: a scratch file that allocates objects without bound dies at 1536 MB with
    `FATAL ERROR: Reached heap limit` naming itself, while the file beside it reports `ok`; the tier's
    own run peaks at 684 MB of cgroup memory.
+   Done.
+5. **The assert boundary scrubs an element before Node sees it.** `component-loader.mjs` maps
+   `node:assert` and `node:assert/strict` to `scripts/assert-hooks.cjs`, which requires the real module
+   (only an ESM import is intercepted) and wraps every assertion so an element argument becomes a short
+   label — `[element <div data-band="rooms"> #7]`, the tag, up to two attributes and the node's own
+   number, capped at 80 characters — and an array is scrubbed member by member; `assert-hooks-strict.cjs`
+   is the same wrapper around the strict module, with its names written one per line so the named import
+   resolves. Nothing else is touched: functions, promises, regexes and primitives pass through,
+   `AssertionError` is not wrapped, and an element-free array keeps its identity so `strictEqual` still
+   means identity. Goals: G2. After: 3. Layers: assert shim, component loader. Check: a red
+   `assert.equal` on a mounted screen's nested element prints its own message and returns in 2 ms, where
+   the same shape without the mapping is SIGKILLed with no message at all; `scripts/test-assert-shim.tsx`
+   holds both import spellings, the label, the two nodes staying two nodes, and the assertions the shim
+   must leave alone.
    Done.
 
 ## Decisions
@@ -87,12 +107,37 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
   does not bound was measured, not assumed: the inspect-shaped growth this plan is about lives outside
   V8's old space, and a probe that reproduces it was still SIGKILLed at the 5 GiB ceiling with the cap in
   place, while a probe that grows the JS heap died at 1536 MB with `FATAL ERROR: Reached heap limit`. The
-  cap is containment for the second shape only; G1 and G2 are carried by the wait and the sweep.
+  cap is containment for the second shape only; G1 and G2 are carried by the wait, the sweep and the
+  assert boundary.
+- **The assert boundary is the guarantee; the guard is the style gate.** The sweep and the guard both
+  read a file, and 24 live sites were still there for the spellings a reader cannot see — an element
+  reached as `thread?.querySelector('[role="img"]')`, a variable bound first, an imported helper — one
+  of which the tier SIGKILLed at exactly 5368709120 bytes. The loader can see them all, because it sits
+  where the specifier is resolved rather than where it is written: both assert spellings become the shim,
+  and an element is `[element <span role="img" aria-label="Tri">]` before Node's inspect is reached.
+  Measured on the live shape: without the mapping, `node --test` reports `signal: 'SIGKILL'` after 42 s
+  and no message; with it, the same assertion prints "the row carries no icon" in 2 ms, with the worker's
+  RSS flat at 345 MB. The guard stays as the style gate — the suite should read as though the shim were
+  not there, and a future tier that loads no hooks would still be swept — but its claim is the shape of
+  a test's own line, never the guarantee. What it cannot read: an element bound to a variable, an
+  imported helper's answer, and `querySelector`/`closest` reached off an element rather than
+  `document`.
+- **A label carries the node's number.** The first shim named an element by its tag and attributes
+  alone, and `test-switch-scroll.tsx`'s `assert.notStrictEqual(scroller, otherScroller)` — two regions
+  that look alike and are not the same node — failed under it, which the tier's run caught. A label is
+  `[element <div role="region" aria-label="Messages"> #12]`, with a number the node keeps in a
+  `WeakMap` for the life of the process: two distinct nodes never compare equal, and one node always
+  compares equal to itself, so identity assertions keep their verdict and only the diff changes.
 
 ## Risks
-- The guard reads the expression an assertion is handed: an element bound to a variable first
-  (`const row = find(sel); assert.equal(row, null)`) still slips past it. Every spelling the suite
-  writes today is read.
+- The guard reads the expressions a test writes, so an element bound to a variable first
+  (`const row = find(sel); assert.equal(row, null)`) or one an imported helper answers still slips past
+  it. That is the shim's business, not the guard's: the failure still prints, it just reads as the label
+  rather than as the test's own sentence. Every spelling the suite writes today is read.
+- The shim changes what a test sees of an element: a failure's `actual` is the label, so a test that
+  reads `error.actual` gets `[element <div …> #7]` rather than the node. Nothing in the suite does.
+- A label's number is a per-process counter, so the same node reads `#7` in one run and `#9` in the
+  next: a test may match the shape of a label, never the number.
 - The heap cap turns a genuinely runaway test into a red file rather than a killed one; a test that
   legitimately needs more than 1.5 GB in one worker would now fail. None measured approach it.
 - The rooms test may still fail for a real behavioural reason; after this change it fails honestly and

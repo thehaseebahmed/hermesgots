@@ -33,6 +33,18 @@ const isFile = (candidate) => {
   }
 }
 
+/**
+ * Assert is the one builtin a test's own line decides the cost of: handed a DOM element, its equality
+ * family inspects the element to depth 1000 — React's fiber graph included — and the worker dies
+ * before the failure prints. A test cannot be trusted to remember that, and the guard that reads for
+ * it cannot see an imported helper or an element bound to a variable, so the boundary is the loader's:
+ * both spellings resolve to the shim, and an element argument is a short string before Node sees it.
+ */
+const asserted = new Map([
+  ["node:assert", path.join(root, "scripts/assert-hooks.cjs")],
+  ["node:assert/strict", path.join(root, "scripts/assert-hooks-strict.cjs")],
+])
+
 /** The file a specifier means, in the app's terms: `@/lib/db`, or a relative path, or a file. */
 function locate(specifier, parent) {
   const alias = specifier.startsWith("@/")
@@ -54,6 +66,9 @@ function locate(specifier, parent) {
 }
 
 export async function resolve(specifier, context, next) {
+  // A test's assertion, at the boundary rather than in its own line: see `asserted` above.
+  const shim = asserted.get(specifier)
+  if (shim) return { url: pathToFileURL(shim).href, shortCircuit: true }
   // A stylesheet is the build's business, not a test's: a component that imports one still runs.
   // Both its spellings count — a package's (`leaflet/dist/leaflet.css`) and its own (`./map.css`),
   // which would otherwise resolve to a file Node has no loader for.
