@@ -455,6 +455,13 @@ _Avoid_: participant, teammate, occupant, seat
 The members a room holds, fixed when the room is made. Changing them means a new room.
 _Avoid_: member list, participants, seats
 
+**Seatable**:
+The profiles a connection may seat in a room, as its Host names them: its own bot, plus any profile the
+Host's own configuration adds, and every profile a host-scoped connection serves. A bot outside the
+seatable list of the connection the room is made from is greyed in New room rather than offered and
+refused.
+_Avoid_: allowed bots, permitted profiles, seatable bots, whitelist
+
 **Disband**:
 End a room: its work is stopped and the Host leaves a tombstone where its record was, so no device
 draws it again. The word is the Host's, and the plugin only relays its answer.
