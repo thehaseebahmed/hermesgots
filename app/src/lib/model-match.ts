@@ -74,7 +74,8 @@ const aliasFamily = (id: string) =>
     segment.replace(/^([a-z0-9]+)/, (token) => BENCHLM_KEY_BY_FAMILY[token] ?? token),
   )
 
-// BenchLM writes a Kimi version without the k: `kimi-3-1-pro` for the catalog's `kimi-k3.1-pro`.
+// BenchLM keys the K3 family without the k (`kimi-3-1-pro` for the catalog's `kimi-k3.1-pro`);
+// the K2.x rows keep it (`kimi-k2-5`, `kimi-k2-7-code`).
 const kimiFamily = (id: string) =>
   rewriteSegments(id, (segment) => segment.replace(/^kimi-k(?=\d)/, "kimi-"))
 
