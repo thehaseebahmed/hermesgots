@@ -44,11 +44,14 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    After: 2. Layers: unit tier. Check: red on today's tree — 62 sites — and green after step 2, with a
    one-line fixture proving it catches a new one.
    Done.
-4. **One worker cannot eat the container.** The tier gives each file's process a heap cap
-   (`--max-old-space-size=1536`, four times the largest worker measured at 570 MB), so a runaway dies
-   naming its own file instead of the OOM killer taking its neighbours. Goals: G1 G2. After: 1.
-   Layers: test tier. Check: a deliberate runaway in a scratch file dies with a heap error while the file
-   beside it still reports green; the tier's own peak stays under 1 GB of anonymous memory.
+4. **A worker that grows the JS heap dies at 1.5 GB, naming itself.** The tier starts each file's
+   process with `--max-old-space-size=1536`, about three times the largest worker measured at 570 MB,
+   so a heap-shaped runaway fails as a red file instead of taking its neighbours with it. It does not
+   bound the growth this plan is about — the inspect-shaped one lives outside V8's old space and is
+   bounded by steps 1–3 alone (see Risks). Goals: G1 G2. After: 1.
+   Layers: test tier. Check: a scratch file that allocates objects without bound dies at 1536 MB with
+   `FATAL ERROR: Reached heap limit` naming itself, while the file beside it reports `ok`; the tier's
+   own run peaks at 684 MB of cgroup memory.
    Done.
 
 ## Decisions
@@ -72,7 +75,11 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
 - **A helper and a guard, not a one-line edit.** 62 sites hand a found element to assert's equality;
   the next red one is the next 5 GB, so the pattern is swept and a unit test keeps it out.
 - **Why 1536 MB.** The largest worker measured is 570 MB (bot-pane) and the tier's anonymous peak is
-  660 MB; the cap bounds a runaway at roughly three times normal without touching a healthy run.
+  660 MB; the cap bounds a runaway at roughly three times normal without touching a healthy run. What it
+  does not bound was measured, not assumed: the inspect-shaped growth this plan is about lives outside
+  V8's old space, and a probe that reproduces it was still SIGKILLed at the 5 GiB ceiling with the cap in
+  place, while a probe that grows the JS heap died at 1536 MB with `FATAL ERROR: Reached heap limit`. The
+  cap is containment for the second shape only; G1 and G2 are carried by the wait and the sweep.
 
 ## Risks
 - The guard is a text match: an assertion written another way (`assert.strictEqual(value, null)` where
