@@ -41,6 +41,8 @@ The hint that says "assume plain text" is in the prompt's stable tier; a section
 
 2. **The rule every session is told.** Add `plugin/replies.py`: the section's text and a guarded `register_section(ctx)` that hands it to Hermes under its own id, answering `False` where this host predates the call rather than failing the plugin. Wire it beside `platform_gots.register_section` in `plugin/__init__.py`. Write the decision down where the repo keeps them — an ADR, `AGENTS.md`'s feature bullet and `plugin/README.md`'s list — because the next reader of the api_server hint will otherwise "fix" this back. Goals: G1. After: 1. Layers: the section, registration, docs. Check: step 1's test green; then `python3 -m unittest discover -s plugin/tests -t .`, and `.github/scripts/scan-plugin.py` over `plugin/`.
 
+   Done.
+
 ## Decisions
 - **The cause is the host's api_server hint, confirmed by reading the running prompt.** `agent/prompt_builder.py:716` reads *"You're responding through an API server. The rendering layer is unknown — assume plain text. No markdown formatting (no asterisks, bullets, headers, code fences). Treat this like a conversation, not a document."* That is the paragraph this session's own prompt carries, and this session is an api_server run like every Gots run. Nothing the plugin tells a run contradicts it: `grep -rn markdown plugin/prompt_builder.py plugin/platform_gots.py plugin/openui/prompt.txt` found one line, about a table's cells.
 - **The renderer is not the cause, refuted.** `app/src/components/chat/markdown.tsx` splits a reply into blocks and draws each through `react-markdown`, and its classes give `ul` a disc and `ol` a decimal. A reply written as markdown is drawn as markdown today.

@@ -63,6 +63,7 @@ from . import (
     projects,
     progress,
     prompt_builder,
+    replies,
     reporting,
     repos,
     research,
@@ -3920,6 +3921,9 @@ def register(ctx) -> None:
     # Gots is a delivery platform, so a routine can speak in a chat (platform_gots.py, ADR 0081).
     platform_gots.register(ctx)
     platform_gots.register_section(ctx)
+    # A reply is read in the app's markdown, and the host's plain-text default is wrong here
+    # (replies.py, ADR 0122).
+    replies.register_section(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("gots: this Hermes version can't add API server routes; update Hermes")
