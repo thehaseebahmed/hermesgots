@@ -15,7 +15,9 @@
 | Layer | Status | Goals | Tested at |
 |---|---|---|---|
 | push delivery (`plugin/push.py`) | changed | G1 | `plugin.tests.test_push_kinds.Scope` |
-| session ancestry (`plugin/sessions.py`) | changed | G1 | `plugin.tests.test_push_kinds.Scope` |
+| session ancestry (`plugin/sessions.py`) | changed | G1 | `plugin.tests.test_push_kinds.Scope`, `.Turns`, `plugin.tests.test_progress.ProgressTest` |
+| run news (`plugin/alerts.py`) | changed | G1 | `plugin.tests.test_push_kinds.Turns` |
+| progress reminders (`plugin/progress.py`) | changed | none — a reminder, not a push | `plugin.tests.test_progress.ProgressTest` |
 | approval hook (`plugin/events.py`) | affected | G1 | `push.notify`'s gate (`plugin.tests.test_push_kinds.Scope`) |
 | clarify tool (`plugin/clarify.py`) | affected | G1 | `push.notify`'s gate (`plugin.tests.test_push_kinds.Scope`) |
 
@@ -49,8 +51,21 @@ sequenceDiagram
    push and got none), green after — then `plugin.tests.test_push_kinds` and `python3 -m unittest
    discover -s plugin/tests -t .`. `sessions.is_chat` answers a session's ancestry in one read-only
    recursive query, bounded by `COMPRESSION_DEPTH` and waiting at most 0.25 s on a locked store;
-   `push._gots_chat` asks it after its cheap prefix return, so compression and a subagent's fork both
-   count, and a store that can't answer drops the push quickly instead of stalling the hook. Done.
+   `push._gots_chat` asks it, so compression and a subagent's fork both count (an app-minted id
+   answers inside the predicate, before the store is opened), and a store that can't answer drops
+   the push quickly instead of stalling the hook. Done.
+4. **Converge the session predicates.** Goals: G1 for a turn's news; none for the reminders (a
+   reminder is not a push). After: 3. Layers: push delivery, run news,
+   progress reminders, session ancestry. Check: `python3 -m unittest plugin.tests.test_progress -v`
+   and `python3 -m unittest plugin.tests.test_push_kinds -v` — the compressed chat's reminder and
+   the delegated child's failed turn red before the change — then `python3 -m unittest discover
+   -s plugin/tests -t .`. `sessions.is_chat` answers an app-minted id before opening the store, so
+   every caller pays nothing on the common path; `push._gots_chat` is only that call and no longer
+   keeps a prefix branch of its own. `alerts.turn_finished` asks `sessions.is_chat` rather than its
+   own prefix check, so a compressed child's and a subagent's news reach the chat's devices.
+   `progress._session` keeps the fast prefix return and, for an unprefixed id, asks whether its
+   compression root is prefixed: a delegation fork stops that walk, so a subagent's reply — which
+   reaches its parent, not the user — still gets no reminder. Done.
 
 ## Decisions
 
@@ -71,6 +86,15 @@ sequenceDiagram
   locked, the answer is "not a chat's" — fail closed, as before — but the question is one read-only
   query with a short busy timeout, so a locked store answers in 0.25 s rather than holding the hook
   thread for the 2 s `sessions.chat_session` waits.
+- **Q3: the other two session checks converge on the same rule.** Made by the user, chosen over
+  leaving them: `alerts.turn_finished` kept its own prefix check, which missed a subagent's failed
+  turn, and `progress._session` kept one that missed a compressed chat's child. One rule for which
+  session is a chat's, rather than three copies that drift.
+- **Q4: converged properly, not identically.** Made by the user: `alerts.turn_finished` follows
+  `sessions.is_chat` (any ancestry), because a compressed child's and a subagent's news are the
+  chat's own. `progress._session` follows compression only: a delegated child's reply reaches its
+  parent rather than the user (its `_delegate_from` fork stops `chat_session`'s walk), so a subagent
+  still gets no reminder. The difference is the point, not an oversight.
 - **Arena skipped** (no new layer, no big decision, one defensible shape).
 
 ### Evidence (before the fix)

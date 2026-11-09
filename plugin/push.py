@@ -457,13 +457,11 @@ def clear(path: Path, key: str) -> None:
 
 
 def _gots_chat(path: Path, session_id: str) -> bool:
-    """Whether a session is a Gots chat's: the app minted its id, or one of its ancestors' — the
-    chat compression moved it onto, and the chat a subagent forked it off (``sessions.is_chat``).
+    """Whether a session is a Gots chat's, by ``sessions.is_chat``: the app minted its id, or one
+    of its ancestors' — the chat compression moved it onto, and the chat a subagent forked it off.
     An id the app never minted, with no such ancestor, is another surface's and nobody's news."""
     from . import sessions
 
-    if session_id.startswith(sessions.ID_PREFIXES):
-        return True
     return sessions.is_chat(home_of(path), session_id)
 
 

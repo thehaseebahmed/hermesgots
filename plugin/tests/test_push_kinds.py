@@ -244,12 +244,16 @@ class Scope(unittest.TestCase):
         self.assertTrue(answer)
         self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
 
-    def test_a_chats_own_id_is_answered_without_the_lineage_walk(self):
-        with mock.patch.object(sessions, "is_chat") as walk:
-            answer, sent = self.tell("question", "gots-abc")
+    def test_a_chats_own_id_is_answered_without_opening_the_store(self):
+        # The predicate answers the app's own prefix first, and the push gate adds no branch of
+        # its own: neither opens state.db for a chat the app minted.
+        with mock.patch.object(sessions, "_open_state") as store:
+            self.assertTrue(sessions.is_chat(self.home, "gots-abc"))
+        store.assert_not_called()
+        with mock.patch.object(sessions, "_open_state") as store, mock.patch.object(push, "_run"):
+            answer = push.notify("question", "gots-abc", path=self.path)
         self.assertTrue(answer, "the app minted the id, so the chat is its own")
-        self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
-        walk.assert_not_called()
+        store.assert_not_called()
 
     def test_another_surfaces_session_is_not_pushed(self):
         # No prefix, no chat record, no compression parent: a session Gots never started.
@@ -510,6 +514,33 @@ class Turns(unittest.TestCase):
         alerts._started["telegram-9"] = time.monotonic() - 1000
         self.end(session="telegram-9", completed=True, failed=False, interrupted=False)
         self.assertEqual(self.told, [])
+
+    def test_a_delegated_childs_failure_is_told_as_its_chats(self):
+        # A subagent's turn ends in a session of its own, with no project record: the chat
+        # started it, so its failure is the chat's news (sessions.is_chat follows the fork).
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        conn = sqlite3.connect(home / "state.db")
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
+            " model_config TEXT, source TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO sessions (id, parent_session_id, end_reason, model_config, source)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [
+                ("gots-1", None, "compression", None, None),
+                ("sess_de1e", "gots-1", None, '{"_delegate_from": "gots-1"}', "subagent"),
+            ],
+        )
+        conn.commit()
+        conn.close()
+        with mock.patch.object(
+            alerts.sessions, "_paths", lambda: (Path("/nonexistent/m.db"), home)
+        ):
+            self.end(session="sess_de1e", completed=False, failed=True, interrupted=False)
+        self.assertEqual(self.told, [("run_failed", "sess_de1e")])
 
 
 class Routines(unittest.TestCase):

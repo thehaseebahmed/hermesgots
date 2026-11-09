@@ -56,13 +56,20 @@ _calls: Dict[str, Dict[str, int]] = {}
 def _session(kwargs: Dict[str, Any]) -> Optional[str]:
     """The session this hook call belongs to, or None for one with no user to update.
 
-    Gots mints its chats' ids (``createConversation`` in the app), and a delegated child is a fresh
-    session of its own whose reply reaches its parent rather than the user.
+    Gots mints its chats' ids (``createConversation`` in the app), so that id answers at once. A
+    chat compression moved onto a child session still has a user to update, and its compression
+    root is the chat's (``sessions.chat_session``). A delegated child is out even when its chat is
+    Gots's: the child's reply reaches its parent rather than the user, and its ``_delegate_from``
+    fork stops that root walk.
     """
     session_id = kwargs.get("session_id") or ""
-    if not isinstance(session_id, str) or not session_id.startswith(sessions.ID_PREFIXES):
+    if not isinstance(session_id, str) or not session_id:
         return None
-    return session_id
+    if session_id.startswith(sessions.ID_PREFIXES):
+        return session_id
+    _, home = sessions._paths()
+    root = sessions.chat_session(home, session_id)
+    return session_id if root.startswith(sessions.ID_PREFIXES) else None
 
 
 def _turn(kwargs: Dict[str, Any]) -> str:

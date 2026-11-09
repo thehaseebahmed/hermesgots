@@ -6,6 +6,7 @@ Run: python3 -m unittest plugin.tests.test_progress -v
 
 from __future__ import annotations
 
+import sqlite3
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -54,6 +55,21 @@ class ProgressTest(unittest.TestCase):
         progress.after_model_call(
             session_id=session, task_id=session, turn_id=turn, assistant_content_chars=chars
         )
+
+    def lineage(self, rows: List[tuple]) -> None:
+        """Hermes's own store, with the parent links compression and a delegation leave behind."""
+        conn = sqlite3.connect(self.home / "state.db")
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
+            " model_config TEXT, source TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO sessions (id, parent_session_id, end_reason, model_config, source)"
+            " VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
 
     # The bot's level -------------------------------------------------------
 
@@ -231,6 +247,27 @@ class ProgressTest(unittest.TestCase):
         spent = progress.CALLS_BETWEEN["normal"] + 1
         for session in ("20261029_101500_ab12cd", "sa-k3j9"):
             self.assertEqual(self.calls(spent, session=session), [None] * spent)
+
+    def test_a_compressed_chats_child_is_still_asked_for_an_update(self) -> None:
+        # Compression moves a chat onto a child session that carries no prefix: its tool calls
+        # are still the chat's, so the chat's user is still owed the update.
+        self.lineage([
+            ("gots-abc", None, "compression", None, None),
+            ("sess_c0ffee", "gots-abc", None, None, None),
+        ])
+        spent = progress.CALLS_BETWEEN["normal"]
+        self.assertEqual(self.calls(spent, session="sess_c0ffee"), [None] * spent)
+        self.assertIsNotNone(self.call(session="sess_c0ffee"))
+
+    def test_a_subagents_session_is_left_alone(self) -> None:
+        # A delegated child's reply reaches its parent rather than the user, so no reminder,
+        # even though the chat that started it is Gots's (its `_delegate_from` stops the walk).
+        self.lineage([
+            ("gots-abc", None, "compression", None, None),
+            ("sess_de1e", "gots-abc", None, '{"_delegate_from": "gots-abc"}', "subagent"),
+        ])
+        spent = progress.CALLS_BETWEEN["normal"] + 1
+        self.assertEqual(self.calls(spent, session="sess_de1e"), [None] * spent)
 
     def test_the_table_does_not_grow_without_bound(self) -> None:
         for index in range(progress.KEEP_SESSIONS + 10):

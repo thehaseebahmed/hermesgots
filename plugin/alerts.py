@@ -114,8 +114,9 @@ def turn_finished(**kwargs: Any) -> None:
         stopped = sessions.outcome(**kwargs)
         path, home = sessions._paths()
         record = sessions.record_for(path, home, session_id) if path.exists() else None
-        # Delegated children and other surfaces' sessions end turns too.
-        if not record and not session_id.startswith(sessions.ID_PREFIXES):
+        # A compressed child's turn and a subagent's end here too, and both are the chat's own
+        # work: this is the chat's news, told for them (``sessions.is_chat`` follows the ancestry).
+        if not sessions.is_chat(home, session_id):
             return
         # A turn's end is where an earlier held run can have finished: its subagents may be gone.
         tell_finished(path, home)

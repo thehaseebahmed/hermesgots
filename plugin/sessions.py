@@ -850,6 +850,8 @@ def _forks(row: Any) -> bool:
 def is_chat(home: Path, session_id: str) -> bool:
     """Whether a session is a Gots chat's: the app minted its id, or one of its ancestors'.
 
+    An app-minted id is answered before the store is opened, so the common path — every call in a
+    Gots chat's own session — costs no read; only an id with no ``ID_PREFIXES`` prefix is walked.
     The walk follows every parent link, unlike ``chat_session``'s: compression moves a chat onto a
     child session, and a subagent forked a session off the chat that started it, and a push already
     resolves both to the chat — ``push.session_title`` and ``push._chat`` name it, ``push.muted``
@@ -864,6 +866,8 @@ def is_chat(home: Path, session_id: str) -> bool:
     on the ancestry carries an ``ID_PREFIXES`` prefix. Fail closed: a push for another surface's
     session is a nuisance, while one for a session that isn't a chat's is the leak this stops.
     """
+    if session_id.startswith(ID_PREFIXES):
+        return True
     conn = _open_state(home, timeout=LINEAGE_TIMEOUT_S)
     if conn is None:
         return False
