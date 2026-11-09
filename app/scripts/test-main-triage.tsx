@@ -798,6 +798,13 @@ test("a Main send that stays while Main's reply runs waits queued in Main", asyn
   await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run")
   assert.equal(await sendFromMain(MAIN, "and this"), undefined)
   assert.equal(triaged(seen).filter((r) => r.body.text === "and this").length, 1)
+  // The row is written beside the ask, not before it answers: a send that returns before the row
+  // lands is the shape of every queued send, so the row is waited for rather than sampled once — a
+  // loaded runner drew this empty and failed a claim the app keeps.
+  await until(
+    async () => (await messagesOf(MAIN)).some((m) => m.content === "and this"),
+    "the queued row in Main",
+  )
   const held = (await messagesOf(MAIN)).filter((m) => m.content === "and this")
   assert.equal(held.length, 1)
   assert.equal(held[0].status, "queued")
