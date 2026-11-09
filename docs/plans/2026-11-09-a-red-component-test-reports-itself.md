@@ -43,6 +43,7 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    assertion that passes `find(`/`findAll(` straight to `equal`/`strictEqual`/`deepEqual`. Goals: G2.
    After: 2. Layers: unit tier. Check: red on today's tree — 62 sites — and green after step 2, with a
    one-line fixture proving it catches a new one.
+   Done.
 4. **One worker cannot eat the container.** The tier gives each file's process a heap cap
    (`--max-old-space-size=1536`, four times the largest worker measured at 570 MB), so a runaway dies
    naming its own file instead of the OOM killer taking its neighbours. Goals: G1 G2. After: 1.
