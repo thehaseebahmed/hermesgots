@@ -59,6 +59,10 @@ MAX_PARENT_HOPS = 5
 # which is the wedge the walk exists to avoid. The loop also stops on a repeat, so a corrupt store
 # can't walk forever.
 COMPRESSION_DEPTH = 1000
+# How long a push's ancestry read may wait on a store another writer holds. A push is news, not
+# work, and the gate runs on Hermes's hook thread: a store that won't answer is dropped quickly
+# rather than waited on for the 2 s a run's keying read may take.
+LINEAGE_TIMEOUT_S = 0.25
 # Hermes marks children that fork off their parent instead of continuing it: a branch, a delegation,
 # a reset, or a session a tool made. Those share ``parent_session_id`` but are another conversation.
 _FORK_MARKERS = ("_branched_from", "_delegate_from", "_reset_from")
@@ -189,17 +193,18 @@ def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:
         conn.close()
 
 
-def _open_state(home: Path) -> Optional[sqlite3.Connection]:
+def _open_state(home: Path, timeout: float = 2) -> Optional[sqlite3.Connection]:
     """A read-only look at the profile's ``state.db``, or None when it has none.
 
     Read-only, so a reader can never lock the gateway out of its own store. Closed by the caller
-    (or ``closing``): a poll opens one of these per request.
+    (or ``closing``): a poll opens one of these per request. ``timeout`` is how long a read may
+    wait on a store another writer holds.
     """
     state = home / "state.db"
     if not state.exists():
         return None
     try:
-        conn = sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2)
+        conn = sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=timeout)
     except sqlite3.Error:
         logger.debug("gots: couldn't open %s", state, exc_info=True)
         return None
@@ -840,6 +845,47 @@ def _forks(row: Any) -> bool:
     except ValueError:
         return False
     return isinstance(config, dict) and any(config.get(marker) for marker in _FORK_MARKERS)
+
+
+def is_chat(home: Path, session_id: str) -> bool:
+    """Whether a session is a Gots chat's: the app minted its id, or one of its ancestors'.
+
+    The walk follows every parent link, unlike ``chat_session``'s: compression moves a chat onto a
+    child session, and a subagent forked a session off the chat that started it, and a push already
+    resolves both to the chat — ``push.session_title`` and ``push._chat`` name it, ``push.muted``
+    honours its mute, and ``alerts.turn_finished`` counts its subagents as the chat's own work. A
+    delegation child of a session the app never minted is still nobody's.
+
+    One read-only query over the whole ancestry, bounded by ``COMPRESSION_DEPTH``, on a connection
+    that waits no longer than ``LINEAGE_TIMEOUT_S``: this is asked inside Hermes's hooks, on a
+    push's thread, so a store another writer holds has to answer quickly or not at all.
+
+    False when the store can't answer — missing, empty, corrupt or locked — as well as when no row
+    on the ancestry carries an ``ID_PREFIXES`` prefix. Fail closed: a push for another surface's
+    session is a nuisance, while one for a session that isn't a chat's is the leak this stops.
+    """
+    conn = _open_state(home, timeout=LINEAGE_TIMEOUT_S)
+    if conn is None:
+        return False
+    try:
+        with closing(conn):
+            rows = conn.execute(
+                """WITH RECURSIVE lineage(id, depth) AS (
+                       SELECT id, 0 FROM sessions WHERE id = ?
+                       UNION ALL
+                       SELECT parent.id, lineage.depth + 1
+                         FROM lineage
+                         JOIN sessions child ON child.id = lineage.id
+                         JOIN sessions parent ON parent.id = child.parent_session_id
+                        WHERE lineage.depth < ?
+                   )
+                   SELECT id, depth FROM lineage ORDER BY depth""",
+                (session_id, COMPRESSION_DEPTH),
+            ).fetchall()
+    except sqlite3.Error:
+        logger.debug("gots: couldn't read a session's ancestry", exc_info=True)
+        return False
+    return any(row["id"].startswith(ID_PREFIXES) for row in rows if isinstance(row["id"], str))
 
 
 def live_runs(

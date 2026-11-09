@@ -181,7 +181,8 @@ class Scope(unittest.TestCase):
 
     Gots mints every chat's Hermes session id with a prefix of its own (``sessions.ID_PREFIXES``),
     and compression moves the chat onto a child session that carries none — so a chat is found from
-    its root, the same walk ``sessions.chat_session`` makes.
+    its ancestors, the ancestry the rest of a push reads too (the chat's title, its mute, and
+    ``alerts.turn_finished`` counting its subagents as its own work).
     """
 
     # A push is delivered on a daemon thread; a local store answers in milliseconds, and a wait this
@@ -244,7 +245,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
 
     def test_a_chats_own_id_is_answered_without_the_lineage_walk(self):
-        with mock.patch.object(sessions, "chat_session") as walk:
+        with mock.patch.object(sessions, "is_chat") as walk:
             answer, sent = self.tell("question", "gots-abc")
         self.assertTrue(answer, "the app minted the id, so the chat is its own")
         self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
@@ -265,14 +266,65 @@ class Scope(unittest.TestCase):
         self.assertTrue(answer, "the child's root is the chat's, so the chat is being pushed")
         self.assertEqual(sent, [{"kind": "question", "session_id": "sess_c0ffee"}])
 
-    def test_a_subagents_session_is_not_pushed_as_its_chats(self):
+    def test_a_subagents_session_is_pushed_as_its_chats(self):
+        chats.merge(
+            self.path,
+            {
+                "chat-1": {
+                    "at": 1,
+                    "value": {"hermesSessionId": "gots-abc", "title": "Refactor the parser"},
+                }
+            },
+        )
         self.lineage([
             ("gots-abc", None, "compression", None, None),
-            ("sess_de1e", "gots-abc", None, '{"_delegate_from": "gots-abc"}', None),
+            ("sess_de1e", "gots-abc", None, '{"_delegate_from": "gots-abc"}', "subagent"),
         ])
         answer, sent = self.tell("question", "sess_de1e")
-        self.assertFalse(answer, "a chat is not told about its subagent's session")
+        self.assertTrue(answer, "the chat started it, so its question is the chat's news")
+        self.assertEqual(
+            sent,
+            [{"kind": "question", "session_id": "sess_de1e", "title": "Refactor the parser"}],
+            "the child's id, under the chat's own title",
+        )
+
+    def test_a_subagents_session_of_another_surface_is_not_pushed(self):
+        self.lineage([
+            ("sess_9f2c41", None, None, None, None),
+            ("sess_de1e", "sess_9f2c41", None, '{"_delegate_from": "sess_9f2c41"}', "subagent"),
+        ])
+        answer, sent = self.tell("question", "sess_de1e")
+        self.assertFalse(answer, "no ancestor is the app's, so it is no device's news")
         self.assertEqual(sent, [])
+
+    def test_a_store_that_cannot_be_read_drops_the_push(self):
+        self.lineage([
+            ("gots-abc", None, "compression", None, None),
+            ("sess_c0ffee", "gots-abc", None, None, None),
+        ])
+        (self.home / "state.db").write_bytes(b"not a database")
+        answer, sent = self.tell("question", "sess_c0ffee")
+        self.assertFalse(answer, "a store that can't answer is not read as 'not a chat'")
+        self.assertEqual(sent, [], "fail closed: nothing is sent on a guess")
+
+    def test_a_held_store_drops_the_push_without_holding_the_hook(self):
+        self.lineage([
+            ("gots-abc", None, "compression", None, None),
+            ("sess_c0ffee", "gots-abc", None, None, None),
+        ])
+        holder = sqlite3.connect(self.home / "state.db", isolation_level=None)
+        holder.execute("BEGIN EXCLUSIVE")
+        holder.execute("INSERT INTO sessions (id) VALUES ('writer')")
+        try:
+            started = time.monotonic()
+            answer, sent = self.tell("question", "sess_c0ffee")
+            elapsed = time.monotonic() - started
+        finally:
+            holder.execute("ROLLBACK")
+            holder.close()
+        self.assertFalse(answer, "the store won't say, so the push drops as it always did")
+        self.assertEqual(sent, [])
+        self.assertLess(elapsed, 1.0, "one short read: a held store doesn't stall the hook thread")
 
 
 class Mutes(unittest.TestCase):
