@@ -21,7 +21,7 @@ const TRIAGE: HostRoute<ModelChoice | undefined> = {
  * answered counts as off: the safe direction.
  */
 export function useTriageModel(profile?: Pick<Profile, "baseUrl" | "apiKey"> | null) {
-  const draws = !(useThreadSwitches()?.opensInMain ?? true)
+  const draws = useThreadSwitches()?.chatThreads ?? false
   const {
     value: pick,
     supported: hostHasRoute,

@@ -37,10 +37,13 @@ export interface Settings {
   navShortcuts?: boolean
   /**
    * Whether a bot may start a new thread at all: Developer's switch, off by default, and the one
-   * fact that decides it. It is in `APPEARANCE_FIELDS` because the account carries it — one flip
-   * turns threads back on everywhere rather than once per device (ADR 0120).
+   * fact that decides it. It rides the account's `settings` document as a record of its own, with
+   * `chatThreadsAt` as its clock, so a device that has not pulled yet cannot carry a stale value
+   * over it by saving an Appearance switch (ADR 0120).
    */
   chatThreads?: boolean
+  /** When this account last changed `chatThreads`: its own clock, apart from `appearanceAt`. */
+  chatThreadsAt?: number
   /**
    * Enter sends the message instead of starting a new line; off by default, and then Ctrl+Enter
    * sends. Local, and never in `APPEARANCE_FIELDS`: it describes this device's keyboard, so a phone
@@ -110,17 +113,14 @@ export interface Settings {
 }
 
 /**
- * The device switches the account carries: sync puts them in the `settings` document's one record
- * and its fingerprint watches them, so this list is the one place that says what syncs. Appearance
- * draws some of them — the colour mode isn't here, since next-themes keeps it on the device — and
- * Developer draws the rest; the list is the account's, not a section's.
+ * The Appearance section's switches, which follow the account; the colour mode isn't one of them,
+ * since next-themes keeps it on the device. Sync carries them as the `settings` document's
+ * `appearance` record and the fingerprint watches them, so this list is the one place that says
+ * which fields that record holds. A device switch the account carries without being an Appearance
+ * one — Developer's **Chat threads** — rides a record of its own instead, so its clock is its own
+ * (ADR 0120).
  */
-export const APPEARANCE_FIELDS = [
-  "steerByDefault",
-  "breakReminders",
-  "navShortcuts",
-  "chatThreads",
-] as const
+export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders", "navShortcuts"] as const
 
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
@@ -1560,6 +1560,22 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
 export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
+}
+
+/**
+ * Saves Developer's **Chat threads** switch. It keeps a clock of its own — its own record in the
+ * `settings` document — because a device that has not pulled yet would otherwise carry its stale
+ * value over the account's when it saves any Appearance switch, and the account would lose the
+ * choice for good (ADR 0120).
+ */
+export async function saveChatThreads(on: boolean) {
+  await saveSettings({ chatThreads: on, chatThreadsAt: Date.now() })
+}
+
+/** Takes the chat threads record another device wrote, clock and all. */
+export async function adoptChatThreads(value: unknown, at: number) {
+  if (typeof value !== "boolean") return
+  await saveSettings({ chatThreads: value, chatThreadsAt: at })
 }
 
 /**

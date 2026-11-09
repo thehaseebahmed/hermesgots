@@ -14,6 +14,7 @@ import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { LimitNotice, type useChatUsage } from "@/components/chat/chat-actions"
 import { Composer } from "@/components/chat/composer"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -426,6 +427,7 @@ function NextComposerBody({
             : undefined
         }
         main={main}
+        botChat={listsAsChat(chat)}
         onCommand={async (command, message) => {
           if (command === "thread")
             return startThread(message?.text ?? "", message?.attachments ?? [])

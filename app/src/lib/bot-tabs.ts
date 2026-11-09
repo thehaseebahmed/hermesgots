@@ -24,7 +24,7 @@ export const BOT_PAGES = [
   {
     segment: "models",
     title: "Models",
-    subtitle: "The model this bot's chats run and its triage model",
+    subtitle: "The model this bot's chats run",
   },
   {
     segment: "coding",

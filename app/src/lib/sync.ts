@@ -26,6 +26,7 @@ import {
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   adoptAppearance,
+  adoptChatThreads,
   botTombstones,
   chatTombstones,
   db,
@@ -523,13 +524,17 @@ async function syncPrompts(key: CryptoKey) {
 }
 
 /**
- * The appearance switches as the `settings` document's one record, each field of
- * `APPEARANCE_FIELDS` named so adding one to the list fails to compile here. `appearanceAt` is 0
- * until the user changes a switch here, so a choice made on another device wins until then; the
- * defaults `DEFAULT_SETTINGS` holds are what a device that never touched them pushes.
+ * The `settings` document: the Appearance switches as one record, and Developer's chat threads
+ * switch as another. Each carries its own clock, so a device that has not pulled yet cannot carry a
+ * stale value over the other switch's by writing this one — the merge is record by record
+ * (`lib/merge.ts`), which is exactly what the two records are for (ADR 0120).
+ *
+ * The appearance record names every field of `APPEARANCE_FIELDS` by hand, so adding one to the list
+ * fails to compile here; `appearanceAt` is 0 until the user changes a switch here, so a choice made
+ * on another device wins until then.
  */
-async function localAppearance(): Promise<Doc<Appearance>> {
-  const { appearanceAt, steerByDefault, breakReminders, navShortcuts, chatThreads } =
+async function localSettings(): Promise<Doc<Appearance | boolean>> {
+  const { appearanceAt, steerByDefault, breakReminders, navShortcuts, chatThreads, chatThreadsAt } =
     await getSettings()
   return {
     appearance: {
@@ -538,17 +543,19 @@ async function localAppearance(): Promise<Doc<Appearance>> {
         steerByDefault: steerByDefault ?? DEFAULT_SETTINGS.steerByDefault,
         breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders,
         navShortcuts: navShortcuts ?? DEFAULT_SETTINGS.navShortcuts,
-        chatThreads: chatThreads ?? DEFAULT_SETTINGS.chatThreads,
       },
     },
+    threads: { at: chatThreadsAt ?? 0, value: chatThreads ?? DEFAULT_SETTINGS.chatThreads },
   }
 }
 
 async function syncAppearance(key: CryptoKey) {
   try {
-    await syncDoc<Appearance>(key, "settings", localAppearance, async (pull) => {
-      for (const [, entry] of pull) {
-        if (entry.value) await adoptAppearance(entry.value, entry.at)
+    await syncDoc<Appearance | boolean>(key, "settings", localSettings, async (pull) => {
+      for (const [id, entry] of pull) {
+        if (id === "threads") await adoptChatThreads(entry.value, entry.at)
+        else if (entry.value && typeof entry.value === "object")
+          await adoptAppearance(entry.value, entry.at)
       }
     })
   } catch (error) {
@@ -711,7 +718,10 @@ async function fingerprint() {
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
   const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
+  // The chat threads switch is its own record, so its clock is what says whether it moved: the
+  // appearance clock says nothing about it (ADR 0120).
+  const threads = `${settings.chatThreads ? 1 : 0}@${settings.chatThreadsAt ?? 0}`
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|${threads}|prompts@${settings.promptsAt ?? 0}`
 }
 
 let chatLane: Promise<void> | undefined

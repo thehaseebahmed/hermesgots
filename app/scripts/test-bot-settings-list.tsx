@@ -101,7 +101,7 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
       findAll("[data-bot-page]").map((one) => one.textContent),
       [
         "GeneralModel, limits, session timeouts and update settings",
-        "ModelsThe model this bot's chats run and its triage model",
+        "ModelsThe model this bot's chats run",
         "CodingAway From Keyboard and this bot's pick budget",
         "Speech-to-textVocabulary, cleanup model and speech model",
         "MCPThe servers this bot works with",

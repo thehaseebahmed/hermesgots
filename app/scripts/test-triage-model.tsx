@@ -10,7 +10,7 @@ import { act } from "react"
 import { toast } from "sonner"
 
 import { TriageModelSetting } from "@/components/chat/model-picker"
-import { saveSettings } from "@/lib/db"
+import { saveChatThreads } from "@/lib/db"
 import {
   botProfile,
   click,
@@ -175,13 +175,26 @@ test("with chat threads off, the field draws nothing and the host is not asked",
   })
 })
 
+test("with the legacy layout on, chat threads off still hides the field", async () => {
+  // The switch hides the field, not the layout: the legacy layout has no Main, so a triage model
+  // there is a setting nothing could run (ADR 0120).
+  await seedSettings({ legacyChat: true })
+  const fake = host({ held: { provider: "openrouter", model: "own-model" } })
+  globalThis.fetch = fake.fetch
+  await mount(<TriageModelSetting profile={botProfile("triage-legacy-off")} />, async () => {
+    await settle()
+    assert.ok(!find("#triage-model"), "nothing is drawn in the legacy layout either")
+    assert.deepEqual(fake.state.calls, [], "and the host is asked nothing")
+  })
+})
+
 test("turning chat threads on gives the field back, holding the pick the host kept", async () => {
   await seedSettings()
   const fake = host({ held: { provider: "openrouter", model: "own-model" } })
   globalThis.fetch = fake.fetch
   await mount(<TriageModelSetting profile={botProfile("triage-flipped")} />, async () => {
     assert.ok(!find("#triage-model"), "off, nothing is drawn")
-    await act(async () => saveSettings({ chatThreads: true }))
+    await act(async () => saveChatThreads(true))
     await until(async () => Boolean(opener()), "the field, once the switch is on")
     assert.match(opener()?.textContent ?? "", /own-model/, "holding the pick the host kept")
     assert.ok(

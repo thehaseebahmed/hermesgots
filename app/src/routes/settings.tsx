@@ -86,7 +86,7 @@ import {
   db,
   getSettings,
   listProfiles,
-  saveAppearance,
+  saveChatThreads,
   saveSettings,
   type Profile,
 } from "@/lib/db"
@@ -647,9 +647,9 @@ export function DeveloperSettings() {
           id="chat-threads"
           icon={MessageSquarePlusIcon}
           title="Chat threads"
-          subtitle="Start a thread from a bot's Main. Follows your account"
+          subtitle="Start a thread from a bot's Main"
           checked={Boolean(settings?.chatThreads)}
-          onCheckedChange={(checked) => saveAppearance({ chatThreads: checked })}
+          onCheckedChange={(checked) => saveChatThreads(checked)}
         />
         <SwitchRow
           id="legacy-chat"

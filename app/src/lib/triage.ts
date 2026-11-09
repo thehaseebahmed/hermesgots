@@ -13,7 +13,7 @@ import { chosenOf, pickFields } from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
 import { quietly } from "@/lib/report"
 import { syncNow } from "@/lib/sync"
-import { opensInMain } from "@/lib/chat-threads"
+import { chatThreadsOn } from "@/lib/chat-threads"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -25,11 +25,11 @@ export const triaging = new Set<string>()
 
 /**
  * Whether a bot's host can triage a Main's message. It answers for this device first: with chat
- * threads off nothing is triaged, so the gate asks the host nothing at all (ADR 0120). The one gate
- * both senders pass through.
+ * threads off nothing is triaged — whatever the layout — so the gate asks the host nothing (ADR
+ * 0120). The one gate both senders pass through.
  */
 export async function canTriage(config: HermesConfig) {
-  if (opensInMain(await getSettings())) return false
+  if (!chatThreadsOn(await getSettings())) return false
   return (
     Boolean(config.apiKey) &&
     (await supportsRuns(config)) &&

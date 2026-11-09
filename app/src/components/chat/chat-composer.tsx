@@ -31,6 +31,7 @@ export function ChatComposer({
   session,
   notice,
   main = false,
+  botChat = true,
   home,
   busy,
   canSteer,
@@ -57,6 +58,8 @@ export function ChatComposer({
   notice?: ReactNode
   /** A bot's Main: `/thread` starts a thread of it. */
   main?: boolean
+  /** A bot's chat: Main or one of its threads. `false` elsewhere. */
+  botChat?: boolean
   /** Where `/new` goes: a thread's Main, else home. */
   home?: string
   busy: boolean
@@ -112,6 +115,7 @@ export function ChatComposer({
         runId={runId}
         session={session}
         main={main}
+        botChat={botChat}
         onCommand={async (command, message) => {
           if (command === "thread")
             return onThread?.({

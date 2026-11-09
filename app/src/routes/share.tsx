@@ -78,7 +78,9 @@ export function SharePage() {
   // A label is not a permission: an unanswered read leaves the screen as it stands.
   const switches = useThreadSwitches()
   const botThreads = switches?.botThreads ?? true
-  const offersMain = switches?.opensInMain ?? false
+  // Until the settings answer, the option is Main: a label that promises a thread nothing may start
+  // is the one guess that breaks a promise, and this one only flickers.
+  const offersMain = switches?.opensInMain ?? true
   const noun = botThreads ? "thread" : "chat"
   const now = useNow()
 

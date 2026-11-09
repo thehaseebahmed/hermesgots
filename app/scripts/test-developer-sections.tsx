@@ -11,7 +11,8 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppearanceSettings } from "@/components/settings/appearance"
-import { adoptAppearance, db, getSettings } from "@/lib/db"
+import { adoptAppearance, adoptChatThreads, db, getSettings } from "@/lib/db"
+import { mergeDocs } from "@/lib/merge"
 import { DeveloperSettings, SettingsPage } from "@/routes/settings"
 import {
   Path,
@@ -155,7 +156,7 @@ test("the Chat threads row ships off, writes chatThreads, and moves the clock th
     assert.ok(row, "the switch is on the Developer screen")
     assert.match(row.textContent ?? "", new RegExp(CHAT_THREADS), "under its own name")
     assert.ok(
-      row.textContent?.includes("Start a thread from a bot's Main. Follows your account"),
+      row.textContent?.includes("Start a thread from a bot's Main"),
       "with its line",
     )
     const first = findAll("[data-settings-group]")[0]
@@ -179,9 +180,10 @@ test("the Chat threads row ships off, writes chatThreads, and moves the clock th
   const stored = await db.settings.get("settings")
   assert.equal(stored?.chatThreads, true, "the device kept it")
   assert.ok(
-    (stored?.appearanceAt ?? THEN) > THEN,
-    "the appearance clock moved, so the account carries the change",
+    (stored?.chatThreadsAt ?? 0) > 0,
+    "and its own clock moved, so the account carries that record",
   )
+  assert.equal(stored?.appearanceAt, THEN, "while the Appearance clock is left alone")
 })
 
 test("the Chat threads switch draws no row in the Appearance section", async () => {
@@ -197,15 +199,31 @@ test("the Chat threads switch draws no row in the Appearance section", async () 
   })
 })
 
-test("a record another device wrote carries chatThreads in, and a record without it leaves it", async () => {
+test("the chat threads record another device wrote is adopted, and a word that is not one is not", async () => {
   const AT = 5
-  await adoptAppearance({ chatThreads: true }, AT)
+  await adoptChatThreads(true, AT)
   let settings = await getSettings()
   assert.equal(settings.chatThreads, true, "the account's switch is adopted")
-  assert.equal(settings.appearanceAt, AT, "with the clock it was written at")
+  assert.equal(settings.chatThreadsAt, AT, "with the clock it was written at")
 
-  await adoptAppearance({}, AT + 1)
+  await adoptChatThreads("on", AT + 1)
   settings = await getSettings()
-  assert.equal(settings.chatThreads, true, "a record that does not name it leaves this device's on")
-  assert.equal(settings.appearanceAt, AT + 1, "while the clock still moves")
+  assert.equal(settings.chatThreadsAt, AT, "a record that is not a boolean leaves the switch alone")
+})
+
+test("a stale device's Appearance write cannot revert the chat threads switch", async () => {
+  // The two are separate records with separate clocks, so the newer Appearance write wins its own
+  // record and loses this one: without that, a device that had not pulled yet would carry its stale
+  // `false` over the account and no flip could bring it back (ADR 0120).
+  const mine = {
+    appearance: { at: 1, value: { steerByDefault: false, breakReminders: true, navShortcuts: false } },
+    threads: { at: 1000, value: true },
+  }
+  const stale = {
+    appearance: { at: 2000, value: { steerByDefault: true, breakReminders: true, navShortcuts: false } },
+    threads: { at: 0, value: false },
+  }
+  const { merged } = mergeDocs(mine, stale)
+  assert.equal(merged.threads?.value, true, "the switch the account holds survives")
+  assert.equal(merged.appearance?.value.steerByDefault, true, "and the newer Appearance write wins")
 })

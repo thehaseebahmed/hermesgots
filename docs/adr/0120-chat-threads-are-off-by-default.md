@@ -6,12 +6,25 @@ are off by default now. Off means the reader loses the ability to start a **new*
 they have: an existing thread still stands in Main's flow as its card, opens, sends, and the thread
 lane beside Main still holds one.
 
-**One switch, and it is Developer's alone.** `Settings.chatThreads` is local to the device's row but
-carried by the account, so it joins `APPEARANCE_FIELDS` — the list is what the account carries, not
-what the Appearance section draws, and a Developer switch is as much a device switch as a layout one.
+**One switch, and it is Developer's alone.** `Settings.chatThreads` lives in the device's row and is
+carried by the account, as a record of its own in the `settings` document with `chatThreadsAt` for
+its clock. Not a field of the `appearance` record beside it: that record merges whole, so a device
+that had not pulled yet would carry its stale value over the account's the moment it saved any
+Appearance switch, and the choice would be gone for every device with no way to push it back. One
+record each is one clock each, and the merge already works that way (`lib/merge.ts`).
+
 Its only row is Developer's, five taps on the version, for the reason ADR 0110 gives for the layout
-switch: the switches that outlive their experiment live there. The cost is named again: a reader who
-does not know the taps has no way back.
+switch: the switches that outlive their experiment live there. ADR 0110 also concluded that removing
+the last two experiments would let the Developer page hold "links and diagnostics instead of product
+choices", and this puts a product choice back on it — deliberately, because the request asked for
+exactly that: a switch for the reader who wants threads back, off for everyone else, not a
+preference every reader meets. The cost is named again: a reader who does not know the taps has no
+way back.
+
+**The rules are a leaf.** `botThreadsOn`, `chatThreadsOn`, `opensInMain` and `startHere` live in
+`lib/chat-threads.ts`, which imports only types, because the triage gate — a domain module with no
+screen's dependencies — asks them too; `lib/threads.ts` keeps the hooks that make them live and the
+one door a new chat is opened through.
 
 **Off means nothing starts, and one rule answers it.** `opensInMain(settings)` — the bot layout with
 the switch off — is the one fact three answers hang off: the slash menu's `startHere` offers neither
@@ -29,7 +42,9 @@ negation of a single `mayStartThreads` would hand that layout a Main.
 thread or opened a new one; with no new one to open, the only answer left is one the switch has
 already given, and a model call that can only say "stay" is a cost with no decision in it. So the
 app does not ask, and `canTriage` — the one gate both senders pass — answers false before it reads
-the host at all. The plugin keeps its route and the host keeps the pick stored for the switch's
+the host at all. The **switch** decides, not the layout: with threads off the triage model is a
+setting nowhere even on a device running the legacy layout, where a Main that could be triaged does
+not exist. The plugin keeps its route and the host keeps the pick stored for the switch's
 return; nothing on the host changed, so an older build signed into the same account still starts
 threads.
 
@@ -54,8 +69,10 @@ rows.
 - **Keeping `/new` in Main with the switch off**: rejected. It can only navigate back to Main, and a
   menu row that does nothing is worse than an absent one.
 - **Writing the blank surface's pick onto Main**: rejected. See the cost above.
-- **Renaming `APPEARANCE_FIELDS`** to say it carries more than appearance: rejected as churn across
-  `db.ts`, `sync.ts` and the Appearance page for a word no reader sees; its comment says what it is.
+- **Giving the switch a field of the `appearance` record** (what this change first did): rejected
+  once a probe showed a stale device reverting the account's value by saving any Appearance switch.
+- **Renaming `APPEARANCE_FIELDS`** to say it carries more than appearance: no longer needed; the list
+  is the Appearance section's own again, and the chat threads switch has its own record.
 - **Hiding the threads that already exist**: not what was asked, and it would lose work the reader
   already has.
 
@@ -63,8 +80,9 @@ rows.
 
 - Dexie needs no version: `chatThreads` is an optional key on the settings row, and an absent one
   reads off, which is the shipped default.
-- `sync.ts`'s `localAppearance` names every field by hand, so leaving the new one out fails to
-  compile.
+- `sync.ts`'s `localSettings` writes the `appearance` record (naming every field of
+  `APPEARANCE_FIELDS` by hand, so a forgotten one fails to compile) and the `threads` record beside
+  it, and its fingerprint watches both clocks.
 - Every existing test that means threads seeds `chatThreads: true`, and so does the `bot-threads`
   browser flow's seed; the default the rest of the suite runs under is now off.
 - The triage plugin route and the host's stored triage model are untouched, and are read again the

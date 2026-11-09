@@ -27,11 +27,11 @@
 
 | Layer | Status | Goals | Tested at |
 |---|---|---|---|
-| Settings row (`lib/db.ts`: `Settings`, `APPEARANCE_FIELDS`, `DEFAULT_SETTINGS`, `saveAppearance`) | changed | G1 | `scripts/test-developer-sections.tsx` |
-| Sync's settings document (`lib/sync.ts`: `localAppearance`, and `adoptAppearance` behind it) | changed | G1 | `scripts/test-sync-scope.tsx` |
+| Settings row (`lib/db.ts`: `Settings`, `DEFAULT_SETTINGS`, `saveChatThreads`, `adoptChatThreads`) | changed | G1 | `scripts/test-developer-sections.tsx` |
+| Sync's settings document (`lib/sync.ts`: `localSettings`, its `appearance` and `threads` records, and the fingerprint) | changed | G1 | `scripts/test-developer-sections.tsx` |
 | Developer settings section (`routes/settings.tsx`: `DeveloperSettings`) | changed | G1 | `scripts/test-developer-sections.tsx` |
 | Start-command rule (`lib/slash.ts`) | changed | G2 | `scripts/test-start-command.mjs`, `scripts/test-slash.mjs` |
-| Threads rule (`lib/threads.ts`: `chatThreadsOn`, `opensInMain`, `startHere`, `useStartHere`, `beginChat`) | new | G1, G2, G3, G4 | `scripts/test-thread-command.tsx`, `scripts/test-chat-next-new-chat.tsx` |
+| Threads rule (`lib/chat-threads.ts`: `chatThreadsOn`, `opensInMain`, `startHere`; `lib/threads.ts`: `useStartHere`, `beginChat`) | new | G1, G2, G3, G4 | `scripts/test-thread-command.tsx`, `scripts/test-chat-next-new-chat.tsx` |
 | Chat composer (`components/chat/composer.tsx`) | changed | G2 | `scripts/test-thread-command.tsx` |
 | Chat screen (`routes/chat.tsx`, `chat-next/chat-body.tsx`, `chat-next/blank.tsx`) | affected | G2, G4 | `scripts/test-thread-command.tsx`, `scripts/test-chat-next-new-chat.tsx` |
 | Share screen (`routes/share.tsx`) | changed | G2, G4 | `scripts/test-share-caps.tsx` |
@@ -163,18 +163,18 @@ sequenceDiagram
    before and after. Done.
 
 2. **The switch exists, ships off, and follows the account.** `Settings.chatThreads` with a `false`
-   default, added to `APPEARANCE_FIELDS` and `DEFAULT_SETTINGS`, named in `localAppearance` so the
-   field cannot be forgotten, and drawn as a `SwitchRow` in Developer's first group — **Chat
-   threads**, subtitle *Start a thread from a bot's Main. Follows your account* — written through
-   `saveAppearance` so the clock moves. ADR 0120 records why the default is off and why the only row
-   lives in Developer; the glossary gains **Chat threads**. Goals: G1, G5. After: none. Layers:
-   Settings row, Sync's settings document, Developer settings section, ADR and glossary. Check:
-   `scripts/test-developer-sections.tsx` — red first on a row that does not exist, then the row
-   ships off, a tap writes `chatThreads: true` and moves `appearanceAt`, and the switch is absent
-   from the Appearance section; and the account half is pinned by one case — `adoptAppearance({ chatThreads: true }, at)`
-   leaves `getSettings()` carrying it, and a record without it leaves it alone. The pushed document
-   itself has no test: `localAppearance` names every field by hand, so a forgotten one is a compile
-   error, and that gate is what holds it. Done.
+   default and `chatThreadsAt` for its clock, drawn as a `SwitchRow` in Developer's first group —
+   **Chat threads**, subtitle *Start a thread from a bot's Main* — written through `saveChatThreads`.
+   It rides the account as a record of its own in the `settings` document, beside the `appearance`
+   record rather than inside it: that one merges whole, so a device that has not pulled yet would
+   revert the switch by saving any Appearance preference. ADR 0120 records why the default is off,
+   why the record is its own and why the only row lives in Developer; the glossary gains **Chat
+   threads**. Goals: G1, G5. After: none. Layers: Settings row, Sync's settings document, Developer
+   settings section, ADR and glossary. Check: `scripts/test-developer-sections.tsx` — red first on a
+   row that does not exist, then the row ships off, a tap writes `chatThreads: true` and moves
+   `chatThreadsAt` while `appearanceAt` stays, the switch is absent from the Appearance section,
+   `adoptChatThreads` takes another device's record, and a stale `appearance` write beside a newer
+   `threads` record leaves the switch standing. Done.
 
 3. **No bot chat offers a start command, and a typed `/thread` is words.** The threads rule gains
    `chatThreadsOn`, `opensInMain` (the bot layout with the switch off) and `startHere(main,

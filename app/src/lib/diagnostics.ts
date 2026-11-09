@@ -66,6 +66,8 @@ export interface DiagDevice {
   developer: boolean
   /** Whether the bot-first layout is the one this device draws: false under the legacy switch. */
   botThreads: boolean
+  /** Developer's chat threads switch: whether a bot may start one at all. */
+  chatThreads: boolean
   /** The latest return to the foreground, timed; absent before this launch's first one. */
   resume?: DiagResume
   bots: DiagBot[]
