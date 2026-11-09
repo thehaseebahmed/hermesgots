@@ -420,7 +420,10 @@ test("Rooms lists the rooms by their last activity, and Recents holds none of th
   })
   await merged()
   await mount(screen("/"), async () => {
-    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the rooms band")
+    // Both bands are waited for whole: the two lists settle on their own, and a runner that is slower
+    // than this one would otherwise read an empty band as the answer (ADR 0127).
+    await until(async () => band("rooms").length === 2, "both rooms")
+    await until(async () => band("recents").length === 2, "both chats")
     assert.deepEqual(
       band("rooms"),
       [`/c/${ROOM}`, "/c/room-older"],
@@ -454,7 +457,7 @@ test("a pinned room stands at the top of Rooms, whatever its age", async () => {
   await settle()
   assert.equal((await db.conversations.get(ROOM))?.pinned, true, "the room's own pin stands")
   await mount(screen("/"), async () => {
-    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the rooms band")
+    await until(async () => band("rooms").length === 2, "both rooms")
     assert.equal(band("rooms")[0], `/c/${ROOM}`, "the pin lifts the room above a newer one")
     assert.ok(
       !band("recents").includes(`/c/${ROOM}`),
@@ -631,7 +634,7 @@ test("Rooms ranks by its own order, kept on the device, and pins above it", asyn
   await db.settings.update("settings", { roomSort: "name", roomSortDir: "asc" })
   await settle()
   await mount(screen("/"), async () => {
-    await until(async () => band("rooms").includes("/c/room-zebra"), "the rooms band")
+    await until(async () => band("rooms").length === 3, "all three rooms")
     assert.deepEqual(
       band("rooms"),
       ["/c/room-alpha", "/c/room-mid", "/c/room-zebra"],
@@ -642,7 +645,7 @@ test("Rooms ranks by its own order, kept on the device, and pins above it", asyn
   await db.conversations.update("room-zebra", { pinned: true })
   await settle()
   await mount(screen("/"), async () => {
-    await until(async () => band("rooms").includes("/c/room-zebra"), "the rooms band")
-    assert.equal(band("rooms")[0], "/c/room-zebra", "a pinned room stands first, whatever its name")
+    await until(async () => band("rooms")[0] === "/c/room-zebra", "the pinned room first")
+    assert.equal(band("rooms").length, 3, "with the other two under it")
   })
 })
