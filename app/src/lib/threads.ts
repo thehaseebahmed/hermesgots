@@ -26,6 +26,7 @@ import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 import { isUnread, threadState, type ThreadState } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
+import type { StartCommand } from "@/lib/slash"
 import {
   useAllLiveRuns,
   useLiveSubagents,
@@ -102,6 +103,52 @@ export function botThreadsOn(settings: { legacyChat?: boolean } | undefined) {
 
 export function useBotThreads() {
   return useLiveQuery(async () => botThreadsOn(await getSettings()), [])
+}
+
+/**
+ * Whether the account may start a new chat thread at all: Developer's **Chat threads** switch
+ * (`Settings.chatThreads`), carried by the account and off by default. Threads that already exist
+ * are untouched by it — it decides who may start one, never what one holds (ADR 0120).
+ */
+export function chatThreadsOn(settings: { chatThreads?: boolean } | undefined) {
+  return Boolean(settings?.chatThreads)
+}
+
+/**
+ * The bot layout with chat threads off: bots in the sidebar, each bot with one conversation — its
+ * Main — that never restarts, and no way to start a thread. The legacy layout is not this: there a
+ * chat is a plain chat and `/new` makes one, so this answers false for it however the switch reads.
+ *
+ * The one fact the rest of the app hangs off "threads are off here" reads: what a chat's `/` menu
+ * offers, where a new chat's first send lands, whether a Main send is triaged, and which chat
+ * Share's new-chat option opens.
+ */
+export function opensInMain(settings: { legacyChat?: boolean; chatThreads?: boolean } | undefined) {
+  return botThreadsOn(settings) && !chatThreadsOn(settings)
+}
+
+/**
+ * The start command a chat may offer, or nothing where none may start: nothing at all in the bot
+ * layout with chat threads off, `/thread` on a bot's Main with them on, and `/new` everywhere else —
+ * the legacy layout's New chat, where a chat is a chat rather than a thread.
+ *
+ * A typed command is read through this same answer, so one the menu does not offer is the message's
+ * own words, not a command that resolves to nothing.
+ */
+export function startHere(
+  main: boolean | undefined,
+  settings: { legacyChat?: boolean; chatThreads?: boolean } | undefined,
+): StartCommand | null {
+  if (opensInMain(settings)) return null
+  return main ? "thread" : "new"
+}
+
+/**
+ * `startHere`, kept live from the settings row, so a flip of the switch redraws a composer that is
+ * already on screen. `null` until settings answer: nothing is offered that may not run.
+ */
+export function useStartHere(main: boolean | undefined): StartCommand | null {
+  return useLiveQuery(async () => startHere(main, await getSettings()), [main]) ?? null
 }
 
 export interface Thread {

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { act } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
-import { db, mainThreadId, type Conversation } from "@/lib/db"
+import { db, mainThreadId, saveAppearance, type Conversation } from "@/lib/db"
 import {
   botProfile,
   composerField,
@@ -25,9 +26,13 @@ const MAIN = mainThreadId(bot.id)
 const THREAD = "t1"
 const PICK = { provider: "picked", model: "picked/model" }
 
-async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
+/** This file is about threads, so the switch that allows them ships on; a case turns it off. */
+async function seed(
+  patch: { developer?: boolean; legacyChat?: boolean; chatThreads?: boolean } = {},
+) {
   await seedSettings({
     developer: true,
+    chatThreads: true,
     activeProfileId: bot.id,
     ...patch,
   })
@@ -191,5 +196,66 @@ test("under the legacy layout the command is /new, as it was, and /thread is abs
     await pickPress()
     await until(async () => where() === "/", "the new chat's screen")
     assert.equal((await started()).length, 0, "a new chat, not a thread")
+  })
+})
+
+test("with chat threads off, Main offers no start command", async () => {
+  await seed({ chatThreads: false })
+  host("bot-thread")
+  await mount(screen(MAIN), async () => {
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/")
+    await until(async () => slashOptions().length > 0, "the command menu")
+    assert.ok(!offersCommand("/thread"), "no thread to start")
+    assert.ok(!offersCommand("/new"), "and no new chat, which would be the same thread by another name")
+    assert.ok(offersCommand("/settings"), "the commands that start nothing are still there")
+  })
+})
+
+test("with chat threads off, an open thread offers no start command either", async () => {
+  await seed({ chatThreads: false })
+  host("bot-thread")
+  await mount(screen(THREAD), async () => {
+    await until(async () => Boolean(composerField()), "the thread's composer")
+    await type(composerField(), "/")
+    await until(async () => slashOptions().length > 0, "the command menu")
+    assert.ok(!offersCommand("/thread"), "a thread can't start one, and nothing may")
+    assert.ok(!offersCommand("/new"), "nor start a chat in its place")
+  })
+})
+
+test("with chat threads off, /thread typed in a thread is that thread's words", async () => {
+  await seed({ chatThreads: false })
+  // A send reaches its host only with a key, and this case is about the words the host is sent.
+  await db.profiles.update(bot.id, { apiKey: "test-key" })
+  const seen = host("bot-thread")
+  await mount(screen(THREAD), async () => {
+    await until(async () => Boolean(composerField()), "the thread's composer")
+    await type(composerField(), "/thread plan it")
+    await sendPress()
+    await until(async () => runs(seen).length > 0, "the turn to post")
+    assert.deepEqual(await started(), [], "no chat was made")
+    const [run] = runs(seen)
+    assert.equal(run.body.session_id, "t1-hermes", "posted on that thread's own session")
+    const [said] = (run.body.input as { content: string }[]).slice(-1)
+    assert.match(said.content, /\/thread plan it/, "with the words the reader typed, command and all")
+  })
+})
+
+test("turning chat threads on without a remount gives Main /thread back", async () => {
+  await seed({ chatThreads: false })
+  host("bot-thread")
+  await mount(screen(MAIN), async () => {
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/")
+    await until(async () => slashOptions().length > 0, "the command menu")
+    assert.ok(!offersCommand("/thread"), "off to begin with")
+    await type(composerField(), "")
+    await act(async () => {
+      await saveAppearance({ chatThreads: true })
+    })
+    await type(composerField(), "/")
+    await until(async () => offersCommand("/thread"), "the command the flip gave back")
+    assert.ok(!offersCommand("/new"), "and only the one name")
   })
 })

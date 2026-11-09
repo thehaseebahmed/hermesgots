@@ -188,7 +188,7 @@ sequenceDiagram
    that chat, a message sent in an existing thread still posts its run on that thread's session
    (G4's send half), and flipping the switch on without a reload gives `/thread` back; with
    `scripts/test-main-cards.tsx`, `scripts/test-bot-rows.tsx` and `scripts/test-bot-pane.tsx` still
-   green under the new default, and `pnpm e2e bot-threads` green on its seeded switch.
+   green under the new default, and `pnpm e2e bot-threads` green on its seeded switch. Done.
 
 4. **A new chat's first send lands in the bot's Main.** The threads rule gains `beginChat`: with the
    switch off in the bot layout it is `ensureMainThread` plus the handover, and otherwise it is

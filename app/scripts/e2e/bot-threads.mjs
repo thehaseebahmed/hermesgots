@@ -82,7 +82,13 @@ function seed(
 ) {
   return page.evaluate(
     async ({ threads, messages, hour, day, long, note }) => {
-      const { db, ensureMainThread, mainThreadId } = await import("/src/lib/db.ts")
+      const { db, ensureMainThread, mainThreadId, saveSettings } = await import(
+        "/src/lib/db.ts"
+      )
+      // The flow is the proof of the thread paths, and they start from an account that may make a
+      // thread: Developer's Chat threads switch, off by default (ADR 0120). Written here rather
+      // than tapped through Developer, whose row has its own component case.
+      await saveSettings({ chatThreads: true })
       const profile = (await db.profiles.toArray())[0]
       // Whatever this device merged from its host before the seed is not part of what the flow
       // asserts: a chat that arrived from the host would stand beside the seeded threads and make

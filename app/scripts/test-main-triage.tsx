@@ -119,7 +119,8 @@ async function seed(
   extra: { main?: boolean; bot?: Partial<Profile>; keepMessages?: boolean } = { main: true },
 ) {
   const bot = botProfile(name, extra.bot)
-  await seedSettings({ developer: true })
+  // Triage asks only where a bot may start a thread, so these cases are the account with them on.
+  await seedSettings({ developer: true, chatThreads: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   if (!extra.keepMessages) await db.messages.clear()

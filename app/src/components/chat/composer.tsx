@@ -74,6 +74,7 @@ import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
+import { useStartHere } from "@/lib/threads"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -377,12 +378,15 @@ export function Composer({
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
+  // One answer for the menu and for a typed command: what this chat may start, or nothing at all —
+  // a `/thread` typed where it is not offered is the message's own words (ADR 0120).
+  const startable = useStartHere(main)
   const items =
     plain || !token
       ? []
       : rankSlashItems(
           [
-            ...localCommands(main ? "thread" : "new"),
+            ...localCommands(startable),
             ...(busy ? SEND_COMMANDS : []),
             ...skillItems,
           ],
@@ -429,7 +433,7 @@ export function Composer({
     // rather than doing something on the press: it lands in the field like a skill's name, and Send
     // carries it out with whatever was typed after it (ADR 0096).
     if (item.kind === "command" && !isSendMode(item.name) && !carriesMessage(item.name)) {
-      const run = localCommand(value, main ? "thread" : "new")
+      const run = localCommand(value, startable)
       return runCommand(item.name, run?.command === item.name ? run.text : "")
     }
     if (!token) return
@@ -623,7 +627,7 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
-    const command = plain ? null : localCommand(value, main ? "thread" : "new")
+    const command = plain ? null : localCommand(value, startable)
     if (command && !disabled) return runCommand(command.command, command.text)
     if (!canSend) return
     submitText(value)

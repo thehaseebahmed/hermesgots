@@ -60,7 +60,8 @@ async function seedMain(name: string) {
       { id: main, title: "Main", main: true, at: 1 },
       { id: `${name}-t1`, title: "Trip to Lisbon", at: 2 },
     ],
-    { bots: [bot] },
+    // Threads are the subject here, so the account may make one: the switch ships off (ADR 0120).
+    { bots: [bot], settings: { chatThreads: true } },
   )
   // The thread has been sent in, as one triage or a /thread made would have: the message that opened
   // it is what its card says, so this device is given that row too.
