@@ -527,7 +527,6 @@ function Rooms({
             options={ROOM_SORTS}
             value={sort}
             onSort={setSort}
-            compact
           />
         </div>
       )}
