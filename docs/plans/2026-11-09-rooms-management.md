@@ -203,6 +203,8 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    create's answer is written as the room's row, and a retry is the same room" and "a write forgets
    the Host's projection" — red then green.
 
+   Done.
+
 4. **A room can be started from the app.** The sidebar's footer gains New room beside New chat, drawn
    only where some bot the device holds answers `rooms_write`. The footer's create control is drawn in
    both layouts — today it is the Recents branch's alone, while a room lists in both — so the bots

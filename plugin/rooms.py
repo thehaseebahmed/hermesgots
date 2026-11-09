@@ -59,6 +59,11 @@ WRITES: Tuple[str, ...] = ("groups.create", "groups.rename", "groups.disband")
 ATTACHMENT_METHODS: Tuple[str, str] = ("groups.attachment.upload", "groups.attachment.download")
 MEDIA_FEATURE = "room_media"
 
+# The two names a roster row spells differently at either end of this seam: the app types camelCase
+# (`RoomMember`), the Host writes `member_id` and `display_name`. `_member` reads one way, `_host_member`
+# writes the other, so neither side learns the other's spelling.
+_HOST_NAMES = {"memberId": "member_id", "displayName": "display_name"}
+
 # One call's whole budget, shared by both ways in; the gate's, which runs on every `info` inside the
 # app's 15 s read, so it gets the smallest; and how long the discovery behind the gateway client
 # waits for an owner. All three are local calls.
@@ -397,36 +402,100 @@ def _asked(
     return found
 
 
+def _forget_projection(home: Any) -> None:
+    """Forget one Host's cached projection, because a write just made it wrong.
+
+    A Host's rooms are held for a breath so a list merge asks once, not once per bot (see
+    ``chat_records``). A write that changed a room leaves that entry saying what the room used to be,
+    and the merge right after it would land the older record over the newer one — the old name back,
+    or a disbanded room's row back — until the entry expired. One line, beside the write that
+    invalidated it (ADR 0123).
+    """
+    if home is None:
+        return
+    with _projections_lock:
+        _projections.pop(str(home), None)
+
+
+def _answer_record(
+    room: Any, *, room_id: str, name: Any = None, members: Any = None
+) -> Dict[str, Any]:
+    """One write's answer as the room's chat-list record, which is the row a device writes.
+
+    The answer is the entry the chat list projects: the same shape, the same field names, and the
+    Host's own clock and roster where its answer carries them (ADR 0123). A Host that answers the id
+    alone leaves the write's own name and roster to stand in, and the seam's clock, so a join always
+    has a row to draw; the next projection then corrects whatever the Host says instead.
+
+    ``room_id`` is the app's, never the Host's echo: it minted the id, navigates to it, and the Host
+    is idempotent on it, so a row filed under another id would be a room nothing can open.
+    """
+    held = dict(room) if isinstance(room, dict) else {}
+    held["room_id"] = room_id
+    if not isinstance(held.get("name"), str) or not held.get("name"):
+        asked = name.strip() if isinstance(name, str) else ""
+        held["name"] = asked or room_id
+    if not isinstance(held.get("members"), (list, tuple)) or not held.get("members"):
+        if isinstance(members, (list, tuple)) and members:
+            held["members"] = _host_members(members)
+    if _millis(held.get("updated_at")) is None and _millis(held.get("created_at")) is None:
+        held["updated_at"] = time.time()
+    record = chat_record(held) or {"at": int(time.time() * 1000), "value": {}}
+    value = record.get("value")
+    if isinstance(value, dict):
+        drawn = value.get("room")
+        # A roster the answer names none of is not an empty roster: dropping the field leaves the
+        # device's own roster standing, where an empty list would blank the room's members.
+        if isinstance(drawn, dict) and not drawn.get("members"):
+            value = {key: one for key, one in value.items() if key != "room"}
+        # A field the Host named none of is not a field to write as null: the row keeps what it has.
+        record = {**record, "value": {key: one for key, one in value.items() if one is not None}}
+    return record
+
+
+def _deletion(tombstone: Any, *, room_id: str) -> Dict[str, Any]:
+    """One disband's answer as the room's row going: the Host's disband time, or now where it gave none."""
+    held = tombstone if isinstance(tombstone, dict) else {}
+    at = _millis(held.get("disbanded_at")) or _millis(held.get("at"))
+    return {"at": at if at is not None else int(time.time() * 1000), "deleted": True}
+
+
 def create_room(
     room_id: str, name: Any, members: Any, *, timeout: float = CALL_TIMEOUT, home: Any = None
 ) -> Dict[str, Any]:
-    """``groups.create``: a room of this Host's profiles, as ``{room}``.
+    """``groups.create``: a room of this Host's profiles, answered as the room's record.
 
     The id is the app's, so a create retried after a dropped answer is the same room and not a
-    second one. The roster is passed on as the app built it: how few or many members it may hold,
-    which handles are taken and which are reserved are the Host's rules, and its refusal says which.
+    second one. The roster arrives in the app's spelling and leaves in the Host's, because that is
+    where the Host's names end (``_member`` spells the read the other way). How few or many members
+    a room may hold, which handles are taken and which are reserved are the Host's rules, and its
+    refusal says which.
     """
-    params = {"room_id": room_id, "name": name, "members": members}
-    return _asked("groups.create", "room", params, timeout=timeout, home=home)
+    params = {"room_id": room_id, "name": name, "members": _host_members(members)}
+    found = _asked("groups.create", "room", params, timeout=timeout, home=home)
+    _forget_projection(home)
+    return _answer_record(found.get("room"), room_id=room_id, name=name, members=members)
 
 
 def rename_room(
     room_id: str, event_id: str, name: Any, *, timeout: float = CALL_TIMEOUT, home: Any = None
 ) -> Dict[str, Any]:
-    """``groups.rename``: the room under its new name, as ``{room}``.
+    """``groups.rename``: the room under its new name, answered as the room's record.
 
     ``event_id`` is the app's too: the rename is one event in the Host's log, and the same id twice
     is the same rename rather than a second one.
     """
     params = {"room_id": room_id, "event_id": event_id, "name": name}
-    return _asked("groups.rename", "room", params, timeout=timeout, home=home)
+    found = _asked("groups.rename", "room", params, timeout=timeout, home=home)
+    _forget_projection(home)
+    return _answer_record(found.get("room"), room_id=room_id, name=name)
 
 
 def disband_room(
     room_id: str, cancel_id: Optional[str] = None, *,
     timeout: float = CALL_TIMEOUT, home: Any = None,
 ) -> Dict[str, Any]:
-    """``groups.disband``: the room's tombstone, as ``{tombstone}``.
+    """``groups.disband``: the room's row going, as the record's deletion.
 
     The Host stops the room's work before it tombstones the room; ``cancel_id`` names that stop
     where the app has an id of its own to give it.
@@ -434,7 +503,9 @@ def disband_room(
     params: Dict[str, Any] = {"room_id": room_id}
     if cancel_id:
         params["cancel_id"] = cancel_id
-    return _asked("groups.disband", "tombstone", params, timeout=timeout, home=home)
+    found = _asked("groups.disband", "tombstone", params, timeout=timeout, home=home)
+    _forget_projection(home)
+    return _deletion(found.get("tombstone"), room_id=room_id)
 
 
 def _event(row: Any) -> Optional[Dict[str, Any]]:
@@ -1139,6 +1210,25 @@ def _millis(value: Any) -> Optional[int]:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return int(value * 1000)
+
+
+def _host_member(row: Any) -> Any:
+    """One seat in the Host's spelling: the wire's names are the app's, and they end at this seam.
+
+    The read spells the Host's roster the other way (``_member``), so the two are one vocabulary seen
+    from either end. A key this seam has no name for rides through as it came: what a roster may hold
+    is the Host's to judge, and a translator that dropped a field would be answering for it.
+    """
+    if not isinstance(row, dict):
+        return row
+    return {_HOST_NAMES.get(key, key): value for key, value in row.items()}
+
+
+def _host_members(members: Any) -> Any:
+    """A roster in the Host's spelling, or whatever the caller gave where it is not a list."""
+    if not isinstance(members, (list, tuple)):
+        return members
+    return [_host_member(one) for one in members]
 
 
 def _member(row: Any) -> Optional[Dict[str, Any]]:

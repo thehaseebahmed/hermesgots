@@ -1208,7 +1208,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except rooms.RoomError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.room", **found})
+        return web.json_response({"object": "gots.room.record", **found})
 
     async def rename_room(request: "web.Request") -> "web.Response":
         """A room under its new name, under the event id the app minted for the rename."""
@@ -1232,7 +1232,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except rooms.RoomError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.room", **found})
+        return web.json_response({"object": "gots.room.record", **found})
 
     async def disband_room(request: "web.Request") -> "web.Response":
         """A room disbanded: the Host stops its work, then answers its tombstone."""
@@ -1255,7 +1255,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except rooms.RoomError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.room.tombstone", **found})
+        return web.json_response({"object": "gots.room.record", **found})
 
     async def read_room(request: "web.Request") -> "web.Response":
         """One room: the log's delta, its live state and whether it can be written to (rooms.py).

@@ -477,6 +477,12 @@ ROSTER = [
     {"member_id": "m1", "profile": "default", "handle": "hermes"},
     {"member_id": "m2", "profile": "coder", "handle": "coder"},
 ]
+# The same two seats as the app spells them: a write's roster arrives in the app's words and leaves
+# in the Host's, and the record it answers comes back in the app's (rooms.py's `_host_members`).
+APP_ROSTER = [
+    {"memberId": "m1", "profile": "default", "handle": "hermes"},
+    {"memberId": "m2", "profile": "coder", "handle": "coder"},
+]
 
 
 class AskedUrl:
@@ -559,7 +565,7 @@ class RoomRoutes(unittest.TestCase):
             self, path, method=method, room_id=room_id, body=body, unreadable=unreadable
         )
 
-    def created(self, members=ROSTER, **extra):
+    def created(self, members=APP_ROSTER, **extra):
         return self.asked(plugin.PREFIX + "/rooms", body={"room_id": "room-1", "name": "Planning", "members": members, **extra})
 
     def test_a_room_is_created_with_the_id_the_app_minted(self):
@@ -567,21 +573,83 @@ class RoomRoutes(unittest.TestCase):
         with dispatcher(host), no_loopback():
             answer = self.created()
         self.assertEqual(answer["status"], 200)
-        self.assertEqual(answer["payload"]["object"], "gots.room")
-        self.assertEqual(answer["payload"]["room"]["room_id"], "room-1")
-        self.assertEqual(answer["payload"]["room"]["members"], ROSTER)
+        self.assertEqual(answer["payload"]["object"], "gots.room.record")
+        # The answer is the chat list's entry, not the Host's room: one shape, and the app writes it.
+        self.assertNotIn("room", answer["payload"])
+        self.assertIsInstance(answer["payload"]["at"], int)
+        self.assertEqual(answer["payload"]["value"]["title"], "Planning")
+        self.assertEqual(answer["payload"]["value"]["room"]["id"], "room-1")
+        self.assertEqual(answer["payload"]["value"]["room"]["members"], APP_ROSTER)
         self.assertEqual(
             host.requests[-1]["params"],
             {"room_id": "room-1", "name": "Planning", "members": ROSTER},
-            "the room's id is the app's, and the roster is the Host's to read",
+            "the room's id is the app's, and the roster reaches the Host in its own spelling",
         )
+
+    def test_a_create_reads_the_roster_in_the_apps_words(self):
+        """The wire speaks camelCase at both ends, and the Host hears its own spelling (ADR 0124)."""
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.created()
+        self.assertEqual(host.requests[-1]["params"]["members"], ROSTER, "the Host hears its own spelling")
+        self.assertEqual(
+            answer["payload"]["value"]["room"]["members"],
+            APP_ROSTER,
+            "and the answer comes back in the app's",
+        )
+
+    def test_every_write_answers_the_rooms_record_not_the_hosts_room(self):
+        """One vocabulary: the entry the chat list projects, whatever the write was (ADR 0123)."""
+        writes = (
+            ("create", lambda: self.asked(plugin.PREFIX + "/rooms", body={"room_id": "room-1", "name": "Planning", "members": APP_ROSTER})),
+            ("rename", lambda: self.asked(plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="POST", body={"event_id": "e1", "name": "Planning 2"})),
+            ("disband", lambda: self.asked(plugin.PREFIX + "/rooms/{room_id}/disband", room_id="room-1", body={})),
+        )
+        for name, ask in writes:
+            with self.subTest(name), dispatcher(Host()), no_loopback():
+                answer = ask()
+                payload = answer["payload"]
+                self.assertEqual(payload["object"], "gots.room.record")
+                self.assertIsInstance(payload["at"], int, "a record has a clock")
+                self.assertNotIn("room", payload, "the Host's room object is not the answer")
+                self.assertNotIn("tombstone", payload)
+
+    def test_every_write_forgets_this_hosts_projection(self):
+        """A Host's rooms are held for a breath, so a write leaves no answer saying what the room was.
+
+        Without it a rename's or a disband's merge would land the older record over the newer one —
+        the old name back, or the retired row back — until the entry expired (ADR 0123).
+        """
+        key = str(self.home)
+        writes = (
+            ("groups.create", lambda: rooms.create_room("room-1", "Planning", APP_ROSTER, home=self.home)),
+            ("groups.rename", lambda: rooms.rename_room("room-1", "e1", "Planning 2", home=self.home)),
+            ("groups.disband", lambda: rooms.disband_room("room-1", home=self.home)),
+        )
+        for method, invoke in writes:
+            with self.subTest(method):
+                rooms._projections[key] = rooms.Projection(rooms.time.monotonic(), {}, 60.0)
+                with dispatcher(Host()), no_loopback():
+                    invoke()
+                self.assertNotIn(key, rooms._projections, "a write leaves this Host's projection to be read again")
+
+    def test_a_rename_names_no_roster_where_the_host_names_none(self):
+        """The record keeps this device's roster: an answer that seats nobody is not an empty room."""
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.asked(
+                plugin.PREFIX + "/rooms/{room_id}", room_id="room-1", method="POST",
+                body={"event_id": "e1", "name": "Planning 2"},
+            )
+        self.assertEqual(answer["status"], 200)
+        self.assertNotIn("room", answer["payload"]["value"])
 
     def test_a_roster_under_two_is_the_hosts_refusal(self):
         self.assert_refused(ROSTER[:1], "members must contain between 2 and 6 entries")
 
     def test_a_roster_over_six_is_the_hosts_refusal(self):
         many = [
-            {"member_id": f"m{n}", "profile": f"bot{n}", "handle": f"bot{n}"} for n in range(7)
+            {"memberId": f"m{n}", "profile": f"bot{n}", "handle": f"bot{n}"} for n in range(7)
         ]
         self.assert_refused(many, "members must contain between 2 and 6 entries")
 
@@ -602,7 +670,17 @@ class RoomRoutes(unittest.TestCase):
         host = Host(refuse="groups.create", refusal=(4110, message))
         with dispatcher(host), loopback(Loopback(host)) as client:
             answer = self.created(members)
-        self.assertEqual(host.requests[-1]["params"]["members"], members)
+        translated = [
+            {"member_id": one["memberId"], **{key: value for key, value in one.items() if key != "memberId"}}
+            if "memberId" in one
+            else one
+            for one in members
+        ]
+        self.assertEqual(
+            host.requests[-1]["params"]["members"],
+            translated,
+            "the roster reaches the Host in its own spelling, and its refusal is its own words",
+        )
         self.assertEqual(answer["status"], 400)
         self.assertEqual(answer["payload"], {"error": {"message": message}})
         self.assertEqual(client.methods, [], "a refusal is the Host's answer, so it is never repeated")
@@ -643,7 +721,8 @@ class RoomRoutes(unittest.TestCase):
                 body={"event_id": "e1", "name": "Planning 2"},
             )
         self.assertEqual(answer["status"], 200)
-        self.assertEqual(answer["payload"]["room"]["name"], "Planning 2")
+        self.assertEqual(answer["payload"]["object"], "gots.room.record")
+        self.assertEqual(answer["payload"]["value"]["title"], "Planning 2")
         self.assertEqual(
             host.requests[-1]["params"], {"room_id": "room-1", "event_id": "e1", "name": "Planning 2"}
         )
@@ -664,9 +743,10 @@ class RoomRoutes(unittest.TestCase):
         with dispatcher(host), no_loopback():
             answer = self.asked(plugin.PREFIX + "/rooms/{room_id}/disband", room_id="room-1", body={})
         self.assertEqual(answer["status"], 200)
-        self.assertEqual(answer["payload"]["object"], "gots.room.tombstone")
-        self.assertEqual(answer["payload"]["tombstone"]["room_id"], "room-1")
-        self.assertIsNotNone(answer["payload"]["tombstone"]["disbanded_at"])
+        self.assertEqual(answer["payload"]["object"], "gots.room.record")
+        self.assertNotIn("tombstone", answer["payload"])
+        self.assertTrue(answer["payload"]["deleted"], "a disband is the row going")
+        self.assertEqual(answer["payload"]["at"], 1_760_000_000_000)
         self.assertEqual(host.requests[-1]["params"], {"room_id": "room-1"})
 
     def test_a_disband_with_no_body_asks_the_host_without_a_cancel_id(self):

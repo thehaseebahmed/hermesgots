@@ -1895,13 +1895,16 @@ export async function writeRoomRow(id: string, record: RoomRecord, profileId: st
   }
   const value = record.value
   if (!value) return
-  const patch = Object.fromEntries(ROOM_FIELDS.map((field) => [field, value[field]]))
+  // Only the fields the record names are written: one it says nothing about is this device's to
+  // keep, and writing `undefined` over a room's roster would leave a row that is no longer a room.
+  const named = ROOM_FIELDS.filter((field) => value[field] !== undefined)
+  const patch = Object.fromEntries(named.map((field) => [field, value[field]]))
   // A room is projected unchanged on every read: writing it again would wake every live query over a
   // chat list for news that nothing happened.
   const same =
     existing !== undefined &&
     existing.changedAt === record.at &&
-    ROOM_FIELDS.every((field) => equal(existing[field], patch[field]))
+    named.every((field) => equal(existing[field], patch[field]))
   if (same) return
   await db.transaction("rw", db.conversations, db.tombstones, async () => {
     await db.conversations.put({

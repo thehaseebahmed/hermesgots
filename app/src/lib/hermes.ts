@@ -15,6 +15,7 @@ import type {
   RoomAttachment,
   RoomKind,
   RoomMember,
+  RoomRecord,
   SessionMode,
   Todo,
   TodoProgress,
@@ -2268,6 +2269,93 @@ export async function stopRoom(
     body: JSON.stringify(cancelId ? { cancel_id: cancelId } : {}),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
+}
+
+/**
+ * One room's record, as a write answers it: the same entry the chat list projects, so the row a write
+ * writes and the row a merge writes cannot drift (ADR 0123). A body with no clock is not a record —
+ * the plugin always sends one — so it is refused here rather than written at a made-up time.
+ */
+function roomRecordOf(raw: Record<string, unknown>): RoomRecord {
+  const at = typeof raw.at === "number" ? raw.at : undefined
+  if (at === undefined)
+    throw new HermesError("The bot's plugin answered without the room's record.", 502)
+  if (raw.deleted === true) return { at, deleted: true }
+  const held = raw.value && typeof raw.value === "object" ? (raw.value as Record<string, unknown>) : {}
+  const value: NonNullable<RoomRecord["value"]> = {}
+  if (typeof held.title === "string") value.title = held.title
+  if (typeof held.createdAt === "number") value.createdAt = held.createdAt
+  if (typeof held.updatedAt === "number") value.updatedAt = held.updatedAt
+  const room = held.room && typeof held.room === "object" ? (held.room as Record<string, unknown>) : undefined
+  if (room && typeof room.id === "string" && room.id) {
+    value.room = {
+      id: room.id,
+      members: Array.isArray(room.members)
+        ? room.members
+            .filter((one): one is Record<string, unknown> => Boolean(one) && typeof one === "object")
+            .map((one) => roomMember(one))
+        : [],
+    }
+  }
+  return { at, value }
+}
+
+/** What a create asks for: the id this app minted, the name the user typed, and the seats it chose. */
+export interface RoomCreate {
+  roomId: string
+  name: string
+  members: RoomMember[]
+}
+
+/**
+ * A room made on its Host (`rooms.create`): the Host's roster rules judge the seats, and its answer is
+ * the room's record. The id is the caller's, so a create retried after a dropped answer is the same
+ * room rather than a second one.
+ */
+export async function createRoom(config: HermesConfig, intent: RoomCreate): Promise<RoomRecord> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/rooms`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ room_id: intent.roomId, name: intent.name, members: intent.members }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return roomRecordOf((await response.json()) as Record<string, unknown>)
+}
+
+/**
+ * A room renamed on its Host (`groups.rename`): one event under the id this app minted, so the same
+ * id twice is the same rename rather than a second one.
+ */
+export async function renameRoom(
+  config: HermesConfig,
+  roomId: string,
+  intent: { eventId: string; name: string },
+): Promise<RoomRecord> {
+  const response = await request(roomRoot(config, roomId), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ event_id: intent.eventId, name: intent.name }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return roomRecordOf((await response.json()) as Record<string, unknown>)
+}
+
+/**
+ * A room ended on its Host (`groups.disband`): the Host stops the room's work and answers the row's
+ * deletion. `cancelId` names that stop, so a retry cancels the same round once.
+ */
+export async function disbandRoom(
+  config: HermesConfig,
+  roomId: string,
+  cancelId: string,
+): Promise<RoomRecord> {
+  const response = await request(`${roomRoot(config, roomId)}/disband`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ cancel_id: cancelId }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return roomRecordOf((await response.json()) as Record<string, unknown>)
 }
 
 /** The bot's research missions on the plugin (`research.py`), as it sends them. */
