@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -169,6 +170,90 @@ class Delivery(unittest.TestCase):
             self.assertEqual(self.sent, [], "the app is already drawing the room")
         self.deliver()
         self.assertEqual(len(self.sent), 1, "put away, it hears it then")
+
+
+class Scope(unittest.TestCase):
+    """Which sessions a profile pushes for: the app's own chats, and no other surface's.
+
+    Gots mints every chat's Hermes session id with a prefix of its own (``sessions.ID_PREFIXES``),
+    and compression moves the chat onto a child session that carries none — so a chat is found from
+    its root, the same walk ``sessions.chat_session`` makes.
+    """
+
+    # A push is delivered on a daemon thread; a local store answers in milliseconds, and a wait this
+    # long that hears nothing is what says nothing was sent.
+    WAIT_S = 1.0
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.path = db_path(self.home)
+        conn = connect(self.path)
+        conn.execute(
+            "INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
+            " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("https://push.example/1", "phone-1", "key", "auth", "vapid", "mailto:a@b.c", 1,
+             '["chat_input"]'),
+        )
+        conn.close()
+        self.sent = []
+        self.arrived = threading.Event()
+
+        def send(row, payload, topic):
+            self.sent.append(payload)
+            self.arrived.set()
+            return 201
+
+        send_patch = mock.patch.object(push, "send", send)
+        send_patch.start()
+        self.addCleanup(send_patch.stop)
+        relay = mock.patch.object(push, "_relay", lambda *args, **kwargs: None)
+        relay.start()
+        self.addCleanup(relay.stop)
+        # One push a kind and session in THROTTLE_SECONDS, so one case would otherwise answer none.
+        push._last.clear()
+        self.addCleanup(push._last.clear)
+
+    def tell(self, kind, session_id):
+        """What ``notify`` answered, and the pushes that reached the wire."""
+        push._last.clear()
+        self.sent.clear()
+        self.arrived.clear()
+        answer = push.notify(kind, session_id, path=self.path)
+        self.arrived.wait(self.WAIT_S)
+        return answer, self.sent
+
+    def lineage(self, rows):
+        """Hermes's own store, with the parent links compression leaves behind."""
+        conn = sqlite3.connect(self.home / "state.db")
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
+            " model_config TEXT, source TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO sessions (id, parent_session_id, end_reason) VALUES (?, ?, ?)", rows
+        )
+        conn.commit()
+        conn.close()
+
+    def test_a_gots_chats_session_is_pushed(self):
+        answer, sent = self.tell("question", "gots-abc")
+        self.assertTrue(answer)
+        self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
+
+    def test_another_surfaces_session_is_not_pushed(self):
+        # No prefix, no chat record, no compression parent: a session Gots never started.
+        answer, sent = self.tell("question", "sess_9f2c41")
+        self.assertFalse(answer, "no device is told about a session the app doesn't own")
+        self.assertEqual(sent, [])
+
+    def test_a_compressed_chats_child_session_is_pushed(self):
+        # The chat began as gots-abc and compression moved it on to a child that carries no prefix.
+        self.lineage([("gots-abc", None, "compression"), ("sess_c0ffee", "gots-abc", None)])
+        answer, sent = self.tell("question", "sess_c0ffee")
+        self.assertTrue(answer, "the child's root is the chat's, so the chat is being pushed")
+        self.assertEqual(sent, [{"kind": "question", "session_id": "sess_c0ffee"}])
 
 
 class Mutes(unittest.TestCase):
