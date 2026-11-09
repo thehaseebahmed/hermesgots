@@ -1,5 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import type { ReactNode } from "react"
+import { useNavigate } from "react-router"
 
 import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
 import { Composer } from "@/components/chat/composer"
@@ -76,6 +77,7 @@ export function ChatComposer({
   onThread?: (message: { text: string; attachments: Attachment[] }) => Promise<void> | void
 }) {
   const { root } = useNav()
+  const navigate = useNavigate()
   const filesFeature = usePluginFeature(bot, "attachments")
   const sheet = useCheatsheet()
   const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
@@ -123,7 +125,7 @@ export function ChatComposer({
               attachments: message?.attachments ?? [],
             })
           if (command === "new") return root(home ?? "/")
-          if (command === "settings") return root("/settings")
+          if (command === "settings") return navigate("/settings")
           if (command === "cheatsheet") return void sheet.show()
         }}
       />

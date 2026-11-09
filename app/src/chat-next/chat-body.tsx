@@ -432,7 +432,7 @@ function NextComposerBody({
           if (command === "thread")
             return startThread(message?.text ?? "", message?.attachments ?? [])
           if (command === "new") return root(home ?? "/")
-          if (command === "settings") return root("/settings")
+          if (command === "settings") return navigate("/settings")
           if (command === "cheatsheet") return void sheet.show()
         }}
       />

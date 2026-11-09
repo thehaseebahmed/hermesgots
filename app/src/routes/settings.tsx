@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
+import { Navigate, useParams, useSearchParams } from "react-router"
 import {
   ActivityIcon,
   AudioLinesIcon,
@@ -145,7 +145,6 @@ export function SettingsPage() {
   const { section, botId, tab, sub, leaf } = useParams()
   const large = useLarge()
   const { up, root } = useNav()
-  const navigate = useNavigate()
   const { account } = useSyncState()
   const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
@@ -159,11 +158,14 @@ export function SettingsPage() {
   // A page's sub-screen: the row's edit or the list it drills into, named by the fourth segment —
   // and, where that segment names a list, the item behind it by the fifth.
   const botSub = botTab && sub ? botSubOf(botTab, sub, leaf) : undefined
-  // On its own screen, a page sits under its bot's list and the list under the Settings menu.
+  // A screen sits under the one that opened it: a section under the Settings menu on a phone, a bot's
+  // list under whatever opened it, and a bot's page under its list — on a phone and on a laptop alike,
+  // since from `lg` the list takes the menu's pane and is a step in as well.
+  const botScreen = section === "bots" && Boolean(botId)
   useEffect(() => {
-    // A bot's own screen publishes the guard itself — it is the screen that can ask — so this one
-    // would only compete with it.
-    if (!separate || (section === "bots" && botId)) return
+    // A bot's own page on a phone publishes the guard itself — it is the screen that can ask about
+    // unsaved changes — so this one would only compete with it.
+    if ((separate && botScreen && botTab) || !(separate || botScreen)) return
     const back = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
@@ -173,7 +175,7 @@ export function SettingsPage() {
       up(back)
       return true
     })
-  }, [separate, up, section, botId, botTab, botSub])
+  }, [separate, botScreen, up, section, botId, botTab, botSub])
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
@@ -215,12 +217,7 @@ export function SettingsPage() {
         <Screen
           title={bot.name}
           className="w-90 flex-none border-r min-[1200px]:w-103"
-          leading={
-            <BackButton
-              label="Back"
-              onClick={() => navigate("/settings", { replace: true, state: { quiet: true } })}
-            />
-          }
+          leading={<BackButton label="Back" onClick={() => up("/settings")} />}
         >
           <BotSettingsList
             profile={bot}

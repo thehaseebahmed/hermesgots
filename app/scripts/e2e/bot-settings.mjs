@@ -154,6 +154,28 @@ const wide = async ({ page, profileId, shot }) => {
   assert.ok(after, "the list still has a box")
   assert.ok(same(before, after), "the list's box did not move while the pane beside it swapped")
   await shot("models")
+
+  // A page opened from a Settings section comes back to that section, not to the menu: AI Dictation's
+  // Bots tab opens a bot's page, and its back control lands on AI Dictation again.
+  await page.goto(`${app}/settings/dictation`)
+  await page.getByRole("tab", { name: "Bots" }).waitFor({ timeout: 15_000 })
+  await page.getByRole("tab", { name: "Bots" }).click()
+  const fromSection = page.locator("[data-dictation-bot]").first()
+  await fromSection.waitFor({ timeout: 15_000 })
+  await fromSection.click()
+  await page.waitForURL((url) => url.pathname.startsWith(`/settings/bots/${profileId}/`), {
+    timeout: 15_000,
+  })
+  await settled(page)
+  await page.getByRole("button", { name: "Back", exact: true }).click()
+  await page.waitForURL((url) => url.pathname === "/settings/dictation", { timeout: 15_000 })
+  await settled(page)
+  assert.ok(
+    await page.getByRole("heading", { level: 1, name: "AI Dictation", exact: true }).isVisible(),
+    "back from a bot's page opened in AI Dictation returns to AI Dictation",
+  )
+  await shot("back-to-section")
+
   assert.deepEqual(errors, [], `no error on the page (${errors.join("; ")})`)
 }
 
@@ -230,5 +252,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
 )

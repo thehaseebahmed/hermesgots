@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
 import { BotThreadsPage } from "@/routes/bot-threads"
@@ -142,4 +142,33 @@ test("Main has no Delete or Discard, in its menu or in the data layer", async ()
   assert.ok(await db.conversations.get(id), "a local delete leaves it")
   await deleteConversation(id, { remote: true })
   assert.equal(await db.conversations.get(id), undefined, "another device's delete still applies")
+})
+
+const Nav = () => <p data-nav>{`${useNavigationType()}:${useLocation().pathname}`}</p>
+const nav = () => find("[data-nav]")?.textContent ?? ""
+
+test("the chat's Bot settings is a step in, so back returns to the chat", async () => {
+  await seed()
+  await ensureMainThread(bot.id)
+  const id = mainThreadId(bot.id)
+  globalThis.fetch = async () => json({})
+  await mount(
+    <MemoryRouter initialEntries={[`/c/${id}`]}>
+      <Routes>
+        <Route path="/c/:id" element={<ChatPage slot="route" />} />
+      </Routes>
+      <Nav />
+    </MemoryRouter>,
+    async () => {
+      await click(find('[aria-label="Bot options"]'))
+      await settle()
+      const item = findAll('[role="menuitem"]').find((one) =>
+        one.textContent?.includes("Bot settings"),
+      )
+      assert.ok(item, "the menu holds Bot settings")
+      await click(item)
+      await until(() => nav().startsWith("PUSH:"), "a step in, not a fresh start")
+      assert.equal(nav(), `PUSH:/settings/bots/${bot.id}`)
+    },
+  )
 })

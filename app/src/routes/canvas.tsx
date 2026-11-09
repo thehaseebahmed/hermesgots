@@ -9,7 +9,7 @@ import {
   PlusIcon,
   Undo2Icon,
 } from "lucide-react"
-import { Link, useNavigate, useParams } from "react-router"
+import { useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { Bot } from "@/components/bot"
@@ -26,6 +26,8 @@ import { UsageSheet } from "@/components/chat/usage-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow } from "@/components/item-list"
+import { setBackGuard } from "@/lib/native"
+import { useNav } from "@/lib/nav"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -196,7 +198,10 @@ const SNAPS = [0.5, 1]
 /** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const navigate = useNavigate()
+  const { up, step } = useNav()
+  // The list pushes a canvas and the drawer's pinned row opens it as a top-level screen, so the
+  // press steps back to the list where it was pushed and is the app's where the menu opened it.
+  useEffect(() => setBackGuard(step("/canvas")), [step])
   const { canvas, missing, loaded, away } = useCanvas(id)
   const online = useOnline()
   // A device with no network can't reach the host either, and is told so in its own words (ADR 0071)
@@ -389,7 +394,7 @@ export function CanvasView() {
     }
     tell.success("Canvas deleted.")
     setOptionsOpen(false)
-    navigate("/canvas")
+    up("/canvas")
   }
 
   // The canvas's own session, as any chat body holds it: it edits the page with the host's tools, and
@@ -423,8 +428,7 @@ export function CanvasView() {
           size="icon-lg"
           className="size-11 rounded-full"
           aria-label="All canvases"
-          nativeButton={false}
-          render={<Link to="/canvas" />}
+          onClick={() => up("/canvas")}
         >
           <ArrowLeftIcon />
         </Button>

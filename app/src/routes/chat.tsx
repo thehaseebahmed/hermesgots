@@ -1460,7 +1460,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
                 case "new":
                   return root(mainPath ?? "/")
                 case "settings":
-                  return root("/settings")
+                  return navigate("/settings")
                 case "cheatsheet":
                   return void sheet.show()
                 default: {

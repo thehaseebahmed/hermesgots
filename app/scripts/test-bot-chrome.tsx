@@ -67,7 +67,7 @@ const mainScreen = (
           </>
         }
       />
-      <Route path="/settings/bots" element={<Path />} />
+      <Route path="/settings/bots/:botId?" element={<Path />} />
     </Routes>
   </MemoryRouter>
 )
@@ -117,13 +117,13 @@ test("mute from Main's menu mutes the bot, and Main's header reads it back", asy
   })
 })
 
-test("Bot settings from Main's menu opens the bots screen", async () => {
+test("Bot settings from Main's menu opens that bot's settings", async () => {
   await seedMain()
   globalThis.fetch = async () => json({})
   await mount(mainScreen, async () => {
     await click(find('[aria-label="Bot options"]'))
     await click(findText('[role="menuitem"]', "Bot settings"))
-    await until(async () => path() === "/settings/bots", "the bots screen")
+    await until(async () => path() === `/settings/bots/${bot.id}`, "the bot's own settings")
   })
 })
 

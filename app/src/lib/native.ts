@@ -159,6 +159,23 @@ const EXIT_WINDOW = 2000
 export const EXIT_TOASTER = "exit"
 
 /**
+ * What one back press came to: the frontmost pop-up closed, the screen on show handled it itself, or
+ * nothing did and the press is the app's — which arms its exit, leaving on a second press.
+ */
+export type BackPress = "popup" | "screen" | "app"
+
+/**
+ * One press of Android's back, decided in the order the app keeps: the frontmost pop-up first, as
+ * Material's modal sheets and dialogs close on back, then the screen's own guard where it sets one
+ * (a thread, a project, a session), then the app's own.
+ */
+export function pressBack(): BackPress {
+  if (closeTopPopup()) return "popup"
+  if (backGuard?.()) return "screen"
+  return "app"
+}
+
+/**
  * Android's back button closes an open pop-up first, as Material's modal sheets and dialogs do. Then
  * it goes up from a screen that sets a guard (a project, a session) and leaves the app from a
  * top-level one, whatever was opened before it, but only on a second press within `EXIT_WINDOW`, so
@@ -169,7 +186,7 @@ export function handleBackButton() {
   if (!isNative) return
   let armedAt = 0
   void App.addListener("backButton", () => {
-    if (closeTopPopup() || backGuard?.()) {
+    if (pressBack() !== "app") {
       armedAt = 0
       return
     }

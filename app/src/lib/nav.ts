@@ -39,5 +39,19 @@ export function useNav() {
     [navigate],
   )
 
-  return { root, up }
+  /**
+   * The guard a screen gives the back button where the menu and a list both open it: a list pushes
+   * it, so the press steps up to `to`; the menu opens it as the first entry, where nothing is behind
+   * it, so the press is left to the app — which leaves, as back does from any top-level screen.
+   */
+  const step = useCallback(
+    (to: string) => () => {
+      if (!depth()) return false
+      up(to)
+      return true
+    },
+    [up],
+  )
+
+  return { root, up, step }
 }

@@ -12,6 +12,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react"
+import { useNavigate } from "react-router"
 
 import { Banner } from "@/components/banner"
 import { ConfirmDialog } from "@/components/chat/confirm-dialog"
@@ -56,7 +57,7 @@ import {
 } from "@/lib/provider-usage"
 import { setBotMuted, setThreadMuted } from "@/lib/push"
 import { quietly } from "@/lib/report"
-import { useNav } from "@/lib/nav"
+import { botPath } from "@/lib/bot-tabs"
 import { closeSessionWork } from "@/lib/workspace"
 
 /**
@@ -255,7 +256,7 @@ export function ChatActions({
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
-  const { root } = useNav()
+  const navigate = useNavigate()
   const configured = Boolean(profile?.baseUrl.trim())
   const isMain = Boolean(chat.main)
   const [renaming, setRenaming] = useState(false)
@@ -316,7 +317,7 @@ export function ChatActions({
                   {profile.muted ? "Unmute notifications" : "Mute notifications"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => root("/settings/bots")}>
+                <DropdownMenuItem onClick={() => navigate(botPath(profile.id))}>
                   <SettingsIcon />
                   Bot settings
                 </DropdownMenuItem>
