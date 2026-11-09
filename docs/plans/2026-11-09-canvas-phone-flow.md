@@ -78,7 +78,7 @@ sequenceDiagram
    page above it pressable — the tapped box and the pointed element are above the sheet's top edge,
    the frame is `sandbox="allow-scripts"` with the policy first in its head, and a real one-finger
    swipe down on the sheet's handle leaves it, the page then filling the screen. Goals: G6. After: 3.
-   Layers: e2e flow, App shell. Check: `pnpm e2e canvas` green end to end.
+   Layers: e2e flow, App shell. Check: `pnpm e2e canvas` green end to end. Done.
 5. **The docs say what the flow holds.** The audit row's argument (why a stay: sandbox, geometry, a
    real gesture, a host's own versions), the counts it moves, ADR 0114 noting the outside-URL leg is
    now measured, and the glossary's canvas sheet row naming the flow. Goals: G6. After: 4. Layers:

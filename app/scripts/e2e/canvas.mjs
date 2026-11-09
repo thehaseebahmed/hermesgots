@@ -103,6 +103,18 @@ await flow(
     )
     assert.equal(await page.locator("[role=dialog][aria-modal=true]").count(), 0, "no modal is up")
     await frame().locator("h1").waitFor({ timeout: 20_000 })
+    // The frame is the browser's own sandbox, and the policy is the first thing in its head.
+    assert.equal(
+      await page.locator(FRAME).getAttribute("sandbox"),
+      "allow-scripts",
+      "the page runs in a scripts-only sandbox",
+    )
+    const srcdoc = (await page.locator(FRAME).getAttribute("srcdoc")) ?? ""
+    assert.match(
+      srcdoc.slice(srcdoc.indexOf("<head")),
+      /^<head[^>]*>\s*<meta http-equiv="Content-Security-Policy"/,
+      "the policy is the page's first element",
+    )
     assert.equal(
       await above(frameBox),
       "iframe",
@@ -110,8 +122,16 @@ await flow(
     )
     const firstTop = await sheetTop()
     assert.ok(
-      firstTop > 300 && firstTop < 844 - 100,
-      `the sheet rests at half the screen (its top at ${firstTop}px)`,
+      Math.abs(firstTop - 422) <= 2,
+      `the sheet rests at half the 844px screen (its top at ${firstTop}px)`,
+    )
+    // The chat is laid out in the stop the sheet rests at, so its composer is on the screen: the
+    // sheet's own visible height is what the content fills, not the full height it is dragged in.
+    const form = await sheet().locator("form").last().boundingBox()
+    assert.ok(form, "the sheet draws a composer")
+    assert.ok(
+      844 - (form.y + form.height) <= 24 && form.y > firstTop,
+      `the composer stands in the stop the sheet rests at, on the screen's bottom (${Math.round(form.y)}px to ${Math.round(form.y + form.height)}px)`,
     )
     await shot("sheet-building")
     pass("the page builds under a non-modal sheet held at half the screen")
@@ -195,16 +215,26 @@ await flow(
     await shot("pointed")
     pass("a point tagged on the page over the open sheet reaches the composer's chip")
 
-    // Swipe the sheet down from its handle: the page is left in view, whole.
+    // Swipe the sheet down from its handle: the page is left in view, whole. The sheet is an overlay
+    // over a page that always filled the screen, so what changes is what a press below its top edge
+    // reaches — the sheet's own content before, the canvas after.
+    const lower = { x: 195, y: Math.round(firstTop + 60) }
+    const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName.toLowerCase() ?? null, lower)
+    assert.notEqual(hit, "iframe", "the sheet covers the lower half before the swipe")
     const handle = await sheet().locator("[aria-label=Close]").boundingBox()
     assert.ok(handle, "the sheet has a drag handle")
     await swipe(page, { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }, 320)
     await sheet().waitFor({ state: "detached", timeout: 10_000 })
     assert.equal(await sheet().count(), 0, "the sheet is gone")
+    assert.equal(
+      await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName.toLowerCase() ?? null, lower),
+      "iframe",
+      "the page is what a press below the old stop reaches",
+    )
     const left = await frameBox()
     assert.ok(
-      left.height > firstTop,
-      `the page took the room the sheet gave back (${Math.round(left.height)}px tall)`,
+      Math.abs(left.y + left.height - (844 - 8)) <= 8,
+      `the page fills the screen under the header (its bottom at ${Math.round(left.y + left.height)}px)`,
     )
     assert.equal(await page.locator("[data-canvas-edit-pill]").isVisible(), true, "Edit is back")
     await shot("left")
