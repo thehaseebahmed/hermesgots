@@ -381,7 +381,11 @@ export function Composer({
     plain || !token
       ? []
       : rankSlashItems(
-          [...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems],
+          [
+            ...localCommands(main ? "thread" : "new"),
+            ...(busy ? SEND_COMMANDS : []),
+            ...skillItems,
+          ],
           token,
         )
   // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
@@ -425,7 +429,7 @@ export function Composer({
     // rather than doing something on the press: it lands in the field like a skill's name, and Send
     // carries it out with whatever was typed after it (ADR 0096).
     if (item.kind === "command" && !isSendMode(item.name) && !carriesMessage(item.name)) {
-      const run = localCommand(value, main)
+      const run = localCommand(value, main ? "thread" : "new")
       return runCommand(item.name, run?.command === item.name ? run.text : "")
     }
     if (!token) return
@@ -619,7 +623,7 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
-    const command = plain ? null : localCommand(value, main)
+    const command = plain ? null : localCommand(value, main ? "thread" : "new")
     if (command && !disabled) return runCommand(command.command, command.text)
     if (!canSend) return
     submitText(value)

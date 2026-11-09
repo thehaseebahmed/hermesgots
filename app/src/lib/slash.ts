@@ -8,27 +8,29 @@ export type SlashItem =
   | { kind: "command"; name: LocalCommand | SendMode; description: string }
   | { kind: "skill"; name: string; description?: string | null; category?: string | null }
 
-export const startCommand = (threads: boolean): StartCommand => (threads ? "thread" : "new")
-
 /**
  * Whether a command takes the rest of the message as its own: `/thread` does, since that text opens
  * the thread it starts.
  */
 export const carriesMessage = (name: string) => name === "thread"
 
-export function localCommands(threads: boolean): SlashItem[] {
+/** The start command's row, worded for the one it is; nothing where none may start. */
+export function localCommands(start: StartCommand | null = null): SlashItem[] {
+  const starter: SlashItem[] = start
+    ? [
+        {
+          kind: "command",
+          name: start,
+          description: start === "thread" ? "Start a thread" : "Start a new chat",
+        },
+      ]
+    : []
   return [
-    {
-      kind: "command",
-      name: startCommand(threads),
-      description: threads ? "Start a thread" : "Start a new chat",
-    },
+    ...starter,
     { kind: "command", name: "settings", description: "Open settings" },
     { kind: "command", name: "cheatsheet", description: "See the keyboard shortcuts" },
   ]
 }
-
-export const LOCAL_COMMANDS: SlashItem[] = localCommands(false)
 
 /** Offered only while a reply runs, when there is something to steer or wait for. */
 export const SEND_COMMANDS: SlashItem[] = [
@@ -46,12 +48,12 @@ export function sendMode(text: string): { mode: SendMode; text: string } | null 
 
 export function localCommand(
   text: string,
-  threads = false,
+  start: StartCommand | null = null,
 ): { command: LocalCommand; text: string } | null {
   const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim())
   if (!match) return null
   const [, name, rest = ""] = match
-  const command = localCommands(threads).find((item) => item.name === name)
+  const command = localCommands(start).find((item) => item.name === name)
   if (!command) return null
   if (rest.trim() && !carriesMessage(name)) return null
   return { command: name as LocalCommand, text: rest.trim() }

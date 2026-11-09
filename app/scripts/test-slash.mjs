@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
-  LOCAL_COMMANDS,
   SEND_COMMANDS,
   localCommand,
+  localCommands,
   nameSpread,
   pickItem,
   pickSendMode,
@@ -20,7 +20,7 @@ const skill = (name, category = null, description = null) => ({
 })
 
 const items = [
-  ...LOCAL_COMMANDS,
+  ...localCommands("new"),
   ...SEND_COMMANDS,
   skill("grill-with-docs", "quality", "Interview relentlessly, writing docs as we go"),
   skill("grilling", "quality", "Stress-test a plan"),
