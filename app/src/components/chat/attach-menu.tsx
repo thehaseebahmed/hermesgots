@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from "react"
 import {
   CameraIcon,
+  CheckIcon,
   CrosshairIcon,
   FileUpIcon,
   ImageIcon,
@@ -181,25 +182,38 @@ export function AttachMenu({
             })}
           </div>
           {point && (
-            <section className={cn("px-4 pt-2 sm:px-6", session ? "pb-2" : "pb-24 md:pb-2")}>
-              <Button
-                type="button"
-                variant={point.armed ? "secondary" : "outline"}
-                className="h-auto justify-start gap-3 rounded-2xl px-4 py-3 text-left text-[15px] font-normal"
-                aria-pressed={point.armed}
-                aria-label={point.armed ? "Tap an element on the page" : "Point at the page"}
-                onClick={pickPoint}
-              >
-                <CrosshairIcon className="size-5! shrink-0" />
-                <span className="flex flex-col">
-                  <span>{point.armed ? "Tap an element on the page" : "Point at the page"}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {point.armed
-                      ? "Waiting for your tap."
-                      : "Adds the element you tap to your message."}
+            <section
+              className={cn(
+                "flex flex-col gap-2 px-4 pt-2 sm:px-6",
+                session ? "pb-2" : "pb-24 md:pb-2",
+              )}
+            >
+              {/* Named for what the rows are rather than for this one: the page is the first tool a
+                  canvas's composer offers, and the group is where the next ones go. */}
+              <h3 className="px-1 text-sm text-muted-foreground">Tools</h3>
+              <div className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1">
+                <button
+                  type="button"
+                  aria-pressed={point.armed}
+                  aria-label={point.armed ? "Tap an element on the page" : "Point at the page"}
+                  onClick={pickPoint}
+                  className={cn(
+                    "flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[15px] transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                    point.armed && "bg-background",
+                  )}
+                >
+                  <CrosshairIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span>{point.armed ? "Tap an element on the page" : "Point at the page"}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {point.armed
+                        ? "Waiting for your tap."
+                        : "Adds the element you tap to your message."}
+                    </span>
                   </span>
-                </span>
-              </Button>
+                  {point.armed && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
+                </button>
+              </div>
             </section>
           )}
           {session && (
