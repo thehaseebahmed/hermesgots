@@ -3876,9 +3876,8 @@ function startRun(req, body, options = {}) {
     // A turn in a canvas's own chat is the bot editing it: the plugin equips that session with
     // `canvas_edit` and nothing else, and the mock stands in for the tool by writing the page's
     // next version now, so the screen redraws as the turn ends.
-    if (CANVAS && !wake && !run.stopped && !failed) {
-      if (editCanvasSession(CANVASES, run.sessionId)) noteEvent("canvas", run.sessionId)
-    }
+    if (CANVAS && !wake && !run.stopped && !failed && editCanvasSession(CANVASES, run.sessionId, last))
+      noteEvent("canvas", run.sessionId)
     run.usage = {
       input_tokens: prompt_tokens,
       output_tokens: completion_tokens,
@@ -4204,16 +4203,14 @@ http
               .filter(([, { value }]) => !value.room && !value.projectId && !value.canvasId)
               .map(([id, { value }]) => ({ id, title: value.title ?? "", at: value.updatedAt ?? 0 }))
               .sort((one, two) => two.at - one.at),
-          // The chat a canvas is edited in, made as `triage.open_thread` makes one (canvases.py's
-          // `create`): its own id and a session named for it, the canvas's name marked
-          // `titleEdited`, and `canvasId` so no list or card ever draws it.
-          openChat: ({ chatId, sessionId, title, canvasId, opener, at }) => {
+          openChat: ({ chatId, sessionId, profileId, title, canvasId, opener, at }) => {
             const key = pluginProfile ?? ""
             if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
             ;(pluginChatLists.get(key) ?? pluginChats).set(chatId, {
               at,
               value: {
                 id: chatId,
+                profileId,
                 title,
                 hermesSessionId: sessionId,
                 createdAt: at,
@@ -4223,8 +4220,7 @@ http
                 changedAt: at,
                 titleEdited: true,
                 canvasId,
-                opener,
-                openerAt: at,
+                ...(opener ? { opener: oneLine(opener, MAX_OPENER), openerAt: at } : {}),
               },
             })
             noteEvent("chats", chatId, key)

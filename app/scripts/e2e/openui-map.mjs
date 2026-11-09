@@ -1,4 +1,4 @@
-import { app, assert, basemapOf, centreOf, dragBy, flow, pass, settled } from "./lib.mjs"
+import { app, assert, basemapOf, centreOf, dragBy, flow, pass, settled, swipeBy } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const MAP = "[data-slot=map]"
@@ -81,29 +81,8 @@ async function wheel(page, dy) {
   await settled(page)
 }
 
-/**
- * One finger over the map, moving `dy` pixels: a thumb's swipe, sent through the browser's own input
- * pipeline so `touch-action` decides what it does — scrolling the thread, or the map's pan.
- */
-async function swipe(page, dy) {
-  const at = await centreOf(page, MAP)
-  const client = await page.context().newCDPSession(page)
-  const steps = 10
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: at.x, y: at.y }],
-  })
-  for (let step = 1; step <= steps; step += 1) {
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ x: at.x, y: Math.round(at.y + (dy * step) / steps) }],
-    })
-    await page.waitForTimeout(16)
-  }
-  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
-  await client.detach()
-  await settled(page)
-}
+/** One finger over the map, which `touch-action` decides the meaning of: scroll, or the map's pan. */
+const swipe = async (page, dy) => swipeBy(page, await centreOf(page, MAP), dy)
 
 async function drag(page, dx, dy) {
   await dragBy(page, await centreOf(page, MAP), dx, dy)

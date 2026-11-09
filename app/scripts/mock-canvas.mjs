@@ -16,17 +16,15 @@ function titleOf(text) {
   return flat.length > TITLE_CHARS ? `${flat.slice(0, TITLE_CHARS - 1)}…` : flat
 }
 
+const escapeHtml = (text) =>
+  String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
 /**
- * What the mock's bot writes: a page in the app's own theme tokens, as a canvas's guide asks. Its
- * count and its box are the canvas's own data, kept through the page's bridge the way a real canvas
- * keeps state, and its Leave button is a page that asks to go to an outside URL — the sandbox holds
- * it, which is what the flow drives.
+ * What the mock's bot writes: a page in the app's own theme tokens, its count and box kept in the
+ * canvas's own data through the page's bridge, and a Leave button that asks to go to an outside URL.
  */
-function page(prompt, title, version) {
-  const escaped = String(prompt)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
+function page(prompt, title, version, edited) {
+  const promptText = escapeHtml(prompt)
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -50,8 +48,8 @@ function page(prompt, title, version) {
     </style>
   </head>
   <body>
-    <h1>${title}</h1>
-    <p>${escaped}</p>
+    <h1>Deck checklist</h1>
+    <p>${promptText}</p>
     <div class="card row">
       <label><input type="checkbox" id="done"> Done</label>
       <button id="leave">Leave</button>
@@ -59,6 +57,7 @@ function page(prompt, title, version) {
     <div class="card">
       <div class="value" id="value">0</div>
       <p>Version ${version} of this canvas, drawn from what its bot wrote.</p>
+      ${edited ? `<p id="edited">${escapeHtml(edited)}</p>` : ""}
       <button id="add">Add one</button>
     </div>
     <div class="card">
@@ -88,7 +87,6 @@ function page(prompt, title, version) {
             console.error("canvas data:", error);
           });
         });
-        // The box is the canvas's too, so it opens ticked after a version the bot wrote over it.
         var box = document.getElementById("done");
         store.list("checks").then(function (rows) {
           for (var i = 0; i < rows.length; i += 1) {
@@ -96,14 +94,14 @@ function page(prompt, title, version) {
               box.checked = true;
             }
           }
-        }).catch(function () {});
+        }).catch(function (error) {
+          console.error("canvas data:", error);
+        });
         box.addEventListener("change", function () {
           store.put("checks", "done", { done: box.checked }).catch(function (error) {
             console.error("canvas data:", error);
           });
         });
-        // A page that asks to leave for an outside URL: the app's own policy is what holds it there,
-        // and the flow reads both the app's address and this document after the tap.
         document.getElementById("leave").addEventListener("click", function () {
           location.href = "https://example.com/gone";
         });
@@ -126,6 +124,8 @@ function page(prompt, title, version) {
 
 export function createCanvasStore() {
   const canvases = new Map()
+  // The canvas a run's session edits, so a turn in a chat finds its canvas without walking them all.
+  const bySession = new Map()
 
   /**
    * The greatest version stored under the record's pointer, as the plugin's `_greatest_below` reads:
@@ -174,26 +174,36 @@ export function createCanvasStore() {
   // answers, so a client that renamed or pinned a canvas keeps the page it already draws.
   const record = (c) => ({ ...summary(c), can_undo: below(c) !== null })
 
-  return { canvases, summary, record, full, below }
+  return { canvases, bySession, summary, record, full, below }
+}
+
+/**
+ * Writes the canvas's next version, as `canvases.py`'s `_commit` does: the history above the record's
+ * pointer goes first, so an undo leaves no redo and the pointer's version is the only row at its
+ * number, then the page is built from what the version was asked to say. The canvas's data — the
+ * box, the count — sits outside the versions, so a new one opens with what the reader left.
+ */
+function writeVersion(canvas, words) {
+  canvas.version += 1
+  canvas.at = Date.now()
+  canvas.versions = canvas.versions.filter((one) => one.version < canvas.version)
+  const edited = typeof words === "string" ? words.replace(/\s+/g, " ").trim().slice(0, 200) : ""
+  canvas.versions.push({
+    version: canvas.version,
+    html: page(canvas.prompt, canvas.title, canvas.version, edited),
+    tools: canvas.tools,
+  })
+  if (canvas.versions.length > KEEP) canvas.versions.shift()
 }
 
 /**
  * The version a turn in a canvas's own chat writes: the mock's stand-in for the bot calling
- * `canvas_edit`, the tool a real canvas session is equipped with (`canvases.py`). The page is rebuilt
- * at the next version, and the canvas's data — the box, the count — sits outside the versions, so a
- * new one opens with what the reader left.
+ * `canvas_edit`, the tool a real canvas session is equipped with (`canvases.py`).
  */
-export function editCanvasSession(store, sessionId) {
-  const canvas = [...store.canvases.values()].find((one) => one.session_id === sessionId)
+export function editCanvasSession(store, sessionId, words) {
+  const canvas = store.bySession.get(sessionId)
   if (!canvas) return null
-  canvas.version += 1
-  canvas.at = Date.now()
-  canvas.versions.push({
-    version: canvas.version,
-    html: page(canvas.prompt, canvas.title, canvas.version),
-    tools: canvas.tools,
-  })
-  if (canvas.versions.length > KEEP) canvas.versions.shift()
+  writeVersion(canvas, words)
   return canvas
 }
 
@@ -205,7 +215,7 @@ export async function handleCanvas(
   store,
 ) {
   if (!path.startsWith("/api/plugins/gots/canvases")) return false
-  const { canvases, summary, full, below } = store
+  const { canvases, bySession, summary, full, below } = store
   const fail = (status, message, code) =>
     json(res, status, { error: { message, ...(code ? { code } : {}) } })
   /** Whether the version the pointer names declared ``tool``. */
@@ -435,27 +445,22 @@ export async function handleCanvas(
         prompt,
       }
       canvases.set(canvas.id, canvas)
+      bySession.set(canvas.session_id, canvas)
       openChat?.({
         chatId,
         sessionId: canvas.session_id,
+        profileId: body?.profile_id ?? null,
         title,
         canvasId: canvas.id,
         opener: prompt,
         at: now,
       })
       // The gap is what lets the screen draw version 0 — "your bot is building it" — before the
-      // page lands.
+      // page lands, with room for a phone to raise its sheet in the meantime.
       setTimeout(() => {
-        canvas.version += 1
-        canvas.at = Date.now()
-        canvas.versions.push({
-          version: canvas.version,
-          html: page(prompt, title, canvas.version),
-          tools: canvas.tools,
-        })
-        if (canvas.versions.length > KEEP) canvas.versions.shift()
+        writeVersion(canvas)
         noteEvent("canvas", canvas.session_id)
-      }, 1500)
+      }, 2500)
       json(res, 202, { object: "gots.canvas", canvas: full(canvas) })
       return true
     }
@@ -522,6 +527,7 @@ export async function handleCanvas(
 
   if (req.method === "DELETE") {
     canvases.delete(canvas.id)
+    bySession.delete(canvas.session_id)
     noteEvent("canvas", canvas.session_id)
     json(res, 200, { object: "gots.canvas.deleted", deleted: true, id: canvas.id })
     return true

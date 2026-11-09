@@ -82,7 +82,7 @@ sequenceDiagram
 5. **The docs say what the flow holds.** The audit row's argument (why a stay: sandbox, geometry, a
    real gesture, a host's own versions), the counts it moves, ADR 0114 noting the outside-URL leg is
    now measured, and the glossary's canvas sheet row naming the flow. Goals: G6. After: 4. Layers:
-   docs. Check: `node --experimental-strip-types --test scripts/test-e2e-registry.mjs` green.
+   docs. Check: `node --experimental-strip-types --test scripts/test-e2e-registry.mjs` green. Done.
 
 ## Decisions
 
@@ -101,6 +101,20 @@ sequenceDiagram
   a box and a Leave button they did not have. No flow does yet.
 - Chromium blocks the frame's outside navigation through the app's own `frame-src 'self'`; a browser
   that did not would fail this leg, which is the claim ADR 0114 says is unchecked in Safari.
+- The mock has no `canvas_edit`: it writes a version on any settled turn in a canvas's chat and puts
+  the turn's words in the page, so the flow proves the app re-reads a version and draws it, not that
+  the host refused or accepted an edit. The plugin's scan refusals (secret, >256 KB, incomplete
+  document, an outside resource) are unrepresented — plugin-tier work, its own ticket.
+- A page that navigates while it is still parsing fires one load, already the browser's error page,
+  so it is never drawn at all and the redraw cannot reach it. A page that reloads itself spends the
+  one redraw and is then told so. ADR 0114 and the glossary say exactly that.
+- A tick written as a version lands can be drawn from the device's copy before the write's answer
+  arrives; it corrects on the next version. The flow awaits the write's own answer, so it cannot see
+  the race.
+- The on-screen keyboard is outside the flow (Playwright has none): iOS, which ignores
+  `interactive-widget=resizes-content`, may hold the composer behind it. Android resizes `dvh`.
+- The composer offers Point at the full stop too, where no part of the page is on screen and the arm
+  has nothing to land on. An affordance for another ticket.
 
 ## Not now
 

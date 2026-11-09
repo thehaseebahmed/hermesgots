@@ -230,8 +230,11 @@ export async function flow(
   // than anything a user has, and its own panel is driven by hand, so a flow hides it and drives the
   // app the reader gets.
   await page.addInitScript(() => {
+    // `[data-reticle-overlay]` is the root the `@reticlehq/browser` presenter mounts in this image
+    // (`presenter/shell`), and hiding it is what keeps its button off the app's bottom-right corner.
+    // A frame has no devtools of its own, and a canvas's page is the document under test.
+    if (window.top !== window) return
     const hide = () => {
-      if (document.querySelector("style[data-e2e-devtools]")) return
       const style = document.createElement("style")
       style.setAttribute("data-e2e-devtools", "")
       style.textContent = "[data-reticle-overlay]{display:none !important}"
@@ -573,6 +576,33 @@ export const centreOf = (page, selector) =>
     const box = document.querySelector(sel).getBoundingClientRect()
     return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }
   }, selector)
+
+/**
+ * One finger from `at`, moving `dy` px down the screen: a thumb's swipe, sent through the browser's
+ * own input pipeline so `touch-action` and the handler decide what it does. Ten moves, a frame apart,
+ * as a hand makes them, and settled afterwards.
+ */
+export async function swipeBy(page, at, dy) {
+  const client = await page.context().newCDPSession(page)
+  try {
+    const steps = 10
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: at.x, y: at.y }],
+    })
+    for (let step = 1; step <= steps; step += 1) {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: at.x, y: Math.round(at.y + (dy * step) / steps) }],
+      })
+      await page.waitForTimeout(16)
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+  } finally {
+    await client.detach()
+  }
+  await settled(page)
+}
 
 /** One finger, or a mouse, dragging from `at` by the given px, settled afterwards. */
 export async function dragBy(page, at, dx, dy) {

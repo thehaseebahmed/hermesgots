@@ -290,6 +290,47 @@ test(
 )
 
 test(
+  "a page that leaves twice is told so, not drawn again for ever",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat("c1")
+    const load = async () => {
+      const frame = find("iframe[data-canvas-frame]") as HTMLIFrameElement | null
+      if (!frame) return
+      await act(async () => {
+        frame.dispatchEvent(new Event("load"))
+      })
+    }
+    await mount(
+      <MemoryRouter initialEntries={["/canvas/c1"]}>
+        <Routes>
+          <Route path="/canvas/:id" element={<CanvasView />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the frame to draw")
+        // Each press is the page leaving. It is drawn again once — a new frame — and the escape after
+        // that is spent, so the loop ends with the words rather than another frame.
+        let drawnAgain = 0
+        let previous = find("iframe[data-canvas-frame]")
+        for (let press = 0; press < 6 && find("iframe[data-canvas-frame]"); press += 1) {
+          await load()
+          const now = find("iframe[data-canvas-frame]")
+          if (now && now !== previous) drawnAgain += 1
+          previous = now
+        }
+        assert.equal(drawnAgain, 1, "the page that left is drawn again, once")
+        await until(
+          () => Boolean(document.body.textContent?.includes("keeps trying to leave")),
+          "the page that keeps leaving to be said so",
+        )
+        assert.equal(find("iframe[data-canvas-frame]"), null, "the frame is not drawn again")
+      },
+    )
+  }),
+)
+
+test(
   "a second canvas opens at its own top",
   atWidth(390, async () => {
     // One screen draws every canvas's address — it is not keyed on the id — so where the first page

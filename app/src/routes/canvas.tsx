@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   EllipsisIcon,
@@ -212,6 +212,9 @@ export function CanvasView() {
   const large = useLarge()
   const [editing, setEditing] = useState(false)
   const [undoing, setUndoing] = useState(false)
+  // How many times the frame has been drawn for this version (a document that left is drawn again),
+  // and whether that one redraw was already spent.
+  const [escapedFor, setEscapedFor] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -255,23 +258,31 @@ export function CanvasView() {
   const { summaries, usage, providerUsage, limit } = useChatSurface(chat, profile, () =>
     setUsageOpen(true),
   )
-  const drawn = useMemo(() => {
-    if (!html || css === null) return null
-    const tokens = themeTokens(readTheme())
-    try {
-      return {
-        document: canvasDocument(html, {
-          mode,
-          tokens,
-          css,
-          libraries: CANVAS_LIBRARIES,
-          scroll: scrolled.current.id === id ? scrolled.current.at : 0,
-        }),
+  // The document at a position, built once for every draw: the reader's page, and the page drawn
+  // again where they left it.
+  const documentAt = useCallback(
+    (scroll: number) => {
+      if (!html || css === null) return null
+      try {
+        return {
+          document: canvasDocument(html, {
+            mode,
+            tokens: themeTokens(readTheme()),
+            css,
+            libraries: CANVAS_LIBRARIES,
+            scroll,
+          }),
+        }
+      } catch {
+        return { error: "This canvas can't be drawn: its document has no head." }
       }
-    } catch {
-      return { error: "This canvas can't be drawn: its document has no head." }
-    }
-  }, [id, html, mode, css])
+    },
+    [html, mode, css],
+  )
+  const drawn = useMemo(
+    () => documentAt(scrolled.current.id === id ? scrolled.current.at : 0),
+    [documentAt, id],
+  )
 
   // The page says where it has been scrolled to, and only this screen's own frame is heard: a message
   // from any other window is not the canvas talking.
@@ -343,22 +354,37 @@ export function CanvasView() {
     if (answers.current.size) tellPage(true)
   }
 
-  // A document that leaves the version it was drawn from — a page that sets `location` to an outside
-  // URL, or one that reloads itself — is refused by the app's own `frame-src 'self'`, and the browser
-  // leaves the frame on its error page. The canvas is drawn again from the same version rather than
-  // left blank: the refusal is the boundary, and this is what keeps the reader on their page inside
-  // it. Counted per drawn document, since React draws a new frame for each version and mode: its
-  // first load is the one React gave it, and any load after that is the page's own doing.
+  // A page that leaves the document it was drawn from — `location` to an outside URL, or a reload —
+  // is refused by the app's own `frame-src 'self'`, and the browser leaves its error page in the
+  // frame. The same version is drawn again where the reader is: the refusal is the boundary, and
+  // this keeps them on their page inside it. A load of the document already shown is the page's own
+  // doing, since React gives each document one load; one redraw per version and then words, so a
+  // page that leaves on every load is not redrawn at the frame's pace for ever.
   const frameKey = `${canvas?.id}:${canvas?.version}:${mode}`
-  const loads = useRef<{ key: string; count: number }>({ key: "", count: 0 })
+  const [redrawn, setRedrawn] = useState<{ key: string; document: string } | null>(null)
+  const loads = useRef({ document: "", count: 0 })
+  const drawnDocument = drawn?.document ?? ""
+  const shownDocument = redrawn?.key === frameKey ? redrawn.document : drawnDocument
+  // A version number is reused after an undo, so a new document — not a new number — is what starts
+  // the redraw and the give-up words afresh.
+  useEffect(() => {
+    setRedrawn(null)
+    setEscapedFor("")
+  }, [drawnDocument])
+  const escaped = escapedFor === frameKey
   const frameLoaded = () => {
-    if (loads.current.key !== frameKey) loads.current = { key: frameKey, count: 1 }
-    else loads.current.count += 1
-    if (loads.current.count > 1 && frame.current && drawn?.document) {
-      // The redraw's own load is the first of a fresh count, so drawing again never draws again.
-      loads.current = { key: frameKey, count: 0 }
-      frame.current.srcdoc = drawn.document
+    if (loads.current.document !== shownDocument) {
+      loads.current = { document: shownDocument, count: 1 }
+      return
     }
+    loads.current.count += 1
+    if (loads.current.count === 1 || !shownDocument) return
+    if (redrawn?.key === frameKey) return setEscapedFor(frameKey)
+    // A new frame is what draws the page again — the same version, at the reader's own position.
+    const document =
+      documentAt(scrolled.current.id === id ? scrolled.current.at : 0)?.document ?? ""
+    loads.current = { document, count: 0 }
+    setRedrawn({ key: frameKey, document })
   }
 
   // The page's own data and its calls through the app: a data read is answered from the copy this
@@ -489,13 +515,17 @@ export function CanvasView() {
             </p>
           ) : drawn?.error ? (
             <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
+          ) : escaped ? (
+            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
+              This page keeps trying to leave. Open it again from its chat.
+            </p>
           ) : drawn?.document ? (
             <iframe
               ref={frame}
-              key={`${canvas?.id}:${canvas?.version}:${mode}`}
+              key={redrawn?.key === frameKey ? `${frameKey}:again` : frameKey}
               title={canvas?.title ?? "Canvas"}
               sandbox="allow-scripts"
-              srcDoc={drawn.document}
+              srcDoc={shownDocument}
               onLoad={frameLoaded}
               className="size-full rounded-2xl border bg-background"
               data-canvas-frame
