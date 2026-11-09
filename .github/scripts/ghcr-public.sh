@@ -4,16 +4,18 @@
 #   usage: ghcr-public.sh <image>[:<tag>] [<tag>]
 #   e.g.:  ghcr-public.sh ghcr.io/thehaseebahmed/gots-dev:latest
 #
-# The question is not whether the image exists but who can obtain it: the sandbox that runs Gots
-# carries no registry credentials, so a package left private is an image only its owner's machine
-# can refresh — and a stale copy keeps answering instead. An anonymous pull token is granted for a
-# public package and refused for a private one, which is the whole test.
+# The sandbox that runs Gots carries no registry credentials: a package left private is an image
+# only its owner's machine can refresh, and the stale copy keeps answering instead.
 #
-# Exit 0 when the token and the manifest both answer, 1 when either is refused (naming the settings
-# page where visibility is changed), 2 on a usage error.
+# Exit 2 for a ref that is not a ghcr.io one or no ref at all; a refused token, a non-200 manifest
+# and an unreachable registry all exit 1, each naming the settings page where visibility is changed.
 set -euo pipefail
 
-ref=${1:?usage: ghcr-public.sh <image>[:<tag>] [<tag>]}
+if [ $# -lt 1 ]; then
+  echo "usage: ghcr-public.sh <image>[:<tag>] [<tag>]" >&2
+  exit 2
+fi
+ref=$1
 case "$ref" in
   ghcr.io/*) ;;
   *)
@@ -32,8 +34,6 @@ if [ -z "$tag" ]; then
   esac
 fi
 
-# A package's settings page is keyed by its own name, which is the last segment of the repository
-# path; the registry path can be longer.
 owner=${repo%%/*}
 name=${repo##*/}
 settings="https://github.com/users/${owner}/packages/container/${name}/settings"
@@ -55,8 +55,9 @@ token_status=$(curl -sS --max-time 30 -o "$temporary/token" -w '%{http_code}' \
 token=$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$temporary/token")
 [ -n "$token" ] || refused "the token answer carried none"
 
-# One Accept header, comma-separated: ghcr.io reads a single header, and a repeated one makes an OCI
-# index answer 404 with `MANIFEST_UNKNOWN` however many types the request lists.
+# One Accept header, comma-separated: ghcr.io honours one, so the four types split across four `-H`
+# lines made this image's OCI manifest answer 404 with `MANIFEST_UNKNOWN`, while the one list answers
+# 200. Measured both ways on ghcr.io/thehaseebahmed/gots-dev:latest.
 status=$(curl -sS --max-time 30 -o "$temporary/manifest" -D "$temporary/headers" \
   -w '%{http_code}' \
   -H "Authorization: Bearer $token" \

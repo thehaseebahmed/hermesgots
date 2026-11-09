@@ -123,10 +123,10 @@ jobs:
           # image itself has already been built.
           cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
 
-      # What the image promises is on PATH for the shell that will call it: Debian's /etc/profile
-      # rebuilds PATH for login shells, so `gh`, `pnpm`, `python3`, `playwright` and `reticle` are
-      # looked up again here rather than assumed from the layer that installed them. An image the
-      # sandbox keeps is one whose `gh` resolves; this is the cheapest place to prove it.
+      # `bash -lc` runs Debian's /etc/profile, which rebuilds PATH: a tool installed outside
+      # /usr/local/bin, or into a venv, is only found from the login shell the sandbox runs. The
+      # import is the other half of that trap — the interpreter that resolves has to be the one
+      # carrying cryptography.
       - name: Verify the image's tools
         if: github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'
         run: |
@@ -163,11 +163,11 @@ jobs:
             "${{ steps.subject.outputs.tag }}")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      # Publishing is not the same as being obtainable. A package left private answers only the
+      # Publishing is not the same as being obtainable. A private package answers only the
       # credentials that own it, and the sandbox that runs Gots carries none: it keeps the copy it
       # already has, however old, which is how a container without `gh` outlives the release that
-      # added it. So the run that publishes proves a pull with no login works, and goes red naming
-      # the settings page when it does not.
+      # added it. So the run that publishes asks for an anonymous token and the tag's manifest, and
+      # goes red with the settings page when the registry refuses either.
       - name: Prove the image is pullable without a login
         if: github.event_name != 'pull_request'
         run: |
