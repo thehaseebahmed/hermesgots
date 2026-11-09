@@ -31,6 +31,7 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    Layers: component tests. Check: `test-rooms-list.tsx` beside two other files, eight runs — before, one
    run in three failed there (and one was SIGKILLed); after, 8/8 green, which is what this branch measured
    with the wait in place.
+   Done.
 2. **No test hands a found element to assert's equality.** A `absent()` / `shown()` pair in the harness
    answers presence with a boolean, and every `assert.equal(find(...), …)` becomes a check of that
    boolean; `assert.equal(element, null)` makes Node build a diff by inspecting the element, and the

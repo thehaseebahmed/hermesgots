@@ -530,13 +530,12 @@ test("a room whose row moved is read again, and its mark follows the Host", asyn
     await syncNow()
     await settle()
     await until(
-      async () => (await needOf())?.seq === undefined,
-      "the device's reading of a room that no longer asks",
-    )
-    assert.equal(
-      find(`a[href="/c/${ROOM}"] [data-needs-you]`),
-      null,
+      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) === null,
       "an answered room's row says nothing",
+    )
+    assert.ok(
+      (await needOf())?.seq === undefined,
+      "the device's reading of a room that no longer asks",
     )
   })
 })
