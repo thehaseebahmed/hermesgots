@@ -65,6 +65,33 @@ test("a screen the menu opened leaves the press to the app", async () => {
 })
 
 test(
+  "a Settings screen a chat opened steps back to the chat",
+  atWidth(390, async () => {
+    await seedSettings()
+    await db.profiles.clear()
+    await db.profiles.put(botProfile("settings"))
+    mediaHost({ features: ["general_page"], general: GENERAL })
+    const history = atDepth(1)
+    try {
+      await mount(
+        <MemoryRouter initialEntries={["/settings"]}>
+          <Routes>
+            <Route path="/settings/:section?/:botId?/:tab?/:sub?" element={<SettingsPage />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(() => Boolean(document.querySelector('a[href="/settings/appearance"]')), "the menu")
+          assert.equal(pressBack(), "screen", "the menu takes the press")
+          assert.deepEqual(history.backs, [1], "and steps back to the chat behind it")
+        },
+      )
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
   "a bot's settings answers the press on a laptop, where its list takes the menu's pane",
   atWidth(1024, async () => {
     await seedSettings()

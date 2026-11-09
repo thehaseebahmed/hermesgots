@@ -53,7 +53,7 @@ export function EmptyState({
       ) : (
         <>
           <p className="max-w-sm text-sm text-muted-foreground">{SETUP_COPY}</p>
-          <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
+          <Button nativeButton={false} render={<Link to="/settings" />} size="lg">
             <SettingsIcon data-icon="inline-start" />
             Open settings
           </Button>

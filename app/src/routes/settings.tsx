@@ -144,7 +144,7 @@ const MenuContext = createContext<{ active?: string; replace: boolean }>({ repla
 export function SettingsPage() {
   const { section, botId, tab, sub, leaf } = useParams()
   const large = useLarge()
-  const { up, root } = useNav()
+  const { up, step, root } = useNav()
   const { account } = useSyncState()
   const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
@@ -158,16 +158,18 @@ export function SettingsPage() {
   // A page's sub-screen: the row's edit or the list it drills into, named by the fourth segment —
   // and, where that segment names a list, the item behind it by the fifth.
   const botSub = botTab && sub ? botSubOf(botTab, sub, leaf) : undefined
-  // A screen sits under the one that opened it: a section under the Settings menu on a phone, a bot's
-  // list under whatever opened it, and a bot's page under its list — on a phone and on a laptop alike,
-  // since from `lg` the list takes the menu's pane and is a step in as well.
+  // A screen sits under the one that opened it: a section under the Settings menu on a phone, and a
+  // bot's list under whatever opened it, on either layout — from `lg` the list takes the menu's pane
+  // and is a step in as well. A page's own entry is its list's on a phone only: at that width the
+  // list's rows `replace` it into the list's entry, which is on screen beside it.
   const botScreen = section === "bots" && Boolean(botId)
   useEffect(() => {
     // A bot's own page on a phone publishes the guard itself — it is the screen that can ask about
     // unsaved changes — so this one would only compete with it.
     if (separate && botScreen && botTab) return
-    // Nothing that isn't a step in publishes a guard: the menu, on either layout, is the first entry.
-    if (!separate && !botScreen) return
+    // The menu itself is a screen a chat can open, and from `lg` so is a section; each steps back to
+    // whatever opened it, and the drawer's own menu — the first entry — leaves the press to the app.
+    if (!separate && !botScreen) return setBackGuard(step("/settings"))
     const back = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab

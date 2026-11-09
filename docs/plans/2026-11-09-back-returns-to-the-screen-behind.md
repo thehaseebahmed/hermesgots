@@ -20,11 +20,11 @@
 | Layer | Status | Goals | Tested at |
 |---|---|---|---|
 | Chat header's menu (`components/chat/chat-actions.tsx`) | changed | G2 | the menu item's navigation type over a memory history |
-| Bot picker and the composer's `/settings` (`components/chat/bot-picker.tsx`, `chat-composer.tsx`) | changed | G2 | the same test, since one rule moves them |
+| Bot picker and the composer's `/settings` (`components/chat/bot-picker.tsx`, `chat-composer.tsx`) | changed | G2 | the chat menu's test covers the rule the three doors share; the picker and the command are the same `navigate` and no test drives them |
 | Settings screens (`routes/settings.tsx`) | changed | G1 | the wide case of the `bot-settings` browser flow, and the two-pane back control |
 | Canvas screen (`routes/canvas.tsx`) | changed | G3 | its header control, and the back rule it registers |
 | Navigation rule (`lib/nav.ts`) | changed | G3 | the rule itself over a stubbed history depth |
-| Android back handling (`lib/native.ts`) | affected | G1 G3 | not reached directly: it calls the guards these screens register |
+| Android back handling (`lib/native.ts`) | changed | G1 G3 | `pressBack`, the press's order, over a mounted screen; the Capacitor listener itself is not driven |
 
 ## Flows
 ### F1: a bot's chat opens its settings, and back returns to the chat (new). Test: "the chat's Bot settings is a step in"
@@ -97,7 +97,9 @@ leaves the app. Its test is named in F3's step.
 2. **A way into Settings from inside the app is a step in.** The chat's `Bot settings` opens that
    bot's settings; the bot picker's `Link a bot` and the composer's `/settings` open Settings the
    same way, one rule for the three. `/new` stays a root. Goals: G2. After: 1. Layers: chat header's
-   menu, bot picker, composer. Check: Step 1's chat test green, the component suite green.
+   menu, bot picker, composer. The Settings menu is a step in too, now that a chat can open it, and
+   steps back to that chat rather than arming the app's exit. Check: Step 1's chat test green, the
+   menu's own guard test green, the component suite green.
 
    Done.
 
