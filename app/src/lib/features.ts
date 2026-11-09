@@ -69,3 +69,37 @@ export function usePluginFeature(server: PluginServer, feature: string): PluginF
 export function usePluginFeatureOn(server: PluginServer, feature: string): boolean {
   return usePluginFeature(server, feature) === "yes"
 }
+
+/**
+ * One feature across several bots' servers, keyed by connection: every connection the device holds is
+ * asked, because a control about something no bot owns — the app's New room is every Host's, not one
+ * bot's (ADR 0115) — has to know which Host answers it. A hook cannot be called in a loop, so this is
+ * the one place that read is made for a set.
+ */
+export function usePluginFeatureByServer(
+  servers: PluginServer[],
+  feature: string,
+): Record<string, PluginFeatureAnswer> {
+  const configs = servers.map((server) => serverConfig(server))
+  const held = answered.use()
+  const keys = configs.map((config) => (config.baseUrl && config.apiKey ? connectionKey(config) : ""))
+  const live = keys.filter(Boolean)
+  usePoll(
+    () => {
+      for (const config of configs) if (config.baseUrl && config.apiKey) void readFeatures(config)
+    },
+    false,
+    [live.join(" ")],
+    { active: live.length > 0, onShow: false },
+  )
+  const answers: Record<string, PluginFeatureAnswer> = {}
+  for (const key of keys) if (key) answers[key] = answer(held.get(key), feature)
+  return answers
+}
+
+/** That feature across several servers: `yes` when any answers it, `no` when none of those that answered does. */
+export function useAnyPluginFeature(servers: PluginServer[], feature: string): PluginFeatureAnswer {
+  const answers = Object.values(usePluginFeatureByServer(servers, feature))
+  if (answers.includes("yes")) return "yes"
+  return answers.length > 0 && answers.every((one) => one === "no") ? "no" : "unknown"
+}

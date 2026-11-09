@@ -223,6 +223,8 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    `app/scripts/e2e/sidebar-collapse.mjs`, which reads the footer's controls by name in both rails; and
    `pnpm e2e room-lifecycle`'s create leg, red on the mock's 405 and green after.
 
+   Done. (The e2e leg was not written: this container has no browser, so `pnpm e2e` cannot run here.)
+
 5. **A room can be renamed from its own menu.** A room's screen mounts a menu of its own — one control
    in the header's actions slot, gated on the bot that answers for the room, drawn only where that bot
    advertises `rooms_write` — holding Rename, which asks for the name in step 2's dialog with a pending
@@ -233,6 +235,8 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    Check: `app/scripts/test-room-actions.tsx` — "a rename is one event under the id the app minted, and
    the header takes the Host's name", "a refusal keeps the room as it was, in the Host's words", "a host
    that cannot write draws no menu" — red then green; `pnpm e2e room-lifecycle`'s rename leg.
+
+   Done. (The e2e leg waits on the flow above.)
 
 6. **A room can be disbanded from its own menu, and the room goes.** The menu's second control asks
    first, saying it is permanent and that the Host stops the room's work; Disband sends the cancel id
@@ -247,6 +251,8 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    `pnpm e2e room-lifecycle`'s disband leg, the row gone from the sidebar and still gone after a
    reload; `app/scripts/test-rooms-list.tsx` stays green, proving another device's row leaves by the
    projection.
+
+   Done. (The e2e leg waits on the flow above.)
 
 ## Decisions
 

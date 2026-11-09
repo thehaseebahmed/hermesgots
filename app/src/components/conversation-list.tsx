@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { NewRoomButton } from "@/components/room/new-room"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -727,20 +728,25 @@ export function ConversationList({
         )}
       >
         <ProfileButton onNavigate={onNavigate} />
-        {botThreads === false && (
-          <Button
-            size="lg"
-            className={cn("h-11 rounded-full", collapsed ? "w-11 px-0" : "px-5")}
-            aria-label="New chat"
-            onClick={() => {
-              root("/")
-              onNavigate?.()
-            }}
-          >
-            <PlusIcon data-icon={collapsed ? undefined : "inline-start"} />
-            {!collapsed && "New chat"}
-          </Button>
-        )}
+        <div className={cn("flex items-center gap-2", collapsed && "flex-col gap-2")}>
+          {/* A room is nobody's bot's, so it is started from the footer both layouts share (ADR 0122);
+              the control draws itself only where a Host can make one. */}
+          <NewRoomButton collapsed={collapsed} onNavigate={onNavigate} />
+          {botThreads === false && (
+            <Button
+              size="lg"
+              className={cn("h-11 rounded-full", collapsed ? "w-11 px-0" : "px-5")}
+              aria-label="New chat"
+              onClick={() => {
+                root("/")
+                onNavigate?.()
+              }}
+            >
+              <PlusIcon data-icon={collapsed ? undefined : "inline-start"} />
+              {!collapsed && "New chat"}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   )
