@@ -237,6 +237,59 @@ def scan(html: Any) -> None:
             )
 
 
+# --- the guide's advice ---------------------------------------------------------------------------
+
+# The guide tells a bot to spend colour on the tokens: a literal is a colour the app never set for
+# the reader's mode, so the page drawn in the other one is the page that breaks. A bot is told here,
+# where it can still fix it, rather than by a user looking at the wrong colours.
+_LITERAL_COLOUR = re.compile(r"(?i)#(?:[0-9a-f]{3}|[0-9a-f]{6})\b|\b(?:rgba?|hsla?|oklch)\(")
+# A form's submit is cancelled in place by the sandbox's guard, so a form whose handler is nowhere in
+# the document is a button that does nothing: the page's own answer has to hang off it somewhere.
+_FORM = re.compile(r"(?is)<form\b")
+_FORM_HANDLER = re.compile(r"(?i)addEventListener\(\s*[\"']submit[\"']|\bonsubmit\s*=")
+# A canvas opens at 390px in one hand, so a width set past it scrolls the phone sideways. A maximum
+# is no such thing — it is what keeps a page in its place — so only `width` and `min-width` are read,
+# and only in px: a percentage is the screen's width rather than the page's own.
+_FIXED_WIDTH = re.compile(r"(?i)(?<![-\w])(?:min-)?width\s*:\s*(\d{2,4})px")
+PHONE_WIDTH = 390
+
+
+def warnings(html: Any) -> List[str]:
+    """The guide's own rules, as advice the answer to a write carries: empty when the page keeps them.
+
+    Advice and never a gate: the version is stored either way, because the scan is what refuses and
+    this is only what the guide would have said. So nothing here raises — a page the rules can't be
+    read out of is a page answered without advice, which is no reason to lose a write.
+    """
+    text = html if isinstance(html, str) else ""
+    try:
+        markup = _markup(text)
+        said: List[str] = []
+        literal = _LITERAL_COLOUR.search(markup)
+        if literal:
+            # A function's name is what was matched, minus its bracket: `rgb()` reads, `rgb(` doesn't.
+            written = literal.group(0) + (")" if literal.group(0).endswith("(") else "")
+            said.append(
+                f"The page writes {written} where a token belongs: a literal breaks in the other "
+                "mode, so spend colour on the tokens."
+            )
+        if _FORM.search(markup) and not _FORM_HANDLER.search(text):
+            said.append(
+                "The page has a <form> and no submit handler, and its submit is cancelled in place: "
+                "handle the button's click."
+            )
+        wide = next((int(px) for px in _FIXED_WIDTH.findall(markup) if int(px) > PHONE_WIDTH), None)
+        if wide is not None:
+            said.append(
+                f"The page sets a {wide}px width, past the {PHONE_WIDTH}px phone it opens on: let "
+                "it fill the screen instead."
+            )
+        return said
+    except Exception:
+        logger.debug("gots: couldn't read a canvas for the guide's warnings", exc_info=True)
+        return []
+
+
 # --- the record ----------------------------------------------------------------------------------
 
 _COLUMNS = (
@@ -1242,7 +1295,8 @@ WRITE_SCHEMA = {
         "Canvas sessions only: writes the canvas's whole HTML document as its next version. The "
         "document must be complete — doctype, html lang, a title and a viewport meta — hold no "
         "secret and load nothing from outside itself, or the write is refused whole and the canvas "
-        "keeps the version it had."
+        "keeps the version it had. The answer carries `warnings`: what the design guide says this "
+        "page breaks, as advice. A warning never refuses the write."
     ),
     "parameters": {
         "type": "object",
@@ -1286,7 +1340,8 @@ EDIT_SCHEMA = {
         "Canvas sessions only: changes the canvas by find and replace, stored as one new version. "
         "Each find has to match the current document exactly once, and either every pair is applied "
         "or nothing is written — so a small change costs no whole rewrite. Write the page again "
-        "with canvas_write when the change is too big to name."
+        "with canvas_write when the change is too big to name. The answer carries `warnings`: what "
+        "the design guide says the page now breaks, as advice. A warning never refuses the edit."
     ),
     "parameters": {
         "type": "object",
@@ -1408,6 +1463,7 @@ def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[
             "title": found["title"],
             "version": found["version"],
             "written": True,
+            "warnings": warnings(found["html"]),
         },
     )
 
@@ -1425,6 +1481,7 @@ def handle_edit(args: Any, task_id: Optional[str] = None, session_id: Optional[s
             "title": found["title"],
             "version": found["version"],
             "edited": True,
+            "warnings": warnings(found["html"]),
         },
     )
 

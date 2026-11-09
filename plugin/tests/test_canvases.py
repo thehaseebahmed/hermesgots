@@ -186,6 +186,57 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(second["version"], 2)
         self.assertEqual(canvases.listing(self.path)[0]["version"], 2)
 
+    def test_a_write_answers_with_the_guides_warnings(self) -> None:
+        # A warning is advice beside the answer and never a gate: the version is stored, and the bot
+        # is told what the guide would say before the user ever sees the page.
+        hardcoded = DOCUMENT.replace("<h1>Tip</h1>", '<h1 style="color: #333333">Tip</h1>')
+        handlerless = DOCUMENT.replace("<h1>Tip</h1>", "<form><input><button>Split</button></form>")
+        wider = DOCUMENT.replace("<h1>Tip</h1>", '<div style="width:600px">Tip</div>')
+        clean = DOCUMENT.replace(
+            "<h1>Tip</h1>",
+            "<style>h1{color:var(--primary)}</style>"
+            "<form><button>Split</button></form>"
+            '<script>document.querySelector("form").addEventListener("submit", '
+            "function (event) { event.preventDefault() })</script>",
+        )
+        cases = (
+            ("a colour written as a literal", hardcoded, "literal"),
+            ("a form with no submit handler", handlerless, "submit"),
+            ("a width past the phone", wider, "width"),
+            ("a page that keeps the rules", clean, None),
+        )
+        with mock.patch.object(canvases, "_session_canvas", return_value=self.canvas["id"]):
+            for name, html, word in cases:
+                with self.subTest(name):
+                    answer = json.loads(
+                        canvases.handle_write({"html": html}, session_id=self.canvas["session_id"])
+                    )
+                    self.assertIs(answer["written"], True)
+                    if word is None:
+                        self.assertEqual(answer["warnings"], [])
+                    else:
+                        self.assertEqual(len(answer["warnings"]), 1, answer["warnings"])
+                        self.assertIn(word, answer["warnings"][0])
+            # The version landed either way: advice never refuses a write.
+            self.assertEqual(canvases.current(self.path, self.canvas["id"])["html"], clean)
+            # An edit answers the same field, over the page it has just written.
+            edited = json.loads(
+                canvases.handle_edit(
+                    {
+                        "edits": [
+                            {
+                                "find": "h1{color:var(--primary)}",
+                                "replace": "h1{color:#333333}",
+                            }
+                        ]
+                    },
+                    session_id=self.canvas["session_id"],
+                )
+            )
+            self.assertIs(edited["edited"], True)
+            self.assertEqual(len(edited["warnings"]), 1, edited["warnings"])
+            self.assertIn("literal", edited["warnings"][0])
+
     def test_only_the_newest_twenty_versions_are_kept(self) -> None:
         for _ in range(canvases.KEEP_VERSIONS + 2):
             canvases.write(self.path, self.canvas["id"], DOCUMENT)
