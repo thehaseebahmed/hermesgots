@@ -60,6 +60,8 @@ sequenceDiagram
 2. **A publish proves it.** The Dev image workflow runs the probe over every tag it pushed, on the paths that publish —
    a `main` push or a dispatch. Goals: G1. After: 1. Check: step 1's command is the step's command; a pull request
    publishes nothing and is skipped by the same condition Publish uses.
+
+   Done.
 3. **The image proves its tools.** The Verify step runs `bash -lc` inside the image and fails on the first tool that is
    missing, naming it. Goals: G2. After: none. Check: the same command in this container — a stale build of the same
    image — reports `missing from PATH: gh` and `reticle`, which is the failure it has to catch, while the image CI
