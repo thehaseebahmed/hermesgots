@@ -35,10 +35,10 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 const plain = (value) => JSON.parse(JSON.stringify(value))
 
 /**
- * The bridge's own calls among what a page posted. The page's point half says it is ready on load,
- * so a tap's call is counted among the bridge's rather than everything the page says.
+ * The page's point half says it is ready on load, so a tap's call is counted among the bridge's
+ * rather than everything the page says.
  */
-const askedIn = (posted) => posted.filter((message) => message && message.type === BRIDGE_MESSAGE)
+const bridgeCalls = (posted) => posted.filter((message) => message && message.type === BRIDGE_MESSAGE)
 
 /**
  * The page's half in a realm of its own: every listener it adds (by type, since it listens for two
@@ -585,10 +585,10 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   assert.equal("open" in context.window.canvas, false, "a page can't open anything without a click")
   const link = anchor("https://example.com/a?b=1")
   const tapped = tap(link)
-  assert.equal(askedIn(sent).length, 1, "one open call per tap")
-  assert.deepEqual(plain(askedIn(sent)[0]), {
+  assert.equal(bridgeCalls(sent).length, 1, "one open call per tap")
+  assert.deepEqual(plain(bridgeCalls(sent)[0]), {
     type: BRIDGE_MESSAGE,
-    epoch: askedIn(sent)[0].epoch,
+    epoch: bridgeCalls(sent)[0].epoch,
     call: 1,
     method: "open",
     url: "https://example.com/a?b=1",
@@ -599,24 +599,24 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
     const kept = tap(anchor(href))
     assert.equal(kept.cancels, 0, `${href} is the page's own`)
   }
-  assert.equal(askedIn(sent).length, 1, "and posts nothing")
+  assert.equal(bridgeCalls(sent).length, 1, "and posts nothing")
 
   // An untrusted click (a script's own) and a click with no target ask nothing.
   assert.equal(tap(anchor("https://example.com/scripted"), { trusted: false }).cancels, 0)
   fire("click", { isTrusted: true })
-  assert.equal(askedIn(sent).length, 1)
+  assert.equal(bridgeCalls(sent).length, 1)
 
   // A click the page already answered itself is the page's: its handler ran first and prevented the
   // default, so this link is not also a tab. A page's own drawer must not open a browser beside it.
   const answered = tap(anchor("https://example.com/handled"), { prevented: true })
   assert.equal(answered.cancels, 0, "a handled click is left alone")
-  assert.equal(askedIn(sent).length, 1, "and asks for nothing")
+  assert.equal(bridgeCalls(sent).length, 1, "and asks for nothing")
 
   // A tap on the link's own words walks up to the anchor it is inside.
   const words = { tagName: "SPAN", nodeType: 1, parentNode: link }
   assert.equal(tap(words).cancels, 1)
-  assert.equal(askedIn(sent).length, 2)
-  assert.equal(askedIn(sent)[1].url, "https://example.com/a?b=1")
+  assert.equal(bridgeCalls(sent).length, 2)
+  assert.equal(bridgeCalls(sent)[1].url, "https://example.com/a?b=1")
 })
 
 test("a page's own window.open asks the app once, and only for http(s)", () => {
@@ -634,8 +634,8 @@ test("a page's own window.open asks the app once, and only for http(s)", () => {
   opened.opener = { anything: true }
   assert.deepEqual(opened.opener, { anything: true }, "the opener is the page's to set")
 
-  assert.equal(askedIn(posted).length, 1, "one open call per window.open")
-  const [message] = askedIn(posted)
+  assert.equal(bridgeCalls(posted).length, 1, "one open call per window.open")
+  const [message] = bridgeCalls(posted)
   assert.ok(Number.isInteger(message.call) && message.call > 0, "the call has a number")
   assert.equal(typeof message.epoch, "string")
   assert.ok(message.epoch.length > 0, "and the page that asked")
@@ -665,7 +665,7 @@ test("a page's own window.open asks the app once, and only for http(s)", () => {
   // elsewhere, and asks nothing.
   assert.equal(context.window.open("https://example.com/x", "_self"), null, "_self")
   assert.equal(context.window.open("https://example.com/x", "_SELF"), null, "whatever its case")
-  assert.equal(askedIn(posted).length, 1, "and nothing is posted")
+  assert.equal(bridgeCalls(posted).length, 1, "and nothing is posted")
 })
 
 test("a tap whose page opens the same link asks once", async () => {
@@ -675,7 +675,7 @@ test("a tap whose page opens the same link asks once", async () => {
   const { context, posted, fire } = pageHarness()
   const url = "https://example.com/kept?n=1"
   assert.ok(context.window.open(url, "_blank"), "the page's own open asks the app")
-  assert.equal(askedIn(posted).length, 1, "once for the page's own call")
+  assert.equal(bridgeCalls(posted).length, 1, "once for the page's own call")
 
   const link = {
     tagName: "A",
@@ -700,13 +700,13 @@ test("a tap whose page opens the same link asks once", async () => {
   }
 
   const event = tap()
-  assert.equal(askedIn(posted).length, 1, "one open call for the tap, not two")
+  assert.equal(bridgeCalls(posted).length, 1, "one open call for the tap, not two")
   assert.equal(event.cancels, 1, "the click is cancelled, so the frame doesn't try to leave")
 
   // The page's ask is the tap's only once: the next tap on the same link asks again.
   await settled()
   const later = tap()
-  assert.equal(askedIn(posted).length, 2, "a later tap asks again")
+  assert.equal(bridgeCalls(posted).length, 2, "a later tap asks again")
   assert.equal(later.cancels, 1)
 })
 

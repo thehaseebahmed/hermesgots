@@ -33,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
+import { HEADER_BUTTON } from "@/lib/layout"
 import { useWide } from "@/lib/media"
 import { chosenOf } from "@/lib/model-pick"
 import { useNow } from "@/lib/threads"
@@ -284,7 +285,7 @@ export function ChatActions({
               <Button
                 variant="outline"
                 size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                className={HEADER_BUTTON}
                 aria-label={mainChrome ? "Bot options" : "Chat options"}
               />
             }

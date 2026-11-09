@@ -3,6 +3,7 @@ import { Link } from "react-router"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
+import { HEADER_BUTTON } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
 /**
@@ -26,7 +27,7 @@ export function BackButton({
   floating?: boolean
   icon?: ReactNode
 }) {
-  const look = cn("size-11 shrink-0 rounded-full", floating && "bg-background/80 backdrop-blur")
+  const look = floating ? cn(HEADER_BUTTON, "shrink-0") : "size-11 shrink-0 rounded-full"
   return (
     <Button
       variant="outline"

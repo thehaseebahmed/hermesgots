@@ -59,6 +59,7 @@ import {
   type CanvasChanges,
 } from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
+import { HEADER_BUTTON } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
@@ -76,8 +77,6 @@ import { useNow } from "@/lib/threads"
 
 /** How the tiles are laid out: a phone holds two, a tablet three, a desktop four. */
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
-
-const HEADER_ACTION = "size-11 rounded-full bg-background/80 backdrop-blur"
 
 /**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
@@ -520,7 +519,7 @@ export function CanvasView() {
         className="relative pb-2"
         title={canvas?.title ?? "Canvas"}
         subtitle={
-          <span className="flex min-w-0 items-center gap-1.5">
+          <>
             {profile && <span className="truncate">{profile.name}</span>}
             {canvas?.version ? (
               <>
@@ -536,7 +535,7 @@ export function CanvasView() {
                 </span>
               </>
             ) : null}
-          </span>
+          </>
         }
         showBot={false}
         heading
@@ -547,7 +546,7 @@ export function CanvasView() {
               <Button
                 variant="outline"
                 size="icon-lg"
-                className={HEADER_ACTION}
+                className={HEADER_BUTTON}
                 aria-label="Undo"
                 disabled={undoing}
                 onClick={() => void undo()}
@@ -559,7 +558,7 @@ export function CanvasView() {
               <Button
                 variant="outline"
                 size="icon-lg"
-                className={HEADER_ACTION}
+                className={HEADER_BUTTON}
                 aria-label="Canvas options"
                 onClick={() => setOptionsOpen(true)}
               >

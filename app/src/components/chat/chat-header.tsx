@@ -4,7 +4,7 @@ import { BellOffIcon, MenuIcon } from "lucide-react"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN_BOX, HEADER_BUTTON } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
 /**
@@ -73,7 +73,7 @@ export function ChatHeader({
             <Button
               variant="outline"
               size="icon-lg"
-              className="pointer-events-auto size-11 shrink-0 rounded-full bg-background/80 backdrop-blur md:hidden"
+              className={cn(HEADER_BUTTON, "pointer-events-auto shrink-0 md:hidden")}
               onClick={openDrawer}
               aria-label="Open conversations"
             >
@@ -108,11 +108,15 @@ export function ChatHeader({
               <span
                 data-slot="header-line"
                 className={cn(
-                  "min-w-0 truncate text-[11px] leading-tight text-muted-foreground",
+                  "flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground",
                   centered && "max-w-full",
                 )}
               >
-                {subtitle}
+                {typeof subtitle === "string" ? (
+                  <span className="min-w-0 truncate">{subtitle}</span>
+                ) : (
+                  subtitle
+                )}
               </span>
             )}
           </div>
