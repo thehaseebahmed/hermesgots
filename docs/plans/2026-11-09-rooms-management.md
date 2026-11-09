@@ -307,9 +307,11 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
 - **A room's own lifecycle flow is its own e2e flow, with its own audit row.** Made by the agent: create,
   rename and disband are geometry and a live Host round-trip that no component tier can measure, and
   folding them into `rooms` would not say which part broke.
-- **No new app module: the intents, the ids and the gate live in the room model.** Made by the agent:
-  `rooms.ts` is where a room's rules are already read from — the answerer, the members line, the profile
-  pictures — and a parallel module would be a second name for the same room.
+- **The intents, the ids and the gate live beside the room model, in `room-writes.ts`.** Made by the
+  agent, correcting the plan's first answer (that they live in `rooms.ts`): the node tier loads the room
+  model through `chat-owner.ts` with no bundler's aliases, so a model importing the client cannot be
+  read there — `test-chat-owner.mjs` failed the moment it did. The model keeps what a room is (the
+  answerer, the members line, the pictures, the seats), and the module beside it keeps what a room does.
 
 ## Risks
 
