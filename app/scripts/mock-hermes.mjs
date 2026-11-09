@@ -174,7 +174,7 @@ import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
-import { createCanvasStore, handleCanvas } from "./mock-canvas.mjs"
+import { createCanvasStore, editCanvasSession, handleCanvas } from "./mock-canvas.mjs"
 import { createRoomStore, handleRooms, roomRecords } from "./mock-rooms.mjs"
 import { handleResearch } from "./mock-research.mjs"
 import { durableUserRow } from "./host-row.mjs"
@@ -3873,6 +3873,12 @@ function startRun(req, body, options = {}) {
     // A scenario can name the final message alone, as Hermes's `final_response` carries it.
     const final = output ?? spoken
     run.output = final
+    // A turn in a canvas's own chat is the bot editing it: the plugin equips that session with
+    // `canvas_edit` and nothing else, and the mock stands in for the tool by writing the page's
+    // next version now, so the screen redraws as the turn ends.
+    if (CANVAS && !wake && !run.stopped && !failed) {
+      if (editCanvasSession(CANVASES, run.sessionId)) noteEvent("canvas", run.sessionId)
+    }
     run.usage = {
       input_tokens: prompt_tokens,
       output_tokens: completion_tokens,

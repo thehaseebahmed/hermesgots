@@ -177,6 +177,26 @@ export function createCanvasStore() {
   return { canvases, summary, record, full, below }
 }
 
+/**
+ * The version a turn in a canvas's own chat writes: the mock's stand-in for the bot calling
+ * `canvas_edit`, the tool a real canvas session is equipped with (`canvases.py`). The page is rebuilt
+ * at the next version, and the canvas's data — the box, the count — sits outside the versions, so a
+ * new one opens with what the reader left.
+ */
+export function editCanvasSession(store, sessionId) {
+  const canvas = [...store.canvases.values()].find((one) => one.session_id === sessionId)
+  if (!canvas) return null
+  canvas.version += 1
+  canvas.at = Date.now()
+  canvas.versions.push({
+    version: canvas.version,
+    html: page(canvas.prompt, canvas.title, canvas.version),
+    tools: canvas.tools,
+  })
+  if (canvas.versions.length > KEEP) canvas.versions.shift()
+  return canvas
+}
+
 export async function handleCanvas(
   req,
   res,

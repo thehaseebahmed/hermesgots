@@ -71,7 +71,9 @@ sequenceDiagram
 3. **Mock Hermes edits the canvas when its chat is sent to.** A turn on a canvas's session writes
    version 2 of the page (the mock's stand-in for `canvas_edit`) and notes the canvas event, so the
    sheet's send redraws the page under it with the box still ticked; Undo walks the pointer back.
-   Goals: G6. After: 2. Layers: Mock Hermes. Check: `pnpm e2e canvas` green through the edit and Undo.
+   Goals: G6. After: 2. Layers: Mock Hermes, App shell (the snapped sheet's content fills its visible
+   stop, so the chat's composer is on the screen at half height). Check: `pnpm e2e canvas` green
+   through the edit and Undo. Done.
 4. **The phone's own geometry is asserted.** The sheet is non-modal — no scrim, no `aria-modal`, the
    page above it pressable — the tapped box and the pointed element are above the sheet's top edge,
    the frame is `sandbox="allow-scripts"` with the policy first in its head, and a real one-finger

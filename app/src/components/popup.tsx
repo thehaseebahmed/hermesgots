@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   type ComponentProps,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react"
@@ -224,6 +225,14 @@ const SHEET_STACK = `[transform:translateY(calc(var(--drawer-swipe-movement-y)-v
 
 const SHEET_SNAP = `[transform:translateY(calc(var(--drawer-snap-point-offset)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] ${STACK_LIFT} data-swiping:[transform:translateY(var(--drawer-swipe-movement-y))] ${SHEET_MOTION}`
 
+/**
+ * A snapped sheet's visible height, copied onto its own popup so its content can inherit it: Base
+ * UI registers the stop's offset with `inherits: false`, so only the popup element can read it.
+ */
+const SNAP_VISIBLE = {
+  "--sheet-visible": "calc(100dvh - var(--drawer-snap-point-offset))",
+} as CSSProperties
+
 export function PopupContent({
   className,
   fixedHeight,
@@ -386,6 +395,7 @@ export function PopupContent({
             data-popup-form={form}
             data-toast-above={toastAbove || undefined}
             initialFocus={focus}
+            style={snapped ? SNAP_VISIBLE : undefined}
             className={cn(
               "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
               SHEET_SIZE[size],
@@ -405,7 +415,17 @@ export function PopupContent({
             >
               <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
             </Drawer.Close>
-            <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
+            <Drawer.Content
+              // A snapped sheet is the whole screen tall and rests at a stop: its visible part is the
+              // `100dvh` above the stop's own offset, so its content is laid out in that part rather
+              // than in the full screen's height — which would put a chat's composer below the
+              // screen until the reader dragged the sheet up. The handle above takes its own 3rem.
+              className={cn(
+                "flex min-h-0 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100",
+                !snapped && "flex-1",
+              )}
+              style={snapped ? { height: "calc(var(--sheet-visible) - 3rem)" } : undefined}
+            >
               {bare ? (
                 children
               ) : (
