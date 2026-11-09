@@ -460,6 +460,11 @@ End a room: its work is stopped and the Host leaves a tombstone where its record
 draws it again. The word is the Host's, and the plugin only relays its answer.
 _Avoid_: delete, archive, close, remove, leave
 
+**Room write**:
+The Host's declared ability to make, rename and disband a room. Where a Host declares none of it, the
+app draws none of those controls rather than one that could only come back refused.
+_Avoid_: room admin, write access, room management
+
 **Room log**:
 Everything that has happened in a room, in the Host's order, each event numbered in the room's own
 sequence. The thread is what the screen draws of it.
