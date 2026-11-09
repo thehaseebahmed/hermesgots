@@ -212,9 +212,10 @@ sequenceDiagram
    capabilities read, no `plugins/gots/info` read, no `/triage` ask, no model call, from
    `sendFromMain` and `triageTurn` alike. Neither caller is edited. Goals: G3. After: 2. Layers:
    Triage gate, Chat screen, The bot's host. Check: `scripts/test-main-triage.tsx` — with the
-   default off, a Main send leaves the faked host's whole log empty of capabilities, info and
-   triage, no row left `triaging`, and the message in Main; the file's triage cases, seeded on, stay
-   green (the restore half).
+   default off, a Main send makes no `/triage` ask and adds no capabilities or plugin read of its own
+   (the two the log still holds are the send's, `chat.ts`'s run choice and its post-turn queue check,
+   which no gate here can take away), no row left `triaging`, and the message in Main; the file's
+   triage cases, seeded on, stay green (the restore half). Done.
 
 7. **The triage model is a setting nowhere.** `useTriageModel` folds `opensInMain` into `supported`
    and skips the host's model-permission read with it, so the Models page's Gots section and the

@@ -1,5 +1,5 @@
 import { wireContent } from "@/lib/attachments"
-import { db, type Attachment, type Conversation, type Profile } from "@/lib/db"
+import { db, getSettings, type Attachment, type Conversation, type Profile } from "@/lib/db"
 import { TRIAGE_MS } from "@/lib/freshness"
 import {
   hasPluginFeature,
@@ -13,6 +13,7 @@ import { chosenOf, pickFields } from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
 import { quietly } from "@/lib/report"
 import { syncNow } from "@/lib/sync"
+import { opensInMain } from "@/lib/threads"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -22,8 +23,15 @@ import { toast } from "sonner"
  */
 export const triaging = new Set<string>()
 
-/** Whether a bot's host can triage a Main's message: it runs turns, queues them and has triage. */
+/**
+ * Whether a bot's host can triage a Main's message: it asks at all — nothing is triaged while chat
+ * threads are off here, since a model call that can only answer "stay" is a cost with no decision
+ * in it (ADR 0120) — and the host runs turns, queues them and has triage. It answers for this
+ * device before it answers for the host, so on such a device the gate reads no capabilities and no
+ * plugin info and asks no triage. The one gate both senders pass through, so neither repeats it.
+ */
 export async function canTriage(config: HermesConfig) {
+  if (opensInMain(await getSettings())) return false
   return (
     Boolean(config.apiKey) &&
     (await supportsRuns(config)) &&

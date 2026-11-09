@@ -116,11 +116,17 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
 
 async function seed(
   name: string,
-  extra: { main?: boolean; bot?: Partial<Profile>; keepMessages?: boolean } = { main: true },
+  extra: {
+    main?: boolean
+    bot?: Partial<Profile>
+    keepMessages?: boolean
+    chatThreads?: boolean
+  } = { main: true },
 ) {
   const bot = botProfile(name, extra.bot)
-  // Triage asks only where a bot may start a thread, so these cases are the account with them on.
-  await seedSettings({ developer: true, chatThreads: true })
+  // Triage asks only where a bot may start a thread, so these cases are the account with them on —
+  // but for the one that proves the switch off, which seeds the shipped default.
+  await seedSettings({ developer: true, chatThreads: extra.chatThreads ?? true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   if (!extra.keepMessages) await db.messages.clear()
@@ -225,6 +231,24 @@ test("a bot whose plugin lacks the feature has a plain Main", async () => {
   assert.equal(await sendFromMain(MAIN, "hello"), undefined)
   assert.equal(triaged(seen).length, 0)
   assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
+})
+
+test("with chat threads off, a Main send asks no triage and stays in Main", async () => {
+  // The shipped default: the bot layout with chat threads off, so this device starts no thread and
+  // a Main send is decided here rather than by the host (ADR 0120). The capabilities and info reads
+  // the log holds are the send's own — its run choice and its post-turn queue check — and triage
+  // adds neither, nor the ask itself.
+  await seed("route-threads-off", { main: true, chatThreads: false })
+  const seen = host("route-threads-off", "thread")
+  assert.equal(await sendFromMain(MAIN, "hello"), undefined)
+  assert.deepEqual(triaged(seen), [], "no /triage ask")
+  const sent = await messagesOf(MAIN)
+  assert.ok(
+    sent.some((m) => m.role === "user" && m.content === "hello"),
+    "the message is in Main",
+  )
+  assert.ok(!sent.some((m) => m.status === "triaging"), "nothing was held for a decision")
+  assert.equal(runsFor(seen, MAIN_SESSION).length, 1, "its turn posted on Main's session")
 })
 
 test("a message sent while another is triaged waits behind it, untriaged", async () => {
