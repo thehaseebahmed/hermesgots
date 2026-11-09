@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from plugin import alerts, chats, delegation, push
+from plugin import alerts, chats, delegation, push, sessions
 from plugin.store import connect, db_path
 
 
@@ -208,12 +208,9 @@ class Scope(unittest.TestCase):
         relay = mock.patch.object(push, "_relay", lambda *args, **kwargs: None)
         relay.start()
         self.addCleanup(relay.stop)
-        # One push a kind and session in THROTTLE_SECONDS, so one class wouldn't answer twice.
-        self.addCleanup(push._last.clear)
 
     def tell(self, kind, session_id):
         """What ``notify`` answered, and the pushes that reached the wire."""
-        push._last.clear()
         self.sent.clear()
         self.arrived.clear()
         answer = push.notify(kind, session_id, path=self.path)
@@ -246,6 +243,13 @@ class Scope(unittest.TestCase):
         self.assertTrue(answer)
         self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
 
+    def test_a_chats_own_id_is_answered_without_the_lineage_walk(self):
+        with mock.patch.object(sessions, "chat_session") as walk:
+            answer, sent = self.tell("question", "gots-abc")
+        self.assertTrue(answer, "the app minted the id, so the chat is its own")
+        self.assertEqual(sent, [{"kind": "question", "session_id": "gots-abc"}])
+        walk.assert_not_called()
+
     def test_another_surfaces_session_is_not_pushed(self):
         # No prefix, no chat record, no compression parent: a session Gots never started.
         answer, sent = self.tell("question", "sess_9f2c41")
@@ -253,7 +257,6 @@ class Scope(unittest.TestCase):
         self.assertEqual(sent, [])
 
     def test_a_compressed_chats_child_session_is_pushed(self):
-        # The chat began as gots-abc and compression moved it on to a child that carries no prefix.
         self.lineage([
             ("gots-abc", None, "compression", None, None),
             ("sess_c0ffee", "gots-abc", None, None, None),
@@ -263,8 +266,6 @@ class Scope(unittest.TestCase):
         self.assertEqual(sent, [{"kind": "question", "session_id": "sess_c0ffee"}])
 
     def test_a_subagents_session_is_not_pushed_as_its_chats(self):
-        # A delegate child is another conversation of its parent's, so the walk stops at the fork
-        # even where the parent looks like a compression predecessor: the chat hears its turn once.
         self.lineage([
             ("gots-abc", None, "compression", None, None),
             ("sess_de1e", "gots-abc", None, '{"_delegate_from": "gots-abc"}', None),

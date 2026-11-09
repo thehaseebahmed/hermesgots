@@ -462,8 +462,6 @@ def _gots_chat(path: Path, session_id: str) -> bool:
     from . import sessions
 
     if session_id.startswith(sessions.ID_PREFIXES):
-        # The common case, and the profile's store stays unopened: this runs on the thread that had
-        # the news, before the push it may start.
         return True
     return sessions.chat_session(home_of(path), session_id).startswith(sessions.ID_PREFIXES)
 
