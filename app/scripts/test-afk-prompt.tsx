@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import {
   DEFAULT_AFK_PROMPT,
   absent,
+  absentText,
   afkHost,
   click,
   connection,
@@ -101,7 +102,7 @@ test("tapping the row opens the editor on the host's words, to write and nothing
     await click(find('button[aria-label="Prompt"]'))
     assert.equal(fieldValue(), DEFAULT_AFK_PROMPT, "the field arrives holding what the row reads")
     assert.ok(missing('[aria-label="Prompt view"]'), "there is no mode to switch to: a Prompt is written")
-    absent("button", "Preview")
+    absentText("button", "Preview")
   })
 })
 

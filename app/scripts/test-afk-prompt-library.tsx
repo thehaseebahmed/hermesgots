@@ -19,6 +19,7 @@ import { setProjectAfkPrompt } from "@/lib/hermes"
 import {
   DEFAULT_AFK_PROMPT,
   absent,
+  absentText,
   afkHost,
   click,
   find,
@@ -266,8 +267,8 @@ test("signed out, the Prompt editor is the textarea it always was", async () => 
   await mountAfk(config, project, async () => {
     await click(find('button[aria-label="Prompt"]'))
     assert.ok(missing("[data-prompt-library-actions]"), "no library without an account signed in with its vault open, whatever the host advertises")
-    assert.ok(!findText("button", "Choose from library"), "and no door to one")
-    absent("button", "Save to library")
+    absentText("button", "Choose from library")
+    absentText("button", "Save to library")
     assert.equal(fieldValue(), DEFAULT_AFK_PROMPT, "today's field, holding the project's words")
 
     await type(field(), "# Mine\n\n- Read the issue first.")
@@ -286,7 +287,7 @@ test("an editor without the library draws no affordances", async () => {
     afkHost({ features: PICKS_FEATURES }),
     async () => {
       assert.ok(missing("[data-prompt-library-actions]"), "no library where it isn't offered")
-      absent("button", "Choose from library")
+      absentText("button", "Choose from library")
       assert.equal(find('textarea[aria-label="Prompt"]') !== null, true, "the field, and nothing more")
     },
     false,

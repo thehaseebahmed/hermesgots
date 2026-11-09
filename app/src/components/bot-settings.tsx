@@ -458,11 +458,22 @@ export function BotSettingsPage({
   // General is the host's own page: its rows come from the bot's Hermes, so it draws its own edit —
   // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
   // detail like any other and takes the generic path below.
-  // Keyed by tab, so moving between the two never draws one tab's block under the other's route.
+  // Keyed by bot and tab, so a page never draws the block, the row or the refusal of the bot or the tab
+  // before it: a switched-to bot starts its own read, and shows the wait until its own answer lands.
   if (isGeneralTab(shown) && own?.kind === "edit")
-    return <GeneralPage key={shown} profile={profile} tab={shown} sub={own} close={close} />
+    return (
+      <GeneralPage
+        key={`${profile.id}:${shown}`}
+        profile={profile}
+        tab={shown}
+        sub={own}
+        close={close}
+      />
+    )
   if (isGeneralTab(shown) && !own)
-    return <GeneralPage key={shown} profile={profile} tab={shown} close={close} />
+    return (
+      <GeneralPage key={`${profile.id}:${shown}`} profile={profile} tab={shown} close={close} />
+    )
 
   // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
   // page's own edit is the screen the route pushed.
@@ -599,6 +610,9 @@ function GeneralPage({
 
   useEffect(() => {
     let cancelled = false
+    // The block a page draws belongs to the read that answered it: a page asked for again draws nothing
+    // until its own answer lands, so a refusal never stands over the rows of the answer before it.
+    setBlock(undefined)
     void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {
         if (cancelled) return
@@ -713,7 +727,9 @@ function GeneralPage({
       <div className="flex flex-col gap-4" {...{ [`data-bot-${tab}`]: true }}>
         {problem && <Banner tone="warning">{problem}</Banner>}
         <Group>
-          {delegation && subagent.supported && (
+          {/* The row is this page's own lead row, so it waits for the page's block: a read the host
+              refused has nothing to stand its row on, and draws its banner alone (#992). */}
+          {delegation && subagent.supported && block && (
             <SubagentModelRow profile={profile} record={subagent} own={own} />
           )}
           {!delegation && (

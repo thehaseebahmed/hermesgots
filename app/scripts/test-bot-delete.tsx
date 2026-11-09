@@ -13,7 +13,7 @@ import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
 import {
   Path,
-  absent,
+  absentText,
   botProfile,
   click,
   find,
@@ -169,7 +169,7 @@ test("the bot's own page holds no remove or delete control but the header's tras
     )
     for (const name of ["Remove A bot", "Delete bot"])
       assert.equal(buttonNamed(name), null, `no button named ${name} on the page`)
-    absent("button", "Remove")
+    absentText("button", "Remove")
     assert.ok(missing('[data-slot="alert-dialog-trigger"]'), "and nothing there asks first")
     for (const label of ["Enabled", "Mute notifications", "Bot Profile", "Test connection"])
       assert.ok(text().includes(label), `it still has ${label}`)

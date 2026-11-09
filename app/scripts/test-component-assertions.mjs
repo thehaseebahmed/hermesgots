@@ -135,7 +135,8 @@ function assertionName(call) {
   return EQUALITY.has(expression.name.text) ? expression.name.text : null
 }
 
-function offendersIn(source, file = "<source>") {
+/** A file read as a tree, or the parse error that stopped it, named where it sits. */
+function parsed(source, file) {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const errors = sourceFile.parseDiagnostics ?? []
   if (errors.length > 0) {
@@ -144,6 +145,44 @@ function offendersIn(source, file = "<source>") {
     const why = ts.flattenDiagnosticMessageText(error.messageText, " ")
     throw new Error(`${file}:${line + 1}:${character + 1} could not be parsed: ${why}`)
   }
+  return sourceFile
+}
+
+/**
+ * The words an `absentText` call looks for are a control's own label, which this suite writes as
+ * capitalised copy. A sentence opening as its messages do — "and nothing else on the page is typed
+ * into" — is the shape #992 is: it matches no control and passes over whatever is on screen. A
+ * capitalised sentence is the one shape this cannot see, so the helper's own doc and its contract
+ * test name the slot as well.
+ */
+function readsAsLabel(text) {
+  return /^[A-Z]/.test(text.trim())
+}
+
+function sentencesInLabelSlot(source, file = "<source>") {
+  const sourceFile = parsed(source, file)
+  const sites = []
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "absentText" &&
+      node.arguments.length > 1 &&
+      ts.isStringLiteralLike(node.arguments[1]) &&
+      !readsAsLabel(node.arguments[1].text)
+    )
+      sites.push({
+        line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+        label: node.arguments[1].text,
+      })
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return sites
+}
+
+function offendersIn(source, file = "<source>") {
+  const sourceFile = parsed(source, file)
   const helpers = elementHelpers(sourceFile)
   const sites = []
   const visit = (node) => {
@@ -205,7 +244,8 @@ const ALLOWED = {
   "a property read": 'assert.equal(find(sel)?.textContent, "3", "the count")',
   "a count": "assert.equal(findAll(sel).length, 0)",
   "a presence boolean": 'assert.ok(missing(sel), "nothing there")',
-  "the harness's own absence": 'absent(sel, "the row")',
+  "the harness's own absence": 'absent(sel, "the row went")',
+  "the harness's text-filtered absence": 'absentText(sel, "Save to library")',
   "a comment quoting the form": '// assert.equal(find(sel), null, "not a call")',
   "a local helper that answers a property":
     'const marker = () => find("[data-marker]")\nconst markerText = () => marker()?.textContent ?? null\nassert.equal(markerText(), null)',
@@ -249,6 +289,39 @@ test("the checker leaves a property read, a boolean and a comment alone", () => 
   for (const [what, source] of Object.entries(ALLOWED)) {
     assert.deepEqual(offendersIn(source), [], `${what} is not an offender`)
   }
+})
+
+test("no component test hands absentText a sentence where a control's words belong", () => {
+  const dir = import.meta.dirname
+  const named = []
+  for (const name of componentTests()) {
+    const source = readFileSync(join(dir, name), "utf8")
+    for (const site of sentencesInLabelSlot(source, join(dir, name)))
+      named.push(`${name}:${site.line} ${site.label}`)
+  }
+  assert.deepEqual(
+    named,
+    [],
+    `absentText looks for a control's own words, so its second argument is the label and never a failure sentence:\n${named.join("\n")}`,
+  )
+})
+
+test("the label checker names a sentence and leaves a control's words alone", () => {
+  assert.equal(
+    sentencesInLabelSlot('absentText("button", "and nothing else on the page is typed into")').length,
+    1,
+    "a sentence opening as the suite's messages do is named",
+  )
+  assert.deepEqual(
+    sentencesInLabelSlot('absentText("button", "Save to library")'),
+    [],
+    "a control's words are left alone",
+  )
+  assert.deepEqual(
+    sentencesInLabelSlot('absentText("button", label)'),
+    [],
+    "a variable is outside what a file can be read for",
+  )
 })
 
 test("a file the checker cannot parse fails, naming it", () => {

@@ -10,6 +10,7 @@ import { toast } from "sonner"
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useState } from "react"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
@@ -516,6 +517,70 @@ test("a host that refuses the Delegation page says so, and draws no Subagent row
   })
 })
 
+/**
+ * A bot switched to on one connection: both answer at one address and key, so the page is the same
+ * instance across the swap. Keyed by the bot it draws, it starts that bot's own read and waits, so
+ * neither the refusal nor the row of the bot before it stands over the page (#992).
+ */
+test("a bot switched to on one connection draws nothing of the bot before it", async () => {
+  await seedSettings()
+  await db.profiles.clear()
+  const address = "http://one.test/v1"
+  const first = botProfile("A bot", { id: "bot-1", baseUrl: address, apiKey: "key" })
+  const second = botProfile("B bot", { id: "bot-2", baseUrl: address, apiKey: "key" })
+  await db.profiles.bulkPut([first, second])
+
+  let reads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", version: "0.81.0", features: [...FEATURES, "delegation_page"] })
+    if (url.pathname.endsWith("/plugins/gots/delegation-settings")) {
+      reads += 1
+      // The first bot's page cannot be read; the second's answer is still on its way when the page is
+      // asked what it draws, which is the moment the bot before it would show.
+      if (reads === 1) return json({ error: { message: "No delegation category." } }, 501)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      return json({ object: "gots.delegation_settings", delegation: DELEGATION })
+    }
+    return json({})
+  }) as unknown as typeof globalThis.fetch
+
+  /** The page, with the bot beneath it swapped the way the route's own param swaps it. */
+  function Switched() {
+    const [profile, setProfile] = useState(first)
+    return (
+      <>
+        <button type="button" onClick={() => setProfile(second)}>
+          To B
+        </button>
+        <BotSettingsPage profile={profile} tab="delegation" />
+      </>
+    )
+  }
+
+  await mount(
+    <MemoryRouter initialEntries={["/settings/bots/bot-1/delegation"]}>
+      <Switched />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(find('[role="alert"]')), "the first bot's refusal")
+      assert.equal(find('[role="alert"]')?.textContent, "No delegation category.")
+
+      await click(findAll("button").find((one) => wordsOf(one) === "To B") ?? null)
+      assert.equal(
+        find('[role="alert"]')?.textContent ?? null,
+        null,
+        "the refusal of the bot before it is not on the page",
+      )
+      absent(
+        '[data-setting="subagent-model"]',
+        "and neither is the row it would have drawn, before the answer lands",
+      )
+    },
+  )
+})
+
 test("a delegation section pointing at a hand-written endpoint reads Custom", async () => {
   await seed("general-custom-delegation", { hostId: "host-1" }, [...FEATURES, "delegation_page"], {
     customDelegation: true,
@@ -648,7 +713,7 @@ test("an address into a page this bot doesn't have draws no edit of it, and writ
       "the address it was asked for stands",
     )
     assert.match(wordsOf(page()), /Bot Profile/, "the bot's own page is what is drawn")
-    absent("#edit-vocabulary", "and the page it names is not, so its edit has no field")
+    absent("[data-vocabulary]", "and the page it names is not drawn")
     absent(
       '[data-general-page] input:not([type="checkbox"])',
       "nothing on the screen is typed into",

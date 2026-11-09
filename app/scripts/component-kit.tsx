@@ -558,16 +558,28 @@ export const labelled = (selector: string, label: string) =>
   findAll(selector).find((one) => one.getAttribute("aria-label") === label) ?? null
 
 /**
- * Asserts nothing on the screen matches a selector, or a control reading `label`. The failure names
- * what should have been absent, rather than printing the element that was found.
+ * Asserts nothing on the screen matches a selector, failing with the caller's `message` — or, with
+ * none, a sentence naming the selector. Never a control's words: those are `absentText`'s, and a
+ * sentence read as a label is a search for a control nobody draws, which passes whatever is on
+ * screen (#992).
  */
-export function absent(selector: string, label?: string) {
-  if (label === undefined) {
-    assert.ok(missing(selector), `nothing on the screen matches ${selector}`)
-    return
-  }
-  const found = findText(selector, label)
-  assert.ok(!found, `nothing on the screen matches ${selector} reading "${label}"`)
+export function absent(selector: string, message?: string) {
+  assert.ok(missing(selector), message ?? `nothing on the screen matches ${selector}`)
+}
+
+/**
+ * Asserts no element matching a selector says `label` — in the words it shows, or the name it is
+ * given where an icon carries no words (`aria-label`). The check for a row or a button by its own
+ * words, where the words are what must not be drawn rather than what a failure says.
+ */
+export function absentText(selector: string, label: string) {
+  const says = (one: Element) =>
+    (one.textContent ?? "").includes(label) ||
+    (one.getAttribute("aria-label") ?? "").includes(label)
+  assert.ok(
+    !findAll(selector).some(says),
+    `nothing on the screen matches ${selector} reading "${label}"`,
+  )
 }
 
 export const composerField = () =>

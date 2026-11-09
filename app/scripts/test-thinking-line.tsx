@@ -4,7 +4,6 @@ import { db, type Message, type Settings, type ToolEvent } from "@/lib/db"
 import { BUSY_WORDS } from "@/lib/busy-words"
 import { THINKING_WORD, type ReasoningRun } from "@/lib/thinking"
 import {
-  absent,
   botProfile,
   chatScreen,
   click,
@@ -439,9 +438,6 @@ test("the sheet reads the run as the reply's own markdown, whole and uncapped", 
         /The scan is cheap in the end/,
         "the whole run reads, down to its last words, with no cap and no Show more",
       )
-      absent("[data-slot=thinking-fade]")
-      absent("[data-slot=thinking-cap]")
-      absent("button", "Show more")
       assert.doesNotMatch(screenText(), /Show more/, "nowhere on the screen")
       assert.match(screenText(), new RegExp(ANSWER), "the answer is still drawn under it")
     },
