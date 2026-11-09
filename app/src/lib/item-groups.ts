@@ -25,20 +25,29 @@ const DAY_MS = 86_400_000
  * sequence when a list brings one. The dated lists and Code's four are this fold over their own
  * vocabulary, so the anatomy (fixed order, empties gone) lives once.
  */
-function groupsOf<T, K extends string>(
+function groupsOf<T, K extends ItemGroupKey | CodeGroupKey>(
   items: T[],
   labels: Record<K, string>,
   keyOf: (item: T) => K,
   order?: (a: T, b: T) => number,
+  folded?: (key: K) => boolean,
 ) {
   const placed = items.map((item) => ({ item, key: keyOf(item) }))
   return (Object.keys(labels) as K[])
-    .map((key) => {
+    .map((key): ListGroup<T> => {
       const members = placed.filter((p) => p.key === key).map((p) => p.item)
-      return { key, label: labels[key], items: order ? members.sort(order) : members }
+      return {
+        key,
+        label: labels[key],
+        items: order ? members.sort(order) : members,
+        ...(folded?.(key) ? { folded: true } : {}),
+      }
     })
     .filter((group) => group.items.length)
 }
+
+/** Which of a vocabulary's groups a reader opens by asking: the ones a list is done with. */
+const DONE_FOLDED = (key: string) => key === "closed"
 
 /**
  * The groups the dated lists (Meetings, Research) share: Waiting on you, Working, then the rest
@@ -62,7 +71,7 @@ export function itemGroups<T>(
     if (when >= today - 6 * DAY_MS) return "week"
     return "earlier"
   }
-  return groupsOf(items, LABELS, of)
+  return groupsOf(items, LABELS, of, undefined, DONE_FOLDED)
 }
 
 /** The Code list's four groups, in the order they always run: what waits on the user first. */
@@ -78,9 +87,11 @@ export type CodeGroupKey = keyof typeof CODE_LABELS
 const PINNED_LABEL = "Pinned" as const
 
 export interface ListGroup<T = unknown> {
-  key: ItemGroupKey | CodeGroupKey | "pinned"
+  key: ItemGroupKey | CodeGroupKey | "pinned" | "hidden"
   label: string
   items: T[]
+  /** Drawn closed until the reader asks: what a list is done with, or put out of the way. */
+  folded?: boolean
 }
 
 /**
@@ -111,7 +122,7 @@ export function codeGroups<T>(
   for (const item of items) (pinned?.(item) ? held : rest).push(item)
   return [
     ...(held.length ? [{ key: "pinned" as const, label: PINNED_LABEL, items: held.sort(order) }] : []),
-    ...groupsOf(rest, CODE_LABELS, group, order),
+    ...groupsOf(rest, CODE_LABELS, group, order, DONE_FOLDED),
   ]
 }
 

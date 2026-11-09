@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
+import { usePinnedCanvases } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { presence } from "@/lib/registry"
 import type { Conversation, Message, Profile } from "@/lib/db"
@@ -63,7 +64,11 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
   )
 
 /** A sidebar destination: top-level, so it opens as the only entry and back leaves the app. */
-function RootLink({ to, onClick, ...props }: NavLinkProps & { to: string }) {
+function RootLink({
+  to,
+  onClick,
+  ...props
+}: NavLinkProps & { to: string } & Record<`data-${string}`, string | undefined>) {
   const { root } = useNav()
   return (
     <NavLink
@@ -202,6 +207,36 @@ function Band({
       >
         {children}
       </ul>
+    </>
+  )
+}
+
+function PinnedCanvases({
+  onNavigate,
+  collapsed,
+}: {
+  onNavigate?: () => void
+  collapsed: boolean
+}) {
+  const pinned = usePinnedCanvases()
+  if (pinned.length === 0) return null
+  return (
+    <>
+      {pinned.map((canvas) => (
+        <RootLink
+          key={canvas.id}
+          to={`/canvas/${canvas.id}`}
+          onClick={onNavigate}
+          aria-label={collapsed ? canvas.title : undefined}
+          data-canvas-pinned=""
+          className={({ isActive }) =>
+            collapsed ? railClass({ isActive }) : cn(rowClass({ isActive }), "pl-8")
+          }
+        >
+          <FrameIcon className="size-5 shrink-0 text-muted-foreground" />
+          {!collapsed && <span className="min-w-0 flex-1 truncate">{canvas.title}</span>}
+        </RootLink>
+      ))}
     </>
   )
 }
@@ -647,6 +682,7 @@ export function ConversationList({
             <FrameIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Canvas"}
           </RootLink>
+          <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />
           <RootLink
             to="/research"
             onClick={onNavigate}

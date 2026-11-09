@@ -21,10 +21,12 @@ import {
   click,
   find,
   findAll,
+  findText,
   json,
   mount,
   seedSettings,
   settle,
+  type,
   until,
   wordsOf,
 } from "./component-kit.tsx"
@@ -42,6 +44,7 @@ const PAGE = `<!doctype html>
 const TITLE = "A tip calculator"
 
 interface Host {
+  title?: string
   /** The tools this version declared. */
   tools: string[]
   /** What the reader answered for each declared tool, and the host's clock when it did. */
@@ -52,6 +55,8 @@ interface Host {
   calls: { shape: string; args: Record<string, unknown>; write?: boolean }[]
   /** Every grant the app posted. */
   answers: { tool: string; allow: boolean }[]
+  changes?: { method: string; body?: Record<string, unknown> }[]
+  removed?: boolean
   /** A grant route that answers no list at all, as a host from before the row carried a clock. */
   silentGrants?: boolean
 }
@@ -65,7 +70,7 @@ const stamp = (host: Host) => (host.clock += 1)
  */
 const canvas = (host: Host, id: string) => ({
   id,
-  title: TITLE,
+  title: host.title ?? TITLE,
   session_id: `gots-${id}`,
   chat_id: `chat-${id}`,
   version: 3,
@@ -171,6 +176,35 @@ function serve(host: Host, id: string): { gate: Gate } {
     }
     const one = /\/canvases\/([^/]+)$/.exec(url.pathname)
     if (one) {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        host.changes?.push({ method: "POST", body })
+        if (typeof body.title === "string") host.title = body.title
+        const { id: heldId, title, session_id, chat_id, version, pinned, hidden, at, created_at } =
+          canvas(host, id)
+        return json({
+          object: "gots.canvas",
+          canvas: {
+            id: heldId,
+            title,
+            session_id,
+            chat_id,
+            version,
+            pinned,
+            hidden,
+            at,
+            created_at,
+            // The record answer carries whether a version sits under the drawn one, as the host's does.
+            can_undo: canvas(host, id).can_undo,
+          },
+        })
+      }
+      if (init?.method === "DELETE") {
+        host.changes?.push({ method: "DELETE" })
+        host.removed = true
+        return json({ object: "gots.canvas.deleted", deleted: true, id })
+      }
+      if (host.removed) return json({ error: { message: "There is no such canvas." } }, 404)
       // The answer is built when the read is asked for, not when it is released: a held read is a
       // host that answered before the reader did, which is the whole point of holding it.
       const answer = json({ object: "gots.canvas", canvas: canvas(host, id) })
@@ -235,6 +269,7 @@ function speak() {
 const consentDialog = () => find("[data-canvas-consent]")
 const consentWords = () => wordsOf(consentDialog())
 const answer = (which: "allow" | "deny") => click(find(`[data-canvas-consent] [data-consent="${which}"]`))
+const toolSwitches = () => findAll('[data-canvas-options] [data-canvas-tool] [role="switch"]')
 
 /** A promise the case resolves by hand, so a read can be held open across an answer. */
 function latch() {
@@ -475,7 +510,7 @@ test(
       assert.match(words, /files\.search/, "the version's declared tool is listed")
       assert.match(words, /Not asked yet/, "a tool with no answer reads as not asked")
 
-      const switches = findAll('[data-canvas-options] [role="switch"]')
+      const switches = toolSwitches()
       assert.equal(switches.length, 1)
       await click(switches[0])
       await until(() => host.answers.length === 1, "the switch to post its answer")
@@ -561,15 +596,13 @@ test(
       assert.match(words, /notes\.list/, "the tool the host holds an answer for is listed")
       assert.match(words, /Not declared by this version/, "and said to be undeclared now")
 
-      const switches = findAll('[data-canvas-options] [role="switch"]')
+      const switches = toolSwitches()
       assert.equal(switches.length, 2, "one row per tool of the union")
       await click(switches[1])
       await until(() => host.answers.length === 1, "the answer to be posted")
       assert.deepEqual(host.answers[0], { tool: "notes.list", allow: false })
       await until(
-        () =>
-          findAll('[data-canvas-options] [role="switch"]')[1]?.getAttribute("aria-checked") ===
-          "false",
+        () => toolSwitches()[1]?.getAttribute("aria-checked") === "false",
         "the row to read as off",
       )
       assert.match(
@@ -600,12 +633,56 @@ test(
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
       await click(find('button[aria-label="Canvas options"]'))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
-      await click(findAll('[data-canvas-options] [role="switch"]')[0])
+      await click(toolSwitches()[0])
       await until(() => host.answers.length === 1, "the answer to be posted")
       await settle()
       const bot = (await db.profiles.get("bot-1"))!
       const kept = await cachedCanvas(bot, "c8")
       assert.deepEqual(kept?.grants ?? [], [], "no row is invented from this device's clock")
+    })
+  }),
+)
+
+test(
+  "the canvas's options rename it, pin it and delete it",
+  atWidth(390, async () => {
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], changes: [] }
+    serve(host, "c9")
+    await seedCanvas()
+    await mount(screen("c9"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+
+      await click(find('button[aria-label="Canvas options"]'))
+      await click(findText('[data-canvas-options] button', "Name"))
+      await until(async () => find("#canvas-name") !== null, "the name field")
+      await type(find("#canvas-name"), "Split the bill")
+      await click(findText("button", "Save"))
+      await until(
+        async () => wordsOf(find("h1")).includes("Split the bill"),
+        "the header to wear the new name",
+      )
+      assert.strictEqual(find("iframe[data-canvas-frame]") !== null, true, "the page stays drawn")
+      assert.notStrictEqual(
+        find('button[aria-label="Undo"]'),
+        null,
+        "Undo survives the rename the host answered",
+      )
+      assert.deepStrictEqual(host.changes, [
+        { method: "POST", body: { title: "Split the bill" } },
+      ])
+
+      await click(find('[data-canvas-options] [id="canvas-pinned"]'))
+      await until(async () => host.changes?.length === 2, "the pin to be posted")
+      assert.deepStrictEqual(host.changes?.[1], { method: "POST", body: { pinned: true } })
+
+      await click(findText("button", "Delete canvas"))
+      await until(
+        async () => find('[role="alertdialog"]') !== null,
+        "the question before the delete",
+      )
+      await click(findText('[role="alertdialog"] button', "Delete"))
+      await until(async () => host.changes?.[2]?.method === "DELETE", "the delete to be posted")
+      assert.strictEqual(host.removed, true, "the canvas is gone from its host")
     })
   }),
 )

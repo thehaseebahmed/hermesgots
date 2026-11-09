@@ -815,6 +815,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return None
         return body if isinstance(body, dict) else None
 
+    async def session_db():
+        """Hermes's own session store — the one that deletes a session — or None.
+
+        Best effort: a store this can't open leaves the session behind rather than failing a request
+        whose real work (a canvas's record, a delete's rows) is already done, and a Hermes from
+        before the store was reachable this way is no reason to refuse either.
+        """
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        if not callable(open_db):
+            return None
+        try:
+            return await open_db()
+        except Exception:
+            logger.debug("gots: couldn't open Hermes's session store", exc_info=True)
+            return None
+
     def mcp_route(
         call: Any,
         key: Optional[str],
@@ -3327,6 +3343,37 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
         return await canvas_view(request, canvases.undo)
 
+    async def update_canvas(request: "web.Request") -> "web.Response":
+        """A canvas's name and its place in the list, written on the host so every device agrees.
+
+        The answer is the canvas's record as the GET carries it, and no document: the screen that
+        pinned, hid or renamed it already holds the version it draws.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        return await canvas_view(request, canvases.update, body)
+
+    async def delete_canvas(request: "web.Request") -> "web.Response":
+        """Takes a canvas out of the store, and its chat and Hermes session with it (canvases.py)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                canvases.delete,
+                store_path(),
+                request.match_info["canvas_id"],
+                home=profile_home(),
+                db=await session_db(),
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas.deleted", **found})
+
     # One table of act locks per wiring: a lock is one server's, held in the thread the call runs
     # on, and a table made for a server this app no longer serves is nobody's to hold.
     canvas_locks: Dict[str, threading.Lock] = {}
@@ -3787,6 +3834,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/canvases", list_canvases)
     app.router.add_post(f"{PREFIX}/canvases", create_canvas)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
+    app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}", update_canvas)
+    app.router.add_delete(f"{PREFIX}/canvases/{{canvas_id}}", delete_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/call", call_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/grants", grant_canvas)

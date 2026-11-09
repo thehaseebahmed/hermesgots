@@ -6,6 +6,13 @@ import { inOrder } from "../src/lib/canvas-bridge.ts"
 const KEEP = 20
 const DATA_BYTES = 1024 * 1024
 const NAME_CHARS = 64
+// The plugin's own cap (`plugin/canvases.py`) and its one-line rule: a title is cut here too.
+const TITLE_CHARS = 60
+
+function titleOf(text) {
+  const flat = String(text).trim().split(/\s+/).join(" ")
+  return flat.length > TITLE_CHARS ? `${flat.slice(0, TITLE_CHARS - 1)}…` : flat
+}
 
 /**
  * What the mock's bot writes: a page in the app's own theme tokens, as a canvas's guide asks. Its
@@ -132,7 +139,11 @@ export function createCanvasStore() {
     }
   }
 
-  return { canvases, summary, full, below }
+  // The record alone, plus whether a version sits under the drawn one: what the plugin's update route
+  // answers, so a client that renamed or pinned a canvas keeps the page it already draws.
+  const record = (c) => ({ ...summary(c), can_undo: below(c) !== null })
+
+  return { canvases, summary, record, full, below }
 }
 
 export async function handleCanvas(req, res, path, { json, readBody, noteEvent, sessions }, store) {
@@ -343,7 +354,7 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
       const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
       if (!prompt) return fail(400, "A canvas needs a prompt to build it from."), true
       const now = Date.now()
-      const title = prompt.length > 60 ? `${prompt.slice(0, 59)}…` : prompt
+      const title = titleOf(prompt)
       const canvas = {
         id: `c_${Math.random().toString(16).slice(2, 18)}`,
         title,
@@ -409,6 +420,46 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
   const canvas = canvases.get(decodeURIComponent(match[1]))
   if (!canvas) {
     fail(404, "There is no such canvas.")
+    return true
+  }
+
+  if (req.method === "POST") {
+    const body = (await readBody(req)) ?? {}
+    if (!["title", "pinned", "hidden"].some((field) => field in body)) {
+      fail(400, "A canvas's update names what changes: a title, pinned, or hidden.")
+      return true
+    }
+    if ("title" in body) {
+      if (typeof body.title !== "string" || !body.title.trim()) {
+        fail(400, "A canvas's title is a line of text; this one is blank.")
+        return true
+      }
+      const title = body.title.trim()
+      canvas.title = titleOf(title)
+    }
+    for (const field of ["pinned", "hidden"]) {
+      if (!(field in body)) continue
+      if (typeof body[field] !== "boolean") {
+        fail(400, `A canvas's ${field} is true or false; this one is ${JSON.stringify(body[field])}.`)
+        return true
+      }
+      canvas[field] = body[field]
+    }
+    canvas.at = Date.now()
+    noteEvent("canvas", canvas.session_id)
+    json(res, 200, { object: "gots.canvas", canvas: store.record(canvas) })
+    return true
+  }
+
+  if (req.method === "DELETE") {
+    canvases.delete(canvas.id)
+    noteEvent("canvas", canvas.session_id)
+    json(res, 200, { object: "gots.canvas.deleted", deleted: true, id: canvas.id })
+    return true
+  }
+
+  if (req.method !== "GET") {
+    fail(405, "A canvas is read with a GET, changed with a POST and removed with a DELETE.")
     return true
   }
   json(res, 200, { object: "gots.canvas", canvas: full(canvas) })

@@ -77,6 +77,32 @@ def _project_session_ids(path: Path) -> Dict[str, int]:
         conn.close()
 
 
+def end_session(
+    path: Path,
+    chat_id: Optional[str],
+    session_id: str,
+    hermes_home: Path,
+    db: Any = None,
+    now: Optional[int] = None,
+) -> None:
+    """Ends a Gots session: its chat as a tombstone every device keeps, Hermes's own session gone,
+    and the attachments folder with it.
+
+    The one order a canvas's delete and the daily sweep both use, so a session ended either way
+    leaves the same record behind. The session store and the folder are best effort: a chat's mark
+    is the row a user sees, and a store this can't reach is a session left behind rather than a
+    delete that fails.
+    """
+    if chat_id:
+        chats.tombstone(path, chat_id, now=now)
+    if db is not None and callable(getattr(db, "delete_session", None)):
+        try:
+            db.delete_session(session_id)
+        except Exception:
+            logger.debug("gots: couldn't delete Hermes session %s", session_id, exc_info=True)
+    attachments.remove(hermes_home, session_id)
+
+
 def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[str, int]:
     """One pass: deletes empty sessions. Returns what it did."""
     now = int(time.time() * 1000) if now is None else now
@@ -98,8 +124,7 @@ def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[
         if sid not in in_chats and now - created >= GRACE_MS and _has_messages(hermes_home, sid) is False
     ]
 
-    gone = set()
-    tombstones = {}
+    gone = 0
     for chat_id, sid in [*empty.items(), *((None, sid) for sid in orphans)]:
         if sid in projects:
             try:
@@ -110,19 +135,9 @@ def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[
             if not dropped:
                 result["kept"] += 1
                 continue
-        if db is not None and callable(getattr(db, "delete_session", None)):
-            try:
-                db.delete_session(sid)
-            except Exception:
-                logger.debug("gots: couldn't delete Hermes session %s", sid, exc_info=True)
-        attachments.remove(hermes_home, sid)
-        gone.add(sid)
-        if chat_id:
-            # A tombstone, so the apps drop their copy as well.
-            tombstones[chat_id] = {"at": max(now, records[chat_id]["at"] + 1), "deleted": True}
-        result["deleted"] += 1
-    if tombstones:
-        chats.merge(path, tombstones)
+        end_session(path, chat_id, sid, hermes_home, db, now)
+        gone += 1
+    result["deleted"] = gone
 
     return result
 

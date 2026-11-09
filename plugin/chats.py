@@ -290,6 +290,23 @@ def _ahead(entry: Dict[str, Any]) -> int:
     return max(int(time.time() * 1000), int(held) + 1 if isinstance(held, int) else 0)
 
 
+def tombstone(path: Path, chat_id: str, now: Optional[int] = None) -> None:
+    """Marks a chat deleted, with a clock the merge will keep.
+
+    A tombstone is a record like any other, and ``merge`` keeps only one newer than what it replaces —
+    so the mark is stamped from the chat's own record rather than from the canvas or session that
+    asked for it: a device whose clock runs ahead can leave a chat record in the future, and a
+    tombstone built from a slower clock would be dropped in silence, leaving the chat drawn.
+    """
+    entry = one(path, chat_id)
+    held = entry.get("at") if isinstance(entry, dict) else None
+    at = max(
+        int(time.time() * 1000) if now is None else int(now),
+        int(held) + 1 if isinstance(held, int) else 0,
+    )
+    merge(path, {chat_id: {"at": at, "deleted": True}})
+
+
 def closed(entry: Optional[Dict[str, Any]]) -> bool:
     """Whether the user is done with a chat: discarded, resolved, or deleted outright.
 

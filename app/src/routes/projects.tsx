@@ -263,7 +263,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
           <p className="px-1 text-sm text-muted-foreground">No projects yet.</p>
         ) : null}
         {archived.length > 0 && (
-          <ItemGroup group={{ key: "closed", label: "Archived", items: archived }}>
+          <ItemGroup group={{ key: "closed", label: "Archived", items: archived, folded: true }}>
             {archived.map((row) => (
               <li key={row.key}>
                 <ProjectItem row={row} now={now} pane={pane} onChanged={refresh} />

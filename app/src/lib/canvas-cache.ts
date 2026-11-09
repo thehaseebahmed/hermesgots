@@ -12,6 +12,7 @@
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
 import { db, type Profile } from "@/lib/db"
+import { equal } from "@/lib/equal"
 import { quietly } from "@/lib/report"
 
 export const canvasListKey = (profile: Profile) => `${connectionKey(profile)}\ncanvases`
@@ -74,17 +75,17 @@ function newer(one: Canvas, other: Canvas) {
  */
 export function keepList(profile: Profile, canvases: Canvas[]) {
   const connection = connectionKey(profile)
+  const rows = canvases.map(recordOf)
   const named = new Set([
     canvasListKey(profile),
     ...canvases.map((one) => canvasCacheKey(profile, one.id)),
   ])
   void db
     .transaction("rw", db.canvasCache, async () => {
-      await db.canvasCache.put({
-        key: canvasListKey(profile),
-        connection,
-        canvases: canvases.map(recordOf),
-      })
+      const key = canvasListKey(profile)
+      // A listing that says what it said last time is no write.
+      if (equal((await db.canvasCache.get(key))?.canvases, rows)) return
+      await db.canvasCache.put({ key, connection, canvases: rows })
       // Keys alone: a page can be 256 KB, and a row that is no longer named is one this device has no
       // reason to read back before it goes.
       const stale = (

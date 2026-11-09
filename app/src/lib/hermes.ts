@@ -2359,6 +2359,41 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 }
 
 /**
+ * A canvas's own record changed — its title, whether it is pinned to the sidebar, whether it is
+ * hidden from the list — kept on the host, so every device agrees on the shape of the list. A title
+ * also renames the chat the canvas is edited in. The host answers the record as it now is: the page
+ * is no part of this change, and a screen that made it already holds the version it draws.
+ */
+export type CanvasChanges = { title?: string; pinned?: boolean; hidden?: boolean }
+
+export async function updateCanvas(
+  config: HermesConfig,
+  id: string,
+  changes: CanvasChanges,
+) {
+  const response = await request(canvasRoot(config, id), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(changes),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.canvas as Record<string, unknown> | undefined
+}
+
+/**
+ * The canvas gone from the host: its record, its versions and its data are removed, its chat is
+ * tombstoned so no list draws it, and the Hermes session that edited it is deleted. Nothing here is
+ * the app's to keep, so the answer is only confirmation.
+ */
+export async function deleteCanvas(config: HermesConfig, id: string) {
+  await request(canvasRoot(config, id), {
+    method: "DELETE",
+    headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+}
+
+/**
  * A call a canvas's page makes, through the app: one of the host's free reads, or a declared tool,
  * or the canvas's own data put or removed on the host. A tool call rides `write`, so two calls on
  * one server are taken one at a time.

@@ -13,14 +13,18 @@ import { Link, useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { Bot } from "@/components/bot"
-import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
+import {
+  CanvasConsentDialog,
+  CanvasOptions,
+  useCanvasConsent,
+} from "@/components/canvas-consent"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
-import { ItemRow } from "@/components/item-list"
+import { ItemGroup, ItemRow } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -33,13 +37,17 @@ import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
 import {
   callCanvasCall,
   canvasData,
+  deleteCanvas,
   grantCanvasTool,
   refreshCanvas,
   startCanvas,
   undoCanvas,
+  updateCanvas,
   useCanvas,
   useCanvases,
   writeCanvasData,
+  type Canvas,
+  type CanvasChanges,
 } from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
 import { hostAnswered } from "@/lib/hermes"
@@ -55,10 +63,23 @@ import { useNow } from "@/lib/threads"
  * `/canvas/:id` draws one page in a sandboxed frame (ADR 0114).
  */
 
+function CanvasRow({ canvas, now }: { canvas: Canvas; now: number }) {
+  return (
+    <ItemRow
+      icon={<FrameIcon />}
+      botId={canvas.profileId}
+      title={canvas.title}
+      when={canvas.at ? formatRelative(canvas.at, now) : undefined}
+      line={canvas.version > 0 ? `Version ${canvas.version}` : "Your bot is building it…"}
+      link={{ to: `/canvas/${canvas.id}` }}
+    />
+  )
+}
+
 export function CanvasPage() {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
-  const { canvases, loaded, unsupported } = useCanvases()
+  const { visible, hidden, loaded, unsupported } = useCanvases()
   const profile = useLiveQuery(getActiveProfile, [])
   const now = useNow()
   const [prompt, setPrompt] = useState("")
@@ -143,26 +164,25 @@ export function CanvasPage() {
         </section>
 
         <section className="flex flex-col gap-2">
-          {loaded && canvases.length === 0 && !blocked && (
+          {loaded && visible.length === 0 && hidden.length === 0 && !blocked && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No canvases yet. Ask for one above and your bot builds it.
             </p>
           )}
-          {canvases.map((canvas) => (
-            <ItemRow
-              key={canvas.id}
-              icon={<FrameIcon />}
-              botId={canvas.profileId}
-              title={canvas.title}
-              when={canvas.at ? formatRelative(canvas.at, now) : undefined}
-              line={
-                canvas.version > 0
-                  ? `Version ${canvas.version}`
-                  : "Your bot is building it…"
-              }
-              link={{ to: `/canvas/${canvas.id}` }}
-            />
+          {visible.map((canvas) => (
+            <CanvasRow key={canvas.id} canvas={canvas} now={now} />
           ))}
+          {hidden.length > 0 && (
+            <ItemGroup
+              group={{ key: "hidden", label: "Hidden", items: hidden, folded: true }}
+            >
+              {hidden.map((canvas) => (
+                <li key={canvas.id}>
+                  <CanvasRow canvas={canvas} now={now} />
+                </li>
+              ))}
+            </ItemGroup>
+          )}
         </section>
       </div>
     </div>
@@ -174,6 +194,7 @@ const SNAPS = [0.5, 1]
 /** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
 export function CanvasView() {
   const { id = "" } = useParams()
+  const navigate = useNavigate()
   const { canvas, missing, loaded, away } = useCanvas(id)
   const online = useOnline()
   // A device with no network can't reach the host either, and is told so in its own words (ADR 0071)
@@ -303,6 +324,34 @@ export function CanvasView() {
     setUndoing(true)
     await attempt("undo the canvas", () => undoCanvas(canvas.id))
     setUndoing(false)
+  }
+
+  const update = async (changes: CanvasChanges) => {
+    // A host that never answered already said so in `withHost`'s words; a refusal is this call's.
+    // Either way it is thrown on, so the sheet keeps what was typed rather than closing on nothing.
+    try {
+      await updateCanvas(id, changes)
+    } catch (failure) {
+      if (hostAnswered(failure)) {
+        tell.error(failure instanceof Error ? failure.message : "Couldn't change the canvas.")
+      }
+      throw failure
+    }
+  }
+
+  const remove = async () => {
+    try {
+      await deleteCanvas(id)
+    } catch (failure) {
+      if (hostAnswered(failure)) {
+        tell.error(failure instanceof Error ? failure.message : "Couldn't delete the canvas.")
+      }
+      // Thrown on so the question stays up: nothing was deleted.
+      throw failure
+    }
+    tell.success("Canvas deleted.")
+    setOptionsOpen(false)
+    navigate("/canvas")
   }
 
   // The canvas's own session, as any chat body holds it: it edits the page with the host's tools, and
@@ -451,6 +500,8 @@ export function CanvasView() {
         onOpenChange={setOptionsOpen}
         canvas={canvas}
         onGrant={grant}
+        onUpdate={update}
+        onDelete={remove}
       />
       <UsageSheet
         open={usageOpen}

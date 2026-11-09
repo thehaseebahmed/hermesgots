@@ -8,6 +8,12 @@ from its own session: ``canvas_write``, ``canvas_edit`` and ``canvas_read`` are 
 nowhere else, and the canvas is found from a run's session by walking the chat's compression lineage
 (``sessions.chat_session``), so a chat that has been compacted still reaches its canvas.
 
+The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
+it is hidden from the list — are the host's record too (``update``), so every device draws the same
+list and a name written there renames the chat with it. A canvas the user deletes is gone whole
+(``delete``): its versions, data and grants, its chat as a tombstone, and the Hermes session it was
+made in.
+
 A version is the whole document. A small change is a list of find-and-replace pairs applied as one
 version (``edit``), undo moves the record's pointer back one without deleting anything, and a read
 answers the version the pointer names — so the agent always edits what the user is looking at.
@@ -43,7 +49,18 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from . import chats, events, mcp, mcp_call, outbox, page_calls, sessions, tools_common, triage
+from . import (
+    chats,
+    cleanup,
+    events,
+    mcp,
+    mcp_call,
+    outbox,
+    page_calls,
+    sessions,
+    tools_common,
+    triage,
+)
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -372,7 +389,10 @@ def current(path: Path, canvas_id: str) -> Dict[str, Any]:
 
 
 def title_of(prompt: Any) -> str:
-    """The title a prompt gives a new canvas, which is the chat's title too."""
+    """A canvas's title as the store keeps it — one line, at most ``TITLE_CHARS`` — or ``Canvas``.
+
+    The chat's title too, both on a canvas's first run and on a rename, so the two never disagree.
+    """
     return triage.one_line(prompt, TITLE_CHARS) or "Canvas"
 
 
@@ -600,6 +620,102 @@ def undo(path: Path, canvas_id: str) -> Dict[str, Any]:
         }
     events.note("canvas", found["session_id"], path, True)
     return answer
+
+
+def _flag(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise CanvasError(f"A canvas's {field} is true or false; this one is {value!r}.")
+    return value
+
+
+def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
+    """Changes a canvas's name and its place in the list, and answers its record as it now is.
+
+    The three are the host's, not the app's: a device that pins a canvas and one that hides it
+    write one record, so every device draws the same list. A title renames the chat too — a canvas
+    and its thread are one name, as ``_commit`` writes them — and ``chats.set_title`` keeps
+    ``titleEdited``, so Hermes's auto-title never takes the canvas's name away.
+
+    The answer is the record alone: a name or a place is not the page, and a screen that changed one
+    already holds the version it draws, so it keeps its document rather than reading 256 KB back.
+    A body naming none of the three is nobody's change; a flag that isn't a boolean or a title that
+    isn't a line of text is refused rather than stored, since a record the app can't draw is worse
+    than a refusal it can show. The record's clock moves on the host's, taken under the write lock
+    like every other write here, since the list is ordered by it.
+    """
+    if not any(field in body for field in ("title", "pinned", "hidden")):
+        raise CanvasError("A canvas's update names what changes: a title, pinned, or hidden.")
+    changes: Dict[str, Any] = {}
+    if "title" in body:
+        if not isinstance(body["title"], str) or not body["title"].strip():
+            raise CanvasError("A canvas's title is a line of text; this one is blank.")
+        changes["title"] = title_of(body["title"])
+    for field in ("pinned", "hidden"):
+        if field in body:
+            changes[field] = _flag(body[field], field)
+    with _writing(path) as conn:
+        found = _record(conn, canvas_id)
+        if found is None:
+            raise CanvasError("There is no such canvas.", 404)
+        now = int(time.time() * 1000)
+        # COALESCE: a body changes only the fields it names, so a pin never clears a title.
+        conn.execute(
+            """UPDATE canvases
+               SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
+                   hidden = COALESCE(?, hidden), at = ?
+               WHERE id = ?""",
+            (changes.get("title"), changes.get("pinned"), changes.get("hidden"), now, canvas_id),
+        )
+        answer = _record(conn, canvas_id) or found
+        # Whether a version sits under the drawn one rides the answer: the record alone would read as
+        # a canvas with nothing to undo, and the screen would lose its Undo until the next read.
+        answer["can_undo"] = _greatest_below(conn, canvas_id, answer["version"]) is not None
+    named = changes.get("title")
+    if named:
+        # A chat this can't rename is a title that lags, not an update that failed.
+        try:
+            chats.set_title(path, found["chat_id"], named)
+        except Exception:
+            logger.warning("gots: renamed %s but not its chat", canvas_id, exc_info=True)
+    events.note("canvas", found["session_id"], path, True)
+    return answer
+
+
+def _erase(conn: sqlite3.Connection, canvas_id: str) -> None:
+    conn.execute("DELETE FROM canvases WHERE id = ?", (canvas_id,))
+    conn.execute("DELETE FROM canvas_versions WHERE canvas_id = ?", (canvas_id,))
+    conn.execute("DELETE FROM canvas_docs WHERE canvas_id = ?", (canvas_id,))
+    conn.execute("DELETE FROM canvas_grants WHERE canvas_id = ?", (canvas_id,))
+
+
+def delete(
+    path: Path, canvas_id: str, *, home: Path, db: Any = None
+) -> Dict[str, Any]:
+    """Takes a canvas out of the store, and ends the thread and the Hermes session it was made in.
+
+    A canvas deleted on one device has to be gone on every one, so this is the host's record first:
+    the row and its versions, documents and grants in one transaction. The event is noted as soon as
+    it is — the record is gone and every device's list has to hear it — and the session's own end
+    (``cleanup.end_session``: the chat as a tombstone, Hermes's session, the attachments folder)
+    follows, so nothing a device waits on holds its row in the list.
+
+    The session end is best effort and never fails the delete: a store this can't reach is a
+    session left behind rather than a canvas the user still sees.
+    """
+    with _writing(path) as conn:
+        found = _record(conn, canvas_id)
+        if found is None:
+            raise CanvasError("There is no such canvas.", 404)
+        now = int(time.time() * 1000)
+        _erase(conn, canvas_id)
+    # A queued turn for this canvas would be posted to a session that is about to be gone.
+    try:
+        outbox.drop(path, found["session_id"])
+    except Exception:
+        logger.debug("gots: couldn't drop %s's queued turns", found["session_id"], exc_info=True)
+    events.note("canvas", found["session_id"], path, True)
+    cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
+    return {"deleted": True, "id": canvas_id}
 
 
 # --- the data ------------------------------------------------------------------------------------
@@ -938,12 +1054,7 @@ def _drop(path: Path, canvas_id: str) -> None:
     """Takes a record back whose first run never got queued, with everything that was its."""
     conn = connect(path)
     try:
-        conn.execute("DELETE FROM canvases WHERE id = ?", (canvas_id,))
-        conn.execute("DELETE FROM canvas_versions WHERE canvas_id = ?", (canvas_id,))
-        # The data is the canvas's too: a row nothing can reach is a store that only grows.
-        conn.execute("DELETE FROM canvas_docs WHERE canvas_id = ?", (canvas_id,))
-        # And so are the answers it was given: a canvas gone leaves no grant behind it.
-        conn.execute("DELETE FROM canvas_grants WHERE canvas_id = ?", (canvas_id,))
+        _erase(conn, canvas_id)
     finally:
         conn.close()
 

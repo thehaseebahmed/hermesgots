@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import {
@@ -25,10 +25,12 @@ import {
 } from "@/lib/canvas-cache"
 import { hostTargets } from "@/lib/connection"
 import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
+import { equal } from "@/lib/equal"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
   callCanvas,
   createCanvas,
+  deleteCanvas as deleteCanvasOnHost,
   getCanvas,
   getPluginFeatures,
   grantCanvasTool as grantCanvasToolOnHost,
@@ -37,6 +39,8 @@ import {
   listCanvases,
   runRequest,
   undoCanvas as undoCanvasOnHost,
+  updateCanvas as updateCanvasOnHost,
+  type CanvasChanges,
 } from "@/lib/hermes"
 import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { onlineNow } from "@/lib/online"
@@ -88,6 +92,9 @@ export interface Canvas {
 /** A canvas as a list keeps it, and as the cache's list row keeps it (`canvas-cache.ts`). */
 export type CanvasRecord = Omit<Canvas, "html" | "data" | "tools" | "dataWrites">
 
+/** What a canvas's own record may change, as the host's route takes it (`hermes.ts`). */
+export type { CanvasChanges }
+
 interface CanvasState {
   lists: Record<string, Canvas[]>
   /** The canvas on screen, with its document. */
@@ -131,11 +138,23 @@ function markAway(id: string) {
   store.set({ ...state, missedAt: { ...state.missedAt, [id]: Date.now() } })
 }
 
-function forgetDrawn(id: string) {
+// One rule for every way a canvas is found gone — a delete the host answered, a read that came back
+// 404 — so the two can't disagree about what "gone" leaves behind.
+async function dropCanvas(profile: Profile, id: string) {
   const state = store.get()
   const details = { ...state.details }
   delete details[id]
-  store.set({ ...state, details, missing: { ...state.missing, [id]: true } })
+  const missedAt = { ...state.missedAt }
+  delete missedAt[id]
+  const rows = state.lists[profile.id] ?? []
+  store.set({
+    ...state,
+    lists: { ...state.lists, [profile.id]: rows.filter((canvas) => canvas.id !== id) },
+    details,
+    missing: { ...state.missing, [id]: true },
+    missedAt,
+  })
+  await forgetCanvas(profile, id)
 }
 
 /** What the list says of a bot that didn't answer: the copy this device holds is what is drawn. */
@@ -327,7 +346,10 @@ async function readAll(): Promise<boolean> {
       }
     }),
   )
-  store.set({ ...store.get(), lists, unsupported, loaded: true })
+  const state = store.get()
+  if (!state.loaded || !equal(state.lists, lists) || !equal(state.unsupported, unsupported)) {
+    store.set({ ...state, lists, unsupported, loaded: true })
+  }
   return complete
 }
 
@@ -392,8 +414,7 @@ async function readInto(
   const { raw, failure } = await answer
   if (failure) {
     if (failure instanceof HermesError && failure.status === 404) {
-      await forgetCanvas(profile, id)
-      forgetDrawn(id)
+      await dropCanvas(profile, id)
       throw failure
     }
     // A host that answered and refused — an undo past the first version, a key it won't take — said
@@ -435,6 +456,48 @@ export async function undoCanvas(id: string) {
 }
 
 /**
+ * The canvas's own record changed: its title, whether it is pinned to the sidebar, whether it is
+ * hidden from the list. Kept on the host, so the shape of every device's list is the same one, and
+ * the record the host answers is folded over the copy this device already draws — the host answers
+ * the record and not the page, so the document on screen stays the one it had.
+ */
+export async function updateCanvas(id: string, changes: CanvasChanges) {
+  const { profile, value } = await withHost(
+    id,
+    (bot) => updateCanvasOnHost(bot, id, changes),
+    CANVAS_UNREACHABLE,
+  )
+  if (!value) throw new Error("The host answered a change the app couldn't read.")
+  const held = store.get().details[id]
+  const record = toCanvas(value, profile.id)
+  put(profile, held ? { ...held, ...record } : record, writes)
+}
+
+/**
+ * The canvas deleted on the host, so no device lists it again: its row leaves the list, the copy the
+ * screen draws goes, and the id is remembered as gone rather than looked for — a stale link then says
+ * the canvas is gone instead of fanning out for one no bot holds. The device's own copy goes with it,
+ * which is what keeps a deleted canvas from being drawn offline after the next open.
+ *
+ * A host that answers 404 is no failure: the canvas is already gone, which is what the delete asked
+ * for, so the row and the copy go the same way and nothing is said about it.
+ */
+export async function deleteCanvas(id: string) {
+  let profile: Profile | undefined
+  try {
+    profile = (await withHost(id, (bot) => deleteCanvasOnHost(bot, id), CANVAS_UNREACHABLE)).profile
+  } catch (failure) {
+    if (!(failure instanceof HermesError && failure.status === 404)) throw failure
+  }
+  if (!profile) {
+    const profileId = await botHolding(id).catch(() => null)
+    if (!profileId) return
+    profile = await configOf(profileId).catch(() => undefined)
+  }
+  if (profile) await dropCanvas(profile, id)
+}
+
+/**
  * A page's write, through the host's one route: the host stores (or removes) the document and the
  * answer replaces the copy this device keeps, so the page reads back what the host kept rather than
  * what it sent. A refusal is thrown, which is the sentence the page's promise gets.
@@ -465,19 +528,58 @@ export async function writeCanvasData(id: string, call: BridgeWriteCall) {
   return answer.value
 }
 
+/**
+ * The canvases this device holds, read from the store alone, and the two lists placement makes of
+ * them. The rule lives here rather than in each view: a hidden canvas is folded out of `/canvas`'s
+ * list, and it loses its sidebar row too — a reader who put a page away asked for neither.
+ */
+export function useCanvasStore() {
+  const state = store.use()
+  return useMemo(() => {
+    const canvases = Object.values(state.lists)
+      .flat()
+      .sort((a, b) => b.at - a.at)
+    return {
+      canvases,
+      /** What `/canvas` draws among the rest. */
+      visible: canvases.filter((canvas) => canvas.hidden !== true),
+      /** What the sidebar gives a row of its own; hidden wins over pinned. */
+      pinned: canvases.filter((canvas) => canvas.pinned && canvas.hidden !== true),
+      hidden: canvases.filter((canvas) => canvas.hidden === true),
+      loaded: state.loaded,
+      unsupported: state.unsupported,
+    }
+  }, [state])
+}
+
 /** Every bot's canvases, newest first, kept fresh while a screen draws them. */
 export function useCanvases() {
-  const state = store.use()
+  const held = useCanvasStore()
   const profiles = useLiveQuery(listEnabledProfiles, [])
-  const canvases = Object.values(state.lists)
-    .flat()
-    .sort((a, b) => b.at - a.at)
   // The plugin notes a `canvas` change on every write, so a connected stream is what keeps the list
   // fresh; the poll is the fallback for a host whose stream isn't up.
   const live = useAllLive(profiles)
   const changes = useAnyChange("canvas")
   usePoll(() => void refreshCanvases(), live ? SAFETY_MS : LIST_MS, [changes, profiles?.length, live])
-  return { canvases, loaded: state.loaded, unsupported: state.unsupported }
+  return held
+}
+
+/**
+ * The pinned canvases, for a screen that isn't Canvas — the sidebar, on every route. It reads the
+ * store, asks for a sweep when it opens and when a canvas changes, and keeps no timer of its own: a
+ * nav mounted beside `/canvas` must not double that screen's poll, and the rows it draws are a
+ * convenience that a change keeps right.
+ */
+export function usePinnedCanvases() {
+  const { pinned } = useCanvasStore()
+  const changes = useAnyChange("canvas")
+  useEffect(() => {
+    void refreshCanvases().catch(quietly("Reading canvases"))
+  }, [])
+  useEffect(() => {
+    if (changes) void refreshCanvases().catch(quietly("Reading canvases"))
+  }, [changes])
+  return pinned
 }
 
 /** One canvas, the document its record points at read and kept fresh while it is on screen. */

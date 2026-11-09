@@ -9,7 +9,7 @@ export const APP_VERSION = __APP_VERSION__
  * `gots` plugin, served under `/api/plugins/gots`; the `memento` plugin's routes are not read.
  * 0.113.0 is the first that holds canvases (`canvases`, `canvas_write`), which the Canvas screen and
  * a canvas's chat both need (ADR 0113). */
-export const MIN_PLUGIN_VERSION = "0.113.0"
+export const MIN_PLUGIN_VERSION = "0.114.0"
 
 function parts(version: string) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())

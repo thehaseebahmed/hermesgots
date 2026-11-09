@@ -135,13 +135,18 @@ class Context:
 
 
 class RouteAdapter:
-    """The API server as far as a wired route reaches: its auth check, and nothing else."""
+    """The API server as far as a wired route reaches: its auth check, and the session store a route
+    that ends a session asks for."""
 
     def __init__(self) -> None:
         self.denied: Any = None
+        self.session_db: Any = None
 
     def _check_auth(self, request: Any) -> Any:
         return self.denied
+
+    async def _ensure_session_db_async(self) -> Any:
+        return self.session_db
 
 
 def wire(case: unittest.TestCase, adapter: Any) -> Any:

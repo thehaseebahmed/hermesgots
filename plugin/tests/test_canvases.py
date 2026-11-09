@@ -1247,6 +1247,129 @@ class RouteTest(unittest.TestCase):
                 ):
                     self.assertEqual("canvas" in self.call("/info")["payload"]["features"], listed)
 
+    def test_pin_hide_rename_and_delete(self) -> None:
+        deleted_sessions: list = []
+
+        class SessionDb:
+            def delete_session(self, session_id: str) -> None:
+                deleted_sessions.append(session_id)
+
+        adapter = RouteAdapter()
+        adapter.session_db = SessionDb()
+        self.app = wire(self, adapter)
+
+        canvas_id = self.make()
+        made = canvases.record(self.path, canvas_id)
+        chat_id, session_id = made["chat_id"], made["session_id"]
+        canvases.write(self.path, canvas_id, DOCUMENT, tools=["files.search"])
+        # A second version, so there is something under the pointer and Undo has to survive the pin.
+        canvases.write(self.path, canvas_id, DOCUMENT, tools=["files.search"])
+        canvases.put_doc(self.path, canvas_id, "notes", "a", {"text": "one"})
+        canvases.grant(self.path, canvas_id, "files.search", True)
+
+        pinned = self.call("/canvases/{canvas_id}", "POST", {"pinned": True}, canvas_id=canvas_id)
+        self.assertEqual((pinned["status"], pinned["payload"]["object"]), (200, "gots.canvas"))
+        answered = pinned["payload"]["canvas"]
+        self.assertIs(answered["pinned"], True)
+        self.assertIs(answered["can_undo"], True, "the record answer still carries Undo")
+        self.assertNotIn("html", answered)
+        self.assertNotIn("data", answered)
+        read = self.call("/canvases/{canvas_id}", canvas_id=canvas_id)["payload"]["canvas"]
+        self.assertEqual(read["html"], DOCUMENT)
+        self.assertEqual([row["doc"] for row in read["data"]], [{"text": "one"}])
+        self.assertEqual(
+            {field: answered[field] for field in ("id", "title", "version", "pinned", "hidden", "at")},
+            {field: read[field] for field in ("id", "title", "version", "pinned", "hidden", "at")},
+        )
+        self.assertIs(canvases.record(self.path, canvas_id)["pinned"], True)
+        listed = self.call("/canvases")["payload"]["canvases"]
+        self.assertEqual(
+            [(row["id"], row["pinned"], row["hidden"]) for row in listed],
+            [(canvas_id, True, False)],
+        )
+
+        hid = self.call("/canvases/{canvas_id}", "POST", {"hidden": True}, canvas_id=canvas_id)
+        self.assertIs(hid["payload"]["canvas"]["hidden"], True)
+        self.assertIs(hid["payload"]["canvas"]["pinned"], True)
+        self.assertEqual(
+            [
+                (row["id"], row["pinned"], row["hidden"])
+                for row in self.call("/canvases")["payload"]["canvases"]
+            ],
+            [(canvas_id, True, True)],
+        )
+
+        renamed = self.call(
+            "/canvases/{canvas_id}", "POST", {"title": "Split the bill"}, canvas_id=canvas_id
+        )
+        self.assertEqual(renamed["status"], 200)
+        self.assertEqual(renamed["payload"]["canvas"]["title"], "Split the bill")
+        self.assertEqual(canvases.record(self.path, canvas_id)["title"], "Split the bill")
+        chat = chats.one(self.path, chat_id)["value"]
+        self.assertEqual(chat["title"], "Split the bill")
+        self.assertIs(chat["titleEdited"], True)
+        self.assertGreaterEqual(renamed["payload"]["canvas"]["at"], made["at"])
+
+        for body, named in (
+            ({}, None),
+            ({"pinned": "yes"}, "pinned"),
+            ({"hidden": 1}, "hidden"),
+            ({"title": 3}, "title"),
+            ({"title": "   "}, "title"),
+        ):
+            with self.subTest(body=body):
+                refused = self.call("/canvases/{canvas_id}", "POST", body, canvas_id=canvas_id)
+                self.assertEqual(refused["status"], 400)
+                if named is not None:
+                    self.assertIn(named, refused["payload"]["error"]["message"])
+
+        for method, body in (("POST", {"pinned": True}), ("DELETE", None)):
+            with self.subTest(method=method):
+                refused = self.call("/canvases/{canvas_id}", method, body, canvas_id="nope")
+                self.assertEqual(refused["status"], 404)
+
+        # The chat's clock is ahead of the canvas's, as a fast device leaves it: the tombstone still lands.
+        ahead = int(time.time() * 1000) + 60_000
+        chats.merge(
+            self.path,
+            {chat_id: {"at": ahead, "value": chats.one(self.path, chat_id)["value"]}},
+        )
+
+        gone = self.call("/canvases/{canvas_id}", "DELETE", canvas_id=canvas_id)
+        self.assertEqual(gone["status"], 200)
+        self.assertEqual(
+            gone["payload"],
+            {"object": "gots.canvas.deleted", "deleted": True, "id": canvas_id},
+        )
+        self.assertEqual(self.call("/canvases/{canvas_id}", canvas_id=canvas_id)["status"], 404)
+        self.assertEqual(self.call("/canvases")["payload"]["canvases"], [])
+        self.assertIs(chats.one(self.path, chat_id)["deleted"], True)
+        self.assertGreater(chats.one(self.path, chat_id)["at"], ahead)
+        self.assertEqual(deleted_sessions, [session_id])
+        # And the first turn the canvas was made with is not left queued for a session that is gone.
+        self.assertEqual(outbox.read(self.path, session_id)["items"], [])
+        conn = connect(self.path)
+        try:
+            left = {
+                table: conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {key} = ?", (canvas_id,)
+                ).fetchone()[0]
+                for table, key in (
+                    ("canvases", "id"),
+                    ("canvas_versions", "canvas_id"),
+                    ("canvas_docs", "canvas_id"),
+                    ("canvas_grants", "canvas_id"),
+                )
+            }
+        finally:
+            conn.close()
+        self.assertEqual(left, {
+            "canvases": 0,
+            "canvas_versions": 0,
+            "canvas_docs": 0,
+            "canvas_grants": 0,
+        })
+
 
 if __name__ == "__main__":
     unittest.main()

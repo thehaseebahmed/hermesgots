@@ -210,6 +210,25 @@ def remove_sent(path: Path, session_id: str, item_id: str) -> bool:
         conn.close()
 
 
+def drop(path: Path, session_id: str) -> int:
+    """Takes every queued message of a session away, and the body a run would have used.
+
+    For a session that is gone: a canvas deleted mid-build leaves its first turn queued, and a row
+    nothing can run would be posted later to a session Hermes no longer has.
+    """
+    if not path.exists():
+        return 0
+    conn = _open(path)
+    try:
+        removed = conn.execute(
+            "DELETE FROM outbox WHERE session_id = ?", (session_id,)
+        ).rowcount
+        conn.execute("DELETE FROM outbox_sessions WHERE session_id = ?", (session_id,))
+        return int(removed or 0)
+    finally:
+        conn.close()
+
+
 def promote(path: Path, session_id: str, item_id: str) -> bool:
     """Puts an item first and lets a paused queue go again."""
     conn = _open(path)

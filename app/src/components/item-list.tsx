@@ -15,9 +15,9 @@ import type { RowTone } from "@/lib/session-work"
 import { cn } from "@/lib/utils"
 
 /**
- * A titled group of rows with its count; Closed starts folded. `sticky` pins the heading under the
- * screen's own header while the group scrolls (Code's four): the header publishes its height as
- * `--list-header-h` on the list's scroll container, and the heading stops beneath it.
+ * A titled group of rows with its count; a `folded` group starts closed. `sticky` pins the heading
+ * under the screen's own header while the group scrolls (Code's four): the header publishes its
+ * height as `--list-header-h` on the list's scroll container, and the heading stops beneath it.
  */
 export function ItemGroup({
   group,
@@ -43,7 +43,7 @@ export function ItemGroup({
   )
   const stickyClass = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
   const list = <ul className="flex flex-col">{children}</ul>
-  if (group.key !== "closed")
+  if (!group.folded)
     return (
       <section className="flex flex-col gap-1" aria-label={group.label}>
         <h2
