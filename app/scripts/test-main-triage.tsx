@@ -41,6 +41,13 @@ import {
   until,
 } from "./component-kit.tsx"
 
+/**
+ * How long a test waits for a run to be posted. Every send here is queued, triaged and posted by the
+ * app's own code rather than answered inline, and the component tier runs two files at once: on a
+ * loaded runner the twelve seconds a wait is given by default has been spent before the post lands.
+ */
+const RUN_START = 30_000
+
 const MAIN = mainThreadId("bot-1")
 const MAIN_SESSION = `gots-${MAIN}`
 
@@ -512,7 +519,7 @@ test("a photo picked for a model that reads no images reaches the agent as a pat
       assert.deepEqual(tileNames(), ["IMG_0001.heic"], "the pick lands on the message")
       await type(document.querySelector("textarea"), "what is this?")
       await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Send"))
-      await until(async () => runsFor(seen, MAIN_SESSION).length > 0, "the run to Main")
+      await until(async () => runsFor(seen, MAIN_SESSION).length > 0, "the run to Main", RUN_START)
 
       assert.deepEqual(uploads, ["IMG_0001.heic"], "the host was handed the photo itself")
       assert.equal(triaged(seen).length, 1, "the confirmed route was the one the send asked")
@@ -772,7 +779,7 @@ test("a Main send while Main's reply runs is triaged at once and moves without w
   hangingRuns.add("route-busy-move")
   const seen = host("route-busy-move", "stay")
   void sendFromMain(MAIN, "first")
-  await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run")
+  await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run", RUN_START)
   const busy = host("route-busy-move", "thread")
   busy.push(...seen)
   assert.deepEqual(await sendFromMain(MAIN, "more on Lisbon", [], { steer: true }), {
@@ -795,7 +802,7 @@ test("a Main send that stays while Main's reply runs waits queued in Main", asyn
   hangingRuns.add("route-busy-stay")
   const seen = host("route-busy-stay", "stay")
   void sendFromMain(MAIN, "first")
-  await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run")
+  await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run", RUN_START)
   assert.equal(await sendFromMain(MAIN, "and this"), undefined)
   assert.equal(triaged(seen).filter((r) => r.body.text === "and this").length, 1)
   // The row is written beside the ask, not before it answers: a send that returns before the row

@@ -13,8 +13,11 @@ set -euo pipefail
 
 # Every gate reports its start and finish here (see `start_gate`), so a killed step leaves a trail.
 exec 3>&1
-# How often a running gate says it is still running. Under the shortest silence a runner tolerates.
-BEAT_SECONDS=${BEAT_SECONDS:-30}
+# How often a gate with nothing to say of its own — an install, a build — says it is still running.
+# A gate that is running tests speaks sooner than this: each test's line is forwarded as it lands (see
+# `start_gate`), so the beat is the fallback for the gates that print nothing rather than the only
+# news a step has. Under the shortest silence a runner tolerates.
+BEAT_SECONDS=${BEAT_SECONDS:-60}
 
 for dir in app plugin website; do
   if [ ! -d "$dir" ]; then
@@ -99,20 +102,35 @@ start_gate() {
   (
     local started=$SECONDS status=0
     # A gate's own log is replayed only at the end, so a long one says nothing to the step for minutes
-    # at a time — and a step that says nothing can be stopped for it. The beat is what tells a reader,
-    # and the runner, that the work is moving rather than wedged.
+    # at a time — and a step that says nothing can be stopped for it. Two things fill that silence:
+    # each test's own line, forwarded the moment it lands and named with the gate it came from, so a
+    # run is followed test by test and a failure is read while the rest are still going; and a beat
+    # for the gates that print no tests at all. The whole log is still kept and replayed below, which
+    # is where a failing test's own output is read.
     (
       while sleep "$BEAT_SECONDS"; do
         printf 'gate %s: still running (%ss)\n' "$name" "$((SECONDS - started))" >&3
       done
     ) &
     local beat=$!
-    "$@" || status=$?
+    # `set +e` around the pipe, not `|| status=$?`: the status wanted is the gate's own, and a
+    # command after a pipeline has already replaced PIPESTATUS by the time it could be read.
+    set +e
+    "$@" 2>&1 | tee "$LOGS/$name.log" | while IFS= read -r line; do
+      case $line in
+        "ok "*" - "*|"not ok "*" - "*|"# pass "*|"# fail "*|"1.."*)
+          printf '[%s] %s\n' "$name" "$line" >&3 ;;
+        *" ... ok"|*" ... FAIL"|*" ... ERROR"|*" ... skipped"*)
+          printf '[%s] %s\n' "$name" "$line" >&3 ;;
+      esac
+    done
+    status=${PIPESTATUS[0]}
+    set -e
     kill "$beat" 2>/dev/null || true
     echo "$((SECONDS - started))" > "$LOGS/$name.seconds"
     printf 'gate %s: finished in %ss (exit %s)\n' "$name" "$((SECONDS - started))" "$status" >&3
     exit $status
-  ) > "$LOGS/$name.log" 2>&1 &
+  ) > /dev/null 2>&1 &
   GATE_PIDS+=($!)
 }
 
