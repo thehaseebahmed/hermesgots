@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react"
+import { memo, useEffect, useMemo, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { Bot } from "@/components/bot"
@@ -8,6 +8,7 @@ import { Markdown } from "@/components/chat/markdown"
 import { SystemLine } from "@/components/chat/system-line"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { RoomWaiting } from "@/components/room/room-waiting"
+import { RoomActions } from "@/components/room/room-actions"
 import { RoomRowMedia } from "@/components/room/room-media"
 import { Banner } from "@/components/banner"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -36,6 +37,7 @@ import {
   type RoomMember,
 } from "@/lib/db"
 import { COLUMN_BOX } from "@/lib/layout"
+import { useNav } from "@/lib/nav"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
 import { botsByProfile, roomMembersLine } from "@/lib/rooms"
@@ -65,6 +67,15 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     [chat, seated],
   )
   const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
+  const { root } = useNav()
+  // A room's row going while the room is open — a disband on another device, or a merge landing
+  // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a
+  // room nothing owns any more.
+  const held = useRef(false)
+  useEffect(() => {
+    if (chat?.room) held.current = true
+    else if (held.current) root("/")
+  }, [chat, root])
   const connection = useMemo(() => serverConfig(answerer), [answerer])
   // A refused send goes back into the field, the way a chat's does: what the Host would not take is
   // the user's words. A file the Host won't take is marked on its own tile and said in a toast by
@@ -94,7 +105,9 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     () => new Map(live.members.map((member) => [member.memberId, member])),
     [live.members],
   )
-  const name = live.name || chat?.title || "Room"
+  // The row is the Host's own record — a write's answer or the projection — so it is read first: a
+  // rename the user just made is on the row before the room's next read names it (ADR 0123).
+  const name = chat?.title || live.name || "Room"
 
   return (
     <div data-slot="chat-pane" data-pane={slot} className="relative flex min-h-0 flex-1 flex-col">
@@ -102,6 +115,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         title={name}
         subtitle={chat?.room ? roomMembersLine({ ...chat.room, members: live.members }) : undefined}
         botId={answerer?.botId}
+        actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
       />
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="flex-1">
