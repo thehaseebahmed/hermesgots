@@ -225,6 +225,21 @@ export async function flow(
   await page.addInitScript(() => {
     globalThis[Symbol.for("openui.devtools.autoMount")] = true
   })
+  // The dev image adds Reticle's presenter, whose button sits over the app's bottom-right corner —
+  // where a sheet's Send and a canvas's Edit pill are. It is a devtools widget of the image rather
+  // than anything a user has, and its own panel is driven by hand, so a flow hides it and drives the
+  // app the reader gets.
+  await page.addInitScript(() => {
+    const hide = () => {
+      if (document.querySelector("style[data-e2e-devtools]")) return
+      const style = document.createElement("style")
+      style.setAttribute("data-e2e-devtools", "")
+      style.textContent = "[data-reticle-overlay]{display:none !important}"
+      document.head?.append(style)
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hide)
+    else hide()
+  })
   // The account has to be in place before the document that reads it: the init script lands on the
   // next navigation, which is the flow's own `goto`.
   if (account) await signIn(page.context())

@@ -500,6 +500,11 @@ export const FLOWS = {
     about:
       "A chat's subagent card and waiting Question fill their pane with its gutter at 390 and 1024px and stop dead at the reading column's 672px box when the pane is wider, centred inside it, while message text keeps the 640px column the card then frames",
   },
+  canvas: {
+    script: "e2e/canvas.mjs",
+    about:
+      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, and the sheet swiped down to leave the page whole",
+  },
   submission: {
     script: "regression-submission.mjs",
     about: "Concurrent sends start one run and get one reply",
