@@ -172,7 +172,7 @@ export function CanvasOptions({
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader>
-          <PopupTitle>{canvas?.title ?? "Canvas"} options</PopupTitle>
+          <PopupTitle>Options</PopupTitle>
         </PopupHeader>
         <div data-canvas-options className="px-4 pb-4">
           {rows.length === 0 ? (

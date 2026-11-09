@@ -42,6 +42,10 @@ function page(prompt, title, version) {
       <p>Version ${version} of this canvas, drawn from what its bot wrote.</p>
       <button id="add">Add one</button>
     </div>
+    <div class="card">
+      <p id="found">The host's files, not searched yet.</p>
+      <button id="search">Search the files</button>
+    </div>
     <script>
       (function () {
         var value = document.getElementById("value");
@@ -63,6 +67,17 @@ function page(prompt, title, version) {
           // word here the page draws a number the host never kept.
           store.put("counter", "value", { n: n }).catch(function (error) {
             console.error("canvas data:", error);
+          });
+        });
+        // The page's one declared tool: its first call is the reader's to answer, and the answer is
+        // kept on the host, so the second search never asks again.
+        var found = document.getElementById("found");
+        document.getElementById("search").addEventListener("click", function () {
+          window.canvas.tool.call("files.search", { q: "notes" }).then(function (answer) {
+            var hits = answer && answer.hits ? answer.hits.length : 0;
+            found.textContent = hits + " found for " + String((answer && answer.query) || "notes") + ".";
+          }).catch(function (error) {
+            found.textContent = String((error && error.message) || error);
           });
         });
       })();
