@@ -11,7 +11,8 @@ import { connectionKey } from "@/lib/connection"
 import { db, type Profile, type RoomMember } from "@/lib/db"
 import { usePluginFeatureByServer } from "@/lib/features"
 import { useNav } from "@/lib/nav"
-import { roomSeats, startRoom } from "@/lib/rooms"
+import { roomSeats } from "@/lib/rooms"
+import { startRoom } from "@/lib/room-writes"
 import { cn, randomId } from "@/lib/utils"
 
 /** The fewest and most seats a room may hold: the Host's rule, said before it can be broken. */

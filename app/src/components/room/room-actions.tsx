@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { Profile } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
-import { disbandRoomNow, renameRoomTo } from "@/lib/rooms"
+import { disbandRoomNow, renameRoomTo } from "@/lib/room-writes"
 
 /**
  * A room's own menu, in its header: Rename and Disband, and nothing of a chat's (ADR 0122). The chat's

@@ -10,7 +10,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { db, type Profile } from "@/lib/db"
-import { disbandRoomNow, renameRoomTo, roomSeats, startRoom } from "@/lib/rooms"
+import { roomSeats } from "@/lib/rooms"
+import { disbandRoomNow, renameRoomTo, startRoom } from "@/lib/room-writes"
 import { randomId } from "@/lib/utils"
 import { botProfile, json, settle } from "./component-kit.tsx"
 
