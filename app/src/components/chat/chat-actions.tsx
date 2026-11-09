@@ -14,6 +14,8 @@ import {
 } from "lucide-react"
 
 import { Banner } from "@/components/banner"
+import { ConfirmDialog } from "@/components/chat/confirm-dialog"
+import { RenameDialog } from "@/components/chat/rename-dialog"
 import {
   ContextIcon,
   ContextPercent,
@@ -21,16 +23,6 @@ import {
   UsageSheet,
   type ContextUsage,
 } from "@/components/chat/usage-sheet"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -39,7 +31,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
 import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
 import { useWide } from "@/lib/media"
 import { chosenOf } from "@/lib/model-pick"
@@ -270,7 +261,6 @@ export function ChatActions({
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
-  const [title, setTitle] = useState("")
 
   /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
   const closeSession = () => {
@@ -314,12 +304,7 @@ export function ChatActions({
             {/* Main has no title of its own to give: its header carries the bot's name, which Bot
                 settings edits. */}
             {!isMain && (
-              <DropdownMenuItem
-                onClick={() => {
-                  setTitle(chat.title)
-                  setRenaming(true)
-                }}
-              >
+              <DropdownMenuItem onClick={() => setRenaming(true)}>
                 <PencilIcon />
                 {session ? "Edit" : "Rename"}
               </DropdownMenuItem>
@@ -399,93 +384,47 @@ export function ChatActions({
         providerUsage={providerUsage}
       />
 
-      <AlertDialog open={renaming} onOpenChange={setRenaming}>
-        <AlertDialogContent>
-          <form
-            className="contents"
-            onSubmit={async (event) => {
-              event.preventDefault()
-              if (title.trim())
-                await updateConversation(chat.id, { title: title.trim(), titleEdited: true })
-              setRenaming(false)
-            }}
-          >
-            <AlertDialogHeader>
-              <AlertDialogTitle>{session ? "Edit session" : "Rename chat"}</AlertDialogTitle>
-            </AlertDialogHeader>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-              aria-label="Chat title"
-            />
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction type="submit">Save</AlertDialogAction>
-            </AlertDialogFooter>
-          </form>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RenameDialog
+        open={renaming}
+        onOpenChange={setRenaming}
+        title={session ? "Edit session" : "Rename chat"}
+        fieldLabel="Chat title"
+        value={chat.title}
+        onSave={(name) => updateConversation(chat.id, { title: name, titleEdited: true })}
+      />
 
-      <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {session ? "Delete this session?" : "Delete this chat?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {session
-                ? "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. It's removed from the app; Hermes keeps its own copy of the session."
-                : "It's removed from this device. Hermes keeps its own copy of the session."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                if (session) closeSession()
-                else stopMessage(chat.id)
-                // The row goes now, not when the host has finished: it is already closed, and the
-                // close reports a kept worktree or a refusal when it ends (ADR 0080).
-                setDeleting(false)
-                await deleteConversation(chat.id)
-                onDeleted()
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title={session ? "Delete this session?" : "Delete this chat?"}
+        description={
+          session
+            ? "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. It's removed from the app; Hermes keeps its own copy of the session."
+            : "It's removed from this device. Hermes keeps its own copy of the session."
+        }
+        confirm="Delete"
+        onConfirm={async () => {
+          if (session) closeSession()
+          else stopMessage(chat.id)
+          // The row goes now, not when the host has finished: it is already closed, and the close
+          // reports a kept worktree or a refusal when it ends (ADR 0080).
+          await deleteConversation(chat.id)
+          onDeleted()
+        }}
+      />
 
-      <AlertDialog open={discarding} onOpenChange={setDiscarding}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard this session?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its run stops and the host closes the session's work now: its worktrees are removed,
-              unless one has uncommitted or unpushed changes, and its pull request is closed and
-              its branch deleted on GitHub. The session moves to Discarded meanwhile.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                setDiscarding(false)
-                if (session) {
-                  closeSession()
-                  await updateConversation(session.id, { discardedAt: Date.now() })
-                }
-              }}
-            >
-              Discard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={discarding}
+        onOpenChange={setDiscarding}
+        title="Discard this session?"
+        description="Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. The session moves to Discarded meanwhile."
+        confirm="Discard"
+        onConfirm={async () => {
+          if (!session) return
+          closeSession()
+          await updateConversation(session.id, { discardedAt: Date.now() })
+        }}
+      />
     </>
   )
 }

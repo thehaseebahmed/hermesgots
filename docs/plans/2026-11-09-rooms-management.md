@@ -184,6 +184,8 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    Check: `app/scripts/test-chat-next-mount.tsx` — "the header's options rename a chat and delete it,
    as the current screen's do" — with `test-chat-header.tsx`, green before and after.
 
+   Done.
+
 3. **A lifecycle write is one call that answers the room's row.** The seam takes the roster in the
    app's spelling and hands the Host its own (`member_id`, `display_name`), and answers every write
    with the room's chat-list record — the Host's own clock, name and roster where its answer names
