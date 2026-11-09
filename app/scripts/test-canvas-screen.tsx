@@ -462,6 +462,69 @@ test(
 )
 
 test(
+  "a tapped link opens in the app, once, with no opener",
+  atWidth(390, async () => {
+    // A canvas's page has no way out of its frame but the app: the one call it makes without being
+    // asked is a link the reader tapped, and the app opens it in a tab of its own.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat("c1")
+    // jsdom has no tabs, so the tab a screen asks for is what this test reads.
+    const opened: { url: string; target?: string; features?: string }[] = []
+    const real = window.open
+    window.open = ((url: string | URL, target?: string, features?: string) => {
+      opened.push({ url: String(url), target, features })
+      return null
+    }) as typeof window.open
+    try {
+      await mount(
+        <MemoryRouter initialEntries={["/canvas/c1"]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(() => Boolean(find("iframe[data-canvas-frame]")), "the frame to draw")
+          const page = (find("iframe[data-canvas-frame]") as HTMLIFrameElement).contentWindow
+          assert.ok(page, "the frame has a window of its own")
+          const say = (data: unknown, source: MessageEventSource | null = page) =>
+            act(async () => {
+              window.dispatchEvent(new window.MessageEvent("message", { data, source }))
+            })
+
+          await say({
+            type: BRIDGE_MESSAGE,
+            call: 1,
+            method: "open",
+            url: "https://example.com/a",
+          })
+          await until(() => opened.length > 0, "the link to be opened")
+          assert.deepEqual(opened, [
+            { url: "https://example.com/a", target: "_blank", features: "noopener,noreferrer" },
+          ])
+
+          // Another window's open call is not the canvas talking, and a scheme the app refuses is
+          // no link at all: neither opens anything.
+          await say(
+            { type: BRIDGE_MESSAGE, call: 2, method: "open", url: "https://example.com/elsewhere" },
+            window,
+          )
+          await say({
+            type: BRIDGE_MESSAGE,
+            call: 3,
+            method: "open",
+            url: "javascript:alert(1)",
+          })
+          await settle()
+          assert.equal(opened.length, 1, "only the frame's own http(s) link opened")
+        },
+      )
+    } finally {
+      window.open = real
+    }
+  }),
+)
+
+test(
   "a read that began before a write cannot put the old copy back",
   atWidth(390, async () => {
     // The page writes while a read is still out: that read carries the copy from before the tap, so

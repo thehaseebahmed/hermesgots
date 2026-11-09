@@ -95,16 +95,20 @@ export async function openMediaViewer(
     void Browser.open({ url })
     return
   }
-  window.open(url, "_blank", "noopener")
+  window.open(url, "_blank", "noopener,noreferrer")
 }
 
-/** A URL opened outside the app: the platform's browser in the Android app, a new tab on the web. */
+/**
+ * A URL opened outside the app: the platform's browser in the Android app, a new tab on the web.
+ * The tab gets no opener and no referrer: a canvas or a message is not the app, and nothing it opens
+ * is told where it came from.
+ */
 export function openExternal(url: string) {
   if (isNative) {
     void Browser.open({ url })
     return
   }
-  window.open(url, "_blank", "noopener")
+  window.open(url, "_blank", "noopener,noreferrer")
 }
 
 /** The Netlify deploy the app signs in and syncs through, baked in by `pnpm build:android`. */

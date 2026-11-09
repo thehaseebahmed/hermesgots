@@ -109,6 +109,7 @@ export type BridgeCall =
   | (BridgeCallBase & { method: "remove"; collection: string; id: string })
   | (BridgeCallBase & { method: "read"; shape: CanvasReadShape; args: Record<string, unknown> })
   | (BridgeCallBase & { method: "tool"; tool: string; args: Record<string, unknown> })
+  | (BridgeCallBase & { method: "open"; url: string })
 
 /** A call answered from this device's copy of the canvas's data: no other method reads it. */
 export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "put" | "remove" }>
@@ -125,6 +126,9 @@ export type BridgeReadCall = Extract<BridgeCall, { method: "read" }>
 /** A call to one of the bot's tools, as the version declared it. */
 export type BridgeToolCall = Extract<BridgeCall, { method: "tool" }>
 
+/** A reader's tap on a link to another site: the one call the page makes without being asked. */
+export type BridgeOpenCall = Extract<BridgeCall, { method: "open" }>
+
 /** A tool's name is `<server>.<tool>`, and both halves have to be there. */
 function namesTool(value: unknown): value is string {
   if (typeof value !== "string" || /\s/.test(value)) return false
@@ -137,6 +141,22 @@ function argsOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+}
+
+/**
+ * The one URL a canvas may hand the app to open: an absolute `http:` or `https:` one, and nothing
+ * else. A `javascript:`, `data:`, `file:` or `blob:` URL is the page's own business and stays in the
+ * frame, and a relative one names no site at all — `new URL` without a base refuses it, which is
+ * exactly the answer wanted.
+ */
+function httpUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null
+  try {
+    const { protocol } = new URL(value)
+    return protocol === "http:" || protocol === "https:" ? value : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -165,6 +185,11 @@ export function readCall(data: unknown): BridgeCall | null {
   if (method === "tool") {
     if (!namesTool(raw.tool)) return null
     return { ...epoch, call: raw.call, method, tool: raw.tool, args: argsOf(raw.args) }
+  }
+  if (method === "open") {
+    const url = httpUrl(raw.url)
+    if (!url) return null
+    return { ...epoch, call: raw.call, method, url }
   }
   if (method !== "list" && method !== "get" && method !== "put" && method !== "remove") return null
   if (typeof raw.collection !== "string" || !raw.collection) return null
@@ -377,11 +402,19 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
  * answer, which the app keeps for it. Every message carries this document's own epoch, so a reply
  * meant for the page drawn before this one can never settle a promise here. ES5, like the scroll
  * bridge beside it: it runs before the page's own scripts and asks nothing of the page.
+ *
+ * A link is the page's second way out of the frame, and it is the reader's tap that asks: a trusted
+ * click over the nearest `<a href>` whose attribute is an absolute `http`/`https` URL cancels the
+ * click and posts one `open` call, which the app opens in a browser of its own. The scheme test is
+ * on the attribute and not on the anchor's resolved `href`, because a resolved `#top` or
+ * `page.html` is the page's own https URL — the page keeps those, and `mailto:`, `javascript:`,
+ * `data:` and `blob:` too. `open` is deliberately not on `window.canvas`: a click is the only way
+ * to ask it, so no script of the page's can open a tab on its own.
  */
 export const BRIDGE_SCRIPT =
   `(function(){var TYPE="` +
   BRIDGE_MESSAGE +
-  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
+  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});var web=function(url){var low=String(url||"").toLowerCase();return low.slice(0,7)==="http://"||low.slice(0,8)==="https://"};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};addEventListener("click",function(event){if(!event||event.isTrusted!==true||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();ask({method:"open",url:url}).catch(function(){})},false);window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
   ";" +
   POINT_SCRIPT
 
@@ -401,6 +434,8 @@ export interface BridgeHost {
   point?(point: CanvasPoint): void
   /** A page that has just run its half of the bridge, and can be armed now. */
   ready?(): void
+  /** A link the reader tapped, opened in the app's own way out: a browser tab, no opener. */
+  open(url: string): void
 }
 
 function wordsOf(error: unknown): string {
@@ -438,9 +473,10 @@ function once(
 /**
  * The parent's listener: a read of the canvas's data is answered at once from the device's copy, a
  * write is the host's, and a host read or a tool call is the host's too — a tool call held until the
- * reader allows it. Nothing from another window is answered or posted — a message is the canvas
- * talking only when it comes from this screen's own frame — and a call this rule cannot read is
- * answered with the reason rather than dropped, since the page's promise is waiting on it.
+ * reader allows it. A link the page's reader tapped is opened through the app's own way out, once
+ * per call. Nothing from another window is answered or posted — a message is the canvas talking only
+ * when it comes from this screen's own frame — and a call this rule cannot read is answered with the
+ * reason rather than dropped, since the page's promise is waiting on it.
  *
  * A tool refused for consent is asked about once, however many calls are waiting on it: the second
  * call waits on the same answer rather than opening a second dialog. Allow retries the call once and
@@ -502,6 +538,11 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
           error: "A canvas's call names a method, and the fields that method needs.",
         })
       }
+      return
+    }
+    if (call.method === "open") {
+      host.open(call.url)
+      reply(call.call, true, { value: null })
       return
     }
     if (call.method === "list" || call.method === "get") {

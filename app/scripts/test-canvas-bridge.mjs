@@ -31,6 +31,26 @@ function fakeFrame() {
 /** Lets a settled promise's `.then` run, so a posted answer is read after the handler's own turn. */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
+/**
+ * The page's half in a realm of its own: every listener it adds (by type, since it listens for two
+ * kinds of event), and everything it posts to the parent.
+ */
+function pageHarness() {
+  const listeners = []
+  const posted = []
+  const context = {
+    parent: { postMessage: (data) => posted.push(data) },
+    addEventListener: (type, fn) => listeners.push({ type, fn }),
+  }
+  context.window = context
+  vm.createContext(context)
+  vm.runInContext(BRIDGE_SCRIPT, context)
+  const fire = (type, event) => {
+    for (const one of listeners) if (one.type === type) one.fn(event)
+  }
+  return { context, posted, fire, reply: (data) => fire("message", { data }) }
+}
+
 test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async () => {
   const frame = fakeFrame()
   const writes = []
@@ -384,21 +404,10 @@ test("a tool the host refuses for any other reason is not put to the reader", as
 })
 
 test("the page's half posts the call it was asked for and settles on the reply", async () => {
-  const listeners = []
-  const posted = []
   // Objects made inside the page's own realm carry its prototypes, so the test reads them as JSON.
   const plain = (value) => JSON.parse(JSON.stringify(value))
-  const context = {
-    parent: { postMessage: (data) => posted.push(data) },
-    addEventListener: (type, fn) => listeners.push(fn),
-  }
-  context.window = context
-  vm.createContext(context)
-  vm.runInContext(BRIDGE_SCRIPT, context)
+  const { context, posted, reply } = pageHarness()
   const api = context.window.canvas.data
-  const reply = (data) => {
-    for (const fn of listeners) fn({ data })
-  }
 
   for (const method of BRIDGE_METHODS) {
     assert.equal(typeof api[method], "function", `${method} is on window.canvas.data`)
@@ -480,6 +489,118 @@ test("the page's half posts the call it was asked for and settles on the reply",
     error: "You didn't allow this canvas to use files.search.",
   })
   await assert.rejects(tool, /didn't allow/)
+})
+
+test("a tapped link opens in the app, once, with no opener", async () => {
+  // The reader: only an absolute http(s) URL is a link the app opens, whatever a page sends.
+  const open = (call, url) => readCall({ type: BRIDGE_MESSAGE, call, method: "open", url })
+  assert.deepEqual(open(1, "https://example.com/a?b=1"), {
+    call: 1,
+    method: "open",
+    url: "https://example.com/a?b=1",
+  })
+  assert.deepEqual(open(2, "http://example.com/"), {
+    call: 2,
+    method: "open",
+    url: "http://example.com/",
+  })
+  for (const url of [
+    "javascript:alert(1)",
+    "data:text/html,<h1>hi</h1>",
+    "file:///etc/passwd",
+    "blob:https://example.com/x",
+    "/relative",
+    "#top",
+    "example.com",
+    "",
+  ]) {
+    assert.equal(open(3, url), null, url)
+  }
+  assert.equal(open(3, 42), null)
+  assert.equal(open(3, null), null)
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "open" }), null)
+
+  // The parent: a call from this screen's frame reaches the app's one way out, once.
+  const frame = fakeFrame()
+  const other = fakeFrame()
+  const opened = []
+  const hear = bridgeHandler({
+    frame: () => frame,
+    copy: () => COPY,
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+    open: (url) => opened.push(url),
+  })
+  hear({
+    source: other,
+    data: { type: BRIDGE_MESSAGE, call: 1, method: "open", url: "https://example.com/elsewhere" },
+  })
+  assert.deepEqual(opened, [], "another window opens nothing")
+  assert.deepEqual(other.posted, [], "and is answered nothing")
+  hear({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 2, method: "open", url: "https://example.com/a" },
+  })
+  assert.deepEqual(opened, ["https://example.com/a"], "the frame's link is opened once")
+  assert.deepEqual(frame.posted, [{ type: BRIDGE_MESSAGE, reply: 2, ok: true, value: null }])
+
+  // The page's half: a link, as its markup gives it — the tag's own `href` attribute, and the
+  // property the browser resolves it to. A tap asks once and cancels the click; everything the
+  // page keeps for itself asks nothing and is not cancelled.
+  const { context, posted: asked, fire } = pageHarness()
+  const plain = (value) => JSON.parse(JSON.stringify(value))
+  const anchor = (href) => ({
+    tagName: "A",
+    nodeType: 1,
+    href,
+    getAttribute: (name) => (name === "href" ? href : null),
+    parentNode: null,
+  })
+  const tap = (target, { trusted = true } = {}) => {
+    const event = {
+      target,
+      isTrusted: trusted,
+      defaultPrevented: false,
+      cancels: 0,
+      preventDefault() {
+        this.cancels += 1
+        this.defaultPrevented = true
+      },
+    }
+    fire("click", event)
+    return event
+  }
+
+  assert.equal("open" in context.window.canvas, false, "a page can't open anything without a click")
+  const link = anchor("https://example.com/a?b=1")
+  const tapped = tap(link)
+  assert.equal(asked.length, 1, "one open call per tap")
+  assert.deepEqual(plain(asked[0]), {
+    type: BRIDGE_MESSAGE,
+    epoch: asked[0].epoch,
+    call: 1,
+    method: "open",
+    url: "https://example.com/a?b=1",
+  })
+  assert.equal(tapped.cancels, 1, "the click is cancelled, so the frame doesn't try to leave")
+
+  for (const href of ["#top", "/elsewhere", "mailto:a@example.com", "javascript:void 0"]) {
+    const kept = tap(anchor(href))
+    assert.equal(kept.cancels, 0, `${href} is the page's own`)
+  }
+  assert.equal(asked.length, 1, "and posts nothing")
+
+  // An untrusted click (a script's own) and a click with no target ask nothing.
+  assert.equal(tap(anchor("https://example.com/scripted"), { trusted: false }).cancels, 0)
+  fire("click", { isTrusted: true })
+  assert.equal(asked.length, 1)
+
+  // A tap on the link's own words walks up to the anchor it is inside.
+  const words = { tagName: "SPAN", nodeType: 1, parentNode: link }
+  assert.equal(tap(words).cancels, 1)
+  assert.equal(asked.length, 2)
+  assert.equal(asked[1].url, "https://example.com/a?b=1")
 })
 
 test("a call the app cannot read is answered rather than dropped", async () => {

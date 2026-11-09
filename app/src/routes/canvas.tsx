@@ -61,6 +61,7 @@ import { db, getActiveProfile } from "@/lib/db"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
+import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
 import { useDark } from "@/lib/theme"
 import { formatRelative } from "@/lib/format"
@@ -443,6 +444,8 @@ export function CanvasView() {
       write: (call) => writeCanvasData(id, call),
       call: (call) => callCanvasCall(id, call),
       consent: (tool) => askRef.current(tool),
+      // A link the reader tapped opens in the platform's browser, never in this frame.
+      open: (url) => openExternal(url),
       point: (point) => points.answer(point),
       ready,
     })
