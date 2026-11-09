@@ -205,7 +205,7 @@ sequenceDiagram
    option reads **Main** and the list below it leaves Main out, so one chat is not offered twice.
    With the switch on nothing changes. Goals: G2, G4. After: 2, 4. Layers: Share screen, Threads
    rule. Check: `scripts/test-share-caps.tsx` — with the default off the option writes Main's record
-   and opens `/c/main-…` with the note in it; with the switch on it makes a thread.
+   and opens `/c/main-…` with the note in it; with the switch on it makes a thread. Done.
 
 6. **Triage stops being asked.** `canTriage` is the one gate both senders pass through, so it reads
    `opensInMain(await getSettings())` first and answers false before it touches the host: no

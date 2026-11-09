@@ -15,10 +15,11 @@ import { listsAsChat } from "@/lib/lists-as-chat"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
-  createConversation,
   db,
   getActiveProfile,
+  getSettings,
   listEnabledProfiles,
+  mainThreadId,
   setActiveProfile,
   type Attachment,
 } from "@/lib/db"
@@ -26,7 +27,7 @@ import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
-import { useBotThreads, useNow } from "@/lib/threads"
+import { beginChat, botThreadsOn, opensInMain, useNow } from "@/lib/threads"
 
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
@@ -76,7 +77,11 @@ export function SharePage() {
   const webId = params.get("id")
   const share = useIncomingShare()
   const [opening, setOpening] = useState(Boolean(webId))
-  const botThreads = useBotThreads()
+  // One read of the switches the chat list hangs on: the bot layout's noun, and whether this bot
+  // has only its Main to offer — the bot layout with chat threads off (ADR 0120).
+  const settings = useLiveQuery(getSettings, [])
+  const botThreads = botThreadsOn(settings)
+  const offersMain = opensInMain(settings)
   const noun = botThreads ? "thread" : "chat"
   const now = useNow()
 
@@ -165,7 +170,13 @@ export function SharePage() {
       .limit(MORE)
       .toArray()
   }, [profile?.id])
-  const shown = showAll ? chats : chats?.slice(0, FIRST)
+  // With chat threads off the first option is the bot's Main itself, so the list below leaves Main
+  // out rather than offering one chat twice.
+  const offered =
+    offersMain && profile
+      ? chats?.filter((chat) => chat.id !== mainThreadId(profile.id))
+      : chats
+  const shown = showAll ? offered : offered?.slice(0, FIRST)
 
   const pickBot = (id: string) => {
     setPicked(id)
@@ -200,14 +211,19 @@ export function SharePage() {
           reconcileHistory(existing.id).catch(() => undefined),
           new Promise((resolve) => setTimeout(resolve, 1500)),
         ])
-      const id = existing?.id ?? (await createConversation(profile.id)).id
-      const busy = existing
-        ? (await db.messages
-            .where("conversationId")
-            .equals(existing.id)
-            .filter((m) => m.status === "streaming")
-            .count()) > 0
-        : false
+      // A picked chat is opened as it stands; the new option asks the threads rule which chat it
+      // answers — the bot's Main with chat threads off, and a thread otherwise — and hands it no
+      // message, since this screen sends the note itself.
+      const chat = existing ?? (await beginChat(profile.id, { text: "", attachments: [] }))
+      const id = chat.id
+      // Main is asked what any chat is: a turn still streaming there means the note waits in the
+      // queue rather than being dropped by a second send.
+      const busy =
+        (await db.messages
+          .where("conversationId")
+          .equals(id)
+          .filter((m) => m.status === "streaming")
+          .count()) > 0
       void setActiveProfile(profile.id)
       leaving.current = true
       clearShare()
@@ -311,9 +327,13 @@ export function SharePage() {
               {option(
                 "new",
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                  <PlusIcon className="size-5" />
+                  {offersMain ? (
+                    <MessageCircleIcon className="size-5" />
+                  ) : (
+                    <PlusIcon className="size-5" />
+                  )}
                 </span>,
-                `New ${noun}`,
+                offersMain ? "Main" : `New ${noun}`,
               )}
               {shown?.map((chat) =>
                 option(
@@ -325,7 +345,7 @@ export function SharePage() {
                   formatRelative(chat.updatedAt, now),
                 ),
               )}
-              {!showAll && (chats?.length ?? 0) > FIRST && (
+              {!showAll && (offered?.length ?? 0) > FIRST && (
                 <button
                   type="button"
                   onClick={() => setShowAll(true)}
