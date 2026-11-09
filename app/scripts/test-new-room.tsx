@@ -407,7 +407,7 @@ test("at the room's ceiling, another Host's bot still says why it is greyed", as
 })
 
 test("the seats sheet heads a laptop's drawer the same way", laptop(async () => {
-  await freshAcross()
+  await fresh("blank-room-drawer.test")
   await mount(screen(), async () => {
     await openSeats()
     assert.ok(
