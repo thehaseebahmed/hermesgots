@@ -51,6 +51,11 @@ export const FLOWS = {
     about:
       "A room of two bots of one Host: its row in the sidebar, a message sent into it running the members' rounds with no client attached, each reply drawn with its member's name and picture, the who-is-working line while a turn runs, the third round's bound, a member that passes as nothing, and a reload landing on the same transcript; then the room's media — a photo in the user's row through an address the plugin signed and a member's own picture in its reply the same way, the photo opened in the app's Previewer and both files kept on this device so a reload re-downloads neither, and a 3 MB file refused by the test host, whose own 2 MB limit sits below the app's 9 MB intake so the leg can reach a refusal at all — the banner naming that limit in the plugin's words",
   },
+  "room-lifecycle": {
+    script: "e2e/room-lifecycle.mjs",
+    about:
+      "A room's whole life from the app: the sidebar's footer starts one with a name and two of the Host's bots, the room it made opens on its own name and takes a message the members answer, its own header menu renames it, and the same menu disbands it behind a question, after which the row is gone and stays gone across a reload",
+  },
   "room-waiting": {
     script: "e2e/room-waiting.mjs",
     about:

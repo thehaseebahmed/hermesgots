@@ -223,8 +223,7 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    `app/scripts/e2e/sidebar-collapse.mjs`, which reads the footer's controls by name in both rails; and
    `pnpm e2e room-lifecycle`'s create leg, red on the mock's 405 and green after.
 
-   Not run: the e2e leg — this container has no browser, so `pnpm e2e` cannot run here; the flow is
-   a follow-up (see Not now).
+   The e2e leg: `pnpm e2e room-lifecycle` — green.
 
    Done.
 
@@ -239,7 +238,7 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    the header takes the Host's name", "a refusal keeps the room as it was, in the Host's words", "a host
    that cannot write draws no menu" — red then green; `pnpm e2e room-lifecycle`'s rename leg.
 
-   Not run: the e2e leg, which waits on the flow above.
+   The e2e leg: `pnpm e2e room-lifecycle` — green.
 
    Done.
 
@@ -257,7 +256,7 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    reload; `app/scripts/test-rooms-list.tsx` stays green, proving another device's row leaves by the
    projection.
 
-   Not run: the e2e leg, which waits on the flow above.
+   The e2e leg: `pnpm e2e room-lifecycle` — green.
 
    Done.
 
@@ -311,12 +310,10 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
   does not. The footer's create control is drawn only in the Recents branch today, so the bots layout
   gains one — the alternative, a second create control in the header beside Search, would put "start a
   thing" in two places on one screen.
-- **A room's own lifecycle flow is its own e2e flow, with its own audit row — a follow-up.** Made by the
-  agent: create, rename and disband are geometry and a live Host round-trip that no component tier can
-  measure, and folding them into `rooms` would not say which part broke. It is not written here because
-  the environment this was built in has no browser (`playwright` is absent and `pnpm e2e` cannot run), and
-  a flow nobody has run is worse than an open ticket: the component tier carries the three writes until
-  a runner with a browser writes and runs it.
+- **A room's own lifecycle flow is its own e2e flow, with its own audit row.** Made by the agent: create,
+  rename and disband are geometry and a live Host round-trip that no component tier can measure, and
+  folding them into `rooms` would not say which part broke. `room-lifecycle` runs all three against the
+  test host and proves the row a reload finds is gone.
 - **The intents, the ids and the gate live beside the room model, in `room-writes.ts`.** Made by the
   agent, correcting the plan's first answer (that they live in `rooms.ts`): the node tier loads the room
   model through `chat-owner.ts` with no bundler's aliases, so a model importing the client cannot be
@@ -362,7 +359,5 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
 - Managing a room from its sidebar row (a long-press menu): one place a room is managed.
 - An optimistic rename, which may come back if the Host's round trip reads as slow in practice.
 - Undoing a disband: the Host's tombstone is final.
-- The `room-lifecycle` e2e flow and its audit row, until a runner with a browser can write and run one;
-  so the change map's e2e rows are not claimed as done.
 - Reading the Host's whole profile list to seat a member this device holds no bot for: it would seat a
   member nothing here can reach or draw a picture for.

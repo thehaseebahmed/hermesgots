@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **91 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 91 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **92 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 92 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 36 |
+| stay | 37 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **91** |
+| **total** | **92** |
 
-Of those 91, 85 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 84 distinct files) and 6 point at the older
+Of those 92, 86 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 85 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -223,6 +223,8 @@ a turn that fails leaves behind.
 | `submission` | component | Two sends racing in one chat start one run and get one reply. | A guard in the send path: the same call twice without awaiting is the whole condition. | A component test calls the send path twice without awaiting and asserts one request and one reply row. |
 | `approval` | component | A session's approval waits in the sidebar's Waiting for input and Code's Waiting for You, and both move it to Idle once it is allowed — with the three panes it also checked at 1440px. | Two renders from one plugin answer; only the three-pane layout it checked is beyond a DOM. | A component test renders the sidebar and Code over a seeded waiting session, asserts both waiting lines, and Code lists it under Idle after the answer; the three-pane layout is the snapshots'. |
 | `approval-missed` | component | An approval the host timed out dismisses itself, and an answer refused with `approval_not_pending` marks the approval missed even while the run status still shows the old request. | Two clearing rules against the host's own error and a stale run status: no wall clock the browser supplies. | A component test drives a timeout and a refused answer against the host's error plus a stale run status, asserting the slot clears and is not re-raised. |
+
+| `room-lifecycle` | stay | A room's whole life from the app: the sidebar's footer starts one with a name and two of the Host's bots, the room it made opens on the name the Host answered and takes a message the members answer, its own header menu renames it, and the same menu disbands it behind a question — after which its screen and its row both leave, and a reload finds neither. | The Host's own round trip: a create, a rename and a disband are three writes whose answers this device merges, and the row that survives a reload is the Host's projection of a room that no longer exists — a faked boundary would pass whether or not the app asked anything, and no component tier can prove the address stops being a room's. | `test-new-room.tsx` carries the sheet, its gate and the refusal; `test-room-actions.tsx` the menu, the attempt's ids and the screen's leave; `test_rooms` the routes and the record answers; `test-room-writes.tsx` the writer. Only here do the three writes happen against a Host, and only here does a reload prove the row stayed gone. |
 
 ### A thread and its history — #307
 

@@ -4091,7 +4091,8 @@ http
           "media_url",
           "openui",
           "rooms",
-          ...(ROOMS ? ["rooms_questions", "room_media"] : []),
+          // The write row rides with the read ones: this mock host can make, rename and disband a room.
+          ...(ROOMS ? ["rooms_questions", "room_media", "rooms_write"] : []),
           "profile_routes",
           "pr_tool",
           "close",

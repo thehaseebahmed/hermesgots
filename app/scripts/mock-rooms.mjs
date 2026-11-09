@@ -330,23 +330,28 @@ function rounds(store, room, noteEvent, text = "", image = false) {
     return
   }
 
+  // The round works the room's own roster, by position: a room the app made seats ids it minted, and
+  // the Host never invents one of its own for a member it was handed (rooms.py, ADR 0124).
+  const first = room.members[0]?.member_id ?? "m1"
+  const second = room.members[1]?.member_id ?? "m2"
   step(0, working([
-    { memberId: "m1", status: "running" },
-    { memberId: "m2", status: "queued" },
+    { memberId: first, status: "running" },
+    { memberId: second, status: "queued" },
   ]))
-  // The first round: Hermes answers, and Coder passes — silence, which the room draws as nothing.
+  // The first round: the first member answers, and the second passes — silence, which the room draws
+  // as nothing.
   // A message that carried a picture is answered with one: a member's own media is a file of the
   // store's, committed to the reply's event, so it draws exactly as the user's does.
   step(ROUND, () => {
     say(
       room,
-      "m1",
+      first,
       "I'll take the API and the routes.",
       image
         ? keepFile(store, { name: MEMBER_PHOTO, mime: "image/png", bytes: MEMBER_PHOTO_BYTES })
         : undefined,
     )
-    room.activity = [{ memberId: "m2", status: "running" }]
+    room.activity = [{ memberId: second, status: "running" }]
   })
   step(PASS, () => {
     room.events.push(
@@ -355,7 +360,7 @@ function rounds(store, room, noteEvent, text = "", image = false) {
         "turn.settled",
         { kind: "gateway", id: "gw-1" },
         {
-          member_id: "m2",
+          member_id: second,
           thread_id: "room-thread",
           passed: true,
         },
@@ -364,7 +369,7 @@ function rounds(store, room, noteEvent, text = "", image = false) {
   })
   // The second round: Coder answers the reply it read.
   step(SECOND, () => {
-    say(room, "m2", "Coder here. I'll take the screen and the tests.")
+    say(room, second, "Coder here. I'll take the screen and the tests.")
   })
   // The third round is the bound: a room works at most three rounds, and says so.
   step(BOUND, () => {
