@@ -5,6 +5,21 @@ export const connectionKey = (server: { baseUrl: string; apiKey: string }) =>
   `${server.baseUrl.trim().replace(/\/+$/, "")}\n${server.apiKey}`
 
 /**
+ * The Host a bot answers at: the origin of its base URL, whatever key or path reaches it by.
+ * `connectionKey` folds the key and the path in, which is what a shared stream and cache want and what
+ * split one gateway into three Hosts on screen; a room's roster is one gateway's profiles (ADR 0115),
+ * so this is the identity it is held to. A base URL that doesn't parse is its own trimmed self.
+ */
+export const hostKey = (server: { baseUrl: string }) => {
+  const baseUrl = server.baseUrl.trim()
+  try {
+    return new URL(baseUrl).origin
+  } catch {
+    return baseUrl
+  }
+}
+
+/**
  * The bots whose lists are read once each: two bots on one server and profile share one list, so the
  * first of them keeps it. Every screen that merges a list across bots reads this, not the raw list.
  */

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import { CheckIcon, UsersIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
@@ -11,7 +12,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { RoomFaces } from "@/components/room/room-faces"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { connectionKey, serverConfig } from "@/lib/connection"
+import { connectionKey, hostKey, serverConfig } from "@/lib/connection"
 import {
   DEFAULT_SETTINGS,
   db,
@@ -30,6 +31,9 @@ import { cn, randomId } from "@/lib/utils"
 /** The fewest and most seats a room may hold: the Host's rule, said before it can be broken. */
 const LEAST = 2
 const MOST = 6
+
+/** What a press on another Host's row says, since a row that greys and then does nothing reads broken. */
+const OTHER_HOST = "A room holds one Host's bots. Unpick the first bot to change Host."
 
 /**
  * A room that does not exist yet, drawn the way a new chat is (ADR 0096, ADR 0125): no record, no
@@ -57,9 +61,6 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         .sort((one, two) => one.name.localeCompare(two.name)),
     [bots, answers],
   )
-  const hosts = [...new Set(writers.map((bot) => connectionKey(bot)))]
-  const [host, setHost] = useState("")
-  const seated = writers.filter((bot) => connectionKey(bot) === (host || hosts[0]))
   const [picked, setPicked] = useState<string[]>([])
   const [picking, setPicking] = useState(false)
   const [roomId] = useState(() => randomId())
@@ -67,8 +68,32 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   const [sending, setSending] = useState(false)
   const [failure, setFailure] = useState<string>()
 
-  const chosen = seated.filter((bot) => picked.includes(bot.id))
+  const chosen = writers.filter((bot) => picked.includes(bot.id))
   const ready = chosen.length >= LEAST && chosen.length <= MOST
+
+  // The first bot in pick order fixes the Host: a room's roster is one gateway's profiles (ADR 0115),
+  // and every bot that answers at another address greys out while one is seated.
+  const first = writers.find((bot) => bot.id === picked[0])
+  const lockedHost = first ? hostKey(first) : null
+
+  /**
+   * A seat toggles on and off, but only for a bot of the Host the first seat named. The others stay
+   * pressable and answer with the one sentence saying how to change Host, since a dead press reads as
+   * a broken row; a full room's rows say nothing, as they always have.
+   */
+  const toggle = (id: string) => {
+    if (picked.includes(id)) {
+      setPicked((held) => held.filter((one) => one !== id))
+      return
+    }
+    if (picked.length >= MOST) return
+    const bot = writers.find((one) => one.id === id)
+    if (bot && lockedHost && hostKey(bot) !== lockedHost) {
+      toast.info(OTHER_HOST)
+      return
+    }
+    setPicked((held) => [...held, id])
+  }
 
   /** One seat per picked bot, minted when it is picked, so a retried create seats the same members. */
   const seatOf = (bot: Profile): RoomMember => {
@@ -170,64 +195,40 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       <SeatsPicker
         open={picking}
         onOpenChange={setPicking}
-        hosts={hosts}
-        host={host || hosts[0] || ""}
-        onHost={(next) => {
-          setHost(next)
-          setPicked([])
-          setSeats({})
-        }}
         writers={writers}
-        seated={seated}
+        lockedHost={lockedHost}
         picked={picked}
-        onToggle={(id) =>
-          setPicked((held) => {
-            if (held.includes(id)) return held.filter((one) => one !== id)
-            if (held.length >= MOST) return held
-            return [...held, id]
-          })
-        }
+        onToggle={toggle}
       />
     </div>
   )
 }
 
 /**
- * The seats a room is made of: the bots of one Host, a check per seat, and the rule the Host keeps.
+ * The seats a room is made of: every bot this device may seat, a check per seat, and the rule the Host
+ * keeps.
  *
- * One Host at a time, because a roster is one Host's profiles (ADR 0115): a device that holds two
- * writable Hosts picks which first. The most is a ceiling rather than a refusal — the seventh tap
- * does nothing — so the rule is felt while picking and not only said after.
+ * One Host at a time, because a roster is one Host's profiles (ADR 0115), and no Host picker: the
+ * first bot seated names the Host, and until one is seated every row is a choice. The most is a
+ * ceiling rather than a refusal — the seventh tap does nothing — so the rule is felt while picking
+ * and not only said after.
  */
 function SeatsPicker({
   open,
   onOpenChange,
-  hosts,
-  host,
-  onHost,
   writers,
-  seated,
+  lockedHost,
   picked,
   onToggle,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  hosts: string[]
-  host: string
-  onHost: (host: string) => void
   writers: Profile[]
-  seated: Profile[]
+  /** The address the first seated bot answers at, while one is seated: another Host's rows grey out. */
+  lockedHost: string | null
   picked: string[]
   onToggle: (id: string) => void
 }) {
-  const nameOf = (key: string) => {
-    const bot = writers.find((one) => connectionKey(one) === key)
-    try {
-      return bot ? new URL(bot.baseUrl).host : key
-    } catch {
-      return bot?.baseUrl ?? key
-    }
-  }
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent className="max-h-[90dvh]">
@@ -240,28 +241,17 @@ function SeatsPicker({
           </p>
         </PopupHeader>
         <div className="flex flex-col gap-4 px-6 pb-6">
-          {hosts.length > 1 && (
-            <div className="flex flex-wrap gap-2">
-              {hosts.map((key) => (
-                <Button
-                  key={key}
-                  size="sm"
-                  variant={key === host ? "default" : "outline"}
-                  onClick={() => onHost(key)}
-                >
-                  {nameOf(key)}
-                </Button>
-              ))}
-            </div>
-          )}
           {/* The seats are a card of rows, the way Settings lists bots, so picking two reads as the
               same act as reading them there. */}
           <Group>
-            {seated.map((bot) => (
+            {writers.map((bot) => (
               <SeatRow
                 key={bot.id}
                 bot={bot}
                 checked={picked.includes(bot.id)}
+                other={
+                  !picked.includes(bot.id) && Boolean(lockedHost && hostKey(bot) !== lockedHost)
+                }
                 full={!picked.includes(bot.id) && picked.length >= MOST}
                 onToggle={() => onToggle(bot.id)}
               />
@@ -282,31 +272,40 @@ function SeatsPicker({
  *
  * The subtitle is where Settings' dictation list says what a host does about speech; here it says
  * what the bot answers with, because that is what decides what a room of these bots produces.
+ *
+ * A row greys for one of two reasons: the room already holds the most it may, or the bot answers at
+ * another Host than the first seat named. Only the second still hears the press (see `other`).
  */
 function SeatRow({
   bot,
   checked,
   full,
+  other,
   onToggle,
 }: {
   bot: Profile
   checked: boolean
-  /** The room already holds the most it may, so this seat says so rather than doing nothing silently. */
+  /** The room already holds the most it may: the seventh tap does nothing, as it always has. */
   full: boolean
+  /** Another Host's bot while one is seated: greyed, and a press says how to change Host. */
+  other: boolean
   onToggle: () => void
 }) {
   const info = useModelInfo(bot)
   const choice = botModel(bot, info)
+  const blocked = full || other
   return (
     <button
       type="button"
       aria-pressed={checked}
+      // Never `disabled` for another Host's row: that would swallow the press the sentence answers.
+      aria-disabled={blocked ? "true" : undefined}
       data-bot={bot.id}
       disabled={full}
       onClick={onToggle}
       className={cn(
         linkRowClass,
-        "disabled:cursor-not-allowed disabled:opacity-40",
+        blocked && "cursor-not-allowed opacity-40",
         checked && "bg-muted",
       )}
     >

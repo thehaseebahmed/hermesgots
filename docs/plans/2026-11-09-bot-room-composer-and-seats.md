@@ -57,7 +57,7 @@ No flow crosses layers for G1 and G3: both are one screen's markup.
 2. **One seat list for every Host, and the first pick fixes the Host.** Goals: G2. After: none.
    Layers: blank room screen, connection identity. Check: the same command, the cases "every bot the
    device holds is listed, whatever Host it is on" and "the first bot picked chooses the Host, and
-   another Host's bots grey out" — both red now, green after.
+   another Host's bots grey out" — both red now, green after. Done.
 3. **The seats sheet heads like every other drawer.** Goals: G3. After: none. Layers: blank room
    screen. Check: the same command, the case "the seats sheet heads its body the way every drawer
    does" — red now, green after.

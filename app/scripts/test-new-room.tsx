@@ -10,6 +10,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
+import { toast } from "sonner"
 
 import { ConversationList } from "@/components/conversation-list"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
@@ -124,6 +125,53 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
   await db.roomLog.clear()
   await settle()
   return bots
+}
+
+/**
+ * Three bots across two Hosts on one device: what a seat is locked to only shows across Hosts, and a
+ * picker that answers for one Host at a time cannot draw this list at all.
+ */
+async function freshAcross() {
+  const [alpha, beta] = ["alpha", "beta"]
+  offers.set(`${alpha}.test`, WRITABLE)
+  offers.set(`${beta}.test`, WRITABLE)
+  posted.length = 0
+  held.id = undefined
+  held.name = ""
+  const bots: Profile[] = [
+    botProfile(alpha, { id: "alpha-ada", name: "Ada", hermesProfile: "ada", botId: "alpha-ada" }),
+    botProfile(alpha, { id: "alpha-bo", name: "Bo", hermesProfile: "bo", botId: "alpha-bo" }),
+    botProfile(beta, { id: "beta-cy", name: "Cy", hermesProfile: "cy", botId: "beta-cy" }),
+    // The same Host reached by another key and no version path: the address is what makes it one
+    // Host, which is the pill that used to print this address three times and split its bots.
+    botProfile(alpha, {
+      id: "alpha-dee",
+      name: "Dee",
+      baseUrl: "http://alpha.test",
+      apiKey: "another-key",
+      hermesProfile: "dee",
+      botId: "alpha-dee",
+    }),
+  ]
+  await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
+  await db.profiles.clear()
+  await db.profiles.bulkPut(bots)
+  await db.conversations.clear()
+  await db.messages.clear()
+  await db.roomLog.clear()
+  await settle()
+  return bots
+}
+
+/** The seats rows, in the order the sheet draws them. */
+const seats = () => findAll("[data-bot]")
+const seat = (id: string) => find(`[data-bot="${id}"]`) as HTMLButtonElement | null
+
+/** Opens the seats sheet, the way the pill above the composer does. */
+async function openSeats() {
+  await until(async () => Boolean(find('[data-slot="seats-pill"]')), "the blank room")
+  await click(find('[data-slot="seats-pill"]'))
+  await until(async () => seats().length > 0, "the seat rows")
 }
 
 /** The blank room at its own address: the room it becomes lives at `/c/<id>`, which the create names. */
@@ -242,4 +290,76 @@ test("the blank room's composer stands in the foot every chat screen gives it", 
       "and the seats pill shares its gutter, so the two align",
     )
   })
+})
+
+test("every bot the device holds is listed, whatever Host it is on", async () => {
+  await freshAcross()
+  await mount(screen(), async () => {
+    await openSeats()
+    assert.deepEqual(
+      seats().map((row) => row.getAttribute("data-bot")),
+      ["alpha-ada", "alpha-bo", "beta-cy", "alpha-dee"],
+      "one list of every bot, not one Host's slice of it",
+    )
+    assert.equal(
+      findAll("button").filter((one) => one.textContent?.includes("alpha.test")).length,
+      0,
+      "no Host picker draws",
+    )
+  })
+})
+
+test("the first bot picked chooses the Host, and another Host's bots grey out", async () => {
+  await freshAcross()
+  const said: unknown[] = []
+  const real = toast.info
+  toast.info = ((message: unknown) => said.push(message)) as typeof toast.info
+  try {
+    await mount(screen(), async () => {
+      await openSeats()
+      await click(seat("alpha-ada"))
+      assert.equal(
+        seat("alpha-bo")?.getAttribute("aria-disabled"),
+        null,
+        "Bo answers at the same address, so it stays a seat",
+      )
+      assert.equal(
+        seat("alpha-dee")?.getAttribute("aria-disabled"),
+        null,
+        "Dee reaches that address by another key and path: one Host all the same",
+      )
+      assert.equal(
+        seat("beta-cy")?.getAttribute("aria-disabled"),
+        "true",
+        "Cy is another Host's, and greys out",
+      )
+
+      await click(seat("beta-cy"))
+      assert.deepEqual(
+        said,
+        ["A room holds one Host's bots. Unpick the first bot to change Host."],
+        "a greyed row answers a press with why it is greyed",
+      )
+      assert.match(
+        find('[data-slot="seats-pill"]')?.textContent ?? "",
+        /1 of 6/,
+        "and seats nothing",
+      )
+
+      await click(seat("alpha-ada"))
+      assert.equal(
+        seat("beta-cy")?.getAttribute("aria-disabled"),
+        null,
+        "unpicking the only seat frees every Host again",
+      )
+      await click(seat("beta-cy"))
+      assert.equal(
+        seat("alpha-bo")?.getAttribute("aria-disabled"),
+        "true",
+        "the first pick is what names the Host",
+      )
+    })
+  } finally {
+    toast.info = real
+  }
 })
