@@ -1,8 +1,7 @@
 /**
  * A bot's Triage model on its Chat page: the field a plugin that offers the route shows, a pick
  * the host refuses (its words in a toast, nothing changed), the permission the host withholds, and
- * the plugin that lacks the route and shows nothing. These cases are the account with chat threads
- * on, since the field exists only there (ADR 0120); the two cases after them prove it.
+ * the plugin that lacks the route and shows nothing.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -165,8 +164,6 @@ test("a host that allows it shows no warning", async () => {
 })
 
 test("with chat threads off, the field draws nothing and the host is not asked", async () => {
-  // The shipped defaults — the bot layout with chat threads off — where the triage model is a
-  // setting nowhere, so the host is not asked for the route, its features or the model (ADR 0120).
   await seedSettings()
   const fake = host({ held: { provider: "openrouter", model: "own-model" } })
   globalThis.fetch = fake.fetch

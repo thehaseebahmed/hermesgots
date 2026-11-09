@@ -24,11 +24,9 @@ import { toast } from "sonner"
 export const triaging = new Set<string>()
 
 /**
- * Whether a bot's host can triage a Main's message: it asks at all — nothing is triaged while chat
- * threads are off here, since a model call that can only answer "stay" is a cost with no decision
- * in it (ADR 0120) — and the host runs turns, queues them and has triage. It answers for this
- * device before it answers for the host, so on such a device the gate reads no capabilities and no
- * plugin info and asks no triage. The one gate both senders pass through, so neither repeats it.
+ * Whether a bot's host can triage a Main's message. It answers for this device first: with chat
+ * threads off nothing is triaged, so the gate asks the host nothing at all (ADR 0120). The one gate
+ * both senders pass through.
  */
 export async function canTriage(config: HermesConfig) {
   if (opensInMain(await getSettings())) return false

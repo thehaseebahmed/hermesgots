@@ -75,9 +75,7 @@ export function SharePage() {
   const webId = params.get("id")
   const share = useIncomingShare()
   const [opening, setOpening] = useState(Boolean(webId))
-  // The switches the chat list hangs on, live: the layout's noun, and whether this bot has only its
-  // Main to offer — the bot layout with chat threads off (ADR 0120). An unanswered read leaves the
-  // screen as it stands: a label is not a permission.
+  // A label is not a permission: an unanswered read leaves the screen as it stands.
   const switches = useThreadSwitches()
   const botThreads = switches?.botThreads ?? true
   const offersMain = switches?.opensInMain ?? false
@@ -208,9 +206,6 @@ export function SharePage() {
           reconcileHistory(existing.id).catch(() => undefined),
           new Promise((resolve) => setTimeout(resolve, 1500)),
         ])
-      // A picked chat is opened as it stands; the new option asks the threads rule which chat it
-      // answers — the bot's Main with chat threads off, and a thread otherwise — and hands it no
-      // message, since this screen sends the note itself.
       const chat = existing ?? (await beginChat(profile.id))
       const id = chat.id
       // Main is asked what any chat is: a turn still streaming there means the note waits in the

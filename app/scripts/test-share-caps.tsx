@@ -29,7 +29,6 @@ import {
   wordsOf,
 } from "./component-kit.tsx"
 
-/** The screen, with the address drawn beside it so a case can read where a send landed. */
 const screen = () => (
   <MemoryRouter initialEntries={["/share"]}>
     <Path />
@@ -279,8 +278,6 @@ test("a photo lands as a photo, and only a model that takes images is given its 
 })
 
 test("with chat threads off, Share's new-chat option opens the bot's Main", async () => {
-  // The shipped default: the bot layout, and Developer's Chat threads switch off, so a share's
-  // new option offers the one chat a bot still has rather than making a thread beside it.
   const bot = botProfile("share-main")
   const main = mainThreadId(bot.id)
   await seedChats([], { bots: [bot] })
@@ -317,7 +314,6 @@ test("with chat threads off, Share's new-chat option opens the bot's Main", asyn
 })
 
 test("with chat threads on, Share's new-chat option still makes a thread", async () => {
-  // The same screen with the switch turned back on: a new option again makes a thread of its own.
   const bot = botProfile("share-thread")
   const main = mainThreadId(bot.id)
   await seedChats([], { bots: [bot], settings: { chatThreads: true } })
@@ -346,8 +342,6 @@ test("with chat threads on, Share's new-chat option still makes a thread", async
 })
 
 test("with chat threads off, a share into a streaming Main waits its turn", async () => {
-  // Main is the chat the option opens, so it is asked the questions a picked chat is: a turn still
-  // streaming there means the note queues rather than being dropped by a second send.
   const bot = botProfile("share-busy")
   const main = mainThreadId(bot.id)
   await seedChats([{ id: main, main: true, messages: ["Still working on it"] }], { bots: [bot] })

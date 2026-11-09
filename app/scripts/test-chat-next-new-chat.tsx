@@ -163,7 +163,6 @@ test("the blank surface's first send makes the chat and the thread sends it as i
 })
 
 test("with chat threads off, a blank chat's first send lands in the bot's Main", async () => {
-  // The shipped default: the bot layout, and Developer's Chat threads switch off.
   await seedChats([], { bots: [bot] })
   const host = anySession()
   await mount(blankScreen, async () => {
@@ -191,7 +190,6 @@ test("with chat threads off, a blank chat's first send lands in the bot's Main",
 })
 
 test("with chat threads on, a blank chat's first send still makes a thread", async () => {
-  // The same bot layout with the switch turned back on: the blank surface makes a thread, as it did.
   await seedChats([], { bots: [bot], settings: { chatThreads: true } })
   const host = anySession()
   await mount(blankScreen, async () => {

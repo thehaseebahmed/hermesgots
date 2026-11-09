@@ -378,8 +378,6 @@ export function Composer({
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
-  // One answer for the menu and for a typed command: what this chat may start, or nothing at all —
-  // a `/thread` typed where it is not offered is the message's own words (ADR 0120).
   const startable = useStartHere(main)
   const items =
     plain || !token

@@ -124,8 +124,6 @@ async function seed(
   } = { main: true },
 ) {
   const bot = botProfile(name, extra.bot)
-  // Triage asks only where a bot may start a thread, so these cases are the account with them on —
-  // but for the one that proves the switch off, which seeds the shipped default.
   await seedSettings({ developer: true, chatThreads: extra.chatThreads ?? true })
   await db.profiles.clear()
   await db.profiles.put(bot)
@@ -234,10 +232,7 @@ test("a bot whose plugin lacks the feature has a plain Main", async () => {
 })
 
 test("with chat threads off, a Main send asks no triage and stays in Main", async () => {
-  // The shipped default: the bot layout with chat threads off, so this device starts no thread and
-  // a Main send is decided here rather than by the host (ADR 0120). The capabilities and info reads
-  // the log holds are the send's own — its run choice and its post-turn queue check — and triage
-  // adds neither, nor the ask itself.
+  // The capabilities and info reads this log holds are the send's own; triage adds no ask.
   await seed("route-threads-off", { main: true, chatThreads: false })
   const seen = host("route-threads-off", "thread")
   assert.equal(await sendFromMain(MAIN, "hello"), undefined)

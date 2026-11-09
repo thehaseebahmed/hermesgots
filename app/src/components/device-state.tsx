@@ -26,7 +26,8 @@ import {
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
 import { resumeTrace } from "@/lib/resume-trace"
-import { botThreadsOn, lastOpened } from "@/lib/threads"
+import { botThreadsOn } from "@/lib/chat-threads"
+import { lastOpened } from "@/lib/threads"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 /** The newest chats each bot's state names, so a busy bot can't make the dump unbounded. */

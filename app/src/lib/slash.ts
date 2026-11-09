@@ -14,7 +14,6 @@ export type SlashItem =
  */
 export const carriesMessage = (name: string) => name === "thread"
 
-/** The start command's row, worded for the one it is; nothing where none may start. */
 export function localCommands(start: StartCommand | null): SlashItem[] {
   const starter: SlashItem[] = start
     ? [

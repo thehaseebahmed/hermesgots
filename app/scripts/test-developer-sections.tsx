@@ -148,7 +148,6 @@ const chatThreadsRow = () => find("label[for='chat-threads']")
 const chatThreadsSwitch = () => find("label[for='chat-threads'] [data-slot='switch']")
 
 test("the Chat threads row ships off, writes chatThreads, and moves the clock the account rides", async () => {
-  // Seeded a moment out of the past, so "the clock moved" is a fact about the write.
   const THEN = 1
   await seedSettings({ developer: true, appearanceAt: THEN })
   await mount(developerPage, async () => {

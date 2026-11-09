@@ -125,9 +125,7 @@ function host({
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch, chain: () => chain }
 }
 
-/** A bot of this test's own: its connection names a host, so no other test's answers are read. These
- * cases are the account with chat threads on, since the Gots triage row exists only there; the two
- * that prove the switch off seed it off (ADR 0120). */
+/** A bot of this test's own: its connection names a host, so no other test's answers are read. */
 async function seed(
   name: string,
   options: Parameters<typeof host>[0] = {},
@@ -339,8 +337,6 @@ test("a host without the triage route draws no Gots caption, and its Hermes card
 })
 
 test("with chat threads off, no Gots section is drawn and the Hermes models still are", async () => {
-  // The shipped default: with chat threads off the triage model is a setting nowhere, so the page is
-  // its Hermes card alone (ADR 0120) — and the bot's own models are not a thread's to lose.
   await seed("chat-threads-off", {}, { chatThreads: false })
   await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.ok(!caption("Gots"), "no caption over a card with no row in it")

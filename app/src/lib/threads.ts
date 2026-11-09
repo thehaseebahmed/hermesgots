@@ -37,11 +37,6 @@ import {
   type WaitingReason,
 } from "@/lib/waiting"
 
-// The rules live in the leaf so the triage gate can read them without a screen's dependencies; these
-// re-exports keep the screens that already import this module working.
-export { botThreadsOn, chatThreadsOn, opensInMain, startHere } from "@/lib/chat-threads"
-export type { ThreadSwitches } from "@/lib/chat-threads"
-
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
 
@@ -86,10 +81,8 @@ export async function beginThread(profileId: string, message: NewChat = {}) {
 export type NewChat = { modelChoice?: ModelChoice } & Partial<Pick<ThreadStart, "text" | "attachments">>
 
 /**
- * The chat a new chat opens: with chat threads off in the bot layout, that bot's Main — made the
- * first time it is asked for — and otherwise the thread `beginThread` makes, so the legacy layout
- * still makes a plain chat and never a Main. Either way the message is handed to the chat the
- * address opens, whose own screen sends it as its first turn (ADR 0096).
+ * The chat a new chat opens: the bot's Main with chat threads off, a record otherwise, so the legacy
+ * layout still makes a plain chat and never a Main.
  *
  * Main's model is a synced field: the pick a blank surface held is not written onto it, since one
  * device's press would move the bot's model on every device. A thread is still made with it.
@@ -101,7 +94,6 @@ export async function beginChat(profileId: string, message: NewChat = {}) {
   return main
 }
 
-/** Hands a chat the message it was opened with, when there is one. */
 function handOverIfSaid(chatId: string, { text = "", attachments = [] }: NewChat) {
   if (text.trim() || attachments.length) handOver(chatId, { text, attachments, at: Date.now() })
 }

@@ -4,7 +4,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { cheatsheetGroups, type CheatsheetSwitches } from "@/lib/cheatsheet"
 import { DEFAULT_SETTINGS, getSettings } from "@/lib/db"
 import { quietly } from "@/lib/report"
-import { botThreadsOn } from "@/lib/threads"
+import { botThreadsOn } from "@/lib/chat-threads"
 
 const SHIPPED: CheatsheetSwitches = {
   navShortcuts: DEFAULT_SETTINGS.navShortcuts,

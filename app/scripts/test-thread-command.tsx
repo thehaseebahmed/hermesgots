@@ -26,7 +26,6 @@ const MAIN = mainThreadId(bot.id)
 const THREAD = "t1"
 const PICK = { provider: "picked", model: "picked/model" }
 
-/** This file is about threads, so the switch that allows them ships on; a case turns it off. */
 async function seed(
   patch: { developer?: boolean; legacyChat?: boolean; chatThreads?: boolean } = {},
 ) {
