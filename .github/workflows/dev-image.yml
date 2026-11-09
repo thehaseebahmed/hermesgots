@@ -12,6 +12,8 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/dev-image.yml"
+      # The probe the publish step runs: a change to it changes what publishing proves.
+      - ".github/scripts/ghcr-public.sh"
       # The image's second-heaviest layer is the pnpm store, warmed from these four: a dependency
       # bump changes what the image carries, so it has to rebuild. Whether that is worth verifying is
       # the recipe's business rather than the lockfile's — see the verify step's condition.
@@ -24,6 +26,7 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/dev-image.yml"
+      - ".github/scripts/ghcr-public.sh"
       - "app/package.json"
       - "app/pnpm-lock.yaml"
       - "website/package.json"
@@ -123,10 +126,13 @@ jobs:
           # image itself has already been built.
           cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
 
-      # `bash -lc` runs Debian's /etc/profile, which rebuilds PATH: a tool installed outside
-      # /usr/local/bin, or into a venv, is only found from the login shell the sandbox runs. The
-      # import is the other half of that trap — the interpreter that resolves has to be the one
-      # carrying cryptography.
+      # `bash -lc` runs Debian's /etc/profile, which replaces PATH with a fixed list: a tool that
+      # only resolves through an ENV PATH entry — a venv's python3, anything under /opt — is one the
+      # login shell never sees, and the sandbox runs a login shell. The import is the other half of
+      # the same trap: the interpreter that resolves has to be the one carrying cryptography.
+      #
+      # Outside `.github/scripts/checks.sh` on purpose: `tests.yml` runs that script on a runner that
+      # carries neither `gh` nor `reticle`, so a PATH gate there would fail for the wrong machine.
       - name: Verify the image's tools
         if: github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'
         run: |

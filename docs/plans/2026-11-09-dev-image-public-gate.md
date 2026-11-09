@@ -30,9 +30,9 @@ sequenceDiagram
   WF->>Reg: docker push ghcr.io/…/gots-dev:sha-<short> and :latest
   rect rgb(255, 245, 200)
   WF->>Reg: anonymous token for repository:…/gots-dev:pull
-  Reg-->>WF: a token, or 401
+  Reg-->>WF: a token, or a refusal (403 DENIED)
   WF->>Reg: GET /v2/…/gots-dev/manifests/latest with it
-  Reg-->>WF: 200, or 401
+  Reg-->>WF: 200, or any non-200
   end
   WF-->>WF: green, or red naming the package's settings page
 ```
@@ -64,8 +64,8 @@ sequenceDiagram
    Done.
 3. **The image proves its tools.** The Verify step runs `bash -lc` inside the image and fails on the first tool that is
    missing, naming it. Goals: G2. After: none. Check: the same command in this container — a stale build of the same
-   image — reports `missing from PATH: gh` and `reticle`, which is the failure it has to catch, while the image CI
-   builds must exit 0.
+   image — reports `missing from PATH: gh`, which is the failure it has to catch; the green half is observed on this
+   branch's first CI run, since this container has no docker.
 
    Done.
 4. **`CONTRIBUTING.md` says what the image carries and what a refused pull means.** Goals: G1 G2. After: none. Check:
@@ -76,12 +76,12 @@ sequenceDiagram
 
 ## Decisions
 - **The visibility flip is the package owner's, not the workflow's.** Made by the agent, because the token available
-  here (`gotsfather`) gets `404` from `PATCH /users/thehaseebahmed/packages/container/gots-dev`, while an anonymous pull
-  token is refused (`401`) and a public control's is granted (`200` with a manifest) — the API cannot make a package
-  its user does not own public.
+  here (`gotsfather`) gets `404` from `PATCH /users/thehaseebahmed/packages/container/gots-dev`, while the registry
+  refuses an anonymous pull for a package nobody may read (`403 DENIED` at the token leg, `401` from the manifest
+  without one) and grants it for a public control — the API cannot make a package its user does not own public.
 - **The pullability probe runs where something publishes.** Made by the agent: on a pull request nothing is pushed, so
   the probe would test the package as it stands and go red for a reason the pull request cannot fix.
-- **The smoke run uses a login shell (`bash -lc`).** Made by the agent: Debian's `/etc/profile` rebuilds `PATH` for
+- **The smoke run uses a login shell (`bash -lc`).** Made by the agent: Debian's `/etc/profile` replaces `PATH` for
   login shells, the trap the Dockerfile already records for `python3`, so the harsher shell is the honest one.
 
 ## Risks
