@@ -24,6 +24,7 @@ import {
   find,
   findAll,
   json,
+  laptop,
   mount,
   Path,
   seedSettings,
@@ -140,6 +141,9 @@ async function freshAcross() {
     botProfile(alpha, { id: "alpha-bo", name: "Bo", hermesProfile: "bo", botId: "alpha-bo" }),
     botProfile(beta, { id: "beta-cy", name: "Cy", hermesProfile: "cy", botId: "beta-cy" }),
     // The same Host reached by another key and no version path: the address is what makes it one Host.
+    botProfile(alpha, { id: "alpha-eve", name: "Eve", hermesProfile: "eve", botId: "alpha-eve" }),
+    botProfile(alpha, { id: "alpha-fay", name: "Fay", hermesProfile: "fay", botId: "alpha-fay" }),
+    botProfile(alpha, { id: "alpha-gus", name: "Gus", hermesProfile: "gus", botId: "alpha-gus" }),
     botProfile(alpha, {
       id: "alpha-dee",
       name: "Dee",
@@ -286,7 +290,7 @@ test("every bot the device holds is listed, whatever Host it is on", async () =>
     await openSeats()
     assert.deepEqual(
       seats().map((row) => row.getAttribute("data-bot")),
-      ["alpha-ada", "alpha-bo", "beta-cy", "alpha-dee"],
+      ["alpha-ada", "alpha-bo", "beta-cy", "alpha-dee", "alpha-eve", "alpha-fay", "alpha-gus"],
       "one list of every bot, not one Host's slice of it",
     )
     assert.equal(
@@ -325,7 +329,7 @@ test("the first bot picked chooses the Host, and another Host's bots grey out", 
       await click(seat("beta-cy"))
       assert.deepEqual(
         said,
-        ["A room holds one Host's bots. Unpick the first bot to change Host."],
+        ["A room holds one Host's bots. Unpick every bot to change Host."],
         "a greyed row answers a press with why it is greyed",
       )
       assert.match(
@@ -373,3 +377,51 @@ test("the seats sheet heads its body the way every drawer does", async () => {
     )
   })
 })
+
+test("at the room's ceiling, another Host's bot still says why it is greyed", async () => {
+  const bots = await freshAcross()
+  const said: unknown[] = []
+  const real = tell.info
+  tell.info = ((message: unknown) => said.push(message)) as typeof tell.info
+  try {
+    await mount(screen(), async () => {
+      await pick(bots.filter((bot) => bot.id !== "beta-cy"))
+      assert.match(
+        find('[data-slot="seats-pill"]')?.textContent ?? "",
+        /6 of 6/,
+        "the room holds the most it may",
+      )
+      await openSeats()
+      assert.equal(
+        seat("beta-cy")?.getAttribute("aria-disabled"),
+        "true",
+        "the other Host's bot is greyed, as it is at every count",
+      )
+      assert.equal(seat("beta-cy")?.disabled, false, "and it is still pressable, so it can say why")
+      await click(seat("beta-cy"))
+      assert.deepEqual(
+        said,
+        ["A room holds one Host's bots. Unpick every bot to change Host."],
+        "a full room does not swallow the sentence the Host lock owes",
+      )
+    })
+  } finally {
+    tell.info = real
+  }
+})
+
+test("the seats sheet heads a laptop's drawer the same way", laptop(async () => {
+  await freshAcross()
+  await mount(screen(), async () => {
+    await openSeats()
+    assert.ok(
+      find('[data-popup-form="drawer"]'),
+      "a laptop opens the side drawer, not the phone's sheet",
+    )
+    assert.equal(
+      find('[data-slot="sheet-title"]')?.textContent?.trim(),
+      "Room bots",
+      "titled the way every drawer's heading is",
+    )
+  })
+}))

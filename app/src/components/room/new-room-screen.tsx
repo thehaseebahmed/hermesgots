@@ -35,7 +35,7 @@ type Refusal = { kind: "full" } | { kind: "host"; say: string }
 const LEAST = 2
 const MOST = 6
 
-const OTHER_HOST = "A room holds one Host's bots. Unpick the first bot to change Host."
+const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Host."
 
 /**
  * A room that does not exist yet, drawn the way a new chat is (ADR 0096, ADR 0125): no record, no
@@ -77,10 +77,9 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
 
   const refusalFor = (bot: Profile): Refusal | null => {
     if (picked.includes(bot.id)) return null
-    if (picked.length >= MOST) return { kind: "full" }
-    return lockedHost && hostKey(bot) !== lockedHost
-      ? { kind: "host", say: OTHER_HOST }
-      : null
+    // Another Host before the ceiling: at six seats its row must still say the thing a press can act on.
+    if (lockedHost && hostKey(bot) !== lockedHost) return { kind: "host", say: OTHER_HOST }
+    return picked.length >= MOST ? { kind: "full" } : null
   }
 
   const toggle = (id: string) => {
