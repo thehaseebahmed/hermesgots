@@ -612,6 +612,45 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   assert.equal(asked()[1].url, "https://example.com/a?b=1")
 })
 
+test("a page's own window.open asks the app once, and only for http(s)", () => {
+  // The page's own script is the other way a link leaves the frame: the bridge replaces
+  // `window.open` before the page's scripts run, so a page that opens its own link asks the app
+  // instead of being refused by the sandbox. The stand-in keeps that page on its "opened" path;
+  // a page that writes into it gets nothing back, which is the cost of a tab the app owns.
+  const page = pageRealm({ body: node("body"), documentElement: node("html") })
+  const asked = () => page.posted.filter((message) => message && message.type === BRIDGE_MESSAGE)
+  const plain = (value) => JSON.parse(JSON.stringify(value))
+
+  const opened = page.window.open("https://example.com/kept?n=1", "_blank")
+  assert.ok(opened, "the page is told its window opened")
+  assert.equal(opened.closed, false)
+  assert.equal(opened.opener, null)
+  for (const method of ["focus", "blur", "close", "postMessage"]) {
+    assert.equal(typeof opened[method], "function", `${method} is on the stand-in window`)
+  }
+  opened.opener = { anything: true }
+  assert.deepEqual(plain(opened.opener), { anything: true }, "the opener is the page's to set")
+
+  assert.equal(asked().length, 1, "one open call per window.open")
+  assert.ok(Number.isInteger(asked()[0].call) && asked()[0].call > 0, "the call has a number")
+  assert.equal(typeof asked()[0].epoch, "string")
+  assert.ok(asked()[0].epoch.length > 0, "and the page that asked")
+  assert.deepEqual(plain(asked()[0]), {
+    type: BRIDGE_MESSAGE,
+    epoch: asked()[0].epoch,
+    call: asked()[0].call,
+    method: "open",
+    url: "https://example.com/kept?n=1",
+  })
+
+  // Everything else is the page's own: no call, and no window either.
+  for (const url of ["javascript:alert(1)", "/kept", "about:blank"]) {
+    assert.equal(page.window.open(url), null, url)
+  }
+  assert.equal(page.window.open(), null, "no argument at all")
+  assert.equal(asked().length, 1, "and nothing is posted")
+})
+
 test("a call the app cannot read is answered rather than dropped", async () => {
   // The page's promise is waiting on the reply: a call with no id, or no document, gets a sentence
   // instead of a promise that never settles.
@@ -687,6 +726,7 @@ function pageRealm(document) {
   vm.createContext(context)
   vm.runInContext(BRIDGE_SCRIPT, context)
   return {
+    window: context.window,
     posted,
     fire: (type, event) =>
       (listeners.get(type) ?? []).forEach((fn) => fn({ preventDefault() {}, stopPropagation() {}, ...event })),
