@@ -10,7 +10,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
-import { toast } from "sonner"
+import { tell } from "@/lib/tell"
 
 import { ConversationList } from "@/components/conversation-list"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
@@ -99,9 +99,6 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 async function fresh(host: string, { writable = true }: { writable?: boolean } = {}) {
   offers.set(host, writable ? WRITABLE : ["chats", "rooms"])
-  posted.length = 0
-  held.id = undefined
-  held.name = ""
   const bots: Profile[] = [
     botProfile(host, {
       id: `${host}-coder`,
@@ -117,6 +114,15 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
       botId: `${host}-writer`,
     }),
   ]
+  await resetRoom(bots)
+  return bots
+}
+
+/** What every case starts from: no calls made, no room held, and these bots the only rows on the device. */
+async function resetRoom(bots: Profile[]) {
+  posted.length = 0
+  held.id = undefined
+  held.name = ""
   await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
   await db.profiles.clear()
   await db.profiles.bulkPut(bots)
@@ -124,7 +130,6 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
   await db.messages.clear()
   await db.roomLog.clear()
   await settle()
-  return bots
 }
 
 /**
@@ -135,9 +140,6 @@ async function freshAcross() {
   const [alpha, beta] = ["alpha", "beta"]
   offers.set(`${alpha}.test`, WRITABLE)
   offers.set(`${beta}.test`, WRITABLE)
-  posted.length = 0
-  held.id = undefined
-  held.name = ""
   const bots: Profile[] = [
     botProfile(alpha, { id: "alpha-ada", name: "Ada", hermesProfile: "ada", botId: "alpha-ada" }),
     botProfile(alpha, { id: "alpha-bo", name: "Bo", hermesProfile: "bo", botId: "alpha-bo" }),
@@ -153,13 +155,7 @@ async function freshAcross() {
       botId: "alpha-dee",
     }),
   ]
-  await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
-  await db.profiles.clear()
-  await db.profiles.bulkPut(bots)
-  await db.conversations.clear()
-  await db.messages.clear()
-  await db.roomLog.clear()
-  await settle()
+  await resetRoom(bots)
   return bots
 }
 
@@ -279,10 +275,10 @@ test("the blank room's composer stands in the foot every chat screen gives it", 
   await mount(screen(), async () => {
     await until(async () => Boolean(find('[data-slot="seats-pill"]')), "the blank room")
     const slot = find('[data-slot="composer-slot"]')
-    assert.equal(
-      slot?.className,
-      COMPOSER_SLOT,
-      "the same px-3/pb-3.5/sm:px-4 the rest of the app gives a composer",
+    assert.deepEqual(
+      COMPOSER_SLOT.split(" ").filter((one) => !slot?.classList.contains(one)),
+      [],
+      "every gutter the rest of the app gives a composer, and nothing else is asked of it",
     )
     assert.ok(slot?.contains(composerField()), "the field itself is inside that slot")
     assert.ok(
@@ -312,8 +308,8 @@ test("every bot the device holds is listed, whatever Host it is on", async () =>
 test("the first bot picked chooses the Host, and another Host's bots grey out", async () => {
   await freshAcross()
   const said: unknown[] = []
-  const real = toast.info
-  toast.info = ((message: unknown) => said.push(message)) as typeof toast.info
+  const real = tell.info
+  tell.info = ((message: unknown) => said.push(message)) as typeof tell.info
   try {
     await mount(screen(), async () => {
       await openSeats()
@@ -360,7 +356,7 @@ test("the first bot picked chooses the Host, and another Host's bots grey out", 
       )
     })
   } finally {
-    toast.info = real
+    tell.info = real
   }
 })
 

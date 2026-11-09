@@ -25,7 +25,7 @@ import {
 import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
@@ -1350,11 +1350,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
         />
       )}
 
-      <div
-        data-slot="composer-slot"
-        data-toast-above
-        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
-      >
+      <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
         {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">

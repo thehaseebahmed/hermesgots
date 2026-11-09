@@ -2,7 +2,6 @@ import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import { CheckIcon, UsersIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
@@ -24,8 +23,9 @@ import {
 import { usePluginFeatureByServer } from "@/lib/features"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
-import { roomSeats } from "@/lib/rooms"
+import { FACES, roomSeats } from "@/lib/rooms"
 import { startRoom } from "@/lib/room-writes"
+import { tell } from "@/lib/tell"
 import { cn, randomId } from "@/lib/utils"
 
 /** The fewest and most seats a room may hold: the Host's rule, said before it can be broken. */
@@ -71,28 +71,43 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   const chosen = writers.filter((bot) => picked.includes(bot.id))
   const ready = chosen.length >= LEAST && chosen.length <= MOST
 
-  // The first bot in pick order fixes the Host: a room's roster is one gateway's profiles (ADR 0115),
-  // and every bot that answers at another address greys out while one is seated.
-  const first = writers.find((bot) => bot.id === picked[0])
-  const lockedHost = first ? hostKey(first) : null
+  // The Host is named by the first bot the room holds, and only by a bot it still holds: a room's
+  // roster is one gateway's profiles (ADR 0115), and every bot that answers at another address greys
+  // out while one is seated. Reading it off `chosen` is what keeps the lock on a bot this device can
+  // still seat, rather than on an id that may have left the list.
+  const lockedHost = chosen[0] ? hostKey(chosen[0]) : null
 
   /**
-   * A seat toggles on and off, but only for a bot of the Host the first seat named. The others stay
-   * pressable and answer with the one sentence saying how to change Host, since a dead press reads as
-   * a broken row; a full room's rows say nothing, as they always have.
+   * Why a bot cannot take a seat right now, or null when it can: one rule for what the row draws and
+   * what a press answers, so the two cannot drift apart.
+   */
+  const blockedFor = (bot: Profile): "full" | "host" | null => {
+    if (picked.includes(bot.id)) return null
+    if (picked.length >= MOST) return "full"
+    return lockedHost && hostKey(bot) !== lockedHost ? "host" : null
+  }
+
+  /**
+   * A seat toggles on and off. Another Host's bot stays pressable and answers with the one sentence
+   * saying how to change Host, since a row that greys out and then does nothing reads as a broken app;
+   * the seventh tap keeps the silence it always had.
    */
   const toggle = (id: string) => {
     if (picked.includes(id)) {
       setPicked((held) => held.filter((one) => one !== id))
       return
     }
-    if (picked.length >= MOST) return
     const bot = writers.find((one) => one.id === id)
-    if (bot && lockedHost && hostKey(bot) !== lockedHost) {
-      toast.info(OTHER_HOST)
+    if (!bot) return
+    if (blockedFor(bot) === "host") {
+      tell.info(OTHER_HOST)
       return
     }
-    setPicked((held) => [...held, id])
+    if (blockedFor(bot)) return
+    // The guards inside the updater too: a press that lands twice in one batch seats one bot once.
+    setPicked((held) =>
+      held.includes(id) || held.length >= MOST ? held : [...held, id],
+    )
   }
 
   /** One seat per picked bot, minted when it is picked, so a retried create seats the same members. */
@@ -160,7 +175,10 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
             onClick={() => setPicking(true)}
           >
             {faces.length ? (
-              <RoomFaces shown={faces.slice(0, 4)} more={Math.max(0, faces.length - 4)} />
+              <RoomFaces
+                shown={faces.slice(0, FACES)}
+                more={Math.max(0, faces.length - FACES)}
+              />
             ) : (
               <UsersIcon className="size-4" />
             )}
@@ -196,7 +214,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         open={picking}
         onOpenChange={setPicking}
         writers={writers}
-        lockedHost={lockedHost}
+        blockedFor={blockedFor}
         picked={picked}
         onToggle={toggle}
       />
@@ -217,25 +235,25 @@ function SeatsPicker({
   open,
   onOpenChange,
   writers,
-  lockedHost,
+  blockedFor,
   picked,
   onToggle,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   writers: Profile[]
-  /** The address the first seated bot answers at, while one is seated: another Host's rows grey out. */
-  lockedHost: string | null
+  /** Why a row cannot take a seat, from the screen's one rule: `full`, `host`, or null for a seat. */
+  blockedFor: (bot: Profile) => "full" | "host" | null
   picked: string[]
   onToggle: (id: string) => void
 }) {
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
-      <PopupContent className="max-h-[90dvh]">
+      <PopupContent className="max-h-[90dvh]" toastAbove>
         <PopupHeader className="pb-2">
           <PopupTitle>Room bots</PopupTitle>
         </PopupHeader>
-        <div className="flex flex-col gap-4 px-4 pb-4">
+        <div className="flex flex-col gap-4 px-4 pb-4 sm:px-6">
           <p className="text-sm text-muted-foreground">
             Two to six bots of one Host. Who a room holds is fixed when it is made: changing its
             members means making a new room.
@@ -248,10 +266,7 @@ function SeatsPicker({
                 key={bot.id}
                 bot={bot}
                 checked={picked.includes(bot.id)}
-                other={
-                  !picked.includes(bot.id) && Boolean(lockedHost && hostKey(bot) !== lockedHost)
-                }
-                full={!picked.includes(bot.id) && picked.length >= MOST}
+                blocked={blockedFor(bot)}
                 onToggle={() => onToggle(bot.id)}
               />
             ))}
@@ -273,26 +288,25 @@ function SeatsPicker({
  * what the bot answers with, because that is what decides what a room of these bots produces.
  *
  * A row greys for one of two reasons: the room already holds the most it may, or the bot answers at
- * another Host than the first seat named. Only the second still hears the press (see `other`).
+ * another Host than the one its first seat named. Only the second still hears the press: a full room's
+ * seventh tap has always done nothing, and keeps doing it.
  */
 function SeatRow({
   bot,
   checked,
-  full,
-  other,
+  blocked,
   onToggle,
 }: {
   bot: Profile
   checked: boolean
-  /** The room already holds the most it may: the seventh tap does nothing, as it always has. */
-  full: boolean
-  /** Another Host's bot while one is seated: greyed, and a press says how to change Host. */
-  other: boolean
+  /** Why this row cannot take a seat, from the screen's one rule. */
+  blocked: "full" | "host" | null
   onToggle: () => void
 }) {
-  const info = useModelInfo(bot)
+  // A row that can never be seated this time reads no model: its Host would be asked for one nothing
+  // on this screen can use.
+  const info = useModelInfo(blocked === "host" ? null : bot)
   const choice = botModel(bot, info)
-  const blocked = full || other
   return (
     <button
       type="button"
@@ -300,7 +314,7 @@ function SeatRow({
       // Never `disabled` for another Host's row: that would swallow the press the sentence answers.
       aria-disabled={blocked ? "true" : undefined}
       data-bot={bot.id}
-      disabled={full}
+      disabled={blocked === "full"}
       onClick={onToggle}
       className={cn(
         linkRowClass,
