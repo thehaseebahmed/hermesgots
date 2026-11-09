@@ -10,10 +10,11 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, CrosshairIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
+import { PointChip, useCanvasPoints } from "@/components/chat/canvas-points"
 import { useCodeFace } from "@/components/chat/code-face"
 import { AttachmentTile } from "@/components/chat/attachments"
 import type { ModeSettings } from "@/components/chat/mode-menu"
@@ -35,6 +36,7 @@ import { attachmentUrl, drawable } from "@/lib/attachment-url"
 import { drawnCell, mediaKind } from "@/lib/media-kind"
 import { previewItem } from "@/lib/media-items"
 import type { Attachment } from "@/lib/db"
+import { pointText, type CanvasPoint } from "@/lib/point-marker"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
 import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
@@ -206,6 +208,14 @@ export function Composer({
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   /**
+   * The elements of the canvas's page this message points at, and whether the page is waiting for a tap.
+   * A point is a chip the message carries, as an attachment is: it goes with the send that takes it,
+   * and a send the host never took hands it back.
+   */
+  const [points, setPoints] = useState<CanvasPoint[]>([])
+  const [pointing, setPointing] = useState(false)
+  const pointAt = useCanvasPoints()
+  /**
    * The staged files the Host refused, each with its own sentence: a tile the user can take off,
    * rather than a message the whole of which was refused with no word about which file it was. A
    * send that keeps a refused file says it again, because the Host is asked again.
@@ -229,6 +239,9 @@ export function Composer({
     setLoaded(undefined)
     setValue("")
     setAttachments([])
+    // A point is the canvas's page, not this chat's: another chat is another place to point at.
+    setPoints([])
+    setPointing(false)
   }
   // A draft that lands after mount fills the field only while it is still empty and untouched.
   const syncedDraft = useDraftText(draftKey)
@@ -304,8 +317,20 @@ export function Composer({
   const steersNow = (raw: string, carrying: Attachment[]) =>
     Boolean(onSteer) && midRoute(raw, carrying) === "steer"
 
+  // A press arms the page, and the tap that answers it is the chip it lands as: the page is let go
+  // then, or when the reader presses again or leaves the composer.
+  useEffect(() => {
+    if (!pointAt || !pointing || disabled) return
+    return pointAt.listen((picked) => {
+      setPoints((held) => [...held, picked])
+      setPointing(false)
+    })
+  }, [pointAt, pointing, disabled])
+
   const canSend =
-    (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
+    (value.trim().length > 0 || attachments.length > 0 || points.length > 0) &&
+    !disabled &&
+    preparing.length === 0
   const steering = steersNow(value, attachments)
   // One press stops everything the session has going, so Send's place is Stop while either works.
   const working = busy || subagentsRunning > 0
@@ -355,10 +380,17 @@ export function Composer({
   const items =
     plain || !token
       ? []
-      : rankSlashItems([...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
+      : rankSlashItems(
+          [...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems],
+          token,
+        )
   // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
   const menuOpen =
-    !plain && token !== null && !dismissed && !disabled && (items.length > 0 || skills.status !== "ok")
+    !plain &&
+    token !== null &&
+    !dismissed &&
+    !disabled &&
+    (items.length > 0 || skills.status !== "ok")
   const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
   // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
   // value — a restored draft, dictation, a message handed back after a failed send — leaves it
@@ -408,24 +440,32 @@ export function Composer({
 
   const submitText = (raw: string) => {
     const text = plain ? raw : (sendMode(raw)?.text ?? raw)
-    if (!text.trim() && !attachments.length) return
+    if (!text.trim() && !attachments.length && !points.length) return
     const sent = attachments
     const steer = !plain && steersNow(raw, sent)
+    // A point rides the message it was taken for: the model reads its label and its selector. A steer
+    // is a nudge at the reply already running, so the chip waits for the message after it.
+    const marked = steer ? text : pointText(text, points)
+    const carried = steer ? [] : points
     setValue("")
     setAttachments([])
-    const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(text, sent))
+    if (carried.length) setPoints([])
+    setPointing(false)
+    const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(marked, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
     void Promise.resolve(go()).then(
       () => setRefused({}),
       (error: unknown) => {
         setValue((current) => current || raw)
         setAttachments((current) => (current.length ? current : sent))
+        setPoints((current) => (current.length ? current : carried))
         // A file the Host refused is the one thing here worth interrupting for: the tile that
         // carries it turns red, and the Host's own sentence — the limit it names — is a toast on
         // the phone and the page's own toaster on the web. A send refused for another reason keeps
         // its place in the screen's own words, as it always has.
         if (!(error instanceof AttachmentError)) return
-        const message = error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
+        const message =
+          error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
         if (error.attachmentId)
           setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
         tell.error(message)
@@ -558,6 +598,24 @@ export function Composer({
       session={session}
     />
   ) : null
+
+  // Only a chat drawn beside a canvas's page offers this: the press arms the page, and the chip it
+  // answers with rides the next message.
+  const pointButton =
+    pointAt && !disabled ? (
+      <InputGroupButton
+        type="button"
+        variant={pointing ? "secondary" : "ghost"}
+        size="icon-sm"
+        className="size-11 rounded-full"
+        aria-label="Point"
+        aria-pressed={pointing}
+        title={pointing ? "Tap an element on the page" : "Point at an element of the page"}
+        onClick={() => setPointing((was) => !was)}
+      >
+        <CrosshairIcon />
+      </InputGroupButton>
+    ) : null
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
@@ -776,9 +834,18 @@ export function Composer({
           onActive={setActive}
         />
       )}
-      {attachments.length + preparing.length > 0 && (
+      {points.length + attachments.length + preparing.length > 0 && (
         // Room on the right so the last tile's remove button isn't cut off.
         <div className="-mt-3 mb-2 flex gap-2.5 overflow-x-auto pt-3 pr-4 pl-1">
+          {points.map((one, at) => (
+            <PointChip
+              key={`${one.selector}-${at}`}
+              point={one}
+              draft
+              className="shrink-0 self-center"
+              onRemove={() => setPoints((held) => held.filter((_, index) => index !== at))}
+            />
+          ))}
           {attachments.map((attachment) => (
             <AttachmentTile
               key={attachment.id}
@@ -848,6 +915,7 @@ export function Composer({
           }}
         >
           {attach}
+          {pointButton}
           {model}
           <span className="flex-1" />
           {controls}

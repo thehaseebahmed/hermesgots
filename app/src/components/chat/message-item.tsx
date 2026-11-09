@@ -13,6 +13,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
+import { PointChips } from "@/components/chat/canvas-points"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { AgentCards } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
@@ -567,6 +568,7 @@ export const MessageItem = memo(function MessageItem({
     return (
       <MessageRow align="end" className={COLUMN}>
         <MessageContent className="items-end gap-1">
+          <PointChips points={message.points} />
           {message.attachments?.length ? (
             <SentAttachments
               conversationId={message.conversationId}

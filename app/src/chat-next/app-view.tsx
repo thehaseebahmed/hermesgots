@@ -20,6 +20,7 @@ import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
 import { Markdown } from "@/components/chat/markdown"
+import { PointChips } from "@/components/chat/canvas-points"
 import { MessageItem } from "@/components/chat/message-item"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
@@ -42,6 +43,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { attachmentsText } from "@/lib/attachment-text"
+import { pointText } from "@/lib/point-marker"
 import { compactionMarks } from "@/lib/compactions"
 import { questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
@@ -56,7 +58,7 @@ import { carriesCount, replyFacts, threadLineOf } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
-import { messagesOf, heldMessage, replyId } from "./messages"
+import { messagesOf, heldMessage, messageParts, replyId } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 import type { Waiting } from "./state"
 
@@ -133,7 +135,7 @@ export function AppThreadView({
   // A turn whose request is in a page not read yet has nothing to send again, and neither has a
   // wake turn the host gave up on: it answers no message of the user's, so Retry would send nothing.
   const tip = turns.at(-1)
-  const resendable = tip?.failed && (tip.user.trim() || tip.files?.length)
+  const resendable = tip?.failed && (tip.user.trim() || tip.files?.length || tip.points?.length)
   const failedTurn = resendable && !tip.cut && !streaming && !waiting ? tip : undefined
   const retryId = failedTurn && replyId(chatId, origin + turns.length - 1)
   async function retry() {
@@ -147,9 +149,10 @@ export function AppThreadView({
         ...file,
         id: file.path ?? file.name,
       }))
-      await latestSend.current(retryText(attachmentsText(failedTurn.user, files)), [], {
-        retry: true,
-      })
+      // The points ride under the words, as the send that carried them wrote them: a retry re-asks
+      // the same request, and the element it named is part of that request.
+      const request = attachmentsText(pointText(failedTurn.user, failedTurn.points ?? []), files)
+      await latestSend.current(retryText(request), [], { retry: true })
     } finally {
       setRetrying(false)
     }
@@ -347,45 +350,51 @@ export function AppThreadView({
                       </div>
                     </MessageScrollerItem>
                   ))}
-                  {queue?.items.map((item) => (
-                    <div
-                      key={item.id}
-                      data-queued
-                      className={cn(COLUMN_BOX, "flex flex-col items-end gap-1")}
-                    >
-                      {item.files.length > 0 && (
-                        <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
-                      )}
-                      {item.text && (
-                        <div className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
-                          <Markdown tone="fill">{item.text}</Markdown>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <span data-queued-state className="px-2">
-                          {item.error ?? "Queued"}
-                        </span>
-                        {(queue.paused || item.error) && (
+                  {queue?.items.map((item) => {
+                    // The queue holds the message as it was sent: its words, then the markers the
+                    // model reads — the points among them, as chips over the bubble.
+                    const held = messageParts(item.text)
+                    return (
+                      <div
+                        key={item.id}
+                        data-queued
+                        className={cn(COLUMN_BOX, "flex flex-col items-end gap-1")}
+                      >
+                        <PointChips points={held.points} />
+                        {item.files.length > 0 && (
+                          <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
+                        )}
+                        {held.text && (
+                          <div className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
+                            <Markdown tone="fill">{held.text}</Markdown>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <span data-queued-state className="px-2">
+                            {item.error ?? "Queued"}
+                          </span>
+                          {(queue.paused || item.error) && (
+                            <Button
+                              data-send-queued
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => queue.act(item.id, "send")}
+                            >
+                              Send now
+                            </Button>
+                          )}
                           <Button
-                            data-send-queued
+                            data-remove-queued
                             variant="ghost"
                             size="sm"
-                            onClick={() => queue.act(item.id, "send")}
+                            onClick={() => queue.act(item.id, "remove")}
                           >
-                            Send now
+                            Remove
                           </Button>
-                        )}
-                        <Button
-                          data-remove-queued
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => queue.act(item.id, "remove")}
-                        >
-                          Remove
-                        </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
               {/* Over the scroller rather than in its flow: a row added or taken away at the top of the
@@ -422,11 +431,7 @@ export function AppThreadView({
             </MessageScroller>
           </MessageScrollerProvider>
         )}
-        <div
-          data-slot="composer-slot"
-          data-toast-above
-          className={COMPOSER_SLOT}
-        >
+        <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
           {waiting ? <div className={COLUMN_BOX}>{waiting}</div> : composer}
         </div>
         <AgentPopup

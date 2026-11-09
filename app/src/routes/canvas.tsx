@@ -14,6 +14,7 @@ import { Link, useNavigate, useParams } from "react-router"
 import { ChatBody } from "@/chat-next/chat-body"
 import { Bot } from "@/components/bot"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
+import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
@@ -26,7 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { attempt } from "@/lib/attempt"
 import { awayLine } from "@/lib/away"
-import { bridgeHandler } from "@/lib/canvas-bridge"
+import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
@@ -42,6 +43,7 @@ import {
   writeCanvasData,
 } from "@/lib/canvases"
 import { db, getActiveProfile } from "@/lib/db"
+import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { useOnline } from "@/lib/online"
@@ -155,11 +157,7 @@ export function CanvasPage() {
               botId={canvas.profileId}
               title={canvas.title}
               when={canvas.at ? formatRelative(canvas.at, now) : undefined}
-              line={
-                canvas.version > 0
-                  ? `Version ${canvas.version}`
-                  : "Your bot is building it…"
-              }
+              line={canvas.version > 0 ? `Version ${canvas.version}` : "Your bot is building it…"}
               link={{ to: `/canvas/${canvas.id}` }}
             />
           ))}
@@ -283,6 +281,40 @@ export function CanvasView() {
   const askRef = useRef(consent.ask)
   askRef.current = consent.ask
 
+  // Pointing, through the bridge (ADR 0114): the chat's composer arms the page through this, and the
+  // element the page answers reaches the composer's chip by the bridge's own listener — so nothing but
+  // this screen's frame is heard. The listeners are held for the screen's life rather than a render's,
+  // so one press is one arm, and the page is let go only once the last listener has gone.
+  const answers = useRef(new Set<(point: CanvasPoint) => void>())
+  const tellPage = (watch: boolean) => {
+    frame.current?.contentWindow?.postMessage(pointWatch(watch), "*")
+  }
+  const points = useMemo<CanvasPoints>(
+    () => ({
+      listen(answer) {
+        answers.current.add(answer)
+        tellPage(true)
+        return () => {
+          answers.current.delete(answer)
+          if (!answers.current.size) tellPage(false)
+        }
+      },
+      answer(point) {
+        for (const answer of [...answers.current]) answer(point)
+      },
+    }),
+    [],
+  )
+  /**
+   * A version or a mode redraws the frame as a whole new document, and one that was never told is not
+   * listening: the page says when its own half has run, and an arm still owed — a press waiting for a
+   * tap — is told to that page. A message posted at the redraw instead would reach a window whose
+   * script had not run yet.
+   */
+  const ready = () => {
+    if (answers.current.size) tellPage(true)
+  }
+
   // The page's own data and its calls through the app: a data read is answered from the copy this
   // device holds and a data write goes to the host's one route (ADR 0113); the host's four reads
   // are asked freely, and a declared tool's call waits here while the reader is asked (ADR 0114).
@@ -293,10 +325,12 @@ export function CanvasView() {
       write: (call) => writeCanvasData(id, call),
       call: (call) => callCanvasCall(id, call),
       consent: (tool) => askRef.current(tool),
+      point: (point) => points.answer(point),
+      ready,
     })
     window.addEventListener("message", hear)
     return () => window.removeEventListener("message", hear)
-  }, [id])
+  }, [id, points])
 
   const undo = async () => {
     if (!canvas || undoing) return
@@ -309,21 +343,23 @@ export function CanvasView() {
   // a turn's end is a version this screen re-reads (ADR 0113).
   const body =
     chat && profile ? (
-      <PreviewerProvider>
-        <ChatBody
-          chat={chat}
-          bot={profile}
-          summaries={summaries}
-          start={undefined}
-          limit={limit}
-          afterSettled={() => {
-            // Every turn's end re-reads the page: a stream can be open and silent (a buffering
-            // proxy), so the event is never the only news. A read already in flight is joined and
-            // one more is owed, so the edit's event and this cost one GET between them.
-            void refreshCanvas(id).catch(() => undefined)
-          }}
-        />
-      </PreviewerProvider>
+      <CanvasPointsProvider points={points}>
+        <PreviewerProvider>
+          <ChatBody
+            chat={chat}
+            bot={profile}
+            summaries={summaries}
+            start={undefined}
+            limit={limit}
+            afterSettled={() => {
+              // Every turn's end re-reads the page: a stream can be open and silent (a buffering
+              // proxy), so the event is never the only news. A read already in flight is joined and
+              // one more is owed, so the edit's event and this cost one GET between them.
+              void refreshCanvas(id).catch(() => undefined)
+            }}
+          />
+        </PreviewerProvider>
+      </CanvasPointsProvider>
     ) : null
 
   return (

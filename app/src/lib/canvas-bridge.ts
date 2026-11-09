@@ -7,11 +7,31 @@
  * (ADR 0113); writes go to the host's one route, `POST canvases/<id>/call`, and the answer it
  * gives is what the copy keeps.
  *
- * Import-free, so `scripts/test-canvas-bridge.mjs` runs it as a pure rule.
+ * Import-free but for the marker's own separator and the rule that cuts a label, so
+ * `scripts/test-canvas-bridge.mjs` runs it as a pure rule.
  */
+
+import { POINT_SELECTOR, type CanvasPoint } from "./point-marker.ts"
+import { oneLine } from "./words.ts"
 
 /** The name both halves mark a message with, so the page and the app agree on one shape. */
 export const BRIDGE_MESSAGE = "gots:canvas-data"
+
+/**
+ * The name both halves mark a point with: the app tells the page a tap is a point, and the page answers
+ * the element that was tapped, through the bridge ADR 0114 puts between the page and the app. A point
+ * is not a call — nothing is awaited, and nothing but this screen's own frame is heard.
+ */
+export const POINT_MESSAGE = "gots:canvas-point"
+
+/** How much of an element's own words a point carries: a chip, not a paragraph. */
+export const POINT_LABEL_MAX = 80
+
+/**
+ * How long a selector may be. The page's own walk gives up long before this; one that arrives longer
+ * was not written by that walk, and a selector cut short finds nothing, so the point is dropped.
+ */
+export const POINT_SELECTOR_MAX = 200
 
 /**
  * What a page may ask of its data, in the order the page's half offers them: the same four names the
@@ -153,7 +173,14 @@ export function readCall(data: unknown): BridgeCall | null {
   if (method === "put") {
     // The key decides, not what it holds: a stored null is a value the page wrote.
     if (!("doc" in raw)) return null
-    return { ...epoch, call: raw.call, method, collection: raw.collection, id: raw.id, doc: raw.doc }
+    return {
+      ...epoch,
+      call: raw.call,
+      method,
+      collection: raw.collection,
+      id: raw.id,
+      doc: raw.doc,
+    }
   }
   return { ...epoch, call: raw.call, method, collection: raw.collection, id: raw.id }
 }
@@ -198,7 +225,9 @@ function byCodePoint(a: string, b: string): number {
 }
 
 export function inOrder(copy: CanvasDoc[]): CanvasDoc[] {
-  return [...copy].sort((a, b) => byCodePoint(a.collection, b.collection) || byCodePoint(a.id, b.id))
+  return [...copy].sort(
+    (a, b) => byCodePoint(a.collection, b.collection) || byCodePoint(a.id, b.id),
+  )
 }
 
 /**
@@ -230,6 +259,117 @@ export function applyWrite(
 }
 
 /**
+ * What the app tells a page about pointing: whether a tap names an element right now. A page that is
+ * let go stops highlighting and stops answering, and a tap is a tap again.
+ */
+export function pointWatch(watch: boolean): { type: typeof POINT_MESSAGE; watch: boolean } {
+  return { type: POINT_MESSAGE, watch }
+}
+
+/**
+ * The point a page answered, or null for anything else — another window's idea of the message, a point
+ * with no words on it, or one with no selector to find it again. Both are clipped to one line, since
+ * what a page says of an element can be a whole paragraph.
+ */
+export function readPoint(data: unknown): CanvasPoint | null {
+  if (!data || typeof data !== "object") return null
+  const raw = data as Record<string, unknown>
+  if (raw.type !== POINT_MESSAGE) return null
+  const point: unknown = raw.point
+  if (!point || typeof point !== "object") return null
+  const { label, selector } = point as { label?: unknown; selector?: unknown }
+  const said = oneLine(typeof label === "string" ? label : "", POINT_LABEL_MAX)
+  const found = oneLine(typeof selector === "string" ? selector : "")
+  if (!said || !found) return null
+  // A selector the page's own walk could not have written — too long, or carrying the marker's own
+  // words, which would move the split the fold reads back — is no selector at all.
+  if (found.length > POINT_SELECTOR_MAX || found.includes(POINT_SELECTOR)) return null
+  return { label: said, selector: found }
+}
+
+/**
+ * The page's half of pointing, put in the head beside the data bridge: the app says when a tap names an
+ * element, a pointer over an element outlines it, and a tap answers the element's own words and a
+ * selector that finds it — one id where it has one, else a class, else its place among its siblings,
+ * under its parents. In the dialect the data bridge is written in, and it asks nothing of the page.
+ */
+export const POINT_SCRIPT = `(function(){
+var TYPE="${POINT_MESSAGE}";
+var MAX=${POINT_LABEL_MAX};
+var watching=false;
+var lit=null;
+var prior=null;
+function words(value){return String(value==null?"":value).replace(/\\s+/g," ").trim()}
+function labelOf(el){
+var said=words(el.getAttribute("aria-label")||el.getAttribute("alt")||el.getAttribute("title"));
+if(said){return said.slice(0,MAX)}
+var text=el.textContent;
+if(text&&text.length>MAX*8){text=text.slice(0,MAX*8)}
+text=words(text);
+if(text){return text.slice(0,MAX)}
+return el.id?"#"+el.id:el.tagName.toLowerCase()
+}
+function firstClass(el){
+var held=el.getAttribute("class");
+var name=words(held).split(" ")[0];
+return name||""
+}
+function selectorOf(el,depth){
+if(el.id){return "#"+el.id}
+if(depth>6){return el.tagName.toLowerCase()}
+var tag=el.tagName.toLowerCase();
+var cls=firstClass(el);
+var name=tag+(cls?"."+cls:"");
+var index=1;
+var sib=el.previousElementSibling;
+while(sib){if(sib.tagName===el.tagName){index++}sib=sib.previousElementSibling}
+if(index>1){name+=":nth-of-type("+index+")"}
+var parent=el.parentElement;
+if(!parent||parent===document.documentElement){return name}
+return selectorOf(parent,(depth||0)+1)+" > "+name
+}
+function unmark(){
+if(!lit){return}
+lit.removeAttribute("data-gots-point");
+if(prior){lit.style.outline=prior.outline;lit.style.outlineOffset=prior.offset;lit.style.cursor=prior.cursor}
+lit=null;
+prior=null
+}
+function mark(el){
+if(!el||el.nodeType!==1||el===document.body||el===document.documentElement||el===lit){return}
+unmark();
+prior={outline:el.style.outline,offset:el.style.outlineOffset,cursor:el.style.cursor};
+lit=el;
+lit.setAttribute("data-gots-point","");
+lit.style.outline="2px solid var(--primary, #6366f1)";
+lit.style.outlineOffset="1px";
+lit.style.cursor="crosshair"
+}
+function move(event){if(watching){mark(event.target)}}
+function pick(event){
+if(!watching){return}
+var el=event.target;
+if(!el||el.nodeType!==1){return}
+event.preventDefault();
+event.stopPropagation();
+var point={label:labelOf(el),selector:selectorOf(el,0)};
+try{parent.postMessage({type:TYPE,point:point},"*")}
+catch(e){return}
+watching=false;
+unmark()
+}
+addEventListener("message",function(event){
+var data=event.data;
+if(!data||typeof data!=="object"||data.type!==TYPE){return}
+watching=data.watch===true;
+if(!watching){unmark()}
+});
+addEventListener("pointermove",move,true);
+addEventListener("click",pick,true);
+try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
+})()`
+
+/**
  * The page's half, put in the head ahead of the page's own scripts: `window.canvas.data` with
  * `list`, `get`, `put` and `remove`, `window.canvas.read(shape, args)` for the host's four free
  * reads, and `window.canvas.tool.call(name, args)` for a tool the version declared. Each posts the
@@ -241,7 +381,9 @@ export function applyWrite(
 export const BRIDGE_SCRIPT =
   `(function(){var TYPE="` +
   BRIDGE_MESSAGE +
-  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()`
+  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
+  ";" +
+  POINT_SCRIPT
 
 /** What the parent's listener may ask of its world, so the rule itself holds no window or store. */
 export interface BridgeHost {
@@ -255,6 +397,10 @@ export interface BridgeHost {
   call(call: BridgeHostCall): Promise<unknown>
   /** Asks the reader whether the canvas may use one tool, and answers what they chose. */
   consent(tool: string): Promise<boolean>
+  /** The element the page answered while a point was armed; a point is never a call. */
+  point?(point: CanvasPoint): void
+  /** A page that has just run its half of the bridge, and can be armed now. */
+  ready?(): void
 }
 
 function wordsOf(error: unknown): string {
@@ -323,7 +469,21 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
     const frame = host.frame()
     if (!frame || event.source !== frame) return
     const raw = event.data as Record<string, unknown> | null
-    if (!raw || typeof raw !== "object" || raw.type !== BRIDGE_MESSAGE) return
+    if (!raw || typeof raw !== "object") return
+    // A page says so once its own half is listening: an arm posted before that reaches a window with
+    // nothing in it to hear.
+    if (raw.type === POINT_MESSAGE && raw.ready === true) {
+      host.ready?.()
+      return
+    }
+    // A point is an answer, not a call: the page names the element it was tapped on, and nothing is
+    // posted back to it.
+    const point = readPoint(raw)
+    if (point) {
+      host.point?.(point)
+      return
+    }
+    if (raw.type !== BRIDGE_MESSAGE) return
     const reply = (call: number, ok: boolean, payload: Record<string, unknown>) =>
       frame.postMessage(
         {

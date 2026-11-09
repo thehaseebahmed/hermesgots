@@ -13,6 +13,7 @@ import { NOT_SENT } from "../lib/words.ts"
 import { clip, describeCall, parseArgs, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
 import { actionOfPreview, settleTool } from "../lib/tools.ts"
+import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
 import { requestIn } from "../lib/retry-message.ts"
 import { splitAttachments } from "../lib/attachment-text.ts"
 
@@ -60,8 +61,17 @@ export const turnId = (chat: string, index: number) => `${chat}-${index}`
 /** The id of the reply row a turn draws, which is where its failure and Retry are drawn. */
 export const replyId = (chat: string, index: number) => `${turnId(chat, index)}-a`
 
-/** A not-sent row's words alone: a bubble draws no retry marker and no attachment marker. */
-export const heldWords = (row: Unsent) => splitAttachments(requestIn(row.text)).text
+/**
+ * A message's own words and the points it named, from the text as the host holds it: a bubble draws
+ * no retry marker, no attachment marker and no point, and the markers sit under the words in the order
+ * a send writes them — attachments last, so they go first, then the points.
+ */
+export function messageParts(text: string): { text: string; points: CanvasPoint[] } {
+  return pointsIn(splitAttachments(requestIn(text)).text)
+}
+
+/** A not-sent row's words and points. */
+export const heldParts = (row: Unsent) => messageParts(row.text)
 
 /**
  * A message a send could not get to the host, as the app's own rows draw it: the words and the
@@ -70,11 +80,13 @@ export const heldWords = (row: Unsent) => splitAttachments(requestIn(row.text)).
  * for a refusal is the chat's own error, so nothing here carries it.
  */
 export function heldMessage(chat: string, row: Unsent): Message {
+  const { text, points } = heldParts(row)
   return {
     id: row.id,
     conversationId: chat,
     role: "user",
-    content: heldWords(row),
+    content: text,
+    ...(points.length ? { points } : {}),
     ...(row.attachments.length ? { attachments: row.attachments } : {}),
     status: "error",
     statusText: NOT_SENT,
@@ -99,6 +111,7 @@ function rowsOf(
       conversationId: chat,
       role: "user",
       content: turn.user,
+      ...(turn.points?.length ? { points: turn.points } : {}),
       ...(turn.files?.length
         ? {
             attachments: turn.files.map((file, at): Attachment => ({

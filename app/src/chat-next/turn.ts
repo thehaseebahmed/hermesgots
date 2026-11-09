@@ -4,6 +4,7 @@ import { db, updateConversation, type Attachment } from "@/lib/db"
 import { retireDraft } from "@/lib/drafts"
 import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
 import { modelOf, wantsPin } from "@/lib/model-pick"
+import { pointsIn } from "@/lib/point-marker"
 import { announceMove, askTriage, canTriage, triaging } from "@/lib/triage"
 import { quietly } from "@/lib/report"
 import { openerFor, pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
@@ -44,6 +45,9 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
   try {
     const config = serverConfig(bot)
     const words = text.trim()
+    // What the message says in a title or a card: a point's marker line is what the model reads, and
+    // no words a reader is shown.
+    const shown = pointsIn(words).text.trim()
     // A project session works in its worktrees; the plugin can't be told about them any other way,
     // and a session whose repo is gone is refused here, before anything is posted.
     const workspace = await ensureSessionWorkspace(chatId, words || attachments[0]?.name || "")
@@ -74,18 +78,20 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
         // The chat moved: its list row, the Code screen and sync go by this clock.
         void updateConversation(chatId, {
           updatedAt: Date.now(),
-          ...(first && !chat.titleEdited ? { title: titleFrom(words || attachments[0].name) } : {}),
+          ...(first && !chat.titleEdited
+            ? { title: titleFrom(shown || attachments[0]?.name || "") }
+            : {}),
           // The message that opened a thread, for Main's card, stamped when the reader sent it: a
           // thread is read on the devices that did not type it, so the card cannot rely on this one
           // holding the row (ADR 0090, ADR 0096).
-          ...openerFor(chat, { first, text: words, at }),
+          ...openerFor(chat, { first, text: shown, at }),
         }).catch(quietly("Marking a chat as sent in"))
         void retireDraft(chatId).catch(quietly("Retiring a chat's draft"))
         // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
         if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
       },
     }
-    return { turn, config, session: chat.hermesSessionId, sent }
+    return { turn, config, session: chat.hermesSessionId, sent, shown }
   } catch (error) {
     await release?.()
     throw error
@@ -105,6 +111,8 @@ export async function queueTurn(chatId: string, text: string, attachments: Attac
   const { turn, config, session, sent } = await built(chatId, text, attachments, Date.now())
   try {
     const item = await addToQueue(config, session, {
+      // The queue holds the message as it was sent, markers and all: the row that draws it reads the
+      // words and the points back, as the not-sent row does.
       text: text.trim(),
       attachments: sent.map(({ name, type, size, path }) => ({ name, type, size, path })),
       run: turn.body,
