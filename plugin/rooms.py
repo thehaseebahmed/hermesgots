@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-from . import attachments, events, link, media, push, ticker
+from . import attachments, config_keys, events, link, media, push, ticker
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,11 @@ ASK_WINDOW = 64
 # A member's words addressed to the user, read exactly as the room's screen reads them
 # (`app/src/lib/room-log.ts`): a mention, not a name that merely begins with one.
 MENTION = re.compile(r"@user\b", re.IGNORECASE)
+
+# The shape the Host's own roster takes a profile name in (`hosted_rooms_common.IDENTIFIER_RE`,
+# pinned by `check-hermes-internals.py`). A name it would refuse is one no entry can seat, so the
+# create says so rather than writing an entry that is ignored for ever (ADR 0129).
+ROSTER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 
 _ids = itertools.count(1)
 _ids_lock = threading.Lock()
@@ -472,6 +477,107 @@ def _deletion(tombstone: Any) -> Dict[str, Any]:
     return {"at": at if at is not None else int(time.time() * 1000), "deleted": True}
 
 
+def _seated_names(members: Any) -> List[str]:
+    """The profiles one create names, in order, once each."""
+    names: List[str] = []
+    for raw in members if isinstance(members, list) else ():
+        profile = raw.get("profile") if isinstance(raw, dict) else None
+        if isinstance(profile, str) and profile and profile not in names:
+            names.append(profile)
+    return names
+
+
+def _config_file(home: Any) -> Optional[Path]:
+    """The ``config.yaml`` a roster is written to: this profile's own, never another's."""
+    if home:
+        return Path(home) / "config.yaml"
+    try:
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home()) / "config.yaml"
+    except Exception:
+        return None
+
+
+def widen(members: Any, *, timeout: float = CALL_TIMEOUT, home: Any = None) -> List[str]:
+    """Seats the profiles this connection cannot, by adding them to the making profile's own roster.
+
+    Answers the names it added, which is what the room says it changed. Nothing is written where the
+    Host names no roster — no rule rather than an empty one — or where it already seats every member.
+    A profile the Host's entry rule would ignore is refused in words before anything is written: an
+    entry nothing reads buys the same refusal at the price of a config change (ADR 0129).
+
+    The mapping is read from the file itself and written whole, once. The effective config is a
+    merged view, so writing that back would materialise a managed overlay into the user's file, and
+    a profile name may carry a dot that a dotted key path cannot.
+    """
+    found, _ = _probe(home, timeout=timeout)
+    seated = seating(found)
+    if seated is None:
+        return []
+    missing = [name for name in _seated_names(members) if name not in seated]
+    if not missing:
+        return []
+    path = _config_file(home)
+    if path is None:
+        raise RoomError("This bot couldn't find its own configuration, so its room wasn't made.", 400)
+    try:
+        from hermes_cli.config import read_user_config_raw
+
+        config = read_user_config_raw(path)
+    except Exception:
+        # A file nobody read is not an empty one: merging over it would drop the entries it holds.
+        raise RoomError(
+            "This bot's Host couldn't read its own configuration, so its room wasn't made.", 400
+        )
+    section = config.get("hosted_rooms") if isinstance(config, dict) else None
+    profiles = section.get("profiles") if isinstance(section, dict) else section
+    if profiles is not None and not isinstance(profiles, dict):
+        raise RoomError(
+            "This bot's Host has a hosted_rooms.profiles it can't read, so its room wasn't made.", 400
+        )
+    mapping = dict(profiles or {})
+    added: Dict[str, str] = {}
+    for name in missing:
+        if not ROSTER_NAME.match(name):
+            raise RoomError(
+                f"{name} can never join a room from this bot: its Host takes no profile name of that "
+                "shape.",
+                400,
+            )
+        target = path.parent / "profiles" / name
+        try:
+            beside = target.is_dir() and not target.is_symlink() and target.resolve() == target
+        except OSError:
+            beside = False
+        if not beside:
+            raise RoomError(
+                f"{name} can never join a room from this bot: its profile isn't a directory beside "
+                "this one's.",
+                400,
+            )
+        held = next(
+            (one for one, value in mapping.items() if isinstance(value, str) and Path(value) == target),
+            None,
+        )
+        if held is not None:
+            raise RoomError(
+                f"{name} can't join a room from this bot: its profile is already seated here as "
+                f"'{held}'.",
+                400,
+            )
+        added[name] = str(target)
+    config_keys.write(path, "hosted_rooms.profiles", {**mapping, **added})
+    again, _ = _probe(home, timeout=timeout)
+    after = seating(again)
+    still = [name for name in added if after is None or name not in after]
+    if still:
+        raise RoomError(
+            f"This bot's Host still doesn't seat {', '.join(still)}, so its room wasn't made.", 400
+        )
+    return list(added)
+
+
 def create_room(
     room_id: str, name: Any, members: Any, *, timeout: float = CALL_TIMEOUT, home: Any = None
 ) -> Dict[str, Any]:
@@ -482,11 +588,19 @@ def create_room(
     where the Host's names end (``_member`` spells the read the other way). How few or many members
     a room may hold, which handles are taken and which are reserved are the Host's rules, and its
     refusal says which.
+
+    A member this connection cannot seat is seated first, by writing the making profile's own roster
+    (``widen``): the room is made where it can exist rather than refused for a config it could have
+    fixed. The record's answer names what was added, so the room can say it once.
     """
+    added = widen(members, timeout=timeout, home=home)
     params = {"room_id": room_id, "name": name, "members": _host_members(members)}
     found = _asked("groups.create", "room", params, timeout=timeout, home=home)
     _forget_projection(home)
-    return _answer_record(found.get("room"), room_id=room_id, name=name, members=members)
+    record = _answer_record(found.get("room"), room_id=room_id, name=name, members=members)
+    if added:
+        record["seated"] = added
+    return record
 
 
 def rename_room(
@@ -1370,6 +1484,21 @@ def available(home: Any = None) -> Optional[str]:
     return _probe(home)[1]
 
 
+def seating(found: Optional[Dict[str, Any]]) -> Optional[List[str]]:
+    """The profiles one ``groups.capabilities`` answer seats in a new room, or ``None`` where it names none.
+
+    ``None`` is a Host older than the field, which is no rule rather than an empty roster; an empty
+    list is a Host that seats nobody. Read here once, so the picker's rows and the create's own check
+    hold a pick to the same list (ADR 0129).
+    """
+    if not isinstance(found, dict):
+        return None
+    named = found.get("seatable_profiles")
+    if not isinstance(named, (list, tuple)):
+        return None
+    return [one for one in named if isinstance(one, str)]
+
+
 def offered(home: Any = None) -> Tuple[List[str], Optional[List[str]]]:
     """The `info` rows this Host's rooms earn, and the profiles this connection may seat.
 
@@ -1393,12 +1522,7 @@ def offered(home: Any = None) -> Tuple[List[str], Optional[List[str]]]:
     if found is None:
         logger.debug("gots: no rooms on this host: %s", why)
         return [], None
-    named = found.get("seatable_profiles")
-    seatable = (
-        [one for one in named if isinstance(one, str)]
-        if isinstance(named, (list, tuple))
-        else None
-    )
+    seatable = seating(found)
     answered = found.get("methods") or ()
     rows = ["rooms"]
     if QUESTION_FEATURE in (found.get("features") or ()):

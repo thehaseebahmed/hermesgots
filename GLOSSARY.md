@@ -455,11 +455,22 @@ _Avoid_: participant, teammate, occupant, seat
 The members a room holds, fixed when the room is made. Changing them means a new room.
 _Avoid_: member list, participants, seats
 
+**Making bot**:
+The picked bot whose connection makes a room: the earliest pick whose connection seats every pick, or
+the first pick where none does. Its profile's own configuration is the roster the create is held to.
+_Avoid_: host bot, owner bot, creator, first pick
+
+**Seat repair**:
+The create adding a picked bot's profile to the making bot's `hosted_rooms.profiles`, so the Host's own
+roster seats it, and reading that roster again before the room is made. It is the one write Gots makes
+to a Host's configuration on its own initiative, and it outlives the room it was made for.
+_Avoid_: widening, granting, auto-config, host fix
+
 **Seatable**:
 The profiles a connection may seat in a room, as its Host names them: its own bot, plus any profile the
 Host's own configuration adds, and every profile a host-scoped connection serves. A bot outside the
-seatable list of the connection the room is made from is greyed in New room rather than offered and
-refused.
+seatable list of the connection the room is made from is marked in New room rather than greyed, and the
+create repairs that connection's Host before it makes the room (ADR 0129).
 _Avoid_: allowed bots, permitted profiles, seatable bots, whitelist
 
 **Disband**:

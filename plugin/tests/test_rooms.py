@@ -52,7 +52,7 @@ class Host:
         driver_status=None,
         states=None,
         features=None,
-        seatable_profiles=("default",),
+        seatable_profiles=("default", "coder"),
     ):
         self.listed = list(listed)
         self.driver = driver
@@ -61,10 +61,10 @@ class Host:
         # member's questions names it here, which is what earns `rooms_questions` (rooms.py).
         self.features = list(features or [])
         # The profiles this caller's connection may seat in a new group, named beside its methods
-        # (#141178). None is a Host older than the field, which answers without it at all.
-        self.seatable_profiles = (
-            list(seatable_profiles) if seatable_profiles is not None else None
-        )
+        # (#141178). None is a Host older than the field, which answers without it at all. A
+        # callable is a roster that moves with the profile's own `config.yaml`, which is how the
+        # create's repair is answered: the Host re-reads it on the next ask (ADR 0129).
+        self.seatable_profiles = seatable_profiles
         self.approvals = []
         self.stops = []
         self.refuse = refuse
@@ -158,11 +158,8 @@ class Host:
         if method == "groups.capabilities":
             # A Host that predates the roster answers every other field and no `seatable_profiles`
             # at all, which is what an older gateway does — never an empty list.
-            named = (
-                {"seatable_profiles": list(self.seatable_profiles)}
-                if self.seatable_profiles is not None
-                else {}
-            )
+            seated = self.seatable_profiles() if callable(self.seatable_profiles) else self.seatable_profiles
+            named = {"seatable_profiles": list(seated)} if seated is not None else {}
             return {"protocol_version": 1, "driver": self.driver, "methods": self.methods,
                     "features": self.features, **named}
         if method == "groups.list":
@@ -345,6 +342,40 @@ def no_loopback():
     """A Host with no gateway client at all: a test that isn't about the way out can't take it."""
     with planted(
         {"hermes_cli": package("hermes_cli")},
+        absent=["hermes_cli.gateway_runtime", "hermes_cli.gateway_client"],
+    ):
+        yield
+
+
+@contextlib.contextmanager
+def config_store(path):
+    """This Hermes's own config read and round-trip writer, kept over one file (ADR 0129).
+
+    The writer is Hermes's; this is its stand-in, with the same key-path semantics and one mapping
+    behind it, so a write the seam makes is what the Host answers its roster from on the next ask.
+    """
+
+    def read_user_config_raw(config_path=None):
+        try:
+            return json.loads(path.read_text())
+        except FileNotFoundError:
+            return {}
+
+    def atomic_roundtrip_yaml_update(config_path, key_path, value):
+        held = read_user_config_raw(config_path)
+        node = held
+        keys = key_path.split(".")
+        for key in keys[:-1]:
+            node = node.setdefault(key, {})
+        node[keys[-1]] = value
+        path.write_text(json.dumps(held))
+
+    config = ModuleType("hermes_cli.config")
+    config.read_user_config_raw = read_user_config_raw  # type: ignore[attr-defined]
+    utils = ModuleType("utils")
+    utils.atomic_roundtrip_yaml_update = atomic_roundtrip_yaml_update  # type: ignore[attr-defined]
+    with planted(
+        {"hermes_cli": package("hermes_cli"), "hermes_cli.config": config, "utils": utils},
         absent=["hermes_cli.gateway_runtime", "hermes_cli.gateway_client"],
     ):
         yield
@@ -696,7 +727,11 @@ class RoomRoutes(unittest.TestCase):
         many = [
             {"memberId": f"m{n}", "profile": f"bot{n}", "handle": f"bot{n}"} for n in range(7)
         ]
-        self.assert_refused(many, "members must contain between 2 and 6 entries")
+        self.assert_refused(
+            many,
+            "members must contain between 2 and 6 entries",
+            seatable=tuple(one["profile"] for one in many),
+        )
 
     def test_a_duplicate_handle_is_the_hosts_refusal(self):
         twice = [ROSTER[0], {**ROSTER[1], "handle": ROSTER[0]["handle"]}]
@@ -710,9 +745,13 @@ class RoomRoutes(unittest.TestCase):
             taken, "member handles must be unique and cannot reserve @all or @everyone"
         )
 
-    def assert_refused(self, members, message):
+    def assert_refused(self, members, message, *, seatable=None):
         """The roster reaches the Host as the app built it, and its refusal comes back as it said it."""
-        host = Host(refuse="groups.create", refusal=(4110, message))
+        host = Host(
+            refuse="groups.create",
+            refusal=(4110, message),
+            **({} if seatable is None else {"seatable_profiles": seatable}),
+        )
         with dispatcher(host), loopback(Loopback(host)) as client:
             answer = self.created(members)
         translated = [
@@ -845,8 +884,128 @@ class RoomRoutes(unittest.TestCase):
         with no_dispatcher(), loopback(Loopback(host)) as client:
             self.created()
         self.assertEqual(
-            client.homes, [self.home], "the request's profile's gateway is the one asked"
+            set(client.homes),
+            {self.home},
+            "every ask a create makes is the request's profile's gateway",
         )
+
+
+class RoomSeating(unittest.TestCase):
+    """A create seats what its connection cannot, by adding it to this profile's own roster (ADR 0129)."""
+
+    def setUp(self):
+        self.home = temp_hermes_home(self)
+        self.path = self.home / "config.yaml"
+
+    def profile_dir(self, name):
+        made = self.home / "profiles" / name
+        made.mkdir(parents=True)
+        return made
+
+    def roster(self, *, seated=("default",)):
+        """What this Host answers for its roster: its own bot, plus the entries the file holds."""
+
+        def answer():
+            try:
+                held = json.loads(self.path.read_text())
+            except (FileNotFoundError, ValueError):
+                return list(seated)
+            profiles = (held.get("hosted_rooms") or {}).get("profiles") or {}
+            return [*seated, *profiles]
+
+        return answer
+
+    def created(self, host, members=APP_ROSTER):
+        with dispatcher(host), config_store(self.path):
+            return asked_route(
+                self,
+                plugin.PREFIX + "/rooms",
+                body={"room_id": "room-1", "name": "Planning", "members": members},
+            )
+
+    def written(self):
+        """The roster this profile's own file holds, as the Host would read it."""
+        if not self.path.exists():
+            return None
+        return json.loads(self.path.read_text())
+
+    def test_a_member_the_roster_misses_is_entered_and_the_room_is_made(self):
+        seat = self.profile_dir("coder")
+        host = Host(seatable_profiles=self.roster())
+        answer = self.created(host)
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["seated"], ["coder"], "the room says what it seated")
+        self.assertEqual(
+            self.written()["hosted_rooms"]["profiles"]["coder"],
+            str(seat),
+            "and this profile's own roster names the home beside its own",
+        )
+        self.assertIn("groups.create", [one["method"] for one in host.requests])
+
+    def test_a_profile_that_is_not_a_directory_beside_this_one_is_refused(self):
+        host = Host(seatable_profiles=self.roster())
+        answer = self.created(host)
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("coder", answer["payload"]["error"]["message"])
+        self.assertIsNone(self.written(), "nothing is written for a home the Host would ignore")
+        self.assertNotIn("groups.create", [one["method"] for one in host.requests])
+
+    def test_a_symlinked_profile_is_refused(self):
+        real = self.home / "elsewhere"
+        real.mkdir()
+        (self.home / "profiles").mkdir()
+        (self.home / "profiles" / "coder").symlink_to(real, target_is_directory=True)
+        host = Host(seatable_profiles=self.roster())
+        answer = self.created(host)
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("coder", answer["payload"]["error"]["message"])
+        self.assertIsNone(self.written(), "a linked home is one the Host cannot reach under that name")
+
+    def test_a_name_the_host_never_seats_is_refused_before_anything_is_written(self):
+        member = {**APP_ROSTER[1], "profile": "my-bot", "handle": "my-bot"}
+        host = Host(seatable_profiles=self.roster())
+        answer = self.created(host, members=[APP_ROSTER[0], member])
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("my-bot", answer["payload"]["error"]["message"])
+        self.assertIsNone(self.written())
+
+    def test_a_home_already_seated_under_another_name_is_refused(self):
+        seat = self.profile_dir("coder")
+        self.path.write_text(json.dumps({"hosted_rooms": {"profiles": {"other": str(seat)}}}))
+        host = Host(seatable_profiles=self.roster())
+        answer = self.created(host)
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("already seated here as 'other'", answer["payload"]["error"]["message"])
+        self.assertEqual(
+            list(self.written()["hosted_rooms"]["profiles"]), ["other"], "and the file is left alone"
+        )
+
+    def test_a_config_this_bot_cannot_read_is_a_refusal_not_an_empty_one(self):
+        self.profile_dir("coder")
+        self.path.write_text("{not a mapping")
+        host = Host(seatable_profiles=self.roster())
+        answer = self.created(host)
+        self.assertEqual(answer["status"], 400)
+        self.assertIn("couldn't read", answer["payload"]["error"]["message"])
+        self.assertEqual(self.path.read_text(), "{not a mapping", "a file nobody read is not replaced")
+
+    def test_a_host_that_names_no_roster_writes_nothing_and_makes_the_room(self):
+        self.profile_dir("coder")
+        host = Host(seatable_profiles=None)
+        answer = self.created(host)
+        self.assertEqual(answer["status"], 200)
+        self.assertNotIn("seated", answer["payload"], "nothing was added, so nothing is said")
+        self.assertIsNone(self.written(), "no roster is no rule, not an empty one")
+
+    def test_a_second_create_writes_nothing_new(self):
+        self.profile_dir("coder")
+        host = Host(seatable_profiles=self.roster())
+        self.created(host)
+        before = self.path.read_bytes()
+        again = self.created(host)
+        self.assertEqual(again["status"], 200)
+        self.assertNotIn("seated", again["payload"])
+        self.assertEqual(self.path.read_bytes(), before, "a roster already seating them is left alone")
 
 
 ROOM = {

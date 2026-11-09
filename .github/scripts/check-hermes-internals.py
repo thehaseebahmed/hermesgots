@@ -125,6 +125,14 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         ("gateway/session_group_controls.py",),
         "'seatable_profiles': sorted(name for name in homes if name not in refused)",
     ),
+    # The entry rule a create's repair writes against (ADR 0129): a profile name's own grammar, and
+    # the home beside this profile's own that the Host will take. A Host that loosened either would
+    # leave the plugin refusing a bot it could have seated.
+    (("gateway/hosted_rooms_common.py",), "IDENTIFIER_RE = re.compile("),
+    (
+        ("gateway/session_hosted_members.py",),
+        "if not target.is_absolute() or target != target.resolve():",
+    ),
     (("hermes_cli/gateway_client.py",), "async def connect_gateway"),
     (("hermes_cli/gateway_runtime.py",), "def discover_gateway_endpoint"),
     (("hermes_cli/gateway_runtime.py",), "def attachable"),
