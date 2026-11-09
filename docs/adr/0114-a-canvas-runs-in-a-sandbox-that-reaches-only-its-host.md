@@ -13,7 +13,11 @@ host is the only door out of it:
 - **The parent's CSP:** the app's own page carries `frame-src 'self'`. Without it, a sandboxed frame
   can still leak its data by navigating itself to an outside URL. Checked in Chromium on 2026-11-07:
   the leak happened with no parent policy and was blocked with this one, and the `srcdoc` page still
-  ran. Safari is unchecked.
+  ran. Safari is unchecked. The refusal leaves the browser's error page in the frame, so the screen
+  draws the version it holds again when a frame's document loads more than once — the page stays what
+  its bot wrote, inside the boundary, rather than a blank the reader has to leave and re-open.
+  `pnpm e2e canvas` measures it: a page whose Leave button sets `location` to an outside URL leaves
+  the app on the canvas's address, makes no request to that URL, and is drawn again.
 - **Libraries:** a vetted set (a chart library, a date library, icons and Tailwind) ships in the app
   bundle and is inlined at render, so the page needs no CDN. This also keeps minified third-party code
   out of `plugin/`, which Hermes's install scanner reads file by file. Chart.js, Day.js and lucide

@@ -699,7 +699,7 @@ _Avoid_: gallery, component gallery, library page, showcase
 ## Canvases
 
 **Canvas**:
-A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. It has data of its own and is changed only by talking to its bot in its canvas session.
+A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. It has data of its own and is changed only by talking to its bot in its canvas session; a page that tries to leave for somewhere else is refused and drawn again.
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
@@ -707,7 +707,7 @@ The one long-lived conversation that belongs to a canvas, reachable only from th
 _Avoid_: canvas chat, build session, edit thread
 
 **Canvas sheet**:
-The canvas session raised over the canvas on a phone, where the page and its chat cannot share the screen. It opens at half height from the Edit pill, is dragged up to the full screen, and is swiped down to leave the page in view.
+The canvas session raised over the canvas on a phone, where the page and its chat cannot share the screen. It opens at half height from the Edit pill with the chat laid out in that half — its composer on the screen — is dragged up to the full screen, and is swiped down to leave the page in view.
 _Avoid_: canvas drawer, edit mode, split view, bottom bar
 
 **Version**:
