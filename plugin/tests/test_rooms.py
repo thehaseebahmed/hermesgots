@@ -568,6 +568,16 @@ class RoomRoutes(unittest.TestCase):
     def created(self, members=APP_ROSTER, **extra):
         return self.asked(plugin.PREFIX + "/rooms", body={"room_id": "room-1", "name": "Planning", "members": members, **extra})
 
+    def test_a_create_with_no_name_is_a_400_and_the_host_is_not_asked(self):
+        host = Host()
+        with dispatcher(host), no_loopback():
+            answer = self.asked(
+                plugin.PREFIX + "/rooms", body={"room_id": "room-1", "members": APP_ROSTER}
+            )
+        self.assertEqual(answer["status"], 400)
+        self.assertEqual(answer["payload"], {"error": {"message": "A room needs a name."}})
+        self.assertEqual(host.requests, [], "a room nothing can be titled by is not asked for")
+
     def test_a_room_is_created_with_the_id_the_app_minted(self):
         host = Host()
         with dispatcher(host), no_loopback():

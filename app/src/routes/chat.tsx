@@ -253,6 +253,14 @@ interface ChatPageProps {
  * chat-next's blank surface, which makes the record on its first send. The choice is one string, so
  * a write to the chat that changes nothing about it draws nothing again.
  */
+/**
+ * The rooms this session has drawn a screen for, by id. A room's row can go while its screen is open
+ * — a disband on another device, or a merge landing first — and the address must stay the room's
+ * until that screen leaves, or the verdict falls to a chat's "gone" page for a thing that was never
+ * a chat. A session draws a handful of rooms, so the set is as small as the user's own reading.
+ */
+const roomsDrawn = new Set<string>()
+
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = props.chatId ?? params.id
@@ -263,6 +271,13 @@ export function ChatPage(props: ChatPageProps) {
     // A room is no bot's chat either: its own screen reads the Host's log, and its address is the
     // chat's because back, deep links and the sidebar's highlight already work there (ADR 0116).
     if (chat?.room) {
+      void loadRoomChat()
+      if (id) roomsDrawn.add(id)
+      return `room\n${id}`
+    }
+    // The row is gone, and this session drew it as a room: the room keeps its address and its own
+    // screen is what leaves for the list (ADR 0122), rather than a chat's goodbye being drawn for it.
+    if (!chat && id && roomsDrawn.has(id)) {
       void loadRoomChat()
       return `room\n${id}`
     }

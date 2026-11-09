@@ -1898,7 +1898,12 @@ export async function writeRoomRow(id: string, record: RoomRecord, profileId: st
   if (!value) return
   // Only the fields the record names are written: one it says nothing about is this device's to
   // keep, and writing `undefined` over a room's roster would leave a row that is no longer a room.
-  const named = ROOM_FIELDS.filter((field) => value[field] !== undefined)
+  // An empty roster is not a roster either — a Host that answers no members has said nothing about
+  // them, and writing `[]` over the seats would cost the room its answering bot (ADR 0115).
+  const rosterless = Boolean(existing?.room) && !value.room?.members.length
+  const named = ROOM_FIELDS.filter(
+    (field) => value[field] !== undefined && !(field === "room" && rosterless),
+  )
   const patch = Object.fromEntries(named.map((field) => [field, value[field]]))
   // A room is projected unchanged on every read: writing it again would wake every live query over a
   // chat list for news that nothing happened.

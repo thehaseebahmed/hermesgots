@@ -1201,6 +1201,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         room_id = minted(body.get("room_id"))
         if room_id is None:
             return _error(web, "A room needs the room_id the app minted for it.", 400)
+        # A room's name is the only thing the app can give that the Host has no way to infer: refused
+        # here, where it can be said, rather than answered as a row titled by its own id.
+        name = body.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return _error(web, "A room needs a name.", 400)
         home = profile_home()
         try:
             found = await asyncio.to_thread(

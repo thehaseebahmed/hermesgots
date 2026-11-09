@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import importlib
 import itertools
 import logging
@@ -413,8 +414,17 @@ def _forget_projection(home: Any) -> None:
     """
     if home is None:
         return
+    key = str(home)
+    # The read in flight holds this home's lock from its first ask until its answer is stored, so
+    # forgetting under the same lock waits for that answer and drops it too. Without it, a merge that
+    # began before the write stores the record the write replaced under a fresh TTL, and the very
+    # merge this guard exists for lands the old name or the retired row.
     with _projections_lock:
-        _projections.pop(str(home), None)
+        loading = _loads.get(key)
+    held = loading if loading is not None else contextlib.nullcontext()
+    with held:
+        with _projections_lock:
+            _projections.pop(key, None)
 
 
 def _answer_record(

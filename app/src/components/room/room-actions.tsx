@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { Profile } from "@/lib/db"
+import { randomId } from "@/lib/utils"
 import { usePluginFeatureOn } from "@/lib/features"
 import { disbandRoomNow, renameRoomTo } from "@/lib/room-writes"
 
@@ -39,6 +40,10 @@ export function RoomActions({
   const canWrite = usePluginFeatureOn(answerer, "rooms_write")
   const [renaming, setRenaming] = useState(false)
   const [disbanding, setDisbanding] = useState(false)
+  // One id per opening of each question: a Save or a Disband tried again after a dropped answer is
+  // the same rename and the same stop, which is the whole of what makes a retry safe (ADR 0123).
+  const [renameId, setRenameId] = useState("")
+  const [cancelId, setCancelId] = useState("")
   if (!canWrite || !answerer) return null
   return (
     <>
@@ -56,12 +61,23 @@ export function RoomActions({
           <EllipsisIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
-          <DropdownMenuItem onClick={() => setRenaming(true)}>
+          <DropdownMenuItem
+            onClick={() => {
+              setRenameId(randomId())
+              setRenaming(true)
+            }}
+          >
             <PencilIcon />
             Rename
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={() => setDisbanding(true)}>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              setCancelId(randomId())
+              setDisbanding(true)
+            }}
+          >
             <Trash2Icon />
             Disband
           </DropdownMenuItem>
@@ -74,7 +90,7 @@ export function RoomActions({
         title="Rename room"
         fieldLabel="Room name"
         value={name}
-        onSave={(next) => renameRoomTo(answerer, roomId, next)}
+        onSave={(next) => renameRoomTo(answerer, roomId, next, renameId)}
       />
 
       <ConfirmDialog
@@ -83,7 +99,7 @@ export function RoomActions({
         title="Disband this room?"
         description="Its work stops, and the room is gone for every device. This can't be undone."
         confirm="Disband"
-        onConfirm={() => disbandRoomNow(answerer, roomId)}
+        onConfirm={() => disbandRoomNow(answerer, roomId, cancelId)}
       />
     </>
   )

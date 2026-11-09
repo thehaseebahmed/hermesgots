@@ -13,7 +13,6 @@
  */
 import { serverConfig } from "./connection.ts"
 import { createRoom, disbandRoom, renameRoom, type RoomCreate } from "./hermes.ts"
-import { randomId } from "./utils.ts"
 import { writeRoomRow, type Profile } from "./db.ts"
 
 /** A room made on its Host, and its row written from the record the Host answered. */
@@ -25,17 +24,26 @@ export async function startRoom(bot: Profile, room: RoomCreate): Promise<void> {
 }
 
 /** A room renamed on its Host: the row takes the Host's own name when its record lands. */
-export async function renameRoomTo(bot: Profile, roomId: string, name: string): Promise<void> {
+export async function renameRoomTo(
+  bot: Profile,
+  roomId: string,
+  name: string,
+  eventId: string,
+): Promise<void> {
   const config = serverConfig(bot)
   if (!config) throw new Error("This bot has no address to rename its room on.")
-  const record = await renameRoom(config, roomId, { eventId: randomId(), name })
+  const record = await renameRoom(config, roomId, { eventId, name })
   await writeRoomRow(roomId, record, bot.id)
 }
 
 /** A room ended on its Host: the row and its page of the log go as the Host's own deletion. */
-export async function disbandRoomNow(bot: Profile, roomId: string): Promise<void> {
+export async function disbandRoomNow(
+  bot: Profile,
+  roomId: string,
+  cancelId: string,
+): Promise<void> {
   const config = serverConfig(bot)
   if (!config) throw new Error("This bot has no address to disband its room on.")
-  const record = await disbandRoom(config, roomId, randomId())
+  const record = await disbandRoom(config, roomId, cancelId)
   await writeRoomRow(roomId, record, bot.id)
 }

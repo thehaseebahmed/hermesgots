@@ -9,7 +9,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { db, type Profile } from "@/lib/db"
+import { db, writeRoomRow, type Profile } from "@/lib/db"
 import { roomSeats } from "@/lib/rooms"
 import { disbandRoomNow, renameRoomTo, startRoom } from "@/lib/room-writes"
 import { randomId } from "@/lib/utils"
@@ -119,7 +119,7 @@ test("a rename takes the Host's name and keeps the roster this device holds", as
   await startRoom(bots[0], room)
   await settle()
 
-  await renameRoomTo(bots[0], room.roomId, "Planning 2")
+  await renameRoomTo(bots[0], room.roomId, "Planning 2", randomId())
   await settle()
 
   const renaming = sent[1]
@@ -150,7 +150,7 @@ test("a disband's answer takes the row and its page, and writes no chat tombston
   })
   await settle()
 
-  await disbandRoomNow(bots[0], room.roomId)
+  await disbandRoomNow(bots[0], room.roomId, randomId())
   await settle()
 
   assert.ok(sent[1].path.endsWith(`/rooms/${room.roomId}/disband`))
@@ -166,4 +166,37 @@ test("a disband's answer takes the row and its page, and writes no chat tombston
     undefined,
     "a room is never carried as a chat, so nothing tombstones one",
   )
+})
+
+test("a record that names no roster keeps the one this device holds", async () => {
+  await fresh()
+  const room = { roomId: randomId(), name: "Planning", members: roomSeats(bots) }
+  await startRoom(bots[0], room)
+  await settle()
+
+  // A Host list answer that names no members is not an empty room: the merge keeps the seats, or the
+  // room loses the bot that answers for it (ADR 0115).
+  await writeRoomRow(
+    room.roomId,
+    { at: AT_CREATED + 5_000, value: { title: "Planning", room: { id: room.roomId, members: [] } } },
+    bots[0].id,
+  )
+  await settle()
+
+  const row = await db.conversations.get(room.roomId)
+  assert.deepEqual(
+    row?.room?.members.map((one) => one.profile),
+    ["coder", "writer"],
+    "the roster survives a record that says nothing about it",
+  )
+})
+
+test("a record that names an empty roster still makes a room this device has none of", async () => {
+  await fresh()
+  const id = randomId()
+  await writeRoomRow(id, { at: AT_CREATED, value: { title: "Fresh", room: { id, members: [] } } }, bots[0].id)
+  await settle()
+  const row = await db.conversations.get(id)
+  assert.ok(row?.room, "the row is a room's, even with no seats this device can reach")
+  assert.deepEqual(row?.room?.members, [])
 })
