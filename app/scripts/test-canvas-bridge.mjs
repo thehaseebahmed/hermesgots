@@ -7,6 +7,10 @@ import {
   BRIDGE_METHODS,
   BRIDGE_SCRIPT,
   CANVAS_CONSENT_REQUIRED,
+  POINT_LABEL_MAX,
+  POINT_MESSAGE,
+  pointWatch,
+  readPoint,
   answerRead,
   applyWrite,
   bridgeHandler,
@@ -400,12 +404,15 @@ test("the page's half posts the call it was asked for and settles on the reply",
     assert.equal(typeof api[method], "function", `${method} is on window.canvas.data`)
   }
 
+  // The page says it is here before anything is asked of it, so the app can arm it at once.
+  assert.deepEqual(plain(posted[0]), { type: POINT_MESSAGE, ready: true })
+
   const listed = api.list("items")
   // Every call names the document that asked, so a reply can only settle a call of its own page.
-  const epoch = posted[0].epoch
+  const epoch = posted[1].epoch
   assert.equal(typeof epoch, "string")
   assert.ok(epoch.length > 0)
-  assert.deepEqual(plain(posted[0]), {
+  assert.deepEqual(plain(posted[1]), {
     type: BRIDGE_MESSAGE,
     epoch,
     call: 1,
@@ -418,7 +425,7 @@ test("the page's half posts the call it was asked for and settles on the reply",
   assert.deepEqual(await listed, COPY)
 
   const put = api.put("items", "a", { n: 5 })
-  assert.deepEqual(plain(posted[1]), {
+  assert.deepEqual(plain(posted[2]), {
     type: BRIDGE_MESSAGE,
     epoch,
     call: 2,
@@ -445,7 +452,7 @@ test("the page's half posts the call it was asked for and settles on the reply",
   // A host read and a tool call ride the same table: the tool's promise settles only on the answer
   // the app posts after the reader has allowed or refused it.
   const read = context.window.canvas.read("usage")
-  assert.deepEqual(plain(posted[4]), {
+  assert.deepEqual(plain(posted[5]), {
     type: BRIDGE_MESSAGE,
     epoch,
     call: 5,
@@ -457,7 +464,7 @@ test("the page's half posts the call it was asked for and settles on the reply",
   assert.deepEqual(await read, { windows: [] })
 
   const tool = context.window.canvas.tool.call("files.search", { q: "x" })
-  assert.deepEqual(plain(posted[5]), {
+  assert.deepEqual(plain(posted[6]), {
     type: BRIDGE_MESSAGE,
     epoch,
     call: 6,
@@ -509,4 +516,170 @@ test("a call the app cannot read is answered rather than dropped", async () => {
   hear({ source: frame, data: { type: BRIDGE_MESSAGE, call: 4, epoch: "p1", method: "list", collection: "items" } })
   assert.equal(frame.posted[3].epoch, "p1")
   assert.equal(frame.posted[3].ok, true)
+})
+
+/** A node of the page's DOM, as far as a point reads it: its words, its place and its own style. */
+function node(tag, { id = "", cls = "", text = "", aria, parent = null } = {}) {
+  const attrs = new Map()
+  if (id) attrs.set("id", id)
+  if (cls) attrs.set("class", cls)
+  if (aria) attrs.set("aria-label", aria)
+  return {
+    nodeType: 1,
+    tagName: tag.toUpperCase(),
+    id,
+    textContent: text,
+    parentElement: parent,
+    previousElementSibling: null,
+    style: {},
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => void attrs.set(name, String(value)),
+    removeAttribute: (name) => void attrs.delete(name),
+    has: (name) => attrs.has(name),
+    read: (name) => attrs.get(name),
+  }
+}
+
+/** Runs a script as the page's own realm: its listeners, what it tells the parent, and its DOM. */
+function pageRealm(document) {
+  const listeners = new Map()
+  const posted = []
+  const context = {
+    document,
+    parent: { postMessage: (data) => posted.push(data) },
+    addEventListener: (type, fn) => {
+      const held = listeners.get(type) ?? []
+      held.push(fn)
+      listeners.set(type, held)
+    },
+  }
+  context.window = context
+  vm.createContext(context)
+  vm.runInContext(BRIDGE_SCRIPT, context)
+  return {
+    posted,
+    fire: (type, event) =>
+      (listeners.get(type) ?? []).forEach((fn) => fn({ preventDefault() {}, stopPropagation() {}, ...event })),
+  }
+}
+
+test("a point is armed, answered with the tapped element, and let go", () => {
+  const body = node("body")
+  const root = node("html")
+  body.parentElement = root
+  const section = node("section", { cls: "tip row", parent: body })
+  const label = node("span", { cls: "label", text: "  Tip  ", parent: section })
+  const value = node("span", { cls: "value", text: "12", parent: section })
+  value.previousElementSibling = label
+  const total = node("p", { id: "total", text: "Total: 12", parent: body })
+  const page = pageRealm({ body, documentElement: root })
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(page.posted)),
+    [{ type: POINT_MESSAGE, ready: true }],
+    "the page says it is here, and nothing else",
+  )
+
+  // A tap is the page's own until the app says otherwise.
+  page.fire("click", { target: value })
+  assert.deepEqual(page.posted.slice(1), [], "an unarmed page answers no point")
+  page.fire("pointermove", { target: total })
+  assert.equal(total.has("data-gots-point"), false, "and highlights nothing under the finger")
+
+  // Armed, the element under the finger is outlined, and the tap names it: its words and a selector.
+  page.fire("message", { data: pointWatch(true) })
+  page.fire("pointermove", { target: value })
+  assert.equal(value.has("data-gots-point"), true, "the element under the finger is marked")
+  assert.match(value.style.outline, /2px solid/)
+  page.fire("click", { target: value })
+  assert.deepEqual(
+    page.posted.slice(1).map((one) => JSON.parse(JSON.stringify(one))),
+    [
+      {
+        type: POINT_MESSAGE,
+        point: { label: "12", selector: "body > section.tip > span.value:nth-of-type(2)" },
+      },
+    ],
+  )
+  assert.equal(value.has("data-gots-point"), false, "the mark goes once the element is answered")
+  assert.equal(value.style.outline, undefined, "and the element's own style is put back")
+
+  // One tap is one point: the page listens again only when the app arms it again.
+  page.fire("click", { target: total })
+  assert.equal(page.posted.length, 2, "a second tap is a tap")
+
+  // An element with an id is named by it, and a sibling's place is there when there is no id or class.
+  page.fire("message", { data: pointWatch(true) })
+  page.fire("click", { target: total })
+  assert.deepEqual(JSON.parse(JSON.stringify(page.posted[2])).point, {
+    label: "Total: 12",
+    selector: "#total",
+  })
+  const bare = node("li", { parent: section })
+  const first = node("li", { parent: section })
+  bare.previousElementSibling = first
+  page.fire("message", { data: pointWatch(true) })
+  page.fire("click", { target: bare })
+  assert.match(page.posted[3].point.selector, /li:nth-of-type\(2\)$/)
+
+  // Let go, the page stops answering and puts back what it was drawing.
+  page.fire("message", { data: pointWatch(true) })
+  page.fire("pointermove", { target: total })
+  page.fire("message", { data: pointWatch(false) })
+  assert.equal(total.has("data-gots-point"), false, "nothing stays marked once the page is let go")
+  const before = page.posted.length
+  page.fire("click", { target: total })
+  assert.equal(page.posted.length, before, "a tap after letting go is a tap")
+})
+
+test("readPoint takes the element a page answered and nothing else", () => {
+  assert.deepEqual(readPoint({ type: POINT_MESSAGE, point: { label: "Total", selector: "#total" } }), {
+    label: "Total",
+    selector: "#total",
+  })
+  // A page's words are one line and no longer than a chip: an element can say a paragraph.
+  assert.deepEqual(
+    readPoint({ type: POINT_MESSAGE, point: { label: " a\n b ", selector: " #a " } }),
+    { label: "a b", selector: "#a" },
+  )
+  assert.equal(
+    readPoint({ type: POINT_MESSAGE, point: { label: "x".repeat(200), selector: "#a" } }).label.length,
+    POINT_LABEL_MAX,
+  )
+  // A selector longer than the page's own walk writes is a selector that finds nothing: no point.
+  assert.equal(
+    readPoint({ type: POINT_MESSAGE, point: { label: "Total", selector: "#".padEnd(400, "a") } }),
+    null,
+  )
+  for (const answer of [
+    { type: POINT_MESSAGE, point: { label: "", selector: "#a" } },
+    { type: POINT_MESSAGE, point: { label: "Total" } },
+    { type: POINT_MESSAGE, point: { label: "Total", selector: "" } },
+    { type: POINT_MESSAGE },
+    { type: BRIDGE_MESSAGE, point: { label: "Total", selector: "#a" } },
+    { point: { label: "Total", selector: "#a" } },
+    null,
+    "gots:canvas-point",
+  ])
+    assert.equal(readPoint(answer), null, JSON.stringify(answer))
+  assert.deepEqual(pointWatch(true), { type: POINT_MESSAGE, watch: true })
+  assert.deepEqual(pointWatch(false), { type: POINT_MESSAGE, watch: false })
+})
+
+test("a point from another window is not the canvas talking", () => {
+  const frame = fakeFrame()
+  const other = fakeFrame()
+  const points = []
+  const hear = bridgeHandler({
+    frame: () => frame,
+    copy: () => COPY,
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+    point: (point) => points.push(point),
+  })
+  hear({ source: other, data: { type: POINT_MESSAGE, point: { label: "Total", selector: "#total" } } })
+  assert.deepEqual(points, [], "a point from elsewhere is heard by nobody")
+  hear({ source: frame, data: { type: POINT_MESSAGE, point: { label: "Total", selector: "#total" } } })
+  assert.deepEqual(points, [{ label: "Total", selector: "#total" }])
+  assert.deepEqual(frame.posted, [], "a point is answered with nothing")
 })

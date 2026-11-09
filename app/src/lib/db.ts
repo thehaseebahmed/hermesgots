@@ -17,6 +17,7 @@ import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
 
+import type { CanvasPoint } from "@/lib/point-marker"
 import type { SortDir } from "@/lib/sort"
 
 export type BotSort = "recent" | "waiting" | "name" | "added"
@@ -605,6 +606,8 @@ export interface Message {
   role: "user" | "assistant"
   content: string
   attachments?: Attachment[]
+  /** The elements of a canvas's page the message points at, read off its marker lines. */
+  points?: CanvasPoint[]
   /**
    * The pre-runs shape of a reply's thinking: one string for the whole turn. Nothing writes it any
    * more — `chat.ts` and `history.ts` fill `reasoningRuns`, and a row that still carries this one is

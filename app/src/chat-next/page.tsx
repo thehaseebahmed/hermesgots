@@ -12,6 +12,7 @@ import {
 } from "react"
 import { useSearchParams } from "react-router"
 
+import { PointChips } from "@/components/chat/canvas-points"
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { ReminderRow } from "@/components/chat/reminder-row"
@@ -65,7 +66,8 @@ import {
 import { clarifyRead, questionAt } from "@/lib/clarify"
 import { WAITING_ON_ANSWER } from "@/lib/format"
 import { PROMPT_RETRY_MS } from "@/lib/freshness"
-import { heldWords } from "./messages"
+import { heldParts, messageParts } from "./messages"
+import type { CanvasPoint } from "@/lib/point-marker"
 import {
   askedByUser,
   drawsRequest,
@@ -192,6 +194,7 @@ const TurnView = memo(
           </p>
         ) : drawsRequest(turn) ? (
           <div className="ml-auto w-fit max-w-[85%] space-y-1">
+            <PointChips points={turn.points} />
             {turn.files?.length ? (
               <ul
                 data-files
@@ -453,11 +456,14 @@ function HeldRow({
   marker,
   text,
   files,
+  points = [],
   children,
 }: {
   marker: "unsent" | "queued"
   text: string
   files: string[]
+  /** The elements the message points at, read off the marker lines under its words. */
+  points?: CanvasPoint[]
   children: ReactNode
 }) {
   return (
@@ -465,6 +471,7 @@ function HeldRow({
       {...(marker === "unsent" ? { "data-unsent": true } : { "data-queued": true })}
       className="ml-auto w-fit max-w-[85%] space-y-1 text-right"
     >
+      <PointChips points={points} />
       {files.length ? (
         <p data-held-files className="text-xs text-muted-foreground">
           {files.join(", ")}
@@ -546,40 +553,53 @@ function PlainView({
           onOpen={onOpenCard}
         />
       ))}
-      {unsent?.items.map((row) => (
-        <HeldRow
-          key={row.id}
-          marker="unsent"
-          text={heldWords(row)}
-          files={row.attachments.map((file) => file.name)}
-        >
-          <span data-unsent-state>{NOT_SENT}</span>
-          <button type="button" data-unsent-retry onClick={() => unsent.retry(row.id)}>
-            Retry
-          </button>
-          <button
-            type="button"
-            data-unsent-cancel
-            aria-label="Cancel failed message"
-            onClick={() => unsent.cancel(row.id)}
+      {unsent?.items.map((row) => {
+        const held = heldParts(row)
+        return (
+          <HeldRow
+            key={row.id}
+            marker="unsent"
+            text={held.text}
+            files={row.attachments.map((file) => file.name)}
+            points={held.points}
           >
-            Cancel
-          </button>
-        </HeldRow>
-      ))}
-      {queue?.items.map((item) => (
-        <HeldRow key={item.id} marker="queued" text={item.text} files={item.files}>
-          <span data-queued-state>{item.error ?? "Queued"}</span>
-          {queue.paused || item.error ? (
-            <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
-              Send now
+            <span data-unsent-state>{NOT_SENT}</span>
+            <button type="button" data-unsent-retry onClick={() => unsent.retry(row.id)}>
+              Retry
             </button>
-          ) : null}
-          <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
-            Remove
-          </button>
-        </HeldRow>
-      ))}
+            <button
+              type="button"
+              data-unsent-cancel
+              aria-label="Cancel failed message"
+              onClick={() => unsent.cancel(row.id)}
+            >
+              Cancel
+            </button>
+          </HeldRow>
+        )
+      })}
+      {queue?.items.map((item) => {
+        const held = messageParts(item.text)
+        return (
+          <HeldRow
+            key={item.id}
+            marker="queued"
+            text={held.text}
+            files={item.files}
+            points={held.points}
+          >
+            <span data-queued-state>{item.error ?? "Queued"}</span>
+            {queue.paused || item.error ? (
+              <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
+                Send now
+              </button>
+            ) : null}
+            <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
+              Remove
+            </button>
+          </HeldRow>
+        )
+      })}
       {child ? <ChildThread goal={child.goal} rows={child.rows} onClose={child.close} /> : null}
       {waiting}
       {composer}
@@ -951,10 +971,7 @@ export function ChatNextThread({
   const asked = useCallback(
     () => ({
       // While older pages are unread the turns drawn are only the newest: "at least this many".
-      turns: store.get().partial
-        ? Infinity
-        : threadTurns(store.get()).filter(askedByUser)
-            .length,
+      turns: store.get().partial ? Infinity : threadTurns(store.get()).filter(askedByUser).length,
     }),
     [store],
   )
@@ -1389,7 +1406,9 @@ export function ChatNextThread({
   ) {
     const words = text.trim()
     if ((!words && !attachments.length) || !server || !key || !session) return
-    const asked = retry ? requestOf(words) : undefined
+    // The request as the thread keeps it: the words, the files, the retry and the points — so a
+    // message that names elements of a canvas's page draws those chips at once, not once it lands.
+    const asked = requestOf(words)
     const at = resend?.at ?? sentAt ?? Date.now()
     // The message's own id is the run's idempotency key too, so a send that timed out but reached
     // the host is answered by the run it started rather than run a second time.
@@ -1398,10 +1417,11 @@ export function ChatNextThread({
     streaming.current = true
     const drawn = {
       type: "sent" as const,
-      user: asked?.user ?? words,
+      user: asked.user,
       ...(retry ? { retry: true } : {}),
+      ...(asked.points?.length ? { points: asked.points } : {}),
       at,
-      files: attachments.length ? attachments.map(sentFileOf) : (asked?.files ?? []),
+      files: attachments.length ? attachments.map(sentFileOf) : (asked.files ?? []),
     }
     // A fresh send is drawn in the flow the moment it goes, as the thread has always drawn it; a
     // message sent again from its row keeps the row until the host takes it, so a retry that fails

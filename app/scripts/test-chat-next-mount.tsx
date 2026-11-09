@@ -13,6 +13,7 @@ import { BreakReminderActivityContext } from "@/components/break-reminder-contex
 import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { db, type Profile, type Settings } from "@/lib/db"
 import { BUSY_WORDS } from "@/lib/busy-words"
+import { pointLine, pointText } from "@/lib/point-marker"
 import { RETRY_OPEN } from "@/lib/retry-message"
 
 import { fakeHost } from "./chat-next-host.ts"
@@ -1024,6 +1025,31 @@ test("a reply the host wrote with no finish reason is not drawn as still being w
   await mount(chatScreen("c-unmarked"), async () => {
     await until(() => replies().includes("All done."), "the turn is drawn")
     await until(() => host.asked.runs === 0 && !writing(text()), "and it is at rest")
+  })
+})
+
+test("Retry re-asks the element a failed request pointed at", async () => {
+  const { host } = await onChatNext("c-retry-point", {}, { plugin: true })
+  const total = { label: "The total", selector: "#total" }
+  host.seed([
+    {
+      user: pointText("Make this bolder", [total]),
+      reply: "",
+      failed: "Your request was not processed.",
+    },
+  ])
+  await mount(chatScreen("c-retry-point"), async () => {
+    await until(() => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    assert.equal(
+      find('[data-chat-next] [data-message-id$="-u"] [data-point-chip]')?.textContent,
+      total.label,
+      "the request that failed draws its point on the bubble",
+    )
+    await click(find("[data-retry]"))
+    await until(() => host.asked.runs === 1, "the request is sent again")
+    const sent = String(JSON.stringify(host.latest.body))
+    assert.ok(sent.includes(RETRY_OPEN), "the message carries the retry's opening marker")
+    assert.ok(sent.includes(pointLine(total)), "and the point the request was made with")
   })
 })
 

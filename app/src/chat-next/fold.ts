@@ -7,6 +7,7 @@ import {
 } from "../lib/compaction-seam.ts"
 import type { Attachment, MessageStats } from "../lib/db.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
+import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
 import { requestIn } from "../lib/retry-message.ts"
 
@@ -76,6 +77,8 @@ export interface Turn {
   at?: number
   /** What the request carried, read off its marker lines, which are not the user's words. */
   files?: SentFile[]
+  /** The elements of a canvas's page the user pointed at, read off the same marker lines. */
+  points?: CanvasPoint[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   /** The request is in rows not read yet: the reply is drawn alone, and the turn is whole once they are. */
@@ -103,14 +106,16 @@ export interface Turn {
 
 /**
  * A user row's request as the thread keeps it, read once for the fold and for the turn this device
- * streams — so both copies of a turn carry the same words, files and retry flag (ADR 0112).
+ * streams — so both copies of a turn carry the same words, files, points and retry flag (ADR 0112).
  */
-export function requestOf(content: string): Pick<Turn, "user" | "files" | "retry"> {
+export function requestOf(content: string): Pick<Turn, "user" | "files" | "retry" | "points"> {
   const request = requestIn(content)
   const { text, attachments } = splitAttachments(request)
+  const { text: words, points } = pointsIn(text)
   return {
-    user: text,
+    user: words,
     ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
+    ...(points.length ? { points } : {}),
     ...(request === content ? {} : { retry: true as const }),
   }
 }
@@ -133,7 +138,7 @@ export const askedByUser = (turn: Turn) => !turn.wake && !turn.retry && !turn.ca
  * tests read each asked it for themselves (ADR 0112).
  */
 export const drawsRequest = (turn: Turn) =>
-  askedByUser(turn) && !turn.cut && Boolean(turn.user || turn.files?.length)
+  askedByUser(turn) && !turn.cut && Boolean(turn.user || turn.files?.length || turn.points?.length)
 
 /**
  * A transcript with the rows a compaction archived put back above it. The archive read holds the

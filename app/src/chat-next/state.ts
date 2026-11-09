@@ -2,6 +2,7 @@ import { sameSummaryRows, type SummaryRows } from "@/lib/compaction-seam"
 import { questionsAround } from "@/lib/clarify-questions"
 import { clarifyAnswered, questionAt, type ClarifyResponse } from "@/lib/clarify"
 import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
+import type { CanvasPoint } from "@/lib/point-marker"
 import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { promptFrom, type RunPrompt } from "@/lib/run-prompt"
@@ -125,6 +126,8 @@ export type ThreadEvent =
       type: "sent"
       user: string
       files?: SentFile[]
+      /** The elements of a canvas's page the message points at. */
+      points?: CanvasPoint[]
       at?: number
       /** The not-sent row this send is: a retried message leaves the thread as the turn draws it. */
       replaces?: string
@@ -728,6 +731,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
             ...(event.retry ? { retry: true } : {}),
             ...(event.at !== undefined ? { at: event.at, timing: { startedAt: event.at } } : {}),
             ...(event.files?.length ? { files: event.files } : {}),
+            ...(event.points?.length ? { points: event.points } : {}),
             parts: [],
             done: false,
             delivered: [],
