@@ -271,11 +271,7 @@ test("the blank room's composer stands in the foot every chat screen gives it", 
   await mount(screen(), async () => {
     await until(async () => Boolean(find('[data-slot="seats-pill"]')), "the blank room")
     const slot = find('[data-slot="composer-slot"]')
-    assert.deepEqual(
-      COMPOSER_SLOT.split(" ").filter((one) => !slot?.classList.contains(one)),
-      [],
-      "every gutter the rest of the app gives a composer, and nothing else is asked of it",
-    )
+    assert.equal(slot?.className, COMPOSER_SLOT, "the one foot every chat screen gives a composer")
     assert.ok(slot?.contains(composerField()), "the field itself is inside that slot")
     assert.ok(
       slot?.querySelector('[data-slot="seats-pill"]'),

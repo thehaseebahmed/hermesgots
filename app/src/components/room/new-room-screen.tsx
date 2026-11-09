@@ -119,7 +119,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       const members = chosen.map(seatOf)
       await startRoom(chosen[0], {
         roomId,
-        // Its name until the Host says otherwise: the seats, in the order they were picked.
+        // Its name until the Host says otherwise: its seats' own names.
         name: chosen.map((bot) => bot.name).join(", "),
         members,
       })
@@ -294,7 +294,10 @@ function SeatRow({
       onClick={onToggle}
       className={cn(
         linkRowClass,
-        refusal && "cursor-not-allowed opacity-40",
+        refusal?.kind === "full" && "cursor-not-allowed",
+        // A row that still answers a press keeps the pointer, so cursor and press tell one story.
+        refusal?.kind === "host" && "cursor-pointer",
+        refusal && "opacity-40",
         checked && "bg-muted",
       )}
     >
