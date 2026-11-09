@@ -363,3 +363,25 @@ test("the first bot picked chooses the Host, and another Host's bots grey out", 
     toast.info = real
   }
 })
+
+test("the seats sheet heads its body the way every drawer does", async () => {
+  await freshAcross()
+  await mount(screen(), async () => {
+    await openSeats()
+    assert.equal(
+      find('[data-slot="sheet-title"]')?.textContent?.trim(),
+      "Room bots",
+      "the drawer's heading is its title",
+    )
+    assert.equal(
+      find('[data-slot="sheet-header"]')?.textContent?.trim(),
+      "Room bots",
+      "and the header holds nothing beside it, as every other drawer's does",
+    )
+    assert.match(
+      find("[data-popup-form]")?.textContent ?? "",
+      /Two to six bots of one Host/,
+      "the rule is the body's to say",
+    )
+  })
+})

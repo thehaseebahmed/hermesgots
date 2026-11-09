@@ -232,15 +232,14 @@ function SeatsPicker({
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent className="max-h-[90dvh]">
-        <PopupHeader>
+        <PopupHeader className="pb-2">
           <PopupTitle>Room bots</PopupTitle>
-          {/* The rule sits with the title, so the body is the choice and the one button that ends it. */}
+        </PopupHeader>
+        <div className="flex flex-col gap-4 px-4 pb-4">
           <p className="text-sm text-muted-foreground">
             Two to six bots of one Host. Who a room holds is fixed when it is made: changing its
             members means making a new room.
           </p>
-        </PopupHeader>
-        <div className="flex flex-col gap-4 px-6 pb-6">
           {/* The seats are a card of rows, the way Settings lists bots, so picking two reads as the
               same act as reading them there. */}
           <Group>
