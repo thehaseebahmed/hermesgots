@@ -548,7 +548,10 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   // The page's half: a link, as its markup gives it — the tag's own `href` attribute, and the
   // property the browser resolves it to. A tap asks once and cancels the click; everything the
   // page keeps for itself asks nothing and is not cancelled.
-  const { context, posted: asked, fire } = pageHarness()
+  const { context, posted: sent, fire } = pageHarness()
+  // The page posts its point half's readiness on load too, so what a tap asks for is counted among
+  // the bridge's own calls rather than everything the page says.
+  const asked = () => sent.filter((message) => message && message.type === BRIDGE_MESSAGE)
   const plain = (value) => JSON.parse(JSON.stringify(value))
   const anchor = (href) => ({
     tagName: "A",
@@ -575,10 +578,10 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   assert.equal("open" in context.window.canvas, false, "a page can't open anything without a click")
   const link = anchor("https://example.com/a?b=1")
   const tapped = tap(link)
-  assert.equal(asked.length, 1, "one open call per tap")
-  assert.deepEqual(plain(asked[0]), {
+  assert.equal(asked().length, 1, "one open call per tap")
+  assert.deepEqual(plain(asked()[0]), {
     type: BRIDGE_MESSAGE,
-    epoch: asked[0].epoch,
+    epoch: asked()[0].epoch,
     call: 1,
     method: "open",
     url: "https://example.com/a?b=1",
@@ -589,24 +592,24 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
     const kept = tap(anchor(href))
     assert.equal(kept.cancels, 0, `${href} is the page's own`)
   }
-  assert.equal(asked.length, 1, "and posts nothing")
+  assert.equal(asked().length, 1, "and posts nothing")
 
   // An untrusted click (a script's own) and a click with no target ask nothing.
   assert.equal(tap(anchor("https://example.com/scripted"), { trusted: false }).cancels, 0)
   fire("click", { isTrusted: true })
-  assert.equal(asked.length, 1)
+  assert.equal(asked().length, 1)
 
   // A click the page already answered itself is the page's: its handler ran first and prevented the
   // default, so this link is not also a tab. A page's own drawer must not open a browser beside it.
   const answered = tap(anchor("https://example.com/handled"), { prevented: true })
   assert.equal(answered.cancels, 0, "a handled click is left alone")
-  assert.equal(asked.length, 1, "and asks for nothing")
+  assert.equal(asked().length, 1, "and asks for nothing")
 
   // A tap on the link's own words walks up to the anchor it is inside.
   const words = { tagName: "SPAN", nodeType: 1, parentNode: link }
   assert.equal(tap(words).cancels, 1)
-  assert.equal(asked.length, 2)
-  assert.equal(asked[1].url, "https://example.com/a?b=1")
+  assert.equal(asked().length, 2)
+  assert.equal(asked()[1].url, "https://example.com/a?b=1")
 })
 
 test("a call the app cannot read is answered rather than dropped", async () => {
