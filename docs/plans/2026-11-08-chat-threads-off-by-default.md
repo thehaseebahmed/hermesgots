@@ -198,7 +198,7 @@ sequenceDiagram
    is the decision below. Goals: G2, G4. After: 2. Layers: Threads rule, Chat screen. Check:
    `scripts/test-chat-next-new-chat.tsx` — a first send with the default off adds no record, opens
    `/c/main-…` and posts its turn on Main's session; the case with the switch on still makes a
-   thread, and the file's legacy case is unchanged.
+   thread, and the file's legacy case is unchanged. Done.
 
 5. **Share's new-chat option opens the bot's Main.** `routes/share.tsx` asks `beginChat` which chat
    its first option opens instead of calling `createConversation` itself; with the switch off that

@@ -10,7 +10,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router"
 
 import { SETUP_COPY } from "@/components/chat/empty-states"
-import { db } from "@/lib/db"
+import { db, mainThreadId } from "@/lib/db"
 import { draftKey, flushDrafts } from "@/lib/drafts"
 import { ChatPage } from "@/routes/chat"
 
@@ -159,6 +159,60 @@ test("the blank surface's first send makes the chat and the thread sends it as i
       "the draft the send retired",
     )
     assert.equal(composerField()?.value, "", "and the thread's composer starts empty")
+  })
+})
+
+test("with chat threads off, a blank chat's first send lands in the bot's Main", async () => {
+  // The shipped default: the bot layout, and Developer's Chat threads switch off.
+  await seedChats([], { bots: [bot] })
+  const host = anySession()
+  await mount(blankScreen, async () => {
+    await until(() => Boolean(find("[data-blank]")), "the blank surface")
+    assert.equal(await db.conversations.count(), 0, "nothing is written before the send")
+    await type(composerField(), "Where do I start?")
+    await click(find('button[aria-label="Send"]'))
+    const main = mainThreadId(bot.id)
+    await until(() => nav() === `REPLACE:/c/${main}:true`, "the address replaced by the bot's Main")
+    const chats = await db.conversations.toArray()
+    assert.equal(chats.length, 1, "Main alone, with no thread made beside it")
+    assert.equal(chats[0].id, main, "the bot's Main")
+    assert.equal(chats[0].main, true, "marked as the bot's Main")
+    const session = host.hostFor(`gots-${main}`)
+    await until(() => session.asked.runs === 1, "Main sent the message as a turn")
+    assert.deepEqual(
+      session.latest.body?.input,
+      [{ role: "user", content: "Where do I start?" }],
+      "the message the reader typed",
+    )
+    assert.equal(session.latest.body?.session_id, `gots-${main}`, "on Main's own session")
+    await until(() => requests().length > 0, "Main's turn drawn")
+    assert.deepEqual(requests(), ["Where do I start?"], "as Main's first message")
+  })
+})
+
+test("with chat threads on, a blank chat's first send still makes a thread", async () => {
+  // The same bot layout with the switch turned back on: the blank surface makes a thread, as it did.
+  await seedChats([], { bots: [bot], settings: { chatThreads: true } })
+  const host = anySession()
+  await mount(blankScreen, async () => {
+    await until(() => Boolean(find("[data-blank]")), "the blank surface")
+    await type(composerField(), "Plan the trip")
+    await click(find('button[aria-label="Send"]'))
+    await until(async () => (await db.conversations.count()) === 1, "the thread the send made")
+    const [thread] = await db.conversations.toArray()
+    assert.notEqual(thread.id, mainThreadId(bot.id), "a thread of its own, not Main")
+    assert.ok(!thread.main, "and no Main mark on it")
+    await until(
+      () => nav() === `REPLACE:/c/${thread.id}:true`,
+      "the address replaced by the thread's",
+    )
+    const session = host.hostFor(thread.hermesSessionId)
+    await until(() => session.asked.runs === 1, "the thread sent the message as a turn")
+    assert.equal(
+      session.latest.body?.session_id,
+      thread.hermesSessionId,
+      "on the thread's own session",
+    )
   })
 })
 

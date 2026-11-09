@@ -6,6 +6,7 @@ import { matchPath, useLocation, useNavigate } from "react-router"
 import {
   createConversation,
   db,
+  ensureMainThread,
   getSettings,
   listEnabledProfiles,
   mainThreadId,
@@ -78,8 +79,41 @@ export async function beginThread(
   }: { modelChoice?: ModelChoice } & Pick<ThreadStart, "text" | "attachments">,
 ) {
   const thread = await createConversation(profileId, { modelChoice })
-  if (text.trim() || attachments.length) handOver(thread.id, { text, attachments, at: Date.now() })
+  handOverIfSaid(thread.id, { text, attachments })
   return thread
+}
+
+/**
+ * The chat a new chat opens: with chat threads off in the bot layout, that bot's Main — made the
+ * first time it is asked for — and otherwise the thread `beginThread` makes, so the legacy layout
+ * still makes a plain chat and never a Main. Either way the message is handed to the chat the
+ * address opens, whose own screen sends it as its first turn (ADR 0096).
+ *
+ * Main's model is a synced field: the pick a blank surface held is not written onto it, since one
+ * device's press would move the bot's model on every device. A thread is still made with it.
+ */
+export async function beginChat(
+  profileId: string,
+  {
+    modelChoice,
+    text,
+    attachments = [],
+  }: { modelChoice?: ModelChoice } & Pick<ThreadStart, "text" | "attachments">,
+) {
+  if (opensInMain(await getSettings())) {
+    const main = await ensureMainThread(profileId)
+    handOverIfSaid(main.id, { text, attachments })
+    return main
+  }
+  return beginThread(profileId, { modelChoice, text, attachments })
+}
+
+/** Hands a chat the message it was opened with, when it was opened with one. */
+function handOverIfSaid(
+  chatId: string,
+  { text, attachments = [] }: Pick<ThreadStart, "text" | "attachments">,
+) {
+  if (text.trim() || attachments.length) handOver(chatId, { text, attachments, at: Date.now() })
 }
 
 /** The time, moved on each minute, for "5 min ago" labels. */

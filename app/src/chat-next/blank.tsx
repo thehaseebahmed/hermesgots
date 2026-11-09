@@ -1,9 +1,10 @@
 /**
  * A chat with no record yet, as chat-next draws it (ADR 0065): the bot's face, an empty thread and
  * the app's own composer — nothing more, and nothing written. Its first send is what makes the
- * chat: `beginThread` writes the record and hands the message over, and the address moves to the
- * thread, which sends it as its first turn (ADR 0096). So a new chat and `/thread` share one
- * delivery path, and this surface posts nothing itself.
+ * chat: `beginChat` decides which one that is — the bot's Main while chat threads are off, a thread
+ * otherwise — and hands the message over, and the address moves to that chat, whose own screen sends
+ * it as the first turn (ADR 0096). So a new chat and `/thread` share one delivery path, and this
+ * surface posts nothing itself.
  */
 import { useLiveQuery } from "dexie-react-hooks"
 import { useLayoutEffect, useRef, useState } from "react"
@@ -20,12 +21,13 @@ import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { chosenOf, storedPick } from "@/lib/model-pick"
-import { beginThread, useBotThreads } from "@/lib/threads"
+import { beginChat, useBotThreads } from "@/lib/threads"
 
 /**
  * The bot a new chat would go to, drawn before the chat exists. The picker writes the active bot and
  * the screen's verdict draws this surface again for it; the model pill's pick has no row to be
- * written to yet, so it rides into the record the first send makes.
+ * written to yet, so it rides into the thread the first send makes — and is dropped where that send
+ * lands in Main, whose model is the bot's on every device.
  */
 export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }) {
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
@@ -43,7 +45,11 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
     if (starting.current) return
     starting.current = true
     try {
-      const chat = await beginThread(bot.id, { modelChoice: chosenOf(modelPick), text, attachments })
+      const chat = await beginChat(bot.id, {
+        modelChoice: chosenOf(modelPick),
+        text,
+        attachments,
+      })
       navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
     } catch (error) {
       starting.current = false
