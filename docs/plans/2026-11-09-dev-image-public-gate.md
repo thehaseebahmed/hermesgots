@@ -72,6 +72,8 @@ sequenceDiagram
    read-through — the tool list names the GitHub CLI, and the pull section says the package is public and links the
    settings where that was changed.
 
+   Done.
+
 ## Decisions
 - **The visibility flip is the package owner's, not the workflow's.** Made by the agent, because the token available
   here (`gotsfather`) gets `404` from `PATCH /users/thehaseebahmed/packages/container/gots-dev`, while an anonymous pull
@@ -83,12 +85,12 @@ sequenceDiagram
   login shells, the trap the Dockerfile already records for `python3`, so the harsher shell is the honest one.
 
 ## Risks
-- The first `main` run after this merge is red until the package is flipped. The Dev image workflow is path-filtered and
-  is not a required check, so nothing else is blocked by it — but the red is the point, not an accident.
+- The flip happened by hand while this branch was being written: the package's `tags/list` answered anonymously, and
+  the probe went green on `sha256:ce2ba35…`. This change is what keeps it true, and what goes red the day it is undone.
 - The probe depends on ghcr.io's anonymous token endpoint. If that changes shape, the step fails and prints the URL
   rather than passing quietly.
-- This pull request cannot make the pull work on its own: between the merge and the flip, the sandbox still runs the
-  stale image, and one `docker pull` is needed after the flip to replace it.
+- This pull request cannot replace a copy someone already has: the sandbox still runs its stale image, so one
+  `docker pull` is needed before `gh` appears in it.
 
 ## Not now
 - `.devcontainer/devcontainer.json`, from `fixes.md` — "No artefact owns the container invocation".
