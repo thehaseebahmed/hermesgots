@@ -128,15 +128,15 @@ export function useRoomSeatable(server: PluginServer): string[] | null | undefin
 }
 
 /**
- * One feature across several bots' servers, keyed by connection: every connection the device holds is
- * asked, because a control about something no bot owns — the app's New room is every Host's, not one
- * bot's (ADR 0115) — has to know which Host answers it. A hook cannot be called in a loop, so this is
- * the one place that read is made for a set.
+ * Every answer this device holds for a set of bots' connections, in one read: the feature rows a
+ * screen asks about and the profiles each connection seats in a room (ADR 0129). A hook cannot be
+ * called in a loop, and the picker needs one roster per pick, so this is the one place that read is
+ * made for a set — the same `info` the feature rows ride, remembered per connection.
  */
-export function usePluginFeatureByServer(
-  servers: PluginServer[],
-  feature: string,
-): Record<string, PluginFeatureAnswer> {
+export function usePluginAnswersByServer(servers: PluginServer[]): {
+  features: (feature: string) => Record<string, PluginFeatureAnswer>
+  seats: Record<string, string[] | null | undefined>
+} {
   const configs = servers.map((server) => serverConfig(server))
   const held = answered.use()
   const keys = configs.map((config) => (config.baseUrl && config.apiKey ? connectionKey(config) : ""))
@@ -149,7 +149,24 @@ export function usePluginFeatureByServer(
     [live.join(" ")],
     { active: live.length > 0, onShow: false },
   )
-  const answers: Record<string, PluginFeatureAnswer> = {}
-  for (const key of keys) if (key) answers[key] = answer(held.get(key), feature)
-  return answers
+  const features = (feature: string) => {
+    const answers: Record<string, PluginFeatureAnswer> = {}
+    for (const key of keys) if (key) answers[key] = answer(held.get(key), feature)
+    return answers
+  }
+  const seats: Record<string, string[] | null | undefined> = {}
+  for (const key of keys) if (key) seats[key] = held.get(key)?.rooms.seatable
+  return { features, seats }
+}
+
+/**
+ * One feature across several bots' servers, keyed by connection: every connection the device holds is
+ * asked, because a control about something no bot owns — the app's New room is every Host's, not one
+ * bot's (ADR 0115) — has to know which Host answers it.
+ */
+export function usePluginFeatureByServer(
+  servers: PluginServer[],
+  feature: string,
+): Record<string, PluginFeatureAnswer> {
+  return usePluginAnswersByServer(servers).features(feature)
 }

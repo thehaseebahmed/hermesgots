@@ -16,11 +16,12 @@ import { createRoom, disbandRoom, renameRoom, type RoomCreate } from "./hermes.t
 import { writeRoomRow, type Profile } from "./db.ts"
 
 /** A room made on its Host, and its row written from the record the Host answered. */
-export async function startRoom(bot: Profile, room: RoomCreate): Promise<void> {
+export async function startRoom(bot: Profile, room: RoomCreate): Promise<string[] | undefined> {
   const config = serverConfig(bot)
   if (!config) throw new Error("This bot has no address to make a room on.")
   const record = await createRoom(config, room)
   await writeRoomRow(room.roomId, record, bot.id)
+  return record.seated
 }
 
 /** A room renamed on its Host: the row takes the Host's own name when its record lands. */

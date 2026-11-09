@@ -49,6 +49,8 @@ const seatable = new Map<string, string[]>()
 const reads = new Map<string, number>()
 /** What the Host says when it refuses a create, in its own words; undefined while it makes them. */
 let refusal: string | undefined
+/** The profiles a create had to add to the making profile's roster, as the plugin answers them. */
+let seated: string[] | undefined
 
 /**
  * The connection a bot's reads arrive on, as this fixture names it: the path its `info` is read at and
@@ -92,6 +94,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({
       object: "gots.room.record",
       at,
+      ...(seated ? { seated } : {}),
       value: {
         title: held.name,
         createdAt: at,
@@ -151,6 +154,7 @@ async function resetRoom(bots: Profile[]) {
   seatable.clear()
   reads.clear()
   refusal = undefined
+  seated = undefined
   held.id = undefined
   held.name = ""
   await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
@@ -285,8 +289,26 @@ test("a room started from the blank screen opens on its own name and takes the f
     assert.equal(first.body.text, "Plan the next release.")
 
     await until(async () => where() === `/c/${roomId}`, "the room's own address")
+    assert.equal(missing('[data-slot="room-seated"]'), true, "a create that seated nothing says nothing")
     const row = await db.conversations.get(roomId)
     assert.equal(row?.title, "Coder, Writer", "the room is a row this device can draw")
+  })
+})
+
+test("a room whose create seated a profile says so once, above its first message", async () => {
+  const bots = await fresh("blank-room-seated.test")
+  // The plugin added this profile to its own Host's roster to make the room (ADR 0129).
+  seated = ["coder"]
+  await mount(screen(), async () => {
+    await pick(bots)
+    await type(composerField(), "Plan the next release.")
+    await click(find('button[aria-label="Send"]'))
+    await until(async () => Boolean(find('[data-slot="room-seated"]')), "the room's own line")
+    assert.equal(
+      find('[data-slot="room-seated"]')?.textContent,
+      "The Host was configured to seat coder.",
+      "one line, naming the bots the Host now seats",
+    )
   })
 })
 
@@ -410,34 +432,28 @@ test("the first bot picked chooses the Host, and another Host's bots grey out", 
   }
 })
 
-test("a bot this Host's connection can't seat is not a pick", async () => {
+test("a bot no picked connection seats is marked, and is still a pick", async () => {
   const bots = await fresh("blank-room-seats.test")
-  // The Host names the profiles the connection the room is made from seats: the writer's is not one.
+  // The Host names what the picked connection seats, and the writer's profile is not one of them: the
+  // create will add it to that connection's roster, so the row says so and still takes the press.
   seatable.set(connectionAt(bots[0]), ["coder"])
-  const said: unknown[] = []
-  const real = tell.info
-  tell.info = ((message: unknown) => said.push(message)) as typeof tell.info
-  try {
-    await mount(screen(), async () => {
-      await openSeats()
-      await click(seat(bots[0].id))
-      await until(
-        async () => seat(bots[1].id)?.getAttribute("aria-disabled") === "true",
-        "the writer greyed where the connection can't seat it",
-      )
-      assert.equal(seat(bots[1].id)?.disabled, false, "still pressable, so it can say why")
-      await click(seat(bots[1].id))
-      assert.deepEqual(
-        said,
-        ["Only the bots this Host's connection seats can join its room. Unpick every bot to change connection."],
-        "a greyed row answers a press with why it is greyed",
-      )
-      assert.match(find('[data-slot="seats-pill"]')?.textContent ?? "", /1 of 6/, "and seats nothing")
-      assert.equal(posted.length, 0, "and the Host is never asked for a room it would refuse")
-    })
-  } finally {
-    tell.info = real
-  }
+  await mount(screen(), async () => {
+    await openSeats()
+    await click(seat(bots[0].id))
+    await until(
+      async () => (seat(bots[1].id)?.textContent ?? "").includes("Needs the Host configured"),
+      "the row says the Host will be configured",
+    )
+    assert.equal(seat(bots[1].id)?.getAttribute("aria-disabled"), null, "and it is not greyed")
+    await click(seat(bots[1].id))
+    await settle()
+    assert.match(
+      find('[data-slot="seats-pill"]')?.textContent ?? "",
+      /2 of 6/,
+      "a row that will need the Host is still a pick",
+    )
+    assert.equal(missing("[role=alert]"), true, "and nothing is refused before the press")
+  })
 })
 
 test("a room is made as the bot picked first, on that bot's connection", async () => {
@@ -469,13 +485,14 @@ test("a room is made as the bot picked first, on that bot's connection", async (
   })
 })
 
-test("a room the first pick's connection cannot seat is never sent", async () => {
+test("the room is made on the connection that seats every pick", async () => {
   const bots = await freshSeats()
   const [ada, zed] = bots
   await mount(screen(), async () => {
     await openSeats()
-    // Ada first: its roster names Zed and not Ada, so the picker takes both and the connection the
-    // room would be made on cannot seat one of them.
+    // Ada first: its roster names Zed and not Ada, so the earliest pick cannot make the room. Zed's
+    // connection seats both, so the create is asked of Zed and the picks stay in the order they were
+    // taken (ADR 0125, ADR 0129).
     await click(seat(ada.id))
     await click(seat(zed.id))
     await until(
@@ -484,16 +501,21 @@ test("a room the first pick's connection cannot seat is never sent", async () =>
     )
 
     await type(composerField(), "Plan the next release.")
-    const sendButton = find('button[aria-label="Send"]') as HTMLButtonElement | null
-    assert.equal(sendButton?.disabled, true, "Send is held while a pick has no seat")
-    assert.match(
-      find("[role=alert]")?.textContent ?? "",
-      /Only the bots this Host's connection seats can join its room/,
-      "and the held Send says why, so it is never dead without a word",
+    await click(find('button[aria-label="Send"]'))
+    await until(async () => posted.length >= 2, "the create and its first message")
+
+    const [create] = posted
+    assert.equal(
+      create.auth,
+      "Bearer key-zed",
+      "the create is made on the connection whose roster holds both picks",
     )
-    await click(sendButton)
-    await settle()
-    assert.equal(posted.length, 0, "and the Host is never asked for a room it would refuse")
+    assert.deepEqual(
+      (create.body.members as { handle?: string }[]).map((one) => one.handle),
+      ["ada", "zed"],
+      "and holds every pick, in the order they were picked",
+    )
+    assert.equal(create.body.name, "Ada, Zed", "named by its seats, in pick order")
   })
 })
 

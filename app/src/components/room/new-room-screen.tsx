@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import { CheckIcon, UsersIcon } from "lucide-react"
@@ -20,11 +20,11 @@ import {
   type Profile,
   type RoomMember,
 } from "@/lib/db"
-import { refreshAnswer, usePluginFeatureByServer, useRoomSeatable } from "@/lib/features"
+import { refreshAnswer, usePluginAnswersByServer } from "@/lib/features"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { FACES, roomSeats } from "@/lib/rooms"
-import { seatsProfile } from "@/lib/room-seats"
+import { makerOf, seatedByAny } from "@/lib/room-seats"
 import { startRoom } from "@/lib/room-writes"
 import { tell } from "@/lib/tell"
 import { cn, randomId } from "@/lib/utils"
@@ -44,8 +44,6 @@ const LEAST = 2
 const MOST = 6
 
 const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Host."
-const UNSEATABLE =
-  "Only the bots this Host's connection seats can join its room. Unpick every bot to change connection."
 
 /**
  * A room that does not exist yet, drawn the way a new chat is (ADR 0096, ADR 0125): no record, no
@@ -55,6 +53,8 @@ const UNSEATABLE =
  *
  * The seats are picked above the composer, from one Host at a time, two at least and six at most: the
  * roster is fixed when the room is made, so it is chosen where the room is, before anything is sent.
+ * The room is made on the earliest pick whose connection seats them all, and where none does the create
+ * adds the missing profiles to the making profile's own roster (ADR 0129).
  * The room's name is its seats' names until the Host names it otherwise — a room's name is the Host's
  * (ADR 0122), and a rename through the room's own menu is how it changes.
  */
@@ -65,14 +65,11 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
     async () => (await getSettings()).sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter,
     [],
   )
-  const answers = usePluginFeatureByServer(bots, "rooms_write")
-  const writers = useMemo(
-    () =>
-      bots
-        .filter((bot) => bot.hermesProfile && !bot.disabled && answers[connectionKey(bot)] === "yes")
-        .sort((one, two) => one.name.localeCompare(two.name)),
-    [bots, answers],
-  )
+  const { features, seats: rosters } = usePluginAnswersByServer(bots)
+  const writes = features("rooms_write")
+  const writers = bots
+    .filter((bot) => bot.hermesProfile && !bot.disabled && writes[connectionKey(bot)] === "yes")
+    .sort((one, two) => one.name.localeCompare(two.name))
   const [picked, setPicked] = useState<string[]>([])
   const [picking, setPicking] = useState(false)
   const [roomId] = useState(() => randomId())
@@ -86,24 +83,27 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
     .map((id) => writers.find((bot) => bot.id === id))
     .filter((bot): bot is Profile => Boolean(bot))
   const ready = chosen.length >= LEAST && chosen.length <= MOST
-  // The room is made as the bot picked FIRST, in pick order: its connection names the Host, answers
-  // for the roster every other row is held to, and takes the create (ADR 0128).
-  const maker = chosen[0] ?? null
+  // Each pick as the maker rule sees it: its profile, and the roster its own connection gave.
+  const picks = chosen.map((bot) => ({
+    profile: bot.hermesProfile,
+    seatable: rosters[connectionKey(bot)],
+  }))
+  // The room is made as the earliest pick whose connection seats them all: its connection names the
+  // Host, answers for every row, and takes the create. Where none does, the first pick makes it, and
+  // the create seats what that connection cannot (ADR 0125, ADR 0129).
+  const maker = chosen[makerOf(picks)] ?? null
 
   const lockedHost = maker ? hostKey(maker) : null
-  // The roster belongs to the connection the room is made from, so it is the first pick's; until
-  // there is one, no connection is named and nothing is held out (ADR 0128).
-  const seatable = useRoomSeatable(maker)
-  // A pick the room's own connection cannot seat: the picker holds one out, but the roster can land
-  // after a pick and the Host would then refuse the create in words about a profile already chosen.
-  const unseated = chosen.filter((bot) => !seatsProfile(seatable, bot.hermesProfile))
+  // A bot no picked connection seats is one the create will add to the making profile's roster, and
+  // its row says so before it is pressed. Nothing is marked until there is a pick, since until then
+  // no connection is named (ADR 0129).
+  const needsHost = (bot: Profile) =>
+    picked.length > 0 && !seatedByAny(picks, bot.hermesProfile)
 
   const refusalFor = (bot: Profile): Refusal | null => {
     if (picked.includes(bot.id)) return null
     // Another Host before the ceiling: at six seats its row must still say the thing a press can act on.
     if (lockedHost && hostKey(bot) !== lockedHost) return { kind: "greyed", say: OTHER_HOST }
-    // Then the seats it holds: a bot this connection can't seat is refused by the Host at the create.
-    if (!seatsProfile(seatable, bot.hermesProfile)) return { kind: "greyed", say: UNSEATABLE }
     return picked.length >= MOST ? { kind: "full" } : null
   }
 
@@ -138,22 +138,24 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
 
   const send = async (text: string, attachments: Attachment[] = []) => {
     if (!ready || sending || !maker) return
-    if (unseated.length) {
-      setFailure(UNSEATABLE)
-      return
-    }
     setSending(true)
     setFailure(undefined)
     try {
-      const members = chosen.map(seatOf)
-      await startRoom(maker, {
+      const seats = chosen.map(seatOf)
+      const seated = await startRoom(maker, {
         roomId,
         // Its name until the Host says otherwise: its seats' own names.
         name: chosen.map((bot) => bot.name).join(", "),
-        members,
+        members: seats,
       })
+      // A create that added a profile changed the roster this app remembers, so that connection is
+      // read again: the picker would otherwise keep marking the bot the create just seated (ADR 0129).
+      if (seated?.length) refreshAnswer(maker)
       // The room exists: its own screen takes the address and sends the first message into it.
-      navigate(`/c/${roomId}`, { replace: true, state: { first: { text, attachments } } })
+      navigate(`/c/${roomId}`, {
+        replace: true,
+        state: { first: { text, attachments, seated } },
+      })
     } catch (error) {
       // A create that failed is the one moment the roster could have been wrong, and the roster is
       // only ever a prediction: reading it again asks the Host whether a seat still stands, while
@@ -168,10 +170,9 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   }
 
   const connection = serverConfig(maker ?? writers[0])
-  // What the screen says above the composer: a pick this connection can't seat outranks a create's
-  // own sentence, because unpicking is what frees the field and a `failure` can linger from before
-  // the roster moved. A dead Send always says why (ADR 0128).
-  const notice = unseated.length ? UNSEATABLE : failure
+  // What the screen says above the composer: a create's own sentence. A pick the making connection
+  // cannot seat is no longer a refusal — the create seats it (ADR 0129).
+  const notice = failure
 
   return (
     <div data-slot="chat-pane" data-pane={slot} className="relative flex min-h-0 flex-1 flex-col">
@@ -223,7 +224,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         <Composer
           plain
           busy={false}
-          disabled={!ready || sending || unseated.length > 0 || !connection}
+          disabled={!ready || sending || !connection}
           connection={connection}
           botName={maker?.name ?? "Hermes"}
           draftKey="room-new"
@@ -245,6 +246,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         onOpenChange={setPicking}
         writers={writers}
         refusalFor={refusalFor}
+        needsHost={needsHost}
         picked={picked}
         onToggle={toggle}
       />
@@ -258,6 +260,7 @@ function SeatsPicker({
   onOpenChange,
   writers,
   refusalFor,
+  needsHost,
   picked,
   onToggle,
 }: {
@@ -265,6 +268,7 @@ function SeatsPicker({
   onOpenChange: (open: boolean) => void
   writers: Profile[]
   refusalFor: (bot: Profile) => Refusal | null
+  needsHost: (bot: Profile) => boolean
   picked: string[]
   onToggle: (id: string) => void
 }) {
@@ -288,6 +292,7 @@ function SeatsPicker({
                 bot={bot}
                 checked={picked.includes(bot.id)}
                 refusal={refusalFor(bot)}
+                needsHost={needsHost(bot)}
                 onToggle={() => onToggle(bot.id)}
               />
             ))}
@@ -312,11 +317,13 @@ function SeatRow({
   bot,
   checked,
   refusal,
+  needsHost,
   onToggle,
 }: {
   bot: Profile
   checked: boolean
   refusal: Refusal | null
+  needsHost: boolean
   onToggle: () => void
 }) {
   // A greyed row reads no model: its Host would be asked for one nothing on this screen can use, so
@@ -324,6 +331,7 @@ function SeatRow({
   const greyed = saysWhy(refusal)
   const info = useModelInfo(greyed ? null : bot)
   const choice = botModel(bot, info)
+  const read = choice ? fullModel(choice) : bot.model
   return (
     <button
       type="button"
@@ -343,7 +351,12 @@ function SeatRow({
       )}
     >
       <Bot id={bot.botId} className={cn("size-8 shrink-0", bot.disabled && "opacity-40")} />
-      <RowText title={bot.name} subtitle={choice ? fullModel(choice) : bot.model} />
+      <RowText
+        title={bot.name}
+        // A bot no picked connection seats is one the create will add to the making profile's roster,
+        // said here rather than as a refusal after the press (ADR 0129).
+        subtitle={needsHost ? `${read} · Needs the Host configured` : read}
+      />
       {checked && <CheckIcon className="size-4 shrink-0" />}
     </button>
   )

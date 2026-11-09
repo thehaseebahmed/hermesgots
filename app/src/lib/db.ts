@@ -1873,6 +1873,8 @@ export interface RoomRecord {
   /** The Host's own clock for the record, in the milliseconds the app counts in. */
   at: number
   deleted?: boolean
+  /** The profiles a create added to the making profile's roster to seat its picks (ADR 0129). */
+  seated?: string[]
   value?: {
     title?: string
     createdAt?: number

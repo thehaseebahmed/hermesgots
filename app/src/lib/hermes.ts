@@ -2326,7 +2326,12 @@ function roomRecordOf(raw: Record<string, unknown>): RoomRecord {
         : [],
     }
   }
-  return { at, value }
+  // A create that had to seat a profile says which, beside the record: the room draws it once
+  // (ADR 0129). Nothing else on the wire answers this, so it is read here and nowhere else.
+  const seated = Array.isArray(raw.seated)
+    ? raw.seated.filter((one): one is string => typeof one === "string")
+    : undefined
+  return seated?.length ? { at, value, seated } : { at, value }
 }
 
 /** What a create asks for: the id this app minted, the name the user typed, and the seats it chose. */

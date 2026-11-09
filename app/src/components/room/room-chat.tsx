@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -38,6 +38,7 @@ import {
   type RoomMember,
 } from "@/lib/db"
 import { COLUMN_BOX } from "@/lib/layout"
+import { seatedLine } from "@/lib/room-seats"
 import { useNav } from "@/lib/nav"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
@@ -96,8 +97,14 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   // A room made a moment ago hands its first message over through the address (ADR 0125): the room
   // did not exist when the user typed it, so the screen that made it could not send it. The state is
   // cleared first, so a reload of this address never sends it twice.
-  const handed = (location.state as { first?: { text: string; attachments?: Attachment[] } } | null)
-    ?.first
+  const handed = (
+    location.state as {
+      first?: { text: string; attachments?: Attachment[]; seated?: string[] }
+    } | null
+  )?.first
+  // A create that had to add a profile to this Host's roster says so once, on the room it made: the
+  // words belong to the making, and the address it came on is cleared below (ADR 0129).
+  const [wasSeated] = useState(() => seatedLine(handed?.seated))
   const sentFirst = useRef(false)
   useEffect(() => {
     if (!handed || sentFirst.current || !answerer || live.canSend === false) return
@@ -137,6 +144,14 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         <MessageScroller className="flex-1">
           <MessageScrollerViewport aria-label="Room messages">
             <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
+              {wasSeated && (
+                <p
+                  data-slot="room-seated"
+                  className={cn(COLUMN_BOX, "px-3.5 text-sm text-muted-foreground")}
+                >
+                  {wasSeated}
+                </p>
+              )}
               {rows.map((row) => (
                 <MessageScrollerItem
                   key={row.seq}
