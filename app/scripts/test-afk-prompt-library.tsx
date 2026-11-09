@@ -266,7 +266,7 @@ test("signed out, the Prompt editor is the textarea it always was", async () => 
   await mountAfk(config, project, async () => {
     await click(find('button[aria-label="Prompt"]'))
     assert.ok(missing("[data-prompt-library-actions]"), "no library without an account signed in with its vault open, whatever the host advertises")
-    absent("button", "Choose from library")
+    assert.ok(!findText("button", "Choose from library"), "and no door to one")
     absent("button", "Save to library")
     assert.equal(fieldValue(), DEFAULT_AFK_PROMPT, "today's field, holding the project's words")
 

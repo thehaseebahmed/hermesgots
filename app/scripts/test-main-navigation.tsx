@@ -186,7 +186,7 @@ test("with nothing stored the app is the bot-first layout", async () => {
         async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
         "the bot row",
       )
-      absent("button", "New chat")
+      assert.ok(!findText("button", "New chat"), "no New chat button beside the bots")
     },
   )
 })

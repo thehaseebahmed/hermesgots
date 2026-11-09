@@ -46,6 +46,13 @@ const CODER = "bot-coder"
 const ROOM = "room-1"
 const LAST_AT = Date.now() - 5 * 60_000
 
+/**
+ * How long a mark is given to leave a row after the device that opened the room has written it:
+ * the list redraws in one commit, so the bound is what keeps this a check on the row rather than a
+ * twelve-second wait a stale mark would pass.
+ */
+const CLEARS_MS = 1_000
+
 const bots: Profile[] = [
   // The bot that carries the room's record onto this device. It is not one of the room's members.
   botProfile("rooms", {
@@ -507,6 +514,7 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
     await until(
       async () => missing(`a[href="/c/${ROOM}"] [data-needs-you]`),
       "a room open on this device no longer needs the user",
+      CLEARS_MS,
     )
   })
 })
@@ -529,8 +537,9 @@ test("a room whose row moved is read again, and its mark follows the Host", asyn
     await syncNow()
     await settle()
     await until(
-      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) === null,
+      async () => missing(`a[href="/c/${ROOM}"] [data-needs-you]`),
       "an answered room's row says nothing",
+      CLEARS_MS,
     )
     assert.ok(
       (await needOf())?.seq === undefined,
