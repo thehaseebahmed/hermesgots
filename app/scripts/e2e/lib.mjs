@@ -12,6 +12,13 @@ export const mock = process.env.MOCK_URL ?? "http://127.0.0.1:18642"
 export const eventsUrl = /\/events(?:\?|$)/
 /** The press that sends in either state of the device's Send on Enter switch (ADR 0078). */
 export const SEND_CHORD = "Control+Enter"
+
+/**
+ * Console noise the environment makes rather than the app: the dev server ships a verification SDK
+ * that dials a local daemon this harness has none of, and the browser logs the refused socket
+ * itself. A flow that reads the console for errors asks this first.
+ */
+export const environmentNoise = (text) => /ws:\/\/localhost:\d+\/reticle/.test(text)
 const shots = process.env.SHOTS_DIR
 const headed = process.env.E2E_HEADED === "1"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
@@ -623,9 +630,41 @@ function helpers(page) {
       await composer.fill(text)
       await composer.press(SEND_CHORD)
     },
+    /**
+     * The chat's reply as the screen draws it. A chat reads its host's transcript, and this device
+     * keeps those rows rather than its own messages, so the reply is the last turn folded from them
+     * (ADR 0111). A chat the device holds messages for — one a flow seeded, or a send the host
+     * never took — answers from those instead.
+     */
     lastReply(chatId) {
       return page.evaluate(async (id) => {
-        const { getMessages } = await import("/src/lib/db.ts")
+        const { db, getMessages } = await import("/src/lib/db.ts")
+        const { readRows } = await import("/src/chat-next/store.ts")
+        const { foldTurns } = await import("/src/chat-next/fold.ts")
+        const session = (await db.conversations.get(id))?.hermesSessionId
+        const rows = session ? await readRows(db, session, "live") : []
+        if (rows.length) {
+          const turn = foldTurns(rows).at(-1)
+          if (!turn) return null
+          const words = turn.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []))
+          const thoughts = turn.parts.flatMap((part) =>
+            part.kind === "text" && part.thought ? [part.thought] : [],
+          )
+          const live = (await db.sessionStates.get(session))?.live
+          return {
+            status: turn.failed ? "error" : live || !turn.done ? "streaming" : "done",
+            length: words.join("\n\n").length,
+            content: words.join("\n\n"),
+            reasoning: [...thoughts, ...(turn.pendingThought ? [turn.pendingThought] : [])].join(
+              "\n\n",
+            ),
+            runs: thoughts.map((thought) => ({ text: thought, afterToolId: null, spanMs: null })),
+            tools: turn.parts.reduce(
+              (count, part) => count + (part.kind === "tools" ? part.calls.length : 0),
+              0,
+            ),
+          }
+        }
         // The index the table already carries, not a full fetch sorted in memory: every flow polls
         // this for the reply's own fields while the run is still writing.
         const last = (await getMessages(id)).at(-1)

@@ -5,16 +5,13 @@
 // The join no lower tier reaches: a request through the app's own transport, the buffered write behind
 // it, and the screen's live query drawing it. The component test seeds its rows, so it would pass with
 // the recorder wired to nothing.
-import { addBot, app, assert, flow, pass } from "./lib.mjs"
+import { addBot, app, assert, environmentNoise, flow, pass } from "./lib.mjs"
 
 const run = async ({ page, send, lastReply, until, shot }) => {
   const errors = []
-  // The dev server ships a verification SDK that dials a local daemon this harness has none of;
-  // its socket is the environment talking, not the app.
-  const noise = (text) => /ws:\/\/localhost:\d+\/reticle/.test(text)
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
-    if (message.type() === "error" && !noise(message.text())) errors.push(message.text())
+    if (message.type() === "error" && !environmentNoise(message.text())) errors.push(message.text())
   })
 
   // The switch, written the way the settings sheet writes it: the recorder follows the setting through

@@ -6,6 +6,7 @@ import {
   assert,
   assertOneLine,
   centred,
+  environmentNoise,
   flow,
   pass,
   readHeader,
@@ -26,7 +27,8 @@ for (const width of [390, 1024]) {
       async ({ page, profileId, send, seed, lastReply, until, shot }) => {
         page.on("pageerror", (error) => errors.push(`${look}: ${error.message}`))
         page.on("console", (message) => {
-          if (message.type() === "error") errors.push(`${look}: ${message.text()}`)
+          if (message.type() === "error" && !environmentNoise(message.text()))
+            errors.push(`${look}: ${message.text()}`)
         })
         await page.goto(`${app}/projects`)
         await page.getByText("Smart Home", { exact: true }).first().waitFor({ timeout: 15_000 })
