@@ -114,9 +114,6 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     ),
     (("tui_gateway/contracts/groups_bot_relay.py",), "class GroupsCapabilitiesResult(Result):"),
     (("tui_gateway/contracts/groups_bot_relay.py",), "    driver: bool"),
-    # The roster this connection may seat in a new room, which rooms.py reads out of the same
-    # answer: the app holds a New room picker to it, so a renamed field would offer profiles the
-    # Host refuses and the picker could never explain.
     (
         ("tui_gateway/contracts/groups_bot_relay.py",),
         "    seatable_profiles: list[str] | None = None",

@@ -151,8 +151,9 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       // The room exists: its own screen takes the address and sends the first message into it.
       navigate(`/c/${roomId}`, { replace: true, state: { first: { text, attachments } } })
     } catch (error) {
-      // The Host has just said this connection's roster is wrong: forget it, so the next look at the
-      // seats reads the Host again rather than repeating a create it will refuse (ADR 0128).
+      // A create that failed is the one moment the roster could have been wrong, and the roster is
+      // only ever a prediction: forgetting the answer makes the next look read the Host again, so a
+      // refusal about a seat is corrected rather than repeated (ADR 0128).
       forgetAnswer(maker)
       setFailure(error instanceof Error && error.message ? error.message : "The room wasn't made.")
       setSending(false)

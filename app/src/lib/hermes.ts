@@ -1611,7 +1611,6 @@ export interface PluginInfo {
 
 /**
  * A list a Host may name in its `info` answer: the strings it holds, or null where it named none.
- * Its lists ride one answer, so each is read the same way.
  */
 function namedList(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null
