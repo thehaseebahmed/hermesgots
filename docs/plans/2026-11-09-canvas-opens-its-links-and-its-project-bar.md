@@ -64,7 +64,7 @@ sequenceDiagram
 
 ## Risks
 - A canvas's script can now ask for an http(s) URL to open on any click it handles. It could already `postMessage` the same call; what is enforced is the scheme and the frame, as ADR 0122 says.
-- The stand-in window is not a window: a page that writes into it silently loses the write.
+- The stand-in window is not a window: it has no `document`, so a page that writes into it throws where a window would have kept the write.
 - On a device still running a build older than #990, links stay inert until that build updates: the page half shipped there, this only reaches the pages that open links themselves.
 
 ## Not now

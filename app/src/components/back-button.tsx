@@ -18,21 +18,18 @@ export function BackButton({
   to,
   onClick,
   floating,
-  variant = "outline",
   icon = <ArrowLeftIcon />,
 }: {
   label: string
   to?: string
   onClick?: () => void
   floating?: boolean
-  /** `ghost` for a header whose neighbours carry no edge, as a canvas's does. */
-  variant?: "outline" | "ghost"
   icon?: ReactNode
 }) {
   const look = cn("size-11 shrink-0 rounded-full", floating && "bg-background/80 backdrop-blur")
   return (
     <Button
-      variant={variant}
+      variant="outline"
       size="icon-lg"
       className={look}
       nativeButton={!to}

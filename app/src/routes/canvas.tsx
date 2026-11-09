@@ -78,6 +78,12 @@ import { useNow } from "@/lib/threads"
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
 /**
+ * A button in the canvas's bar, drawn as a Project's menu is (`project.tsx`): the same outline,
+ * edge and blur, so the two places the reader is in read as one bar.
+ */
+const HEADER_ACTION = "size-11 rounded-full bg-background/80 backdrop-blur"
+
+/**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
  * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
  * whole of what tells two canvases apart at a glance.
@@ -549,7 +555,7 @@ export function CanvasView() {
               <Button
                 variant="outline"
                 size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                className={HEADER_ACTION}
                 aria-label="Undo"
                 disabled={undoing}
                 onClick={() => void undo()}
@@ -563,7 +569,7 @@ export function CanvasView() {
               <Button
                 variant="outline"
                 size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                className={HEADER_ACTION}
                 aria-label="Canvas options"
                 onClick={() => setOptionsOpen(true)}
               >

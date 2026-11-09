@@ -251,11 +251,13 @@ test(
         for (const label of ["Undo", "Canvas options"]) {
           const button = actions.querySelector(`button[aria-label="${label}"]`)
           assert.ok(button, `${label} is one of the row's actions`)
-          for (const look of ["bg-background/80", "backdrop-blur", "rounded-full"]) {
-            assert.ok(
-              button.className.includes(look),
-              `${label} wears the Project's ${look}`,
-            )
+          for (const look of [
+            "border-border",
+            "bg-background/80",
+            "backdrop-blur",
+            "rounded-full",
+          ]) {
+            assert.ok(button.className.includes(look), `${label} wears the Project's ${look}`)
           }
         }
       },
