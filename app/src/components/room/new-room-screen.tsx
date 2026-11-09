@@ -4,10 +4,12 @@ import { useNavigate } from "react-router"
 import { CheckIcon, UsersIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
+import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { RoomFaces } from "@/components/room/room-faces"
+import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { connectionKey, serverConfig } from "@/lib/connection"
 import {
@@ -20,6 +22,7 @@ import {
 } from "@/lib/db"
 import { usePluginFeatureByServer } from "@/lib/features"
 import { COLUMN_BOX } from "@/lib/layout"
+import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { roomSeats } from "@/lib/rooms"
 import { startRoom } from "@/lib/room-writes"
 import { cn, randomId } from "@/lib/utils"
@@ -226,10 +229,15 @@ function SeatsPicker({
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent className="max-h-[90dvh]">
-        <PopupHeader className="pb-2">
+        <PopupHeader>
           <PopupTitle>Room bots</PopupTitle>
+          {/* The rule sits with the title, so the body is the choice and the one button that ends it. */}
+          <p className="text-sm text-muted-foreground">
+            Two to six bots of one Host. Who a room holds is fixed when it is made: changing its
+            members means making a new room.
+          </p>
         </PopupHeader>
-        <div className="flex flex-col gap-3 px-1 pb-4">
+        <div className="flex flex-col gap-4 px-6 pb-6">
           {hosts.length > 1 && (
             <div className="flex flex-wrap gap-2">
               {hosts.map((key) => (
@@ -244,45 +252,65 @@ function SeatsPicker({
               ))}
             </div>
           )}
-          <ul className="flex flex-col gap-1">
-            {seated.map((bot) => {
-              const on = picked.includes(bot.id)
-              const full = !on && picked.length >= MOST
-              return (
-                <li key={bot.id}>
-                  <button
-                    type="button"
-                    aria-pressed={on}
-                    data-bot={bot.id}
-                    disabled={full}
-                    onClick={() => onToggle(bot.id)}
-                    className={cn(
-                      "flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm transition-colors",
-                      on ? "bg-muted" : "hover:bg-muted/60",
-                      full && "opacity-40",
-                    )}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{bot.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        @{bot.hermesProfile}
-                      </span>
-                    </span>
-                    {on && <CheckIcon className="size-4 shrink-0" />}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-          <p className="text-xs text-muted-foreground">
-            Two to six bots of one Host. Who a room holds is fixed when it is made: changing its
-            members means making a new room.
-          </p>
-          <Button size="lg" className="h-11 rounded-full" onClick={() => onOpenChange(false)}>
+          {/* The seats are a card of rows, the way Settings lists bots, so picking two reads as the
+              same act as reading them there. */}
+          <Group>
+            {seated.map((bot) => (
+              <SeatRow
+                key={bot.id}
+                bot={bot}
+                checked={picked.includes(bot.id)}
+                full={!picked.includes(bot.id) && picked.length >= MOST}
+                onToggle={() => onToggle(bot.id)}
+              />
+            ))}
+          </Group>
+          <Button size="lg" className="h-11 w-full rounded-full" onClick={() => onOpenChange(false)}>
             Done
           </Button>
         </div>
       </PopupContent>
     </Popup>
+  )
+}
+
+/**
+ * One bot a room can seat: its picture, its name and the model it runs by default, in the
+ * `provider/model` spelling the app names models everywhere, with the check that says it is seated.
+ *
+ * The subtitle is where Settings' dictation list says what a host does about speech; here it says
+ * what the bot answers with, because that is what decides what a room of these bots produces.
+ */
+function SeatRow({
+  bot,
+  checked,
+  full,
+  onToggle,
+}: {
+  bot: Profile
+  checked: boolean
+  /** The room already holds the most it may, so this seat says so rather than doing nothing silently. */
+  full: boolean
+  onToggle: () => void
+}) {
+  const info = useModelInfo(bot)
+  const choice = botModel(bot, info)
+  return (
+    <button
+      type="button"
+      aria-pressed={checked}
+      data-bot={bot.id}
+      disabled={full}
+      onClick={onToggle}
+      className={cn(
+        linkRowClass,
+        "disabled:cursor-not-allowed disabled:opacity-40",
+        checked && "bg-muted",
+      )}
+    >
+      <Bot id={bot.botId} className={cn("size-8 shrink-0", bot.disabled && "opacity-40")} />
+      <RowText title={bot.name} subtitle={choice ? fullModel(choice) : bot.model} />
+      {checked && <CheckIcon className="size-4 shrink-0" />}
+    </button>
   )
 }

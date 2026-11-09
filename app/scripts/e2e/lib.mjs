@@ -251,6 +251,9 @@ const botPatch = (baseUrl) => ({
   baseUrl: `${baseUrl}/v1`,
   apiKey: "mock-key",
   pluginChats: true,
+  // A bot on a Host is one of its profiles: the name is what seats it in a room, and what the
+  // sidebar's Rooms section needs to offer New room (ADR 0124, ADR 0127).
+  hermesProfile: "default",
 })
 
 /** Points the first bot at the mock and skips the setup wizard; answers the bot's id. */

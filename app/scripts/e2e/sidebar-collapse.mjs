@@ -168,9 +168,9 @@ for (const dark of [false, true]) {
         "a bot keeps its icon",
       )
       assert.equal(
-        await aside.getByRole("link", { name: "Link a bot" }).first().isVisible(),
+        await aside.getByRole("link", { name: "New room" }).first().isVisible(),
         true,
-        "Link a bot keeps its icon",
+        "the Rooms section's New room keeps its icon",
       )
       await shot("bots-collapsed")
 

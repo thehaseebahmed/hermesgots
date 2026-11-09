@@ -22,7 +22,6 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
-import { NewRoomButton } from "@/components/room/new-room"
 import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
@@ -31,14 +30,17 @@ import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
 import { usePinnedCanvases } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
+import { connectionKey } from "@/lib/connection"
+import { usePluginFeatureByServer } from "@/lib/features"
 import { presence } from "@/lib/registry"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
-import { needsYouLine, roomFaces, roomMembersLine } from "@/lib/rooms"
+import { roomFaces, needsYouLine, roomMembersLine } from "@/lib/rooms"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
+import { ROOM_SORTS, sortRooms, useRoomSort } from "@/lib/room-order"
 import { useSyncState } from "@/lib/sync"
 import {
   BOT_SORTS,
@@ -270,7 +272,8 @@ function Recents({
     const listed = await db.conversations
       .orderBy("updatedAt")
       .reverse()
-      .filter((c) => chatOwner(c, bots).listed)
+      // Rooms have a section of their own, so Recents holds chats alone (ADR 0127).
+      .filter((c) => chatOwner(c, bots).listed && !c.room)
       .toArray()
     const chats = [
       ...listed.filter((c) => c.pinned),
@@ -373,16 +376,7 @@ function Recents({
  * belongs to no bot's row, and it is not a section of its own either — it is drawn by the chat
  * list's own row, with its members, its last activity and the mark its log reads (ADR 0115).
  */
-function Bots({
-  onNavigate,
-  collapsed = false,
-  rooms,
-}: {
-  onNavigate?: () => void
-  collapsed?: boolean
-  /** The Host's rooms, listed by `useRoomNeeds` so the sidebar reads the table once. */
-  rooms?: RoomNeedsRow[]
-}) {
+function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const summaries = useBotSummaries()
   const [sort, setSort] = useBotSort()
   const bots = summaries && sortBots(summaries, sort)
@@ -397,9 +391,6 @@ function Bots({
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
-  // A room is nobody's thread, so it has no bot to sit under: its row joins this list after the
-  // bots, newest first, drawn by the list's own row and marked by its own log.
-  const listed = [...(rooms ?? [])].sort((one, two) => two.chat.updatedAt - one.chat.updatedAt)
 
   return (
     <nav
@@ -485,7 +476,66 @@ function Bots({
             </li>
           )
         })}
-        {listed.map(({ chat, bot, faces }) => (
+      </ul>
+    </nav>
+  )
+}
+
+/**
+ * The sidebar's Rooms section: the Host's rooms, ranked by the section's own order, with the one
+ * control a room is started from at its end (ADR 0127).
+ *
+ * A room used to be a row of Recents and of the bots list — unordered, and after the bots — because a
+ * room was nobody's thread. It is a section now, drawn by the same row it always was: the rows are
+ * rooms alone, the heading says how they rank, and New room takes the place of the link row that
+ * ended the bots list. The section is drawn even with no rooms in it: an empty room list is where
+ * someone who has never made a room finds the control.
+ */
+function Rooms({
+  onNavigate,
+  collapsed = false,
+  rows,
+}: {
+  onNavigate?: () => void
+  collapsed?: boolean
+  /** The Host's rooms, read once by `useRoomNeeds` and shared with the badges the list draws. */
+  rows?: RoomNeedsRow[]
+}) {
+  const [sort, setSort] = useRoomSort()
+  const now = useNow()
+  const ordered = rows ? sortRooms(rows, sort) : []
+  const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
+  const answers = usePluginFeatureByServer(bots, "rooms_write")
+  // A Host that cannot make a room offers no control, rather than one that can only come back refused.
+  const canMake = bots.some(
+    (bot) => bot.hermesProfile && !bot.disabled && answers[connectionKey(bot)] === "yes",
+  )
+  return (
+    <nav
+      className="flex flex-col gap-0.5"
+      aria-labelledby={collapsed ? undefined : "rooms-heading"}
+      aria-label={collapsed ? "Rooms" : undefined}
+    >
+      {!collapsed && (
+        <div className="-mt-2 flex items-center justify-between gap-2 pl-3">
+          <h2 id="rooms-heading" className="text-sm font-medium text-muted-foreground">
+            Rooms
+          </h2>
+          <SortMenu
+            by="rooms"
+            label="Sort rooms by"
+            options={ROOM_SORTS}
+            value={sort}
+            onSort={setSort}
+            compact
+          />
+        </div>
+      )}
+      <ul
+        data-band="rooms"
+        className={cn("flex flex-col gap-0.5", collapsed && "items-center")}
+      >
+        {ordered.map(({ chat, bot, faces }) => (
           <li key={chat.id}>
             <ChatRow
               chat={chat}
@@ -498,24 +548,27 @@ function Bots({
             />
           </li>
         ))}
-        <li>
-          <RootLink
-            to="/settings/bots?link=1"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Link a bot" : undefined}
-            className={({ isActive }) =>
-              cn(
-                collapsed ? railClass({ isActive }) : rowClass({ isActive }),
-                "text-muted-foreground",
-              )
-            }
-          >
-            <span className="flex size-9 items-center justify-center">
-              <PlusIcon className="size-5" />
-            </span>
-            {!collapsed && "Link a bot"}
-          </RootLink>
-        </li>
+        {canMake && (
+          <li>
+            <RootLink
+              to="/new-room"
+              onClick={onNavigate}
+              aria-label={collapsed ? "New room" : undefined}
+              data-slot="new-room"
+              className={({ isActive }) =>
+                cn(
+                  collapsed ? railClass({ isActive }) : rowClass({ isActive }),
+                  "text-muted-foreground",
+                )
+              }
+            >
+              <span className="flex size-9 items-center justify-center">
+                <PlusIcon className="size-5" />
+              </span>
+              {!collapsed && "New room"}
+            </RootLink>
+          </li>
+        )}
       </ul>
     </nav>
   )
@@ -730,9 +783,15 @@ export function ConversationList({
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
         {botThreads ? (
-          <Bots onNavigate={onNavigate} collapsed={collapsed} rooms={rooms} />
+          <Bots onNavigate={onNavigate} collapsed={collapsed} />
         ) : (
           botThreads === false && <Recents onNavigate={onNavigate} collapsed={collapsed} />
+        )}
+        {rooms && (
+          <>
+            <Separator className="mx-1 my-3 data-horizontal:w-auto" />
+            <Rooms onNavigate={onNavigate} collapsed={collapsed} rows={rooms} />
+          </>
         )}
       </div>
 
@@ -744,9 +803,6 @@ export function ConversationList({
       >
         <ProfileButton onNavigate={onNavigate} />
         <div className={cn("flex items-center gap-2", collapsed && "flex-col gap-2")}>
-          {/* A room is nobody's bot's, so it is started from the footer both layouts share (ADR 0122);
-              the control draws itself only where a Host can make one. */}
-          <NewRoomButton collapsed={collapsed} onNavigate={onNavigate} />
           {botThreads === false && (
             <Button
               size="lg"

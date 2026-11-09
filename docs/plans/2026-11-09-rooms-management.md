@@ -205,11 +205,10 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
 
    Done.
 
-4. **A room can be started from the app.** The sidebar's footer gains New room beside New chat, drawn
-   only where some bot the device holds answers `rooms_write`. The footer's create control is drawn in
-   both layouts — today it is the Recents branch's alone, while a room lists in both — so the bots
-   layout gains that control where it had none. It opens a blank room at `/new-room` rather than a
-   sheet (ADR 0125): no record, no Host call, and the composer's own pill picks the seats — the Host
+4. **A room can be started from the app.** The sidebar gains a Rooms section, drawn after the chats or
+   bots and ranked by its own order, whose last row is New room — the place the link-a-bot row held —
+   drawn only where some bot the device holds answers `rooms_write` (ADR 0127). A room is listed in that
+   section and nowhere else. It opens a blank room at `/new-room` rather than a sheet (ADR 0125): no record, no Host call, and the composer's own pill picks the seats — the Host
    when the device holds more than one writable one, the bots of that Host, two to six, and the line
    that the members cannot change later. The first send mints the room's id, creates it on the Host
    under a name derived from its seats, writes the row the Host answers, and moves the address to
@@ -227,7 +226,9 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
    mock's 405 and green after.
 
    Amended after 4 landed: the sheet this step described was replaced by the blank room (ADR 0125), so
-   the refusal F4 covered is the create's answer held by the blank screen, not a sheet's. The e2e leg:
+   the refusal F4 covered is the create's answer held by the blank screen, not a sheet's; and the
+   footer's control became the Rooms section's New room row, with the seat picker drawn as Settings
+   draws a bot's row — its picture, its name and the model it answers with (ADR 0127). The e2e leg:
    `pnpm e2e room-lifecycle` — green.
 
    Done.

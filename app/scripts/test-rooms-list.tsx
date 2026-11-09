@@ -405,22 +405,48 @@ test("the sidebar every device gets draws the room's row", async () => {
   })
 })
 
-test("a room takes its place among Recents by its last activity", async () => {
+test("Rooms lists the rooms by their last activity, and Recents holds none of them", async () => {
   await fresh({ chats: true })
+  // A second room, older than the first, written straight to the device: the section orders rooms by
+  // their own clocks, whatever the Host's record says (ADR 0127).
+  await db.conversations.put({
+    id: "room-older",
+    profileId: CARRIER,
+    title: "Standup",
+    room: { id: "room-older", members: [] },
+    createdAt: LAST_AT - 600_000,
+    updatedAt: LAST_AT - 600_000,
+    changedAt: LAST_AT - 600_000,
+  })
   await merged()
   await mount(screen("/"), async () => {
-    await until(async () => band("recents").includes(`/c/${ROOM}`), "the room's row among Recents")
+    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the rooms band")
+    assert.deepEqual(
+      band("rooms"),
+      [`/c/${ROOM}`, "/c/room-older"],
+      "the newest room first, and the older one under it",
+    )
     assert.deepEqual(
       band("recents"),
-      [`/c/${CHAT_NEWER}`, `/c/${ROOM}`, `/c/${CHAT_OLDER}`],
-      "the room is sorted with the chats, by its own last activity",
+      [`/c/${CHAT_NEWER}`, `/c/${CHAT_OLDER}`],
+      "and the chat list holds chats alone",
     )
   })
 })
 
-test("a pinned room stands in the pinned band, not in Recents", async () => {
+test("a pinned room stands at the top of Rooms, whatever its age", async () => {
   await fresh({ chats: true })
   await merged()
+  // A room newer than the pinned one, so the pin is the only thing that can put the older one first.
+  await db.conversations.put({
+    id: "room-newer",
+    profileId: CARRIER,
+    title: "Standup",
+    room: { id: "room-newer", members: [] },
+    createdAt: LAST_AT + 600_000,
+    updatedAt: LAST_AT + 600_000,
+    changedAt: LAST_AT + 600_000,
+  })
   // A room's record carries no pin — the Host's room has none (ADR 0116) — so the pin is this
   // device's own, and the merge that follows must not take it away.
   await db.conversations.update(ROOM, { pinned: true })
@@ -428,27 +454,24 @@ test("a pinned room stands in the pinned band, not in Recents", async () => {
   await settle()
   assert.equal((await db.conversations.get(ROOM))?.pinned, true, "the room's own pin stands")
   await mount(screen("/"), async () => {
-    await until(async () => band("pinned").includes(`/c/${ROOM}`), "the pinned band's room")
-    assert.deepEqual(band("pinned"), [`/c/${ROOM}`], "the pin lifts the room, as it lifts a chat")
+    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the rooms band")
+    assert.equal(band("rooms")[0], `/c/${ROOM}`, "the pin lifts the room above a newer one")
     assert.ok(
       !band("recents").includes(`/c/${ROOM}`),
-      "a pinned room is lifted out of Recents rather than drawn twice",
+      "and a room is never drawn twice, in two lists",
     )
   })
 })
 
-test("a pinned chat is lifted into the same band, so the room joins one rule", async () => {
+test("a pinned chat is lifted into the pinned band, and a room stays in Rooms", async () => {
   await fresh({ chats: true })
   await db.conversations.update(CHAT_OLDER, { pinned: true })
   await merged()
   await mount(screen("/"), async () => {
     await until(async () => band("pinned").includes(`/c/${CHAT_OLDER}`), "the pinned chat")
-    assert.deepEqual(
-      band("pinned"),
-      [`/c/${CHAT_OLDER}`],
-      "a chat and a room are drawn by the same band",
-    )
-    assert.deepEqual(band("recents"), [`/c/${CHAT_NEWER}`, `/c/${ROOM}`], "and leave Recents")
+    assert.deepEqual(band("pinned"), [`/c/${CHAT_OLDER}`], "the pin lifts the chat alone")
+    assert.deepEqual(band("recents"), [`/c/${CHAT_NEWER}`], "Recents holds what is left of the chats")
+    assert.deepEqual(band("rooms"), [`/c/${ROOM}`], "and the room is its own section's row")
   })
 })
 
@@ -476,7 +499,7 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
     )
   })
   await mount(screen("/"), async () => {
-    await until(async () => band("recents").includes(`/c/${ROOM}`), "the room's row")
+    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the room's row")
     await settle()
     assert.equal(
       find(`a[href="/c/${ROOM}"] [data-needs-you]`),
@@ -531,7 +554,7 @@ test("the Host saying a room moved marks its row though the record never moved",
   await fresh()
   await merged()
   await mount(screen("/"), async () => {
-    await until(async () => band("recents").includes(`/c/${ROOM}`), "the room's row")
+    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the room's row")
     // The list has read the room and found nothing; the member's reply lands while the record's own
     // clock stands still, so only the change stream can tell the row.
     const opened = Date.now()
@@ -583,5 +606,43 @@ test("a room's row draws its members' pictures, four at most, and counts the res
       "the seats in the Host's order",
     )
     assert.equal(find("[data-room-faces-more]")?.textContent, "+1", "and the fifth counted")
+  })
+})
+
+test("Rooms ranks by its own order, kept on the device, and pins above it", async () => {
+  await fresh()
+  const named = [
+    { id: "room-zebra", title: "Zebra", at: LAST_AT + 30_000 },
+    { id: "room-alpha", title: "Alpha", at: LAST_AT + 10_000 },
+    { id: "room-mid", title: "Middle", at: LAST_AT + 20_000 },
+  ]
+  await db.conversations.bulkPut(
+    named.map(({ id, title, at }) => ({
+      id,
+      profileId: CARRIER,
+      title,
+      room: { id, members: [] },
+      createdAt: at - 1_000,
+      updatedAt: at,
+      changedAt: at,
+    })),
+  )
+  // The section's order is a device setting like every other list's (ADR 0091, ADR 0127).
+  await db.settings.update("settings", { roomSort: "name", roomSortDir: "asc" })
+  await settle()
+  await mount(screen("/"), async () => {
+    await until(async () => band("rooms").includes("/c/room-zebra"), "the rooms band")
+    assert.deepEqual(
+      band("rooms"),
+      ["/c/room-alpha", "/c/room-mid", "/c/room-zebra"],
+      "A to Z by the section's own key, whatever order the clocks are in",
+    )
+  })
+  // A pin is lifted above the arrow rather than ranked by it.
+  await db.conversations.update("room-zebra", { pinned: true })
+  await settle()
+  await mount(screen("/"), async () => {
+    await until(async () => band("rooms").includes("/c/room-zebra"), "the rooms band")
+    assert.equal(band("rooms")[0], "/c/room-zebra", "a pinned room stands first, whatever its name")
   })
 })

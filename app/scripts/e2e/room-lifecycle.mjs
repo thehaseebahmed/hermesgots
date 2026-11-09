@@ -30,7 +30,7 @@ await flow("room-lifecycle", async ({ page, until, shot }) => {
   }, mock)
 
   await page.goto(`${app}/`)
-  const start = page.getByRole("button", { name: "New room" })
+  const start = page.getByRole("link", { name: "New room" })
   await start.waitFor({ timeout: 20_000 })
   await shot("list")
   await start.click()
@@ -119,7 +119,7 @@ await flow("room-lifecycle", async ({ page, until, shot }) => {
 
   // The Host's own projection carries the deletion, so a reload finds no row either.
   await page.reload()
-  await page.getByRole("button", { name: "New room" }).waitFor({ timeout: 20_000 })
+  await page.getByRole("link", { name: "New room" }).waitFor({ timeout: 20_000 })
   await settled(page)
   assert.equal(
     await page.getByRole("link", { name: new RegExp(RENAMED) }).count(),
