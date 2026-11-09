@@ -172,7 +172,7 @@ sequenceDiagram
    `scripts/test-developer-sections.tsx` — red first on a row that does not exist, then the row
    ships off, a tap writes `chatThreads: true` and moves `appearanceAt`, and the switch is absent
    from the Appearance section; `scripts/test-sync-scope.tsx` gains one case — the `settings`
-   document a pass writes carries `chatThreads`, and a record another device wrote is adopted.
+   document a pass writes carries `chatThreads`, and a record another device wrote is adopted. Done.
 
 3. **No bot chat offers a start command, and a typed `/thread` is words.** The threads rule gains
    `chatThreadsOn`, `opensInMain` (the bot layout with the switch off) and `startHere(main,

@@ -10,7 +10,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { db } from "@/lib/db"
+import { AppearanceSettings } from "@/components/settings/appearance"
+import { adoptAppearance, db, getSettings } from "@/lib/db"
 import { DeveloperSettings, SettingsPage } from "@/routes/settings"
 import {
   Path,
@@ -18,11 +19,13 @@ import {
   find,
   findAll,
   findText,
+  json,
   mount,
   path,
   seedSettings,
   settle,
   text,
+  until,
 } from "./component-kit.tsx"
 
 const at = (entry: string) => (
@@ -138,4 +141,72 @@ test("the hide button takes Remove server's shape, and Device state sits with Sy
     assert.ok(sync && device, "both rows are drawn")
     assert.equal(sync, device, "and one group holds them")
   })
+})
+
+const CHAT_THREADS = "Chat threads"
+const chatThreadsRow = () => find("label[for='chat-threads']")
+const chatThreadsSwitch = () => find("label[for='chat-threads'] [data-slot='switch']")
+
+test("the Chat threads row ships off, writes chatThreads, and moves the clock the account rides", async () => {
+  // Seeded a moment out of the past, so "the clock moved" is a fact about the write.
+  const THEN = 1
+  await seedSettings({ developer: true, appearanceAt: THEN })
+  await mount(developerPage, async () => {
+    const row = chatThreadsRow()
+    assert.ok(row, "the switch is on the Developer screen")
+    assert.match(row.textContent ?? "", new RegExp(CHAT_THREADS), "under its own name")
+    assert.ok(
+      row.textContent?.includes("Start a thread from a bot's Main. Follows your account"),
+      "with its line",
+    )
+    const first = findAll("[data-settings-group]")[0]
+    assert.equal(
+      first?.querySelector("label")?.getAttribute("for"),
+      "chat-threads",
+      "and as the first row of Developer's first group",
+    )
+    assert.equal(
+      chatThreadsSwitch()?.getAttribute("aria-checked"),
+      "false",
+      "off until it is turned on",
+    )
+    await click(chatThreadsSwitch())
+    await until(
+      async () => (await db.settings.get("settings"))?.chatThreads === true,
+      "the chatThreads setting",
+    )
+    assert.equal(chatThreadsSwitch()?.getAttribute("aria-checked"), "true", "and on once it is")
+  })
+  const stored = await db.settings.get("settings")
+  assert.equal(stored?.chatThreads, true, "the device kept it")
+  assert.ok(
+    (stored?.appearanceAt ?? THEN) > THEN,
+    "the appearance clock moved, so the account carries the change",
+  )
+})
+
+test("the Chat threads switch draws no row in the Appearance section", async () => {
+  // The section asks its bot about Interfaces, so a host that answers nothing is stubbed in.
+  globalThis.fetch = (async () =>
+    json({ error: { message: "no route" } }, 404)) as unknown as typeof globalThis.fetch
+  await db.profiles.clear()
+  await seedSettings({ developer: true })
+  await mount(<AppearanceSettings />, async () => {
+    await settle()
+    assert.equal(chatThreadsRow(), null, "Developer's switch is not repeated here")
+    assert.doesNotMatch(text(), /Chat threads/, "and nothing on the screen names it")
+  })
+})
+
+test("a record another device wrote carries chatThreads in, and a record without it leaves it", async () => {
+  const AT = 5
+  await adoptAppearance({ chatThreads: true }, AT)
+  let settings = await getSettings()
+  assert.equal(settings.chatThreads, true, "the account's switch is adopted")
+  assert.equal(settings.appearanceAt, AT, "with the clock it was written at")
+
+  await adoptAppearance({}, AT + 1)
+  settings = await getSettings()
+  assert.equal(settings.chatThreads, true, "a record that does not name it leaves this device's on")
+  assert.equal(settings.appearanceAt, AT + 1, "while the clock still moves")
 })

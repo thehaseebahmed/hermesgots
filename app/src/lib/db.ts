@@ -36,6 +36,12 @@ export interface Settings {
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
   /**
+   * Whether a bot may start a new thread at all: Developer's switch, off by default, and the one
+   * fact that decides it. It is in `APPEARANCE_FIELDS` because the account carries it — one flip
+   * turns threads back on everywhere rather than once per device (ADR 0120).
+   */
+  chatThreads?: boolean
+  /**
    * Enter sends the message instead of starting a new line; off by default, and then Ctrl+Enter
    * sends. Local, and never in `APPEARANCE_FIELDS`: it describes this device's keyboard, so a phone
    * and a laptop answer it separately (ADR 0078).
@@ -104,11 +110,17 @@ export interface Settings {
 }
 
 /**
- * The Appearance section's switches, which follow the account; the colour mode isn't one of them,
- * since next-themes keeps it on the device. Sync carries them as the `settings` document's one
- * record and the fingerprint watches them, so this list is the one place that says what syncs.
+ * The device switches the account carries: sync puts them in the `settings` document's one record
+ * and its fingerprint watches them, so this list is the one place that says what syncs. Appearance
+ * draws some of them — the colour mode isn't here, since next-themes keeps it on the device — and
+ * Developer draws the rest; the list is the account's, not a section's.
  */
-export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders", "navShortcuts"] as const
+export const APPEARANCE_FIELDS = [
+  "steerByDefault",
+  "breakReminders",
+  "navShortcuts",
+  "chatThreads",
+] as const
 
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
@@ -908,6 +920,7 @@ export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
+  chatThreads: false,
   sendOnEnter: false,
 }
 

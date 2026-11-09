@@ -215,6 +215,10 @@ _Avoid_: default chat, general chat, inbox
 A bot's one chat surface: its Main thread and the threads drawn inside it as cards. A project session is not one.
 _Avoid_: bot screen, chat screen, bot page
 
+**Chat threads**:
+Whether a bot may start a new thread at all: Developer's switch, off by default and carried by the account, and the one thing that decides it. Off, no bot's chat offers a start command, a new chat's first send lands in that bot's Main, and the host is never asked to triage — a thread that already exists still lists in Main, opens and sends (ADR 0120).
+_Avoid_: bot threads (that is the layout), thread mode, threads on
+
 **Thread lane**:
 The pane a bot's Chat opens beside Main for the one thread it holds: half the room the sidebar leaves while it holds one, and not there at all once the thread is closed, so Main has the whole width. A bot's alone — Code, the projects, the meetings, research and the apps keep their list lane.
 _Avoid_: sidebar, third pane, detail pane, right pane
@@ -224,11 +228,11 @@ The separator between a bot's Main and its Thread lane: dragged, it sets the sha
 _Avoid_: divider, gutter, grip, drag bar
 
 **Blank chat**:
-A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat; under bot threads a chat starts at its bot's Main instead.
+A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat; under bot threads a chat starts at its bot's Main instead, and with **Chat threads** off its first send lands there too.
 _Avoid_: new chat screen, draft chat, empty chat
 
 **Triage**:
-The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays.
+The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays. It runs only while **Chat threads** are on, and with them off nothing is asked and every message stays.
 _Avoid_: routing, sorting, dispatch
 
 **Triage model**:
