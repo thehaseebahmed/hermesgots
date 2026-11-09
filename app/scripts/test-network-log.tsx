@@ -11,7 +11,7 @@ import { db, type NetRequest } from "@/lib/db"
 import { KEPT } from "@/lib/net-log"
 import { clearNetLog, trimNetLog } from "@/lib/net-recorder"
 import { DeveloperSettings } from "@/routes/settings"
-import { botProfile, click, find, findAll, mount, seedSettings, text } from "./component-kit.tsx"
+import { botProfile, click, find, findAll, missing, mount, seedSettings, text } from "./component-kit.tsx"
 
 const ada = botProfile("network-ada", { id: "bot-1", name: "Ada" })
 const grace = botProfile("network-grace", { id: "bot-2", name: "Grace" })
@@ -71,7 +71,7 @@ test("off, the Developer switch records nothing and offers no log to read", asyn
     </MemoryRouter>,
     async () => {
       assert.equal(checkedOf(switchOf()), false, "off until it is turned on")
-      assert.equal(find('a[href="/settings/network"]'), null, "no log to open until it records")
+      assert.ok(missing('a[href="/settings/network"]'), "no log to open until it records")
       await click(switchOf())
       assert.equal(checkedOf(switchOf()), true, "and on once it is")
       assert.ok(find('a[href="/settings/network"]'), "the way into the log it now keeps")

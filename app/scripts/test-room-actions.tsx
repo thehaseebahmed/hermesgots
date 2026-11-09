@@ -14,13 +14,14 @@ import { RoomChat } from "@/components/room/room-chat"
 import { ChatPage } from "@/routes/chat"
 import { db, type Profile } from "@/lib/db"
 import {
+  Path,
   botProfile,
   click,
   find,
   findAll,
   json,
+  missing,
   mount,
-  Path,
   seedSettings,
   settle,
   text,
@@ -177,7 +178,7 @@ test("a host that cannot write draws no menu", async () => {
   await mount(screen(), async () => {
     await until(async () => text().includes("Planning"), "the room")
     await settle()
-    assert.equal(find('[aria-label="Room options"]'), null, "no menu for a Host that cannot write")
+    assert.ok(missing('[aria-label="Room options"]'), "no menu for a Host that cannot write")
   })
 })
 

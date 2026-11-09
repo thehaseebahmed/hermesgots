@@ -26,13 +26,14 @@ import { connectionKey, noteChange } from "@/lib/live"
 import { syncNow } from "@/lib/sync"
 import { useBotPane, useThreads } from "@/lib/threads"
 import {
+  Path,
   atWidth,
   botProfile,
   find,
   findAll,
   json,
+  missing,
   mount,
-  Path,
   seedSettings,
   settle,
   until,
@@ -504,11 +505,7 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
   await mount(screen("/"), async () => {
     await until(async () => band("rooms").includes(`/c/${ROOM}`), "the room's row")
     await settle()
-    assert.equal(
-      find(`a[href="/c/${ROOM}"] [data-needs-you]`),
-      null,
-      "a room open on this device no longer needs the user",
-    )
+    assert.ok(missing(`a[href="/c/${ROOM}"] [data-needs-you]`), "a room open on this device no longer needs the user")
   })
 })
 

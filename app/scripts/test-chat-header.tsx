@@ -11,7 +11,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { ChatHeader } from "@/components/chat/chat-header"
-import { find, mount } from "./component-kit.tsx"
+import { find, missing, mount } from "./component-kit.tsx"
 
 const options = <button type="button" aria-label="Chat options" />
 const back = <button type="button" aria-label="Back to Code" />
@@ -68,7 +68,7 @@ test("no picture beside a bot pane or before a chat has started", async () => {
       const row = rowParts()
       assert.equal(row.length, 3, "the row is the leading control, text, actions")
       const [leading, text, actions] = row
-      assert.equal(find('[role="img"]'), null, "a bot pane already shows the bot")
+      assert.ok(missing('[role="img"]'), "a bot pane already shows the bot")
       assert.deepEqual(
         lines(text),
         ["A thread's title", "3 replies"],

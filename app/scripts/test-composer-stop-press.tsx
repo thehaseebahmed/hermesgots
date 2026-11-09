@@ -11,7 +11,7 @@ import { act } from "react"
 
 import { Composer } from "@/components/chat/composer"
 
-import { click, connection, find, mount, until } from "./component-kit.tsx"
+import { click, connection, find, missing, mount, until } from "./component-kit.tsx"
 
 const bot = connection("composer-stop-press")
 
@@ -58,7 +58,7 @@ test("a reading that lands after the children end does not push the answer out a
       Date.now() - quiet + 6_000,
     )
     const answered = Date.now() - quiet
-    assert.equal(find('button[aria-label="Stopping"]'), null, "the answer is over")
+    assert.ok(missing('button[aria-label="Stopping"]'), "the answer is over")
     assert.ok(answered < 6_000, `the answer ended ${answered}ms after the quiet reading`)
   })
 })

@@ -515,6 +515,12 @@ export const wordsOf = (element: Element | null) =>
 export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 /**
+ * Whether nothing on the screen matches a selector, as a boolean: a failed assertion handed the
+ * element builds its diff by inspecting it, and a mounted element carries React's fiber graph, so
+ * that diff walks the whole tree.
+ */
+export const missing = (selector: string) => find(selector) === null
+/**
  * The card Main draws for a thread, by the thread it draws and never by the words on it: those are the
  * thread's own message, which a fixture can reword (ADR 0082).
  */

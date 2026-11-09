@@ -24,6 +24,7 @@ import {
   composerField,
   find,
   json,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -169,11 +170,7 @@ test(
           "the marker line carries the label and the selector",
         )
         assert.ok(sent.includes("Make this bolder"), "and the words the reader typed")
-        assert.equal(
-          find("[data-draft-point]"),
-          null,
-          "the chip goes with the message it was taken for",
-        )
+        assert.ok(missing("[data-draft-point]"), "the chip goes with the message it was taken for")
 
 
         // The reply lands, so the thread draws the host's own row: the chip on the bubble, read off
@@ -338,7 +335,7 @@ test(
       </MemoryRouter>,
       async () => {
         await until(() => Boolean(composerField()), "the composer to draw")
-        assert.equal(find('button[aria-label="Point"]'), null, "a plain chat offers no Point")
+        assert.ok(missing('button[aria-label="Point"]'), "a plain chat offers no Point")
       },
     )
   }),

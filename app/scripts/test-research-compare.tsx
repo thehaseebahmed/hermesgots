@@ -10,7 +10,7 @@ import test from "node:test"
 
 import { CompareBriefForm, MemoCanvas } from "@/components/compare"
 import type { Cell, Mission } from "@/lib/research"
-import { click, find, findAll, findText, mount, text } from "./component-kit.tsx"
+import { click, find, findAll, findText, missing, mount, text } from "./component-kit.tsx"
 
 const cell = (score: number | null, reason: string, claims: string[]): Cell => ({
   score,
@@ -147,7 +147,7 @@ test("while the memo is being written it shows the cases so far and no ranking",
   })
   await mount(<MemoCanvas mission={drafting} onCite={noop} />, async () => {
     assert.ok(findText("h3", "Verdict"), "no leader before the judge has scored")
-    assert.equal(find("table"), null, "no scores table before the judge has scored")
+    assert.ok(missing("table"), "no scores table before the judge has scored")
     assert.match(text(), /Bun's case\./)
   })
 })

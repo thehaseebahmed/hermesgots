@@ -16,6 +16,7 @@ import {
   findAll,
   json,
   laptop,
+  missing,
   mount,
   Path,
   path,
@@ -328,11 +329,7 @@ test(
       await until(async () => text().includes("1 thread"), "Main's own threads to load")
       await settle()
       assert.deepEqual(titles(), ["Mainly"], "Main alone is better than a chat nothing holds")
-      assert.equal(
-        find('[data-slot="bot-pane-empty"]'),
-        null,
-        "a bot with threads is not the empty one",
-      )
+      assert.ok(missing('[data-slot="bot-pane-empty"]'), "a bot with threads is not the empty one")
     })
   }),
 )
@@ -397,11 +394,7 @@ test(
         // The switch, while the other bot's thread list is still on its way.
         await click(find("[data-to-other]"))
         const lane = () => find('[data-pane="thread"]')?.textContent ?? ""
-        assert.equal(
-          find('[data-slot="bot-pane-empty"]'),
-          null,
-          "nothing says the bot has no threads while its list is on its way",
-        )
+        assert.ok(missing('[data-slot="bot-pane-empty"]'), "nothing says the bot has no threads while its list is on its way")
         assert.ok(
           !lane().includes("Opened t-a"),
           `the lane draws nothing of the thread it was showing (saw "${lane().slice(0, 80)}")`,
@@ -424,7 +417,7 @@ test(
         )
         observer.disconnect()
         assert.deepEqual(seen.filter(Boolean), [], "no frame ever said the bot has no threads")
-        assert.equal(find('[data-slot="bot-pane-empty"]'), null, "and it has one")
+        assert.ok(missing('[data-slot="bot-pane-empty"]'), "and it has one")
         assert.deepEqual(titles(), ["Otherly", "Thread t-b"], "both panes are the new bot's")
       } finally {
         count.restore()
@@ -597,11 +590,7 @@ test(
       await settle()
       assert.deepEqual(titles(), ["Mainly"], "the bot's own header is the only one left")
       assert.equal(remembered(bot.id), null, "and nothing is remembered for it")
-      assert.equal(
-        find('[data-slot="bot-pane-empty"]'),
-        null,
-        "a bot with threads is not the empty one",
-      )
+      assert.ok(missing('[data-slot="bot-pane-empty"]'), "a bot with threads is not the empty one")
     })
   }),
 )

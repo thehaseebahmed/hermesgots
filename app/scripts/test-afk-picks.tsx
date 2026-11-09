@@ -15,6 +15,7 @@ import {
   findAll,
   find,
   json,
+  missing,
   mountAfk,
   seedSettings,
   type HoldRow,
@@ -235,8 +236,8 @@ test("the pop-up draws the pick count and no budget line, whatever the bot answe
     holdsHeld: 3,
   }).fetch as unknown as typeof fetch
   await picksOn(async () => {
-    assert.equal(find("[data-afk-budget]"), null, "the usage line is cut from the sheet")
-    assert.equal(find("[data-holds-held]"), null, "and its numbers with it")
+    assert.ok(missing("[data-afk-budget]"), "the usage line is cut from the sheet")
+    assert.ok(missing("[data-holds-held]"), "and its numbers with it")
     assert.equal(chosen()?.textContent, "3", "the project's own count is what the row draws")
     assert.equal(
       find("[data-holds]")?.textContent ?? null,
@@ -250,8 +251,8 @@ test("a host that answers no count draws no pick count row, whatever budget it a
   globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickBudget: 5, holdsHeld: 2 })
     .fetch as unknown as typeof fetch
   await picksOn(async () => {
-    assert.equal(find("[data-afk-picks]"), null, "no count to draw")
-    assert.equal(find("[data-afk-budget]"), null, "and no budget line in its place")
+    assert.ok(missing("[data-afk-picks]"), "no count to draw")
+    assert.ok(missing("[data-afk-budget]"), "and no budget line in its place")
     assert.equal(
       find("[data-holds]")?.textContent ?? null,
       null,

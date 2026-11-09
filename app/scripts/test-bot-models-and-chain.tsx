@@ -25,6 +25,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   path,
   seedSettings,
@@ -234,7 +235,7 @@ test("the triage row says what the model decides, and no pop-up explains it", as
       "the explanation is the row's own line, word for word, over the value it holds",
     )
     assert.equal(accent("triage-model"), "Default model")
-    assert.equal(find('[aria-label^="About the"]'), null, "and nothing explains it in a pop-up")
+    assert.ok(missing('[aria-label^="About the"]'), "and nothing explains it in a pop-up")
   })
 })
 

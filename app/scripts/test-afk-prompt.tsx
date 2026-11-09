@@ -18,6 +18,7 @@ import {
   find,
   findText,
   json,
+  missing,
   mountAfk,
   seedSettings,
   type,
@@ -98,11 +99,7 @@ test("tapping the row opens the editor on the host's words, to write and nothing
   await promptMode(afkHost(), async () => {
     await click(find('button[aria-label="Prompt"]'))
     assert.equal(fieldValue(), DEFAULT_AFK_PROMPT, "the field arrives holding what the row reads")
-    assert.equal(
-      find('[aria-label="Prompt view"]'),
-      null,
-      "there is no mode to switch to: a Prompt is written",
-    )
+    assert.ok(missing('[aria-label="Prompt view"]'), "there is no mode to switch to: a Prompt is written")
     assert.equal(findText("button", "Preview"), null, "and nothing previews it")
   })
 })
@@ -111,11 +108,7 @@ test("the skills pickers are not drawn under a Prompt", async () => {
   await promptMode(
     afkHost({ features: WITH_SKILLS }),
     async () => {
-      assert.equal(
-        find("[data-afk-skills]"),
-        null,
-        "a Prompt names its own skills, so Build and Critique have nothing to say",
-      )
+      assert.ok(missing("[data-afk-skills]"), "a Prompt names its own skills, so Build and Critique have nothing to say")
     },
     withSkills,
   )

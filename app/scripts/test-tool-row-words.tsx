@@ -5,7 +5,7 @@ import test from "node:test"
 import { MessageItem } from "@/components/chat/message-item"
 import type { Message, ToolEvent } from "@/lib/db"
 import { PR_TOOL } from "@/lib/tools"
-import { click, findAll, find, mount } from "./component-kit.tsx"
+import { click, find, findAll, missing, mount } from "./component-kit.tsx"
 
 /** A call as the thread keeps it: its tool and the label its arguments were worded into. */
 function call(toolCallId: string, tool: string, label: string): ToolEvent {
@@ -169,7 +169,7 @@ test("a call the reader refused wears no failure, and its sheet says so", async 
     async () => {
       const row = find('[data-slot="tool-group"]')
       assert.doesNotMatch(row?.getAttribute("aria-label") ?? "", /failed/, "the row is not a failure")
-      assert.equal(find('[data-slot="tool-group-reason"]'), null, "and draws no reason under it")
+      assert.ok(missing('[data-slot="tool-group-reason"]'), "and draws no reason under it")
       await click(row)
       await click(find("ol li button"))
       const sheets = [...document.querySelectorAll("[data-popup-form]")]

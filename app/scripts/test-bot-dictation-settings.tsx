@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { click, find, findAll, mount, type, until } from "./component-kit.tsx"
+import { click, find, findAll, missing, mount, type, until } from "./component-kit.tsx"
 import {
   STT,
   captions,
@@ -46,11 +46,7 @@ test("the page draws every speech setting its host carries, in cards named for w
       ["Cleanup level", "Cleanup model"],
       "the level in play, then the model that does the tidying",
     )
-    assert.deepEqual(
-      findAll("[data-cleanup-level]"),
-      [],
-      "the levels themselves are the level row's sheet, not this page",
-    )
+    assert.equal(findAll("[data-cleanup-level]").length, 0, "the levels themselves are the level row's sheet, not this page")
     assert.deepEqual(
       titlesIn("Local"),
       [
@@ -313,7 +309,7 @@ test("a provider's page is left by the screen's back, which takes the provider's
     await click(find('button[aria-label="Back"]'))
     await until(async () => Boolean(speechPage()), "back on the page the card sits in")
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "which is the page itself")
-    assert.equal(find("[data-stt-provider]"), null, "with the provider's page gone")
+    assert.ok(missing("[data-stt-provider]"), "with the provider's page gone")
   })
 })
 
@@ -340,11 +336,7 @@ test("local's address is no page: it lands on the page whose Local card draws it
   await mount(editor("/settings/bots/bot-1/speech-to-text/providers/local"), async () => {
     await until(async () => Boolean(speechPage()), "the page, since local's settings are its card")
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "at the page's own address")
-    assert.equal(
-      find("[data-stt-provider]"),
-      null,
-      "and no provider page claiming the app cannot draw what it draws below",
-    )
+    assert.ok(missing("[data-stt-provider]"), "and no provider page claiming the app cannot draw what it draws below")
   })
 })
 

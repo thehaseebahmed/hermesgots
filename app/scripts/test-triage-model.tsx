@@ -17,6 +17,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -89,7 +90,7 @@ test("a plugin that lacks the route shows no field", async () => {
   const fake = host({ features: ["triage"] })
   globalThis.fetch = fake.fetch
   await mount(<TriageModelSetting profile={botProfile("triage-old")} />, async () => {
-    assert.equal(find("#triage-model"), null)
+    assert.ok(missing("#triage-model"))
     assert.doesNotMatch(text(), /Triage model/)
   })
 })
@@ -150,7 +151,7 @@ test("the row says what the model is for, with no info icon any more", async () 
       "Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own.",
       "the explanation is the row's subtitle, word for word",
     )
-    assert.equal(find('[aria-label="About the triage model"]'), null, "the info icon is gone")
+    assert.ok(missing('[aria-label="About the triage model"]'), "the info icon is gone")
   })
 })
 

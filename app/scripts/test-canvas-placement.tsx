@@ -13,7 +13,7 @@ import { ConversationList } from "@/components/conversation-list"
 import { db } from "@/lib/db"
 import { CanvasPage } from "@/routes/canvas"
 
-import { botProfile, click, find, json, mount, seedSettings, until } from "./component-kit.tsx"
+import { botProfile, click, find, json, missing, mount, seedSettings, until } from "./component-kit.tsx"
 
 const PINNED = {
   id: "p1",
@@ -82,11 +82,7 @@ test("a pinned canvas has a sidebar row and an archived one is folded", async ()
       await until(async () => Boolean(pinnedRow()), "the pinned canvas's row")
       assert.match(pinnedRow()!.textContent ?? "", /A pinned timetable/)
       assert.equal(drawn("An archived scratchpad"), false, "an archived canvas has no sidebar row")
-      assert.equal(
-        find('a[data-canvas-pinned][href="/canvas/b1"]'),
-        null,
-        "a pinned page the reader archived keeps out of the nav",
-      )
+      assert.ok(missing('a[data-canvas-pinned][href="/canvas/b1"]'), "a pinned page the reader archived keeps out of the nav")
       assert.equal(drawn("An archived favourite"), false, "and draws no row of its own")
 
       const nav = find('nav[aria-label="Main"]')!

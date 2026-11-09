@@ -24,6 +24,7 @@ import {
   composerField,
   find,
   findAll,
+  missing,
   mount,
   seedChats,
   sendPress,
@@ -118,7 +119,7 @@ async function midReply(host: ReturnType<typeof fakeHost>, first: string) {
 
 test("the body draws a seeded chat in a plain container and a send runs a turn", async () => {
   await withBody("c-body", {}, async (host) => {
-    assert.equal(find('[data-slot="header-title"]'), null, "the body draws no header")
+    assert.ok(missing('[data-slot="header-title"]'), "the body draws no header")
     await type(composerField(), "Why is the sky blue?")
     await click(find('button[aria-label="Send"]'))
     await until(() => host.asked.runs === 1, "the host was asked to run the message")

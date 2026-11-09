@@ -13,17 +13,13 @@ const env = (globalThis as unknown as { __HERMES_ENV__: Record<string, unknown> 
 env.VITE_FIREBASE = "1"
 
 const { NotificationSettingsRow } = await import("@/routes/settings")
-const { click, find, mount, seedSettings, text } = await import("./component-kit.tsx")
+const { click, find, missing, mount, seedSettings, text } = await import("./component-kit.tsx")
 
 test("with the app's switch off, the row still shows", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
   await mount(<NotificationSettingsRow />, async () => {
     assert.match(text(), /Notification settings/, "the row is there with notifications off")
-    assert.equal(
-      find('a[href="/settings/notifications"]'),
-      null,
-      "and the app's own list is linked from nowhere on the phone",
-    )
+    assert.ok(missing('a[href="/settings/notifications"]'), "and the app's own list is linked from nowhere on the phone")
   })
 })
 

@@ -38,6 +38,7 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    element carries React's fiber graph, so the diff walks the whole tree. Goals: G2. After: 1.
    Layers: component harness, component tests. Check: a forced failure of a presence check prints its
    message and returns in milliseconds, where the element form climbs to ~5 GB and is SIGKILLed.
+   Done.
 3. **A guard keeps the pattern out.** A unit test reads every `scripts/test-*.tsx` and fails on an
    assertion that passes `find(`/`findAll(` straight to `equal`/`strictEqual`/`deepEqual`. Goals: G2.
    After: 2. Layers: unit tier. Check: red on today's tree — 62 sites — and green after step 2, with a

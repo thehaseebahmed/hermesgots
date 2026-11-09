@@ -9,6 +9,7 @@ import {
   connection,
   find,
   findAll,
+  missing,
   mount,
   seedSettings,
   text,
@@ -67,7 +68,7 @@ test("a take the app was killed in is offered, and its text lands where it began
   const hosted = host()
   await mount(composer, async () => {
     assert.match(text(), /hasn't been transcribed yet/, "the bar offers the take")
-    assert.equal(find("textarea"), null, "the bar takes the composer's place")
+    assert.ok(missing("textarea"), "the bar takes the composer's place")
 
     await click(button("Retry"))
     await until(async () => field() === `Before hello there after`, "the words in the draft")

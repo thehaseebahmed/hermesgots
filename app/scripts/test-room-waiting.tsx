@@ -19,6 +19,7 @@ import {
   click,
   find,
   json,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -309,7 +310,7 @@ test("at rest the room draws the chat's composer, without a model pill or a file
       await until(composerField, "the room's composer")
       assert.equal(composerField()!.getAttribute("placeholder"), "Message the room…")
       assert.equal(button("Add context"), undefined, "a room's message carries no file")
-      assert.equal(find('[data-slot="room-card"]'), null, "and nothing holds its place")
+      assert.ok(missing('[data-slot="room-card"]'), "and nothing holds its place")
       assert.equal(document.querySelector('[aria-label^="Model"]'), null, "and no model pill")
     })
   }))
@@ -351,6 +352,6 @@ test("a host that never declares rooms_questions draws no question card",
     await fresh([QUESTION], [], NO_QUESTIONS)
     await mount(screen(), async () => {
       await until(async () => Boolean(composerField()), "the composer to draw")
-      assert.equal(find('[data-slot="room-card"]'), null, "no card the Host never offered")
+      assert.ok(missing('[data-slot="room-card"]'), "no card the Host never offered")
     })
   }))

@@ -25,6 +25,7 @@ import {
   composerField,
   find,
   findAll,
+  missing,
   mount,
   sendPress,
   seedChats,
@@ -89,7 +90,7 @@ test("a chat whose bot has no key stays on the current screen", async () => {
       () => Boolean(find('[data-pane="route"]')?.textContent?.includes("held by the old screen")),
       "the current screen drew the chat",
     )
-    assert.equal(find("[data-chat-next]"), null)
+    assert.ok(missing("[data-chat-next]"))
   })
 })
 
@@ -213,8 +214,8 @@ test("a host that isn't answering is the header's word, and the composer stays",
     await mount(chatScreen("c-away"), async () => {
       await until(() => headerLine() === "This host isn't answering", "the header to name the host")
       assert.ok(find('textarea[aria-label="Message"]'), "the composer is still drawn")
-      assert.equal(find('[data-chat-next] [data-away]'), null, "and no notice in the thread")
-      assert.equal(find('[data-chat-next] [role="alert"]'), null, "nor a banner about the host")
+      assert.ok(missing('[data-chat-next] [data-away]'), "and no notice in the thread")
+      assert.ok(missing('[data-chat-next] [role="alert"]'), "nor a banner about the host")
 
       Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => false })
       await act(async () => void window.dispatchEvent(new Event("offline")))
@@ -545,14 +546,10 @@ test("a chat this device holds nothing of loads under one loader mid-screen, not
   const first = host.hold(0)
   await mount(chatScreen("c-fresh"), async () => {
     await until(() => Boolean(find("[data-loading-fresh]")), "the first read has the one loader")
-    assert.equal(
-      find('[data-slot="status-line"]'),
-      null,
-      "and no line of the thread speaks for it",
-    )
+    assert.ok(missing('[data-slot="status-line"]'), "and no line of the thread speaks for it")
     first.release()
     await until(() => replies().length > 0, "the chat arrives")
-    assert.equal(find("[data-loading-fresh]"), null, "the loader goes with the rows")
+    assert.ok(missing("[data-loading-fresh]"), "the loader goes with the rows")
   })
 })
 
@@ -570,12 +567,8 @@ test("a chat this device already holds opens as a thread, with the host's answer
   await mount(chatScreen("c-held"), async () => {
     await until(() => host.offsets.length > read, "the newest page is asked for")
     assert.ok(replies().includes("Found it."), "the thread is drawn before the host answers")
-    assert.equal(find("[data-loading-fresh]"), null, "no loader mid-screen")
-    assert.equal(
-      find('[data-slot="status-line"]'),
-      null,
-      "and no line says the thread is still being read",
-    )
+    assert.ok(missing("[data-loading-fresh]"), "no loader mid-screen")
+    assert.ok(missing('[data-slot="status-line"]'), "and no line says the thread is still being read")
     second.release()
     await until(() => replies().includes("Still here."), "the host's turn to land behind it")
     assert.ok(replies().includes("Found it."), "over the rows the device already had")
@@ -638,7 +631,7 @@ test("a stop the host refused still leaves Stop for the run it could not stop", 
       () => Boolean(find('button[aria-label="Stop"]')),
       "the run the host still holds is Stoppable again",
     )
-    assert.equal(find('button[aria-label="Send"]'), null, "and Send is not offered over a live run")
+    assert.ok(missing('button[aria-label="Send"]'), "and Send is not offered over a live run")
   })
 })
 

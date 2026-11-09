@@ -19,6 +19,7 @@ import {
   connection,
   find,
   findText,
+  missing,
   mountAfk,
   seedPrompts,
   seedSettings,
@@ -75,7 +76,7 @@ test("a copy whose entry moved on is labelled, and the editor offers the entry's
 
     await click(marker())
     await settle()
-    assert.equal(find('[role="alertdialog"]'), null, "pressing the label asks nothing")
+    assert.ok(missing('[role="alertdialog"]'), "pressing the label asks nothing")
     assert.deepEqual(afkWrites(host), [], "and the label writes nothing")
 
     await click(find('button[aria-label="Prompt"]'))

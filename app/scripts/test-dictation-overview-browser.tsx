@@ -14,7 +14,7 @@ withoutPlugin("Bubble")
 const { DictationSettings } = await import("@/components/settings/dictation")
 const { Screen } = await import("@/components/settings-chrome")
 const { db } = await import("@/lib/db")
-const { botProfile, find, mount, seedSettings, text, until } = await import("./component-kit.tsx")
+const { botProfile, find, missing, mount, seedSettings, text, until } = await import("./component-kit.tsx")
 
 test("with no Bubble plugin, the Overview draws the totals alone", async () => {
   await seedSettings({ activeProfileId: "bot-1" })
@@ -31,8 +31,8 @@ test("with no Bubble plugin, the Overview draws the totals alone", async () => {
     </MemoryRouter>,
     async () => {
       await until(async () => Boolean(find('[data-setting="words-spoken"]')), "the totals")
-      assert.equal(find('[data-setting="bubble"]'), null, "there is no service to turn on")
-      assert.equal(find('[data-setting="bubble-bot"]'), null, "and no bot to point at it")
+      assert.ok(missing('[data-setting="bubble"]'), "there is no service to turn on")
+      assert.ok(missing('[data-setting="bubble-bot"]'), "and no bot to point at it")
       assert.match(text(), /Words spoken/)
     },
   )

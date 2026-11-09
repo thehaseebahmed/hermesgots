@@ -17,6 +17,7 @@ import {
   findAll,
   findText,
   json,
+  missing,
   mount,
   path,
   seedSettings,
@@ -74,7 +75,7 @@ test("every component has one entry, in the library's own order", async () => {
     )
     for (const entry of referenceEntries())
       assert.ok(entry.example, `${entry.name} has a drawn example`)
-    assert.equal(find("[data-reference-missing]"), null, "so no entry is missing its drawing")
+    assert.ok(missing("[data-reference-missing]"), "so no entry is missing its drawing")
     for (const name of names()) {
       assert.ok(entryOf(name)?.querySelector("[data-reference-props]"), `${name} carries its props`)
       assert.ok(entryOf(name)?.querySelector("[data-reference-lang]"), `${name} carries its Lang`)
@@ -216,7 +217,7 @@ test("a pasted block draws, and its query calls nothing", async () => {
       /Pasted/,
       "with the words it was given",
     )
-    assert.equal(find("[data-reference-error]"), null, "a block that draws has no error")
+    assert.ok(missing("[data-reference-error]"), "a block that draws has no error")
   })
   assert.deepEqual(calls, [], "the playground calls nothing, not even for a query")
 })
@@ -234,11 +235,7 @@ test("a block that does not parse says why in words, beside its source", async (
       find("[data-reference-result] [data-md-code]"),
       "the source it was given sits beneath it as code",
     )
-    assert.equal(
-      find("[data-reference-result] [data-slot=card]"),
-      null,
-      "and no empty frame stands in the drawing's place",
-    )
+    assert.ok(missing("[data-reference-result] [data-slot=card]"), "and no empty frame stands in the drawing's place")
   })
 })
 
@@ -270,7 +267,7 @@ test("the playground keeps nothing: a remount is empty", async () => {
   await mount(screen, async () => {
     const field = find("#openui-playground") as HTMLTextAreaElement | null
     assert.equal(field?.value, "", "the field is empty again")
-    assert.equal(find("[data-reference-result]"), null, "and nothing is drawn from the last visit")
+    assert.ok(missing("[data-reference-result]"), "and nothing is drawn from the last visit")
   })
 })
 
@@ -283,8 +280,8 @@ test("the screen is behind the setup gate every other screen passes through", as
     </MemoryRouter>,
     async () => {
       await settle()
-      assert.equal(find("[data-reference-entry]"), null, "no entry is drawn before setup")
-      assert.equal(find("[data-reference-playground]"), null, "nor the playground")
+      assert.ok(missing("[data-reference-entry]"), "no entry is drawn before setup")
+      assert.ok(missing("[data-reference-playground]"), "nor the playground")
     },
   )
 })
@@ -323,7 +320,7 @@ test("Settings no longer offers the reference", async () => {
     </MemoryRouter>,
     async () => {
       await settle()
-      assert.equal(find('a[href="/docs/open-ui"]'), null, "the menu row is gone")
+      assert.ok(missing('a[href="/docs/open-ui"]'), "the menu row is gone")
     },
   )
 })

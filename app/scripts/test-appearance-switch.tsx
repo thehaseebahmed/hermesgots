@@ -10,7 +10,7 @@ import test from "node:test"
 import { AppearanceSettings } from "@/components/settings/appearance"
 import { db, type Settings } from "@/lib/db"
 
-import { click, find, json, mount, seedSettings, text, until } from "./component-kit.tsx"
+import { click, find, json, missing, mount, seedSettings, text, until } from "./component-kit.tsx"
 
 interface Switch {
   id: string
@@ -127,7 +127,7 @@ test("seeded on, each switch reads on", async () => {
 
 test("the retired Fold thinking switch draws no row", async () => {
   await appearance({}, async () => {
-    assert.equal(find("label[for='fold-thinking']"), null, "its row is gone from the section")
+    assert.ok(missing("label[for='fold-thinking']"), "its row is gone from the section")
     assert.doesNotMatch(text(), /Fold thinking/, "and nothing on the screen names the switch")
     assert.ok(rowOf(SWITCHES[0]), "the switches that follow the account are still drawn")
   })

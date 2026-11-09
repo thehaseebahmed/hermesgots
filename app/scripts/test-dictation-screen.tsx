@@ -30,6 +30,7 @@ import {
   findAll,
   json,
   lineLabel,
+  missing,
   mount,
   seedSettings,
   text,
@@ -522,7 +523,7 @@ test("a row whose cleanup was never recorded says nothing about it", async () =>
     await until(async () => rows().length === 1, "the dictation")
     await click(rows()[0] ?? null)
     await until(async () => Boolean(heardBlock()), "the sheet")
-    assert.equal(find("[data-dictation-tidied]"), null, "nothing is claimed about its cleanup")
+    assert.ok(missing("[data-dictation-tidied]"), "nothing is claimed about its cleanup")
   })
 })
 

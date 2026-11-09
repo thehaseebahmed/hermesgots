@@ -18,6 +18,7 @@ import {
   composerField,
   find,
   findAll,
+  missing,
   mount,
   Path,
   path,
@@ -105,7 +106,7 @@ test("a Main this device holds only a card of opens as a thread, under no loader
   await mount(screen(main), async () => {
     await until(() => host.offsets.length > read, "the newest page is asked for")
     assert.ok(find('[data-slot="thread-card"]'), "the card this device holds is drawn")
-    assert.equal(find("[data-loading-fresh]"), null, "and no loader stands over it (ADR 0084)")
+    assert.ok(missing("[data-loading-fresh]"), "and no loader stands over it (ADR 0084)")
     held.release()
   })
 })
@@ -234,6 +235,6 @@ test("a Main left with nothing but what left it draws its card after its marker"
     assert.ok(follows(marker, card), "the thread began after the move")
     // The compaction came after everything Main holds, and Main holds no message: a divider stands
     // between two messages, so it draws none rather than closing the flow.
-    assert.equal(find('[data-slot="compaction"]'), null, "no divider closes the flow")
+    assert.ok(missing('[data-slot="compaction"]'), "no divider closes the flow")
   })
 })

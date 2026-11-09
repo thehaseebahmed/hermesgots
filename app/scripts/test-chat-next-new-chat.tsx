@@ -22,6 +22,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   seedChats,
   settle,
@@ -222,8 +223,8 @@ test("a keyless bot keeps the current screen and writes nothing", async () => {
       () => (document.body.textContent ?? "").includes(SETUP_COPY),
       "the current screen's setup copy",
     )
-    assert.equal(find("[data-blank]"), null, "and no blank surface")
-    assert.equal(find("[data-chat-next]"), null, "nothing of chat-next is drawn")
+    assert.ok(missing("[data-blank]"), "and no blank surface")
+    assert.ok(missing("[data-chat-next]"), "nothing of chat-next is drawn")
     assert.ok(find('button[aria-label^="Bot:"]'), "the picker it keeps")
     assert.equal(await db.conversations.count(), 0, "no record for a bot that cannot be called")
   })
@@ -240,7 +241,7 @@ test("a bot with an address and no key keeps setup, not a dead composer", async 
       () => (document.body.textContent ?? "").includes(SETUP_COPY),
       "the setup copy for a bot with no key",
     )
-    assert.equal(find("[data-blank]"), null, "no blank surface")
+    assert.ok(missing("[data-blank]"), "no blank surface")
     const send = find('button[aria-label="Send"]') as HTMLButtonElement | null
     assert.ok(send, "the composer is drawn")
     assert.equal(send.disabled, true, "and it cannot send without a key")

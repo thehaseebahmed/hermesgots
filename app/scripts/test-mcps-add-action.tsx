@@ -26,12 +26,13 @@ import {
   json,
   laptop,
   mediaHost,
+  missing,
   mount,
   path,
   seedSettings,
   settle,
-  until,
   type HostAsk,
+  until,
 } from "./component-kit.tsx"
 
 /** The MCP page, at the address the bot's settings list gives it, with the address on screen. */
@@ -179,11 +180,7 @@ test("a Host with mcps_add but no Catalogue has the +, offering only a custom se
     assert.ok(addButton(), "the + is there for a server typed in by hand")
     await click(addButton())
     await until(async () => Boolean(find('[data-mcp-source="custom"]')), "the Add sheet to open")
-    assert.equal(
-      find('[data-mcp-source="catalogue"]'),
-      null,
-      "and offers no way into a Catalogue this Host can't read",
-    )
+    assert.ok(missing('[data-mcp-source="catalogue"]'), "and offers no way into a Catalogue this Host can't read")
   })
 })
 

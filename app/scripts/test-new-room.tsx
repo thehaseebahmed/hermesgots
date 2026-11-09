@@ -18,6 +18,7 @@ import { RoomChat } from "@/components/room/room-chat"
 import { db, type Profile } from "@/lib/db"
 import { COMPOSER_SLOT } from "@/lib/layout"
 import {
+  Path,
   botProfile,
   click,
   composerField,
@@ -25,8 +26,8 @@ import {
   findAll,
   json,
   laptop,
+  missing,
   mount,
-  Path,
   seedSettings,
   settle,
   type,
@@ -257,11 +258,7 @@ test("a host that cannot write offers no New room", async () => {
     async () => {
       await until(async () => Boolean(find('nav[aria-label="Main"]')), "the sidebar")
       await settle()
-      assert.equal(
-        find('[data-slot="new-room"]'),
-        null,
-        "no control for a Host that cannot make a room",
-      )
+      assert.ok(missing('[data-slot="new-room"]'), "no control for a Host that cannot make a room")
     },
   )
 })

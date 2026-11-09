@@ -23,6 +23,7 @@ import {
   find,
   findAll,
   findText,
+  missing,
   mount,
   mountAfk,
   seedPrompts,
@@ -128,7 +129,7 @@ test("saving keeps the words on screen under a name and tags, and writes no Prom
     assert.equal(saved[0].body, DEFAULT_AFK_PROMPT, "holding the words it started from")
     assert.ok(saved[0].id.startsWith("e-"), "with an id this device minted, which the document keys by")
     assert.deepEqual(writes(host), [], "saving to the library is not a write to any project")
-    assert.equal(find("[data-prompt-entry]"), null, "and the sheet closes on the save")
+    assert.ok(missing("[data-prompt-entry]"), "and the sheet closes on the save")
 
     await click(findText("button", "Choose from library"))
     assert.match(entryRows()[0].textContent ?? "", /Review first/, "the list shows what was saved")
@@ -216,7 +217,7 @@ test("deleting an entry tombstones it and leaves every project's Prompt standing
       DEFAULT_AFK_PROMPT,
       "the copy the project holds stands: a pick was a copy, not a pointer",
     )
-    assert.equal(find("[data-prompt-entry]"), null, "and the entry sheet closes on the delete")
+    assert.ok(missing("[data-prompt-entry]"), "and the entry sheet closes on the delete")
   })
 })
 
@@ -263,11 +264,7 @@ test("signed out, the Prompt editor is the textarea it always was", async () => 
   await seedSettings({ developer: true })
   await mountAfk(config, project, async () => {
     await click(find('button[aria-label="Prompt"]'))
-    assert.equal(
-      find("[data-prompt-library-actions]"),
-      null,
-      "no library without an account signed in with its vault open, whatever the host advertises",
-    )
+    assert.ok(missing("[data-prompt-library-actions]"), "no library without an account signed in with its vault open, whatever the host advertises")
     assert.equal(findText("button", "Choose from library"), null, "and no door to one")
     assert.equal(findText("button", "Save to library"), null)
     assert.equal(fieldValue(), DEFAULT_AFK_PROMPT, "today's field, holding the project's words")
@@ -287,7 +284,7 @@ test("an editor without the library draws no affordances", async () => {
   await editor(
     afkHost({ features: PICKS_FEATURES }),
     async () => {
-      assert.equal(find("[data-prompt-library-actions]"), null, "no library where it isn't offered")
+      assert.ok(missing("[data-prompt-library-actions]"), "no library where it isn't offered")
       assert.equal(findText("button", "Choose from library"), null)
       assert.equal(find('textarea[aria-label="Prompt"]') !== null, true, "the field, and nothing more")
     },

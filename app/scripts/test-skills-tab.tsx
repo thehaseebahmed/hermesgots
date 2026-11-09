@@ -14,6 +14,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -272,7 +273,7 @@ test("every row says how it is doing, in the host's own words where it isn't rea
       "a broken skill says why, in the host's sentence",
     )
     assert.ok(find('[data-skill="browse"] .text-destructive'), "a failure reads as one")
-    assert.equal(find('[data-skill="deploy"] .text-destructive'), null, "Off is not a failure")
+    assert.ok(missing('[data-skill="deploy"] .text-destructive'), "Off is not a failure")
   })
 })
 
@@ -317,7 +318,7 @@ test("a host that can't list skills has no Skills tab, and its address lands on 
   await seed("skills-absent", ["mcps"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     assert.equal(tabNamed("Skills"), null, "no Skills page")
-    assert.equal(find("[data-skills-tab]"), null, "and nothing of the tab is drawn")
+    assert.ok(missing("[data-skills-tab]"), "and nothing of the tab is drawn")
     assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
     assert.ok(find("[data-bot-card]"), "and the bot's own page is what is drawn")
   })
@@ -359,7 +360,7 @@ test("a Host that advertises no write puts no switch on any row", async () => {
   await seed("skills-readonly", ["skills"], SWITCHABLE)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    assert.deepEqual(findAll("[role='switch']"), [], "a read-only tab has no controls")
+    assert.equal(findAll("[role='switch']").length, 0, "a read-only tab has no controls")
   })
 })
 
@@ -422,7 +423,7 @@ test("a row's title opens the skill's own note, at the note's own address", asyn
     await until(async () => noteBody() !== null, "the skill's note")
     assert.equal(here(), "/settings/bots/bot-1/skills/pr-review", "the note is the route's own")
     assert.equal(noteSkill(), "pr-review", "the note is that skill's own page")
-    assert.equal(find("[data-skills-tab]"), null, "and it takes the page's place")
+    assert.ok(missing("[data-skills-tab]"), "and it takes the page's place")
     assert.equal(find("[data-skill-origin]")?.textContent, "Yours", "where it came from, first")
     assert.equal(
       find('[data-skill-prop="name"]')?.textContent,
@@ -472,10 +473,10 @@ test("a linked file opens in the same note, and the way back returns to the skil
       /title: The checklist/,
       "its yaml is drawn as properties, never as raw text",
     )
-    assert.equal(find("[data-skill-files]"), null, "one note, showing one thing")
+    assert.ok(missing("[data-skill-files]"), "one note, showing one thing")
     await click(find('button[aria-label="Back to the skill"]'))
     await until(async () => find("[data-skill-files]") !== null, "the skill's own note again")
-    assert.equal(find("[data-skill-file]"), null, "the file's text went with the tap back")
+    assert.ok(missing("[data-skill-file]"), "the file's text went with the tap back")
     assert.equal(noteSkill(), "pr-review", "and stays that skill's page")
   })
 })
@@ -519,11 +520,7 @@ test("the Host's readiness and setup are the note's next lines, both where it ha
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await openNote("pr-land")
-    assert.deepEqual(
-      findAll("[data-skill-setup]"),
-      [],
-      "a host that says neither draws neither line",
-    )
+    assert.equal(findAll("[data-skill-setup]").length, 0, "a host that says neither draws neither line")
   })
 })
 
@@ -534,7 +531,7 @@ test("a Host that can't open a skill leaves the rows plain, and nothing opens", 
     await click(row("pr-review"))
     await settle()
     assert.equal(here(), "/settings/bots/bot-1/skills", "the row has no address to open")
-    assert.equal(find("[data-skill-sheet]"), null, "and a row opens nothing")
+    assert.ok(missing("[data-skill-sheet]"), "and a row opens nothing")
   })
 })
 
@@ -561,7 +558,7 @@ test("a note the Host refuses goes back on its own sentence", async () => {
       await until(async () => errors.length === 1, "the toast")
       assert.deepEqual(errors, ["Skill 'pr-review' isn't on this bot."])
       await settle()
-      assert.equal(find("[data-skill-sheet]"), null, "nothing is left half-drawn")
+      assert.ok(missing("[data-skill-sheet]"), "nothing is left half-drawn")
       assert.equal(here(), "/settings/bots/bot-1/skills", "and the tab has the address back")
     })
   } finally {
@@ -625,12 +622,8 @@ test("a skill whose row says no origin offers no Remove, and no guess at one", a
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await openNote("stray")
-    assert.equal(find("[data-skill-origin]"), null, "the note says nothing it wasn't told")
-    assert.equal(
-      find("[data-skill-properties]"),
-      null,
-      "and a skill holding neither frontmatter nor host facts draws no block at all",
-    )
+    assert.ok(missing("[data-skill-origin]"), "the note says nothing it wasn't told")
+    assert.ok(missing("[data-skill-properties]"), "and a skill holding neither frontmatter nor host facts draws no block at all")
     assert.equal(removeButton(), null, "and offers no removal behind an origin it can't name")
   })
 })
@@ -912,7 +905,7 @@ test("a skill row with both targets: the left opens its note, the switch toggles
     )
     await click(switchIn("ops-one"))
     await until(async () => posts(calls).length === 1, "the row's write")
-    assert.equal(find("[data-skill-sheet]"), null, "the switch opens nothing")
+    assert.ok(missing("[data-skill-sheet]"), "the switch opens nothing")
     await click(find('[data-skill="ops-one"] button'))
     await until(async () => noteBody() !== null, "the skill's sheet")
     assert.equal(noteSkill(), "ops-one", "the left column opened it")
@@ -956,7 +949,7 @@ test("a Host with no write: a plain category title, and the rows still open", as
   )
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    assert.deepEqual(findAll("[role='switch']"), [], "no header's switch and no row's")
+    assert.equal(findAll("[role='switch']").length, 0, "no header's switch and no row's")
     assert.match(
       categoryOf("ops")?.textContent ?? "",
       /1 of 3 on/,
@@ -976,7 +969,7 @@ test("a Host with no view: the category and its rows toggle without opening anyt
     assert.ok(categorySwitch("ops"), "the category keeps its switch")
     await click(switchIn("ops-one"))
     await until(async () => /Off/.test(row("ops-one")?.textContent ?? ""), "the row to say Off")
-    assert.equal(find("[data-skill-sheet]"), null, "and nothing opened")
+    assert.ok(missing("[data-skill-sheet]"), "and nothing opened")
     assert.equal(here(), "/settings/bots/bot-1/skills", "the tab keeps its address")
   })
 })

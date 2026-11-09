@@ -37,7 +37,7 @@ import {
   STT,
   switchIn,
 } from "./dictation-page-kit.tsx"
-import { click, find, findAll, mount, type, until } from "./component-kit.tsx"
+import { click, find, findAll, missing, mount, type, until } from "./component-kit.tsx"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
 
@@ -267,11 +267,7 @@ test("the Speech model row names the model in play, and opens the host's models 
       /Not measured/,
       "a row nobody timed says so rather than quoting a factor",
     )
-    assert.equal(
-      find("[data-speech-probe]"),
-      null,
-      "and a host that owes nothing captions nothing: each row carries its own measurement",
-    )
+    assert.ok(missing("[data-speech-probe]"), "and a host that owes nothing captions nothing: each row carries its own measurement")
     const clearing = speechOptions().find((option) =>
       /\b(default|none|clear)\b/i.test(option.textContent ?? ""),
     )
