@@ -1,12 +1,3 @@
-// A component test that hands a found element to assert's equality makes Node build its failure by
-// inspecting that element, and a mounted element carries React's fiber graph, so a red run walks the
-// tree until the worker holds gigabytes. `scripts/test-rooms-list.tsx` was killed at 5 GB by one
-// `assert.equal(find(…), null, …)`. The sweep answered presence with a boolean; this keeps the form
-// out, since the next red one is the next 5 GB.
-//
-// The check reads the TypeScript grammar rather than the text, so it names every spelling that
-// produces an element — the harness's helpers, `document.querySelector`, and a local helper that
-// returns one — wherever the call is written and whatever its selector holds.
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
@@ -23,7 +14,6 @@ const EQUALITY = new Set([
   "notDeepEqual",
 ])
 
-/** The harness's helpers that answer an element (or a list of them). */
 const ELEMENT_FUNCTIONS = new Set([
   "find",
   "findAll",
@@ -33,10 +23,8 @@ const ELEMENT_FUNCTIONS = new Set([
   "threadCard",
 ])
 
-/** `document.querySelector` and its list form, read as one name. */
 const DOCUMENT_FUNCTIONS = new Set(["querySelector", "querySelectorAll"])
 
-/** A node with the wrappers that leave what it answers unchanged taken off. */
 function unwrap(node) {
   let current = node
   for (;;) {
@@ -48,7 +36,6 @@ function unwrap(node) {
   }
 }
 
-/** The name a call goes by — `find`, `dialog`, `document.querySelector` — or nothing. */
 function calleeName(call) {
   const expression = call.expression
   if (ts.isIdentifier(expression)) return expression.text
@@ -59,11 +46,6 @@ function calleeName(call) {
   return null
 }
 
-/**
- * Whether an expression is an element and nothing read off one: a bare call to a function that
- * answers an element. `find(sel)?.textContent` and `findAll(sel).length` are property reads that
- * answer a string or a count, so they are no offender.
- */
 function elementValued(expression, helpers) {
   const node = unwrap(expression)
   if (!ts.isCallExpression(node)) return false
@@ -72,7 +54,6 @@ function elementValued(expression, helpers) {
   return name.startsWith("document.") || ELEMENT_FUNCTIONS.has(name) || helpers.has(name)
 }
 
-/** The expressions a function answers, taken at the returns that belong to its own body. */
 function returnedExpressions(fn) {
   if (!fn.body) return []
   if (!ts.isBlock(fn.body)) return [fn.body]
@@ -87,7 +68,6 @@ function returnedExpressions(fn) {
   return returns
 }
 
-/** Every function the file defines, by name, with what its body answers. */
 function definitions(sourceFile) {
   const found = new Map()
   const note = (name, fn) => {
@@ -111,11 +91,6 @@ function definitions(sourceFile) {
   return found
 }
 
-/**
- * The file's own helpers that answer an element, resolved to a fixed point so a helper of a helper
- * counts too. A function that answers a property of one (`marker()?.textContent`) answers a string
- * and stays out: the same rule the assertions are read by.
- */
 function elementHelpers(sourceFile) {
   const answers = definitions(sourceFile)
   const helpers = new Set()
@@ -133,7 +108,6 @@ function elementHelpers(sourceFile) {
   return helpers
 }
 
-/** The equality name a call is written as (`assert.equal`), or nothing. */
 function assertionName(call) {
   const expression = call.expression
   if (!ts.isPropertyAccessExpression(expression)) return null
@@ -141,8 +115,7 @@ function assertionName(call) {
   return EQUALITY.has(expression.name.text) ? expression.name.text : null
 }
 
-/** Every `assert.<equality>(…)` whose first argument hands it an element. */
-export function offendersIn(source, file = "<source>") {
+function offendersIn(source, file = "<source>") {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const errors = sourceFile.parseDiagnostics ?? []
   if (errors.length > 0) {

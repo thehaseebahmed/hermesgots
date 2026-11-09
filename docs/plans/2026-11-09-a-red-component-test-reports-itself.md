@@ -45,8 +45,9 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
 3. **A guard keeps the pattern out.** A unit test reads every `scripts/test-*.tsx` with the TypeScript
    parser and fails on an assertion that hands `equal`/`strictEqual`/`deepEqual`/`deepStrictEqual`/
    `notEqual`/`notDeepEqual` a `find`/`findAll`/`findText`/`labelled`/`composerField`/`threadCard` or
-   `document.querySelector*` call, or a local function that answers one — however the call is written
-   and whatever its selector holds. Goals: G2. After: 2. Layers: unit tier. Check: red on
+   `document.querySelector*` call, or a local function that answers one. An element bound to a
+   variable first (`const row = find(sel); assert.equal(row, null)`) is still outside it, which Risks
+   records. Goals: G2. After: 2. Layers: unit tier. Check: red on
    `9ab58e34`'s tests — 171 sites, 90 of them on the tree the first sweep left — and green after the
    sweep, with a fixture for each spelling and an unparsable file failing rather than skipped.
    Done.
