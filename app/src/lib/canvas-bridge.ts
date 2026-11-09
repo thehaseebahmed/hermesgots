@@ -403,18 +403,21 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
  * meant for the page drawn before this one can never settle a promise here. ES5, like the scroll
  * bridge beside it: it runs before the page's own scripts and asks nothing of the page.
  *
- * A link is the page's second way out of the frame, and it is the reader's tap that asks: a trusted
- * click over the nearest `<a href>` whose attribute is an absolute `http`/`https` URL cancels the
- * click and posts one `open` call, which the app opens in a browser of its own. The scheme test is
+ * A link is the page's second way out of the frame, and the reader's tap is how a page is meant to ask:
+ * a trusted click over the nearest `<a href>` whose attribute is an absolute `http`/`https` URL cancels
+ * the click and posts one `open` call, which the app opens in a browser of its own — unless the page
+ * already answered that click itself, which is why `defaultPrevented` is read first. The scheme test is
  * on the attribute and not on the anchor's resolved `href`, because a resolved `#top` or
  * `page.html` is the page's own https URL — the page keeps those, and `mailto:`, `javascript:`,
- * `data:` and `blob:` too. `open` is deliberately not on `window.canvas`: a click is the only way
- * to ask it, so no script of the page's can open a tab on its own.
+ * `data:` and `blob:` too. `open` is not on `window.canvas`, so the API a page is offered has no way
+ * to ask it. That is a shape, not a fence: a page's own script can `postMessage` the same call, and
+ * nothing on this side can tell a tap from a script. What is enforced here is the scheme — the app
+ * opens `http(s)` and nothing else — and the frame: only this screen's own frame is heard.
  */
 export const BRIDGE_SCRIPT =
   `(function(){var TYPE="` +
   BRIDGE_MESSAGE +
-  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});var web=function(url){var low=String(url||"").toLowerCase();return low.slice(0,7)==="http://"||low.slice(0,8)==="https://"};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};addEventListener("click",function(event){if(!event||event.isTrusted!==true||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();ask({method:"open",url:url}).catch(function(){})},false);window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
+  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});var web=function(url){var low=String(url||"").toLowerCase();return low.slice(0,7)==="http://"||low.slice(0,8)==="https://"};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};addEventListener("click",function(event){if(!event||event.isTrusted!==true||event.defaultPrevented||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();ask({method:"open",url:url}).catch(function(){})},false);window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
   ";" +
   POINT_SCRIPT
 
@@ -430,12 +433,12 @@ export interface BridgeHost {
   call(call: BridgeHostCall): Promise<unknown>
   /** Asks the reader whether the canvas may use one tool, and answers what they chose. */
   consent(tool: string): Promise<boolean>
+  /** A link the reader tapped, opened in the app's own way out: a browser tab, no opener. */
+  open(url: string): void
   /** The element the page answered while a point was armed; a point is never a call. */
   point?(point: CanvasPoint): void
   /** A page that has just run its half of the bridge, and can be armed now. */
   ready?(): void
-  /** A link the reader tapped, opened in the app's own way out: a browser tab, no opener. */
-  open(url: string): void
 }
 
 function wordsOf(error: unknown): string {

@@ -66,11 +66,12 @@ const NO_PEER = `(function(){var names=["RTCPeerConnection","webkitRTCPeerConnec
  * without this the reader is left on a refusal with the page's state gone; the guard cancels the
  * default instead, and the page stays whole.
  *
- * It listens on `window` in the bubble phase, which is the whole trick: every handler the page put
- * on the form, on a field or on `window` has already run and kept whatever it did, and a submit the
- * page prevented itself arrives already prevented and is left alone. Only an unprevented submit is
- * cancelled, so nothing the page means to happen is taken away from it. The policy does not move:
- * this cancels a navigation, it does not permit one.
+ * It listens on `window` in the bubble phase: a submit travels from the form up to the window, so every
+ * handler the page put on the form or on a field has already run and kept whatever it did, and a submit
+ * the page prevented itself arrives already prevented and is left alone. Only an unprevented submit is
+ * cancelled, so nothing the page means to happen is taken away from it. One it put on the window itself
+ * is registered after this and runs afterwards, which is the cost of being first in the head. The policy
+ * does not move: this cancels a navigation, it does not permit one.
  */
 export const SUBMIT_IN_PLACE = `(function(){addEventListener("submit",function(event){if(event&&!event.defaultPrevented){event.preventDefault()}},false)})()`
 

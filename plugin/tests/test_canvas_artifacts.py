@@ -15,9 +15,10 @@ frontmatter, which is the name `openui.py` registers it under.
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "DESIGN.md"
@@ -55,6 +56,44 @@ class SpecCopyTest(unittest.TestCase):
             spec,
             f"{PLUGIN_COPY.relative_to(ROOT)} is not DESIGN.md's own bytes: copy it again "
             "(cp DESIGN.md plugin/canvas/DESIGN.md) rather than editing the two.",
+        )
+
+
+def _frontmatter_colours(text: str) -> List[str]:
+    """The colour names a spec declares, from its `colors:` map, in the order it writes them."""
+    names: List[str] = []
+    inside = False
+    for line in text.splitlines():
+        if line.startswith("colors:"):
+            inside = True
+            continue
+        if inside:
+            if line[:1] not in (" ", "\t"):
+                break
+            name, sep, _value = line.strip().partition(":")
+            if sep and name:
+                # A nested key is a property of the token above it, not a token of its own.
+                names.append(name)
+    return names
+
+
+class SpecAgainstTheAppTest(unittest.TestCase):
+    """The spec says what the app's stylesheet says, or the next rename goes unnoticed."""
+
+    def test_every_colour_it_documents_is_one_the_app_declares(self) -> None:
+        # The copy test above keeps the two specs identical, and the linter keeps the spec coherent;
+        # neither can tell that `app/src/index.css` renamed a token. This is the one test that fails
+        # when the spec and the stylesheet drift, which is the only way a rename could land silently.
+        css = (ROOT / "app" / "src" / "index.css").read_text(encoding="utf-8")
+        declared = set(re.findall(r"^\s*--([a-z0-9-]+)\s*:", css, re.M))
+        documented = _frontmatter_colours(SPEC.read_text(encoding="utf-8"))
+        self.assertTrue(documented, "DESIGN.md declares no colours at all")
+        missing = sorted(name for name in documented if name not in declared)
+        self.assertEqual(
+            missing,
+            [],
+            "DESIGN.md documents colours app/src/index.css doesn't declare: "
+            + ", ".join(missing),
         )
 
 

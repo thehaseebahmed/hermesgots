@@ -491,7 +491,7 @@ test("the page's half posts the call it was asked for and settles on the reply",
   await assert.rejects(tool, /didn't allow/)
 })
 
-test("a tapped link opens in the app, once, with no opener", async () => {
+test("a tap posts one open call and a handled or foreign click posts none", async () => {
   // The reader: only an absolute http(s) URL is a link the app opens, whatever a page sends.
   const open = (call, url) => readCall({ type: BRIDGE_MESSAGE, call, method: "open", url })
   assert.deepEqual(open(1, "https://example.com/a?b=1"), {
@@ -557,11 +557,11 @@ test("a tapped link opens in the app, once, with no opener", async () => {
     getAttribute: (name) => (name === "href" ? href : null),
     parentNode: null,
   })
-  const tap = (target, { trusted = true } = {}) => {
+  const tap = (target, { trusted = true, prevented = false } = {}) => {
     const event = {
       target,
       isTrusted: trusted,
-      defaultPrevented: false,
+      defaultPrevented: prevented,
       cancels: 0,
       preventDefault() {
         this.cancels += 1
@@ -595,6 +595,12 @@ test("a tapped link opens in the app, once, with no opener", async () => {
   assert.equal(tap(anchor("https://example.com/scripted"), { trusted: false }).cancels, 0)
   fire("click", { isTrusted: true })
   assert.equal(asked.length, 1)
+
+  // A click the page already answered itself is the page's: its handler ran first and prevented the
+  // default, so this link is not also a tab. A page's own drawer must not open a browser beside it.
+  const answered = tap(anchor("https://example.com/handled"), { prevented: true })
+  assert.equal(answered.cancels, 0, "a handled click is left alone")
+  assert.equal(asked.length, 1, "and asks for nothing")
 
   // A tap on the link's own words walks up to the anchor it is inside.
   const words = { tagName: "SPAN", nodeType: 1, parentNode: link }

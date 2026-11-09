@@ -34,20 +34,26 @@ head the app injects, not by asking a bot to work around them:
   an absolute `http` or `https` URL cancels the click and posts one `open` call, which the bridge
   accepts only through `new URL` with no base and only for those two schemes, and the screen opens
   through `openExternal` — the platform's browser on Android, a tab with `noopener,noreferrer` on the
-  web. `open` is deliberately not on `window.canvas`: a click is the only way to ask, so no script of
-  the page's can open a tab on its own. `mailto:`, `javascript:`, `data:`, `blob:`, relative and
-  `#hash` links stay in the frame, where they are the page's own business.
+  web. A click the page already answered itself is left alone. `open` is not on `window.canvas`, so the
+  API a page is offered has no way to ask it; that is a shape, not a fence, since a page's own script
+  can post the same call and nothing on this side can tell a tap from a script. What is enforced is the
+  scheme — the app opens `http(s)` and nothing else — and the frame: only this screen's own frame is
+  heard. `mailto:`, `javascript:`, `data:`, `blob:`, relative and `#hash` links stay in the frame,
+  where they are the page's own business.
 
 **A write answers with the guide's advice.** `canvas_write` and `canvas_edit` carry `warnings`: a
-literal colour where a token belongs, a `<form>` with no submit handler anywhere in the document, and
-a fixed width past the 390px phone. They are advice and never a gate — the version is stored either
-way, because `scan` is what refuses a write and these are what the guide would have said. Only rules
-decidable from the markup are here: a 44px target or an empty state cannot be measured from a string,
-and a warning a bot cannot act on is noise.
+`<form>` with nothing handling its submit or a click inside it, and a width past the 390px phone set on
+an element's own `style`. They are advice and never a gate — the version is stored either way, because
+`scan` is what refuses a write and these are what the guide would have said. Deliberately absent is any
+rule about colour: a user's named palette is the design, and a rule that argued with it would be the
+guide overruling what it puts first. So is anything the markup cannot decide — a 44px target, an empty
+state — because a warning a bot cannot act on is noise, and one that fires on the guide's own advice
+(its 768px breakpoint, its button click) teaches a bot to distrust all three.
 
-The cost of the choice is that the guide has 42 characters of headroom under the host's 4,000 (a
-section over it is dropped whole, and the app hides Canvas when its section is missing), that the
-vendored skills are snapshots with no updater, and that a tab opened from a message handler can still
-be popup-blocked on the desktop web. A consent question per link, a fourth skill holding the spec, and
-renaming the bridge's transport were all considered and left out: each is a surface this change does
-not need.
+The cost of the choice is that the guide has 25 characters of headroom under the host's 4,000 (a
+section over it is dropped whole, and the app hides Canvas when its section is missing), that a page's
+own script can ask for a link to open — the scheme is what is enforced, not a proven tap — that the
+vendored skills are snapshots with no updater and duplicate names a host may already ship, and that a
+tab opened from a message handler can still be popup-blocked on the desktop web. A consent question per
+link, a fourth skill holding the spec, and renaming the bridge's transport were all considered and left
+out: each is a surface this change does not need.

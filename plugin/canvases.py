@@ -239,18 +239,20 @@ def scan(html: Any) -> None:
 
 # --- the guide's advice ---------------------------------------------------------------------------
 
-# The guide tells a bot to spend colour on the tokens: a literal is a colour the app never set for
-# the reader's mode, so the page drawn in the other one is the page that breaks. A bot is told here,
-# where it can still fix it, rather than by a user looking at the wrong colours.
-_LITERAL_COLOUR = re.compile(r"(?i)#(?:[0-9a-f]{3}|[0-9a-f]{6})\b|\b(?:rgba?|hsla?|oklch)\(")
-# A form's submit is cancelled in place by the sandbox's guard, so a form whose handler is nowhere in
-# the document is a button that does nothing: the page's own answer has to hang off it somewhere.
+# A form's submit is cancelled in place by the sandbox's guard, so a form whose answer hangs off
+# nothing in the document is a button that does nothing. A click handler on the button is the answer
+# the guide gives, so it counts: the rule is about the page having somewhere to go, not about which
+# event it chose.
 _FORM = re.compile(r"(?is)<form\b")
-_FORM_HANDLER = re.compile(r"(?i)addEventListener\(\s*[\"']submit[\"']|\bonsubmit\s*=")
-# A canvas opens at 390px in one hand, so a width set past it scrolls the phone sideways. A maximum
-# is no such thing — it is what keeps a page in its place — so only `width` and `min-width` are read,
-# and only in px: a percentage is the screen's width rather than the page's own.
-_FIXED_WIDTH = re.compile(r"(?i)(?<![-\w])(?:min-)?width\s*:\s*(\d{2,4})px")
+_FORM_HANDLER = re.compile(
+    r"(?i)addEventListener\(\s*[\"'](?:submit|click)[\"']|\bonsubmit\s*=|\bonclick\s*="
+)
+# A canvas opens at 390px in one hand, so a width the page carries on the element itself is a width
+# the phone has to scroll sideways. Only an inline `style` is read: a `<style>` block is where the
+# guide's own breakpoints live (`min-width: 768px`), and a rule that fires on the advice it ships with
+# is worse than no rule at all.
+_INLINE_STYLE = re.compile(r"(?is)\bstyle\s*=\s*(?:\"([^\"]*)\"|'([^']*)')")
+_FIXED_WIDTH = re.compile(r"(?i)(?<![-a-z])(?:min-)?width\s*:\s*(\d{3,4})px")
 PHONE_WIDTH = 390
 
 
@@ -260,29 +262,33 @@ def warnings(html: Any) -> List[str]:
     Advice and never a gate: the version is stored either way, because the scan is what refuses and
     this is only what the guide would have said. So nothing here raises — a page the rules can't be
     read out of is a page answered without advice, which is no reason to lose a write.
+
+    Only rules a bot can act on, and only ones that never overrule the user: a named look, brand or
+    palette is the design (the guide says so first), so nothing here judges a colour. What is left is
+    a page that can't work — a form whose answer goes nowhere, and a width the phone must scroll.
     """
     text = html if isinstance(html, str) else ""
     try:
         markup = _markup(text)
         said: List[str] = []
-        literal = _LITERAL_COLOUR.search(markup)
-        if literal:
-            # A function's name is what was matched, minus its bracket: `rgb()` reads, `rgb(` doesn't.
-            written = literal.group(0) + (")" if literal.group(0).endswith("(") else "")
-            said.append(
-                f"The page writes {written} where a token belongs: a literal breaks in the other "
-                "mode, so spend colour on the tokens."
-            )
         if _FORM.search(markup) and not _FORM_HANDLER.search(text):
             said.append(
-                "The page has a <form> and no submit handler, and its submit is cancelled in place: "
-                "handle the button's click."
+                "The page has a <form> and nothing handling its submit or a click inside it, and "
+                "its submit is cancelled in place: handle the button's click."
             )
-        wide = next((int(px) for px in _FIXED_WIDTH.findall(markup) if int(px) > PHONE_WIDTH), None)
+        wide = next(
+            (
+                int(px)
+                for style in _INLINE_STYLE.findall(markup)
+                for px in _FIXED_WIDTH.findall(style[0] or style[1])
+                if int(px) > PHONE_WIDTH
+            ),
+            None,
+        )
         if wide is not None:
             said.append(
-                f"The page sets a {wide}px width, past the {PHONE_WIDTH}px phone it opens on: let "
-                "it fill the screen instead."
+                f"The page sets a {wide}px width on an element, past the {PHONE_WIDTH}px phone it "
+                "opens on: let it fill the screen instead."
             )
         return said
     except Exception:

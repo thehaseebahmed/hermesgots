@@ -64,9 +64,11 @@ test("RTCPeerConnection is gone before the page's scripts", () => {
 })
 
 test("a form submits in place", () => {
-  // The guard is a head script of its own, so it is on the page before the page's own scripts are:
-  // its listener runs after every handler the page put on the form, a field or the window, and it
-  // cancels the navigation only where none of them did.
+  // The guard is a head script of its own, so it is on the page before the page's own scripts are.
+  // A submit bubbles from the form up to the window, so every handler the page put on the form or a
+  // field has run by the time this one is reached, and it cancels the navigation only where none of
+  // them did. A handler the page puts on the window itself is registered later than the guard, so it
+  // runs after it and finds the submit already cancelled.
   const listeners = []
   const prevented = []
   const seen = []

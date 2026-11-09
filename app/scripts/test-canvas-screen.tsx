@@ -462,7 +462,7 @@ test(
 )
 
 test(
-  "a tapped link opens in the app, once, with no opener",
+  "an open call from a canvas's page opens a link in the app, once, with no opener",
   atWidth(390, async () => {
     // A canvas's page has no way out of its frame but the app: the one call it makes without being
     // asked is a link the reader tapped, and the app opens it in a tab of its own.
