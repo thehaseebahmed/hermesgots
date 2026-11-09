@@ -102,12 +102,14 @@ test("a linked bot's trash asks first, then unlinks its host and lands on the Se
 
     await click(trash())
     await click(inDialog("Delete"))
-    await settle()
-    await settle()
-    const left = (await db.profiles.toArray()).map((profile) => profile.id)
-    assert.ok(
-      !left.includes("bot-1") && !left.includes("bot-2"),
-      "the unlink took every bot that host linked",
+    // The unlink is a request and a write that follow the dialog's own turn, so wait for the rows to
+    // go rather than for two flushes of React's queue: on a loaded runner the settles came back
+    // before the write did, and this read the bots that were about to leave.
+    await until(
+      async () =>
+        (await db.profiles.get("bot-1")) === undefined &&
+        (await db.profiles.get("bot-2")) === undefined,
+      "the unlink to take every bot that host linked",
     )
     assert.equal(
       asked.filter((one) => one.search.includes("route=hosts")).length,
