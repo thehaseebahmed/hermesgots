@@ -727,8 +727,8 @@ function GeneralPage({
       <div className="flex flex-col gap-4" {...{ [`data-bot-${tab}`]: true }}>
         {problem && <Banner tone="warning">{problem}</Banner>}
         <Group>
-          {/* The row is this page's own lead row, so it waits for the page's block: a read the host
-              refused has nothing to stand its row on, and draws its banner alone (#992). */}
+          {/* The row is the page's own lead row, drawn only over a page the host let this app read: a
+              refused page says so in its banner and carries no row (#992). */}
           {delegation && subagent.supported && block && (
             <SubagentModelRow profile={profile} record={subagent} own={own} />
           )}

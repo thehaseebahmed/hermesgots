@@ -35,7 +35,8 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    with the wait in place.
    Done.
 2. **No test hands a found element to assert's equality.** A `missing()` helper in the harness — beside
-   the pre-existing `absent()`, which answers a labelled control — answers presence with a boolean, and
+   the pre-existing `absent()`, which answers a selector with the caller's message, and `absentText()`,
+   which answers a control's words — answers presence with a boolean, and
    every equality assertion that hands it a found element becomes a check of that boolean;
    `assert.equal(element, null)` makes Node build a diff by inspecting the element, and the element
    carries React's fiber graph, so the diff walks the whole tree. The first pass swept the 80

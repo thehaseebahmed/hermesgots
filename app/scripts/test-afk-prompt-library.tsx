@@ -18,7 +18,6 @@ import { setProjectAfkPrompt } from "@/lib/hermes"
 
 import {
   DEFAULT_AFK_PROMPT,
-  absent,
   absentText,
   afkHost,
   click,

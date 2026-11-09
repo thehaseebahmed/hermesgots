@@ -12,7 +12,6 @@ import { toast } from "sonner"
 
 import {
   DEFAULT_AFK_PROMPT,
-  absent,
   absentText,
   afkHost,
   click,
