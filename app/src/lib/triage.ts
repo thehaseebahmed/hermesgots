@@ -13,7 +13,7 @@ import { chosenOf, pickFields } from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
 import { quietly } from "@/lib/report"
 import { syncNow } from "@/lib/sync"
-import { opensInMain } from "@/lib/threads"
+import { opensInMain } from "@/lib/chat-threads"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 

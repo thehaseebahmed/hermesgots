@@ -29,16 +29,8 @@ import {
   wordsOf,
 } from "./component-kit.tsx"
 
+/** The screen, with the address drawn beside it so a case can read where a send landed. */
 const screen = () => (
-  <MemoryRouter initialEntries={["/share"]}>
-    <Routes>
-      <Route path="/share" element={<SharePage />} />
-    </Routes>
-  </MemoryRouter>
-)
-
-/** The screen with the address drawn beside it, so a case can read where a send landed. */
-const routed = () => (
   <MemoryRouter initialEntries={["/share"]}>
     <Path />
     <Routes>
@@ -295,7 +287,7 @@ test("with chat threads off, Share's new-chat option opens the bot's Main", asyn
   const host = fakeHost(`gots-${main}`)
   await withToasts(async (said) => {
     receiveShare(toShare({ text: "Read this later" }))
-    await mount(routed(), async () => {
+    await mount(screen(), async () => {
       assert.equal(await db.conversations.count(), 0, "nothing is written before the send")
       const option = await newOption()
       assert.equal(wordsOf(option), "Main", "the new-chat option reads Main")
@@ -332,7 +324,7 @@ test("with chat threads on, Share's new-chat option still makes a thread", async
   const host = fakeHost("share-thread-host")
   await withToasts(async (said) => {
     receiveShare(toShare({ text: "Plan the trip" }))
-    await mount(routed(), async () => {
+    await mount(screen(), async () => {
       const option = await newOption()
       assert.equal(wordsOf(option), "New thread", "the wording threads had before")
       await click(option)
@@ -363,7 +355,7 @@ test("with chat threads off, a share into a streaming Main waits its turn", asyn
   const host = fakeHost(`gots-${main}`)
   await withToasts(async (said) => {
     receiveShare(toShare({ text: "One more thing" }))
-    await mount(routed(), async () => {
+    await mount(screen(), async () => {
       await click(await newOption())
       await until(async () => path() === `/c/${main}`, "the address on the bot's Main")
       const written = () => db.messages.where("conversationId").equals(main).toArray()

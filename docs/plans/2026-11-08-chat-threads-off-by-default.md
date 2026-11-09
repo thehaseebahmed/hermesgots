@@ -171,8 +171,10 @@ sequenceDiagram
    Settings row, Sync's settings document, Developer settings section, ADR and glossary. Check:
    `scripts/test-developer-sections.tsx` — red first on a row that does not exist, then the row
    ships off, a tap writes `chatThreads: true` and moves `appearanceAt`, and the switch is absent
-   from the Appearance section; `scripts/test-sync-scope.tsx` gains one case — the `settings`
-   document a pass writes carries `chatThreads`, and a record another device wrote is adopted. Done.
+   from the Appearance section; and the account half is pinned by one case — `adoptAppearance({ chatThreads: true }, at)`
+   leaves `getSettings()` carrying it, and a record without it leaves it alone. The pushed document
+   itself has no test: `localAppearance` names every field by hand, so a forgotten one is a compile
+   error, and that gate is what holds it. Done.
 
 3. **No bot chat offers a start command, and a typed `/thread` is words.** The threads rule gains
    `chatThreadsOn`, `opensInMain` (the bot layout with the switch off) and `startHere(main,

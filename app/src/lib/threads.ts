@@ -28,6 +28,7 @@ import { useStoredSort } from "@/lib/use-sort"
 import { isUnread, threadState, type ThreadState } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
 import type { StartCommand } from "@/lib/slash"
+import { botThreadsOn, opensInMain, startHere } from "@/lib/chat-threads"
 import {
   useAllLiveRuns,
   useLiveSubagents,
@@ -35,6 +36,11 @@ import {
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
+
+// The rules live in the leaf so the triage gate can read them without a screen's dependencies; these
+// re-exports keep the screens that already import this module working.
+export { botThreadsOn, chatThreadsOn, opensInMain, startHere } from "@/lib/chat-threads"
+export type { ThreadSwitches } from "@/lib/chat-threads"
 
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
@@ -70,18 +76,14 @@ export function takeHandover(threadId: string): ThreadStart | undefined {
  * A thread a bot's Main starts with `/thread`: its record, made with the model the composer holds,
  * and the message its own screen is to send as the thread's first turn.
  */
-export async function beginThread(
-  profileId: string,
-  {
-    modelChoice,
-    text,
-    attachments = [],
-  }: { modelChoice?: ModelChoice } & Pick<ThreadStart, "text" | "attachments">,
-) {
-  const thread = await createConversation(profileId, { modelChoice })
-  handOverIfSaid(thread.id, { text, attachments })
+export async function beginThread(profileId: string, message: NewChat = {}) {
+  const thread = await createConversation(profileId, { modelChoice: message.modelChoice })
+  handOverIfSaid(thread.id, message)
   return thread
 }
+
+/** The chat a new chat opens, and the message it is opened with when there is one. */
+export type NewChat = { modelChoice?: ModelChoice } & Partial<Pick<ThreadStart, "text" | "attachments">>
 
 /**
  * The chat a new chat opens: with chat threads off in the bot layout, that bot's Main — made the
@@ -92,27 +94,15 @@ export async function beginThread(
  * Main's model is a synced field: the pick a blank surface held is not written onto it, since one
  * device's press would move the bot's model on every device. A thread is still made with it.
  */
-export async function beginChat(
-  profileId: string,
-  {
-    modelChoice,
-    text,
-    attachments = [],
-  }: { modelChoice?: ModelChoice } & Pick<ThreadStart, "text" | "attachments">,
-) {
-  if (opensInMain(await getSettings())) {
-    const main = await ensureMainThread(profileId)
-    handOverIfSaid(main.id, { text, attachments })
-    return main
-  }
-  return beginThread(profileId, { modelChoice, text, attachments })
+export async function beginChat(profileId: string, message: NewChat = {}) {
+  if (!opensInMain(await getSettings())) return beginThread(profileId, message)
+  const main = await ensureMainThread(profileId)
+  handOverIfSaid(main.id, message)
+  return main
 }
 
-/** Hands a chat the message it was opened with, when it was opened with one. */
-function handOverIfSaid(
-  chatId: string,
-  { text, attachments = [] }: Pick<ThreadStart, "text" | "attachments">,
-) {
+/** Hands a chat the message it was opened with, when there is one. */
+function handOverIfSaid(chatId: string, { text = "", attachments = [] }: NewChat) {
   if (text.trim() || attachments.length) handOver(chatId, { text, attachments, at: Date.now() })
 }
 
@@ -126,55 +116,25 @@ export function useNow() {
   return now
 }
 
-/**
- * Whether the bot-first layout is on: bots in the sidebar, each chat a thread in its bot. That is the
- * layout every device gets, so this reads the one switch that says otherwise — Developer's **Enable
- * legacy chat UX** (`Settings.legacyChat`, local) — and never the Developer switch itself.
- */
-export function botThreadsOn(settings: { legacyChat?: boolean } | undefined) {
-  return !settings?.legacyChat
-}
-
 export function useBotThreads() {
   return useLiveQuery(async () => botThreadsOn(await getSettings()), [])
 }
 
 /**
- * Whether the account may start a new chat thread at all: Developer's **Chat threads** switch
- * (`Settings.chatThreads`), carried by the account and off by default. Threads that already exist
- * are untouched by it — it decides who may start one, never what one holds (ADR 0120).
+ * The switches a screen draws two answers from — the layout's noun, and whether this bot has only its
+ * Main to offer — live, and as one string so a settings write that changes neither redraws nothing.
+ * `undefined` until the settings row answers.
  */
-export function chatThreadsOn(settings: { chatThreads?: boolean } | undefined) {
-  return Boolean(settings?.chatThreads)
-}
-
-/**
- * The bot layout with chat threads off: bots in the sidebar, each bot with one conversation — its
- * Main — that never restarts, and no way to start a thread. The legacy layout is not this: there a
- * chat is a plain chat and `/new` makes one, so this answers false for it however the switch reads.
- *
- * The one fact the rest of the app hangs off "threads are off here" reads: what a chat's `/` menu
- * offers, where a new chat's first send lands, whether a Main send is triaged, and which chat
- * Share's new-chat option opens.
- */
-export function opensInMain(settings: { legacyChat?: boolean; chatThreads?: boolean } | undefined) {
-  return botThreadsOn(settings) && !chatThreadsOn(settings)
-}
-
-/**
- * The start command a chat may offer, or nothing where none may start: nothing at all in the bot
- * layout with chat threads off, `/thread` on a bot's Main with them on, and `/new` everywhere else —
- * the legacy layout's New chat, where a chat is a chat rather than a thread.
- *
- * A typed command is read through this same answer, so one the menu does not offer is the message's
- * own words, not a command that resolves to nothing.
- */
-export function startHere(
-  main: boolean | undefined,
-  settings: { legacyChat?: boolean; chatThreads?: boolean } | undefined,
-): StartCommand | null {
-  if (opensInMain(settings)) return null
-  return main ? "thread" : "new"
+export function useThreadSwitches(): { botThreads: boolean; opensInMain: boolean } | undefined {
+  const key = useLiveQuery(async () => {
+    const settings = await getSettings()
+    return `${botThreadsOn(settings) ? 1 : 0}${opensInMain(settings) ? 1 : 0}`
+  }, [])
+  return useMemo(
+    () =>
+      key === undefined ? undefined : { botThreads: key[0] === "1", opensInMain: key[1] === "1" },
+    [key],
+  )
 }
 
 /**

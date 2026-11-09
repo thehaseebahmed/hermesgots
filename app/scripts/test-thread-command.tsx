@@ -207,7 +207,10 @@ test("with chat threads off, Main offers no start command", async () => {
     await type(composerField(), "/")
     await until(async () => slashOptions().length > 0, "the command menu")
     assert.ok(!offersCommand("/thread"), "no thread to start")
-    assert.ok(!offersCommand("/new"), "and no new chat, which would be the same thread by another name")
+    assert.ok(
+      !offersCommand("/new"),
+      "and no new chat, which would be the same thread by another name",
+    )
     assert.ok(offersCommand("/settings"), "the commands that start nothing are still there")
   })
 })
@@ -238,7 +241,11 @@ test("with chat threads off, /thread typed in a thread is that thread's words", 
     const [run] = runs(seen)
     assert.equal(run.body.session_id, "t1-hermes", "posted on that thread's own session")
     const [said] = (run.body.input as { content: string }[]).slice(-1)
-    assert.match(said.content, /\/thread plan it/, "with the words the reader typed, command and all")
+    assert.match(
+      said.content,
+      /\/thread plan it/,
+      "with the words the reader typed, command and all",
+    )
   })
 })
 

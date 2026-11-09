@@ -33,10 +33,10 @@ test("only /thread carries the message it opens a thread with", () => {
 })
 
 test("/cheatsheet opens the sheet, and takes no text with it", () => {
-  assert.deepEqual(localCommand("/cheatsheet"), { command: "cheatsheet", text: "" })
+  assert.deepEqual(localCommand("/cheatsheet", null), { command: "cheatsheet", text: "" })
   assert.deepEqual(localCommand("/cheatsheet", "thread"), { command: "cheatsheet", text: "" })
   assert.equal(
-    localCommand("/cheatsheet anything"),
+    localCommand("/cheatsheet anything", null),
     null,
     "text behind it is a message for the host, as /settings' is",
   )

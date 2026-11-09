@@ -15,7 +15,7 @@ export type SlashItem =
 export const carriesMessage = (name: string) => name === "thread"
 
 /** The start command's row, worded for the one it is; nothing where none may start. */
-export function localCommands(start: StartCommand | null = null): SlashItem[] {
+export function localCommands(start: StartCommand | null): SlashItem[] {
   const starter: SlashItem[] = start
     ? [
         {
@@ -48,7 +48,7 @@ export function sendMode(text: string): { mode: SendMode; text: string } | null 
 
 export function localCommand(
   text: string,
-  start: StartCommand | null = null,
+  start: StartCommand | null,
 ): { command: LocalCommand; text: string } | null {
   const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim())
   if (!match) return null

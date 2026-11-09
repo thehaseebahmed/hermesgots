@@ -82,9 +82,7 @@ function seed(
 ) {
   return page.evaluate(
     async ({ threads, messages, hour, day, long, note }) => {
-      const { db, ensureMainThread, mainThreadId, saveSettings } = await import(
-        "/src/lib/db.ts"
-      )
+      const { db, ensureMainThread, mainThreadId, saveSettings } = await import("/src/lib/db.ts")
       // The flow is the proof of the thread paths, and they start from an account that may make a
       // thread: Developer's Chat threads switch, off by default (ADR 0120). Written here rather
       // than tapped through Developer, whose row has its own component case.

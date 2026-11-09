@@ -11,15 +11,13 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { isPhoto } from "@/lib/attachment-caps"
-import { listsAsChat } from "@/lib/lists-as-chat"
+import { listsAsChat, listsAsThread } from "@/lib/lists-as-chat"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
   db,
   getActiveProfile,
-  getSettings,
   listEnabledProfiles,
-  mainThreadId,
   setActiveProfile,
   type Attachment,
 } from "@/lib/db"
@@ -27,7 +25,7 @@ import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
-import { beginChat, botThreadsOn, opensInMain, useNow } from "@/lib/threads"
+import { beginChat, useNow, useThreadSwitches } from "@/lib/threads"
 
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
@@ -77,11 +75,12 @@ export function SharePage() {
   const webId = params.get("id")
   const share = useIncomingShare()
   const [opening, setOpening] = useState(Boolean(webId))
-  // One read of the switches the chat list hangs on: the bot layout's noun, and whether this bot
-  // has only its Main to offer — the bot layout with chat threads off (ADR 0120).
-  const settings = useLiveQuery(getSettings, [])
-  const botThreads = botThreadsOn(settings)
-  const offersMain = opensInMain(settings)
+  // The switches the chat list hangs on, live: the layout's noun, and whether this bot has only its
+  // Main to offer — the bot layout with chat threads off (ADR 0120). An unanswered read leaves the
+  // screen as it stands: a label is not a permission.
+  const switches = useThreadSwitches()
+  const botThreads = switches?.botThreads ?? true
+  const offersMain = switches?.opensInMain ?? false
   const noun = botThreads ? "thread" : "chat"
   const now = useNow()
 
@@ -162,21 +161,19 @@ export function SharePage() {
 
   const chats = useLiveQuery(async () => {
     if (!profile) return []
-    return db.conversations
-      .where("[profileId+updatedAt]")
-      .between([profile.id, -Infinity], [profile.id, Infinity])
-      .reverse()
-      .filter((c) => listsAsChat(c) && !c.discardedAt)
-      .limit(MORE)
-      .toArray()
-  }, [profile?.id])
-  // With chat threads off the first option is the bot's Main itself, so the list below leaves Main
-  // out rather than offering one chat twice.
-  const offered =
-    offersMain && profile
-      ? chats?.filter((chat) => chat.id !== mainThreadId(profile.id))
-      : chats
-  const shown = showAll ? offered : offered?.slice(0, FIRST)
+    return (
+      db.conversations
+        .where("[profileId+updatedAt]")
+        .between([profile.id, -Infinity], [profile.id, Infinity])
+        .reverse()
+        // With chat threads off the first option is Main itself, so the list leaves it out where it is
+        // offered above — inside the read, so the limit counts the chats actually drawn.
+        .filter((c) => (offersMain ? listsAsThread(c) : listsAsChat(c)) && !c.discardedAt)
+        .limit(MORE)
+        .toArray()
+    )
+  }, [profile?.id, offersMain])
+  const shown = showAll ? chats : chats?.slice(0, FIRST)
 
   const pickBot = (id: string) => {
     setPicked(id)
@@ -214,16 +211,18 @@ export function SharePage() {
       // A picked chat is opened as it stands; the new option asks the threads rule which chat it
       // answers — the bot's Main with chat threads off, and a thread otherwise — and hands it no
       // message, since this screen sends the note itself.
-      const chat = existing ?? (await beginChat(profile.id, { text: "", attachments: [] }))
+      const chat = existing ?? (await beginChat(profile.id))
       const id = chat.id
       // Main is asked what any chat is: a turn still streaming there means the note waits in the
-      // queue rather than being dropped by a second send.
-      const busy =
-        (await db.messages
-          .where("conversationId")
-          .equals(id)
-          .filter((m) => m.status === "streaming")
-          .count()) > 0
+      // queue rather than being dropped by a second send. Read through the `status` index, so the
+      // check costs the one running row rather than every message the chat holds.
+      const busy = Boolean(
+        await db.messages
+          .where("status")
+          .equals("streaming")
+          .filter((m) => m.conversationId === id)
+          .first(),
+      )
       void setActiveProfile(profile.id)
       leaving.current = true
       clearShare()
@@ -345,7 +344,7 @@ export function SharePage() {
                   formatRelative(chat.updatedAt, now),
                 ),
               )}
-              {!showAll && (offered?.length ?? 0) > FIRST && (
+              {!showAll && (chats?.length ?? 0) > FIRST && (
                 <button
                   type="button"
                   onClick={() => setShowAll(true)}

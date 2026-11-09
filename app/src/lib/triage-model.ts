@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 
-import { getSettings, type ModelChoice } from "@/lib/db"
+import type { ModelChoice } from "@/lib/db"
 import { getResearchWriters, getTriageModel, setTriageModel } from "@/lib/hermes"
 import { useHostRecord, type HostRoute } from "@/lib/host-record"
 import { noteFailure } from "@/lib/report"
-import { opensInMain } from "@/lib/threads"
+import { useThreadSwitches } from "@/lib/threads"
 
 const TRIAGE: HostRoute<ModelChoice | undefined> = {
   feature: "triage_model",
@@ -28,7 +27,7 @@ const TRIAGE: HostRoute<ModelChoice | undefined> = {
  */
 export function useTriageModel(profile?: { baseUrl: string; apiKey: string } | null) {
   // Read live, so a flip of the switch gives the field back without a reload.
-  const draws = useLiveQuery(async () => !opensInMain(await getSettings()), []) === true
+  const draws = !(useThreadSwitches()?.opensInMain ?? true)
   const {
     value: pick,
     supported: hostHasRoute,
