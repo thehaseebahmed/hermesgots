@@ -171,9 +171,11 @@ jobs:
       - name: Prove the image is pullable without a login
         if: github.event_name != 'pull_request'
         run: |
+          tags="${{ steps.meta.outputs.tags }}"
+          [ -n "$tags" ] || { echo "no tags to verify"; exit 1; }
           while IFS= read -r tag; do
             if [ -n "$tag" ]; then bash .github/scripts/ghcr-public.sh "$tag"; fi
-          done <<< "${{ steps.meta.outputs.tags }}"
+          done <<< "$tags"
 
       - name: Summary
         if: always()

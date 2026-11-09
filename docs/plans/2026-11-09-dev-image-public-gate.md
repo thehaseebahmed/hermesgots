@@ -11,8 +11,8 @@
 - Flipping the package's visibility from CI: the token this environment holds (`gotsfather`) has no admin on a package
   owned by `thehaseebahmed`, so the click is the owner's (see Decisions).
 - Pinning the sandbox to a digest, or otherwise editing the Hermes config outside this repository.
-- `.devcontainer/devcontainer.json`, the single owner for the toolchain versions, and a non-root image — all three are
-  already recorded in `fixes.md` and #230's notes as decisions of their own.
+- A `.devcontainer` file that owns the container invocation, one owner for the toolchain versions, and a non-root
+  image — all three are decisions of their own, recorded in `fixes.md` and #230's notes.
 
 ## Change map
 | Layer | Status | Goals | Tested at |

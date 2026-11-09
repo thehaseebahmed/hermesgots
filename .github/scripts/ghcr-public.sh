@@ -44,14 +44,18 @@ trap 'rm -rf "$temporary"' EXIT
 
 refused() {
   printf '%s is not publicly pullable: %s\n' "$subject" "$1" >&2
-  printf 'Nobody without this account can pull it. Make the package public:\n  %s\n' "$settings" >&2
+  shift
+  [ "$#" -eq 0 ] || printf '%s\n' "$@" >&2
   exit 1
 }
+
+visibility_hint=("Nobody without this account can pull it. Make the package public:" "  ${settings}")
 
 token_status=$(curl -sS --max-time 30 -o "$temporary/token" -w '%{http_code}' \
   "https://ghcr.io/token?scope=repository:${repo}:pull") \
   || refused "the registry could not be asked for a token"
-[ "$token_status" = 200 ] || refused "the anonymous token was refused (${token_status})"
+[ "$token_status" = 200 ] \
+  || refused "the anonymous token was refused (${token_status})" "${visibility_hint[@]}"
 token=$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$temporary/token")
 [ -n "$token" ] || refused "the token answer carried none"
 
@@ -66,7 +70,7 @@ status=$(curl -sS --max-time 30 -o "$temporary/manifest" -D "$temporary/headers"
 
 case "$status" in
   200) ;;
-  404) refused "the manifest answered 404 — the package is private, or nothing is published under that name" ;;
+  404) refused "the manifest answered 404 — nothing is published under that name" ;;
   *) refused "the manifest answered ${status}" ;;
 esac
 
