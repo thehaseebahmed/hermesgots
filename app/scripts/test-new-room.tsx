@@ -15,6 +15,7 @@ import { ConversationList } from "@/components/conversation-list"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { RoomChat } from "@/components/room/room-chat"
 import { db, type Profile } from "@/lib/db"
+import { COMPOSER_SLOT } from "@/lib/layout"
 import {
   botProfile,
   click,
@@ -223,4 +224,22 @@ test("a host that cannot write offers no New room", async () => {
       )
     },
   )
+})
+
+test("the blank room's composer stands in the foot every chat screen gives it", async () => {
+  await fresh("blank-room-slot.test")
+  await mount(screen(), async () => {
+    await until(async () => Boolean(find('[data-slot="seats-pill"]')), "the blank room")
+    const slot = find('[data-slot="composer-slot"]')
+    assert.equal(
+      slot?.className,
+      COMPOSER_SLOT,
+      "the same px-3/pb-3.5/sm:px-4 the rest of the app gives a composer",
+    )
+    assert.ok(slot?.contains(composerField()), "the field itself is inside that slot")
+    assert.ok(
+      slot?.querySelector('[data-slot="seats-pill"]'),
+      "and the seats pill shares its gutter, so the two align",
+    )
+  })
 })

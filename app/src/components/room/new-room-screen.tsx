@@ -21,7 +21,7 @@ import {
   type RoomMember,
 } from "@/lib/db"
 import { usePluginFeatureByServer } from "@/lib/features"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { roomSeats } from "@/lib/rooms"
 import { startRoom } from "@/lib/room-writes"
@@ -125,45 +125,47 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         </div>
       )}
 
-      <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")}>
-        <Button
-          variant="outline"
-          className="h-10 rounded-full"
-          aria-label="Pick the room's bots"
-          data-slot="seats-pill"
-          onClick={() => setPicking(true)}
-        >
-          {faces.length ? (
-            <RoomFaces shown={faces.slice(0, 4)} more={Math.max(0, faces.length - 4)} />
-          ) : (
-            <UsersIcon className="size-4" />
-          )}
-          <span className="text-sm">
-            {chosen.length
-              ? `${chosen.length} of ${MOST} bots`
-              : `${LEAST} to ${MOST} bots`}
-          </span>
-        </Button>
-      </div>
+      <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
+        <div className={cn(COLUMN_BOX, "pb-2")}>
+          <Button
+            variant="outline"
+            className="h-10 rounded-full"
+            aria-label="Pick the room's bots"
+            data-slot="seats-pill"
+            onClick={() => setPicking(true)}
+          >
+            {faces.length ? (
+              <RoomFaces shown={faces.slice(0, 4)} more={Math.max(0, faces.length - 4)} />
+            ) : (
+              <UsersIcon className="size-4" />
+            )}
+            <span className="text-sm">
+              {chosen.length
+                ? `${chosen.length} of ${MOST} bots`
+                : `${LEAST} to ${MOST} bots`}
+            </span>
+          </Button>
+        </div>
 
-      <Composer
-        plain
-        busy={false}
-        disabled={!ready || sending || !connection}
-        connection={connection}
-        botName={chosen[0]?.name ?? "Hermes"}
-        draftKey="room-new"
-        files={false}
-        filesFeature="no"
-        imagesAvailable={false}
-        placeholder={
-          ready ? "Message the room…" : `Pick at least ${LEAST} bots to start the room`
-        }
-        sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
-        onSend={send}
-        onQueue={send}
-        onStop={() => undefined}
-      />
+        <Composer
+          plain
+          busy={false}
+          disabled={!ready || sending || !connection}
+          connection={connection}
+          botName={chosen[0]?.name ?? "Hermes"}
+          draftKey="room-new"
+          files={false}
+          filesFeature="no"
+          imagesAvailable={false}
+          placeholder={
+            ready ? "Message the room…" : `Pick at least ${LEAST} bots to start the room`
+          }
+          sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
+          onSend={send}
+          onQueue={send}
+          onStop={() => undefined}
+        />
+      </div>
 
       <SeatsPicker
         open={picking}
