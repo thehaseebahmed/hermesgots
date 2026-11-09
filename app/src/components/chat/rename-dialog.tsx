@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 
 import {
   AlertDialog,
@@ -48,12 +48,12 @@ export function RenameDialog({
   // Every opening starts from the name the caller holds, and from nothing said about the last one. A
   // name that changes while the dialog is open is not an opening: a merge landing another device's
   // title must not wipe what the user is typing.
-  const opening = useRef(value)
-  opening.current = value
   useEffect(() => {
     if (!open) return
-    setName(opening.current)
+    setName(value)
     setFailure(undefined)
+    // Only an opening seeds it: a name that changes while the dialog is open is another device's news,
+    // and it must not wipe what the user is typing.
   }, [open])
 
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
