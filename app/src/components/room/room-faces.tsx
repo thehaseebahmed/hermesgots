@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * A room's row, drawn as its members: up to four of their bots' pictures, overlapped by 8px so the
- * cluster reads as one thing, and a count for the members it could not show (ADR 0125).
+ * cluster reads as one thing, and a count for the members it could not show (ADR 0126).
  *
  * The overlap is the whole trick: each picture's own transparency is what separates it from the one
  * under it, so the cluster needs no ring or backing disc — the app draws bots as their art everywhere

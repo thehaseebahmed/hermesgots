@@ -10,6 +10,7 @@ import { warmCatalog } from "@/lib/models"
 import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
 import { useBotThreads } from "@/lib/threads"
+import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
 
@@ -118,6 +119,8 @@ function AppRoutes() {
         <Route index element={<Home />} />
         <Route path="b/:profileId" element={<BotThreadsPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
+        {/* A room that does not exist yet: its first send makes it (ADR 0125). */}
+        <Route path="new-room" element={<NewRoomScreen slot="route" />} />
         <Route path="s/:sessionId" element={<OpenSessionPage />} />
         <Route path="code" element={<CodePage />} />
         <Route path="code/:profileId/:projectId" element={<MovedProject />} />

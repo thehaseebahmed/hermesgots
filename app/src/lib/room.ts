@@ -206,7 +206,7 @@ async function readNeeds({ chat, bot }: RoomNeedsRow, { paced }: { paced: boolea
 export interface RoomNeedsRow {
   chat: Conversation
   bot?: Profile
-  /** The members' pictures the row draws, and how many it could not draw (ADR 0125). */
+  /** The members' pictures the row draws, and how many it could not draw (ADR 0126). */
   faces: { shown: string[]; more: number }
   /** The record's clock this device last read the room's page at, or nothing before it has. */
   read?: number

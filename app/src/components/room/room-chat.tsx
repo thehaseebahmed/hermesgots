@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef } from "react"
+import { useLocation, useNavigate } from "react-router"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { Bot } from "@/components/bot"
@@ -68,6 +69,8 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   )
   const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
   const { root } = useNav()
+  const location = useLocation()
+  const navigate = useNavigate()
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a
   // room nothing owns any more.
@@ -89,6 +92,19 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
       throw error
     }
   }
+
+  // A room made a moment ago hands its first message over through the address (ADR 0125): the room
+  // did not exist when the user typed it, so the screen that made it could not send it. The state is
+  // cleared first, so a reload of this address never sends it twice.
+  const handed = (location.state as { first?: { text: string; attachments?: Attachment[] } } | null)
+    ?.first
+  const sentFirst = useRef(false)
+  useEffect(() => {
+    if (!handed || sentFirst.current || !answerer || live.canSend === false) return
+    sentFirst.current = true
+    navigate(location.pathname, { replace: true, state: null })
+    void write(handed.text, handed.attachments ?? []).catch(() => undefined)
+  }, [handed, answerer, live.canSend])
   // A message's files are the Host's room store's, and the row that carries them is drawn only where
   // the Host advertises the store: an older plugin's room is words alone.
   const canMedia = usePluginFeatureOn(answerer, "room_media")

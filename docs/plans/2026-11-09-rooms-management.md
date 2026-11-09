@@ -47,7 +47,7 @@ their first record-shaped answer, and the one place each control is drawn.
 
 ## Flows
 
-### F1: A user starts a room from the sidebar, and it opens (new). Test: "a room started from the sheet opens on its own screen"
+### F1: A user starts a room from the sidebar, and it opens (new). Test: "a room started from the blank screen opens on its own name and takes the first message"
 
 ```mermaid
 sequenceDiagram
@@ -59,8 +59,8 @@ sequenceDiagram
   participant Seam as plugin room seam
   participant Host as Host's hosted rooms
   participant DB as device database
-  User->>Sheet: New room, a name, two to six bots of one Host
-  Sheet->>Model: the seats, and the room id minted once for this attempt
+  User->>Blank: New room, two to six bots of one Host, then the first message
+  Blank->>Model: on send, the seats and the room id minted once for this attempt
   Model->>Client: create
   Client->>Route: POST /rooms
   Route->>Seam: create_room
@@ -71,8 +71,8 @@ sequenceDiagram
   Route-->>Client: the record
   Client-->>Model: the record
   Model->>DB: write the room's row, through the one writer
-  DB-->>Sheet: the row is there
-  Sheet-->>User: the room opens, and takes a message
+  DB-->>Blank: the row is there
+  Blank-->>User: the address moves to the room, which sends that message as its first turn
 ```
 
 The row the write writes is the row the next projection would write, so the first merge after it
@@ -208,22 +208,27 @@ the room as it was, in the Host's words" (`test-room-actions.tsx`).
 4. **A room can be started from the app.** The sidebar's footer gains New room beside New chat, drawn
    only where some bot the device holds answers `rooms_write`. The footer's create control is drawn in
    both layouts — today it is the Recents branch's alone, while a room lists in both — so the bots
-   layout gains that control where it had none; it opens the sheet — a name, the Host when the device
-   holds more than one writable one, the bots of that Host to seat (two to six, each drawn with the
-   handle the room will address it by), the line that the members cannot change later, and Create,
-   enabled only when a name and two to six seats are there. Create closes the sheet and opens the new
-   room at the chat's own address. The mock stops refusing creation, serves it, and refuses a roster
-   under two or over six in the Host's own words so the wire's refusal is exercised.
-   Goals: G1. After: 3. Layers: app chat list / entry point, app New room sheet, mock server, e2e,
+   layout gains that control where it had none. It opens a blank room at `/new-room` rather than a
+   sheet (ADR 0125): no record, no Host call, and the composer's own pill picks the seats — the Host
+   when the device holds more than one writable one, the bots of that Host, two to six, and the line
+   that the members cannot change later. The first send mints the room's id, creates it on the Host
+   under a name derived from its seats, writes the row the Host answers, and moves the address to
+   `/c/<id>`, where the room's screen sends that message as its first turn. The mock stops refusing
+   creation, serves it, and refuses a roster under two or over six in the Host's own words so the
+   wire's refusal is exercised.
+   Goals: G1. After: 3. Layers: app chat list / entry point, app blank room, mock server, e2e,
    e2e registry.
-   Check: `app/scripts/test-new-room.tsx` — "a room started from the sheet opens on its own screen",
-   "a roster the Host refuses is said in its own words, and nothing is written" (F4) and "a host that
-   cannot write offers no New room" — red then green; `app/scripts/test-main-navigation.tsx` — "no New
-   chat button beside the bots" stays true, and a New room is drawn there — red then green;
-   `app/scripts/e2e/sidebar-collapse.mjs`, which reads the footer's controls by name in both rails; and
-   `pnpm e2e room-lifecycle`'s create leg, red on the mock's 405 and green after.
+   Check: `app/scripts/test-new-room.tsx` — "a room started from the blank screen opens on its own name
+   and takes the first message", "the seats hold the room at two, and the send is refused before that"
+   and "a host that cannot write offers no New room" — red then green;
+   `app/scripts/test-main-navigation.tsx` — "no New chat button beside the bots" stays true, and a New
+   room is drawn there — red then green; `app/scripts/e2e/sidebar-collapse.mjs`, which reads the
+   footer's controls by name in both rails; and `pnpm e2e room-lifecycle`'s create leg, red on the
+   mock's 405 and green after.
 
-   The e2e leg: `pnpm e2e room-lifecycle` — green.
+   Amended after 4 landed: the sheet this step described was replaced by the blank room (ADR 0125), so
+   the refusal F4 covered is the create's answer held by the blank screen, not a sheet's. The e2e leg:
+   `pnpm e2e room-lifecycle` — green.
 
    Done.
 

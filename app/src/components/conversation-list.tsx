@@ -135,7 +135,7 @@ function ChatRow({
 }: {
   chat: Conversation
   bot?: Profile
-  /** A room's members, as pictures: what the row draws instead of the one bot a chat is (ADR 0125). */
+  /** A room's members, as pictures: what the row draws instead of the one bot a chat is (ADR 0126). */
   faces?: { shown: string[]; more: number }
   /** What waits on the user, in words the screen reader hears: a chat's, or the room's own reading. */
   reason?: string
@@ -306,7 +306,7 @@ function Recents({
       chat,
       bot: chatOwner(chat, bots).bot,
       // A room's faces: its members' bots on the Host that carries the record, which is the same seat
-      // the room's screen draws its pictures from (ADR 0115, ADR 0125).
+      // the room's screen draws its pictures from (ADR 0115, ADR 0126).
       faces: chat.room
         ? roomFaces(chat.room, profiles, bots.get(chat.profileId)?.hostId)
         : undefined,

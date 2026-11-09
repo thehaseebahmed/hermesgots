@@ -1,6 +1,6 @@
-// A room's whole life from the app, which until now only read rooms: the sidebar's footer starts one
-// (a name and two of the Host's bots), the room it made opens on its own name and takes a message the
-// members answer, its own header menu renames it, and the same menu disbands it behind a question —
+// A room's whole life from the app, which until now only read rooms: the sidebar's footer opens a
+// blank room, its seats are picked above the composer and its first message makes it on the Host, the
+// members answer it, its own header menu renames it, and the same menu disbands it behind a question —
 // after which the row is gone from every list and stays gone across a reload.
 //
 // The Host is the mock, and it is the truth the whole way: the create, the rename and the disband are
@@ -8,7 +8,6 @@
 // whether or not the app asked the Host anything, which is the one thing this flow exists to prove.
 import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
-const NAME = "Release planning"
 const RENAMED = "Release plan"
 const SENT = "Plan the next release."
 const FIRST = "I'll take the API and the routes."
@@ -36,33 +35,42 @@ await flow("room-lifecycle", async ({ page, until, shot }) => {
   await shot("list")
   await start.click()
 
-  // The sheet: a name, and the two bots of this one Host, seated by the profile each answers under.
-  const name = page.getByLabel("Room name", { exact: true })
-  await name.waitFor({ timeout: 10_000 })
-  await name.fill(NAME)
+  // The blank room, the way a new chat is blank: no record and no Host call, its seats picked where the
+  // room is drawn, and its first message the thing that makes it (ADR 0125).
+  await page.waitForURL(/\/new-room$/, { timeout: 20_000 })
+  const seats = page.getByRole("button", { name: "Pick the room's bots" })
+  await seats.waitFor({ timeout: 10_000 })
+  await shot("blank")
+
+  await seats.click()
   await page.locator("[data-bot]").first().click()
   await page.locator("[data-bot]").nth(1).click()
   await settled(page)
-  await shot("sheet")
-  await page.getByRole("button", { name: "Create", exact: true }).click()
+  await shot("seats")
+  await page.getByRole("button", { name: "Done", exact: true }).click()
+  await until(
+    async () =>
+      (await seats.innerText()).includes("2 of 6") ? true : null,
+    10_000,
+    "the pill to count both seats",
+  )
 
-  // The room opens at the chat's own address, on the name the Host answered, and its own menu is
-  // there because this Host says it can write a room.
+  // The first send makes the room on the Host and moves the address to it; its name, until the Host
+  // says otherwise, is the seats it holds.
+  const composer = page.getByLabel("Message", { exact: true })
+  await composer.fill(SENT)
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await page.waitForURL(/\/c\/[^/]+$/, { timeout: 20_000 })
   // The room's own screen, not the bot's Main the app was on: its transcript's viewport is the mark.
   await page.getByLabel("Room messages").waitFor({ timeout: 20_000 })
   assert.match(
     await page.locator("body").innerText(),
-    new RegExp(NAME),
-    "the new room opens on the name the Host answered",
+    /Coder, Test bot/,
+    "the new room opens on the name its seats give it",
   )
   await page.getByRole("button", { name: "Room options" }).waitFor({ timeout: 10_000 })
-  await shot("room")
 
   // A message runs the members' rounds on the Host; the first reply proves the room works.
-  const composer = page.getByLabel("Message", { exact: true })
-  await composer.fill(SENT)
-  await page.getByRole("button", { name: "Send", exact: true }).click()
   await page.getByText(FIRST).first().waitFor({ timeout: 25_000 })
   await shot("replied")
 
