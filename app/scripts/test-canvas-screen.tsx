@@ -222,9 +222,6 @@ test(
 
 test(
   "the canvas's top bar is Project's top bar",
-  // A canvas is a place, as a project is: the reader is somewhere, so its bar is the shared header's
-  // one row — the title, a back control, and the same outline, blurred, round buttons a Project's
-  // menu is — rather than a copy of that row the screen keeps and drifts from.
   atWidth(390, async () => {
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat("c1")

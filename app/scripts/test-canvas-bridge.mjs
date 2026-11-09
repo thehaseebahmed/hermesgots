@@ -413,7 +413,6 @@ test("a tool the host refuses for any other reason is not put to the reader", as
 })
 
 test("the page's half posts the call it was asked for and settles on the reply", async () => {
-  // Objects made inside the page's own realm carry its prototypes, so the test reads them as JSON.
   const { context, posted, reply } = pageHarness()
   const api = context.window.canvas.data
 
@@ -617,11 +616,6 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
 })
 
 test("a page's own window.open asks the app once, and only for http(s)", () => {
-  // The page's own script is the other way a link leaves the frame: the bridge replaces
-  // `window.open` before the page's scripts run, so a page that opens its own link asks the app
-  // instead of being refused by the sandbox. The stand-in keeps that page on its "opened" path;
-  // it has no document, so a page that writes into the stand-in throws where a window would have
-  // kept the write — the cost of a tab the app owns.
   const { context, posted } = pageHarness()
 
   const opened = context.window.open("https://example.com/kept?n=1", "_blank")
@@ -649,7 +643,6 @@ test("a page's own window.open asks the app once, and only for http(s)", () => {
     url: "https://example.com/kept?n=1",
   })
 
-  // Everything else is the page's own: no call, and no window either.
   for (const url of ["javascript:alert(1)", "/kept", "about:blank"]) {
     assert.equal(context.window.open(url), null, url)
   }

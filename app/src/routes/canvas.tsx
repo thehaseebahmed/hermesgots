@@ -77,10 +77,6 @@ import { useNow } from "@/lib/threads"
 /** How the tiles are laid out: a phone holds two, a tablet three, a desktop four. */
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
-/**
- * A button in the canvas's bar, drawn as a Project's menu is (`project.tsx`): the same outline,
- * edge and blur, so the two places the reader is in read as one bar.
- */
 const HEADER_ACTION = "size-11 rounded-full bg-background/80 backdrop-blur"
 
 /**
@@ -520,14 +516,9 @@ export function CanvasView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* The bar is a Project's, drawn once by the shared header: a canvas is a place the reader is in,
-          and a second copy of that row here would drift from the one Projects › Project draws. */}
       <ChatHeader
         className="relative pb-2"
         title={canvas?.title ?? "Canvas"}
-        // A place's line, as a coding session's is: whose canvas it is, which version of it, and —
-        // while the host hasn't answered — that the page on screen is this device's copy. The away
-        // words stay their own element, which is what the reader's assistive tech hears move.
         subtitle={
           <span className="flex min-w-0 items-center gap-1.5">
             {profile && <span className="truncate">{profile.name}</span>}
@@ -563,8 +554,6 @@ export function CanvasView() {
                 <Undo2Icon />
               </Button>
             ) : null}
-            {/* The menu is the row's last control, so the one button that opens a sheet is always where
-                a hand reaches for it, whatever else the canvas offers today. */}
             {canvas ? (
               <Button
                 variant="outline"
