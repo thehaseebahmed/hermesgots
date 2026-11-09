@@ -28,7 +28,7 @@ import { useStoredSort } from "@/lib/use-sort"
 import { isUnread, threadState, type ThreadState } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
 import type { StartCommand } from "@/lib/slash"
-import { botThreadsOn, chatThreadsOn, opensInMain, startHere } from "@/lib/chat-threads"
+import { botThreadsOn, chatThreadsOn, opensInMain, startCommandFor } from "@/lib/chat-threads"
 import {
   useAllLiveRuns,
   useLiveSubagents,
@@ -78,7 +78,9 @@ export async function beginThread(profileId: string, message: NewChat = {}) {
 }
 
 /** The chat a new chat opens, and the message it is opened with when there is one. */
-export type NewChat = { modelChoice?: ModelChoice } & Partial<Pick<ThreadStart, "text" | "attachments">>
+export type NewChat = { modelChoice?: ModelChoice } & Partial<
+  Pick<ThreadStart, "text" | "attachments">
+>
 
 /**
  * The chat a new chat opens: the bot's Main with chat threads off, a record otherwise, so the legacy
@@ -118,8 +120,7 @@ export function useBotThreads() {
  * `undefined` until the settings row answers.
  */
 export function useThreadSwitches():
-  | { botThreads: boolean; chatThreads: boolean; opensInMain: boolean }
-  | undefined {
+  { botThreads: boolean; chatThreads: boolean; opensInMain: boolean } | undefined {
   const key = useLiveQuery(async () => {
     const settings = await getSettings()
     return `${botThreadsOn(settings) ? 1 : 0}${chatThreadsOn(settings) ? 1 : 0}${
@@ -140,16 +141,18 @@ export function useThreadSwitches():
 }
 
 /**
- * `startHere`, kept live from the settings row, so a flip of the switch redraws a composer that is
+ * `startCommandFor`, kept live from the settings row, so a flip of the switch redraws a composer that is
  * already on screen. `null` until settings answer: nothing is offered that may not run. `botChat` is
  * false for a project session, a canvas or a room, where `/new` is a home shortcut rather than a
  * chat this switch decides.
  */
-export function useStartHere(main: boolean | undefined, botChat = true): StartCommand | null {
-  return useLiveQuery(
-    async () => (botChat ? startHere(main, await getSettings()) : "new"),
-    [main, botChat],
-  ) ?? null
+export function useStartCommandFor(main: boolean | undefined, botChat = true): StartCommand | null {
+  return (
+    useLiveQuery(
+      async () => (botChat ? startCommandFor(main, await getSettings()) : "new"),
+      [main, botChat],
+    ) ?? null
+  )
 }
 
 export interface Thread {

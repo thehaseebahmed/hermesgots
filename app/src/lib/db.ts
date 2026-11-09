@@ -1133,7 +1133,7 @@ export const db = new Dexie("gots") as Dexie & {
 
 /** The messages store as this device declares it, so a test can stand a database up at an old version. */
 export const MESSAGE_STORES =
-  "id, conversationId, [conversationId+createdAt], status, [conversationId+role]"
+  "id, conversationId, [conversationId+createdAt], status, [conversationId+role], [conversationId+status]"
 
 db.version(1).stores({
   settings: "id",
@@ -1514,6 +1514,9 @@ db.version(38).stores({ canvasCss: "key, at" })
 // v39: the canvases a bot's host listed and the pages read from it, kept on this device so a canvas
 // opens with the host away. A new table: nothing older has to be moved into it.
 db.version(39).stores({ canvasCache: "key, connection, canvasId" })
+// v40: a chat's streaming turn is read by the chat and its status together — Share asks it of the
+// chat it is about to open — so the pair is indexed rather than the status set filtered in JS.
+db.version(40).stores({ messages: MESSAGE_STORES })
 
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.

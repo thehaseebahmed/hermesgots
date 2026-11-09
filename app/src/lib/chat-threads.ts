@@ -30,7 +30,7 @@ export function opensInMain(settings: ThreadSwitches | undefined) {
  * The start command a chat may offer, or nothing where none may start. A typed command is read
  * through the same answer, so one the menu does not offer is the message's own words.
  */
-export function startHere(
+export function startCommandFor(
   main: boolean | undefined,
   settings: ThreadSwitches | undefined,
 ): StartCommand | null {

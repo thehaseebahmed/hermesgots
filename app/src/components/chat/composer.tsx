@@ -74,7 +74,7 @@ import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
-import { useStartHere } from "@/lib/threads"
+import { useStartCommandFor } from "@/lib/threads"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -381,16 +381,12 @@ export function Composer({
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
-  const startable = useStartHere(main, botChat)
+  const startable = useStartCommandFor(main, botChat)
   const items =
     plain || !token
       ? []
       : rankSlashItems(
-          [
-            ...localCommands(startable),
-            ...(busy ? SEND_COMMANDS : []),
-            ...skillItems,
-          ],
+          [...localCommands(startable), ...(busy ? SEND_COMMANDS : []), ...skillItems],
           token,
         )
   // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.

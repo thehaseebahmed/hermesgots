@@ -214,11 +214,7 @@ export function SharePage() {
       // queue rather than being dropped by a second send. Read through the `status` index, so the
       // check costs the one running row rather than every message the chat holds.
       const busy = Boolean(
-        await db.messages
-          .where("status")
-          .equals("streaming")
-          .filter((m) => m.conversationId === id)
-          .first(),
+        await db.messages.where("[conversationId+status]").equals([id, "streaming"]).first(),
       )
       void setActiveProfile(profile.id)
       leaving.current = true

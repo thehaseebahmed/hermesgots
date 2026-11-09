@@ -31,7 +31,7 @@
 | Sync's settings document (`lib/sync.ts`: `localSettings`, its `appearance` and `threads` records, and the fingerprint) | changed | G1 | `scripts/test-developer-sections.tsx` |
 | Developer settings section (`routes/settings.tsx`: `DeveloperSettings`) | changed | G1 | `scripts/test-developer-sections.tsx` |
 | Start-command rule (`lib/slash.ts`) | changed | G2 | `scripts/test-start-command.mjs`, `scripts/test-slash.mjs` |
-| Threads rule (`lib/chat-threads.ts`: `chatThreadsOn`, `opensInMain`, `startHere`; `lib/threads.ts`: `useStartHere`, `beginChat`) | new | G1, G2, G3, G4 | `scripts/test-thread-command.tsx`, `scripts/test-chat-next-new-chat.tsx` |
+| Threads rule (`lib/chat-threads.ts`: `chatThreadsOn`, `opensInMain`, `startCommandFor`; `lib/threads.ts`: `useStartHere`, `beginChat`) | new | G1, G2, G3, G4 | `scripts/test-thread-command.tsx`, `scripts/test-chat-next-new-chat.tsx` |
 | Chat composer (`components/chat/composer.tsx`) | changed | G2 | `scripts/test-thread-command.tsx` |
 | Chat screen (`routes/chat.tsx`, `chat-next/chat-body.tsx`, `chat-next/blank.tsx`) | affected | G2, G4 | `scripts/test-thread-command.tsx`, `scripts/test-chat-next-new-chat.tsx` |
 | Share screen (`routes/share.tsx`) | changed | G2, G4 | `scripts/test-share-caps.tsx` |
@@ -177,7 +177,7 @@ sequenceDiagram
    `threads` record leaves the switch standing. Done.
 
 3. **No bot chat offers a start command, and a typed `/thread` is words.** The threads rule gains
-   `chatThreadsOn`, `opensInMain` (the bot layout with the switch off) and `startHere(main,
+   `chatThreadsOn`, `opensInMain` (the bot layout with the switch off) and `startCommandFor(main,
    settings)` answering `"thread"`, `"new"` or nothing, with `useStartHere(main)` for the composer.
    The composer asks it, so the menu and a typed command both read one answer: with the switch off
    neither `/thread` nor `/new` is offered anywhere in a bot's chat, and `/thread plan it` is sent
@@ -249,7 +249,7 @@ sequenceDiagram
   because "threads off in the bot layout" is one fact and three answers hang off it; the legacy
   layout must keep making plain chats, which the negation of a single `mayStartThreads` would have
   lost.
-- **`startHere` answers three things where a boolean answered two.** Made by the agent: with the
+- **`startCommandFor` answers three things where a boolean answered two.** Made by the agent: with the
   switch off there is nothing to start, and a boolean cannot say that — the trap that left `/new`
   as a dead command in every shape considered.
 - **`beginChat` decides where a new chat goes; `beginThread` stays the primitive.** Made by the

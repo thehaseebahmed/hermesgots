@@ -21,13 +21,13 @@ exactly that: a switch for the reader who wants threads back, off for everyone e
 preference every reader meets. The cost is named again: a reader who does not know the taps has no
 way back.
 
-**The rules are a leaf.** `botThreadsOn`, `chatThreadsOn`, `opensInMain` and `startHere` live in
+**The rules are a leaf.** `botThreadsOn`, `chatThreadsOn`, `opensInMain` and `startCommandFor` live in
 `lib/chat-threads.ts`, which imports only types, because the triage gate — a domain module with no
 screen's dependencies — asks them too; `lib/threads.ts` keeps the hooks that make them live and the
 one door a new chat is opened through.
 
 **Off means nothing starts, and one rule answers it.** `opensInMain(settings)` — the bot layout with
-the switch off — is the one fact three answers hang off: the slash menu's `startHere` offers neither
+the switch off — is the one fact three answers hang off: the slash menu's `startCommandFor` offers neither
 `/thread` nor `/new` in a bot's chat (a start command that could only lead back to Main is a dead
 command), a new chat's first send goes to that bot's Main, and triage is not asked. `beginChat`
 gives a new chat its three possible homes — a new thread, the bot's Main, or a plain chat in the
