@@ -454,7 +454,7 @@ test("a session whose repo is gone is read-only: the card says why and nothing c
         find("[data-chat-next]")?.textContent?.includes("was removed from the project") ?? false,
       "the session says why it is read-only",
     )
-    assert.equal(composerField(), null, "and has no composer")
+    assert.ok(missing('textarea[aria-label="Message"]'), "and has no composer")
   })
 })
 

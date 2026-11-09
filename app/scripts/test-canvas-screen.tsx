@@ -26,6 +26,7 @@ import {
   click,
   find,
   json,
+  missing,
   mount,
   nav,
   seedSettings,
@@ -241,7 +242,7 @@ test(
           () => Boolean(document.querySelector("[data-canvas-screen]")),
           "the canvas to open",
         )
-        assert.equal(document.querySelector("[data-thread]"), null)
+        assert.ok(missing("[data-thread]"))
       },
     )
   }),

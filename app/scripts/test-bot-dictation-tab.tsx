@@ -685,7 +685,10 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
       ["Cleanup level", "Gots", "How much the tidying changes in a take", "Light"],
       "a title, its mark, what it decides, and the level in play",
     )
-    assert.deepEqual(levelCards(), [], "no cards on the page itself: they live in the sheet")
+    assert.ok(
+      missing("[data-cleanup-level]"),
+      "no cards on the page itself: they live in the sheet",
+    )
     await click(row("cleanup-level"))
     await until(async () => levelCards().length === 4, "the four levels")
     assert.equal(
@@ -710,7 +713,7 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
       async () => lines(row("cleanup-level"))[3] === "High",
       "the row naming the level the host now runs",
     )
-    assert.deepEqual(levelCards(), [], "and the sheet closed behind the pick")
+    assert.ok(missing("[data-cleanup-level]"), "and the sheet closed behind the pick")
   })
 })
 

@@ -22,6 +22,7 @@ import {
   mediaAsks,
   mediaHost,
   mediaReads,
+  missing,
   mount,
   seedChat,
   seedChats,
@@ -205,9 +206,8 @@ test("a photo no browser draws is a row that hands it over, not a cell that can 
         async () => labelled("button", "Download photo.heic") !== null,
         "the photo's download row",
       )
-      assert.equal(
-        labelled("button", "Open photo.heic"),
-        null,
+      assert.ok(
+        missing('button[aria-label="Open photo.heic"]'),
         "no Gallery cell for a type the browser can't paint",
       )
       await click(labelled("button", "Download photo.heic"))

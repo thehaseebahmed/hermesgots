@@ -7,7 +7,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { PAGE } from "@/chat-next/pages"
-import { botProfile, chatScreen, findAll, mount, seedChats, settle } from "./component-kit.tsx"
+import { botProfile, chatScreen, findAll, missing, mount, seedChats, settle } from "./component-kit.tsx"
 import { eventually, openDevice, showsEverything, wait, withDevice } from "./chat-next-devices.tsx"
 import { fakeHost } from "./chat-next-host.ts"
 
@@ -184,7 +184,7 @@ test("a page that fails leaves the thread as drawn, and is read again only when 
     assert.equal(device.older(), "failed")
     assert.equal(host.offsets.filter((at) => at === 2 * PAGE).length, 1, "not read by itself")
     assert.deepEqual(device.turns(), drawn)
-    assert.equal(document.querySelector('[role="alert"]'), null, "and the chat is not failed")
+    assert.ok(missing('[role="alert"]'), "and the chat is not failed")
 
     broken.fix()
     await device.retryOlder()
@@ -214,7 +214,7 @@ test("a page answered with no page at all fails the read, and the chat drawn is 
     await wait(200)
     assert.equal(device.older(), "failed", "and it says so until the reader asks again")
     assert.deepEqual(device.turns(), drawn, "with the chat as it was")
-    assert.equal(document.querySelector('[role="alert"]'), null, "the chat itself is not failed")
+    assert.ok(missing('[role="alert"]'), "the chat itself is not failed")
 
     blank.fix()
     await device.retryOlder()
@@ -252,15 +252,14 @@ test("the app's rows keep their ids while older turns are added above, which is 
       document.querySelector('[data-older="reading"]'),
       "the loader is over the scroller while it reads",
     )
-    assert.equal(
-      document.querySelector('[data-slot="message-scroller-content"] [data-older]'),
-      null,
+    assert.ok(
+      missing('[data-slot="message-scroller-content"] [data-older]'),
       "and not in its flow, where adding or taking it away would move the thread",
     )
     second.release()
     await eventually(() => assert.equal(ids().length > newest.length, true), "older turns arrive")
     await eventually(
-      () => assert.equal(document.querySelector("[data-older]"), null),
+      () => assert.ok(missing("[data-older]")),
       "loader gone",
     )
     assert.deepEqual(

@@ -8,7 +8,7 @@ import test from "node:test"
 
 import { type Message } from "@/lib/db"
 
-import { botProfile, chatScreen, click, find, json, mount, seedChat, until } from "./component-kit.tsx"
+import { botProfile, chatScreen, click, find, json, missing, mount, seedChat, until } from "./component-kit.tsx"
 
 const bot = botProfile("pending", { apiKey: undefined })
 
@@ -79,7 +79,7 @@ test("a chat whose queue a lost turn holds names what waits instead of the compo
     assert.match(words, /the older message behind it/)
     assert.match(words, /Waiting/)
     assert.match(words, /Discard lost turn/)
-    assert.equal(composer(), null, "nothing can be typed behind the lost turn")
+    assert.ok(missing("textarea"), "nothing can be typed behind the lost turn")
   })
 })
 
@@ -88,7 +88,7 @@ test("a queue still moving draws no card, and the composer stays", async () => {
   await seedChat({ id: "chat-moving", messages: turn, profile: bot })
   await mount(chatScreen("chat-moving"), async () => {
     await until(() => Boolean(composer()), "the composer")
-    assert.equal(card(), null)
+    assert.ok(missing("[data-discard-lost]"))
   })
 })
 
@@ -99,7 +99,7 @@ test("a host without the route draws no card at all", async () => {
   await seedChat({ id: "chat-old", messages: turn, profile: botProfile("pending-old", { apiKey: undefined }) })
   await mount(chatScreen("chat-old"), async () => {
     await until(() => Boolean(composer()), "the composer")
-    assert.equal(card(), null)
+    assert.ok(missing("[data-discard-lost]"))
   })
   assert.equal(asks(seen).length, 0, "an older plugin is not asked")
 })

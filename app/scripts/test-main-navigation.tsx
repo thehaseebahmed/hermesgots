@@ -10,6 +10,7 @@ import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 
 import {
   Nav,
+  absent,
   botProfile,
   click,
   find,
@@ -185,7 +186,7 @@ test("with nothing stored the app is the bot-first layout", async () => {
         async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
         "the bot row",
       )
-      assert.equal(findText("button", "New chat"), null, "no New chat button beside the bots")
+      absent("button", "New chat")
     },
   )
 })

@@ -561,9 +561,12 @@ export const labelled = (selector: string, label: string) =>
  * what should have been absent, rather than printing the element that was found.
  */
 export function absent(selector: string, label?: string) {
-  const found = label === undefined ? find(selector) : findText(selector, label)
-  const what = label === undefined ? selector : `${selector} reading "${label}"`
-  assert.ok(!found, `nothing on the screen matches ${what}`)
+  if (label === undefined) {
+    assert.ok(missing(selector), `nothing on the screen matches ${selector}`)
+    return
+  }
+  const found = findText(selector, label)
+  assert.ok(!found, `nothing on the screen matches ${selector} reading "${label}"`)
 }
 
 export const composerField = () =>

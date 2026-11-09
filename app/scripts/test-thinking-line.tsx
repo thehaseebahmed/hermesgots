@@ -10,17 +10,18 @@ import {
   click,
   expanded,
   find,
+  findAll,
   json,
   lineLabel,
-  saysThinking,
+  missing,
   mount,
   onlyThinkingLine,
   resized,
+  saysThinking,
   seedChat,
   settle,
   shutSheet,
   spyScrollIntoView,
-  findAll,
   thinkingLines,
   withReducedMotion,
 } from "./component-kit.tsx"
@@ -199,10 +200,12 @@ test("a working row says its own word and pulses it, muted, and the footer never
     )
     assert.equal(line.getAttribute("aria-label"), "Thinking…", "named plainly for assistive tech")
     assert.equal(expanded(line), "false", "its sheet starts shut")
-    assert.equal(sheet(), null, "with nothing of the run on the page until it is asked for")
-    assert.equal(
-      workingLine(),
-      null,
+    assert.ok(
+      missing("[data-slot=thinking-body]"),
+      "with nothing of the run on the page until it is asked for",
+    )
+    assert.ok(
+      missing("[data-slot=status-line]"),
       "the footer says nothing: the row is the one place the turn's thinking is named",
     )
   })
@@ -331,7 +334,7 @@ test("a tap opens the whole working-out in a sheet, which never closes itself", 
 
     await shutSheet(sheet)
     assert.equal(expanded(onlyThinkingLine()), "false", "the reader closes it, their own way")
-    assert.equal(sheet(), null, "and the words leave the page with it")
+    assert.ok(missing("[data-slot=thinking-body]"), "and the words leave the page with it")
   })
 })
 
@@ -592,7 +595,7 @@ test("the tool group's row spins while a call runs, and is still once it lands",
       await stream(id)
       const group = toolRow(document.body)
       assert.ok(pulses(group), "the calls' row pulses while a call runs")
-      assert.equal(workingLine(), null, "and the footer leaves the saying to it")
+      assert.ok(missing("[data-slot=status-line]"), "and the footer leaves the saying to it")
 
       await db.messages.put({
         ...(await db.messages.get(id))!,
@@ -868,7 +871,10 @@ test("a coding session's thread draws the same row, in place, as the same reply 
     assert.equal(streaming.length, 1, "a streaming session keeps the one row")
     assert.ok(saysThinking(lineLabel(streaming[0])), "its newest stretch holds the whole row")
     assert.ok(pulses(streaming[0]), "pulsing, as a work row pulses everywhere else")
-    assert.equal(workingLine(), null, "and the session's footer leaves the saying to the row too")
+    assert.ok(
+      missing("[data-slot=status-line]"),
+      "and the session's footer leaves the saying to the row too",
+    )
 
     assert.match(
       await read(streaming[0]),

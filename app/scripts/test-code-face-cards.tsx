@@ -11,7 +11,7 @@ import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { QuestionCard } from "@/components/chat/question-card"
 import type { Message } from "@/lib/db"
 
-import { find, findAll, mount } from "./component-kit.tsx"
+import { find, findAll, missing, mount } from "./component-kit.tsx"
 
 /** Whether an element reads in the code face, from itself or any ancestor. */
 const inFace = (element: Element | null) => Boolean(element?.closest(`.${CODE_FACE}`))
@@ -79,6 +79,6 @@ test("an approval's sentence reads in the face, its command is code and its titl
 
 test("a chat's cards keep the app's face throughout", async () => {
   await mount(<QuestionCard message={asked} onAnswer={async () => {}} />, async () => {
-    assert.equal(document.querySelector(`.${CODE_FACE}`), null, "a chat has no code face at all")
+    assert.ok(missing(`.${CODE_FACE}`), "a chat has no code face at all")
   })
 })

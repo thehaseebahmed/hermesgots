@@ -13,7 +13,7 @@ import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig, SessionMessage } from "@/lib/hermes"
 import { MAX_TEXT_CHARS, toMessages } from "@/lib/history"
 import { controlAction, DELEGATE_TOOL, spawnedAgent } from "@/lib/spawn"
-import { click, connection, findAll, find, json, mount, settle, text } from "./component-kit.tsx"
+import { click, connection, find, findAll, json, missing, mount, settle, text } from "./component-kit.tsx"
 
 const server: HermesConfig = connection("card-classification")
 const SESSION = "parent-session"
@@ -332,7 +332,7 @@ test("a spawn inside a subagent's own pop-up still draws its card", async () => 
       await settle()
       assert.equal(cards().length, 1, "the nested spawn draws its card in the pop-up")
       assert.equal(cards()[0].getAttribute("data-agent"), nested.id)
-      assert.equal(toolRow(), null, "and nothing about it is a tool row")
+      assert.ok(missing('[data-slot="tool-group"]'), "and nothing about it is a tool row")
     },
   )
 })

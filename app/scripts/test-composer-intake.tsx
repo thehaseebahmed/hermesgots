@@ -17,7 +17,7 @@ import { uploadAttachments } from "@/lib/send-turn"
 
 import { PreviewerProvider } from "@/components/chat/previewer"
 
-import { click, connection, findAll, json, mount, settle, until } from "./component-kit.tsx"
+import { click, connection, findAll, json, missing, mount, settle, until } from "./component-kit.tsx"
 
 const bot = connection("composer-intake")
 
@@ -520,7 +520,7 @@ test("a staged photo this device can't draw is handed to the platform, not the P
       )
       await until(async () => opened.length > 0, "the platform's hand-off")
       assert.match(opened[0], /^blob:/, "the bytes this device holds, under its own name")
-      assert.equal(document.querySelector('[role="dialog"]'), null, "and no Previewer opens")
+      assert.ok(missing('[role="dialog"]'), "and no Previewer opens")
     })
   } finally {
     URL.createObjectURL = real.create
@@ -547,7 +547,7 @@ test("a staged file this device holds is handed to the platform from its own byt
       )
       await until(async () => opened.length > 0, "the tab")
       assert.match(opened[0], /^blob:/, "the bytes this device holds, which the host never saw")
-      assert.equal(document.querySelector('[role="dialog"]'), null, "a file is never previewed")
+      assert.ok(missing('[role="dialog"]'), "a file is never previewed")
     })
   } finally {
     URL.createObjectURL = real.create

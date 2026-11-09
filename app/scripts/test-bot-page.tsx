@@ -25,6 +25,7 @@ import {
   findAll,
   json,
   laptop,
+  missing,
   mount,
   path,
   seedSettings,
@@ -762,7 +763,10 @@ test("a level the host refuses says so, and the row keeps what the host holds", 
 test("a plugin that doesn't advertise reminders draws no row", async () => {
   await seed("general-no-reminders", { hostId: "host-1" })
   await mount(general(), async () => {
-    assert.equal(row("reminders"), null, "no row to set a setting this host doesn't have")
+    assert.ok(
+      missing('[data-setting="reminders"]'),
+      "no row to set a setting this host doesn't have",
+    )
     assert.doesNotMatch(wordsOf(page()), /Progress updates/)
   })
 })

@@ -1,144 +1,171 @@
-// The plan's step 3: a component test that hands a found element to assert's equality makes Node
-// build its failure by inspecting that element, and a mounted element carries React's fiber graph,
-// so a red run walks the tree until the worker holds gigabytes. `scripts/test-rooms-list.tsx` was
-// killed at 5 GB by one `assert.equal(find(…), null, …)`. The sweep answered presence with a
-// boolean; this keeps the form out, since the next red one is the next 5 GB.
+// A component test that hands a found element to assert's equality makes Node build its failure by
+// inspecting that element, and a mounted element carries React's fiber graph, so a red run walks the
+// tree until the worker holds gigabytes. `scripts/test-rooms-list.tsx` was killed at 5 GB by one
+// `assert.equal(find(…), null, …)`. The sweep answered presence with a boolean; this keeps the form
+// out, since the next red one is the next 5 GB.
 //
-// The check is textual, and reads a call by walking its parentheses rather than by matching a
-// line: a call may put its argument on the next line, and a selector is often a template literal
-// holding a comma or a bracket.
+// The check reads the TypeScript grammar rather than the text, so it names every spelling that
+// produces an element — the harness's helpers, `document.querySelector`, and a local helper that
+// returns one — wherever the call is written and whatever its selector holds.
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
+import ts from "typescript"
 
-const EQUALITY = ["equal", "strictEqual", "notEqual", "deepEqual"]
-const IDENTIFIER = /[A-Za-z0-9_$]/
+/** Assert's equality family: each builds its failure by inspecting both arguments. */
+const EQUALITY = new Set([
+  "equal",
+  "strictEqual",
+  "deepEqual",
+  "deepStrictEqual",
+  "notEqual",
+  "notDeepEqual",
+])
 
-/** The index just past the line's newline, so a `//` comment is skipped whole. */
-function afterLine(source, i) {
-  const end = source.indexOf("\n", i)
-  return end === -1 ? source.length : end + 1
-}
+/** The harness's helpers that answer an element (or a list of them). */
+const ELEMENT_FUNCTIONS = new Set([
+  "find",
+  "findAll",
+  "findText",
+  "labelled",
+  "composerField",
+  "threadCard",
+])
 
-/** The index just past the end of a block comment, so the stars it closes on are skipped whole. */
-function afterBlock(source, i) {
-  const end = source.indexOf("*/", i + 2)
-  return end === -1 ? source.length : end + 2
-}
+/** `document.querySelector` and its list form, read as one name. */
+const DOCUMENT_FUNCTIONS = new Set(["querySelector", "querySelectorAll"])
 
-/** The index just past the string or template literal opening at i, an interpolation walked whole. */
-function afterString(source, i) {
-  const quote = source[i]
-  let j = i + 1
-  while (j < source.length) {
-    const ch = source[j]
-    if (ch === "\\") {
-      j += 2
-    } else if (ch === quote) {
-      return j + 1
-    } else if (quote === "`" && ch === "$" && source[j + 1] === "{") {
-      j = afterBraces(source, j + 2)
-    } else {
-      j++
-    }
+/** A node with the wrappers that leave what it answers unchanged taken off. */
+function unwrap(node) {
+  let current = node
+  for (;;) {
+    if (ts.isParenthesizedExpression(current)) current = current.expression
+    else if (ts.isAsExpression(current) || ts.isSatisfiesExpression(current)) current = current.expression
+    else if (ts.isNonNullExpression(current)) current = current.expression
+    else if (ts.isAwaitExpression(current)) current = current.expression
+    else return current
   }
-  return j
 }
 
-/** The index just past the `}` closing an interpolation whose body starts at i. */
-function afterBraces(source, i) {
-  let depth = 1
-  let j = i
-  while (j < source.length && depth > 0) {
-    const ch = source[j]
-    if (ch === "\\") j += 2
-    else if (ch === '"' || ch === "'" || ch === "`") j = afterString(source, j)
-    else {
-      if (ch === "{") depth++
-      else if (ch === "}") depth--
-      j++
-    }
-  }
-  return j
-}
-
-/** Where a call opened at `(` closes, and where its first argument ends. */
-function callSpan(source, open) {
-  let depth = 0
-  let comma = -1
-  let j = open
-  while (j < source.length) {
-    const ch = source[j]
-    if (ch === "/" && source[j + 1] === "/") {
-      j = afterLine(source, j)
-      continue
-    }
-    if (ch === "/" && source[j + 1] === "*") {
-      j = afterBlock(source, j)
-      continue
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      j = afterString(source, j)
-      continue
-    }
-    if (ch === "(" || ch === "[" || ch === "{") {
-      depth++
-    } else if (ch === ")" || ch === "]" || ch === "}") {
-      depth--
-      if (depth === 0) return { close: j, comma }
-    } else if (ch === "," && depth === 1 && comma === -1) {
-      comma = j
-    }
-    j++
+/** The name a call goes by — `find`, `dialog`, `document.querySelector` — or nothing. */
+function calleeName(call) {
+  const expression = call.expression
+  if (ts.isIdentifier(expression)) return expression.text
+  if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
+    if (expression.expression.text !== "document") return null
+    return DOCUMENT_FUNCTIONS.has(expression.name.text) ? `document.${expression.name.text}` : null
   }
   return null
 }
 
-/** Whether an argument is a `find(…)`/`findAll(…)` call and nothing read off what it answered. */
-function isFoundElement(argument) {
-  const call = /^(find|findAll)\s*\(/.exec(argument)
-  if (!call) return false
-  const span = callSpan(argument, argument.indexOf("(", call[0].length - 1))
-  return span !== null && argument.slice(span.close + 1).trim() === ""
+/**
+ * Whether an expression is an element and nothing read off one: a bare call to a function that
+ * answers an element. `find(sel)?.textContent` and `findAll(sel).length` are property reads that
+ * answer a string or a count, so they are no offender.
+ */
+function elementValued(expression, helpers) {
+  const node = unwrap(expression)
+  if (!ts.isCallExpression(node)) return false
+  const name = calleeName(node)
+  if (name === null) return false
+  return name.startsWith("document.") || ELEMENT_FUNCTIONS.has(name) || helpers.has(name)
 }
 
-/** Every `assert.<equality>(…)` whose first argument is a bare `find(…)` or `findAll(…)`. */
-export function offendersIn(source) {
-  const sites = []
-  let i = 0
-  while (i < source.length) {
-    const ch = source[i]
-    if (ch === "/" && source[i + 1] === "/") {
-      i = afterLine(source, i)
-      continue
-    }
-    if (ch === "/" && source[i + 1] === "*") {
-      i = afterBlock(source, i)
-      continue
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      i = afterString(source, i)
-      continue
-    }
-    const name = IDENTIFIER.test(source[i - 1] ?? "")
-      ? undefined
-      : EQUALITY.find((one) => source.startsWith(`assert.${one}(`, i))
-    if (name === undefined) {
-      i++
-      continue
-    }
-    const open = i + `assert.${name}`.length
-    const span = callSpan(source, open)
-    if (span === null) break
-    if (span.comma !== -1) {
-      const argument = source.slice(open + 1, span.comma).trim()
-      if (isFoundElement(argument)) {
-        sites.push({ line: source.slice(0, i).split("\n").length, argument })
+/** The expressions a function answers, taken at the returns that belong to its own body. */
+function returnedExpressions(fn) {
+  if (!fn.body) return []
+  if (!ts.isBlock(fn.body)) return [fn.body]
+  const returns = []
+  const walk = (node) => {
+    if (ts.isReturnStatement(node) && node.expression) returns.push(node.expression)
+    // A return inside a nested function belongs to that function, not this one.
+    if (ts.isFunctionLike(node) && node !== fn) return
+    ts.forEachChild(node, walk)
+  }
+  walk(fn.body)
+  return returns
+}
+
+/** Every function the file defines, by name, with what its body answers. */
+function definitions(sourceFile) {
+  const found = new Map()
+  const note = (name, fn) => {
+    if (!name || !fn) return
+    if (!found.has(name)) found.set(name, [])
+    found.get(name).push(...returnedExpressions(fn))
+  }
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      note(statement.name.text, statement)
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue
+        const init = unwrap(declaration.initializer)
+        if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+          note(declaration.name.text, init)
+        }
       }
     }
-    i = span.close + 1
   }
+  return found
+}
+
+/**
+ * The file's own helpers that answer an element, resolved to a fixed point so a helper of a helper
+ * counts too. A function that answers a property of one (`marker()?.textContent`) answers a string
+ * and stays out: the same rule the assertions are read by.
+ */
+function elementHelpers(sourceFile) {
+  const answers = definitions(sourceFile)
+  const helpers = new Set()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [name, returned] of answers) {
+      if (helpers.has(name)) continue
+      if (returned.length > 0 && returned.every((one) => elementValued(one, helpers))) {
+        helpers.add(name)
+        changed = true
+      }
+    }
+  }
+  return helpers
+}
+
+/** The equality name a call is written as (`assert.equal`), or nothing. */
+function assertionName(call) {
+  const expression = call.expression
+  if (!ts.isPropertyAccessExpression(expression)) return null
+  if (!ts.isIdentifier(expression.expression) || expression.expression.text !== "assert") return null
+  return EQUALITY.has(expression.name.text) ? expression.name.text : null
+}
+
+/** Every `assert.<equality>(…)` whose first argument hands it an element. */
+export function offendersIn(source, file = "<source>") {
+  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const errors = sourceFile.parseDiagnostics ?? []
+  if (errors.length > 0) {
+    const [error] = errors
+    const { line, character } = sourceFile.getLineAndCharacterOfPosition(error.start ?? 0)
+    const why = ts.flattenDiagnosticMessageText(error.messageText, " ")
+    throw new Error(`${file}:${line + 1}:${character + 1} could not be parsed: ${why}`)
+  }
+  const helpers = elementHelpers(sourceFile)
+  const sites = []
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && assertionName(node) !== null) {
+      const [first] = node.arguments
+      if (first && elementValued(first, helpers)) {
+        sites.push({
+          line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+          argument: first.getText(sourceFile),
+        })
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
   return sites
 }
 
@@ -152,6 +179,26 @@ const FLAGGED = {
     ")",
   ].join("\n"),
   "a list handed to deepEqual": "assert.deepEqual(findAll(sel), [])",
+  "a list handed to deepStrictEqual": "assert.deepStrictEqual(findAll(sel), [])",
+  "a list handed to notDeepEqual": "assert.notDeepEqual(findAll(sel), [])",
+  "the strict spelling": 'assert.strictEqual(find(sel), null, "the row went")',
+  "a text find": 'assert.equal(findText(sel, "Send"), null, "the button went")',
+  "a labelled find": 'assert.equal(labelled(sel, "Close"), null, "the row went")',
+  "the composer's field": "assert.equal(composerField(), null)",
+  "a thread card": "assert.equal(threadCard(id), null)",
+  "the document's single query": "assert.equal(document.querySelector(sel), null)",
+  "the document's list query": "assert.notEqual(document.querySelectorAll(sel), 0)",
+  "a local arrow that answers find":
+    'const dialog = () => find(\'[role="alertdialog"]\')\nassert.equal(dialog(), null, "the dialog stays shut")',
+  "a local arrow that answers a list":
+    "const rows = () => findAll('[data-row]')\nassert.deepEqual(rows(), [], \"the rows went\")",
+  "a local function declaration":
+    'function marker() {\n  return find("[data-marker]")\n}\nassert.equal(marker(), null)',
+  "a helper of a helper": [
+    'const one = () => find("[data-one]")',
+    "const two = () => one()",
+    "assert.equal(two(), null)",
+  ].join("\n"),
 }
 
 const ALLOWED = {
@@ -160,6 +207,9 @@ const ALLOWED = {
   "a presence boolean": 'assert.ok(missing(sel), "nothing there")',
   "the harness's own absence": 'absent(sel, "the row")',
   "a comment quoting the form": '// assert.equal(find(sel), null, "not a call")',
+  "a local helper that answers a property":
+    'const marker = () => find("[data-marker]")\nconst markerText = () => marker()?.textContent ?? null\nassert.equal(markerText(), null)',
+  "a value found before the assertion": 'const row = find(sel)\nassert.equal(row?.textContent, "3")',
 }
 
 function componentTests() {
@@ -167,12 +217,13 @@ function componentTests() {
 }
 
 test("no component test hands a found element to assert's equality", () => {
+  const dir = import.meta.dirname
   const files = componentTests()
   assert.ok(files.length > 0, "the component tests were read")
   const named = []
   for (const name of files) {
-    const source = readFileSync(join(import.meta.dirname, name), "utf8")
-    for (const site of offendersIn(source)) named.push(`${name}:${site.line} ${site.argument}`)
+    const source = readFileSync(join(dir, name), "utf8")
+    for (const site of offendersIn(source, join(dir, name))) named.push(`${name}:${site.line} ${site.argument}`)
   }
   assert.deepEqual(
     named,
@@ -184,9 +235,10 @@ test("no component test hands a found element to assert's equality", () => {
 test("the checker names every form a component test can write", () => {
   for (const [what, source] of Object.entries(FLAGGED)) {
     const sites = offendersIn(source)
+    const line = source.slice(0, source.indexOf("assert.")).split("\n").length
     assert.equal(sites.length, 1, `${what} is named once`)
-    assert.match(sites[0].argument, /^(find|findAll)\(/, `${what} names the argument it found`)
-    assert.equal(sites[0].line, 1, `${what} is named where its assertion starts`)
+    assert.equal(sites[0].line, line, `${what} is named where its assertion starts`)
+    assert.ok(sites[0].argument.length > 0, `${what} names the argument it found`)
   }
 })
 
@@ -194,4 +246,12 @@ test("the checker leaves a property read, a boolean and a comment alone", () => 
   for (const [what, source] of Object.entries(ALLOWED)) {
     assert.deepEqual(offendersIn(source), [], `${what} is not an offender`)
   }
+})
+
+test("a file the checker cannot parse fails, naming it", () => {
+  assert.throws(
+    () => offendersIn("const = ;", "scripts/test-broken.tsx"),
+    /scripts\/test-broken\.tsx:\d+:\d+ could not be parsed/,
+    "an unreadable file is a failure rather than a skip",
+  )
 })

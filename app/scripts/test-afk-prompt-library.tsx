@@ -18,6 +18,7 @@ import { setProjectAfkPrompt } from "@/lib/hermes"
 
 import {
   DEFAULT_AFK_PROMPT,
+  absent,
   afkHost,
   click,
   find,
@@ -151,11 +152,11 @@ test("picking copies the entry's words in and writes them with their source", as
     )
     assert.equal(host.state().source, "e-one", "and the copy remembers the entry it came from")
     assert.equal(fieldValue(), body, "and the words are in the field, where they were copied")
-    assert.equal(list(), null, "the list closes on the pick")
+    assert.ok(missing("[data-prompt-library]"), "the list closes on the pick")
 
     await click(findText("button", "Done"))
     assert.equal(writes(host).length, 1, "Done on the copy the host already holds writes nothing")
-    assert.equal(field(), null, "and the editor closes")
+    assert.ok(missing('textarea[aria-label="Prompt"]'), "and the editor closes")
   })
 })
 
@@ -265,8 +266,8 @@ test("signed out, the Prompt editor is the textarea it always was", async () => 
   await mountAfk(config, project, async () => {
     await click(find('button[aria-label="Prompt"]'))
     assert.ok(missing("[data-prompt-library-actions]"), "no library without an account signed in with its vault open, whatever the host advertises")
-    assert.equal(findText("button", "Choose from library"), null, "and no door to one")
-    assert.equal(findText("button", "Save to library"), null)
+    absent("button", "Choose from library")
+    absent("button", "Save to library")
     assert.equal(fieldValue(), DEFAULT_AFK_PROMPT, "today's field, holding the project's words")
 
     await type(field(), "# Mine\n\n- Read the issue first.")
@@ -285,7 +286,7 @@ test("an editor without the library draws no affordances", async () => {
     afkHost({ features: PICKS_FEATURES }),
     async () => {
       assert.ok(missing("[data-prompt-library-actions]"), "no library where it isn't offered")
-      assert.equal(findText("button", "Choose from library"), null)
+      absent("button", "Choose from library")
       assert.equal(find('textarea[aria-label="Prompt"]') !== null, true, "the field, and nothing more")
     },
     false,

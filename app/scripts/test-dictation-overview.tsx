@@ -18,7 +18,7 @@ const { DictationSettings } = await import("@/components/settings/dictation")
 const { Screen } = await import("@/components/settings-chrome")
 const { connectionKey } = await import("@/lib/connection")
 const { db } = await import("@/lib/db")
-const { botProfile, click, find, mount, seedSettings, text, until } = await import(
+const { botProfile, click, find, missing, mount, seedSettings, text, until } = await import(
   "./component-kit.tsx"
 )
 const { speech } = await import("./dictation-page-kit.tsx")
@@ -91,8 +91,14 @@ test("the Overview draws the Bubble and its bot, and no rows for the phone's gra
     assert.match(said("bubble"), /Bubble/)
     assert.equal(bubbleOn(), false, "a service that is not running reads off")
     assert.match(said("bubble-bot"), /A bot/, "the bot is this device's selection")
-    assert.equal(row("bubble-overlay"), null, "the draw-over grant is not a setting of this app's")
-    assert.equal(row("bubble-accessibility"), null, "and neither is the accessibility service")
+    assert.ok(
+      missing('[data-setting="bubble-overlay"]'),
+      "the draw-over grant is not a setting of this app's",
+    )
+    assert.ok(
+      missing('[data-setting="bubble-accessibility"]'),
+      "and neither is the accessibility service",
+    )
     assert.match(said("words-spoken"), /Words spoken/, "and the totals are still under them")
   })
 })

@@ -24,6 +24,7 @@ import {
   click,
   find,
   json,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -423,9 +424,8 @@ test(
         1,
         "a route that answered 404 is settled: the file is asked for once, and no more",
       )
-      assert.equal(
-        row("brief.pdf"),
-        null,
+      assert.ok(
+        missing('button[aria-label="Download brief.pdf"]'),
         "the Host settled the file with a 404, so there is nothing to download",
       )
       assert.match(document.body.textContent ?? "", /the brief/, "the reply's words still draw")
@@ -536,8 +536,11 @@ test(
         async () => document.querySelector('[data-slot="room-row"]') !== null,
         "the room's row",
       )
-      assert.equal(attachButton(), null, "no file to attach where the Host has no store for it")
-      assert.equal(cell("chart.png"), null, "and nothing draws a cell")
+      assert.ok(
+        missing('button[aria-label^="Add context"]'),
+        "no file to attach where the Host has no store for it",
+      )
+      assert.ok(missing('button[aria-label="Open chart.png"]'), "and nothing draws a cell")
     })
   }),
 )
@@ -581,9 +584,8 @@ test(
         assert.equal(tile.getAttribute("aria-invalid"), "true", "the tile is marked invalid")
         assert.equal(tile.getAttribute("title"), REFUSED, "and carries the Host's sentence")
         assert.deepEqual(said, [REFUSED], "the refusal is a toast, in the Host's own words")
-        assert.equal(
-          document.querySelector('[role="alert"]'),
-          null,
+        assert.ok(
+          missing('[role="alert"]'),
           "a refused file is a toast and its own tile, not a banner over the composer",
         )
         assert.ok(

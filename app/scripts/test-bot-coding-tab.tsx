@@ -19,14 +19,15 @@ import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
+  Call,
   afkHost,
   botProfile,
   click,
   find,
   findAll,
+  missing,
   mount,
   seedSettings,
-  type Call,
 } from "./component-kit.tsx"
 
 function LiveEditor() {
@@ -146,10 +147,10 @@ test("the Coding page shows Pick budget as one value row, saying what a pick cou
 test("a host without afk_picks has no Coding tab, and its address lands on the bot's page", async () => {
   await seed("no-coding-tab", ["general_page", "afk", "afk_switch"])
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
-    assert.equal(codingTab(), null, "no Coding page")
+    assert.ok(missing('[data-bot-page="coding"]'), "no Coding page")
     assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
     assert.ok(find("[data-bot-card]"), "and the bot's own page is what is drawn")
-    assert.equal(budget(), null, "and no budget to set")
+    assert.ok(missing("[data-pick-budget]"), "and no budget to set")
   })
 })
 
@@ -347,7 +348,7 @@ test("a host that answers no deciding window leaves the row silent", async () =>
     deciding: null,
   })
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
-    assert.equal(accountFigure(), null, "a host with nothing to say draws no figure")
+    assert.ok(missing("[data-usage-window]"), "a host with nothing to say draws no figure")
     assert.equal(
       calls.filter((call) => call.path.endsWith("/plugins/gots/usage")).length,
       1,
@@ -359,7 +360,7 @@ test("a host that answers no deciding window leaves the row silent", async () =>
 test("a host older than the threshold draws no figure, since there is no number to judge it by", async () => {
   const calls = await seed("threshold-old", ["afk", "afk_picks"])
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
-    assert.equal(accountFigure(), null)
+    assert.ok(missing("[data-usage-window]"))
     assert.equal(
       calls.filter((call) => call.path.endsWith("/plugins/gots/usage")).length,
       0,

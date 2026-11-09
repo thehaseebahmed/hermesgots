@@ -20,6 +20,7 @@ import {
   labelled,
   mediaHost,
   mediaReads,
+  missing,
   mount,
   seedChat,
   until,
@@ -99,7 +100,7 @@ test("a message's photo and clip draw in one Gallery, its recording in a row, it
     assert.ok(cells.contains(cell("cat.png")), "the photo keeps its place in the Gallery")
     assert.ok(cells.contains(cell("clip.mp4")), "and the clip sits beside it")
     assert.equal(cells.contains(row("voice.mp3")), false, "a recording is not a picture")
-    assert.equal(cell("notes.pdf"), null, "a PDF is not media")
+    assert.ok(missing('button[aria-label="Open notes.pdf"]'), "a PDF is not media")
     assert.equal(
       findAll('[role="group"][aria-label="Gallery"]').length,
       1,
@@ -112,8 +113,8 @@ test("a message's photo and clip draw in one Gallery, its recording in a row, it
       /\/media\?path=[^&]*cat\.png&token=/,
       "the photo draws from its signed URL",
     )
-    assert.equal(document.querySelector("video"), null, "nothing is played in the thread")
-    assert.equal(document.querySelector("audio"), null)
+    assert.ok(missing("video"), "nothing is played in the thread")
+    assert.ok(missing("audio"))
     assert.deepEqual(
       mediaReads(asked)
         .map((path) => path.replace(`${HOST}/`, ""))
@@ -146,7 +147,10 @@ test("a photo whose URL never answers keeps its cell, never a download row", asy
   mediaHost({ fail: ["cat.png"], failure: 503 })
   await mount(chatScreen("c1"), async () => {
     await until(async () => cell("cat.png") !== null, "the photo's cell")
-    assert.equal(download("cat.png"), null, "a picture is never handed over as a file to save")
+    assert.ok(
+      missing('button[aria-label="Download cat.png"]'),
+      "a picture is never handed over as a file to save",
+    )
     assert.equal(gallery()?.contains(cell("cat.png")), true, "its place is kept in the Gallery")
   })
 })
@@ -160,7 +164,7 @@ test("a photo whose read failed offers a retry that asks again and draws", async
       async () => filled(cell("cat.png")),
       "the cell that couldn't read, kept where it was",
     )
-    assert.equal(download("cat.png"), null, "still not a file to save")
+    assert.ok(missing('button[aria-label="Download cat.png"]'), "still not a file to save")
     // The host comes back: the retry in the Previewer asks it again, and the picture draws.
     mediaHost({ asked })
     await click(cell("cat.png"))
@@ -220,7 +224,10 @@ test("a photo whose bytes the host refuses is a cell that says why, not a row", 
   })
   await mount(chatScreen("c1"), async () => {
     await until(async () => filled(cell("cat.png")), "the photo's cell, kept where it was")
-    assert.equal(download("cat.png"), null, "and never the row a file downloads in")
+    assert.ok(
+      missing('button[aria-label="Download cat.png"]'),
+      "and never the row a file downloads in",
+    )
     await click(cell("cat.png"))
     await until(
       () => (document.querySelector('[role="dialog"]')?.textContent ?? "").includes("200 MB limit"),
@@ -270,7 +277,7 @@ test("a photo of any image type is drawn as the picture it is, SVG included", as
       () => Boolean(document.querySelector('img[alt="diagram.svg"]')),
       "an SVG draws as the image it is, not as a file row",
     )
-    assert.equal(download("diagram.svg"), null)
+    assert.ok(missing('button[aria-label="Download diagram.svg"]'))
   })
 })
 

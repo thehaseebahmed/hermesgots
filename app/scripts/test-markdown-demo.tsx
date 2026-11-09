@@ -8,7 +8,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { MarkdownDemoPage } from "@/routes/demos/markdown"
-import { Path, find, mountMarkdown, path, seedSettings } from "./component-kit.tsx"
+import { Path, find, missing, mountMarkdown, path, seedSettings } from "./component-kit.tsx"
 
 const screen = () => (
   <MemoryRouter initialEntries={["/demos/markdown"]}>
@@ -74,6 +74,6 @@ test("with the Developer switch off the address falls back to Settings", async (
   await seedSettings({ developer: false })
   await mountMarkdown(screen(), async () => {
     assert.equal(path(), "/settings", "the address is Settings'")
-    assert.equal(article(), null, "none of the article is drawn")
+    assert.ok(missing("[data-slot=markdown]"), "none of the article is drawn")
   })
 })

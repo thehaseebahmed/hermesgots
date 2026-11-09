@@ -284,9 +284,9 @@ test("a row that is off or doesn't load is still listed, with its description", 
     assert.ok(row("deploy"), "the off skill has a row")
     assert.ok(row("browse"), "the broken skill has a row")
     assert.match(row("deploy")?.textContent ?? "", /Ship it\./, "its description is on it")
-    assert.deepEqual(
-      findAll('[data-skill="deploy"] [role="switch"]').map((one) => one),
-      [],
+    assert.equal(
+      findAll('[data-skill="deploy"] [role="switch"]').length,
+      0,
       "a Host that advertises no write offers nothing to press",
     )
   })
@@ -351,7 +351,10 @@ test("a Host that advertises the write puts a switch on every row it can switch"
     assert.ok(switchIn("pr-review"), "a writable row has a switch")
     assert.equal(on(switchIn("pr-review")), true, "checked means on")
     assert.equal(on(switchIn("deploy")), false, "a skill switched off wears its switch off")
-    assert.equal(switchIn("hermes-agent"), null, "an essential skill has no switch")
+    assert.ok(
+      missing('[data-skill="hermes-agent"] [role="switch"]'),
+      "an essential skill has no switch",
+    )
     assert.ok(switchIn("gots:notes"), "a plugin's skill is switched like any other")
   })
 })
@@ -637,7 +640,7 @@ test("Remove asks first, and cancelling leaves the skill's note where it was", a
     assert.ok(alert(), "the confirmation is up")
     assert.match(alert()?.textContent ?? "", /Remove pr-review\?/, "it names the skill")
     await click(alertButton("Cancel"))
-    assert.equal(alert(), null, "cancelling closes the confirmation")
+    assert.ok(missing('[role="alertdialog"]'), "cancelling closes the confirmation")
     assert.ok(noteBody(), "and leaves the skill's own note where it was")
   })
 })
@@ -660,8 +663,8 @@ test("confirming removes the skill, and the row leaves every list at once", asyn
       "one removal, of the skill the note was opened on",
     )
     await until(async () => row("pr-review") === null, "the row to leave the tab")
-    assert.equal(alert(), null, "both dialogs are closed")
-    assert.equal(noteBody(), null, "the note went with the skill")
+    assert.ok(missing('[role="alertdialog"]'), "both dialogs are closed")
+    assert.ok(missing("[data-skill-sheet]"), "the note went with the skill")
     const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
     assert.deepEqual(
       stored.map((skill) => skill.name),
@@ -688,7 +691,7 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
       await until(async () => errors.length === 1, "the toast")
       assert.deepEqual(errors, [refusal], "the Host's own words, nothing added")
       await settle()
-      assert.equal(alert(), null, "the confirmation closes with the refusal")
+      assert.ok(missing('[role="alertdialog"]'), "the confirmation closes with the refusal")
       assert.ok(noteBody(), "back on the skill's own note")
       assert.equal(noteSkill(), "pr-review", "still that skill's page")
       assert.ok(removeButton(), "and it still offers the removal the Host refused")
@@ -884,7 +887,10 @@ test("a tap on a category never writes the skill the Host can't switch", async (
     )
     assert.equal(on(categorySwitch("ops")), true, "the header keeps the Host's truth")
     assert.equal(on(switchIn("ops-one")), false, "the row it could switch did move")
-    assert.equal(switchIn("hermes-agent"), null, "and the pinned row has no switch of its own")
+    assert.ok(
+      missing('[data-skill="hermes-agent"] [role="switch"]'),
+      "and the pinned row has no switch of its own",
+    )
   })
 })
 

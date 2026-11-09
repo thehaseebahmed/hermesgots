@@ -12,7 +12,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { THREAD_MISSING } from "@/components/chat/empty-states"
 import { db } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
-import { botProfile, json, mount, seedChats, settle } from "./component-kit.tsx"
+import { botProfile, json, missing, mount, seedChats, settle } from "./component-kit.tsx"
 
 const BOT = botProfile("thread-missing")
 
@@ -51,6 +51,6 @@ test("a synced chat on an uncallable bot says the thread didn't load", async () 
     assert.ok(body.includes(THREAD_MISSING), "the pane says the thread didn't load")
     assert.ok(body.includes("Try again"), "and offers the read again")
     assert.ok(body.includes("Copy details"), "and the failed read for support")
-    assert.equal(document.querySelector("[data-blank]"), null, "not chat-next's blank surface")
+    assert.ok(missing("[data-blank]"), "not chat-next's blank surface")
   })
 })

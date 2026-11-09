@@ -16,6 +16,7 @@ import {
   labelled,
   mediaHost,
   mediaReads,
+  missing,
   mount,
   spyOpen,
   text,
@@ -102,11 +103,7 @@ test("a library file opens through the app's previewer, from a URL the bot signs
       // it can, never a cell that can never fill.
       await click(row("photo.heic"))
       await until(async () => browser.opened.length === 2, "the HEIC handed to the platform")
-      assert.equal(
-        document.querySelector("img[alt='photo.heic']"),
-        null,
-        "no Previewer on a photo the browser can't draw",
-      )
+      assert.ok(missing("img[alt='photo.heic']"), "no Previewer on a photo the browser can't draw")
 
       assert.deepEqual(
         mediaReads(asked).map((path) => path.split("/").pop()),

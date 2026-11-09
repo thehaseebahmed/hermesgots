@@ -23,6 +23,7 @@ import {
   findAll,
   findText,
   json,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -324,7 +325,7 @@ test(
       })
       await until(() => page.posted.length === 2, "the second call's answer")
       assert.equal(page.posted[1].ok, true)
-      assert.equal(consentDialog(), null, "a granted tool is not asked about again")
+      assert.ok(missing("[data-canvas-consent]"), "a granted tool is not asked about again")
 
       // A second declared tool the reader refuses: the grant is recorded as a no and the page's
       // promise is rejected plainly, with no retry behind it.
@@ -361,7 +362,7 @@ test(
       assert.equal(page.posted[3].ok, false)
       assert.match(page.posted[3].error ?? "", /never declared/)
       await settle()
-      assert.equal(consentDialog(), null, "an undeclared tool asks nothing")
+      assert.ok(missing("[data-canvas-consent]"), "an undeclared tool asks nothing")
     })
   }),
 )

@@ -14,7 +14,7 @@ import { THINKING_ACTIVITY } from "@/lib/format"
 import { REPLY_EDGE } from "@/lib/layout"
 import { THINKING_WORD } from "@/lib/thinking"
 
-import { mount } from "./component-kit.tsx"
+import { missing, mount } from "./component-kit.tsx"
 
 const rowOf = () => document.querySelector('[data-slot="thinking-line"] button')!
 const pulses = (row: Element) => row.hasAttribute("data-working")
@@ -74,7 +74,7 @@ test("a line that says something of its own is announced as written", async () =
   await mount(<StatusLine text="Running bash" />, async () => {
     const words = document.querySelector('[data-slot="status-words"]')!
     assert.equal(words.getAttribute("aria-hidden"), null, "no rotation to hide")
-    assert.equal(document.querySelector(".sr-only"), null, "and nothing said twice")
+    assert.ok(missing(".sr-only"), "and nothing said twice")
     assert.equal(words.textContent, "Running bash")
   })
 })

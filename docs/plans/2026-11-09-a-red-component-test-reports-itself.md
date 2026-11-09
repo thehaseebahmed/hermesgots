@@ -32,17 +32,23 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
    run in three failed there (and one was SIGKILLed); after, 8/8 green, which is what this branch measured
    with the wait in place.
    Done.
-2. **No test hands a found element to assert's equality.** A `absent()` / `shown()` pair in the harness
-   answers presence with a boolean, and every `assert.equal(find(...), …)` becomes a check of that
-   boolean; `assert.equal(element, null)` makes Node build a diff by inspecting the element, and the
-   element carries React's fiber graph, so the diff walks the whole tree. Goals: G2. After: 1.
-   Layers: component harness, component tests. Check: a forced failure of a presence check prints its
-   message and returns in milliseconds, where the element form climbs to ~5 GB and is SIGKILLed.
+2. **No test hands a found element to assert's equality.** A `missing()` helper in the harness — beside
+   the pre-existing `absent()`, which answers a labelled control — answers presence with a boolean, and
+   every equality assertion that hands it a found element becomes a check of that boolean;
+   `assert.equal(element, null)` makes Node build a diff by inspecting the element, and the element
+   carries React's fiber graph, so the diff walks the whole tree. The first pass swept the 80
+   `find(...)`/`findAll(...)` sites; the spellings the widened guard knows swept 90 more. Goals: G2.
+   After: 1. Layers: component harness, component tests. Check: a forced failure of a presence check
+   prints its message and returns in milliseconds, where the element form climbs to ~5 GB and is
+   SIGKILLed.
    Done.
-3. **A guard keeps the pattern out.** A unit test reads every `scripts/test-*.tsx` and fails on an
-   assertion that passes `find(`/`findAll(` straight to `equal`/`strictEqual`/`deepEqual`. Goals: G2.
-   After: 2. Layers: unit tier. Check: red on today's tree — 62 sites — and green after step 2, with a
-   one-line fixture proving it catches a new one.
+3. **A guard keeps the pattern out.** A unit test reads every `scripts/test-*.tsx` with the TypeScript
+   parser and fails on an assertion that hands `equal`/`strictEqual`/`deepEqual`/`deepStrictEqual`/
+   `notEqual`/`notDeepEqual` a `find`/`findAll`/`findText`/`labelled`/`composerField`/`threadCard` or
+   `document.querySelector*` call, or a local function that answers one — however the call is written
+   and whatever its selector holds. Goals: G2. After: 2. Layers: unit tier. Check: red on
+   `9ab58e34`'s tests — 171 sites, 90 of them on the tree the first sweep left — and green after the
+   sweep, with a fixture for each spelling and an unparsable file failing rather than skipped.
    Done.
 4. **A worker that grows the JS heap dies at 1.5 GB, naming itself.** The tier starts each file's
    process with `--max-old-space-size=1536`, about three times the largest worker measured at 570 MB,
@@ -72,7 +78,8 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
 - **The wait, not just the device's reading.** The test asserted the sidebar after waiting on the
   database; the list redraws one commit later. Waiting for what the assertion reads is the fix the
   evidence supports, and it keeps the device's reading as its own assertion rather than dropping it.
-- **A helper and a guard, not a one-line edit.** 62 sites hand a found element to assert's equality;
+- **A helper and a guard, not a one-line edit.** 90 sites the guard names (of the 171 it reads on
+  `9ab58e34`'s tests, the rest answered by the first sweep) hand a found element to assert's equality;
   the next red one is the next 5 GB, so the pattern is swept and a unit test keeps it out.
 - **Why 1536 MB.** The largest worker measured is 570 MB (bot-pane) and the tier's anonymous peak is
   660 MB; the cap bounds a runaway at roughly three times normal without touching a healthy run. What it
@@ -82,8 +89,9 @@ No flow crosses layers: every participant is the test tier, and no app layer cha
   cap is containment for the second shape only; G1 and G2 are carried by the wait and the sweep.
 
 ## Risks
-- The guard is a text match: an assertion written another way (`assert.strictEqual(value, null)` where
-  `value` came from `find` earlier) slips past it. It catches the form the suite uses today.
+- The guard reads the expression an assertion is handed: an element bound to a variable first
+  (`const row = find(sel); assert.equal(row, null)`) still slips past it. Every spelling the suite
+  writes today is read.
 - The heap cap turns a genuinely runaway test into a red file rather than a killed one; a test that
   legitimately needs more than 1.5 GB in one worker would now fail. None measured approach it.
 - The rooms test may still fail for a real behavioural reason; after this change it fails honestly and

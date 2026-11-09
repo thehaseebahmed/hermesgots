@@ -16,7 +16,7 @@ import { db, updateConversation } from "@/lib/db"
 import { SessionItem } from "@/routes/code"
 import { sessionGroup, type LiveTurn, type LocalTurn } from "@/lib/session-work"
 import type { WaitingReason } from "@/lib/waiting"
-import { mount, seedSettings } from "./component-kit.tsx"
+import { missing, mount, seedSettings } from "./component-kit.tsx"
 import { pr } from "./fixtures/pr.ts"
 
 const conversation = (id: string, patch: Partial<Conversation> = {}): Conversation => ({
@@ -181,13 +181,16 @@ test("the second line says why the row waits only while the row waits", async ()
 test("a dot needs a read mark to measure against, and a read mark clears it", async () => {
   await drawRow(conversation("never-opened"), {
     body: async () => {
-      assert.equal(dot(), null, "never opened here: no reference of when it was last read")
+      assert.ok(
+        missing("[data-unread]"),
+        "never opened here: no reference of when it was last read",
+      )
     },
   })
   await drawRow(conversation("read"), {
     mark: Date.now(),
     body: async () => {
-      assert.equal(dot(), null, "read: the dot is gone")
+      assert.ok(missing("[data-unread]"), "read: the dot is gone")
     },
   })
   await drawRow(conversation("older", { updatedAt: Date.now() }), {
@@ -206,7 +209,7 @@ test("a dot needs a read mark to measure against, and a read mark clears it", as
 test("a closed session never opened here is not dotted, one read before it closed is dotted", async () => {
   await drawRow(conversation("closed-never-opened", { resolvedAt: 300 }), {
     body: async () => {
-      assert.equal(dot(), null, "Resolved with no mark here: nothing to compare against")
+      assert.ok(missing("[data-unread]"), "Resolved with no mark here: nothing to compare against")
     },
   })
   await drawRow(conversation("closed-read", { resolvedAt: 300 }), {

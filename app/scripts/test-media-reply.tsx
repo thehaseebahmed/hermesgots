@@ -20,6 +20,7 @@ import {
   labelled,
   mediaHost,
   mediaReads,
+  missing,
   mount,
   seedChat,
   spyOpen,
@@ -145,13 +146,16 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
         false,
         "a tag whose file the host has no copy of is not left as its text",
       )
-      assert.equal(cell("missing.png"), null, "and it leaves no empty cell in its place")
+      assert.ok(
+        missing('button[aria-label="Open missing.png"]'),
+        "and it leaves no empty cell in its place",
+      )
       assert.match(
         text(),
         new RegExp(`MEDIA: ${LIBRARY}/example.png`),
         "and a tag inside a fenced block stays text",
       )
-      assert.equal(cell("example.png"), null, "a fenced example draws no cell")
+      assert.ok(missing('button[aria-label="Open example.png"]'), "a fenced example draws no cell")
 
       // One URL per file, however many times the thread is drawn — the sent photo included, since
       // the thread reads every file from the host.
@@ -176,8 +180,8 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
         "a sent photo is read from the host's URL too",
       )
 
-      assert.equal(document.querySelector("video"), null, "no clip is played in the thread")
-      assert.equal(document.querySelector("audio"), null)
+      assert.ok(missing("video"), "no clip is played in the thread")
+      assert.ok(missing("audio"))
       await click(cell("render.mp4"))
       await until(async () => document.querySelector("video") !== null, "the clip's player")
       const player = document.querySelector("video")!
@@ -202,7 +206,7 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
 
       await click(row("take.mp3"))
       await until(async () => document.querySelector("audio") !== null, "the recording's player")
-      assert.equal(document.querySelector("video"), null, "the clip is not on screen")
+      assert.ok(missing("video"), "the clip is not on screen")
       assert.equal(browser.opened.length, 0, "and nothing left the app for it")
       await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
 
@@ -243,7 +247,10 @@ test("a tag the host couldn't serve keeps its cell, and is asked again when the 
       false,
       "the tag is not left as text",
     )
-    assert.equal(download("chart.png"), null, "and the file is never a download row")
+    assert.ok(
+      missing('button[aria-label="Download chart.png"]'),
+      "and the file is never a download row",
+    )
     mediaHost({ asked })
     // The reply carries on and names another file, so its tags are read again.
     await act(async () => {

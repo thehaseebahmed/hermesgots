@@ -504,8 +504,10 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
   })
   await mount(screen("/"), async () => {
     await until(async () => band("rooms").includes(`/c/${ROOM}`), "the room's row")
-    await settle()
-    assert.ok(missing(`a[href="/c/${ROOM}"] [data-needs-you]`), "a room open on this device no longer needs the user")
+    await until(
+      async () => missing(`a[href="/c/${ROOM}"] [data-needs-you]`),
+      "a room open on this device no longer needs the user",
+    )
   })
 })
 

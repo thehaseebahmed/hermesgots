@@ -155,7 +155,7 @@ for (const { feature, segment, name } of GATED) {
       ALL.filter((one) => one !== feature),
     )
     await mount(settings(`/settings/bots/bot-1/${segment}`), async () => {
-      assert.equal(row(segment), null, `no ${name} row on the settings card`)
+      assert.ok(missing(`[data-bot-page="${segment}"]`), `no ${name} row on the settings card`)
       assert.equal(path(), "/settings/bots/bot-1", "the bot's own address, in place")
       assert.ok(find("[data-bot-card]"), "and the bot's page is what is drawn")
     })

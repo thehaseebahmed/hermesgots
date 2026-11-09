@@ -16,11 +16,13 @@ import { mergeDocs } from "@/lib/merge"
 import { DeveloperSettings, SettingsPage } from "@/routes/settings"
 import {
   Path,
+  absent,
   click,
   find,
   findAll,
   findText,
   json,
+  missing,
   mount,
   path,
   seedSettings,
@@ -82,12 +84,8 @@ test("/settings/developer with the switch on draws it", async () => {
       false,
       "and is no longer marked experimental: the layout is the app's own",
     )
-    assert.equal(findText("label", "Bot threads"), null, "the old switch is gone")
-    assert.equal(
-      findText("label", "New chat screen"),
-      null,
-      "and the chat screen's, which every chat a bot can be called for opens on",
-    )
+    absent("label", "Bot threads")
+    absent("label", "New chat screen")
   })
 })
 
@@ -194,7 +192,7 @@ test("the Chat threads switch draws no row in the Appearance section", async () 
   await seedSettings({ developer: true })
   await mount(<AppearanceSettings />, async () => {
     await settle()
-    assert.equal(chatThreadsRow(), null, "Developer's switch is not repeated here")
+    assert.ok(missing("label[for='chat-threads']"), "Developer's switch is not repeated here")
     assert.doesNotMatch(text(), /Chat threads/, "and nothing on the screen names it")
   })
 })

@@ -207,7 +207,7 @@ test("the approval takes the composer's place, with the chat's own card, at a ph
       assert.match(wordsOf(card), /rm -rf build/, "the command is drawn whole")
       assert.ok(button("Allow once") && button("Deny"), "the card's two answers")
       assert.equal(button("Always allow"), undefined, "the Host takes no third answer")
-      assert.equal(composerField(), null, "the card holds the composer's place")
+      assert.ok(missing('textarea[aria-label="Message"]'), "the card holds the composer's place")
 
       await click(button("Allow once")!)
       await until(async () => calls.length > 0, "the answer to reach the Host")
@@ -266,7 +266,7 @@ test("a question takes the composer's place too, offering the Host's own choices
       assert.match(wordsOf(card), /Coder/, "naming the member who asked")
       assert.match(wordsOf(card), /Which database\?/, "and asking what it asks")
       assert.ok(choice("Postgres") && choice("SQLite"), "each choice is a control of its own")
-      assert.equal(composerField(), null, "the card holds the composer's place")
+      assert.ok(missing('textarea[aria-label="Message"]'), "the card holds the composer's place")
 
       await click(choice("Postgres")!)
       await click(button("Send")!)
@@ -311,7 +311,7 @@ test("at rest the room draws the chat's composer, without a model pill or a file
       assert.equal(composerField()!.getAttribute("placeholder"), "Message the room…")
       assert.equal(button("Add context"), undefined, "a room's message carries no file")
       assert.ok(missing('[data-slot="room-card"]'), "and nothing holds its place")
-      assert.equal(document.querySelector('[aria-label^="Model"]'), null, "and no model pill")
+      assert.ok(missing('[aria-label^="Model"]'), "and no model pill")
     })
   }))
 
@@ -342,7 +342,7 @@ test("a room at rest offers no Stop, since there is no round to end",
     await fresh([], [{ seq: 1, eventId: "e1", kind: "message.user", text: "who is free?" }])
     await mount(screen(), async () => {
       await until(async () => Boolean(find('[data-slot="room-row"]')), "the room's own row")
-      assert.equal(stopButton(), null, "a Stop at rest could only cancel nothing")
+      assert.ok(missing('button[aria-label="Stop"]'), "a Stop at rest could only cancel nothing")
       assert.ok(composerField(), "the composer keeps its place")
     })
   }))

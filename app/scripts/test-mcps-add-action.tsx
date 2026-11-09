@@ -159,7 +159,7 @@ test("a Host without mcps_add has no + anywhere, and still lists its servers", a
   const asked = await seed("mcp-add-withheld", ["mcps", "mcps_catalogue"])
   await mount(settings(), async () => {
     await settle()
-    assert.equal(addButton(), null, "no +")
+    assert.ok(missing("[data-mcp-add]"), "no +")
     assert.equal(namedAdd().length, 0, "and nothing named Add a server")
     assert.equal(
       asked.filter((one) => one.path.endsWith("/plugins/gots/mcp")).length,

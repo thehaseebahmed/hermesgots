@@ -100,7 +100,7 @@ test("the offer fills the writing surface, and Done writes the words with their 
     await click(findText("[data-prompt-update] button", "Update"))
 
     assert.equal(field()?.value, NOW, "the field holds the entry's current words")
-    assert.equal(offer(), null, "the line is spent once its words are on screen")
+    assert.ok(missing("[data-prompt-update]"), "the line is spent once its words are on screen")
     assert.deepEqual(afkWrites(host), [], "filling alone writes nothing — Done does")
 
     await click(findText("button", "Done"))
@@ -110,7 +110,10 @@ test("the offer fills the writing surface, and Done writes the words with their 
       [{ prompt: NOW, prompt_id: "e-one" }],
       "Done writes the entry's current words and its id together, so the copy stands as a copy",
     )
-    assert.equal(marker(), null, "the copy is the entry's again, so there is nothing left to say")
+    assert.ok(
+      missing("[data-afk-prompt-changed]"),
+      "the copy is the entry's again, so there is nothing left to say",
+    )
     assert.match(
       row()?.textContent ?? "",
       /Read the issue first/,
@@ -164,29 +167,34 @@ test("an original, a deleted entry and a host without a source are all unlabelle
   await seedPrompts([{ id: "e-one", name: "Review first", body: NOW }])
   await copied(afkHost({ features: FEATURES, prompt: NOW, promptId: "e-one" }), async () => {
     assert.match(row()?.textContent ?? "", /Read the issue first/, "the copy the project holds")
-    assert.equal(marker(), null, "the same words in both is no change to say")
+    assert.ok(missing("[data-afk-prompt-changed]"), "the same words in both is no change to say")
   })
 
   // The entry was saved with a trailing newline, and the host trimmed what it was given: a pick of
   // it lands without the ends, and that is still its copy — not a change the moment it was picked.
   await seedPrompts([{ id: "e-one", name: "Review first", body: `${NOW}\n` }])
   await copied(afkHost({ features: FEATURES, prompt: NOW, promptId: "e-one" }), async () => {
-    assert.equal(marker(), null, "the ends a write trims are not a change in the library")
+    assert.ok(
+      missing("[data-afk-prompt-changed]"),
+      "the ends a write trims are not a change in the library",
+    )
   })
 
   // Deleted from the library: the copy stands, and nothing calls it stale.
   await seedPrompts([])
   await copied(afkHost({ features: FEATURES, prompt: NOW, promptId: "e-one" }), async () => {
-    assert.equal(marker(), null, "an entry this device no longer holds leaves no label")
+    assert.ok(
+      missing("[data-afk-prompt-changed]"),
+      "an entry this device no longer holds leaves no label",
+    )
     assert.match(row()?.textContent ?? "", /Read the issue first/, "and its copy stands")
   })
 
   // A host from before the library answers no source at all, whatever the device holds.
   await seedPrompts([{ id: "e-one", name: "Review first", body: COPY }])
   await copied(afkHost({ features: FEATURES, prompt: NOW }), async () => {
-    assert.equal(
-      marker(),
-      null,
+    assert.ok(
+      missing("[data-afk-prompt-changed]"),
       "words the host doesn't say were copied from anywhere are the user's",
     )
   })
@@ -201,7 +209,7 @@ test("a hand edit writes the words alone, and the label is gone for the next rea
     await click(find('button[aria-label="Prompt"]'))
     await settle()
     await type(field()!, MINE)
-    assert.equal(offer(), null, "typing the user's own words retires the offer line")
+    assert.ok(missing("[data-prompt-update]"), "typing the user's own words retires the offer line")
 
     await click(findText("button", "Done"))
 
@@ -211,9 +219,8 @@ test("a hand edit writes the words alone, and the label is gone for the next rea
       "editing the copy is a plain write: the words, and no source beside them",
     )
     assert.equal(host.state().source, null, "which clears the copy on the host")
-    assert.equal(
-      marker(),
-      null,
+    assert.ok(
+      missing("[data-afk-prompt-changed]"),
       "so the row never calls the user's own words a stale copy of an entry they left",
     )
   })
