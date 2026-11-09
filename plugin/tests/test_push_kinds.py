@@ -20,6 +20,17 @@ from plugin import alerts, chats, delegation, push
 from plugin.store import connect, db_path
 
 
+def subscribed(path: Path, categories: str) -> None:
+    """A profile's push store with one device on it, asked for ``categories`` as the app sends them."""
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
+        " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("https://push.example/1", "phone-1", "key", "auth", "vapid", "mailto:a@b.c", 1, categories),
+    )
+    conn.close()
+
+
 class Categories(unittest.TestCase):
     def test_an_older_subscription_wants_what_it_always_got(self):
         row = {"categories": None}
@@ -135,14 +146,7 @@ class Delivery(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = db_path(Path(self.tmp.name))
-        conn = connect(self.path)
-        conn.execute(
-            "INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
-            " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("https://push.example/1", "phone-1", "key", "auth", "vapid", "mailto:a@b.c", 1,
-             '["room_input"]'),
-        )
-        conn.close()
+        subscribed(self.path, '["room_input"]')
         self.sent = []
         patch = mock.patch.object(
             push, "send", lambda row, payload, topic: self.sent.append(payload) or 201
@@ -181,7 +185,7 @@ class Scope(unittest.TestCase):
     """
 
     # A push is delivered on a daemon thread; a local store answers in milliseconds, and a wait this
-    # long that hears nothing is what says nothing was sent.
+    # long that hears nothing is what says nothing arrived.
     WAIT_S = 1.0
 
     def setUp(self):
@@ -189,14 +193,7 @@ class Scope(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         self.path = db_path(self.home)
-        conn = connect(self.path)
-        conn.execute(
-            "INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
-            " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("https://push.example/1", "phone-1", "key", "auth", "vapid", "mailto:a@b.c", 1,
-             '["chat_input"]'),
-        )
-        conn.close()
+        subscribed(self.path, '["chat_input"]')
         self.sent = []
         self.arrived = threading.Event()
 
@@ -211,8 +208,7 @@ class Scope(unittest.TestCase):
         relay = mock.patch.object(push, "_relay", lambda *args, **kwargs: None)
         relay.start()
         self.addCleanup(relay.stop)
-        # One push a kind and session in THROTTLE_SECONDS, so one case would otherwise answer none.
-        push._last.clear()
+        # One push a kind and session in THROTTLE_SECONDS, so one class wouldn't answer twice.
         self.addCleanup(push._last.clear)
 
     def tell(self, kind, session_id):
@@ -221,18 +217,26 @@ class Scope(unittest.TestCase):
         self.sent.clear()
         self.arrived.clear()
         answer = push.notify(kind, session_id, path=self.path)
-        self.arrived.wait(self.WAIT_S)
+        if answer:
+            # A False answer started no thread, so nothing can still be on its way.
+            self.arrived.wait(self.WAIT_S)
         return answer, self.sent
 
     def lineage(self, rows):
-        """Hermes's own store, with the parent links compression leaves behind."""
+        """Hermes's own store, with the parent links compression leaves behind.
+
+        ``model_config`` and ``source`` are the columns ``sessions._forks`` reads, so a case can
+        make a session a fork of its parent rather than the chat's continuation.
+        """
         conn = sqlite3.connect(self.home / "state.db")
         conn.execute(
             "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
             " model_config TEXT, source TEXT)"
         )
         conn.executemany(
-            "INSERT INTO sessions (id, parent_session_id, end_reason) VALUES (?, ?, ?)", rows
+            "INSERT INTO sessions (id, parent_session_id, end_reason, model_config, source)"
+            " VALUES (?, ?, ?, ?, ?)",
+            rows,
         )
         conn.commit()
         conn.close()
@@ -250,10 +254,24 @@ class Scope(unittest.TestCase):
 
     def test_a_compressed_chats_child_session_is_pushed(self):
         # The chat began as gots-abc and compression moved it on to a child that carries no prefix.
-        self.lineage([("gots-abc", None, "compression"), ("sess_c0ffee", "gots-abc", None)])
+        self.lineage([
+            ("gots-abc", None, "compression", None, None),
+            ("sess_c0ffee", "gots-abc", None, None, None),
+        ])
         answer, sent = self.tell("question", "sess_c0ffee")
         self.assertTrue(answer, "the child's root is the chat's, so the chat is being pushed")
         self.assertEqual(sent, [{"kind": "question", "session_id": "sess_c0ffee"}])
+
+    def test_a_subagents_session_is_not_pushed_as_its_chats(self):
+        # A delegate child is another conversation of its parent's, so the walk stops at the fork
+        # even where the parent looks like a compression predecessor: the chat hears its turn once.
+        self.lineage([
+            ("gots-abc", None, "compression", None, None),
+            ("sess_de1e", "gots-abc", None, '{"_delegate_from": "gots-abc"}', None),
+        ])
+        answer, sent = self.tell("question", "sess_de1e")
+        self.assertFalse(answer, "a chat is not told about its subagent's session")
+        self.assertEqual(sent, [])
 
 
 class Mutes(unittest.TestCase):
