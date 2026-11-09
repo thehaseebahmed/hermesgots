@@ -115,7 +115,7 @@ export function createCanvasStore() {
     chat_id: c.chat_id,
     version: c.version,
     pinned: c.pinned,
-    hidden: c.hidden,
+    archived: c.archived,
     at: c.at,
     created_at: c.created_at,
   })
@@ -362,7 +362,7 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
         chat_id: Math.random().toString(16).slice(2, 18),
         version: 0,
         pinned: false,
-        hidden: false,
+        archived: false,
         at: now,
         created_at: now,
         versions: [],
@@ -425,8 +425,8 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
 
   if (req.method === "POST") {
     const body = (await readBody(req)) ?? {}
-    if (!["title", "pinned", "hidden"].some((field) => field in body)) {
-      fail(400, "A canvas's update names what changes: a title, pinned, or hidden.")
+    if (!["title", "pinned", "archived"].some((field) => field in body)) {
+      fail(400, "A canvas's update names what changes: a title, pinned, or archived.")
       return true
     }
     if ("title" in body) {
@@ -437,7 +437,7 @@ export async function handleCanvas(req, res, path, { json, readBody, noteEvent, 
       const title = body.title.trim()
       canvas.title = titleOf(title)
     }
-    for (const field of ["pinned", "hidden"]) {
+    for (const field of ["pinned", "archived"]) {
       if (!(field in body)) continue
       if (typeof body[field] !== "boolean") {
         fail(400, `A canvas's ${field} is true or false; this one is ${JSON.stringify(body[field])}.`)

@@ -229,12 +229,10 @@ function PinnedCanvases({
           onClick={onNavigate}
           aria-label={collapsed ? canvas.title : undefined}
           data-canvas-pinned=""
-          className={({ isActive }) =>
-            collapsed ? railClass({ isActive }) : cn(rowClass({ isActive }), "pl-8")
-          }
+          className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
         >
-          <FrameIcon className="size-5 shrink-0 text-muted-foreground" />
-          {!collapsed && <span className="min-w-0 flex-1 truncate">{canvas.title}</span>}
+          <FrameIcon className="size-5 text-muted-foreground" />
+          {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
         </RootLink>
       ))}
     </>
@@ -682,7 +680,6 @@ export function ConversationList({
             <FrameIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Canvas"}
           </RootLink>
-          <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />
           <RootLink
             to="/research"
             onClick={onNavigate}
@@ -712,6 +709,7 @@ export function ConversationList({
             <TimerIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Routines"}
           </RootLink>
+          <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # version or undo touches it. 62 adds the answers a canvas's page got for the tools its version
 # declared (`canvases.py`'s grants, ADR 0114) — one new table, and a pass over the names an earlier
 # build stored in `canvas_versions.tools` to drop the ones the rule refuses now.
-SCHEMA_VERSION = 62
+SCHEMA_VERSION = 63
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -946,11 +946,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    chat_id TEXT NOT NULL,
                    version INTEGER NOT NULL DEFAULT 0,
                    pinned INTEGER NOT NULL DEFAULT 0,
-                   hidden INTEGER NOT NULL DEFAULT 0,
+                   archived INTEGER NOT NULL DEFAULT 0,
                    at INTEGER NOT NULL,
                    created_at INTEGER NOT NULL
                )"""
         )
+        # v63: the record's folded-away flag is the reader's "Archived" (canvases.py, #933). A store
+        # written before the name carries the first one, and the state is the same state under it.
+        if version < 63:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "hidden" in canvas_columns and "archived" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases RENAME COLUMN hidden TO archived")
         # A version's `tools` is the consent list it declared, kept with the words it was written
         # for: a page reads what its own version declared, never a later one's.
         conn.execute(

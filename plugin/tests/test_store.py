@@ -91,7 +91,7 @@ class ACanvasKeepsItsGrants(unittest.TestCase):
         path = db_path(temp_hermes_home(self))
         old = connect(path)
         old.execute(
-            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, hidden, at,"
+            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, archived, at,"
             " created_at) VALUES ('c1', 'Tip', 's1', 'chat-1', 1, 0, 0, 7, 5)"
         )
         old.execute(
@@ -141,6 +141,33 @@ class ACanvasKeepsItsGrants(unittest.TestCase):
         )
 
 
+class AFlagKeepsItsStateWhenItIsRenamed(unittest.TestCase):
+    """The record's folded-away flag is the reader's "Archived"; a store written before that name
+    keeps what it held."""
+
+    def test_a_store_with_the_first_column_name_opens_with_its_state_kept(self) -> None:
+        path = db_path(temp_hermes_home(self))
+        old = connect(path)
+        old.execute("ALTER TABLE canvases RENAME COLUMN archived TO hidden")
+        old.execute(
+            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, hidden, at,"
+            " created_at) VALUES ('c1', 'Tip', 's1', 'chat-1', 1, 1, 1, 7, 5)"
+        )
+        # The build that wrote the first name, opening at the version before this one's.
+        old.execute("PRAGMA user_version = 62")
+        old.close()
+
+        conn = connect(path)
+        try:
+            self.assertEqual(
+                conn.execute("SELECT pinned, archived FROM canvases WHERE id = 'c1'").fetchone(),
+                (1, 1),
+            )
+        finally:
+            conn.close()
+        self.assertIs(canvases.current(path, "c1")["archived"], True)
+
+
 class ADeclaredNameNothingCanCall(unittest.TestCase):
     """The v62 pass: a name the one rule refuses is no declaration, so a row keeps only the rest."""
 
@@ -151,7 +178,7 @@ class ADeclaredNameNothingCanCall(unittest.TestCase):
         path = db_path(temp_hermes_home(self))
         old = connect(path)
         old.execute(
-            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, hidden, at,"
+            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, archived, at,"
             " created_at) VALUES ('c1', 'Tip', 's1', 'chat-1', 1, 0, 0, 7, 5)"
         )
         old.execute(

@@ -1247,7 +1247,7 @@ class RouteTest(unittest.TestCase):
                 ):
                     self.assertEqual("canvas" in self.call("/info")["payload"]["features"], listed)
 
-    def test_pin_hide_rename_and_delete(self) -> None:
+    def test_pin_archive_rename_and_delete(self) -> None:
         deleted_sessions: list = []
 
         class SessionDb:
@@ -1278,22 +1278,22 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(read["html"], DOCUMENT)
         self.assertEqual([row["doc"] for row in read["data"]], [{"text": "one"}])
         self.assertEqual(
-            {field: answered[field] for field in ("id", "title", "version", "pinned", "hidden", "at")},
-            {field: read[field] for field in ("id", "title", "version", "pinned", "hidden", "at")},
+            {field: answered[field] for field in ("id", "title", "version", "pinned", "archived", "at")},
+            {field: read[field] for field in ("id", "title", "version", "pinned", "archived", "at")},
         )
         self.assertIs(canvases.record(self.path, canvas_id)["pinned"], True)
         listed = self.call("/canvases")["payload"]["canvases"]
         self.assertEqual(
-            [(row["id"], row["pinned"], row["hidden"]) for row in listed],
+            [(row["id"], row["pinned"], row["archived"]) for row in listed],
             [(canvas_id, True, False)],
         )
 
-        hid = self.call("/canvases/{canvas_id}", "POST", {"hidden": True}, canvas_id=canvas_id)
-        self.assertIs(hid["payload"]["canvas"]["hidden"], True)
+        hid = self.call("/canvases/{canvas_id}", "POST", {"archived": True}, canvas_id=canvas_id)
+        self.assertIs(hid["payload"]["canvas"]["archived"], True)
         self.assertIs(hid["payload"]["canvas"]["pinned"], True)
         self.assertEqual(
             [
-                (row["id"], row["pinned"], row["hidden"])
+                (row["id"], row["pinned"], row["archived"])
                 for row in self.call("/canvases")["payload"]["canvases"]
             ],
             [(canvas_id, True, True)],
@@ -1313,7 +1313,7 @@ class RouteTest(unittest.TestCase):
         for body, named in (
             ({}, None),
             ({"pinned": "yes"}, "pinned"),
-            ({"hidden": 1}, "hidden"),
+            ({"archived": 1}, "archived"),
             ({"title": 3}, "title"),
             ({"title": "   "}, "title"),
         ):

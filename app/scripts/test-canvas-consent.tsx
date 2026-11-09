@@ -75,7 +75,7 @@ const canvas = (host: Host, id: string) => ({
   chat_id: `chat-${id}`,
   version: 3,
   pinned: false,
-  hidden: false,
+  archived: false,
   at: 5,
   created_at: 1,
   can_undo: true,
@@ -180,7 +180,7 @@ function serve(host: Host, id: string): { gate: Gate } {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>
         host.changes?.push({ method: "POST", body })
         if (typeof body.title === "string") host.title = body.title
-        const { id: heldId, title, session_id, chat_id, version, pinned, hidden, at, created_at } =
+        const { id: heldId, title, session_id, chat_id, version, pinned, archived, at, created_at } =
           canvas(host, id)
         return json({
           object: "gots.canvas",
@@ -191,7 +191,7 @@ function serve(host: Host, id: string): { gate: Gate } {
             chat_id,
             version,
             pinned,
-            hidden,
+            archived,
             at,
             created_at,
             // The record answer carries whether a version sits under the drawn one, as the host's does.

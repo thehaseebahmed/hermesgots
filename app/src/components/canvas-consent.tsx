@@ -1,9 +1,9 @@
 /**
  * A canvas's own record and its tools (ADR 0114, issue #933): the options the header's ellipsis
- * opens — the canvas's name, whether it is pinned to the sidebar, whether it is hidden from the list,
+ * opens — the canvas's name, whether it is pinned to the sidebar, whether it is archived out of the list,
  * and the one way to delete it — and, under them, the reader's answers about the tools this version
  * declared. Every change but a tool's is the canvas's record on the host, so the same page is named,
- * pinned and hidden the same way on every device; nothing here is kept on this one alone.
+ * pinned and archived the same way on every device; nothing here is kept on this one alone.
  */
 import { useCallback, useState } from "react"
 import { Trash2Icon } from "lucide-react"
@@ -309,7 +309,7 @@ export function CanvasOptions({
               <SwitchRow
                 id="canvas-pinned"
                 title="Pin to sidebar"
-                subtitle="Keep it in the sidebar under Canvas, on every device."
+                subtitle="Keep it in the sidebar after Routines, on every device."
                 checked={canvas?.pinned === true}
                 disabled={!canvas || busy}
                 onCheckedChange={(checked) =>
@@ -317,13 +317,13 @@ export function CanvasOptions({
                 }
               />
               <SwitchRow
-                id="canvas-hidden"
-                title="Hide from list"
-                subtitle="Take it out of the Canvas list without deleting it."
-                checked={canvas?.hidden === true}
+                id="canvas-archived"
+                title="Archive"
+                subtitle="Keep it out of the Canvas list without deleting it."
+                checked={canvas?.archived === true}
                 disabled={!canvas || busy}
                 onCheckedChange={(checked) =>
-                  void change("hidden", () => onUpdate({ hidden: checked }))
+                  void change("archived", () => onUpdate({ archived: checked }))
                 }
               />
             </Group>

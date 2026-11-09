@@ -9,7 +9,7 @@ nowhere else, and the canvas is found from a run's session by walking the chat's
 (``sessions.chat_session``), so a chat that has been compacted still reaches its canvas.
 
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
-it is hidden from the list — are the host's record too (``update``), so every device draws the same
+it is archived out of the list — are the host's record too (``update``), so every device draws the same
 list and a name written there renames the chat with it. A canvas the user deletes is gone whole
 (``delete``): its versions, data and grants, its chat as a tombstone, and the Hermes session it was
 made in.
@@ -233,14 +233,14 @@ def scan(html: Any) -> None:
 
 # --- the record ----------------------------------------------------------------------------------
 
-_COLUMNS = ("id", "title", "session_id", "chat_id", "version", "pinned", "hidden", "at", "created_at")
+_COLUMNS = ("id", "title", "session_id", "chat_id", "version", "pinned", "archived", "at", "created_at")
 _RECORD = ", ".join(_COLUMNS)
 
 
 def _row(row: Any) -> Dict[str, Any]:
     record = dict(zip(_COLUMNS, row))
     record["pinned"] = bool(record["pinned"])
-    record["hidden"] = bool(record["hidden"])
+    record["archived"] = bool(record["archived"])
     return record
 
 
@@ -643,14 +643,14 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     than a refusal it can show. The record's clock moves on the host's, taken under the write lock
     like every other write here, since the list is ordered by it.
     """
-    if not any(field in body for field in ("title", "pinned", "hidden")):
-        raise CanvasError("A canvas's update names what changes: a title, pinned, or hidden.")
+    if not any(field in body for field in ("title", "pinned", "archived")):
+        raise CanvasError("A canvas's update names what changes: a title, pinned, or archived.")
     changes: Dict[str, Any] = {}
     if "title" in body:
         if not isinstance(body["title"], str) or not body["title"].strip():
             raise CanvasError("A canvas's title is a line of text; this one is blank.")
         changes["title"] = title_of(body["title"])
-    for field in ("pinned", "hidden"):
+    for field in ("pinned", "archived"):
         if field in body:
             changes[field] = _flag(body[field], field)
     with _writing(path) as conn:
@@ -662,9 +662,9 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
         conn.execute(
             """UPDATE canvases
                SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
-                   hidden = COALESCE(?, hidden), at = ?
+                   archived = COALESCE(?, archived), at = ?
                WHERE id = ?""",
-            (changes.get("title"), changes.get("pinned"), changes.get("hidden"), now, canvas_id),
+            (changes.get("title"), changes.get("pinned"), changes.get("archived"), now, canvas_id),
         )
         answer = _record(conn, canvas_id) or found
         # Whether a version sits under the drawn one rides the answer: the record alone would read as
@@ -1034,7 +1034,7 @@ def _insert(path: Path, found: Dict[str, Any]) -> None:
     conn = connect(path)
     try:
         conn.execute(
-            """INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, hidden, at,
+            """INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, archived, at,
                                      created_at)
                VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?)""",
             (
@@ -1110,7 +1110,7 @@ def create(
         **found,
         "version": 0,
         "pinned": False,
-        "hidden": False,
+        "archived": False,
         "html": "",
         "tools": [],
         "grants": [],

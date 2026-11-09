@@ -79,7 +79,7 @@ function CanvasRow({ canvas, now }: { canvas: Canvas; now: number }) {
 export function CanvasPage() {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
-  const { visible, hidden, loaded, unsupported } = useCanvases()
+  const { visible, archived, loaded, unsupported } = useCanvases()
   const profile = useLiveQuery(getActiveProfile, [])
   const now = useNow()
   const [prompt, setPrompt] = useState("")
@@ -164,7 +164,7 @@ export function CanvasPage() {
         </section>
 
         <section className="flex flex-col gap-2">
-          {loaded && visible.length === 0 && hidden.length === 0 && !blocked && (
+          {loaded && visible.length === 0 && archived.length === 0 && !blocked && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No canvases yet. Ask for one above and your bot builds it.
             </p>
@@ -172,11 +172,11 @@ export function CanvasPage() {
           {visible.map((canvas) => (
             <CanvasRow key={canvas.id} canvas={canvas} now={now} />
           ))}
-          {hidden.length > 0 && (
+          {archived.length > 0 && (
             <ItemGroup
-              group={{ key: "hidden", label: "Hidden", items: hidden, folded: true }}
+              group={{ key: "archived", label: "Archived", items: archived, folded: true }}
             >
-              {hidden.map((canvas) => (
+              {archived.map((canvas) => (
                 <li key={canvas.id}>
                   <CanvasRow canvas={canvas} now={now} />
                 </li>

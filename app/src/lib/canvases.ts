@@ -64,7 +64,7 @@ export interface Canvas {
   /** The version the record points at: an undo moves it back, and a read answers that one. */
   version: number
   pinned: boolean
-  hidden: boolean
+  archived: boolean
   /** The record's change clock. */
   at: number
   createdAt: number
@@ -218,7 +218,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     title: typeof raw.title === "string" && raw.title ? raw.title : "Canvas",
     version: Number(raw.version) || 0,
     pinned: Boolean(raw.pinned),
-    hidden: Boolean(raw.hidden),
+    archived: Boolean(raw.archived),
     at: Number(raw.at) || 0,
     createdAt: Number(raw.created_at) || 0,
     sessionId: String(raw.session_id ?? ""),
@@ -457,7 +457,7 @@ export async function undoCanvas(id: string) {
 
 /**
  * The canvas's own record changed: its title, whether it is pinned to the sidebar, whether it is
- * hidden from the list. Kept on the host, so the shape of every device's list is the same one, and
+ * archived out of the list. Kept on the host, so the shape of every device's list is the same one, and
  * the record the host answers is folded over the copy this device already draws — the host answers
  * the record and not the page, so the document on screen stays the one it had.
  */
@@ -530,7 +530,7 @@ export async function writeCanvasData(id: string, call: BridgeWriteCall) {
 
 /**
  * The canvases this device holds, read from the store alone, and the two lists placement makes of
- * them. The rule lives here rather than in each view: a hidden canvas is folded out of `/canvas`'s
+ * them. The rule lives here rather than in each view: an archived canvas is folded out of `/canvas`'s
  * list, and it loses its sidebar row too — a reader who put a page away asked for neither.
  */
 export function useCanvasStore() {
@@ -542,10 +542,10 @@ export function useCanvasStore() {
     return {
       canvases,
       /** What `/canvas` draws among the rest. */
-      visible: canvases.filter((canvas) => canvas.hidden !== true),
-      /** What the sidebar gives a row of its own; hidden wins over pinned. */
-      pinned: canvases.filter((canvas) => canvas.pinned && canvas.hidden !== true),
-      hidden: canvases.filter((canvas) => canvas.hidden === true),
+      visible: canvases.filter((canvas) => canvas.archived !== true),
+      /** What the sidebar gives a row of its own; archived wins over pinned. */
+      pinned: canvases.filter((canvas) => canvas.pinned && canvas.archived !== true),
+      archived: canvases.filter((canvas) => canvas.archived === true),
       loaded: state.loaded,
       unsupported: state.unsupported,
     }

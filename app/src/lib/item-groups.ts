@@ -87,7 +87,7 @@ export type CodeGroupKey = keyof typeof CODE_LABELS
 const PINNED_LABEL = "Pinned" as const
 
 export interface ListGroup<T = unknown> {
-  key: ItemGroupKey | CodeGroupKey | "pinned" | "hidden"
+  key: ItemGroupKey | CodeGroupKey | "pinned" | "archived"
   label: string
   items: T[]
   /** Drawn closed until the reader asks: what a list is done with, or put out of the way. */
