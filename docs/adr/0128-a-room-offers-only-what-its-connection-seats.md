@@ -25,15 +25,24 @@ so it is that bot's connection the rows are held to, and every pick is held to i
 send goes out. Nothing is decided before the first pick, since until then there is no connection to
 ask about.
 
-**A create the Host refuses forgets the roster.** The Host's refusal is the one word on whether a
-connection seats a profile, so an answer it contradicts is dropped and read again the next time the
-seats are looked at: the picker stops offering what the Host has taken away instead of repeating a
-create it will refuse.
+**A create the Host refuses re-reads the roster.** The Host's refusal is the one word on whether a
+connection seats a profile, so the answer it contradicts is read again at once rather than dropped:
+the picks stay seated and the old answer stands until the new one lands, because a screen that lost
+it in between would say the Host can make no room and take away the rows the refusal's own sentence
+tells the user to unpick. Only the new read is written — one that began before the re-read and lands
+after it answers the question the re-read replaced — and the words the create carried go back into
+the field for the retry, as a room's own refused send does (ADR 0125). An answer that names neither
+features nor a roster is still not worth keeping, so an older Host is asked again rather than
+answered for good.
 
 **What this does not fix.** Where a connection seats one profile, a room of two is not possible, and
 the screen will offer one bot and grey the rest. That is the Host's limit: making that room means an
 entry in the Host's `hosted_rooms.profiles`, or a host-scoped connection, which Gots does not hold. The
-app says what it knows rather than inventing a way round it.
+app says what it knows rather than inventing a way round it. **And a Host answered in process carries
+no roster at all**: only the gateway's `groups.capabilities` (`gateway/session_group_controls.py`)
+fills `seatable_profiles`; `tui_gateway/methods_groups.py`'s own handler for the same call answers
+without the field, so a Host the plugin reaches through that dispatcher filters nothing and keeps
+today's picker until Hermes adds it there. That half is Hermes's, not this repository's.
 
 ## Considered and rejected
 

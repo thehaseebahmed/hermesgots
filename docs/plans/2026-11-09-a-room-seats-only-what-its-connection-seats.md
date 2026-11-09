@@ -103,8 +103,15 @@ Host's refusal still comes back in the Host's own words for anything the picker 
   Gots does not.
 - **The roster is remembered until a create the Host refuses.** It is read once per connection, as every
   feature answer is, so a profile parked on the Host after the read still shows as seatable. The Host's
-  refusal at create is unchanged and still says so, and it forgets the roster, so the next look at the
-  seats reads the Host again rather than repeating the create.
+  refusal at create is unchanged and still says so in its own words; it re-reads that connection's
+  `info` rather than forgetting it, so the picks stay seated while the Host is asked again and the
+  answer that lands replaces the one it contradicted. A read still in flight when the re-read began is
+  dropped rather than written, an answer naming neither features nor a roster is not kept at all, and
+  the typed message comes back to the field for the retry.
+- **A Host answered in process filters nothing.** Only the gateway's `groups.capabilities`
+  (`gateway/session_group_controls.py`) fills `seatable_profiles`; `tui_gateway/methods_groups.py`'s own
+  handler for the same call answers without it, so a Host the plugin reaches through that dispatcher
+  offers every bot until Hermes adds the field there — out of this repository's scope.
 
 ## Not now
 

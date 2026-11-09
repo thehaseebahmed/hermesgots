@@ -5,7 +5,8 @@
  * opens at its own address on the name its seats give it, and carries the message as its first turn.
  *
  * A Host that cannot make rooms draws no control at all rather than one that can only come back
- * refused.
+ * refused. A create the Host does refuse says so in its own words, keeps the seats it was made from,
+ * asks that connection's roster again, and hands the typed message back for the retry.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -44,6 +45,10 @@ const posted: { path: string; auth: string; body: Record<string, unknown> }[] = 
 const offers = new Map<string, string[]>()
 /** The profiles each connection seats, by the name `connectionAt` gives it. */
 const seatable = new Map<string, string[]>()
+/** How many times each connection's `info` was read, so a re-read can be counted. */
+const reads = new Map<string, number>()
+/** What the Host says when it refuses a create, in its own words; undefined while it makes them. */
+let refusal: string | undefined
 
 /**
  * The connection a bot's reads arrive on, as this fixture names it: the path its `info` is read at and
@@ -67,15 +72,19 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
   const auth = new Headers(init?.headers).get("Authorization") ?? ""
   const onThis = `${url.pathname}|${auth}`
-  if (url.pathname.endsWith("/plugins/gots/info"))
+  if (url.pathname.endsWith("/plugins/gots/info")) {
+    reads.set(onThis, (reads.get(onThis) ?? 0) + 1)
     return json({
       name: "gots",
       features: offers.get(onThis) ?? ["chats"],
       ...(seatable.has(onThis) ? { rooms: { seatable: seatable.get(onThis) } } : {}),
     })
+  }
   if (url.pathname.endsWith("/plugins/gots/chats")) return json({ object: "gots.chats", chats: {} })
   if (url.pathname.endsWith("/plugins/gots/rooms") && method === "POST") {
     posted.push({ path: url.pathname, auth, body })
+    if (refusal !== undefined)
+      return json({ error: { code: "room_member_unseated", message: refusal } }, 500)
     const id = String(body.room_id)
     held.id = id
     held.name = String(body.name)
@@ -140,6 +149,8 @@ async function fresh(host: string, { writable = true }: { writable?: boolean } =
 async function resetRoom(bots: Profile[]) {
   posted.length = 0
   seatable.clear()
+  reads.clear()
+  refusal = undefined
   held.id = undefined
   held.name = ""
   await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
@@ -435,7 +446,7 @@ test("a room is made as the bot picked first, on that bot's connection", async (
   await mount(screen(), async () => {
     await openSeats()
     // Zed's roster is the richer one and Zed is later in name order: picking it first is what names
-    // the connection the room is made on.
+    // the connection the room is made on, and the order the seats are picked in.
     await click(seat(zed.id))
     await click(seat(ada.id))
     await until(
@@ -451,10 +462,10 @@ test("a room is made as the bot picked first, on that bot's connection", async (
     assert.equal(create.auth, "Bearer key-zed", "the create is made on the first pick's connection")
     assert.deepEqual(
       (create.body.members as { handle?: string }[]).map((one) => one.handle),
-      ["ada", "zed"],
-      "and holds every pick",
+      ["zed", "ada"],
+      "and holds every pick, in the order they were picked",
     )
-    assert.equal(create.body.name, "Ada, Zed", "named by its seats, in name order")
+    assert.equal(create.body.name, "Zed, Ada", "named by its seats, in the order they were picked")
   })
 })
 
@@ -475,9 +486,87 @@ test("a room the first pick's connection cannot seat is never sent", async () =>
     await type(composerField(), "Plan the next release.")
     const sendButton = find('button[aria-label="Send"]') as HTMLButtonElement | null
     assert.equal(sendButton?.disabled, true, "Send is held while a pick has no seat")
+    assert.match(
+      find("[role=alert]")?.textContent ?? "",
+      /Only the bots this Host's connection seats can join its room/,
+      "and the held Send says why, so it is never dead without a word",
+    )
     await click(sendButton)
     await settle()
     assert.equal(posted.length, 0, "and the Host is never asked for a room it would refuse")
+  })
+})
+
+test("a create the Host refuses says why, keeps its seats, and reads the roster again", async () => {
+  const bots = await fresh("blank-room-refused.test")
+  const at = connectionAt(bots[0])
+  // The Host's own sentence for a member its connection cannot seat (#141178), and the one word on
+  // whether the roster the picker used still stands.
+  refusal =
+    "member 1 profile 'ops': only a host-scoped connection seats a served profile without an entry"
+  await mount(screen(), async () => {
+    await pick(bots)
+    await until(
+      async () => (find('[data-slot="seats-pill"]')?.textContent ?? "").includes("2 of 6"),
+      "two seats",
+    )
+    const before = reads.get(at) ?? 0
+
+    await type(composerField(), "Plan the next release.")
+    await click(find('button[aria-label="Send"]'))
+    await settle()
+
+    // The refusal is the screen's to say, in the Host's own words.
+    await until(
+      async () =>
+        (find("[role=alert]")?.textContent ?? "").includes("only a host-scoped connection"),
+      "the Host's refusal",
+    )
+
+    // The answer was read again rather than forgotten: the picks and their rows outlive the refusal,
+    // so the "Unpick every bot" the sentence asks for is a thing the user can still do.
+    await until(async () => (reads.get(at) ?? 0) > before, "the roster read again")
+    assert.equal(reads.get(at), before + 1, "one read of that connection, for the re-read")
+    assert.match(
+      find('[data-slot="seats-pill"]')?.textContent ?? "",
+      /2 of 6/,
+      "both picks are still seated",
+    )
+    await click(find('[data-slot="seats-pill"]'))
+    await until(async () => seats().length > 0, "the seat rows")
+    assert.deepEqual(
+      seats()
+        .filter((row) => row.getAttribute("aria-pressed") === "true")
+        .map((row) => row.getAttribute("data-bot")),
+      [bots[0].id, bots[1].id],
+      "and both rows are still the seats they were picked as",
+    )
+    assert.equal(posted.length, 1, "the Host was asked for the room once")
+  })
+})
+
+test("a create the Host refuses leaves the words in the field for the retry", async () => {
+  const bots = await fresh("blank-room-refused-words.test")
+  refusal =
+    "member 1 profile 'ops': only a host-scoped connection seats a served profile without an entry"
+  await mount(screen(), async () => {
+    await pick(bots)
+    await until(
+      async () => (find('[data-slot="seats-pill"]')?.textContent ?? "").includes("2 of 6"),
+      "two seats",
+    )
+
+    await type(composerField(), "Plan the next release.")
+    await click(find('button[aria-label="Send"]'))
+    await settle()
+
+    // A refused create is a send that never happened: the words go back into the field, as a room's
+    // own refused send does, rather than being lost with the request.
+    await until(
+      async () => composerField()?.value === "Plan the next release.",
+      "the message back in the field",
+    )
+    assert.equal(posted.length, 1, "the Host was asked once, and refused")
   })
 })
 

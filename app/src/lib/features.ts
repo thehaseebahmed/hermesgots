@@ -21,31 +21,52 @@ export type PluginFeatureAnswer = "unknown" | "yes" | "no"
 export type PluginServer = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
 
 // What each connection's plugin answered, whole: its feature names and the profiles it may seat in
-// a room (ADR 0128). Only a real answer is remembered, and the map is replaced rather than mutated
-// so a subscriber is handed a new value.
+// a room (ADR 0128). Only an answer that names something is remembered, and the map is replaced
+// rather than mutated so a subscriber is handed a new value.
 const answered = createStore<ReadonlyMap<string, PluginInfo>>(new Map())
 
-async function readAnswer(config: HermesConfig) {
+/**
+ * The read each connection is on. A refresh bumps this, so a read that began before the refresh and
+ * lands after it writes nothing: it answers the question the refresh replaced, and pinning it would
+ * short-circuit every later read (ADR 0128).
+ */
+const generations = new Map<string, number>()
+const generationOf = (key: string) => generations.get(key) ?? 0
+
+/**
+ * An answer worth keeping: one that names its features or the profiles it seats. A Host that names
+ * neither said nothing, and saying it again must not become final — an older Host answers no
+ * features, and a roster on its own is still a real answer (ADR 0128).
+ */
+const worthKeeping = (info: PluginInfo) =>
+  info.features !== null || info.rooms.seatable !== null
+
+async function readAnswer(config: HermesConfig, reread = false) {
   const key = connectionKey(config)
-  if (answered.get().has(key)) return
+  if (!reread && answered.get().has(key)) return
+  const generation = generationOf(key)
   const info = await getPluginAnswer(config)
   // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
-  if (!info) return
+  if (!info || !worthKeeping(info)) return
+  if (generation !== generationOf(key)) return
   answered.set(new Map(answered.get()).set(key, info))
 }
 
-/** Forgets what a connection answered, so its next read asks the Host again (ADR 0128). */
-export function forgetAnswer(server: PluginServer) {
+/**
+ * Reads a connection's `info` again and replaces what was remembered with what it answers, keeping
+ * the old answer until the new one lands (ADR 0128). A create the Host refused is the one word on
+ * whether a connection seats a profile, so the answer it contradicts is asked again — but a screen
+ * that lost the answer in between would draw a Host that can make no room and take away the rows
+ * the refusal's own sentence tells the user to unpick.
+ */
+export function refreshAnswer(server: PluginServer) {
   const config = serverConfig(server)
   const key = connectionKey(config)
-  // Both halves go, whatever the order they were filled in: a memo left behind would answer the
-  // next read with the roster the Host just refused.
+  // The memo half goes, whatever the order it was filled in: left behind, it would answer this read
+  // with the roster the Host just refused.
   forgetPluginAnswer(config)
-  const held = answered.get()
-  if (!held.has(key)) return
-  const next = new Map(held)
-  next.delete(key)
-  answered.set(next)
+  generations.set(key, generationOf(key) + 1)
+  void readAnswer(config, true)
 }
 
 function answer(known: PluginInfo | undefined, feature: string): PluginFeatureAnswer {

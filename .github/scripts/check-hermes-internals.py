@@ -118,6 +118,13 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         ("tui_gateway/contracts/groups_bot_relay.py",),
         "    seatable_profiles: list[str] | None = None",
     ),
+    # The line that fills that field. The contract above only says the answer may carry a roster;
+    # this is the one place the gateway works out which profiles the caller seats, so a Host that
+    # kept the field and stopped naming the profiles would leave every picker offering every bot.
+    (
+        ("gateway/session_group_controls.py",),
+        "'seatable_profiles': sorted(name for name in homes if name not in refused)",
+    ),
     (("hermes_cli/gateway_client.py",), "async def connect_gateway"),
     (("hermes_cli/gateway_runtime.py",), "def discover_gateway_endpoint"),
     (("hermes_cli/gateway_runtime.py",), "def attachable"),

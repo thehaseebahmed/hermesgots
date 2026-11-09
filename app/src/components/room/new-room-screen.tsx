@@ -20,7 +20,7 @@ import {
   type Profile,
   type RoomMember,
 } from "@/lib/db"
-import { forgetAnswer, usePluginFeatureByServer, useRoomSeatable } from "@/lib/features"
+import { refreshAnswer, usePluginFeatureByServer, useRoomSeatable } from "@/lib/features"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { FACES, roomSeats } from "@/lib/rooms"
@@ -80,11 +80,15 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   const [sending, setSending] = useState(false)
   const [failure, setFailure] = useState<string>()
 
-  const chosen = writers.filter((bot) => picked.includes(bot.id))
+  // The seats in the order they were picked, which is the order the room is named and made in: the
+  // first pick is the bot whose connection makes it (ADR 0125, ADR 0128).
+  const chosen = picked
+    .map((id) => writers.find((bot) => bot.id === id))
+    .filter((bot): bot is Profile => Boolean(bot))
   const ready = chosen.length >= LEAST && chosen.length <= MOST
   // The room is made as the bot picked FIRST, in pick order: its connection names the Host, answers
   // for the roster every other row is held to, and takes the create (ADR 0128).
-  const maker = writers.find((bot) => bot.id === picked[0]) ?? null
+  const maker = chosen[0] ?? null
 
   const lockedHost = maker ? hostKey(maker) : null
   // The roster belongs to the connection the room is made from, so it is the first pick's; until
@@ -152,15 +156,22 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       navigate(`/c/${roomId}`, { replace: true, state: { first: { text, attachments } } })
     } catch (error) {
       // A create that failed is the one moment the roster could have been wrong, and the roster is
-      // only ever a prediction: forgetting the answer makes the next look read the Host again, so a
-      // refusal about a seat is corrected rather than repeated (ADR 0128).
-      forgetAnswer(maker)
+      // only ever a prediction: reading it again asks the Host whether a seat still stands, while
+      // the picks stay seated until the answer lands (ADR 0128).
+      refreshAnswer(maker)
       setFailure(error instanceof Error && error.message ? error.message : "The room wasn't made.")
       setSending(false)
+      // The words are the user's: a create that failed hands them back to the field for the retry,
+      // the way a room's own refused send does (ADR 0125).
+      throw error
     }
   }
 
   const connection = serverConfig(maker ?? writers[0])
+  // What the screen says above the composer: a pick this connection can't seat outranks a create's
+  // own sentence, because unpicking is what frees the field and a `failure` can linger from before
+  // the roster moved. A dead Send always says why (ADR 0128).
+  const notice = unseated.length ? UNSEATABLE : failure
 
   return (
     <div data-slot="chat-pane" data-pane={slot} className="relative flex min-h-0 flex-1 flex-col">
@@ -178,9 +189,9 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         </p>
       </div>
 
-      {failure && (
+      {notice && (
         <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")} role="alert">
-          <Banner tone="error">{failure}</Banner>
+          <Banner tone="error">{notice}</Banner>
         </div>
       )}
 
