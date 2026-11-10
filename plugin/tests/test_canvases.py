@@ -1185,6 +1185,21 @@ class DataTest(unittest.TestCase):
         self.canvas = make_canvas(self.path)
         self.other = make_canvas(self.path)
 
+    def test_a_data_write_never_reads_the_record_and_so_never_its_picture(self) -> None:
+        # A data write asks only that the canvas is there. The record carries the tile's picture, up
+        # to 192 KB, and this path holds the store's write lock, so reading it would make every other
+        # writer wait behind a row nobody asked for.
+        canvas_id = self.canvas["id"]
+
+        def broad(*_args, **_kwargs):
+            raise AssertionError("a data write read the whole record")
+
+        with mock.patch.object(canvases, "_record", broad):
+            stored = canvases.put_doc(self.path, canvas_id, "notes", "a", {"text": "one"})
+            self.assertEqual(stored["doc"], {"text": "one"})
+            self.assertEqual([row["id"] for row in canvases.data(self.path, canvas_id)], ["a"])
+            self.assertTrue(canvases.remove_doc(self.path, canvas_id, "notes", "a")["removed"])
+
     def test_data_writes_win_by_host_clock_survive_an_undo_and_stop_at_the_cap(self) -> None:
         canvas_id = self.canvas["id"]
         # A document is answered as it was stored, stamped with the host's clock.

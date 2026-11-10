@@ -341,6 +341,17 @@ def _record(conn: sqlite3.Connection, canvas_id: str) -> Optional[Dict[str, Any]
     return _row(row) if row else None
 
 
+def _exists(conn: sqlite3.Connection, canvas_id: str) -> bool:
+    """Whether this store has that canvas, without its record — and so without its picture.
+
+    A data write only asks that the canvas is there, and a record carries the tile's picture, up to
+    192 KB: reading it to answer "does this exist" copies the picture on a path that holds the write
+    lock, so every other writer waits behind a row nobody needed.
+    """
+    row = conn.execute("SELECT 1 FROM canvases WHERE id = ?", (canvas_id,)).fetchone()
+    return row is not None
+
+
 def record(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
     """One canvas's record, or None when no canvas is that one."""
     if not canvas_id or not path.exists():
@@ -983,7 +994,7 @@ def data(
         doc_id = _name(doc_id, "id")
     conn = connect(path)
     try:
-        if _record(conn, canvas_id) is None:
+        if not _exists(conn, canvas_id):
             raise CanvasError("There is no such canvas.", 404)
         return _documents(conn, canvas_id, collection, doc_id)
     finally:
@@ -1068,7 +1079,7 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
     doc_id = _name(doc_id, "id")
     value = _json(doc)
     with _writing(path) as conn:
-        if _record(conn, canvas_id) is None:
+        if not _exists(conn, canvas_id):
             raise CanvasError("There is no such canvas.", 404)
         # The clock is read under the lock, so `at` follows the order the writes landed in: two
         # racing writers can't store the later stamp first and be read as the older one.
@@ -1101,7 +1112,7 @@ def remove_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any) -> Dict
     collection = _name(collection, "collection")
     doc_id = _name(doc_id, "id")
     with _writing(path) as conn:
-        if _record(conn, canvas_id) is None:
+        if not _exists(conn, canvas_id):
             raise CanvasError("There is no such canvas.", 404)
         removed = conn.execute(
             "DELETE FROM canvas_docs WHERE canvas_id = ? AND collection = ? AND id = ?",
