@@ -231,3 +231,37 @@ test("the card opens on the page the host asks, not on the first of the ask", as
     },
   )
 })
+
+test("a card opened on a later page lands on it, rather than scrolling up from the first", async () => {
+  // A host asks a call's questions one prompt at a time and the card is drawn again for each: an
+  // animated scroll from the first page reads every page it passes, and the count flashes back.
+  const scrolls: ScrollBehavior[] = []
+  const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+  const scrollTo = HTMLElement.prototype.scrollTo
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 320 })
+  HTMLElement.prototype.scrollTo = function (this: HTMLElement, options?: ScrollToOptions | number) {
+    const given = typeof options === "object" ? options : {}
+    scrolls.push(given.behavior ?? "auto")
+    this.scrollLeft = Number(given.left ?? 0)
+    this.dispatchEvent(new Event("scroll"))
+  } as typeof HTMLElement.prototype.scrollTo
+  try {
+    const ask = [
+      { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+      { id: "q1", question: "Which services?", choices: ["api", "worker"] },
+      { id: "q2", question: "Who reviews it?", choices: ["Platform", "Product"] },
+    ]
+    await mount(
+      <QuestionCard message={message(ask)} askedId="q2" onAnswer={async () => {}} />,
+      async () => {
+        await settle()
+        assert.ok(scrolls.length > 0, "the row is moved to the asked page")
+        assert.notEqual(scrolls[0], "smooth", "the first move is a landing, not an animation")
+        assert.match(text(), /3 of 3/)
+      },
+    )
+  } finally {
+    if (width) Object.defineProperty(HTMLElement.prototype, "clientWidth", width)
+    HTMLElement.prototype.scrollTo = scrollTo
+  }
+})

@@ -273,8 +273,8 @@ export function QuestionCard({
     return () => observer.disconnect()
   }, [page, paged])
 
-  const goTo = (index: number) => {
-    row.current?.scrollTo({ left: index * row.current.clientWidth, behavior: motion() })
+  const goTo = (index: number, behavior: ScrollBehavior = motion()) => {
+    row.current?.scrollTo({ left: index * row.current.clientWidth, behavior })
   }
 
   // Turns with the host, without taking the arrows away between its turns.
@@ -283,8 +283,14 @@ export function QuestionCard({
     setTurnedTo(askedPage)
     setPage(askedPage)
   }
-  useEffect(() => {
-    if (oneAtATime) goTo(askedPage)
+  // A host that asks one prompt at a time has the card drawn again for each: it lands on the asked
+  // page before it is painted, since an animated scroll from the first would read every page it
+  // passes and the count would flash back. Later turns within one card still slide.
+  const landed = useRef(false)
+  useLayoutEffect(() => {
+    if (!oneAtATime) return
+    goTo(askedPage, landed.current ? motion() : "instant")
+    landed.current = true
   }, [oneAtATime, askedPage])
 
   // Leaves this question unanswered (a skipped question is null to Hermes) and moves on.
@@ -316,9 +322,7 @@ export function QuestionCard({
         <CardTitle className="flex items-center gap-2 text-base text-primary">
           <MessageCircleQuestionIcon className="size-5 shrink-0" />
           {paged ? "Questions" : "Question"}
-          {from && (
-            <span className="text-sm font-normal text-muted-foreground">{from}</span>
-          )}
+          {from && <span className="text-sm font-normal text-muted-foreground">{from}</span>}
           {paged && (
             <div className="ml-auto flex items-center gap-1">
               <span
