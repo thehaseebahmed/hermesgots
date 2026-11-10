@@ -21,7 +21,7 @@ import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canva
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
-import { UsageSheet } from "@/components/chat/usage-sheet"
+import { UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
@@ -57,9 +57,9 @@ import {
   type Canvas,
   type CanvasChanges,
 } from "@/lib/canvases"
-import { db, getActiveProfile } from "@/lib/db"
+import { db, getActiveProfile, type Profile } from "@/lib/db"
 import type { CanvasPoint } from "@/lib/point-marker"
-import { hostAnswered } from "@/lib/hermes"
+import { hostAnswered, type ProviderUsage } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
@@ -258,11 +258,12 @@ export function CanvasView() {
   const html = canvas?.html
   const large = useLarge()
   const [editing, setEditing] = useState(false)
-  const [undoing, setUndoing] = useState(false)
   // How many times the frame has been drawn for this version (a document that left is drawn again),
   // and whether that one redraw was already spent.
   const [escapedFor, setEscapedFor] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
+  // The numbers the usage sheet draws, handed up by the chat it belongs to.
+  const [surface, setSurface] = useState<ChatSurfaceUsage | null>(null)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
   // Where the frame's page last said it was, and which canvas said it. Read when the document is
@@ -270,7 +271,6 @@ export function CanvasView() {
   // rides it because this screen draws every canvas's address — it isn't keyed on one — so a second
   // canvas opens at its own top rather than at the offset the first one was left at.
   const scrolled = useRef<{ id: string; at: number }>({ id, at: 0 })
-  const chatId = canvas?.chatId
   // The page's classes compiled, kept with the version they were compiled for: an answer that lands
   // after the screen has moved to another version is no CSS to draw with, and no CSS at all keeps
   // the frame off the page until there is one.
@@ -297,13 +297,9 @@ export function CanvasView() {
       live = false
     }
   }, [canvasId, version, html])
-  const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
   const profile = useLiveQuery(
     () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
     [canvas?.profileId],
-  )
-  const { summaries, usage, providerUsage, limit } = useChatSurface(chat, profile, () =>
-    setUsageOpen(true),
   )
   // The document at a position, built once for every draw: the reader's page, and the page drawn
   // again where they left it.
@@ -453,13 +449,6 @@ export function CanvasView() {
     return () => window.removeEventListener("message", hear)
   }, [id, points])
 
-  const undo = async () => {
-    if (!canvas || undoing) return
-    setUndoing(true)
-    await attempt("undo the canvas", () => undoCanvas(canvas.id))
-    setUndoing(false)
-  }
-
   const update = async (changes: CanvasChanges) => {
     // A host that never answered already said so in `withHost`'s words; a refusal is this call's.
     // Either way it is thrown on, so the sheet keeps what was typed rather than closing on nothing.
@@ -488,81 +477,17 @@ export function CanvasView() {
     up("/canvas")
   }
 
-  // The canvas's own session, as any chat body holds it: it edits the page with the host's tools, and
-  // a turn's end is a version this screen re-reads (ADR 0113).
-  const body =
-    chat && profile ? (
-      <CanvasPointsProvider points={points}>
-        <PreviewerProvider>
-          <ChatBody
-            chat={chat}
-            bot={profile}
-            summaries={summaries}
-            start={undefined}
-            limit={limit}
-            afterSettled={() => {
-              // Every turn's end re-reads the page: a stream can be open and silent (a buffering
-              // proxy), so the event is never the only news. A read already in flight is joined and
-              // one more is owed, so the edit's event and this cost one GET between them.
-              void refreshCanvas(id).catch(() => undefined)
-            }}
-          />
-        </PreviewerProvider>
-      </CanvasPointsProvider>
-    ) : null
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-        <BackButton label="All canvases" variant="ghost" onClick={() => up("/canvas")} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
-          {/* A place's header, as a coding session's is: the name over the one line that says where
-              the reader is — whose canvas it is, and which version of it. */}
-          <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
-            {profile && <span className="truncate">{profile.name}</span>}
-            {canvas?.version ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="shrink-0">v{canvas.version}</span>
-              </>
-            ) : null}
-            {awayWords ? (
-              <>
-                <span aria-hidden>·</span>
-                <span role="status" data-canvas-offline className="shrink-0">
-                  {awayWords}
-                </span>
-              </>
-            ) : null}
-          </p>
-        </div>
-        {canvas?.canUndo && !awayNow ? (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            aria-label="Undo"
-            disabled={undoing}
-            onClick={() => void undo()}
-          >
-            <Undo2Icon />
-          </Button>
-        ) : null}
-        {/* The menu is the row's last control, so the one button that opens a sheet is always where a
-            hand reaches for it, whatever else the canvas offers today. */}
-        {canvas ? (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            aria-label="Canvas options"
-            onClick={() => setOptionsOpen(true)}
-          >
-            <EllipsisIcon />
-          </Button>
-        ) : null}
-      </header>
+      <CanvasHeader
+        canvas={canvas}
+        profile={profile}
+        awayWords={awayWords}
+        awayNow={awayNow}
+        backLabel="All canvases"
+        onBack={() => up("/canvas")}
+        onOptions={() => setOptionsOpen(true)}
+      />
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 flex-1 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
@@ -612,10 +537,15 @@ export function CanvasView() {
         </div>
         {/* The house's list lane: 412px, the width the app already asks its text to read in
             (`w-103`, `SPLIT_FLOOR` in `lib/split.ts`), with the page beside it never narrower. */}
-        {large && body && (
-          <div className="flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l">
-            {body}
-          </div>
+        {large && (
+          <CanvasChat
+            canvas={canvas}
+            bot={profile}
+            points={points}
+            className="flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l"
+            onView={() => setUsageOpen(true)}
+            onUsage={setSurface}
+          />
         )}
       </div>
 
@@ -625,7 +555,16 @@ export function CanvasView() {
             <PopupHeader className="pb-2">
               <PopupTitle>Edit with {profile?.name || "your bot"}</PopupTitle>
             </PopupHeader>
-            {editing && body}
+            {editing && (
+              <CanvasChat
+                canvas={canvas}
+                bot={profile}
+                points={points}
+                className="flex min-h-0 flex-1 flex-col"
+                onView={() => setUsageOpen(true)}
+                onUsage={setSurface}
+              />
+            )}
           </PopupContent>
         </Popup>
       )}
@@ -643,12 +582,163 @@ export function CanvasView() {
         onUpdate={update}
         onDelete={remove}
       />
-      <UsageSheet
-        open={usageOpen}
-        onOpenChange={setUsageOpen}
-        usage={usage}
-        providerUsage={providerUsage}
-      />
+      {surface && (
+        <UsageSheet
+          open={usageOpen}
+          onOpenChange={setUsageOpen}
+          usage={surface.usage}
+          providerUsage={surface.providerUsage}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The numbers a canvas's usage sheet draws, read by its chat and drawn by its screen. */
+interface ChatSurfaceUsage {
+  usage: ContextUsage
+  providerUsage?: ProviderUsage
+}
+
+/**
+ * A canvas's header, as both of its screens draw it: the way back, the page's name over the one line
+ * that says whose it is and where it stands, Undo while a version sits under this one, and the menu
+ * last so the one button that opens a sheet is where a hand reaches for it.
+ */
+function CanvasHeader({
+  canvas,
+  profile,
+  awayWords,
+  awayNow,
+  backLabel,
+  onBack,
+  onOptions,
+}: {
+  canvas: Canvas | undefined
+  profile: Profile | undefined
+  /** What the header says of a host that isn't answering, or a device with no network (ADR 0071). */
+  awayWords: string | undefined
+  awayNow: boolean
+  backLabel: string
+  onBack: () => void
+  onOptions: () => void
+}) {
+  const [undoing, setUndoing] = useState(false)
+  const undo = async () => {
+    if (!canvas || undoing) return
+    setUndoing(true)
+    await attempt("undo the canvas", () => undoCanvas(canvas.id))
+    setUndoing(false)
+  }
+  return (
+    <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
+      <BackButton label={backLabel} variant="ghost" onClick={onBack} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
+        {/* A place's header, as a coding session's is: the name over the one line that says where
+            the reader is — whose canvas it is, and which version of it. */}
+        <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
+          {profile && <span className="truncate">{profile.name}</span>}
+          {canvas?.version ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="shrink-0">v{canvas.version}</span>
+            </>
+          ) : null}
+          {awayWords ? (
+            <>
+              <span aria-hidden>·</span>
+              <span role="status" data-canvas-offline className="shrink-0">
+                {awayWords}
+              </span>
+            </>
+          ) : null}
+        </p>
+      </div>
+      {canvas?.canUndo && !awayNow ? (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 rounded-full"
+          aria-label="Undo"
+          disabled={undoing}
+          onClick={() => void undo()}
+        >
+          <Undo2Icon />
+        </Button>
+      ) : null}
+      {/* The menu is the row's last control, so the one button that opens a sheet is always where a
+          hand reaches for it, whatever else the canvas offers today. */}
+      {canvas ? (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 rounded-full"
+          aria-label="Canvas options"
+          onClick={onOptions}
+        >
+          <EllipsisIcon />
+        </Button>
+      ) : null}
+    </header>
+  )
+}
+
+/**
+ * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's
+ * thread asks for, the body itself, and the page re-read at every settled turn (ADR 0113). Where it
+ * stands — in the desktop lane, or filling the phone's sheet — is the screen's, handed in as its
+ * own classes; a canvas with no chat or no bot draws nothing at all.
+ *
+ * The numbers its usage sheet draws are handed up rather than drawn here: the canvas's sheet stands
+ * at its screen's root, and a sheet opened inside the phone's edit sheet would stack in it.
+ */
+function CanvasChat({
+  canvas,
+  bot,
+  points,
+  className,
+  onView,
+  onUsage,
+}: {
+  canvas: Canvas | undefined
+  bot: Profile | undefined
+  points: CanvasPoints
+  className: string
+  /** Opens the usage sheet the composer's limit line asks for, which the screen draws. */
+  onView: () => void
+  onUsage: (surface: ChatSurfaceUsage) => void
+}) {
+  const chatId = canvas?.chatId
+  const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
+  const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, onView)
+  const { tracked, tokens, window: windowSize, model } = usage
+  // The sheet is the screen's, and these are the numbers it draws: handed up as they change, since
+  // the component that reads them is the one that draws them. They are compared field by field
+  // because the usage object is read afresh on every render.
+  useEffect(() => {
+    onUsage({ usage: { tracked, tokens, window: windowSize, model }, providerUsage })
+  }, [onUsage, tracked, tokens, windowSize, model, providerUsage])
+  if (!canvas || !chat || !bot) return null
+  return (
+    <div className={className}>
+      <CanvasPointsProvider points={points}>
+        <PreviewerProvider>
+          <ChatBody
+            chat={chat}
+            bot={bot}
+            summaries={summaries}
+            start={undefined}
+            limit={limit}
+            afterSettled={() => {
+              // Every turn's end re-reads the page: a stream can be open and silent (a buffering
+              // proxy), so the event is never the only news. A read already in flight is joined and
+              // one more is owed, so the edit's event and this cost one GET between them.
+              void refreshCanvas(canvas.id).catch(() => undefined)
+            }}
+          />
+        </PreviewerProvider>
+      </CanvasPointsProvider>
     </div>
   )
 }
