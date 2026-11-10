@@ -809,7 +809,8 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(openui.canvas_content({"session_id": self.session + "-c1"}), openui.CANVAS_TEXT)
         self.assertEqual(openui.content({"session_id": self.session + "-c1"}), "")
         self.assertEqual(openui.canvas_content({"session_id": self.plain}), "")
-        self.assertEqual(openui.content({"session_id": self.plain}), openui.TEXT)
+        with mock.patch.object(openui, "enabled", return_value=True):
+            self.assertEqual(openui.content({"session_id": self.plain}), openui.TEXT)
 
     def test_a_call_is_found_from_either_id_hermes_gives_it(self) -> None:
         # A tool and a hook are handed a task id that is the run's own, which is not always the
