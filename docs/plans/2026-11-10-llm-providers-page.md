@@ -251,6 +251,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    the test from the page's own entry, so a second page can hold items. Prepares: 4. After: none.
    Layers: `app` UI — sub-screens. Check: `pnpm test` over `test-bot-subs.tsx` — green before and
    after, including "a name the page doesn't hold names nothing".
+
+   Done.
+
 4. **The page lists providers, and a key never leaves the host.** `plugin/llm_providers.py` with
    `read()`, its `FEATURES` gate and the one `GET` route (its `endpoints` list is empty until step 7);
    `info` advertises `llm_providers`; `plugin.yaml` and `dashboard/manifest.json` go to `0.115.0`;
