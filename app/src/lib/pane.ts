@@ -104,8 +104,9 @@ export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefin
     return { id, profileId: found && listsAsChat(found) ? found.profileId : undefined }
   }, [id])
   if (!split || !enabled) return undefined
-  // The bot's own screen, and whatever the list opens over it that is no chat of its own.
-  const own = matchPath("/b/:profileId/*", pathname) ?? matchPath("/b/:profileId", pathname)
+  // A bot's own screen, and everything the list opens over it: the splat matches the bare address
+  // too, so one pattern answers every address under a bot.
+  const own = matchPath("/b/:profileId/*", pathname)
   if (own) return { open: true, profileId: own.params.profileId ?? "" }
   if (!id) return undefined
   const answered = read?.id === id ? read : undefined

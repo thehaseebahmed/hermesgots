@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react"
 
 import { agentTranscript } from "@/lib/agents"
+import { boundedStore } from "@/lib/bounded-cache"
 import { serverConfig } from "@/lib/connection"
 import type { Message } from "@/lib/db"
 import type { PluginServer } from "@/lib/features"
@@ -28,11 +29,13 @@ export interface RoutineTranscript {
   loaded: boolean
 }
 
-/** Runs that are over don't change, so a transcript is read once per connection and run. */
-const finished = new Map<string, Message[]>()
-
-/** How many transcripts are kept: a reader who opens a run, then another, doesn't hold every row. */
+/**
+ * Runs that are over don't change, so a transcript is read once per connection and run, and what a
+ * reader has moved on from falls out: a run opened, then another, doesn't hold every row.
+ */
 const KEEP_RUNS = 8
+
+const finished = boundedStore<Message[]>({ limit: KEEP_RUNS })
 
 /**
  * A run's transcript: the newest rows of the session the run wrote, folded the way a chat's reply is.
@@ -57,7 +60,6 @@ export function useRoutineTranscript(
       .then((rows) => {
         if (cancelled) return
         const next = toMessages(`run-${id}`, id, rows, { live: false })
-        if (finished.size >= KEEP_RUNS) finished.delete(finished.keys().next().value as string)
         finished.set(cacheKey, next)
         setMessages(next)
       })

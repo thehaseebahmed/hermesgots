@@ -1,6 +1,5 @@
 import type { CSSProperties } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MenuIcon, MessageCircleIcon, PlusIcon, SearchIcon, TimerIcon } from "lucide-react"
 import {
@@ -18,9 +17,9 @@ import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { botPath } from "@/lib/bot-tabs"
-import { chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
-import { db, type Profile } from "@/lib/db"
+import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
+import { conversationsOf, db, newestMessage, type Profile } from "@/lib/db"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { BACK_ON_LIST } from "@/lib/nav"
@@ -32,8 +31,6 @@ import { isUnread } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
 
-/** How many of a bot's newest chats its screen reads, the bound the sidebar holds them to as well. */
-const CHATS = 50
 const SEARCH_FIELD_ID = "chats-search"
 
 /**
@@ -58,7 +55,7 @@ export function BotChatsPage() {
   if (!enabled || !profileId) return <Navigate to="/" replace />
   // The chat the address opens is on its way, so neither the list it is leaving nor an empty pane is
   // drawn for a frame.
-  if (landing !== "none") return null
+  if (landing) return null
   if (pane) return <NoChatOpen />
   return <BotChatsList profileId={profileId} />
 }
@@ -70,8 +67,9 @@ export function BotChatsPage() {
  * place says the reader is back on the list — so a press back never bounces into the chat it came
  * from.
  *
- * `out` while the read is out, `opens` while a chat is taking the address, `none` for a bot with
- * nothing to open.
+ * Answers whether the address is still being settled — the read is out, or a chat is taking it —
+ * which the screen draws nothing for, so neither the list it is leaving nor an empty pane is drawn
+ * for a frame.
  */
 function useLanding(profileId: string | undefined, enabled: boolean | undefined) {
   const navigate = useNavigate()
@@ -94,8 +92,7 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined)
     opened.current = true
     navigate(`/c/${chat}`)
   }, [opens, chat, navigate])
-  if (chat === undefined) return "out"
-  return opens ? "opens" : "none"
+  return chat === undefined || opens
 }
 
 /**
@@ -121,16 +118,6 @@ function NoChatOpen() {
   )
 }
 
-/** A chat's newest message this device holds: the one read a row's line and its time both come from. */
-function newestIn(conversationId: string) {
-  return db.messages
-    .where("[conversationId+createdAt]")
-    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
-    .reverse()
-    .filter((message) => Boolean(message.content.trim()))
-    .first()
-}
-
 /**
  * A bot's chats, each with the one read of its newest message that a row's line and time come from,
  * and the rooms it is a participant of: one list, one order (G3).
@@ -141,19 +128,18 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
   const rooms = useRoomNeeds()
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
   const answer = useLiveQuery(async () => {
-    if (!profileId) return { profileId, bot: null, rows: [] }
     const bot = await db.profiles.get(profileId)
     if (!bot) return { profileId, bot: null, rows: [] }
-    const chats = await db.conversations
-      .where("[profileId+updatedAt]")
-      .between([profileId, -Infinity], [profileId, Infinity])
+    const chats = await conversationsOf(profileId)
       .reverse()
       .filter(listsAsChat)
-      .limit(CHATS)
+      .limit(BOT_CHATS)
       .toArray()
     const rows = await Promise.all(
       // A routine's row reads its line and time off the record, so its tail isn't asked for at all.
-      chats.map(async (chat) => chatRowOf(chat, chat.routine ? undefined : await newestIn(chat.id))),
+      chats.map(async (chat) =>
+        chatRowOf(chat, chat.routine ? undefined : await newestMessage(chat.id)),
+      ),
     )
     return { profileId, bot, rows }
   }, [profileId])
@@ -246,7 +232,7 @@ function ChatList({
             size="icon-lg"
             className="size-11 shrink-0 rounded-full text-muted-foreground"
             nativeButton={false}
-            render={<Link to={`/b/${bot.id}/routines`} aria-label="Routines" />}
+            render={<Link to={botRoutinesPath(bot.id)} aria-label="Routines" />}
           >
             <TimerIcon />
           </Button>

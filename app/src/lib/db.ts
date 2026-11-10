@@ -1891,6 +1891,29 @@ export async function getMessages(conversationId: string) {
     .toArray()
 }
 
+/** A message a list can draw a line from: one with words in it. */
+export const hasWords = (message: Message) => Boolean(message.content.trim())
+
+/** A reply — the only row a question or an approval sits on. */
+export const isReply = (message: Message) => message.role === "assistant"
+
+/**
+ * The newest message this device holds for a chat, or the newest one `keep` accepts: the one read a
+ * list's line, its clock and what it waits on all come from. The range over a chat's tail is written
+ * here alone, so every list that reads one reads the same rows.
+ */
+export async function newestMessage(
+  conversationId: string,
+  keep: (message: Message) => boolean = hasWords,
+) {
+  return db.messages
+    .where("[conversationId+createdAt]")
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+    .reverse()
+    .filter(keep)
+    .first()
+}
+
 export async function clearAllData() {
   const tables = [
     db.conversations,

@@ -92,6 +92,7 @@ import { formatRelative } from "@/lib/format"
 import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
+import { legacyChatOn } from "@/lib/legacy-chat"
 import { useLarge } from "@/lib/media"
 import { isNative, openNotificationSettings, setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -646,7 +647,7 @@ export function DeveloperSettings() {
           icon={MessagesSquareIcon}
           title="Enable legacy chat UX"
           subtitle="Recents in the sidebar, chats in one list"
-          checked={Boolean(settings?.legacyChat)}
+          checked={legacyChatOn(settings)}
           onCheckedChange={(checked) => saveSettings({ legacyChat: checked })}
         />
         <SwitchRow

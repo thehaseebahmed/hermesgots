@@ -15,6 +15,7 @@ import { CrashBoundary } from "@/components/crash-screen"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { botChatsPath } from "@/lib/bot-tabs"
 import { useBubbleMirror, useBubbleTakeaways } from "@/lib/bubble"
 import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
@@ -211,7 +212,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
       }
     : bot
       ? {
-          screen: `/b/${bot.profileId}`,
+          screen: botChatsPath(bot.profileId),
           open: bot.open,
           itemKey: bot.selected,
           node: <BotChatsPane pane={bot} />,

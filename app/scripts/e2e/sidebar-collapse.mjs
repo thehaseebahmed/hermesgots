@@ -167,7 +167,8 @@ for (const dark of [false, true]) {
         true,
         "a bot keeps its icon",
       )
-      // The bot layout has no Rooms section: a room is a row of every bot's chat list (step 8).
+      // The bot layout has no Rooms section: a room is a row of every bot's chat list, so the
+      // sidebar has none to draw.
       assert.equal(
         await aside.getByRole("link", { name: "New room" }).count(),
         0,

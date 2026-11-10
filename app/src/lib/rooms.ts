@@ -138,16 +138,17 @@ export function roomRowOf(
   >,
   faces: { shown: string[]; more: number },
 ): ChatListRow {
-  const needs = roomNeedsOf(chat)
   return {
     id: chat.id,
     title: chat.title,
     line: chat.room ? roomMembersLine(chat.room) : undefined,
     at: chat.updatedAt,
     pinned: Boolean(chat.pinned),
-    waiting: Boolean(needs),
+    // A room's need is `needs`, drawn as its line in the warning tone: a room is never a chat whose
+    // reply is waiting, so it never wears the badge that says one is.
+    waiting: false,
     room: faces,
-    needs,
+    needs: roomNeedsOf(chat),
   }
 }
 

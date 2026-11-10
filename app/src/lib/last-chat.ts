@@ -7,7 +7,7 @@
  * has come to belong to another bot — falls to the newest chat the bot has left, and a bot this
  * device has never opened has nothing to open at all, so its list is what draws.
  */
-import { db, type Conversation } from "./db.ts"
+import { conversationsOf, db, type Conversation } from "./db.ts"
 import { listsAsChat } from "./lists-as-chat.ts"
 
 /** Where this device keeps the chat a bot was last in. */
@@ -46,11 +46,6 @@ export async function landingChat(profileId: string): Promise<string | undefined
   if (!kept) return undefined
   const found = await db.conversations.get(kept)
   if (found && isChatOf(found, profileId)) return found.id
-  const newest = await db.conversations
-    .where("[profileId+updatedAt]")
-    .between([profileId, -Infinity], [profileId, Infinity])
-    .reverse()
-    .filter((chat) => isChatOf(chat, profileId))
-    .first()
+  const newest = await conversationsOf(profileId).reverse().filter(listsAsChat).first()
   return newest?.id
 }

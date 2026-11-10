@@ -1,10 +1,11 @@
-import Dexie from "dexie"
 import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  conversationsOf,
   createConversation,
-  db,
+  isReply,
   listEnabledProfiles,
+  newestMessage,
   type BotSort,
   type Conversation,
   type ModelChoice,
@@ -18,9 +19,7 @@ import { useStoredSort } from "@/lib/use-sort"
 import { isUnread } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
 import { useWaiting } from "@/lib/waiting"
-
-/** How many of a bot's newest chats the sidebar reads to preview one. */
-const CHATS = 50
+import { BOT_CHATS, waitsOnUser } from "@/lib/chat-list"
 
 /**
  * The chat a new chat opens: a plain chat of the bot's, since a bot's screen is the list of its chats
@@ -88,18 +87,6 @@ export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] 
   return [...bots].sort((a, b) => withDir(rank(a, b), sort.dir))
 }
 
-const line = (text?: string) => (text === undefined ? undefined : oneLine(text))
-
-async function latestLine(conversationId: string) {
-  const newest = await db.messages
-    .where("[conversationId+createdAt]")
-    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
-    .reverse()
-    .filter((message) => Boolean(message.content.trim()))
-    .first()
-  return line(newest?.content)
-}
-
 /**
  * Every bot that's turned on, with its newest chat and the line it last said, for the sidebar, in the
  * order linked. Its dot reads the same chats, never a coding session's: a row that leads to the bot's
@@ -112,41 +99,21 @@ export function useBotSummaries(): BotSummary[] | undefined {
     const bots = await listEnabledProfiles()
     return Promise.all(
       bots.map(async (bot) => {
-        const chats = await db.conversations
-          .where("[profileId+updatedAt]")
-          .between([bot.id, -Infinity], [bot.id, Infinity])
+        const chats = await conversationsOf(bot.id)
           .reverse()
           .filter(listsAsChat)
-          .limit(CHATS)
+          .limit(BOT_CHATS)
           .toArray()
-        // Only a chat's newest reply can wait on the user, so only that one is read.
-        const newest = await Promise.all(
-          chats.map((c) =>
-            db.messages
-              .where("[conversationId+createdAt]")
-              .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
-              .reverse()
-              .filter((m) => m.role === "assistant")
-              .first(),
-          ),
-        )
-        const local = new Set(
-          newest
-            .filter(
-              (m) =>
-                !!(m?.approval && !m.approval.resolved) || !!(m?.clarify && !m.clarify.resolved),
-            )
-            .map((m) => m!.conversationId),
-        )
+        // Only a chat's newest reply can wait on the user, so only that one is read, and the row the
+        // bot previews is read beside it rather than after the batch.
+        const [newest, words] = await Promise.all([
+          Promise.all(chats.map((c) => newestMessage(c.id, isReply))),
+          chats[0] ? newestMessage(chats[0].id) : undefined,
+        ])
+        const local = new Set(newest.filter((m) => waitsOnUser(m)).map((m) => m!.conversationId))
         // What the row previews: what the bot's newest chat last said, a chat with no words answering
         // with its own name rather than nothing at all (ADR 0090).
-        const newestChat = chats[0]
-        return {
-          bot,
-          chats,
-          local,
-          preview: newestChat ? await latestLine(newestChat.id) : undefined,
-        }
+        return { bot, chats, local, preview: words ? oneLine(words.content) : undefined }
       }),
     )
   }, [])

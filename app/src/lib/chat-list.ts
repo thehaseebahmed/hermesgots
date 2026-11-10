@@ -11,6 +11,12 @@ import { filterByFuzzy } from "./fuzzy.ts"
 import { oneLine } from "./words.ts"
 import type { Conversation, Message } from "./db.ts"
 
+/**
+ * How many of a bot's newest chats one screen reads. Its own list and the sidebar's preview are two
+ * readings of the same set, so they are held to one bound.
+ */
+export const BOT_CHATS = 50
+
 /** The chat record a row is read from. */
 export type ChatRecord = Pick<
   Conversation,
@@ -48,7 +54,7 @@ export interface ChatListRow {
 }
 
 /** Whether the newest reply in a chat asked the reader something they have not answered. */
-function waitsOnUser(newest: ChatTail | undefined): boolean {
+export function waitsOnUser(newest: ChatTail | undefined): boolean {
   if (!newest) return false
   if (newest.clarify && !newest.clarify.resolved) return true
   return Boolean(newest.approval && !newest.approval.resolved)
@@ -109,14 +115,16 @@ export function chatList(rows: readonly ChatListRow[], query: string): ChatListR
 
 const DAY_MS = 86_400_000
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
+const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" })
 
 /**
  * How old a row is, as the list says it: how long ago within the day, and the date itself beyond
  * that, since "3 days ago" is not what a reader wants off a list they scan down.
+ *
+ * The formatters are built once: a row asks this on every render, and a list holds fifty of them.
  */
 export function chatAge(at: number, now: number) {
-  if (now - at >= DAY_MS)
-    return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
+  if (now - at >= DAY_MS) return date.format(at)
   const seconds = Math.round((at - now) / 1000)
   if (Math.abs(seconds) >= 3_600) return relative.format(Math.round(seconds / 3_600), "hour")
   if (Math.abs(seconds) >= 60) return relative.format(Math.round(seconds / 60), "minute")

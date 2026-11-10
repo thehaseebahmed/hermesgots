@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { botChatsPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { BackButton } from "@/components/back-button"
 import { Bot } from "@/components/bot"
@@ -36,7 +37,7 @@ import {
   type CronRun,
   type CronState,
 } from "@/lib/cron"
-import { db, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
+import { db, conversationsOf, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useChanges, useLive } from "@/lib/live"
 import { useNav } from "@/lib/nav"
@@ -62,11 +63,11 @@ export function RoutinesPage() {
   // has nothing to lead back to; below that width the list pushed it and is what back returns to.
   const beside = Boolean(useBotChatsPane(useLegacyChat() === false))
   const { up } = useNav()
-  const back = useCallback(() => up(`/b/${profileId}`), [up, profileId])
+  const back = useCallback(() => up(botChatsPath(profileId)), [up, profileId])
   useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
-  const [collapsed, setOpen] = useCollapsedBots()
+  const [open, setOpen] = useRoutinesOpen()
   const refresh = useCallback(() => setTick((n) => n + 1), [])
 
   usePoll(() => setPollTick((n) => n + 1), LIST_MS, [], { immediate: false, onShow: false })
@@ -101,8 +102,8 @@ export function RoutinesPage() {
           profile={bot}
           tick={tick}
           pollTick={pollTick}
-          open={!collapsed.has(bot.id)}
-          onOpenChange={(open) => setOpen(bot.id, open)}
+          open={open}
+          onOpenChange={setOpen}
         />
       </div>
     </div>
@@ -116,7 +117,7 @@ export function RoutinesPage() {
 export function RoutinesHome() {
   const active = useLiveQuery(async () => (await getActiveProfile()) ?? null, [])
   if (active === undefined) return null
-  return active ? <Navigate to={`/b/${active.id}/routines`} replace /> : <Navigate to="/" replace />
+  return active ? <Navigate to={botRoutinesPath(active.id)} replace /> : <Navigate to="/" replace />
 }
 
 function describeError(error: unknown) {
@@ -128,32 +129,29 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : "Couldn't load routines."
 }
 
-const COLLAPSED_KEY = "gots:routines:collapsed"
+const OPEN_KEY = "gots:routines:open"
 
-/** Bots whose routines are folded away; a per-device convenience, so localStorage is enough. */
-function useCollapsedBots() {
-  const [collapsed, setCollapsed] = useState(() => {
+/**
+ * Whether a bot's routines are folded away: one bot draws on this page now, so it is one switch
+ * rather than a set of bots, and a per-device convenience, so localStorage is enough.
+ */
+function useRoutinesOpen(): [boolean, (open: boolean) => void] {
+  const [open, setStored] = useState(() => {
     try {
-      const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]")
-      return new Set(Array.isArray(stored) ? stored.filter((id) => typeof id === "string") : [])
+      return localStorage.getItem(OPEN_KEY) !== "0"
     } catch {
-      return new Set<string>()
+      return true
     }
   })
-  const setOpen = useCallback((profileId: string, open: boolean) => {
-    setCollapsed((current) => {
-      const next = new Set(current)
-      if (open) next.delete(profileId)
-      else next.add(profileId)
-      try {
-        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
-      } catch {
-        // Private mode or blocked storage: it just won't be remembered.
-      }
-      return next
-    })
+  const setOpen = useCallback((next: boolean) => {
+    setStored(next)
+    try {
+      localStorage.setItem(OPEN_KEY, next ? "1" : "0")
+    } catch {
+      // Private mode or blocked storage: it just won't be remembered.
+    }
   }, [])
-  return [collapsed, setOpen] as const
+  return [open, setOpen]
 }
 
 const isPaused = (job: CronJob) => !job.enabled || job.state === "paused"
@@ -202,9 +200,9 @@ function BotRoutines({
   // Hermes's ledger keeps the execution and the session apart (G4).
   const published = useLiveQuery(
     async () =>
-      (
-        await db.conversations.where("profileId").equals(profile.id).toArray()
-      ).filter((chat) => chat.routine),
+      conversationsOf(profile.id)
+        .filter((chat) => Boolean(chat.routine))
+        .toArray(),
     [profile.id],
   )
   const cronTick = useChanges("cron", profile)

@@ -22,6 +22,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
+import { botChatsPath } from "@/lib/bot-tabs"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { serverConfig } from "@/lib/connection"
 import { db, type Message } from "@/lib/db"
@@ -66,7 +67,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   upRef.current = up
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
   // row is the bot's own, so its screen leads back to where its row stands (G5).
-  const listPath = !legacy && chat ? `/b/${chat.profileId}` : undefined
+  const listPath = !legacy && chat ? botChatsPath(chat.profileId) : undefined
   const wide = useWide()
   // Where there is room the bot's list stands beside this screen (`useBotChatsPane`), so there is
   // nothing behind it for its header to lead back to.

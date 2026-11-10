@@ -132,6 +132,7 @@ import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
 import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
+import { botChatsPath } from "@/lib/bot-tabs"
 import { chatFlow } from "@/lib/chat-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
@@ -368,7 +369,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   // A chat of a bot answers its bot's list: where its own control and Android's back step when
   // nothing stands behind it, and — since a row opens the chat from that list — where they land
   // after one (G5). A Main is one of the bot's chats, so it answers the same address.
-  const listPath = !legacy && chat && listsAsChat(chat) ? `/b/${chat.profileId}` : undefined
+  const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
   const xl = useXLarge()
   const wide = useWide()
   // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
@@ -979,7 +980,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   // A chat of a bot answers its bot's list, Main among them (G5).
   const listPath =
     !legacy && conversation && !session && listsAsChat(conversation)
-      ? `/b/${conversation.profileId}`
+      ? botChatsPath(conversation.profileId)
       : undefined
   // A session opens beside Code's list where there's room, and is then a top-level screen with
   // nothing to go back to.

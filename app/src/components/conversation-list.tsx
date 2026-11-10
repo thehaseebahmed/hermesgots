@@ -25,17 +25,17 @@ import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import Dexie from "dexie"
+import { botChatsPath } from "@/lib/bot-tabs"
 import { previewLine } from "@/lib/bot-chrome"
 import { usePinnedCanvases } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
-import { compareChatOrder } from "@/lib/chat-list"
+import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
 import { presence } from "@/lib/registry"
 import type { Conversation, Message, Profile } from "@/lib/db"
-import { db } from "@/lib/db"
+import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
-import { roomFaces, roomMembersLine, roomNeedsOf } from "@/lib/rooms"
+import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
@@ -260,22 +260,8 @@ function Recents({
     ]
     // This device's own unanswered approval or question, which a keyless bot or one without the
     // plugin can't report. Only a chat's newest reply can wait, so only that one is read.
-    const newest = await Promise.all(
-      chats.map((c) =>
-        c.room
-          ? undefined
-          : db.messages
-              .where("[conversationId+createdAt]")
-              .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
-              .reverse()
-              .filter((m) => m.role === "assistant")
-              .first(),
-      ),
-    )
-    const open = newest.filter(
-      (m): m is Message =>
-        !!(m?.approval && !m.approval.resolved) || !!(m?.clarify && !m.clarify.resolved),
-    )
+    const newest = await Promise.all(chats.map((c) => newestMessage(c.id, isReply)))
+    const open = newest.filter((m): m is Message => m !== undefined && waitsOnUser(m))
     const local = new Map<string, WaitingReason>(
       open.map((m) => [
         m.conversationId,
@@ -287,12 +273,6 @@ function Recents({
     return chats.map((chat) => ({
       chat,
       bot: chatOwner(chat, bots).bot,
-      // A room's faces: its members' bots on the Host that carries the record, which is the same seat
-      // the room's screen draws its pictures from (ADR 0115, ADR 0126).
-      faces: chat.room
-        ? roomFaces(chat.room, profiles, bots.get(chat.profileId))
-        : undefined,
-      reason: chat.room ? roomNeedsOf(chat) : undefined,
       local: local.get(chat.id),
     }))
   }, [])
@@ -301,16 +281,15 @@ function Recents({
   const rest = recents?.filter((one) => !one.chat.pinned) ?? []
 
   const rows = (band: typeof rest) =>
-    band.map(({ chat, bot, faces, reason, local }) => (
+    band.map(({ chat, bot, local }) => (
       <li key={chat.id}>
         <ChatRow
           chat={chat}
           bot={bot}
-          faces={faces}
           now={now}
           collapsed={collapsed}
           onNavigate={onNavigate}
-          reason={reason ?? reasonTextOf(local) ?? reasonTextOf(live[chat.hermesSessionId])}
+          reason={reasonTextOf(local) ?? reasonTextOf(live[chat.hermesSessionId])}
         />
       </li>
     ))
@@ -397,7 +376,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
           return (
             <li key={bot.id}>
               <RootLink
-                to={`/b/${bot.id}`}
+                to={botChatsPath(bot.id)}
                 onClick={onNavigate}
                 aria-label={collapsed ? bot.name : undefined}
                 className={({ isActive }) =>
@@ -467,7 +446,13 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
  * among the chats, so it needs neither a place here nor an order of its own. The section is drawn even
  * with no rooms in it: an empty room list is where someone who has never made a room finds the control.
  */
-function Rooms({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
+function Rooms({
+  onNavigate,
+  collapsed = false,
+}: {
+  onNavigate?: () => void
+  collapsed?: boolean
+}) {
   const now = useNow()
   const rows = useRoomNeeds()
   const canMake = useCanMakeRoom()
@@ -483,14 +468,14 @@ function Rooms({ onNavigate, collapsed = false }: { onNavigate?: () => void; col
         aria-label={collapsed ? "Rooms" : undefined}
       >
         {!collapsed && (
-          <h2 id="rooms-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+          <h2
+            id="rooms-heading"
+            className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
+          >
             Rooms
           </h2>
         )}
-        <ul
-          data-band="rooms"
-          className={cn("flex flex-col gap-0.5", collapsed && "items-center")}
-        >
+        <ul data-band="rooms" className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
           {ordered.map(({ chat, bot, faces }) => (
             <li key={chat.id}>
               <ChatRow

@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, Route, Routes, useParams } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
+import { botChatsPath } from "@/lib/bot-tabs"
 import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
@@ -95,11 +96,7 @@ export function Home() {
     [legacy],
   )
   if (legacy === undefined || (legacy === false && active === undefined)) return null
-  return active ? (
-    <Navigate to={`/b/${active.id}`} replace />
-  ) : (
-    <ChatPage slot="route" />
-  )
+  return active ? <Navigate to={botChatsPath(active.id)} replace /> : <ChatPage slot="route" />
 }
 
 /** A project's old address, from before projects had a place of their own. */
