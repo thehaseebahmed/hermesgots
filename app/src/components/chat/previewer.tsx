@@ -10,15 +10,26 @@ import {
   type ReactNode,
   type RefObject,
 } from "react"
-import { ChevronLeftIcon, ChevronRightIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ExternalLinkIcon,
+  RotateCwIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react"
 
 import { FullscreenPopup, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatBytes } from "@/lib/attachment-caps"
+import { openAttachment } from "@/lib/attachments"
 import { useImageReady } from "@/lib/image"
 import type { MediaKind } from "@/lib/media-kind"
 import type { MediaStage } from "@/lib/media-stage"
+import { ask } from "@/lib/net-watch"
+import { readPage, type PageRead } from "@/lib/page-read"
+import { SANDBOX_CSP, sandboxedDocument } from "@/lib/sandboxed-document"
 import { cn } from "@/lib/utils"
 import {
   UNZOOMED,
@@ -392,16 +403,92 @@ function Zoomed({ item, onRetry }: { item: PreviewItem; onRetry?: (item: Preview
 }
 
 /** A file whose read failed: its place is kept, and this is the tap that asks the host again. */
-function Retry({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
+function Retry({
+  item,
+  onRetry,
+  onElsewhere,
+}: {
+  item: PreviewItem
+  onRetry?: (item: PreviewItem) => void
+  /** Hands the file to the platform, where the Previewer can't draw it. */
+  onElsewhere?: () => void
+}) {
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-2xl bg-muted/50 px-4 py-10 text-center">
       <RotateCwIcon className="size-8 text-muted-foreground" />
       <span className="text-sm break-all text-muted-foreground">{item.name}</span>
       {item.note && <span className="text-sm text-balance">{item.note}</span>}
-      <Button variant="outline" className="min-h-11" onClick={() => onRetry?.(item)}>
-        Try again
-      </Button>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button variant="outline" className="min-h-11" onClick={() => onRetry?.(item)}>
+          Try again
+        </Button>
+        {onElsewhere && (
+          <Button variant="ghost" className="min-h-11" onClick={onElsewhere}>
+            <ExternalLinkIcon data-icon="inline-start" />
+            Open elsewhere
+          </Button>
+        )}
+      </div>
     </div>
+  )
+}
+
+/**
+ * A page, drawn as the one rule for an untrusted document says (ADR 0114, 0132): its text is read,
+ * the sandbox head is put first in it, and it runs in an opaque-origin frame — `allow-scripts`, never
+ * `allow-same-origin` — so its own scripts work and reach nothing of the app's. No zoom or swipe
+ * handlers sit over it, so the page keeps its own gestures; the stepping buttons are outside it.
+ * The frame unmounts when the Previewer steps away or closes, which stops whatever the page runs.
+ */
+function Page({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
+  const src = item.src ?? ""
+  const [attempt, setAttempt] = useState(0)
+  const [read, setRead] = useState<{ src: string; attempt: number; answer: PageRead } | null>(null)
+  useEffect(() => {
+    if (!src) return
+    const stop = new AbortController()
+    void readPage(src, { fetch: (url, init) => ask(url, init), signal: stop.signal }).then(
+      (answer) => {
+        if (!stop.signal.aborted) setRead({ src, attempt, answer })
+      },
+    )
+    return () => stop.abort()
+  }, [src, attempt])
+  const answer = read && read.src === src && read.attempt === attempt ? read.answer : null
+  const page = useMemo(
+    () =>
+      answer?.state === "ready" ? sandboxedDocument(answer.html, { policy: SANDBOX_CSP }) : null,
+    [answer],
+  )
+  if (!answer)
+    return (
+      <div data-slot="previewer-page" className="h-full w-full" aria-busy>
+        <Skeleton className="h-full w-full rounded-2xl" />
+      </div>
+    )
+  if (answer.state === "failed")
+    return (
+      <Retry
+        item={{ ...item, note: answer.note }}
+        onRetry={() => {
+          setAttempt((count) => count + 1)
+          // A signed URL may have run out: the caller asks the host again, and a new one lands here.
+          onRetry?.(item)
+        }}
+        onElsewhere={() =>
+          void openAttachment(null, { name: item.name, type: item.type, src: item.src })
+        }
+      />
+    )
+  return (
+    <iframe
+      data-slot="previewer-page"
+      title={item.name}
+      sandbox="allow-scripts"
+      srcDoc={page ?? ""}
+      referrerPolicy="no-referrer"
+      className="h-full w-full rounded-2xl border-0 bg-white"
+    />
   )
 }
 
@@ -410,18 +497,7 @@ function Shown({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewI
   if (item.state === "failed" || (item.state === "ready" && !item.src))
     return <Retry item={item} onRetry={onRetry} />
   if (!item.src || item.state === "reading") return <Skeleton className="h-2/3 w-2/3 rounded-2xl" />
-  // A page is drawn as its name over a loading box for now; the sandboxed frame that draws it
-  // comes with the page read (plan step 5).
-  if (item.kind === "page")
-    return (
-      <div
-        data-slot="previewer-page"
-        className="flex h-2/3 w-2/3 flex-col items-center justify-center gap-3"
-      >
-        <span className="text-sm break-all text-muted-foreground">{item.name}</span>
-        <Skeleton className="h-full w-full rounded-2xl" />
-      </div>
-    )
+  if (item.kind === "page") return <Page key={item.key} item={item} onRetry={onRetry} />
   if (item.kind === "image") return <Zoomed key={item.key} item={item} onRetry={onRetry} />
   // A player the platform draws: it starts paused because nothing here asks it to play, and it
   // streams, seeks and buffers by its own rules rather than by anything this app holds.
