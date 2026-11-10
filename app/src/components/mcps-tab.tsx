@@ -106,8 +106,18 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const granting = sheet?.kind === "access" ? sheet.name : null
   // While the access sheet waits, the screen keeps reading, so the wait sees the access land on a
   // row whose own state would never move it.
-  const { servers, setEnabled, remove, saveConfig, addCustom, install, grant, deliver, reload } =
-    useMcpServers(profile, answers.list === "yes", granting !== null)
+  const {
+    servers,
+    stale,
+    setEnabled,
+    remove,
+    saveConfig,
+    addCustom,
+    install,
+    grant,
+    deliver,
+    reload,
+  } = useMcpServers(profile, answers.list === "yes", granting !== null)
   const [busy, setBusy] = useState(false)
   // The server this address drills into. Its name is the segment's, so a server the Host has stopped
   // listing still opens as the address it was given, saying the bot no longer has it.
@@ -193,7 +203,7 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
         servers={mine}
         onOpen={openable ? (name) => navigate(botSubPath(profile.id, "mcps", name)) : undefined}
         controls={{
-          writable: answers.write === "yes",
+          writable: answers.write === "yes" && !stale,
           access: answers.access === "yes",
           onToggle: setEnabled,
           onGrant: (name) => setSheet({ kind: "access", name }),

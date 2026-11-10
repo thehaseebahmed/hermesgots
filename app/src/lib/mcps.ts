@@ -15,10 +15,11 @@
  * hasn't answered yet is left to answer rather than flashing its screen away. A plugin without the
  * route is left alone like every other optional one.
  */
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
+import { cachedHost, keepHost } from "@/lib/host-cache"
 import {
   usePluginFeatureAnswers,
   type PluginFeatureAnswer,
@@ -138,6 +139,9 @@ const unsupported = cooldown()
  */
 export function useMcpServers(server: McpServerConfig, active: boolean, watching = false) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
+  // Whether the Host's own answer has landed: until it has, the list is this device's copy of the
+  // last one (ADR 0132) and nothing is written from it.
+  const [fresh, setFresh] = useState(false)
   // The interval changes with what the screen is doing, and `usePoll` reads at once when its
   // interval changes — so a sheet opening or closing would re-read a list that is a second old.
   // Half the poll is the threshold, since a read that landed within one interval is still the answer
@@ -146,6 +150,22 @@ export function useMcpServers(server: McpServerConfig, active: boolean, watching
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
+  useEffect(() => {
+    if (!key) return
+    let cancelled = false
+    setFresh(false)
+    void cachedHost<McpServer[]>(config, "mcp").then((held) => {
+      if (!cancelled && held) setServers((now) => now ?? held)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  useEffect(() => {
+    if (fresh && servers) void keepHost(config, "mcp", servers)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh, servers])
   usePoll(
     (signal) => {
       if (unsupported.cooling(key)) return
@@ -157,6 +177,7 @@ export function useMcpServers(server: McpServerConfig, active: boolean, watching
           unsupported.clear(key)
           readAt.current = Date.now()
           setServers(next)
+          setFresh(true)
         },
         (error) => {
           // An older plugin has no route to read: nothing is shown, and it is asked again later.
@@ -269,7 +290,18 @@ export function useMcpServers(server: McpServerConfig, active: boolean, watching
     },
     [baseUrl, apiKey],
   )
-  return { servers, setEnabled, remove, install, saveConfig, addCustom, grant, deliver, reload }
+  return {
+    servers,
+    stale: servers !== undefined && !fresh,
+    setEnabled,
+    remove,
+    install,
+    saveConfig,
+    addCustom,
+    grant,
+    deliver,
+    reload,
+  }
 }
 
 /**
