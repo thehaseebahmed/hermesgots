@@ -723,7 +723,8 @@ class WriteTest(unittest.TestCase):
 
 
 class SessionTest(unittest.TestCase):
-    """The tools and the guide reach a canvas's session and no other, a compacted one included."""
+    """The page tools and the guide reach a canvas's session and no other, a compacted one included;
+    the data tools answer any session that names a canvas."""
 
     def setUp(self) -> None:
         self.home = temp_hermes_home(self)
@@ -746,7 +747,9 @@ class SessionTest(unittest.TestCase):
             ],
         )
 
-    def test_the_tools_and_the_section_reach_only_a_canvas_session_through_a_compression_child_too(self) -> None:
+    def test_the_page_tools_and_the_section_reach_only_a_canvas_session_through_a_compression_child_too(
+        self,
+    ) -> None:
         # The canvas is resolved from the run's own session, through the lineage walk.
         self.assertEqual(canvases.canvas_of_session(self.path, self.home, self.session), self.canvas["id"])
         self.assertEqual(
@@ -774,8 +777,12 @@ class SessionTest(unittest.TestCase):
             ],
         )
         self.assertEqual(len(canvas_agent.tools), 5)
-        self.assertEqual(plain_agent.tools, [])
-        self.assertEqual(plain_agent.valid_tool_names, set())
+        # A session that is not the canvas's keeps the canvas's data and never its page.
+        self.assertEqual(
+            sorted(plain_agent.valid_tool_names),
+            [canvases.TOOL_DATA_READ, canvases.TOOL_DATA_WRITE],
+        )
+        self.assertEqual(len(plain_agent.tools), 2)
 
         # The guide is the canvas's, and the component library's is withheld from that session.
         self.assertEqual(openui.canvas_content({"session_id": self.session + "-c1"}), openui.CANVAS_TEXT)

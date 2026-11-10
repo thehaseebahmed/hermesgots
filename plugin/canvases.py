@@ -1771,10 +1771,14 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives a canvas's agents its five tools, and only them: every other session would carry
-    tools it can't use."""
+    """Gives every agent the canvas's data tools, and a canvas's own session its page tools too.
+
+    The data is the canvas's rather than its page's, so a chat, a routine or a delegated run may
+    keep it by naming a canvas; the page is written from the canvas's own session and nowhere else.
+    """
     global adapter, _wired
     adapter = api_adapter
+
     def is_canvas(session: Optional[str]) -> bool:
         return _session_canvas(session) is not None
 
@@ -1787,7 +1791,7 @@ def wire(api_adapter: Any) -> bool:
         (TOOL_DATA_READ, DATA_READ_SCHEMA),
         (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA),
     ):
-        if not tools_common.wire_tool(api_adapter, tool, schema, tool, when=is_canvas):
+        if not tools_common.wire_tool(api_adapter, tool, schema, tool):
             took = False
     _wired = took
     return took
@@ -1795,5 +1799,5 @@ def wire(api_adapter: Any) -> bool:
 
 def ready() -> bool:
     """Whether a canvas can be worked on this host: its tools registered and wired into the agents
-    the API server builds, so a canvas's session is given them."""
+    the API server builds, so a session is given the data tools and a canvas's own all of them."""
     return _registered and _wired
