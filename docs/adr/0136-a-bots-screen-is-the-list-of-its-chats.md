@@ -17,8 +17,8 @@ day, by waiting — moves rows under the reader every time something happens. Se
 and the line through the matcher Code's list already uses; a search narrows a list, it never
 re-orders one.
 
-**The list is everything the bot is in.** Its own chats, the rooms whose roster seats it (ADR 0132)
-and its routines' runs (ADR 0131), each drawn by what it is: a chat's icon, a room's members'
+**The list is everything the bot is in.** Its own chats, the rooms whose roster seats it (ADR 0138)
+and its routines' runs (ADR 0137), each drawn by what it is: a chat's icon, a room's members'
 pictures, a routine's timer. A routine's row is the one row whose line and time come off its record
 rather than a transcript, because its words are in the run's own session.
 
@@ -40,7 +40,7 @@ tells the list it was stepped back onto rather than opened). `Home` opens the ac
 
 **The list's own control is the routine icon; a chat keeps its `…`.** The header's `…` went with the
 things only it could do, and what the list can act on, a row can act on. In its place the header holds
-the one screen a bot's list opens that is not a chat: the bot's routines (ADR 0133).
+the one screen a bot's list opens that is not a chat: the bot's routines (ADR 0139).
 
 **Main is an ordinary row.** The record's `main` flag stays, with two readers and no third: a Main
 cannot be deleted, and a row that carries it is a chat like any other to everything that draws the list

@@ -203,7 +203,7 @@ def publish(
         "hermesSessionId": run_session,
         "createdAt": now,
         "updatedAt": now,
-        # The marker a bot's list draws the routine's icon from, rather than a chat's (ADR 0131).
+        # The marker a bot's list draws the routine's icon from, rather than a chat's (ADR 0137).
         "routine": True,
         "line": first_line(text),
     }

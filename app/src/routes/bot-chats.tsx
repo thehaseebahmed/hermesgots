@@ -128,7 +128,7 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
     const bot = await db.profiles.get(profileId)
     if (!bot) return { profileId, bot: null, rows: [] }
     // Every chat the bot has, newest first: a chat older than any bound is still a row of this list,
-    // since a bound is not something a reader can see (ADR 0130).
+    // since a bound is not something a reader can see (ADR 0136).
     const chats = await conversationsOf(profileId).reverse().filter(listsAsChat).toArray()
     // What a row costs is the read of its newest message, never its record, so the tails are read
     // for the newest `BOT_CHATS` chats and every pinned one — a pin is the reader's own word that

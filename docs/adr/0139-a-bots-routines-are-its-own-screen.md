@@ -10,7 +10,7 @@ routines, and a list of them across everything is a place they have to pick one 
 **So a bot's routines are a screen under the bot.** `/b/:profileId/routines` draws that bot's jobs and
 their runs, in the same groups — and with the same controls to pause, resume, run and refresh — the
 page drew before. It is opened by the routine icon in the bot's chat list header, beside the search
-toggle, which is the one control in that header that opens something other than a chat (ADR 0130).
+toggle, which is the one control in that header that opens something other than a chat (ADR 0136).
 Below the width where the list stands beside it, the page's back returns to the bot's list; at that
 width the list is already there and the page has nothing to lead back to.
 
