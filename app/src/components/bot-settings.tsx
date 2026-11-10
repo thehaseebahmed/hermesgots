@@ -89,6 +89,7 @@ import {
   type GeneralTab,
   type ReminderLevel,
 } from "@/lib/hermes"
+import { cachedHost, keepHost } from "@/lib/host-cache"
 import { useLarge } from "@/lib/media"
 import { LLM_PROVIDERS } from "@/lib/llm-providers"
 import { MCP_FEATURES } from "@/lib/mcps"
@@ -634,22 +635,34 @@ function GeneralPage({
   const [block, setBlock] = useState<GeneralSettings>()
   const [problem, setProblem] = useState<string>()
   const [read, setRead] = useState("")
+  const [fresh, setFresh] = useState("")
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
+  const route = GENERAL_ROUTES[tab].path
+  const page = `${connection}/${tab}`
 
   useEffect(() => {
     let cancelled = false
-    // The block a page draws belongs to the read that answered it: a page asked for again draws nothing
-    // until its own answer lands, so a refusal never stands over the rows of the answer before it.
+    let landed = false
+    // The page opens on the last answer this host gave this device, and the fresh read replaces it;
+    // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
     setBlock(undefined)
+    void cachedHost<GeneralSettings>(profile, route).then((held) => {
+      if (!cancelled && !landed && held) setBlock(held)
+    })
     void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {
         if (cancelled) return
+        landed = true
         setRead(connection)
         setProblem(
           next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
         )
-        if (next) setBlock(next)
+        if (next) {
+          setBlock(next)
+          setFresh(page)
+          void keepHost(profile, route, next)
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -686,6 +699,8 @@ function GeneralPage({
         // rather than closing the form over the value it held before.
         if (!next) throw new Error("The host answered without its settings.")
         setBlock(next)
+        setFresh(page)
+        void keepHost(profile, route, next)
         return true
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Couldn't save that.")
@@ -694,22 +709,24 @@ function GeneralPage({
         setSaving(undefined)
       }
     },
-    [profile, tab],
+    [profile, tab, page, route],
   )
 
-  const seeded = read === connection
+  // Drawn from this device's copy: nothing is written from it until the host's own answer lands.
+  const stale = Boolean(block) && fresh !== page
+  const seeded = read === connection || Boolean(block)
   const groups = block ? generalGroups(block.fields) : []
   // An address into a key this host doesn't hold: the page goes back to itself rather than standing
   // on a screen that would draw nothing and write to a field it has no row for.
   const field = block && sub ? block.fields.find((one) => one.key === sub.id) : undefined
-  const stray = Boolean(sub) && seeded && Boolean(block) && !field
+  const stray = Boolean(sub) && seeded && Boolean(block) && !stale && !field
   useEffect(() => {
     if (stray) close()
   }, [close, stray])
 
   if (sub) {
     const form =
-      block && field ? (
+      block && field && !stale ? (
         <FieldForm
           block={block}
           field={field}
@@ -811,7 +828,7 @@ function GeneralPage({
         key={field.key}
         block={block}
         field={field}
-        disabled={Boolean(problem)}
+        disabled={Boolean(problem) || stale}
         saving={saving === field.key}
         onWrite={write}
         onPick={() => setPick(field.key)}

@@ -328,3 +328,20 @@ test("a host without the page lands on the bot's own page, which needs nothing n
     assert.ok(find("[data-bot-card]"), "the bot's own page")
   })
 })
+
+test("a page opened again with the host away draws the rows the host last gave, shut", async () => {
+  const server = await seed("general-held")
+  await mount(page(), async () => {
+    await until(async () => Boolean(find('[data-setting="model"]')), "the first open's rows")
+    await until(async () => (await db.hostCache.count()) > 0, "the copy kept")
+  })
+  const hung = new Promise<Response>(() => {})
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith("/plugins/gots/info")
+      ? server.fetch(input, init)
+      : hung) as typeof globalThis.fetch
+  await mount(page(), async () => {
+    await until(async () => Boolean(find('[data-setting="timezone"]')), "the held rows")
+    assert.equal(find("[data-general-loading]"), null, "no spinner stands over them")
+  })
+})
