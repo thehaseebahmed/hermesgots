@@ -31,7 +31,7 @@ a hardcoded one breaks in dark. Tailwind v4 compiles classes from the same token
 Most open on a phone:
 
 - Lay it out for 390px first, then breathe from 768px; nothing scrolls sideways.
-- Anything tappable is 44px tall and never behind hover; typed-into type is 16px.
+- Tappable is 44px tall and never behind hover; typed-into type is 16px.
 - Keep the foot clear of the phone's bar: `env(safe-area-inset-bottom)`.
 
 ## Points
@@ -44,22 +44,20 @@ asking. The label says what they tapped; the selector finds it.
 Three load with `skill_view`: `gots:impeccable` when the page should look like something,
 `gots:web-design-guidelines` when it has to pass a review, `gots:transitions-dev` when it moves —
 that one is CSS to paste, not to import.
-`plugin/canvas/DESIGN.md` is the app's design system; the page gets the tokens above and no others.
+`plugin/canvas/DESIGN.md` is the design system; the page gets the tokens above and no others.
 
 ## The sandbox
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
 - An `http(s)` link opens in the app on tap: use one when the reader should leave.
-- Remote images over https are allowed (`<img src="https://…">`, `srcset`, `<picture><source
-  srcset>`); nothing else loads from outside: no `<script src>`, `<link href>` to a CDN, `http://`
-  image, `<iframe>`, `<object>`, `<embed>`, `<base>`, meta refresh or `url(https://…)`, or the write
-  is refused whole. No `RTCPeerConnection`: the sandbox removes it.
+- Remote images over https are allowed (`<img>`, `srcset`, `<picture>`); nothing else loads from outside:
+  no `<script src>`, `<link href>` to a CDN, `http://` image, `<iframe>`, `<object>`, `<embed>`, `<base>`,
+  meta refresh or `url(https://…)`, or the write is refused whole. No `RTCPeerConnection`.
 
 ## The document
 
-One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and a viewport
-meta, styles in `<style>` and script in `<script>`. Under 256 KB. No secrets: anyone who opens the
-canvas reads them.
+One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and viewport
+meta, styles in `<style>`, script in `<script>`. Under 256 KB. No secrets: it is readable by all.
 
 ## Libraries
 
