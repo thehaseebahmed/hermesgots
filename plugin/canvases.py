@@ -9,8 +9,10 @@ write is a row of ``canvas_versions``, the newest ``KEEP_VERSIONS`` kept. A canv
 from its own session: ``canvas_write``, ``canvas_edit`` and ``canvas_read`` are equipped there and
 nowhere else, and the canvas is found from a run's session by walking the chat's compression lineage
 (``sessions.chat_session``), so a chat that has been compacted still reaches its canvas.
-``canvas_list`` is the one tool every session is given, since a session with no canvas of its own is
-who has to look one up; it answers the names (``names``), never a record's picture.
+``canvas_list`` and ``canvas_data_read`` reach every session — a session with no canvas of its own
+is exactly who has to look one up, and a chat that wants a canvas's data shouldn't have to become
+that canvas's session — while the data write stays with the document tools. Both name a canvas by
+its title or its id (``resolve``) and answer ``names``, never a record's picture.
 
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
 it is archived out of the list — are the host's record too (``update``), so every device draws the same
@@ -385,6 +387,56 @@ def names(path: Path) -> List[Dict[str, Any]]:
         {"id": raw_id, "title": title, "archived": bool(archived), "at": at}
         for raw_id, title, archived, at in rows
     ]
+
+
+def _stored_title(path: Path, canvas_id: str) -> Optional[str]:
+    """One canvas's title, read by its key — the name its own session may call it by.
+
+    A read by the store's key rather than an enumeration: a canvas's bot naming its own canvas
+    costs one row, and can't learn what else this bot has.
+    """
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT title FROM canvases WHERE id = ?", (canvas_id,)).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else None
+
+
+def resolve(path: Path, name: Any) -> str:
+    """The id of the canvas a caller named, by its id first and then its title without case.
+
+    An id is the store's key and a title is not, so the key answers first and a title can never
+    shadow one. A title is matched casefold over ``names``: one canvas answering is the canvas,
+    several are refused with their ids — a title is not unique, and a guess that writes to the
+    wrong canvas has nothing to undo it — and none is refused with what was looked for. Both
+    refusals point at ``canvas_list``, which names every canvas this bot has.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise CanvasError(
+            f"A canvas is named by its title or its id; {name!r} is not a name. "
+            f"{TOOL_LIST} names every canvas this bot has."
+        )
+    every = names(path)
+    for found in every:
+        if found["id"] == name:
+            return found["id"]
+    wanted = name.casefold()
+    matched = [found for found in every if found["title"].casefold() == wanted]
+    if len(matched) == 1:
+        return matched[0]["id"]
+    if matched:
+        ids = ", ".join(found["id"] for found in matched)
+        raise CanvasError(
+            f'{len(matched)} canvases are called "{name}": {ids}. Name one of them by its id. '
+            f"{TOOL_LIST} lists them."
+        )
+    raise CanvasError(
+        f'No canvas is called "{name}", by its title or its id. {TOOL_LIST} names every canvas '
+        "this bot has."
+    )
 
 
 def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[Dict[str, Any]]:
@@ -1520,14 +1572,22 @@ EDIT_SCHEMA = {
 DATA_READ_SCHEMA = {
     "name": TOOL_DATA_READ,
     "description": (
-        "Canvas sessions only: reads the data the canvas keeps — the documents its page stores "
-        "on the host, which no version and no undo touches. No arguments answers every "
+        "Reads the data a canvas keeps — the documents its page stores on the host, which no "
+        "version and no undo touches. Name the canvas by its title or its id; in the canvas's own "
+        "session leave `canvas` out to mean this canvas. No more arguments answers every "
         "collection; a collection answers that one; a collection and an id answers one document, "
         "or null when there is none."
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "canvas": {
+                "type": "string",
+                "description": (
+                    "The canvas to read, by its title or its id. Leave it out in the canvas's own "
+                    "session, where it means this canvas."
+                ),
+            },
             "collection": {
                 "type": "string",
                 "description": "One collection's name, for its documents.",
@@ -1578,6 +1638,68 @@ def _tool_answer(
         found = run(path, canvas_id)
     except CanvasError as error:
         return json.dumps({"error": str(error)})
+    return json.dumps(answer(found))
+
+
+def _own_canvas(tool: str, named: Any, canvas_id: str, path: Path) -> Optional[str]:
+    """The words refusing a name inside a canvas's own session, or None when it is this canvas.
+
+    No name is this canvas, and so are its id and its title — read by its key, never enumerated, so
+    a canvas's bot naming its own canvas learns nothing of its neighbours. Any other name is
+    refused here, before the bot's canvases are looked up at all: a canvas's session reaches only
+    its own data, and is told so without being handed a list of what it can't have.
+    """
+    if named is None or (isinstance(named, str) and not named.strip()):
+        return None
+    if not isinstance(named, str):
+        return f"A canvas is named by its title or its id; {named!r} is not a name."
+    if named == canvas_id or named == _stored_title(path, canvas_id):
+        return None
+    return (
+        f"{tool} reaches only this canvas's data from a canvas's session: this is {canvas_id}'s "
+        f"session, and {named!r} is another canvas. Leave canvas out to mean this one."
+    )
+
+
+def _data_canvas(
+    tool: str, named: Any, task_id: Optional[str], session_id: Optional[str]
+) -> tuple[Path, str]:
+    """The store and the canvas one data call reaches, or a ``CanvasError`` saying why it can't.
+
+    A canvas's own session is asked first, and its own name costs no lookup of the bot's canvases.
+    Every other session has to name one, since no canvas is its own — and the refusal says what to
+    name and where the names are, because a caller who knows no title has only ``canvas_list``.
+    """
+    canvas_id, path = _call_canvas(task_id, session_id)
+    if path is None:
+        raise CanvasError(f"{tool} can't read this bot's store, so it can't name a canvas.")
+    if canvas_id:
+        refused = _own_canvas(tool, named, canvas_id, path)
+        if refused is not None:
+            raise CanvasError(refused)
+        return path, canvas_id
+    if not isinstance(named, str) or not named.strip():
+        raise CanvasError(
+            f"{tool} needs the canvas whose data it reads: name it by its title or its id. "
+            f"{TOOL_LIST} names every canvas this bot has."
+        )
+    return path, resolve(path, named)
+
+
+def _data_answer(
+    tool: str,
+    named: Any,
+    task_id: Optional[str],
+    session_id: Optional[str],
+    run: Callable[[Path, str], Dict[str, Any]],
+    answer: Callable[[Dict[str, Any]], Dict[str, Any]],
+) -> str:
+    """One data tool's answer: the canvas this call named, or the one its own session edits."""
+    try:
+        path, canvas_id = _data_canvas(tool, named, task_id, session_id)
+        found = run(path, canvas_id)
+    except CanvasError as refused:
+        return json.dumps({"error": str(refused)})
     return json.dumps(answer(found))
 
 
@@ -1661,7 +1783,8 @@ def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[s
 def handle_data_read(
     args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
 ) -> str:
-    """The tool: the canvas's own documents — all of them, a collection, or one document."""
+    """The tool: the named canvas's own documents — all of them, a collection, or one document —
+    or, in that canvas's own session, this canvas's."""
     args = args if isinstance(args, dict) else {}
     collection, doc_id = args.get("collection"), args.get("id")
 
@@ -1675,7 +1798,9 @@ def handle_data_read(
             return {"documents": documents}
         return {"document": documents[0] if documents else None}
 
-    return _tool_answer(TOOL_DATA_READ, task_id, session_id, read, lambda found: found)
+    return _data_answer(
+        TOOL_DATA_READ, args.get("canvas"), task_id, session_id, read, lambda found: found
+    )
 
 
 def handle_data_write(
@@ -1714,8 +1839,8 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's tools — the list every session carries, and the
-    five a canvas's own session is given."""
+    """Keeps the context and registers the canvas's six tools — the list and the data read every
+    session carries, and the four more a canvas's own session is given."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -1741,10 +1866,11 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives a canvas's agents its five page and data tools, and every agent the list.
+    """Gives every agent the list and the data read, and a canvas's agents the rest.
 
-    The list is wired with no ``when``: a session with no canvas of its own is exactly who needs to
-    look one up. The five that read or change a canvas stay in the session that canvas is edited in.
+    Those two are wired with no ``when``: a session with no canvas of its own is exactly who needs
+    to look one up, and one that isn't a canvas's reads a canvas's data by naming it. The three
+    document tools and the data write stay in the session the canvas is edited in.
     """
     global adapter, _wired
     adapter = api_adapter
@@ -1752,18 +1878,18 @@ def wire(api_adapter: Any) -> bool:
         return _session_canvas(session) is not None
 
     took = tools_common.wire_tool(api_adapter, TOOL_LIST, LIST_SCHEMA, TOOL_LIST)
+    if not tools_common.wire_tool(api_adapter, TOOL_DATA_READ, DATA_READ_SCHEMA, TOOL_DATA_READ):
+        took = False
     if not tools_common.wire_tool(api_adapter, TOOL_WRITE, WRITE_SCHEMA, TOOL_WRITE, when=is_canvas):
         took = False
     if not tools_common.wire_tool(api_adapter, TOOL_EDIT, EDIT_SCHEMA, TOOL_EDIT, when=is_canvas):
         took = False
     if not tools_common.wire_tool(api_adapter, TOOL_READ, READ_SCHEMA, TOOL_READ, when=is_canvas):
         took = False
-    for tool, schema in (
-        (TOOL_DATA_READ, DATA_READ_SCHEMA),
-        (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA),
+    if not tools_common.wire_tool(
+        api_adapter, TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, TOOL_DATA_WRITE, when=is_canvas
     ):
-        if not tools_common.wire_tool(api_adapter, tool, schema, tool, when=is_canvas):
-            took = False
+        took = False
     _wired = took
     return took
 
