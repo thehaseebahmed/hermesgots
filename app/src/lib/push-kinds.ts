@@ -251,3 +251,40 @@ export function pushedSession(path: string) {
 export function pushTarget(session: string | undefined, chatId: string | undefined) {
   return session && chatId ? `/c/${encodeURIComponent(chatId)}` : undefined
 }
+
+/** A push the device is holding in its tray: the tag it was shown under, and what it carried. */
+export interface TrayPush {
+  /** `<group>:<subject>`, from `public/push-sw.js` on the web and `netlify/lib/fcm.ts` on Android. */
+  tag?: string | null
+  /** The web's notification data, or a phone's extras where it hands them over. */
+  data?: unknown
+}
+
+/**
+ * What a tray's push is about — a session, a room, a research mission, a meeting — where it names
+ * something a screen opens: the id its data carries, else the id its tag ends with. A push about
+ * nothing openable (a routine's failure, a project that couldn't be set up) names nothing.
+ */
+export function pushSubject(entry: TrayPush): string | undefined {
+  const data = (entry.data ?? {}) as { sessionId?: unknown; session_id?: unknown }
+  const named = data.sessionId ?? data.session_id
+  if (typeof named === "string" && named) return named
+  const tag = typeof entry.tag === "string" ? entry.tag : ""
+  const colon = tag.lastIndexOf(":")
+  if (colon < 0) return undefined
+  return tag.slice(colon + 1) || undefined
+}
+
+/** Whether a tray's push is about one of these subjects: what a screen has answered. */
+export function aboutSubject(entry: TrayPush, subjects: readonly string[]) {
+  const subject = pushSubject(entry)
+  return subject !== undefined && subjects.includes(subject)
+}
+
+/**
+ * The subject a chat's own pushes name: the Host pushes a room under the room's id, and every push
+ * about a chat under the Hermes session it runs in.
+ */
+export function chatSubject(chat: { id: string; hermesSessionId?: string; room?: unknown }) {
+  return chat.room ? chat.id : chat.hermesSessionId
+}
