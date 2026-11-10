@@ -115,7 +115,8 @@ import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
-import { useNav } from "@/lib/nav"
+import { BACK_ON_LIST, useNav } from "@/lib/nav"
+import { rememberLastChat } from "@/lib/last-chat"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
@@ -261,9 +262,25 @@ interface ChatPageProps {
  */
 const roomsDrawn = new Set<string>()
 
+/**
+ * The chat the address names is the one this device will open its bot on next time, so it is written
+ * here — where every screen that draws a chat passes — and only for one of a bot's chats: a project
+ * session, a room and a canvas are none of a bot's list.
+ */
+function useRememberedChat(id: string | undefined) {
+  const chat = useLiveQuery(async () => (id ? await db.conversations.get(id) : undefined), [id])
+  useEffect(() => {
+    if (!chat || chat.id !== id || !listsAsChat(chat)) return
+    rememberLastChat(chat.profileId, chat.id)
+  }, [chat, id])
+}
+
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = props.chatId ?? params.id
+  // Only the chat the address names is remembered: the pane beside a list draws one the address
+  // doesn't, and a bot opens onto the chat a reader was really in.
+  useRememberedChat(props.chatId ? undefined : id)
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
     // A canvas's chat is no chat: its address opens the canvas it belongs to (ADR 0113).
@@ -387,16 +404,20 @@ function NextChat({
     botThreads && chat && listsAsChat(chat) && !isMain
       ? `/c/${mainThreadId(chat.profileId)}`
       : undefined
+  // A chat of a bot answers its bot's list: where its own control and Android's back step when
+  // nothing stands behind it, and — since a row opens the chat from that list — where they land
+  // after one (G5). A Main is one of the bot's chats, so it answers the same address.
+  const listPath = botThreads && chat && listsAsChat(chat) ? `/b/${chat.profileId}` : undefined
   const xl = useXLarge()
   const wide = useWide()
   const besideMain = Boolean(mainPath) && xl
   useEffect(() => {
-    if (!mainPath) return
+    if (!listPath) return
     return setBackGuard(() => {
-      upRef.current(mainPath)
+      upRef.current(listPath, BACK_ON_LIST)
       return true
     })
-  }, [mainPath])
+  }, [listPath])
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
   // and a session nothing was sent in isn't kept.
   const session = chat?.projectId ? chat : undefined
@@ -509,10 +530,10 @@ function NextChat({
                     icon={<XIcon />}
                   />
                 )
-              ) : mainPath ? (
+              ) : listPath ? (
                 <BackButton
                   label={`Back to ${bot.name || "bot"}`}
-                  onClick={() => up(mainPath)}
+                  onClick={() => up(listPath, BACK_ON_LIST)}
                   floating
                 />
               ) : (
@@ -1054,6 +1075,11 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
     botThreads && conversation && !session && !isMain
       ? `/c/${mainThreadId(conversation.profileId)}`
       : undefined
+  // A chat of a bot answers its bot's list, Main among them (G5).
+  const listPath =
+    botThreads && conversation && !session && listsAsChat(conversation)
+      ? `/b/${conversation.profileId}`
+      : undefined
   // `beside` stays on the address alone, so a card tapped from Main still pushes a history entry
   // Back can return to, while the thread the pane really holds is still the one marked open.
   const openThread = routeThread ?? (isMain ? paneThread : undefined)
@@ -1095,12 +1121,12 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
       ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
       : undefined
   useEffect(() => {
-    if (!mainPath) return
+    if (!listPath) return
     return setBackGuard(() => {
-      up(mainPath)
+      up(listPath, BACK_ON_LIST)
       return true
     })
-  }, [mainPath, up])
+  }, [listPath, up])
 
   // Main's messages are triaged even while its reply runs, so one for another thread goes there at
   // once; the rest steer or queue behind the reply.
@@ -1234,11 +1260,11 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
                 icon={<XIcon />}
               />
             )
-          ) : mainPath ? (
-            // Below `xl` the thread is a screen over Main, and leads back to it.
+          ) : listPath ? (
+            // Below `xl` the thread is a screen over its bot's list, and leads back to it.
             <BackButton
               label={`Back to ${profile?.name ?? "bot"}`}
-              onClick={() => up(mainPath)}
+              onClick={() => up(listPath, BACK_ON_LIST)}
               floating
             />
           ) : (

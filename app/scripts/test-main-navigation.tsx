@@ -7,6 +7,7 @@ import { ConversationList } from "@/components/conversation-list"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { rememberLastChat } from "@/lib/last-chat"
 
 import {
   Nav,
@@ -47,6 +48,15 @@ const homeScreen = (
         element={
           <>
             <Home />
+            <Where />
+          </>
+        }
+      />
+      <Route
+        path="b/:profileId"
+        element={
+          <>
+            <BotChatsPage />
             <Where />
           </>
         }
@@ -179,10 +189,11 @@ test("with nothing stored the app is the bot-first layout", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    await until(
-      async () => Boolean(await db.conversations.get(MAIN)),
-      "Main is made so the address lands somewhere",
+    await until(async () => where() === `/b/${bot.id}`, "the bot's own address")
+    assert.equal(
+      await db.conversations.count(),
+      0,
+      "a bot with nothing to open draws its list rather than making a chat for it",
     )
   })
   await mount(
@@ -199,15 +210,13 @@ test("with nothing stored the app is the bot-first layout", async () => {
   )
 })
 
-test("home opens the bot's Main thread", async () => {
+test("home opens the chat this device last had open in the bot", async () => {
   await seed()
+  await ensureMainThread(bot.id)
+  rememberLastChat(bot.id, MAIN)
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    await until(
-      async () => Boolean(await db.conversations.get(MAIN)),
-      "Main is made so the address lands somewhere",
-    )
+    await until(async () => where() === `/c/${MAIN}`, "the chat the bot was left in")
   })
 })
 

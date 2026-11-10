@@ -489,6 +489,11 @@ export const FLOWS = {
     about:
       "A live composer's text stays on the device; saving the draft on the way out carries it through the plugin's chat record, and a picked mode still syncs",
   },
+  "bot-chats": {
+    script: "e2e/bot-chats.mjs",
+    about:
+      "A bot opens the chat this device left it in — from the sidebar, and after a reload — with its list behind that chat, whose own press back leaves the app; a bot never opened draws its list, with nothing made for it",
+  },
   "bot-threads": {
     script: "e2e/bot-threads.mjs",
     extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },

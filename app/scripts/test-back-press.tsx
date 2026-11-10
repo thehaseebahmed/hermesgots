@@ -5,23 +5,34 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useEffect } from "react"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { db } from "@/lib/db"
 import { useNav } from "@/lib/nav"
 import { pressBack, setBackGuard } from "@/lib/native"
+import { ChatPage } from "@/routes/chat"
 import { SettingsPage } from "@/routes/settings"
 
 import {
+  Path,
   atDepth,
   atWidth,
   botProfile,
+  click,
+  find,
   GENERAL,
+  json,
   mediaHost,
   mount,
+  path,
+  seedChat,
   seedSettings,
   until,
 } from "./component-kit.tsx"
+
+/** The state the address on screen carries, as a screen a chat's way out leaves behind reads it. */
+const State = () => <p data-state>{JSON.stringify(useLocation().state ?? null)}</p>
+const state = () => find("[data-state]")?.textContent ?? ""
 
 /** The guard a screen the menu and a list both open registers: `step` to the screen behind it. */
 function Stepping({ to }: { to: string }) {
@@ -129,3 +140,89 @@ test("an open pop-up takes the press before any screen", async () => {
     popup.remove()
   }
 })
+
+/** A chat of a bot's on screen, with the list its bot's address draws reachable from it. */
+const chatAt = (id: string) => (
+  <MemoryRouter initialEntries={[`/c/${id}`]}>
+    <Path />
+    <State />
+    <Routes>
+      <Route path="c/:id" element={<ChatPage slot="route" />} />
+      <Route path="b/:profileId" element={<p data-list />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+/** One chat of a bot this device holds, drawn by the screen every bot's chat opens on. */
+async function seedChatOfBot() {
+  const profile = botProfile("back-list", { id: "bot-1", name: "Mainly" })
+  await seedChat({
+    id: "back-chat",
+    profile,
+    settings: { developer: true, activeProfileId: profile.id },
+    messages: [
+      {
+        id: "back-chat-1",
+        conversationId: "back-chat",
+        role: "user",
+        content: "The first thing said",
+        status: "done",
+        createdAt: 2,
+      },
+    ],
+  })
+  globalThis.fetch = async () => json({})
+}
+
+test(
+  "a chat of a bot's own control answers its bot's list",
+  atWidth(390, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(chatAt("back-chat"), async () => {
+        const back = () =>
+          [...document.querySelectorAll("button")].find(
+            (one) => one.getAttribute("aria-label") === "Back to Mainly",
+          ) ?? null
+        await until(async () => Boolean(back()), "the chat's way out")
+        await click(back())
+        await until(async () => path() === "/b/bot-1", "the bot's list")
+        assert.deepEqual(history.backs, [], "nothing was stepped back: nothing stood behind it")
+        assert.deepEqual(
+          JSON.parse(state()),
+          { listed: true },
+          "and the list knows the reader stepped back onto it, so it draws itself",
+        )
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "a chat opened as the app's only entry leaves its bot's list in its place",
+  atWidth(390, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(chatAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        assert.equal(pressBack(), "screen", "the chat takes the press rather than the app")
+        await until(async () => path() === "/b/bot-1", "the bot's list in the chat's place")
+        assert.deepEqual(history.backs, [], "nothing was stepped back: nothing stood behind it")
+        assert.deepEqual(
+          JSON.parse(state()),
+          { listed: true },
+          "and the list knows the reader stepped back onto it, so it draws itself",
+        )
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)

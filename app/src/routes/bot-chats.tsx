@@ -1,9 +1,16 @@
 import type { CSSProperties } from "react"
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MenuIcon, MessageCircleIcon, PlusIcon, SearchIcon } from "lucide-react"
-import { Link, Navigate, useNavigate, useParams } from "react-router"
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+  useParams,
+} from "react-router"
 
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
@@ -13,7 +20,9 @@ import { Button } from "@/components/ui/button"
 import { botPath } from "@/lib/bot-tabs"
 import { chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
 import { db, type Profile } from "@/lib/db"
+import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
+import { BACK_ON_LIST } from "@/lib/nav"
 import { useReadMarks } from "@/lib/read-marks"
 import { isUnread } from "@/lib/session-work"
 import { beginChat, useBotThreads, useNow } from "@/lib/threads"
@@ -25,11 +34,13 @@ const SEARCH_FIELD_ID = "chats-search"
 /**
  * A bot's screen: the list of its chats, one flat band — the pinned ones first and the rest by what
  * was last said in them. Its header is the bot itself, whose name is the way to its settings, and its
- * foot starts a chat or a room. The list is a root screen, so its own back leaves the app (G5).
+ * foot starts a chat or a room. The list is a root screen, so its own back leaves the app (G5), and a
+ * reader arriving at it lands in the chat this device last had open here (G1).
  */
 export function BotChatsPage() {
   const { profileId } = useParams()
   const enabled = useBotThreads()
+  const landing = useLanding(profileId, enabled)
   // A bot's chats, each with the one read of its newest message that a row's line and time come from.
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
   const answer = useLiveQuery(async () => {
@@ -53,7 +64,41 @@ export function BotChatsPage() {
   // layout, where a bot has no screen — lands home rather than on a list it cannot fill.
   if (enabled === undefined || !fresh) return null
   if (!enabled || !fresh.bot) return <Navigate to="/" replace />
+  // The chat the address opens is on its way, so the list it is leaving is not drawn for a frame.
+  if (landing === undefined) return null
   return <ChatList bot={fresh.bot} rows={fresh.rows} />
+}
+
+/**
+ * The chat a bot's address opens: the one this device last had open there, while it is still one of
+ * the bot's. A reader who arrives at the address steps into that chat; one who steps back onto the
+ * list gets the list — the press arrives as a pop, and the entry a chat's own control leaves in its
+ * place says the reader is back on the list — so a press back never bounces into the chat it came
+ * from.
+ *
+ * `undefined` while the read is out, `null` for a bot with nothing to open.
+ */
+function useLanding(profileId: string | undefined, enabled: boolean | undefined) {
+  const navigate = useNavigate()
+  const type = useNavigationType()
+  const listed = Boolean((useLocation().state as typeof BACK_ON_LIST | null)?.listed)
+  const answer = useLiveQuery(
+    async () =>
+      profileId && enabled
+        ? { profileId, chat: (await landingChat(profileId)) ?? null }
+        : undefined,
+    [profileId, enabled],
+  )
+  const chat = answer && answer.profileId === profileId ? answer.chat : undefined
+  // One landing per visit: a second effect (a strict-mode double run) opens nothing again, and the
+  // push it leaves is the entry the chat's own control steps back from.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (type === "POP" || listed || !chat || opened.current) return
+    opened.current = true
+    navigate(`/c/${chat}`)
+  }, [type, listed, chat, navigate])
+  return chat
 }
 
 /** A chat's newest message this device holds: the one read a row's line and its time both come from. */

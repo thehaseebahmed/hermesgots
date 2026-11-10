@@ -2,7 +2,7 @@
  * A bot's Main on chat-next (ADR 0065, ADR 0029): under the bot's name and its count of threads,
  * with its threads as cards in its flow, every message it sends asked of the host's triage first —
  * one the host sends to a thread leaving Main for that thread, one it keeps posted to Main — and a
- * thread of it leading back to it.
+ * thread of it leading back to its bot's list.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -169,13 +169,13 @@ test("/thread from Main starts a thread with the message as its first turn", asy
   })
 })
 
-test("a thread of Main leads back to it", async () => {
-  const { main, thread } = await seedMain("main-back")
+test("a thread of Main leads back to its bot's list", async () => {
+  const { bot, thread } = await seedMain("main-back")
   fakeHost(`gots-${thread}`, { plugin: true })
   await mount(screen(thread), async () => {
     await until(() => Boolean(find('[aria-label="Back to Tri"]')), "the thread leads back")
     await click(find('[aria-label="Back to Tri"]'))
-    await until(() => path() === `/c/${main}`, "to its bot's Main")
+    await until(() => path() === `/b/${bot.id}`, "to the list its bot's chats are drawn in")
   })
 })
 

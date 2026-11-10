@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **93 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 93 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **94 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 94 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 38 |
+| stay | 39 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **93** |
+| **total** | **94** |
 
-Of those 93, 87 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 86 distinct files) and 6 point at the older
+Of those 94, 88 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 87 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -183,20 +183,26 @@ archived turns once, in order, under a divider that stays where the compaction r
 as a prop), so it passes whether or not anything in the app reads the chat's own; this flow is the
 only place the app is asked, and it fails at the base commit on the button alone.
 
+A twenty-ninth stay has arrived with a bot's own screen (G1): `bot-chats`, because what it walks is the
+browser's session history — the entry a page stands on, the address a press walks to, and the stack a
+reload leaves behind — which no DOM without a session history, and no harness that stubs
+`history.back`, has. So the registry holds 93 + 1 = **94** keys, the component verdicts unchanged at
+**51**, the plugin verdicts **2**, the deletes **2**, and the stays are 38 + 1: **39**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the thirty-eight fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the thirty-nine fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 92 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 37
+grep -c '^| `' docs/e2e-flow-audit.md                           # 94 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 39
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 93 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 94 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -386,6 +392,7 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bot-chats` | stay | A bot opens the chat this device left it in. The bot's screen from a cold load is its list, with nothing to open and nothing made for it; a row opens that chat on an address of its own; the chat's own control is one press from the list, and the list is the app's first entry, so the browser's own back walks the chat to it and the next press takes the page off the app; the sidebar's bot row, from anywhere in the app, lands the chat it was left in — and a real reload keeps the reader there. | The claim is the browser's own session history: which entry a page stands on (`window.history.state.idx`), which press walks back to which address, and what a real reload does to a stack of them. The component harness fakes depth with a `replaceState` and stubs `history.back`, so `test-bot-open.tsx` and `test-back-press.tsx` rule the landing and the guard right — the chat a bot opens on, the newest chat a stale memory falls to, the address and the state a press leaves — but neither has a stack to walk, so each passes whether the list stands behind the chat or in its place, which is the whole of what a reader's second press meets. | Nothing: a stay is replaced by itself. `test-bot-open.tsx` holds the landing rule and `test-back-press.tsx` the guard and the entry a press leaves; this flow is where a real history, a real reload and the browser's own back button are walked. |
 | `bot-threads` | stay | A bot opens its Main from home; its threads are cards at their start times, each with the message that opened it in its own bubble above and the thread's name on the card, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; tapping `/thread` in the composer's own menu puts the command in the field and opens nothing; `/thread` with text, sent, opens a thread holding that message as its own first turn, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. Then the switch itself is sampled a painted frame at a time, on the pane the shell names, with a second bot added beside the first: a card's thread opened and back on a phone, and a bot's Main switched from the sidebar and back on a laptop, the thread beside it sampled through the same two switches — its lane only ever drawing the thread of the bot being left, the one asked for, or nothing while that one answers, never a lane calling the bot thread-less while its list is still answering. Every painted frame between the two chats is the one left, the one asked for, or the pane waiting on it — inert, untitled and carrying neither chat's words — never the setup copy, a `New chat` header or the new-chat hero, and never the chat left once a frame has left it; a long chat asked for may open on its newest rows, its title over rows of its own, and is drawn whole by the time the switch settles; the frame the arriving scroller holds itself invisible on, while it places the chat and its items still stand at their `content-visibility` estimate, is not a painted one and does not count, and from the first frame it does paint the arriving chat's content the last thing drawn there never moves: the reader is left at the end, and still. The chat is also read and captured ready, at 390, 768 and 1440px, light and dark. On a laptop, a thread's header holds its title on its pane's centre and its actions ending on the row's right edge, each within 2px, and Main and the thread beside it take half of the row the sidebar leaves each — within 2px of each other and both wider than 500px — where Main alone keeps the 412px lane. The close cross stands by that thread's title whether the address names the thread or Main, and puts it away from either: on Main, one header is left and Main's box is within 2px of the row's whole width; from the thread's own address, that entry becomes Main's — the address is Main again with the thread gone — and a step back lands the page before the thread, never the thread just dismissed, until its card in Main opens a thread beside it again. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and the flow leaves them there. What stays a browser's is the layout those tests cannot measure — on a laptop a thread's header puts its title on its pane's centre and its actions at the row's right edge, and Main and its thread divide the row the sidebar leaves between them — and that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx`, `test-thread-command.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts — and the menu pick is driven here by a pointer on the real row, where the component test presses Enter on it (ADR 0096). |
 
 ## The twenty-two that stay, and why only a browser can assert each

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { db, ensureMainThread, mainThreadId, type Message } from "@/lib/db"
 import { dayOf } from "@/lib/days"
+import { ChatPage } from "@/routes/chat"
 import {
   botProfile,
   chatScreen,
@@ -234,20 +236,28 @@ test("a thread nothing names an opener for draws no bubble, only its name", asyn
   })
 })
 
-test("tapping a card opens its thread, and back returns to Main", async () => {
+test("tapping a card opens its thread, and back lands its bot's list", async () => {
   await seed()
   globalThis.fetch = async () => json({})
-  await mount(chatScreen(mainThreadId(bot.id)), async () => {
-    await drawn()
-    const one = card("t-b")
-    assert.ok(one, "the thread's card is on screen")
-    await click(one.querySelector("a"))
-    assert.ok(text().includes("Thread b"), "the thread opened")
-    assert.ok(text().includes("A reply"), "with its own messages")
-    await click(find('[aria-label="Back to Cards"]'))
-    await until(async () => text().includes(MAIN_MESSAGES[2]), "back on Main")
-    assert.ok(cards().length === THREADS.length, "with its cards in place")
-  })
+  // Main's cards, and the list its bot's own address draws: where a thread's way out lands.
+  await mount(
+    <MemoryRouter initialEntries={[`/c/${mainThreadId(bot.id)}`]}>
+      <Routes>
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
+        <Route path="b/:profileId" element={<p data-list />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await drawn()
+      const one = card("t-b")
+      assert.ok(one, "the thread's card is on screen")
+      await click(one.querySelector("a"))
+      assert.ok(text().includes("Thread b"), "the thread opened")
+      assert.ok(text().includes("A reply"), "with its own messages")
+      await click(find('[aria-label="Back to Cards"]'))
+      await until(async () => Boolean(find("[data-list]")), "its bot's list in the thread's place")
+    },
+  )
 })
 
 test("a card and a marker in one gap stand by their own times, not one producer's list", async () => {

@@ -671,16 +671,18 @@ await flow(
   async ({ page, profileId, send, composer, until, shot }) => {
     const mainId = `main-${profileId}`
     const mainPath = `/c/${mainId}`
-
+    // A bot this device has never opened draws its list, and Main is a row of that list.
     await page.goto(`${app}/`)
-    await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
-    pass("the bot opens its Main thread")
+    await page.waitForURL(`**/b/${profileId}`, { timeout: 15_000 })
+    pass("a bot this device has never opened draws its list")
 
     await seed(page, { profileId })
     await seedHost(HOST)
     // Main draws the host's transcript, so the seed lands there and the screen reads it: a reload is
     // this device opening the chat for the first time, not a merge of a copy it already held.
     await page.reload()
+    await page.locator(`ul a[href="${mainPath}"]`).first().click()
+    await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
     await until(
       async () => (await sequence(page)).length === MESSAGES.length + THREADS.length,
       20_000,
@@ -1549,7 +1551,14 @@ await flow(
     await seedChat(page, `gots-${SECOND_THREAD.id}`, [
       { role: "user", content: SECOND_THREAD_SAY, timestamp: (secondAt - 2 * HOUR) / 1000 },
     ])
-    const secondRow = page.locator(`aside a[href="${secondMain}"]`).first()
+    // The sidebar's row opens the chat a bot was last in, and both bots are left in their own Main —
+    // as a reader leaves one — so the switch below compares the two Mains it lands, as it always has.
+    for (const one of [profileId, secondBot])
+      await page.evaluate(
+        (id) => localStorage.setItem(`gots:last-chat:${id}`, `main-${id}`),
+        one,
+      )
+    const secondRow = page.locator(`aside a[href="/b/${secondBot}"]`).first()
     await secondRow.waitFor({ timeout: 15_000 })
     await until(
       async () => (await secondRow.textContent())?.includes(SECOND_BOT),
@@ -1597,7 +1606,7 @@ await flow(
       ],
       what: "and back to the first bot",
       pane: "main",
-      act: () => page.locator(`aside a[href="${mainPath}"]`).first().click(),
+      act: () => page.locator(`aside a[href="/b/${profileId}"]`).first().click(),
       also: [
         {
           pane: "thread",
