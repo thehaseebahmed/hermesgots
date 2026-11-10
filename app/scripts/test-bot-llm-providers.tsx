@@ -1,22 +1,20 @@
 /**
- * The LLM Providers page: the API-key providers this bot's Hermes knows, each row saying which
- * provider it is and, as its value, the key the host masked itself — or *Not set* where there is
- * none. The value is the host's mask and never a key: the page is handed `sk-o...c123` and draws it
- * as it arrived, so nothing here derives, reveals or compares a key.
+ * The LLM Providers page: the API-key providers this bot's Hermes knows and the custom endpoints it
+ * holds, each row saying which one it is and, as its value, the key the host masked itself — or
+ * *Not set* where there is none. The value is the host's mask and never a key: the page is handed
+ * `sk-o...c123` and draws it as it arrived, so nothing here derives, reveals or compares a key.
  *
- * A row opens its slot screen, whose one write is a key: the field starts empty (a mask is never
- * offered back as a key), Save is dead until the field holds something a key could be, and the POST
- * carries `{target, key}` — the typed key, never the mask that was on the screen — and the screen
- * then draws the block that write answered.
+ * A row opens one form for the whole slot. A provider's form holds its API key alone, and the mask
+ * the row drew is the field's **placeholder**: an empty field keeps the key that is there, and only
+ * something typed over it is written — so the mask never rides a write, and `Save` is dead until
+ * there is something to send. An endpoint's form holds every setting the host keeps for it — name,
+ * base URL, model, transport, the session-affinity header and the key — filled with the values the
+ * row holds, and it posts the fields that differ plus the endpoint's id.
  *
- * Its other write is a removal: *Remove key* asks first, in a question naming the provider, and
- * Cancel sends nothing at all. Confirm sends one DELETE for that target and the screen draws the
- * answered block again, where the row reads *Not set*. Nothing of either write is a key: the only
- * key the page ever holds is the typed one, in the field it was typed in.
- *
- * The page's `+` adds an endpoint: the form asks for a name, a base URL, a model and a key, its Save
- * waits until it holds all four, and one POST carries exactly what was typed while the page then
- * draws the block the write answered — the new row, with the key as the host masked it.
+ * The actions stand at the screen's foot on a phone: `Delete key` / `Delete endpoint` on the left,
+ * because the row holds something to delete, and `Cancel` in its place on a provider that holds no
+ * key — where the back arrow is the only way out. `Delete` asks first; the answer is the host's
+ * fresh block, or the host's own sentence when it refuses.
  *
  * A host on an older plugin advertises no `llm_providers`, so the page draws no row and its address
  * lands on the bot's own page — the gate every page over a host's own feature wears.
@@ -46,7 +44,18 @@ import {
 } from "./component-kit.tsx"
 
 type Provider = { slug: string; label: string; description: string; masked: string | null }
-type Endpoint = { id: string; name: string; base_url: string; model: string; masked: string | null }
+/** One custom endpoint, as the host's list answers it: every setting a form can change. */
+type Endpoint = {
+  id: string
+  name: string
+  base_url: string
+  model: string
+  /** The transport it pins (`api_mode` on the host), `""` for Automatic. */
+  transport: string
+  /** The header a proxy carries the conversation on, `""` for none. */
+  affinity: string
+  masked: string | null
+}
 type Block = { providers: Provider[]; endpoints: Endpoint[] }
 
 /** What `GET llm-providers` answers: two providers, one with a key and one without. */
@@ -69,8 +78,9 @@ const BLOCK: Block = {
 }
 
 /**
- * The custom endpoints a host holds: one with a key, one without. They draw under their own caption,
- * and either one's slot screen is the same Replace-key form a provider's is.
+ * The custom endpoints a host holds: one with a key and a transport, one without either but with a
+ * session-affinity header. They draw under their own caption, and either one's row opens the form
+ * that holds the whole setting.
  */
 const ENDPOINTS: Endpoint[] = [
   {
@@ -78,6 +88,8 @@ const ENDPOINTS: Endpoint[] = [
     name: "Local Llama",
     base_url: "http://127.0.0.1:8080/v1",
     model: "llama-3.1-8b",
+    transport: "chat_completions",
+    affinity: "",
     masked: "llam...0a1f",
   },
   {
@@ -85,6 +97,8 @@ const ENDPOINTS: Endpoint[] = [
     name: "Work gateway",
     base_url: "https://llm.example.com/v1",
     model: "gpt-4o-mini",
+    transport: "",
+    affinity: "x-litellm-session-id",
     masked: null,
   },
 ]
@@ -149,7 +163,7 @@ const UNREAD_ANSWER =
 /**
  * A bot of this test's own over a faked host: what a connection's plugin answered is remembered for
  * the page, so each case names its own host and no answer leaks into the next. A key write lands on
- * the block that host answers next, an endpoint's removal takes its row off it, and every request is
+ * the block that host answers next, an endpoint's write lands on its row, and every request is
  * recorded.
  */
 async function seed(
@@ -232,18 +246,44 @@ async function seed(
       return answered(current)
     }
     if (pathname.endsWith("/plugins/gots/llm-providers/endpoints") && method === "POST") {
-      // A custom endpoint added (plugin/llm_providers.py): the host slugs the id, keeps the key as
-      // the mask it makes, and answers the block with the new row in it. The read above keeps
-      // answering what this host held *before* the write, deliberately: a page that asked again
-      // instead of drawing the block the write answered would show no new row at all.
+      // A custom endpoint written (plugin/llm_providers.py): with an `id` the body is a patch on
+      // the row that id names — what it carries is written and what it leaves out is kept — and
+      // without one the host adds the row it slugs from the name. Either way a key rides only when
+      // one was typed, and the answer is the block with the row as the write left it.
+      const words = (field: string, fallback: string) => {
+        const sent = body?.[field]
+        return typeof sent === "string" && sent.trim() ? sent.trim() : fallback
+      }
+      const typed = typeof body?.key === "string" ? body.key.trim() : ""
+      const id = typeof body?.id === "string" ? body.id : ""
+      if (id) {
+        const held = current.endpoints.find((one) => one.id === id)
+        if (!held)
+          return json({ error: { message: `${id} isn't a custom endpoint this Hermes knows.` } }, 400)
+        const next: Endpoint = {
+          ...held,
+          name: words("name", held.name),
+          base_url: words("base_url", held.base_url),
+          model: words("model", held.model),
+          transport: "transport" in (body ?? {}) ? String(body?.transport ?? "") : held.transport,
+          affinity: "affinity" in (body ?? {}) ? String(body?.affinity ?? "") : held.affinity,
+          masked: typed ? maskOf(typed) : held.masked,
+        }
+        current = {
+          ...current,
+          endpoints: current.endpoints.map((one) => (one.id === id ? next : one)),
+        }
+        return answered(current)
+      }
       const name = String(body?.name ?? "").trim()
-      const id = slugOf(name)
       const added: Endpoint = {
-        id,
+        id: slugOf(name),
         name,
         base_url: String(body?.base_url ?? ""),
         model: String(body?.model ?? ""),
-        masked: maskOf(String(body?.key ?? "")),
+        transport: typeof body?.transport === "string" ? body.transport : "",
+        affinity: typeof body?.affinity === "string" ? body.affinity : "",
+        masked: typed ? maskOf(typed) : null,
       }
       return answered({ ...current, endpoints: [...current.endpoints, added] })
     }
@@ -260,33 +300,38 @@ async function seed(
   }
 }
 
-/** The page itself, one provider's row on it, and the slot screen a row opens. */
+/** The page itself, one provider's row on it, and the slot screens a row opens. */
 const page = () => find("[data-bot-llm-providers]")
 const providerRow = (slug: string) => find(`[data-setting="llm-provider-${slug}"]`)
 const endpointRow = (id: string) => find(`[data-setting="llm-endpoint-${id}"]`)
 const slot = () => find("[data-llm-provider-slot]")
-const maskRow = () => find('[data-setting="llm-provider-mask"]')
-/** An endpoint's facts on its slot screen: the base URL and the model, neither of them ours. */
-const baseUrlRow = () => find('[data-setting="llm-endpoint-base-url"]')
-const modelRow = () => find('[data-setting="llm-endpoint-model"]')
+/** The endpoint's form, which holds every setting the row does. */
+const endpointForm = () => find("[data-llm-endpoint-form]")
 /**
- * The key field: the app's own `EditForm`, whose field's id is its label's — `New key` — so the
- * form the page uses is the one with the show/hide toggle and the unsaved-changes guard.
+ * The provider's key field: the app's own `EditForm`, whose field is the only input on a key
+ * screen. Its label names the provider, so the screen says whose key it is under a title that says
+ * what the screen does.
  */
-const keyField = () => find("#edit-new-key") as HTMLInputElement | null
+const keyField = () =>
+  find("[data-llm-provider-slot] input[type=password]") as HTMLInputElement | null
+/** An endpoint's fields, by the setting each holds. */
+const field = (name: string) => find(`[data-llm-endpoint-${name}]`) as HTMLInputElement | null
+/** The transport, a pick: the control shows the choice it holds and opens the list. */
+const transportField = () => find("[data-llm-endpoint-transport]")
+const pick = (label: string) => findText("[data-pick-list] button", label)
 /** The page's own `+`, and the form it opens: one field per thing a new endpoint needs. */
 const addButton = () => find("[data-llm-add-endpoint]")
 const addForm = () => find("[data-llm-endpoint-add]")
 const nameField = () => find("[data-llm-endpoint-name]") as HTMLInputElement | null
 const urlField = () => find("[data-llm-endpoint-base-url]") as HTMLInputElement | null
-const endpointModelField = () => find("[data-llm-endpoint-model]") as HTMLInputElement | null
-const newKeyField = () => find("[data-llm-endpoint-key]") as HTMLInputElement | null
+/** The form's actions: one bar, its left action and its Save. */
 const saveButton = () =>
   findAll("[data-form-actions] button").find((one) => one.textContent?.trim() === "Save") ?? null
-/** The slot screen's own way to remove the key, and the question it asks first. */
-const removeKey = () => find("[data-llm-remove-key]")
-/** An endpoint's own removal, on its slot screen, and the question that names it. */
-const removeEndpoint = () => find("[data-llm-remove-endpoint]")
+const leftAction = () =>
+  findAll("[data-form-actions] button")
+    .map((one) => one.textContent?.trim() ?? "")
+    .find((label) => label !== "Save") ?? ""
+const bar = () => find("[data-form-actions]")
 const dialog = () => find('[role="alertdialog"]')
 const dialogTitle = () => find('[data-slot="alert-dialog-title"]')?.textContent?.trim() ?? ""
 const inDialog = (label: string) => findText('[role="alertdialog"] button', label)
@@ -298,8 +343,6 @@ const lines = (element: Element | null) =>
   leaves(element).map((span) => span.textContent?.trim() ?? "")
 const titleOf = (element: Element | null) => lines(element)[0] ?? ""
 const valueOf = (element: Element | null) => lines(element).at(-1) ?? ""
-/** The class a row's value is drawn with: muted where the value is not the page's to claim. */
-const valueClass = (element: Element | null) => leaves(element).at(-1)?.className ?? ""
 
 test("a provider with a key shows its first and last four, one without shows Not set", async () => {
   await seed("providers", ["llm_providers"])
@@ -347,7 +390,8 @@ test("an older plugin draws no LLM Providers row", async () => {
   })
 })
 
-test("a row opens its slot screen: the provider's line, its mask, and a Save that waits", async () => {
+// (a)
+test("a provider's form holds its key alone, its mask as the placeholder, and no Save yet", async () => {
   await seed("slot", ["llm_providers"])
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(providerRow("openai")), "the host's providers")
@@ -359,23 +403,36 @@ test("a row opens its slot screen: the provider's line, its mask, and a Save tha
       "/settings/bots/bot-1/llm-providers/key/openai",
       "the slot screen has an address of its own",
     )
-    assert.deepEqual(
-      lines(maskRow()),
-      ["OpenAI", "GPT models, straight from OpenAI.", "sk-o...c123"],
-      "the provider's label and line, and its key as the host masked it",
+    assert.equal(
+      findAll("h1").map((heading) => heading.textContent).at(-1),
+      "API key",
+      "the screen is titled for what it does",
     )
-    assert.equal(keyField()?.value, "", "the field starts empty: a mask is never offered as a key")
-    assert.equal(saveButton()?.disabled, true, "and Save waits for something typed")
+    // The mask is the field's own placeholder: what is there is what the field says, and typing
+    // over it is the only way to replace it.
+    assert.equal(keyField()?.value, "", "the field starts empty")
+    assert.equal(
+      keyField()?.getAttribute("placeholder"),
+      "sk-o...c123",
+      "and its placeholder is the key the host holds, masked",
+    )
+    assert.ok(
+      Boolean(find("[data-llm-provider-slot] label")?.textContent?.includes("OpenAI")),
+      "the field's label names the provider whose key it is",
+    )
+    assert.equal(saveButton()?.disabled, true, "Save is dead until something is typed over it")
     // The app's own edit form, so the field carries what every secret the app edits carries.
     assert.ok(find('[aria-label="Show key"]'), "a show/hide toggle, because the form is `EditForm`")
-    assert.ok(
-      !text().includes("Saved on this bot's Hermes"),
-      "and no footnote explaining the field: a setting's subtitle is the only place it says",
-    )
+    // The shape the last one had, and the new one hasn't: a mask row above the form and a caption
+    // over it both went with the form that holds the whole setting.
+    assert.ok(missing('[data-setting="llm-provider-mask"]'), "no mask row stands above the form")
+    assert.ok(!text().includes("Replace key"), "and no caption over it")
+    assert.ok(!text().includes("New key"), "and no `New key` label")
   })
 })
 
-test("replacing posts the typed key, never the mask on screen, and reads the host's new mask", async () => {
+// (b)
+test("a typed key is posted and the row reads the mask the host makes of it", async () => {
   const host = await seed("replace", ["llm_providers"])
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(providerRow("openai")), "the host's providers")
@@ -398,97 +455,98 @@ test("replacing posts the typed key, never the mask on screen, and reads the hos
       "the mask that was on screen never rides the write",
     )
     await until(
-      async () => valueOf(maskRow()) === "new-...zyxw",
-      "the screen to read the block the write answered",
+      async () => keyField()?.getAttribute("placeholder") === "new-...zyxw",
+      "the field to read the mask the write answered",
     )
     assert.equal(keyField()?.value, "", "and the field is empty again, holding no key")
+    assert.equal(saveButton()?.disabled, true, "with nothing to send until the next key is typed")
+    assert.equal(leftAction(), "Delete key", "and the key it just set is the one that can be deleted")
   })
 })
 
-test("removing a key asks first, and the row reads Not set", async () => {
-  const host = await seed("remove", ["llm_providers"])
-  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
-    await until(async () => Boolean(providerRow("openai")), "the host's providers")
-    await click(providerRow("openai"))
-    await until(async () => Boolean(removeKey()), "the Remove key action")
-
-    // A question, not a write: the provider is named, and the way out of it sends nothing at all.
-    await click(removeKey())
-    assert.ok(dialog(), "Remove asks first")
-    assert.equal(dialogTitle(), "Remove OpenAI's key?", "and the question names the provider")
-    const asked = host.asks.length
-    await click(inDialog("Cancel"))
-    await until(async () => !dialog(), "the question to shut")
-    assert.equal(host.asks.length, asked, "Cancel makes no request at all")
-    assert.equal(valueOf(maskRow()), "sk-o...c123", "and the key is still the one that was there")
-
-    await click(removeKey())
-    await until(async () => Boolean(dialog()), "the question again")
-    await click(inDialog("Remove"))
-    await until(
-      async () => valueOf(maskRow()) === "Not set",
-      "the row to read the block the removal answered",
-    )
-
-    const deletes = host.asks.filter((one) => one.method === "DELETE")
-    assert.equal(deletes.length, 1, "exactly one removal")
-    assert.equal(deletes[0].path, "/api/plugins/gots/llm-providers/key/openai", "for that provider")
-    assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
-    assert.ok(missing("[data-llm-remove-key]"), "the action goes with the key it removed")
-  })
-})
-
-test("an endpoint row shows its base URL and its key masked, and its key can be replaced", async () => {
-  const host = await seed("endpoints", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+// (c)
+test("an endpoint's form holds every setting with the values the row does", async () => {
+  await seed("endpoint-form", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
-
-    // Both lists are one page: the providers' caption, then the endpoints' — the second one only
-    // because there are endpoints to draw under it.
-    assert.deepEqual(
-      findAll("[data-bot-llm-providers] > p").map((one) => one.textContent?.trim()),
-      ["Providers", "Custom endpoints"],
-      "a second caption over the endpoints' rows",
-    )
-    assert.deepEqual(
-      lines(endpointRow("local-llama")),
-      ["Local Llama", "http://127.0.0.1:8080/v1 · llama-3.1-8b", "llam...0a1f"],
-      "its name, the base URL and model it runs, and its key as the host masked it",
-    )
-    assert.equal(
-      valueOf(endpointRow("work-gateway")),
-      "Not set",
-      "an endpoint holding no key says so the way every row does",
-    )
-
     await click(endpointRow("local-llama"))
-    await until(async () => Boolean(slot()), "the endpoint's screen")
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
 
     assert.equal(
       path(),
       "/settings/bots/bot-1/llm-providers/key/custom%3Alocal-llama",
-      "the address names the endpoint's key, spelled custom:<id>",
+      "the address still names the endpoint's slot",
     )
-    assert.deepEqual(
-      lines(maskRow()),
-      ["Local Llama", "llam...0a1f"],
-      "the endpoint's name over its key, as the host masked it",
+    assert.equal(
+      findAll("h1").map((heading) => heading.textContent).at(-1),
+      "Local Llama",
+      "and the screen is titled for the endpoint, so a reader knows which one they are editing",
     )
-    assert.deepEqual(
-      lines(baseUrlRow()),
-      ["Base URL", "http://127.0.0.1:8080/v1"],
-      "and the base URL it was configured with",
+    assert.equal(field("name")?.value, "Local Llama", "its name")
+    assert.equal(field("base-url")?.value, "http://127.0.0.1:8080/v1", "the base URL it runs on")
+    assert.equal(field("model")?.value, "llama-3.1-8b", "the model it serves")
+    assert.equal(
+      transportField()?.textContent?.trim(),
+      "Chat completions",
+      "the transport it pins, in words",
     )
-    assert.deepEqual(lines(modelRow()), ["Model", "llama-3.1-8b"], "and the model")
-    // Neither is the page's to claim: they are what the host holds, so they read muted.
-    for (const row of [baseUrlRow(), modelRow()])
-      assert.ok(
-        valueClass(row).includes("text-muted-foreground") &&
-          !valueClass(row).includes("text-primary"),
-        "a value the page doesn't own reads muted",
-      )
+    assert.equal(field("affinity")?.value, "", "the session-affinity header it carries, if any")
+    assert.equal(field("key")?.value, "", "the key field starts empty")
+    assert.equal(
+      field("key")?.getAttribute("placeholder"),
+      "llam...0a1f",
+      "and its placeholder is the mask the host holds",
+    )
+    assert.equal(saveButton()?.disabled, true, "Save is dead until one of them changes")
 
-    await type(keyField(), "endpoint-key-0000-0a1f")
+    await type(field("model"), "llama-3.1-70b")
+    await until(async () => saveButton()?.disabled === false, "Save to wake for a changed field")
+  })
+})
+
+// (d)
+test("saving an endpoint posts the fields that changed and its id, and no key", async () => {
+  const host = await seed("endpoint-save", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
+    await click(endpointRow("local-llama"))
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
+
+    await type(field("model"), "llama-3.1-70b")
+    await until(async () => saveButton()?.disabled === false, "Save to wake for a changed model")
+    await click(saveButton())
+    await until(async () => host.asks.some((one) => one.method === "POST"), "the write")
+
+    const write = host.asks.find((one) => one.method === "POST")
+    assert.deepEqual(
+      write?.body,
+      { id: "local-llama", model: "llama-3.1-70b" },
+      "the one field that differs, under the id of the row it edits — and no key at all",
+    )
+    assert.equal(
+      field("model")?.value,
+      "llama-3.1-70b",
+      "the form reads the block the write answered, its model as the host now holds it",
+    )
+    await until(async () => saveButton()?.disabled === true, "and Save is dead again")
+  })
+})
+
+// (e)
+test("a typed key rides the endpoint's own write, and the row reads its new mask", async () => {
+  const host = await seed("endpoint-key", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
+    await click(endpointRow("local-llama"))
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
+
+    // The transport is a pick, and picking one is a change the form would write.
+    await click(transportField())
+    await until(async () => Boolean(pick("Anthropic messages")), "the transport's choices")
+    await click(pick("Anthropic messages"))
+    assert.equal(transportField()?.textContent?.trim(), "Anthropic messages", "the pick it took")
+
+    await type(field("key"), "endpoint-key-0000-0a1f")
     await until(async () => saveButton()?.disabled === false, "Save to wake for a typed key")
     await click(saveButton())
     await until(async () => host.asks.some((one) => one.method === "POST"), "the write")
@@ -496,21 +554,193 @@ test("an endpoint row shows its base URL and its key masked, and its key can be 
     const write = host.asks.find((one) => one.method === "POST")
     assert.deepEqual(
       write?.body,
-      { target: "custom:local-llama", key: "endpoint-key-0000-0a1f" },
-      "the endpoint's key under its custom: target, and nothing else",
-    )
-    assert.ok(
-      !JSON.stringify(write?.body).includes("llam...0a1f"),
-      "the mask that was on screen never rides the write",
+      {
+        id: "local-llama",
+        transport: "anthropic_messages",
+        key: "endpoint-key-0000-0a1f",
+      },
+      "the transport that changed, the key that was typed, and the id — and no field that didn't",
     )
     await until(
-      async () => valueOf(maskRow()) === "endp...0a1f",
-      "the screen to read the block the write answered",
+      async () => field("key")?.getAttribute("placeholder") === "endp...0a1f",
+      "the key field to read the mask the write answered",
+    )
+    assert.equal(field("key")?.value, "", "and to hold no key afterwards")
+
+    await click(back())
+    await until(async () => Boolean(page()), "the page again")
+    await until(
+      async () => valueOf(endpointRow("local-llama")) === "endp...0a1f",
+      "the row to read the mask the host made",
     )
   })
 })
 
-test("the plus opens a form and the endpoint lands as a row", async () => {
+// (f)
+test("Delete stands where the slot holds something to delete, and asks before it goes", async () => {
+  const host = await seed("delete", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+
+    // A provider holding a key: the bar's left action is the key's removal, and the way out is the
+    // back arrow — so no Cancel is offered beside it.
+    await click(providerRow("openai"))
+    await until(async () => Boolean(keyField()), "the key's field")
+    assert.equal(leftAction(), "Delete key", "Delete key leads the bar")
+    assert.ok(
+      !findAll("[data-form-actions] button").some((one) => one.textContent?.trim() === "Cancel"),
+      "and no Cancel stands beside it",
+    )
+    assert.ok(bar()?.closest("form"), "the bar is inside the form whose Save it presses")
+
+    const asked = host.asks.length
+    await click(findText("[data-form-actions] button", "Delete key"))
+    await until(async () => Boolean(dialog()), "the question")
+    assert.equal(dialogTitle(), "Remove OpenAI's key?", "which names the provider")
+    await click(inDialog("Cancel"))
+    await until(async () => !dialog(), "the question to shut")
+    assert.equal(host.asks.length, asked, "and canceling it makes no request at all")
+    assert.equal(
+      keyField()?.getAttribute("placeholder"),
+      "sk-o...c123",
+      "the key is still the one that was there",
+    )
+
+    await click(findText("[data-form-actions] button", "Delete key"))
+    await until(async () => Boolean(dialog()), "the question again")
+    await click(inDialog("Remove"))
+    await until(
+      async () => keyField()?.getAttribute("placeholder") === "Paste the key",
+      "the answered block, where the row holds no key",
+    )
+    const deletes = host.asks.filter((one) => one.method === "DELETE")
+    assert.equal(deletes.length, 1, "exactly one removal")
+    assert.equal(deletes[0].path, "/api/plugins/gots/llm-providers/key/openai", "for that provider")
+    assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
+    assert.equal(leftAction(), "Cancel", "and with nothing left to delete the bar offers Cancel")
+
+    // An endpoint's form: the slot holds the endpoint and its key together, so Delete endpoint is
+    // the left action wherever the endpoint is, and the back arrow is the way out.
+    await click(back())
+    await until(async () => Boolean(page()), "the page again")
+    await click(endpointRow("work-gateway"))
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
+    assert.equal(leftAction(), "Delete endpoint", "Delete endpoint leads the bar")
+    assert.ok(
+      !findAll("[data-form-actions] button").some((one) => one.textContent?.trim() === "Cancel"),
+      "and no Cancel beside it",
+    )
+    await click(findText("[data-form-actions] button", "Delete endpoint"))
+    await until(async () => Boolean(dialog()), "the question")
+    assert.equal(dialogTitle(), "Remove Work gateway?", "naming the endpoint it removes")
+    await click(inDialog("Remove"))
+    await until(async () => Boolean(page()), "the page the removal answers")
+
+    assert.equal(path(), "/settings/bots/bot-1/llm-providers", "the screen is left behind")
+    assert.ok(missing(endpointRow("work-gateway")), "the endpoint that went draws no row")
+    assert.ok(endpointRow("local-llama"), "and the one that stayed still does")
+  })
+})
+
+// (g)
+test("a provider holding no key leads with Cancel, which leaves without a request", async () => {
+  const host = await seed("cancel", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("groq")), "the host's providers")
+    await click(providerRow("groq"))
+    await until(async () => Boolean(keyField()), "the key's field")
+
+    assert.equal(leftAction(), "Cancel", "nothing here can be deleted, so Cancel leads the bar")
+    const asked = host.asks.length
+    await click(findText("[data-form-actions] button", "Cancel"))
+    await until(async () => Boolean(page()), "the page again")
+    assert.equal(path(), "/settings/bots/bot-1/llm-providers", "Cancel leaves the screen")
+    // The page it lands on reads for itself — that is the page's business — but Cancel itself wrote
+    // nothing: no write was ever asked, here or on the way out.
+    assert.equal(host.asks.filter((one) => one.method !== "GET").length, 0, "no write was ever asked")
+    assert.ok(
+      host.asks.slice(asked).every((one) => one.method === "GET"),
+      "and only the page's own read followed it",
+    )
+  })
+})
+
+// (h)
+test("the actions stand in the form's foot, which fills the screen above them", async () => {
+  await seed("foot", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
+    // The endpoint's form is the tallest one, so it is the one whose actions have to stay reachable.
+    await click(endpointRow("local-llama"))
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
+
+    const form = endpointForm()!
+    const foot = find("[data-form-foot]")
+    assert.ok(foot, "the actions stand in a foot of the form's own")
+    assert.equal(foot.parentElement, form, "inside the form")
+    assert.equal(foot, form.lastElementChild, "as its last row, under every field")
+    assert.ok(
+      foot.className.includes("sticky") && foot.className.includes("bottom-0"),
+      "stuck to the bottom of the screen the form is scrolled in",
+    )
+    assert.ok(
+      form.className.includes("min-h-[calc(100dvh"),
+      "and the form takes the screen's height, so the foot lands on its floor",
+    )
+    // jsdom lays nothing out — every box is 0×0 — so "inside the viewport at 390×844" cannot be
+    // measured here (ADR 0019 sends geometry to the sweep). What this holds is the structure; the
+    // screenshots at 390×844 are what show the bar on the screen's floor.
+    assert.equal(
+      document.documentElement.getBoundingClientRect().height,
+      0,
+      "jsdom gives no layout, so the geometry is proved by the sweep's screenshots",
+    )
+  })
+})
+
+test("removing the endpoint the model runs on is refused and deletes nothing", async () => {
+  const host = await seed("remove-endpoint", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
+    await click(endpointRow("local-llama"))
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
+
+    await click(findText("[data-form-actions] button", "Delete endpoint"))
+    await until(async () => Boolean(dialog()), "the question")
+    assert.equal(dialogTitle(), "Remove Local Llama?", "and the question names the endpoint")
+    await click(inDialog("Remove"))
+    await until(async () => text().includes(IN_USE), "the host's sentence")
+
+    assert.deepEqual(
+      host.refusals,
+      [{ status: 409, code: "endpoint_in_use" }],
+      "the host refused under the plan's own status and code, and the page drew its sentence",
+    )
+    // The one removal, and the answer to it is the host's own words rather than the app's. Nothing
+    // was deleted, so the screen and the fields it draws are exactly what they were.
+    const deletes = host.asks.filter((one) => one.method === "DELETE")
+    assert.equal(deletes.length, 1, "exactly one removal asked")
+    assert.equal(
+      deletes[0].path,
+      "/api/plugins/gots/llm-providers/endpoints/local-llama",
+      "for that endpoint, by its id",
+    )
+    assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
+    assert.ok(!dialog(), "the question is done — a retry can't succeed from this screen")
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/llm-providers/key/custom%3Alocal-llama",
+      "the screen stays where it was",
+    )
+    assert.equal(field("name")?.value, "Local Llama", "and the endpoint is still drawn, whole")
+    assert.ok(
+      host.block().endpoints.some((one) => one.id === "local-llama"),
+      "nothing was deleted on the host either",
+    )
+  })
+})
+
+test("the plus opens a form that adds an endpoint's whole shape", async () => {
   const host = await seed("add", ["llm_providers"])
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(providerRow("openai")), "the host's providers")
@@ -538,9 +768,9 @@ test("the plus opens a form and the endpoint lands as a row", async () => {
     assert.equal(saveButton()?.disabled, true, "a name alone is no endpoint")
     await type(urlField(), "http://10.0.0.5:8080/v1")
     assert.equal(saveButton()?.disabled, true, "nor is a name and a URL")
-    await type(endpointModelField(), "qwen2.5")
+    await type(field("model"), "qwen2.5")
     assert.equal(saveButton()?.disabled, true, "and nothing is saved without a key")
-    await type(newKeyField(), "home-box-key-0000-abcd")
+    await type(field("key"), "home-box-key-0000-abcd")
     await until(async () => saveButton()?.disabled === false, "Save to wake for a whole endpoint")
 
     await click(saveButton())
@@ -556,7 +786,7 @@ test("the plus opens a form and the endpoint lands as a row", async () => {
         model: "qwen2.5",
         key: "home-box-key-0000-abcd",
       },
-      "the four fields the form holds, and nothing else",
+      "the four fields the form holds, and nothing else: no transport and no header it wasn't given",
     )
     // The row is the block the write answered: this host's read still answers the page as it was
     // before the write, so a page that asked again rather than drawing that block would show no row.
@@ -577,92 +807,7 @@ test("the plus opens a form and the endpoint lands as a row", async () => {
   })
 })
 
-test("removing the endpoint the model runs on is refused and deletes nothing", async () => {
-  const host = await seed("remove-endpoint", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
-  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
-    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
-    await click(endpointRow("local-llama"))
-    await until(async () => Boolean(removeEndpoint()), "the Remove endpoint action")
-
-    // A question, not a write: the endpoint is named, and the way out of it sends nothing at all.
-    await click(removeEndpoint())
-    assert.ok(dialog(), "Remove endpoint asks first")
-    assert.equal(dialogTitle(), "Remove Local Llama?", "and the question names the endpoint")
-    const asked = host.asks.length
-    await click(inDialog("Cancel"))
-    await until(async () => !dialog(), "the question to shut")
-    assert.equal(host.asks.length, asked, "Cancel makes no request at all")
-
-    await click(removeEndpoint())
-    await until(async () => Boolean(dialog()), "the question again")
-    await click(inDialog("Remove"))
-    await until(async () => text().includes(IN_USE), "the host's sentence")
-
-    assert.deepEqual(
-      host.refusals,
-      [{ status: 409, code: "endpoint_in_use" }],
-      "the host refused under the plan's own status and code, and the page drew its sentence",
-    )
-
-    // The one removal, and the answer to it is the host's own words rather than the app's. Nothing
-    // was deleted, so the screen and the row it draws are exactly what they were.
-    const deletes = host.asks.filter((one) => one.method === "DELETE")
-    assert.equal(deletes.length, 1, "exactly one removal asked")
-    assert.equal(
-      deletes[0].path,
-      "/api/plugins/gots/llm-providers/endpoints/local-llama",
-      "for that endpoint, by its id",
-    )
-    assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
-    assert.ok(!dialog(), "the question is done — a retry can't succeed from this screen")
-    assert.equal(
-      path(),
-      "/settings/bots/bot-1/llm-providers/key/custom%3Alocal-llama",
-      "the screen stays where it was",
-    )
-    assert.deepEqual(
-      lines(maskRow()),
-      ["Local Llama", "llam...0a1f"],
-      "and the endpoint's row is still drawn, key and all",
-    )
-    assert.ok(
-      host.block().endpoints.some((one) => one.id === "local-llama"),
-      "nothing was deleted on the host either",
-    )
-  })
-})
-
-test("removing another endpoint takes its row off the page", async () => {
-  const host = await seed("remove-endpoint-other", ["llm_providers"], {
-    ...BLOCK,
-    endpoints: ENDPOINTS,
-  })
-  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
-    await until(async () => Boolean(endpointRow("work-gateway")), "the host's custom endpoints")
-    await click(endpointRow("work-gateway"))
-    await until(async () => Boolean(removeEndpoint()), "the Remove endpoint action")
-
-    await click(removeEndpoint())
-    await until(async () => Boolean(dialog()), "the question")
-    assert.equal(dialogTitle(), "Remove Work gateway?", "naming the endpoint it removes")
-    await click(inDialog("Remove"))
-    await until(async () => Boolean(page()), "the page the removal answers")
-
-    // The page here is the block the removal answered, drawn once: no read stands between the write
-    // and the rows it left, and the endpoint that stayed is still one of them.
-    assert.equal(path(), "/settings/bots/bot-1/llm-providers", "and the screen is left behind")
-    assert.ok(missing(endpointRow("work-gateway")), "the endpoint that went draws no row")
-    assert.ok(endpointRow("local-llama"), "and the one that stayed still does")
-    const removedAt = host.asks.findIndex((one) => one.method === "DELETE")
-    assert.ok(removedAt >= 0, "the removal was asked")
-    assert.ok(
-      !host.asks.slice(removedAt + 1).some((one) => one.method === "GET"),
-      "and the page asked nothing after it: the block the removal answered is what it drew",
-    )
-  })
-})
-
-test("a mask pasted into the key field keeps Save dead and asks nothing", async () => {
+test("a mask pasted into a key field keeps Save dead and asks nothing", async () => {
   const host = await seed("pasted-mask", ["llm_providers"])
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(providerRow("openai")), "the host's providers")
@@ -683,7 +828,7 @@ test("a mask pasted into the key field keeps Save dead and asks nothing", async 
       assert.equal(saveButton()?.disabled, true, `${shape} is a mask's shape, not a key`)
     }
     // And the very string the row drew, pasted back, is refused as that string.
-    const drawn = valueOf(maskRow())
+    const drawn = keyField()?.getAttribute("placeholder") ?? ""
     await type(keyField(), drawn)
     assert.equal(saveButton()?.disabled, true, `the mask the row drew (${drawn}) is never a key`)
     assert.ok(!host.asks.some((one) => one.method === "POST"), "and no write was ever asked")
@@ -704,9 +849,13 @@ test("a write the host answers without its block is refused in place, keeping th
     await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
 
     // The answer held no block, so this screen can't say the write landed: the field keeps what was
-    // typed, the mask under it is still the one the host last sent, and nothing is claimed.
+    // typed, and the mask it drew is still the one it drew.
     assert.equal(keyField()?.value, "new-key-0000-zyxw", "the typed key stays in the field")
-    assert.equal(valueOf(maskRow()), "sk-o...c123", "and the key it drew is still the one it drew")
+    assert.equal(
+      keyField()?.getAttribute("placeholder"),
+      "sk-o...c123",
+      "and the key it drew is still the one it drew",
+    )
     assert.equal(host.asks.filter((one) => one.method === "POST").length, 1, "one write, no retry")
   })
 })
@@ -716,16 +865,20 @@ test("a removal the host answers without its block keeps its question up", async
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(providerRow("openai")), "the host's providers")
     await click(providerRow("openai"))
-    await until(async () => Boolean(removeKey()), "the Remove key action")
+    await until(async () => Boolean(keyField()), "the key's field")
 
     host.answersNoBlock()
-    await click(removeKey())
+    await click(findText("[data-form-actions] button", "Delete key"))
     await until(async () => Boolean(dialog()), "the question")
     await click(inDialog("Remove"))
     await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
 
     assert.ok(dialog(), "the question stays up rather than reporting a removal it can't read")
-    assert.equal(valueOf(maskRow()), "sk-o...c123", "and the key is still drawn as it was")
+    assert.equal(
+      keyField()?.getAttribute("placeholder"),
+      "sk-o...c123",
+      "and the key is still drawn as it was",
+    )
   })
 })
 
@@ -737,10 +890,10 @@ test("an endpoint removal the host answers without its block stays on the screen
   await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
     await until(async () => Boolean(endpointRow("work-gateway")), "the host's custom endpoints")
     await click(endpointRow("work-gateway"))
-    await until(async () => Boolean(removeEndpoint()), "the Remove endpoint action")
+    await until(async () => Boolean(endpointForm()), "the endpoint's form")
 
     host.answersNoBlock()
-    await click(removeEndpoint())
+    await click(findText("[data-form-actions] button", "Delete endpoint"))
     await until(async () => Boolean(dialog()), "the question")
     await click(inDialog("Remove"))
     await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
@@ -752,7 +905,7 @@ test("an endpoint removal the host answers without its block stays on the screen
       "/settings/bots/bot-1/llm-providers/key/custom%3Awork-gateway",
       "the screen stays where it was",
     )
-    assert.equal(titleOf(maskRow()), "Work gateway", "and the endpoint is still drawn")
+    assert.equal(field("name")?.value, "Work gateway", "and the endpoint is still drawn")
     assert.ok(!dialog(), "the question is done, since a retry asks the same thing")
   })
 })
@@ -767,8 +920,8 @@ test("a page returned to reads for itself rather than drawing the block a write 
     await until(async () => Boolean(addForm()), "the add form")
     await type(nameField(), "Home box")
     await type(urlField(), "http://10.0.0.5:8080/v1")
-    await type(endpointModelField(), "qwen2.5")
-    await type(newKeyField(), "home-box-key-0000-abcd")
+    await type(field("model"), "qwen2.5")
+    await type(field("key"), "home-box-key-0000-abcd")
     await until(async () => saveButton()?.disabled === false, "Save to wake for a whole endpoint")
     await click(saveButton())
     await until(async () => Boolean(endpointRow("home-box")), "the row the write answered")
@@ -787,6 +940,8 @@ test("a page returned to reads for itself rather than drawing the block a write 
           name: "Home box",
           base_url: "http://10.0.0.5:8080/v1",
           model: "qwen2.5",
+          transport: "",
+          affinity: "",
           masked: "home...abcd",
         },
       ],

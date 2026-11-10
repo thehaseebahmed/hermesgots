@@ -3452,6 +3452,10 @@ const LLM_ENDPOINTS = [
     name: "Local Llama",
     base_url: "http://127.0.0.1:8080/v1",
     model: "llama-3.1-8b",
+    // The transport the entry pins (`api_mode` in `providers.<id>`), and the header a proxy carries
+    // the conversation on (`session_affinity_header`) — the two settings the row's form edits.
+    transport: "chat_completions",
+    affinity: "",
     // The host's own `is_current`: the model this bot runs on, so a removal of it is refused. It is
     // the mock's fact and not the page's: `llmBlock` returns the row's own fields, never `current`.
     current: true,
@@ -3461,6 +3465,8 @@ const LLM_ENDPOINTS = [
     name: "Work gateway",
     base_url: "https://llm.example.com/v1",
     model: "gpt-4o-mini",
+    transport: "",
+    affinity: "x-litellm-session-id",
   },
 ]
 const LLM_ENDPOINT_SEEDED = { "local-llama": "llam-3.1-local-0a1f" }
@@ -3485,9 +3491,17 @@ const llmBlock = (profile) => ({
     const secret = llmKeyOf(profile, slug)
     return { slug, label, description, masked: secret ? maskSecret(secret) : null }
   }),
-  endpoints: LLM_ENDPOINTS.map(({ id, name, base_url, model }) => {
+  endpoints: LLM_ENDPOINTS.map(({ id, name, base_url, model, transport, affinity }) => {
     const secret = llmEndpointKeyOf(profile, id)
-    return { id, name, base_url, model, masked: secret ? maskSecret(secret) : null }
+    return {
+      id,
+      name,
+      base_url,
+      model,
+      transport: transport ?? "",
+      affinity: affinity ?? "",
+      masked: secret ? maskSecret(secret) : null,
+    }
   }),
 })
 const GENERAL_DEFAULTS = {
@@ -4876,23 +4890,51 @@ http
       url.pathname === "/api/plugins/gots/llm-providers/endpoints" &&
       req.method === "POST"
     ) {
-      // A custom endpoint added (plugin/llm_providers.py): a name, a base URL and a model are all
-      // required, a name an endpoint already carries is refused — the host's upsert would merge onto
-      // that entry rather than add a second one — and the id is the one the host slugs from the name.
-      // A mask sent back as a key is refused, as every write here refuses one.
+      // A custom endpoint written (plugin/llm_providers.py). With an `id`, the body is a patch on the
+      // row that id names — the host writes the fields it carries and keeps every field it doesn't,
+      // which is what lets a form send only what changed — and without one, the write adds a row the
+      // name, base URL and model must all be given for. A name an endpoint already carries is refused
+      // (the host's upsert would merge onto that entry rather than add a second one), the id is the
+      // one the host slugs from the name, and a mask sent back as a key is refused as every write here
+      // refuses one.
       const key = pluginProfile ?? ""
       const body = await readBody(req)
-      const name = typeof body?.name === "string" ? body.name.trim() : ""
-      const baseUrl = typeof body?.base_url === "string" ? body.base_url.trim() : ""
-      const model = typeof body?.model === "string" ? body.model.trim() : ""
       const typed = typeof body?.key === "string" ? body.key.trim() : ""
-      if (!(name && baseUrl && model))
-        return json(res, 400, {
-          error: { message: "A custom endpoint needs a name, a base URL and a model." },
-        })
       if (typed && looksMasked(typed))
         return json(res, 400, {
           error: { message: "That is a masked key, not a key. Type the key itself." },
+        })
+      const id = typeof body?.id === "string" ? body.id : ""
+      if (id) {
+        const at = LLM_ENDPOINTS.findIndex((one) => one.id === id)
+        if (at < 0)
+          return json(res, 400, {
+            error: { message: `${id} isn't a custom endpoint this Hermes knows.` },
+          })
+        const held = LLM_ENDPOINTS[at]
+        const words = (field, fallback) => {
+          const sent = body?.[field]
+          return typeof sent === "string" && sent.trim() ? sent.trim() : fallback
+        }
+        LLM_ENDPOINTS[at] = {
+          ...held,
+          name: words("name", held.name),
+          base_url: words("base_url", held.base_url),
+          model: words("model", held.model),
+          // A field the body names is written as it stands, the empty string included: that is how a
+          // transport goes back to Automatic and a header comes off the entry.
+          transport: "transport" in body ? String(body.transport ?? "") : (held.transport ?? ""),
+          affinity: "affinity" in body ? String(body.affinity ?? "") : (held.affinity ?? ""),
+        }
+        if (typed) llmKeys.set(`${key}\ncustom:${id}`, typed)
+        return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+      }
+      const name = typeof body?.name === "string" ? body.name.trim() : ""
+      const baseUrl = typeof body?.base_url === "string" ? body.base_url.trim() : ""
+      const model = typeof body?.model === "string" ? body.model.trim() : ""
+      if (!(name && baseUrl && model))
+        return json(res, 400, {
+          error: { message: "A custom endpoint needs a name, a base URL and a model." },
         })
       const held = LLM_ENDPOINTS.find((one) => one.name.toLowerCase() === name.toLowerCase())
       if (held)
@@ -4903,9 +4945,16 @@ http
               "Adding one with that name would replace it instead of adding a new one.",
           },
         })
-      const id = slugEndpoint(name)
-      LLM_ENDPOINTS.push({ id, name, base_url: baseUrl, model })
-      if (typed) llmKeys.set(`${key}\ncustom:${id}`, typed)
+      const added = slugEndpoint(name)
+      LLM_ENDPOINTS.push({
+        id: added,
+        name,
+        base_url: baseUrl,
+        model,
+        transport: typeof body?.transport === "string" ? body.transport : "",
+        affinity: typeof body?.affinity === "string" ? body.affinity : "",
+      })
+      if (typed) llmKeys.set(`${key}\ncustom:${added}`, typed)
       return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers") {

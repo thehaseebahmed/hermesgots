@@ -34,7 +34,7 @@ import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
-import { readLlmProviders, type LlmEndpointDraft } from "@/lib/llm-providers"
+import { readLlmProviders, type LlmEndpointBody } from "@/lib/llm-providers"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -1399,28 +1399,26 @@ export async function removeLlmProviderKey(
 }
 
 /**
- * Adds one custom endpoint — the name, base URL and model the form was given, and the key typed into
- * it — and answers the block with the new row in it, which is how the page learns the id the host
- * slugged and the mask it made of the key. The host validates the URL, writes `providers.<id>` and
- * puts the key in `.env` behind the entry's `key_env`; its refusal (a URL with no host, a name an
- * endpoint already carries) is the sentence the screen shows. The key is never logged here: it rides
- * the request body and nothing else.
+ * Writes one custom endpoint — the whole shape of a new one, or the fields an existing one changed —
+ * and answers the block with the row as the write left it, which is how the page learns the id the
+ * host slugged, the fields it now holds and the mask it made of the key. `id` is what makes the write
+ * an edit: the host then patches that entry and keeps every field the body doesn't carry, which is
+ * why the form sends only what changed. The host validates the URL, writes `providers.<id>` and puts
+ * the key in `.env` behind the entry's `key_env`; its refusal (a URL with no host, a name an endpoint
+ * already carries) is the sentence the screen shows. The key is never logged here: it rides the
+ * request body and nothing else.
  */
-export async function addLlmEndpoint(
+export async function saveLlmEndpoint(
   config: HermesConfig,
-  body: LlmEndpointDraft,
+  body: LlmEndpointBody,
   signal?: AbortSignal,
 ) {
   const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers/endpoints`, {
     method: "POST",
     headers: headers(config),
-    // The form's own four fields, trimmed: the host slugs the id and validates the URL itself.
-    body: JSON.stringify({
-      name: body.name.trim(),
-      base_url: body.base_url.trim(),
-      model: body.model.trim(),
-      key: body.key.trim(),
-    }),
+    // The body as the form built it: the id where it edits, the fields that changed, and a key only
+    // where one was typed. Nothing is added here that a form didn't hold.
+    body: JSON.stringify(body),
     signal,
   })
   return readLlmProviders(((await response.json())?.llm ?? null) as unknown)

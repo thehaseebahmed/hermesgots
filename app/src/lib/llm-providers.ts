@@ -32,6 +32,13 @@ export interface LlmEndpoint {
   base_url: string
   /** The model the endpoint runs when this bot's model names it. */
   model: string
+  /**
+   * The transport it pins, in the host's own spelling (`api_mode` in its `config.yaml`), or `""`
+   * for Automatic — the runtime's own guess from the address, which is what a fresh endpoint does.
+   */
+  transport: string
+  /** The header a proxy carries the conversation on (`session_affinity_header`), or `""`. */
+  affinity: string
   masked: string | null
 }
 
@@ -130,14 +137,143 @@ export function submittableKey(value: string, masked?: string | null): boolean {
 }
 
 /**
+ * The transports a custom endpoint can pin, in the host's own spellings: `api_mode` in its
+ * `config.yaml`, the value `hermes model` writes and the runtime reads. `""` is Automatic — no pin
+ * at all, the runtime guessing from the address — and is drawn as its own choice rather than a
+ * missing one, since an endpoint with a hand-written `api_mode` is the exception.
+ */
+export const TRANSPORTS: { value: string; label: string }[] = [
+  { value: "", label: "Automatic" },
+  { value: "chat_completions", label: "Chat completions" },
+  { value: "codex_responses", label: "Responses" },
+  { value: "anthropic_messages", label: "Anthropic messages" },
+]
+
+/**
+ * A transport as the pick and the row say it. A spelling this build doesn't know is drawn as it
+ * arrived rather than dropped or rounded to Automatic: a value the host pinned is the host's fact,
+ * and the form must write it back exactly as it read it.
+ */
+export function transportLabel(value: string): string {
+  return TRANSPORTS.find((one) => one.value === value)?.label ?? value
+}
+
+/**
+ * The fields an endpoint's form holds, as one object: everything the host keeps for the endpoint
+ * that this page can change. The key is not one of them — it is typed, never drawn — and the id is
+ * the address the write names rather than a field.
+ */
+export interface LlmEndpointFields {
+  name: string
+  base_url: string
+  model: string
+  transport: string
+  affinity: string
+}
+
+/** The fields a row hands its form, as the form starts: the host's own values, untouched. */
+export function endpointFieldsOf(endpoint: LlmEndpoint): LlmEndpointFields {
+  return {
+    name: endpoint.name,
+    base_url: endpoint.base_url,
+    model: endpoint.model,
+    transport: endpoint.transport,
+    affinity: endpoint.affinity,
+  }
+}
+
+/** The fields, in the order the form draws them, so a change is found the same way every time. */
+const ENDPOINT_FIELDS = ["name", "base_url", "model", "transport", "affinity"] as const
+
+/**
+ * What an endpoint's save writes: each field whose value differs from the row's, trimmed, and no
+ * field that doesn't. A field emptied is a change like any other and is written as `""` — for the
+ * transport that is Automatic, and for the header that is none — so a setting a user clears is
+ * cleared on the host rather than left behind by an omission.
+ */
+export function endpointChanges(
+  held: LlmEndpointFields,
+  draft: LlmEndpointFields,
+): Partial<LlmEndpointFields> {
+  const changes: Partial<LlmEndpointFields> = {}
+  for (const field of ENDPOINT_FIELDS) {
+    const value = draft[field].trim()
+    if (value !== held[field].trim()) changes[field] = value
+  }
+  return changes
+}
+
+/**
+ * Whether an endpoint's form holds something worth writing: a typed key, or a field that differs
+ * from the row it opened with. A form that emptied one of the three fields an endpoint is has
+ * nothing to write whatever else changed — the host needs a name, a base URL and a model — and a
+ * mask in the key field is never a key (`submittableKey`).
+ */
+export function saveableEndpointEdit(
+  held: LlmEndpointFields,
+  draft: LlmEndpointFields,
+  key: string,
+  masked?: string | null,
+): boolean {
+  const whole = Boolean(draft.name.trim() && draft.base_url.trim() && draft.model.trim())
+  if (!whole) return false
+  return Object.keys(endpointChanges(held, draft)).length > 0 || submittableKey(key, masked)
+}
+
+/** The body one endpoint write carries: the fields a caller set, and nothing it left out. */
+export interface LlmEndpointBody extends Partial<LlmEndpointFields> {
+  /** The id the write patches; left off a write that adds an endpoint. */
+  id?: string
+  /** The key typed into the form, and never a mask, and never anything a form left empty. */
+  key?: string
+}
+
+/**
+ * The body an endpoint's edit posts: the id of the row it edits, the fields that differ, and the
+ * key only where one was typed over the mask — so a save that touched nothing but the model never
+ * carries a credential, and a save that touched nothing but the key never rewrites a setting with
+ * a value the form happened to send back.
+ */
+export function editEndpointBody(
+  id: string,
+  held: LlmEndpointFields,
+  draft: LlmEndpointFields,
+  key: string,
+  masked?: string | null,
+): LlmEndpointBody {
+  const body: LlmEndpointBody = { id, ...endpointChanges(held, draft) }
+  if (submittableKey(key, masked)) body.key = key.trim()
+  return body
+}
+
+/**
  * The four fields the add form holds, as the page sends them: the name the host slugs an id from,
- * the base URL and model the endpoint runs, and the key typed into the form.
+ * the base URL and model the endpoint runs, and the key typed into the form — plus the two settings
+ * where the form was given them.
  */
 export interface LlmEndpointDraft {
   name: string
   base_url: string
   model: string
   key: string
+  transport?: string
+  affinity?: string
+}
+
+/**
+ * The body that adds an endpoint: its three required fields, the key, and the transport and header
+ * only where the form was given one. An untouched Automatic and an empty header are nothing typed,
+ * so they ride no further than the form — the host's own defaults then apply.
+ */
+export function newEndpointBody(draft: LlmEndpointDraft): LlmEndpointBody {
+  return {
+    name: draft.name.trim(),
+    base_url: draft.base_url.trim(),
+    model: draft.model.trim(),
+    ...(draft.transport ? { transport: draft.transport } : {}),
+    ...(draft.affinity?.trim() ? { affinity: draft.affinity.trim() } : {}),
+    key: draft.key.trim(),
+  }
 }
 
 /**
@@ -191,6 +327,10 @@ function endpointOf(raw: unknown): LlmEndpoint[] {
       name: typeof row.name === "string" && row.name ? row.name : row.id,
       base_url: typeof row.base_url === "string" ? row.base_url : "",
       model: typeof row.model === "string" ? row.model : "",
+      // A host that names neither pins nothing and carries no header: the form is filled from what
+      // the row says, so a silence becomes the host's own default rather than a guess at one.
+      transport: typeof row.transport === "string" ? row.transport : "",
+      affinity: typeof row.affinity === "string" ? row.affinity : "",
       masked: typeof row.masked === "string" && row.masked ? row.masked : null,
     },
   ]
