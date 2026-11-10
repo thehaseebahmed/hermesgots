@@ -2569,17 +2569,40 @@ export async function grantCanvasTool(
 }
 
 /**
+ * A record of a file a caller saved for a canvas, as the plugin's first queued turn keeps one
+ * (`outbox.clean_files`): the name, type and size a file bubble draws, and where the host put it.
+ */
+export type CanvasFile = { name: string; type: string; size: number; path: string }
+
+/**
  * A canvas from a prompt: the plugin writes the record and the chat, and queues the run that builds
  * it on the canvas's own session, so it is built with the app closed (ADR 0113).
+ *
+ * A start that carries files names the chat it made for the canvas (`chatId`) and the records it
+ * saved under that chat's session (`files`): the plugin opens the thread on that chat and the first
+ * turn carries those files (ADR 0131). A caller that names neither is a start with a prompt alone,
+ * so both are left out of the body rather than sent empty.
  */
 export async function createCanvas(
   config: HermesConfig,
-  input: { prompt: string; profileId: string; body?: Record<string, unknown> },
+  input: {
+    prompt: string
+    profileId: string
+    body?: Record<string, unknown>
+    chatId?: string
+    files?: CanvasFile[]
+  },
 ) {
   const response = await request(canvasRoot(config), {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ prompt: input.prompt, profile_id: input.profileId, body: input.body }),
+    body: JSON.stringify({
+      prompt: input.prompt,
+      profile_id: input.profileId,
+      body: input.body,
+      ...(input.chatId ? { chat_id: input.chatId } : {}),
+      ...(input.files ? { files: input.files } : {}),
+    }),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return (await response.json())?.canvas as Record<string, unknown> | undefined

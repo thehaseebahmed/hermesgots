@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { wireContent } from "@/lib/attachments"
 import {
   applyWrite,
   mergeGrants,
@@ -23,8 +24,8 @@ import {
   recordOf,
   upsert,
 } from "@/lib/canvas-cache"
-import { hostTargets } from "@/lib/connection"
-import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
+import { hostTargets, serverConfig } from "@/lib/connection"
+import { db, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
@@ -40,7 +41,9 @@ import {
   runRequest,
   undoCanvas as undoCanvasOnHost,
   updateCanvas as updateCanvasOnHost,
+  uploadAttachment,
   type CanvasChanges,
+  type CanvasFile,
 } from "@/lib/hermes"
 import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { onlineNow } from "@/lib/online"
@@ -48,6 +51,7 @@ import { usePoll } from "@/lib/poll"
 import { quietly } from "@/lib/report"
 import { createStore } from "@/lib/store"
 import { tell } from "@/lib/tell"
+import { randomId } from "@/lib/utils"
 
 /**
  * Canvases live on each bot's Gots plugin (`canvases.py`, ADR 0113), which keeps the record, the
@@ -715,13 +719,48 @@ export async function grantCanvasTool(id: string, tool: string, allow: boolean) 
   return answer
 }
 
-/** A canvas from a prompt: the plugin writes it and queues the run that builds it. */
-export async function startCanvas(profile: Profile, prompt: string, choice?: ModelChoice) {
+/**
+ * A canvas from a prompt and the files staged with it: the app mints the chat the canvas will be
+ * built in and saves each file under the session that chat names (`gots-<chat id>`, the pair the
+ * host itself uses), because the first turn can only carry files already on the host — and the
+ * session a file belongs under is named by a chat that has to exist first (ADR 0131).
+ *
+ * The prompt stays the reader's own words: the host titles a canvas, and the chat that carries it,
+ * from them, so the markers naming the saved files ride only the run body. The record the host
+ * answers is the canvas the screen opens — a plugin older than the chat id mints its own chat, and
+ * its record is the one that exists.
+ */
+export async function startCanvas(
+  profile: Profile,
+  prompt: string,
+  choice?: ModelChoice,
+  attachments: Attachment[] = [],
+) {
+  const chatId = randomId()
+  const session = `gots-${chatId}`
+  const config = serverConfig(profile)
+  const saved: Attachment[] = []
+  const files: CanvasFile[] = []
+  for (const attachment of attachments) {
+    if (!attachment.blob) continue
+    const path = await uploadAttachment(config, session, {
+      name: attachment.name,
+      blob: attachment.blob,
+    })
+    saved.push({ ...attachment, path })
+    files.push({ name: attachment.name, type: attachment.type, size: attachment.size, path })
+  }
   const body = runRequest(profile, {
-    messages: [{ role: "user", content: prompt }],
+    messages: [{ role: "user", content: await wireContent(prompt, saved) }],
     ...(choice ? { model: choice.model, provider: choice.provider } : {}),
   })
-  const raw = await createCanvas(profile, { prompt, profileId: profile.id, body })
+  const raw = await createCanvas(profile, {
+    prompt,
+    profileId: profile.id,
+    body,
+    chatId,
+    files,
+  })
   if (!raw) throw new Error("The bot didn't make the canvas.")
   const canvas = toCanvas(raw, profile.id)
   put(profile, canvas, writes)

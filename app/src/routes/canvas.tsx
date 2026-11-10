@@ -19,6 +19,8 @@ import {
 } from "@/components/canvas-consent"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { useChatSurface } from "@/components/chat/chat-actions"
+import { AttachMenu } from "@/components/chat/attach-menu"
+import { AttachmentTile } from "@/components/chat/attachments"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
@@ -56,7 +58,9 @@ import {
   type Canvas,
   type CanvasChanges,
 } from "@/lib/canvases"
-import { db, getActiveProfile, type Profile } from "@/lib/db"
+import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
+import { prepareIntake } from "@/lib/attachments"
+import { usePluginFeature } from "@/lib/features"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered, type ProviderUsage } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
@@ -111,6 +115,41 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
   )
 }
 
+/**
+ * The create composer's `+`: the same intake a chat's composer has — the same count and size caps,
+ * the same inline-or-host road, the same refusal sentences — with the bot's own answer about its
+ * upload route deciding which road a file takes. It is a component of its own because that answer is
+ * a hook that wants a server, and this screen opens before a bot has been read.
+ */
+function CanvasAttach({
+  profile,
+  attachments,
+  onTake,
+}: {
+  profile: Profile
+  attachments: Attachment[]
+  onTake: (taken: Attachment[]) => void
+}) {
+  const filesFeature = usePluginFeature(profile, "attachments")
+  const readsImages = profile.imageInput !== false
+  const add = async (files: File[]) => {
+    const { attachments: prepared, refusals } = await prepareIntake(files, {
+      held: attachments,
+      readsImages,
+      route: filesFeature,
+    })
+    for (const refusal of refusals) tell.error(refusal.message)
+    if (prepared.length) onTake(prepared)
+  }
+  return (
+    <AttachMenu
+      filesFeature={filesFeature}
+      imagesAvailable={readsImages}
+      onAdd={(files) => void add(files)}
+    />
+  )
+}
+
 export function CanvasPage() {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
@@ -118,6 +157,7 @@ export function CanvasPage() {
   const profile = useLiveQuery(getActiveProfile, [])
   const now = useNow()
   const [prompt, setPrompt] = useState("")
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [starting, setStarting] = useState(false)
   const blocked = profile ? unsupported[profile.id] : undefined
 
@@ -126,12 +166,15 @@ export function CanvasPage() {
     setStarting(true)
     let started: Awaited<ReturnType<typeof startCanvas>> | undefined
     await attempt("start the canvas", async () => {
-      started = await startCanvas(profile, prompt.trim(), profile.modelChoice)
+      started = await startCanvas(profile, prompt.trim(), profile.modelChoice, attachments)
     })
     setStarting(false)
     if (!started) return
+    // Only once the host has answered its own record: a start it refused leaves the tiles where
+    // they were, so the reader can send again without picking everything again.
     setPrompt("")
-    navigate(`/canvas/${started.id}`)
+    setAttachments([])
+    navigate(`/canvas/${started.id}/edit`)
   }
 
   return (
@@ -171,6 +214,21 @@ export function CanvasPage() {
                 <BotPicker profile={profile} />
               </div>
             )}
+            {/* A file staged for the start, above the field it will be sent with: a photo or a
+                document, each one movable before the press. */}
+            {attachments.length > 0 && (
+              <div className="flex gap-2.5 overflow-x-auto pb-1" aria-label="Files to start it with">
+                {attachments.map((attachment) => (
+                  <AttachmentTile
+                    key={attachment.id}
+                    attachment={attachment}
+                    onRemove={() =>
+                      setAttachments((held) => held.filter((one) => one.id !== attachment.id))
+                    }
+                  />
+                ))}
+              </div>
+            )}
             {/* The prompt and its send are one field, as Research asks its own: the button sits in
                 the box's corner rather than under it, so the words and the press are one thing. */}
             <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
@@ -189,6 +247,13 @@ export function CanvasPage() {
                 className="max-h-48 min-h-20 px-5 pt-4 pb-2 text-base md:text-[15px]"
               />
               <InputGroupAddon align="block-end" className="px-2.5 pt-0 pb-1.5">
+                {profile && (
+                  <CanvasAttach
+                    profile={profile}
+                    attachments={attachments}
+                    onTake={(taken) => setAttachments((held) => [...held, ...taken])}
+                  />
+                )}
                 <span className="flex-1" />
                 <InputGroupButton
                   type="submit"
