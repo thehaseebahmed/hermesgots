@@ -42,6 +42,26 @@ for (const [width, collapsed, panes] of CASES) {
       await page.getByText("Weekly product sync").first().waitFor({ timeout: 15_000 })
       if (panes === 2) {
         await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
+        // The panes settle a frame or two after the redirect: the sidebar's own answer is read
+        // asynchronously, so the meeting can be drawn once as a phone's before the list comes
+        // beside it. What "with room" means is the settled screen — the list in its lane, and no
+        // Back to Meetings in the meeting's header — so both are waited for rather than caught
+        // mid-paint. A screen that never gets its list still fails, naming what is missing.
+        await until(
+          async () => {
+            const lane = page.locator('[data-slot="list-lane"]')
+            if ((await lane.count()) !== 1) return false
+            const width = await lane.evaluate((element) => element.getBoundingClientRect().width)
+            return width > 0 && width < 600
+          },
+          5_000,
+          "the meeting's list in its lane beside it",
+        )
+        await until(
+          async () => (await page.getByRole("button", { name: "Back to Meetings" }).count()) === 0,
+          5_000,
+          "the meeting drawn beside its list, no Back to Meetings in its header",
+        )
         await shot("meetings")
         assert.equal(await page.getByRole("button", { name: "Back to Meetings" }).count(), 0)
         // Opening another takes the place of the one open, and it's the one open next time.
