@@ -591,3 +591,61 @@ class Routines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnScreen(unittest.TestCase):
+    """A device whose app is on screen is skipped: its stream is open, so it already knows.
+
+    The app matches a push to the screen it is about, and only answers it when that screen is
+    opened; a device the Host tells anyway reads the tray twice for news it has already drawn. The
+    skip is the stream's, never the account's, and a stream that closes puts the device back on the
+    list.
+    """
+
+    def test_only_a_device_whose_stream_is_open_is_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "gots.db"
+            self.assertEqual(push._on_screen_devices(path), [], "an app that is closed is told")
+            with push.watching(path, "phone-1"):
+                self.assertEqual(push._on_screen_devices(path), ["phone-1"])
+            self.assertEqual(
+                push._on_screen_devices(path), [], "a stream that closed is told again"
+            )
+
+    def test_two_streams_of_one_device_hold_it_on_screen_until_both_close(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "gots.db"
+            with push.watching(path, "phone-1"):
+                with push.watching(path, "phone-1"):
+                    self.assertEqual(push._on_screen_devices(path), ["phone-1"])
+                self.assertEqual(
+                    push._on_screen_devices(path), ["phone-1"], "the stream still open holds it"
+                )
+            self.assertEqual(push._on_screen_devices(path), [])
+
+    def test_the_relay_carries_the_skip_list_to_the_registry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "gots.db"
+            bodies = []
+            state = {"token": "token", "site": "https://app.example"}
+
+            def call(site, method, route, **kwargs):
+                bodies.append(kwargs.get("body"))
+                return {}
+
+            with push.watching(path, "phone-1"), mock.patch.object(
+                push.link, "load_state", lambda home: state
+            ), mock.patch.object(push.link, "call", call):
+                push._relay(path, "chat_input", "chat_input", "gots-1", {})
+            self.assertEqual(
+                bodies,
+                [
+                    {
+                        "kind": "chat_input",
+                        "category": "chat_input",
+                        "session_id": "gots-1",
+                        "skip": ["phone-1"],
+                    }
+                ],
+                "the phone whose app is open is the one the registry leaves out",
+            )

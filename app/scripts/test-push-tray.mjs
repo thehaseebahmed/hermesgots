@@ -122,3 +122,22 @@ test("the screens a push names answer it, and a tap answers its own", () => {
     "the push a tap came from has been answered, whatever screen it opens",
   )
 })
+
+test("both writers end a tag with the id a dismissal reads", () => {
+  // Two files build this tag and neither can be imported here: the service worker the browser runs,
+  // and the function Firebase is asked through. Pinning the shape is the only way a change to either
+  // is a change to what `pushSubject` reads.
+  const writers = [
+    ["public/push-sw.js", /const tag = sessionId \? `\$\{[^}]+\}:\$\{sessionId\}`/, "session:"],
+    ["netlify/lib/fcm.ts", /tag: `\$\{category\}:\$\{sessionId\}`/, "chat_input:"],
+  ]
+  for (const [file, shape, prefix] of writers) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8")
+    assert.match(source, shape, `${file} tags a push \`<what it is>:<the id>\``)
+    assert.equal(
+      pushSubject({ tag: `${prefix}gots-1` }),
+      "gots-1",
+      `${file}'s tag names the session its push is about`,
+    )
+  }
+})

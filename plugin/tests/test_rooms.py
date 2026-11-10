@@ -2204,7 +2204,11 @@ class RoomPushes(unittest.TestCase):
         self.assertEqual(self.told, [])
         host.driver_status["pending_actions"] = [APPROVAL]
         self.assertEqual(self.check(host), 1)
-        self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
+        self.assertEqual(
+            self.told,
+            [("room_input", "room-1", "Planning")],
+            "the push names the room's own id, which is what the app matches it by",
+        )
         self.assertEqual(self.check(host), 0, "the same wait is not news twice")
         self.assertEqual(len(self.told), 1)
 

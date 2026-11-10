@@ -223,8 +223,7 @@ async function dismiss(subject: string) {
 /**
  * The screen on display answers the pushes about it, so they leave the tray — and nothing else does.
  * Answers again when the app comes back to the same screen, since a push may have arrived while it
- * was away: the plugin skips a device whose stream is open, never one that was hidden. A screen in
- * a tab nobody is looking at answers nothing.
+ * was away. A screen in a tab nobody is looking at answers nothing.
  */
 export function useDismissPushes(subject: string | undefined) {
   useEffect(() => {

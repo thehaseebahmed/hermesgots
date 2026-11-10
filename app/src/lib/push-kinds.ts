@@ -279,10 +279,6 @@ export function aboutSubject(entry: TrayPush, subject: string) {
   return pushSubject(entry) === subject
 }
 
-/**
- * The subject a chat's own pushes name: the Host pushes a room under the room's id, and every push
- * about a chat under the Hermes session it runs in.
- */
 export function chatSubject(chat: Pick<Conversation, "id" | "hermesSessionId" | "room">) {
   return chat.room ? chat.id : chat.hermesSessionId
 }
