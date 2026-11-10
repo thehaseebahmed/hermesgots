@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { PICK_BUDGET, USAGE_THRESHOLDS } from "@/lib/afk-picks"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { cachedHost, keepHost } from "@/lib/host-cache"
 import {
   getBotAfk,
   getProviderUsage,
@@ -53,6 +54,8 @@ export function CodingTab({ profile }: { profile: Profile }) {
   const [budget, setBudget] = useState<number | null>(null)
   const [threshold, setThreshold] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
+  // Only this device's copy of the host's last answer is drawn: the controls are shut until it lands.
+  const [stale, setStale] = useState(false)
   // The count a write is carrying until its answer lands: a refused one drops it, so nothing on the
   // tab reads as saved that the host never kept.
   const [draft, setDraft] = useState<number | null>(null)
@@ -66,12 +69,25 @@ export function CodingTab({ profile }: { profile: Profile }) {
   // it rather than drawing a number nobody wrote.
   useEffect(() => {
     let cancelled = false
+    let landed = false
     setFailed(false)
+    void cachedHost<{ budget: number; threshold: number | null }>(config, "bot-afk").then(
+      (held) => {
+        if (cancelled || landed || !held) return
+        setBudget(held.budget)
+        setThreshold(held.threshold)
+        setStale(true)
+      },
+    )
     void getBotAfk(config, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((answer) => {
         if (cancelled) return
-        setBudget(answer.pickBudget ?? PICK_BUDGET.unset)
+        landed = true
+        const next = answer.pickBudget ?? PICK_BUDGET.unset
+        setBudget(next)
         setThreshold(answer.usageThreshold)
+        setStale(false)
+        void keepHost(config, "bot-afk", { budget: next, threshold: answer.usageThreshold })
       })
       .catch(() => {
         if (!cancelled) setFailed(true)
@@ -136,13 +152,24 @@ export function CodingTab({ profile }: { profile: Profile }) {
   const choose = async (next: number) => {
     // The count the tab already holds is no write, and neither is one past the host's own range: the
     // stepper's buttons are out of reach there, so this is only the guard behind them.
-    if (saving || failed || next < PICK_BUDGET.least || next > PICK_BUDGET.most || next === shown)
+    if (
+      saving ||
+      stale ||
+      failed ||
+      next < PICK_BUDGET.least ||
+      next > PICK_BUDGET.most ||
+      next === shown
+    )
       return
     setDraft(next)
     setSaving(true)
     try {
       const answer = await setBotAfkPickBudget(config, next)
       setBudget(answer.pickBudget ?? next)
+      void keepHost(config, "bot-afk", {
+        budget: answer.pickBudget ?? next,
+        threshold,
+      })
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick budget.")
     } finally {
@@ -153,12 +180,16 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   const chooseThreshold = async (next: number | null) => {
     // The value the tab already holds is no write, and a write still in flight is not one to race.
-    if (saving || failed || next === thresholdShown) return
+    if (saving || stale || failed || next === thresholdShown) return
     setThresholdDraft(next)
     setSaving(true)
     try {
       const answer = await setBotAfkUsageThreshold(config, next)
       setThreshold(answer.usageThreshold)
+      void keepHost(config, "bot-afk", {
+        budget: budget ?? PICK_BUDGET.unset,
+        threshold: answer.usageThreshold,
+      })
       // Off draws no figure, and the window behind it is no longer this bot's to show: the next
       // threshold set reads the account again.
       if ((answer.usageThreshold ?? null) === null) setDeciding(null)
@@ -175,7 +206,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
   return (
     <div className="flex flex-col gap-4" data-bot-coding>
       <Group>
-        <div className={cn(rowClass, "items-start gap-3")} aria-busy={saving || undefined}>
+        <div className={cn(rowClass, "items-start gap-3")} aria-busy={saving || stale || undefined}>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
             <span id="pick-budget-label" className="text-base">
               Pick budget
@@ -193,7 +224,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
               variant="outline"
               className="size-11"
               aria-label="Decrease pick budget"
-              disabled={saving || failed || shown <= PICK_BUDGET.least}
+              disabled={saving || stale || failed || shown <= PICK_BUDGET.least}
               onClick={() => void choose(shown - 1)}
             >
               <MinusIcon />
@@ -203,7 +234,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
               variant="outline"
               className="size-11"
               aria-label="Increase pick budget"
-              disabled={saving || failed || shown >= PICK_BUDGET.most}
+              disabled={saving || stale || failed || shown >= PICK_BUDGET.most}
               onClick={() => void choose(shown + 1)}
             >
               <PlusIcon />
@@ -217,7 +248,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
         )}
       </Group>
       <Group>
-        <div className="flex flex-col gap-3 px-4 py-3" aria-busy={saving || undefined}>
+        <div className="flex flex-col gap-3 px-4 py-3" aria-busy={saving || stale || undefined}>
           <div className="flex min-w-0 flex-col gap-0.5">
             <span data-usage-threshold-title className="text-base">
               Usage threshold
@@ -243,7 +274,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
               }))}
               value={thresholdShown}
               onChange={(next) => void chooseThreshold(next)}
-              disabled={saving || failed}
+              disabled={saving || stale || failed}
             />
           </div>
           {figure && (
