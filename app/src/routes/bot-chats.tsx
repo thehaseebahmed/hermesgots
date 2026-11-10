@@ -103,10 +103,6 @@ export function BotChatsPane({ pane }: { pane: BotPane }) {
   return <BotChatsList profileId={pane.profileId} selected={pane.selected} />
 }
 
-/**
- * The item lane a bot's screen is where the list stands beside it and no chat is open: the reader
- * stepped back onto the list, and the row they pick draws its chat in this place.
- */
 function NoChatOpen() {
   return (
     <div
@@ -220,7 +216,6 @@ function ChatList({
           >
             <MenuIcon />
           </Button>
-          {/* The bot's own name is the way into its settings, so the heading is a link and reads as one. */}
           <h1 className="min-w-0 flex-1">
             <Link
               to={botPath(bot.id)}
@@ -232,7 +227,6 @@ function ChatList({
               <span className="truncate text-xl font-semibold tracking-tight">{bot.name}</span>
             </Link>
           </h1>
-          {/* The bot's routines are the bot's own, so its list is where they are opened (G7). */}
           <Button
             variant="ghost"
             size="icon-lg"

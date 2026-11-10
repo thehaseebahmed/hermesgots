@@ -20,7 +20,6 @@ export interface CompactionEntry {
 /** An entry one chat's flow draws: a message, or the divider of a compaction above one. */
 export type ChatFlowEntry = { kind: "message"; message: Message } | CompactionEntry
 
-/** A compaction's divider, at the time the host recorded it. */
 export const compactionEntry = (compaction: Compaction): CompactionEntry => ({
   kind: "compaction",
   at: compactionAt(compaction),

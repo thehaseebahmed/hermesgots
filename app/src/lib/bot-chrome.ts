@@ -11,14 +11,12 @@ export function previewLine({
   title,
   online,
 }: {
-  /** The newest chat's latest words, cut to a line. */
   line?: string
   /** That chat's title, for one holding no words yet. */
   title?: string
   /** Whether the bot's host is checking in; `undefined` when this device can't tell. */
   online?: boolean
 }): string | undefined {
-  // A chat whose newest words are blank has said nothing the row can show.
   const said = line?.trim() ? line : title
   if (said) return said
   if (online === undefined) return undefined

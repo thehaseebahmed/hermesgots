@@ -8,7 +8,6 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { getSettings, type Settings } from "@/lib/db"
 
-/** Developer's legacy Recents layout: whether this device draws it instead of a bot's chats. */
 export function legacyChatOn(settings: Pick<Settings, "legacyChat"> | undefined) {
   return Boolean(settings?.legacyChat)
 }

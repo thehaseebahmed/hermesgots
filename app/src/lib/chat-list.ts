@@ -17,22 +17,17 @@ import type { Conversation, Message } from "./db.ts"
  */
 export const BOT_CHATS = 50
 
-/** The chat record a row is read from. */
 export type ChatRecord = Pick<
   Conversation,
   "id" | "title" | "pinned" | "updatedAt" | "routine" | "line"
 >
 
-/** The newest message this device holds for a chat: its words, its time, and anything it waits on. */
 export type ChatTail = Pick<Message, "content" | "createdAt" | "clarify" | "approval">
 
 /**
- * One row of a bot's chat list: the chat's title, the newest thing said in it cut to a line, the clock
- * the row is ordered and aged by, and whether a reply in it is waiting on the reader.
- *
- * A room is one of these rows too. It wears its members' pictures where a chat wears its bot's, and
- * what its own log ends asking the reader for, since a room has no tail on this device to read
- * (ADR 0115, ADR 0116).
+ * A room is a row of this list like a chat: it wears its members' pictures where a chat wears its
+ * bot's, and says what its own log ends asking the reader for, since a room has no tail on this
+ * device to read (ADR 0115, ADR 0116).
  */
 export interface ChatListRow {
   id: string
@@ -67,8 +62,6 @@ export function waitsOnUser(newest: ChatTail | undefined): boolean {
  * a chat would clear a mark the answer is still owed.
  */
 export function chatRowOf(chat: ChatRecord, newest?: ChatTail, waits = newest): ChatListRow {
-  // A routine's delivery: the run's line and the delivery's time are on the record, because the words
-  // are in the run's own session and this device holds no message of the row at all.
   if (chat.routine)
     return {
       id: chat.id,

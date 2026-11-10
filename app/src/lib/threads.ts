@@ -44,11 +44,9 @@ export function useNow() {
 
 export interface BotSummary {
   bot: Profile
-  /** Its newest chat. */
   latest?: Conversation
   /** The newest chat's latest message, cut to a line. */
   preview?: string
-  /** Chats waiting on the user. */
   waiting: number
   /** A chat this device holds past its read mark, and never a coding session's (ADR 0110). */
   unread: boolean

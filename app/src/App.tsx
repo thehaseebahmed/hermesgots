@@ -120,7 +120,6 @@ function AppRoutes() {
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
         <Route path="b/:profileId" element={<BotChatsPage />} />
-        {/* A bot's routines, opened by the control in its list's header (G7). */}
         <Route path="b/:profileId/routines" element={<RoutinesPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}

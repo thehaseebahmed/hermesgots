@@ -10,7 +10,6 @@
 import { conversationsOf, db, type Conversation } from "./db.ts"
 import { listsAsChat } from "./lists-as-chat.ts"
 
-/** Where this device keeps the chat a bot was last in. */
 export const lastChatKey = (profileId: string) => `gots:last-chat:${profileId}`
 
 /**
@@ -20,7 +19,6 @@ export const lastChatKey = (profileId: string) => `gots:last-chat:${profileId}`
 const isChatOf = (chat: Conversation, profileId: string) =>
   chat.profileId === profileId && listsAsChat(chat) && !chat.routine
 
-/** The chat this device last had open for a bot, or nothing. */
 export function lastChatOf(profileId: string): string | null {
   try {
     return localStorage.getItem(lastChatKey(profileId))
@@ -30,13 +28,12 @@ export function lastChatOf(profileId: string): string | null {
   }
 }
 
-/** Remembers `chat` as the chat a bot was last in. */
 export function rememberLastChat(profileId: string, chat: string) {
   try {
     if (localStorage.getItem(lastChatKey(profileId)) !== chat)
       localStorage.setItem(lastChatKey(profileId), chat)
   } catch {
-    // As above: the next opening draws the list.
+    // Storage blocked: the write is lost, so the bot opens on its list.
   }
 }
 

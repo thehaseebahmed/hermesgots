@@ -98,9 +98,6 @@ const TONES: Record<RowTone, string> = {
 }
 
 /**
- * One row of a list: the feature's icon with the bot in its corner, the title and time, one status
- * line, and anything below it. The open item is tinted.
- *
  * A row whose mark is not one glyph — a room, wearing its members' pictures — hands it over as
  * `avatar`, which stands in the icon's place with no disc behind it: a cluster of four faces is wider
  * than the icon's circle, and the cluster is the app's own mark for a room wherever it is drawn

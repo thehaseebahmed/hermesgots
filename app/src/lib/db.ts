@@ -1891,7 +1891,6 @@ export async function getMessages(conversationId: string) {
     .toArray()
 }
 
-/** A message a list can draw a line from: one with words in it. */
 export const hasWords = (message: Message) => Boolean(message.content.trim())
 
 /** A reply — the only row a question or an approval sits on. */

@@ -457,7 +457,6 @@ function Rooms({
   const rows = useRoomNeeds()
   const canMake = useCanMakeRoom()
   if (!rows) return null
-  // A room's place is the chat list's own: pinned first, then by what was last said in it.
   const ordered = [...rows].sort((one, two) => compareChatOrder(placeOf(one), placeOf(two)))
   return (
     <>
@@ -516,7 +515,6 @@ function Rooms({
   )
 }
 
-/** The three facts the one list order reads, off a room's row. */
 const placeOf = ({ chat }: RoomNeedsRow) => ({
   id: chat.id,
   at: chat.updatedAt,
