@@ -8,6 +8,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { aboutSubject, chatSubject, pushSubject } from "../src/lib/push-kinds.ts"
+import { body, read } from "./push-source.mjs"
 
 /** A push the web's service worker is showing, tagged and carried the way it writes them. */
 const web = (session, group = "session") => ({
@@ -31,7 +32,10 @@ test("a push names the subject its tag or its data carries", () => {
 
 test("a push about nothing a screen opens names no subject", () => {
   // A routine's failure and a project that couldn't be set up: no thread, no screen of their own.
-  assert.equal(pushSubject({ tag: "gots", data: { sessionId: "", screen: "/routines" } }), undefined)
+  assert.equal(
+    pushSubject({ tag: "gots", data: { sessionId: "", screen: "/routines" } }),
+    undefined,
+  )
   assert.equal(pushSubject({ tag: "routine_failed:", data: {} }), undefined)
   assert.equal(pushSubject({ tag: "code_setup_failed:", data: {} }), undefined)
   assert.equal(pushSubject({}), undefined)
@@ -67,4 +71,41 @@ test("a chat answers its session, and a room its own id", () => {
     "the Host pushes a room under the room's id, not the session the app gave its row",
   )
   assert.equal(chatSubject({ id: "chat-1" }), undefined, "a chat with no session names nothing")
+})
+
+test("nothing empties the tray: an arrival answers no push", () => {
+  const push = read("push.ts")
+  assert.doesNotMatch(
+    push,
+    /removeAllDeliveredNotifications/,
+    "every push is dismissed one at a time, by what it is about",
+  )
+  assert.doesNotMatch(push, /clearNotifications/, "and nothing clears the tray whole")
+  for (const name of ["startWeb", "startNative", "startPush"]) {
+    assert.ok(body(name), `${name} is in push.ts`)
+    assert.doesNotMatch(
+      body(name),
+      /dismiss/,
+      `${name} answers nothing: a push leaves by the screen it is about, or by its tap`,
+    )
+  }
+})
+
+test("one screen's answer closes its own pushes, read once", () => {
+  const dismissal = body("dismiss")
+  assert.ok(dismissal, "dismiss is in push.ts")
+  assert.match(dismissal, /getDeliveredNotifications\(\)/, "the phone's tray is read")
+  assert.match(
+    dismissal,
+    /removeDeliveredNotifications\(\{ notifications: answered \}\)/,
+    "and only the pushes the rule answered are removed",
+  )
+  assert.match(dismissal, /getNotifications\(\)/, "the web's tray is read the same way")
+  const rule = dismissal.indexOf("aboutSubject(")
+  assert.ok(rule >= 0, "both are held to the rule")
+  assert.ok(
+    rule < dismissal.indexOf("notification.close()"),
+    "a notification is closed only where it picked one",
+  )
+  assert.ok(rule < dismissal.indexOf("removeDeliveredNotifications("), "and removed only there too")
 })

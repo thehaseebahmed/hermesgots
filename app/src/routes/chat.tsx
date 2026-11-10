@@ -113,6 +113,7 @@ import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
 import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
+import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -264,6 +265,8 @@ const roomsDrawn = new Set<string>()
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = props.chatId ?? params.id
+  // The chat on screen answers the pushes about it, and a chat it has not opened keeps its own.
+  useDismissChatPushes(id)
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
     // A canvas's chat is no chat: its address opens the canvas it belongs to (ADR 0113).

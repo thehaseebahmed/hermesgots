@@ -23,11 +23,14 @@ import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
   PUSH_FEATURES,
+  aboutSubject,
   allowedCategoryIds,
   changedList,
   channelPlan,
   categoryOn,
+  chatSubject,
   pushPath,
+  pushSubject,
   pushTarget,
   pushedSession,
   reachableCategories,
@@ -195,24 +198,59 @@ function useWebPush() {
 }
 
 /**
- * Clears what this app has shown in the device's notification tray: the Android app's, or the
- * service worker's on the web. Runs when the app comes to the front, so a push that arrived while
- * it was closed doesn't sit there after it's been opened. A session still waiting on the user stays
- * in Waiting for input. Nothing to clear (no registration, push never turned on) is a no-op.
+ * Dismisses what the device's tray holds about these subjects, and leaves every other push where it
+ * is: a screen answers its own, since a push about a thread the user has not opened is still news
+ * (ADR 0132). A push that names nothing openable is answered by its tap alone. Nothing to read (no
+ * registration, push never turned on) is a no-op.
  */
-export async function clearNotifications() {
+async function dismiss(subjects: readonly string[]) {
+  if (!subjects.length) return
   try {
     if (isNative) {
       const { push } = await plugin()
-      await push.removeAllDeliveredNotifications()
+      const { notifications } = await push.getDeliveredNotifications()
+      const answered = notifications.filter((entry) => aboutSubject(entry, subjects))
+      if (answered.length) await push.removeDeliveredNotifications({ notifications: answered })
       return
     }
     const registration = await navigator.serviceWorker?.getRegistration()
     if (!registration) return
-    for (const notification of await registration.getNotifications()) notification.close()
+    for (const notification of await registration.getNotifications())
+      if (aboutSubject(notification, subjects)) notification.close()
   } catch {
-    // An older APK's plugin without the call, or a browser without the Notifications API.
+    // An older APK's plugin without the read, or a browser without the Notifications API.
   }
+}
+
+/**
+ * The screen on display answers the pushes about it, so they leave the tray — and nothing else does.
+ * Runs again when the app comes back to the same screen, since a push may have arrived while it was
+ * away: the plugin skips a device whose stream is open, never one that was hidden.
+ */
+export function useDismissPushes(subject: string | undefined) {
+  useEffect(() => {
+    if (!subject) return
+    const answer = () => void dismiss([subject])
+    answer()
+    const back = () => {
+      if (document.visibilityState === "visible") answer()
+    }
+    document.addEventListener("visibilitychange", back)
+    return () => document.removeEventListener("visibilitychange", back)
+  }, [subject])
+}
+
+/**
+ * A chat's screen answers the pushes about it: the session its row runs in, or a room's own id. The
+ * row is followed rather than read once, so a session written after the screen opened is answered
+ * too.
+ */
+export function useDismissChatPushes(chatId: string | undefined) {
+  const subject = useLiveQuery(async () => {
+    const chat = chatId ? await db.conversations.get(chatId) : undefined
+    return chat ? chatSubject(chat) : undefined
+  }, [chatId])
+  useDismissPushes(subject)
 }
 
 /** Keeps new bots and a restarted app in step with the subscription. */
@@ -227,7 +265,6 @@ function startWeb() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return
     soon()
-    void clearNotifications()
   })
 }
 
@@ -416,6 +453,10 @@ async function listen(push: Push) {
   })
   await push.addListener("pushNotificationActionPerformed", ({ notification }) => {
     const path = pushPath(notification.data?.kind, notification.data?.session_id)
+    // The push that was tapped has been answered, whatever screen it opens: a chat this device
+    // holds, one it doesn't yet, a mission's, or a list no screen answers.
+    const subject = pushSubject(notification)
+    if (subject) void dismiss([subject])
     if (path) void openPush(path)
   })
 }
@@ -553,7 +594,6 @@ function startNative() {
   void syncNative().catch(() => {})
   void App.addListener("resume", () => {
     void syncNative().catch(() => {})
-    void clearNotifications()
   })
 }
 
@@ -700,8 +740,6 @@ export function startPush() {
   startMutes()
   if (isNative) startNative()
   else startWeb()
-  // Launch: the app is already in front, so whatever is in the tray has been seen.
-  void clearNotifications()
 }
 
 /** The toggle's state: whether push is available, allowed by the OS or browser and turned on here. */
