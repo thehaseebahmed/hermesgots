@@ -5,10 +5,14 @@
  * thread leaves the tray when that thread is opened, and one about anything else stays where it is.
  */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { aboutSubject, chatSubject, pushSubject } from "../src/lib/push-kinds.ts"
 import { body, read } from "./push-source.mjs"
+
+/** A screen's own file, as text: the route modules the screens live in. */
+const route = (name) => readFileSync(new URL(`../src/routes/${name}.tsx`, import.meta.url), "utf8")
 
 /** A push the web's service worker is showing, tagged and carried the way it writes them. */
 const web = (session, group = "session") => ({
@@ -108,4 +112,17 @@ test("one screen's answer closes its own pushes, read once", () => {
     "a notification is closed only where it picked one",
   )
   assert.ok(rule < dismissal.indexOf("removeDeliveredNotifications("), "and removed only there too")
+})
+
+test("the screens a push names answer it, and a tap answers its own", () => {
+  assert.match(route("chat"), /useDismissChatPushes\(/, "the chat on screen answers its thread")
+  assert.match(route("research"), /useDismissPushes\(mission\?\.id\)/, "a mission answers its own")
+  assert.match(route("meetings"), /useDismissPushes\(id\)/, "and so does a meeting")
+  const listen = body("listen")
+  assert.ok(listen, "listen is in push.ts")
+  assert.match(
+    listen,
+    /pushNotificationActionPerformed[\s\S]*dismiss\(/,
+    "the push a tap came from has been answered, whatever screen it opens",
+  )
 })

@@ -80,6 +80,7 @@ import { useModelInfo } from "@/lib/model-info"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useRememberOpened, useResearchPane, type FeaturePane } from "@/lib/pane"
+import { useDismissPushes } from "@/lib/push"
 import {
   FORMATS,
   MAX_FOLLOWUPS,
@@ -463,6 +464,8 @@ export function MissionPage() {
   // Beside the list a mission is the top-level screen, so back leaves the app.
   useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   useRememberOpened("research", mission?.id)
+  // The mission on screen answers the pushes about it, and every other push stays in the tray.
+  useDismissPushes(mission?.id)
 
   if (!mission)
     return (
