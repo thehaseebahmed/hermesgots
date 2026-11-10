@@ -22,6 +22,14 @@ and its routines' runs (ADR 0131), each drawn by what it is: a chat's icon, a ro
 pictures, a routine's timer. A routine's row is the one row whose line and time come off its record
 rather than a transcript, because its words are in the run's own session.
 
+**Every chat is a row; the tails are bounded.** The list holds every chat the bot has, however old, so
+nothing a pin or an old conversation could reach is left off it. What a row costs is the read of its
+newest message — its line, its age, the reply that waits — and those reads are bounded to the newest
+fifty chats and every pinned one (`BOT_CHATS` in `lib/chat-list.ts`); a row below that bound draws its
+title and its age off the record, which costs nothing to hold. A bound on the *rows* would have been
+cheaper still and could not be honest: it would put a pinned chat, or a chat of an older bot, out of
+reach of the only screen that reaches chats.
+
 **A bot opens where the reader left it.** Opening the bot opens the chat whose address was last on
 screen for it — kept per bot in this device's storage, never synced, since it is where a reader was
 sitting rather than a fact about the chat (`lib/last-chat.ts`). A memory that no longer holds — the

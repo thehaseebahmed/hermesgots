@@ -12,8 +12,10 @@ import { oneLine } from "./words.ts"
 import type { Conversation, Message } from "./db.ts"
 
 /**
- * How many of a bot's newest chats one screen reads. Its own list and the sidebar's preview are two
- * readings of the same set, so they are held to one bound.
+ * How many of a bot's newest chats one screen reads the tail of. Every chat the bot has is a row of
+ * its list — a bound on the rows would put a chat out of reach — and a record is cheap; what a row
+ * costs is the read of its newest message, which is what this bounds (`routes/bot-chats.tsx`, and the
+ * sidebar's one preview read here too). A pinned chat's tail is read wherever its clock puts it.
  */
 export const BOT_CHATS = 50
 

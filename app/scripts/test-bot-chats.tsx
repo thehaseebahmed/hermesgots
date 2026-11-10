@@ -8,10 +8,12 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BotChatsPage } from "@/routes/bot-chats"
-import { db, type Message } from "@/lib/db"
+import { BOT_CHATS } from "@/lib/chat-list"
+import { db, deleteConversation, type Message } from "@/lib/db"
 import { markRead } from "@/lib/read-marks"
 import {
   Path,
@@ -266,6 +268,58 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
   })
 })
 
+test("the list holds every chat the bot has, so a pin and a chat past the bound are both reachable", async () => {
+  // One more chat than a list reads a tail for. The bound is on the reads a row costs — its newest
+  // message — and never on which of the bot's chats the list holds: a chat older than the bound is
+  // still a row, and the pin on the oldest of them puts it where its pin says.
+  const many: Seed[] = [
+    { id: "pinned-old", title: "Held on top", at: 1, pinned: true, said: "Still here" },
+    ...Array.from({ length: BOT_CHATS + 1 }, (_, index) => ({
+      id: `chat-${index}`,
+      title: `Chat ${index}`,
+      at: 1_000 + index * 10,
+      said: `Said ${index}`,
+    })),
+  ]
+  await seed(many)
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === many.length, "every chat the bot has")
+    assert.equal(rowIds()[0], "pinned-old", "the pin lifts it above every chat newer than the bound")
+    assert.ok(
+      wordsOf(rowOf("pinned-old")).includes("Still here"),
+      "and a pinned chat keeps the line its own tail gives it",
+    )
+    assert.ok(rowIds().includes("chat-0"), "the oldest chat past the bound is a row of the list")
+    await click(rowOf("chat-0"))
+    await until(async () => path() === "/c/chat-0", "the chat a row past the bound opens")
+  })
+})
+
+test("a row deleted here is not resurrected by a record written ahead of this device's clock", async () => {
+  // A delivery's record is stamped by the host's clock, which can run ahead of this device's. The
+  // merge keeps only the strictly newer record, so a tombstone stamped from the device's own clock
+  // would lose to the row it kills and the row would come back on the next merge.
+  const ahead = Date.now() + 60 * 60_000
+  await seed([
+    {
+      id: "routine-job-1-cron_9",
+      title: "Morning watch",
+      at: ahead,
+      routine: { line: "The tide turns at 06:40." },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(rowOf("routine-job-1-cron_9")), "the run's row")
+  })
+  await deleteConversation("routine-job-1-cron_9")
+  const tombstone = await db.tombstones.get("chat:routine-job-1-cron_9")
+  assert.ok(tombstone, "its deletion is named for the other devices")
+  assert.ok(
+    tombstone!.deletedAt > ahead,
+    "and stamped past the record it kills, which is the only clock the merge compares",
+  )
+})
+
 test("the header's title is the bot's name, and it is the way to its settings", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
@@ -287,6 +341,13 @@ test("the header's title is the bot's name, and it is the way to its settings", 
       1,
       "and the routine control stands apart from the drawer and the search",
     )
+    const routines = find('header a[aria-label="Routines"]')
+    assert.equal(
+      routines?.getAttribute("role"),
+      null,
+      "a link to a screen announced as the link it is, not as a button",
+    )
+    assert.ok((routines?.className ?? "").includes("size-11"), "and still a full touch target")
   })
 })
 
@@ -318,6 +379,53 @@ test("the search narrows the rows to the chats whose title or line it finds", as
     assert.deepEqual(rowIds(), [], "nothing matches what is not there")
   })
 })
+
+test("emptying the search leaves the field where it is, and only Escape or the toggle close it", async () => {
+  // A field that closes itself the moment it is empty takes the focus and the keyboard with it, so
+  // backspacing the last character — or the field's own clear control — throws the reader out of a
+  // search they were still in.
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "dinner", title: "Dinner", at: 200, said: "We said eight" },
+  ])
+  await mount(screen(), async () => {
+    // The field itself, read once per look: a found element handed to `assert`'s equality is one the
+    // reporter inspects, which the tier's own guard refuses.
+    const field = () => find("#chats-search") as HTMLInputElement | null
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    await click(find("[data-search-toggle]"))
+    await type(field(), "lisbon")
+    await until(async () => rowIds().length === 1, "the row the search keeps")
+    await type(field(), "")
+    assert.ok(field(), "backspacing the last character leaves the field open")
+    await until(async () => rowIds().length === 2, "and the list it narrowed")
+
+    await type(field(), "dinner")
+    await until(async () => rowIds().length === 1, "the row it narrows to again")
+    await click(find('[aria-label="Clear search"]'))
+    const cleared = field()
+    assert.ok(cleared, "the clear control empties the field rather than closing it")
+    assert.equal(cleared?.value, "", "and the field is empty")
+    await until(async () => rowIds().length === 2, "with the whole list back")
+
+    await press(field(), "Escape")
+    absent("#chats-search", "Escape is one of the two ways it closes")
+
+    await click(find("[data-search-toggle]"))
+    assert.ok(field(), "the toggle opens it again")
+    await click(find("[data-search-toggle]"))
+    absent("#chats-search", "and is the other way it closes")
+  })
+})
+
+/** A key pressed in the field, as the field's own handler reads it. */
+async function press(field: Element | null, key: string) {
+  assert.ok(field, "the field is on screen")
+  await act(async () => {
+    field.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))
+  })
+  await settle()
+}
 
 test("the foot starts a chat of this bot's, and a room where the Host makes one", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { Bot } from "@/components/bot"
+import { BackButton } from "@/components/back-button"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { Markdown } from "@/components/chat/markdown"
@@ -23,9 +24,14 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { ROOM_MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { botChatsPath } from "@/lib/bot-tabs"
 import { chatOwner } from "@/lib/chat-owner"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
+import { useLegacyChat } from "@/lib/legacy-chat"
+import { BACK_ON_LIST, useNav } from "@/lib/nav"
+import { setBackGuard } from "@/lib/native"
+import { useBotChatsPane } from "@/lib/pane"
 import { AttachmentError } from "@/lib/send-turn"
 import { tell } from "@/lib/tell"
 import type { HermesConfig } from "@/lib/hermes"
@@ -39,7 +45,6 @@ import {
 } from "@/lib/db"
 import { COLUMN_BOX } from "@/lib/layout"
 import { seatedLine } from "@/lib/room-seats"
-import { useNav } from "@/lib/nav"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
 import { botsByProfile, roomMembersLine } from "@/lib/rooms"
@@ -69,9 +74,28 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     [chat, seated],
   )
   const { live, rows, send, approve, answer, stop } = useRoom(chat, answerer)
-  const { root } = useNav()
+  const { root, up } = useNav()
   const location = useLocation()
   const navigate = useNavigate()
+  const legacy = useLegacyChat()
+  // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
+  const upRef = useRef(up)
+  upRef.current = up
+  // The bot's list this room is a row of: the one the row was opened from, as its link says in the
+  // address's state, else the bot that carries the room onto this device. A room is no bot's chat
+  // (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width — the list is never
+  // beside it, and this screen is always one the list pushed.
+  const carrier = (location.state as { bot?: string } | null)?.bot ?? chat?.profileId
+  const listPath = legacy === false && carrier ? botChatsPath(carrier) : undefined
+  const besideList = Boolean(useBotChatsPane(legacy === false)) && Boolean(listPath)
+  const listBot = carrier ? seated.get(carrier) : undefined
+  useEffect(() => {
+    if (!listPath) return
+    return setBackGuard(() => {
+      upRef.current(listPath, BACK_ON_LIST)
+      return true
+    })
+  }, [listPath])
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a
   // room nothing owns any more.
@@ -139,6 +163,17 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         subtitle={chat?.room ? roomMembersLine({ ...chat.room, members: live.members }) : undefined}
         botId={answerer?.botId}
         actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
+        leading={
+          // The list its row stands in, where that list is not on screen beside this one: a room is
+          // opened from a bot's list like any row of it, so it carries the same way back a chat does.
+          besideList ? undefined : listPath ? (
+            <BackButton
+              label={`Back to ${listBot?.name ?? "the chats"}`}
+              onClick={() => up(listPath, BACK_ON_LIST)}
+              floating
+            />
+          ) : undefined
+        }
       />
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="flex-1">

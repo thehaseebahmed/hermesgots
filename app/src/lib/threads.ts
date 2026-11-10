@@ -103,15 +103,23 @@ export function useBotSummaries(): BotSummary[] | undefined {
           .limit(BOT_CHATS)
           .toArray()
         // Only a chat's newest reply can wait on the user, so only that one is read, and the row the
-        // bot previews is read beside it rather than after the batch.
+        // bot previews is read beside it rather than after the batch — unless that row is a
+        // routine's, whose line is on its record and which holds no message here at all.
+        const newestChat = chats[0]
         const [newest, words] = await Promise.all([
           Promise.all(chats.map((c) => newestMessage(c.id, isReply))),
-          chats[0] ? newestMessage(chats[0].id) : undefined,
+          newestChat && !newestChat.routine ? newestMessage(newestChat.id) : undefined,
         ])
         const local = new Set(newest.filter((m) => waitsOnUser(m)).map((m) => m!.conversationId))
-        // What the row previews: what the bot's newest chat last said, a chat with no words answering
-        // with its own name rather than nothing at all (ADR 0090).
-        return { bot, chats, local, preview: words ? oneLine(words.content) : undefined }
+        // What the row previews: what the bot's newest chat last said — a run says it on its own
+        // record, as the bot's list draws it — and a chat with no words of its own answering with
+        // its name rather than nothing at all (ADR 0090).
+        const preview = newestChat?.routine
+          ? newestChat.line
+          : words
+            ? oneLine(words.content)
+            : undefined
+        return { bot, chats, local, preview }
       }),
     )
   }, [])

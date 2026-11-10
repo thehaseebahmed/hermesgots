@@ -16,7 +16,7 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
 import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
@@ -30,6 +30,7 @@ import { roomRowOf } from "@/lib/rooms"
 import { isUnread } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
+import { cn } from "@/lib/utils"
 
 const SEARCH_FIELD_ID = "chats-search"
 
@@ -126,15 +127,20 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
   const answer = useLiveQuery(async () => {
     const bot = await db.profiles.get(profileId)
     if (!bot) return { profileId, bot: null, rows: [] }
-    const chats = await conversationsOf(profileId)
-      .reverse()
-      .filter(listsAsChat)
-      .limit(BOT_CHATS)
-      .toArray()
+    // Every chat the bot has, newest first: a chat older than any bound is still a row of this list,
+    // since a bound is not something a reader can see (ADR 0130).
+    const chats = await conversationsOf(profileId).reverse().filter(listsAsChat).toArray()
+    // What a row costs is the read of its newest message, never its record, so the tails are read
+    // for the newest `BOT_CHATS` chats and every pinned one — a pin is the reader's own word that
+    // the chat matters, wherever its clock puts it — and a row past that bound draws its title and
+    // age from the record alone.
+    const tailed = new Set(
+      [...chats.slice(0, BOT_CHATS), ...chats.filter((chat) => chat.pinned)].map((chat) => chat.id),
+    )
     const rows = await Promise.all(
       // A routine's row reads its line and time off the record, so its tail isn't asked for at all.
       chats.map(async (chat) => {
-        if (chat.routine) return chatRowOf(chat)
+        if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
         const newest = await newestMessage(chat.id)
         // A question or an approval sits on a reply, so a chat whose newest row is the reader's own
         // still waits while the reply above it does.
@@ -227,15 +233,16 @@ function ChatList({
               <span className="truncate text-xl font-semibold tracking-tight">{bot.name}</span>
             </Link>
           </h1>
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 shrink-0 rounded-full text-muted-foreground"
-            nativeButton={false}
-            render={<Link to={botRoutinesPath(bot.id)} aria-label="Routines" />}
+          <Link
+            to={botRoutinesPath(bot.id)}
+            aria-label="Routines"
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon-lg" }),
+              "size-11 shrink-0 rounded-full text-muted-foreground",
+            )}
           >
             <TimerIcon />
-          </Button>
+          </Link>
           <Button
             ref={searchToggle}
             variant="ghost"
@@ -257,7 +264,10 @@ function ChatList({
           <SearchField
             id={SEARCH_FIELD_ID}
             value={query}
-            onChange={(next) => (next ? setQuery(next) : closeSearch())}
+            // An empty field is a search that found everything, not a reason to shut: Escape and the
+            // toggle are the two ways this closes, so backspacing the last character — or the
+            // field's own clear control — keeps the focus and the keyboard where the reader is.
+            onChange={setQuery}
             label="Search chats"
             inputRef={field}
             onKeyDown={(event) => {

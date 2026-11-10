@@ -20,6 +20,7 @@ import {
   seedSettings,
   SwitchTo,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-rows", { id: "bot-1", name: "Mainly" })
@@ -168,6 +169,63 @@ test("a thread's render writes its mark, which is the moment the row measures ag
   await seed({ id: "mark-thread", at: 777 })
   await mount(chatScreen("mark-thread"), async () => {
     await until(async () => readMark("mark-thread") === 777, "the mark the thread's own render wrote")
+  })
+})
+
+test("the bot layout's sidebar has no Routines row, and the legacy one keeps its own", async () => {
+  // The bot layout reaches a bot's routines from that bot's list, so a sidebar row there would open
+  // a screen the list already offers. The legacy layout has no bot list at all: with the row gone
+  // too, the Developer switch would leave its reader with no way to their routines.
+  await seed({ id: "routines-thread", at: 2 })
+  await mount(screen("/"), async () => {
+    await until(async () => Boolean(botRow()), "the bot's row")
+    absent('a[href="/routines"]', "the bot layout opens routines from the bot's list")
+  })
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
+  await mount(screen("/"), async () => {
+    await until(async () => Boolean(find('a[href="/routines"]')), "the legacy sidebar's routines row")
+    assert.equal(wordsOf(find('a[href="/routines"]')), "Routines", "named as the screen it opens")
+  })
+})
+
+test("a bot's newest row being a routine's, the sidebar says the line the list says", async () => {
+  // A routine's row has no message on this device: its line is the record's. The sidebar reads the
+  // newest chat's tail, which a run doesn't have, so without its record's line the row falls back
+  // to the routine's name — one thing in the sidebar and another in the list.
+  await seedSettings({ developer: true, activeProfileId: bot.id })
+  await db.profiles.clear()
+  await db.profiles.put(bot)
+  await db.messages.clear()
+  await db.conversations.clear()
+  await db.conversations.bulkPut([
+    {
+      id: "routine-job-1-cron_9",
+      profileId: bot.id,
+      title: "Morning watch",
+      routine: true,
+      line: "The tide turns at 06:40, and the wind is from the west.",
+      hermesSessionId: "cron_9",
+      createdAt: 1,
+      updatedAt: 500,
+      changedAt: 1,
+    },
+    {
+      id: "older-chat",
+      profileId: bot.id,
+      title: "An older chat",
+      hermesSessionId: "gots-older-chat",
+      createdAt: 2,
+      updatedAt: 400,
+      changedAt: 2,
+    },
+  ])
+  globalThis.fetch = async () => json({})
+  await mount(screen("/"), async () => {
+    await until(async () => Boolean(botRow()), "the bot's row")
+    assert.ok(
+      wordsOf(botRow()).includes("The tide turns at 06:40"),
+      "the run's own line, as the bot's list draws it",
+    )
   })
 })
 

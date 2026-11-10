@@ -27,6 +27,7 @@ import { formatRelative } from "@/lib/format"
 import { connectionKey, noteChange } from "@/lib/live"
 import { syncNow } from "@/lib/sync"
 import { useLegacyChat } from "@/lib/legacy-chat"
+import { pressBack } from "@/lib/native"
 import { useBotChatsPane } from "@/lib/pane"
 
 import {
@@ -34,12 +35,14 @@ import {
   absent,
   atWidth,
   botProfile,
+  click,
   find,
   findAll,
   findText,
   json,
   missing,
   mount,
+  path,
   seedSettings,
   settle,
   until,
@@ -606,6 +609,35 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
       "a room open on this device no longer needs the user",
       CLEARS_MS,
     )
+  })
+})
+
+test("a room opened from a bot's list leads back to that list, by its control and by back", async () => {
+  // A room is a row of every bot's list it seats, and the shell lays no bot list beside a room — it
+  // is no bot's chat (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width. The
+  // room's screen is therefore a screen the list pushed wherever it is opened from, and without a
+  // control of its own the only way out would be Android's hardware back.
+  await fresh({ chats: true, layout: "bots" })
+  await merged()
+  const roomFromList = () => (
+    <MemoryRouter initialEntries={[{ pathname: `/c/${ROOM}`, state: { bot: CODER } }]}>
+      <Path />
+      <Routes>
+        <Route path="/c/:id" element={<RoomChat id={ROOM} slot="route" />} />
+        <Route path="/b/:profileId" element={<p data-list />} />
+      </Routes>
+    </MemoryRouter>
+  )
+  await mount(roomFromList(), async () => {
+    await until(async () => Boolean(find(`[aria-label="Back to Coder"]`)), "the way back")
+    await click(find(`[aria-label="Back to Coder"]`))
+    await until(async () => path() === `/b/${CODER}`, "the list the row stands in")
+    assert.ok(find("[data-list]"), "and the room's screen is what was left")
+  })
+  await mount(roomFromList(), async () => {
+    await until(async () => Boolean(find(`[aria-label="Back to Coder"]`)), "the screen's own way out")
+    assert.equal(pressBack(), "screen", "Android's back is the same answer")
+    await until(async () => path() === `/b/${CODER}`, "the list behind it")
   })
 })
 

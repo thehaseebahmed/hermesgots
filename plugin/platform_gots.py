@@ -271,8 +271,14 @@ def publish_waiting(home: Path) -> int:
 
     Those rows waited for a chat's turn to end; the write path that would have written them is gone, so
     each becomes the row it would be now — the run it names, published once, with the time it was
-    delivered — rather than being lost at the upgrade. The table (v51's ``routine_messages``) goes with
-    that write path once nothing is left in it, so a home that never had one is left alone.
+    delivered, and announced the way a delivery landing now is — rather than being lost at the upgrade.
+
+    The table (v51's ``routine_messages``) goes only once nothing in it was left behind. A row naming no
+    routine, or no run, is one nothing can publish — a row whose run is unknown would open an empty
+    chat — so it is kept and logged by its execution instead: the queue is small, and dropping it would
+    be the one way a delivery disappears without a trace. A row the old path already wrote into a
+    chat's transcript is not queued at all: it went where the old app drew it, and the table takes that
+    with it.
 
     Answers how many rows it published.
     """
@@ -280,7 +286,18 @@ def publish_waiting(home: Path) -> int:
     if not path.exists():
         return 0
     published = 0
+    kept = 0
     for item in _waiting(path):
+        if not item["job_id"] or not item["run_session"]:
+            kept += 1
+            logger.warning(
+                "gots: a routine delivery left queued in %s (%s) names no %s, so it is kept rather "
+                "than dropped",
+                path,
+                item["execution"] or "no execution",
+                "routine" if not item["job_id"] else "run",
+            )
+            continue
         title = routine_name(item["job_id"], item["title"])
         if publish(
             path,
@@ -291,22 +308,26 @@ def publish_waiting(home: Path) -> int:
             at=item["at"],
         ):
             published += 1
-    _drop_waiting(path)
+            # Inside the publishing, so a delivery announced at the upgrade reaches the device the
+            # way one that lands now does (`deliver`), and a row queued as not-notifying stays quiet.
+            if item["notify"]:
+                push.notify(KIND, item["run_session"], path=path)
+    if not kept:
+        _drop_waiting(path)
     return published
 
 
 def _waiting(path: Path) -> List[Dict[str, Any]]:
     """The deliveries an older plugin queued and never wrote, oldest first.
 
-    Only rows naming both a job and the run it executed can be published: a row with neither is one
-    nothing can open, and it has no run to be about.
+    Every unwritten row, including the ones nothing can attribute: which of them can be published is
+    ``publish_waiting``'s to decide, since keeping the table is what it does with the rest.
     """
     conn = connect(path)
     try:
         rows = conn.execute(
-            """SELECT job_id, title, run_session, text, at FROM routine_messages
-               WHERE row IS NULL AND job_id IS NOT NULL AND run_session IS NOT NULL
-               ORDER BY at"""
+            """SELECT execution, job_id, title, run_session, text, at, notify
+               FROM routine_messages WHERE row IS NULL ORDER BY at"""
         ).fetchall()
     except sqlite3.OperationalError:
         # A store that never had the table: the write path is long gone.
@@ -314,8 +335,16 @@ def _waiting(path: Path) -> List[Dict[str, Any]]:
     finally:
         conn.close()
     return [
-        {"job_id": str(job_id), "title": title, "run_session": str(run_session), "text": text, "at": at}
-        for job_id, title, run_session, text, at in rows
+        {
+            "execution": execution,
+            "job_id": str(job_id) if job_id else None,
+            "title": title,
+            "run_session": str(run_session) if run_session else None,
+            "text": text,
+            "at": at,
+            "notify": True if notify is None else bool(notify),
+        }
+        for execution, job_id, title, run_session, text, at, notify in rows
     ]
 
 
@@ -461,17 +490,28 @@ def adapter_factory(config: Any) -> Any:
     return cls(config=config, platform=Platform(NAME))
 
 
-def name_channel() -> None:
-    """Writes the home channel a bare ``deliver: gots`` resolves to into this profile's ``.env``.
+def name_channel(homes: Iterable[Path]) -> List[Path]:
+    """Writes the home channel a bare ``deliver: gots`` resolves to into each home's ``.env``.
 
-    The writer is the one linking already uses, so the file keeps the shape link leaves in it. A
-    profile whose file can't be written keeps working for every job that names a target; only a bare
-    ``gots`` is refused by Hermes, and that is the write this exists for.
+    A host may serve several profiles (`link.served_homes`), and each profile's cron resolves the
+    channel out of its own file: a line written into one home leaves every other profile's bare
+    ``gots`` with no legal target, which is the write this exists for. The writer is the one linking
+    already uses, so the file keeps the shape link leaves in it.
+
+    Answers the homes whose file couldn't be written. A profile that refuses the line keeps working
+    for every job that names a target — only a bare ``gots`` is refused by Hermes — so one unreadable
+    file is a warning naming it rather than a write that gives up on the rest.
     """
-    try:
-        link.set_env(home_of(current_path()), HOME_ENV_VAR, HOME_CHANNEL)
-    except Exception:
-        logger.warning("gots: couldn't write %s to this profile's .env", HOME_ENV_VAR, exc_info=True)
+    failed: List[Path] = []
+    for home in homes:
+        try:
+            link.set_env(Path(home), HOME_ENV_VAR, HOME_CHANNEL)
+        except Exception:
+            logger.warning(
+                "gots: couldn't write %s to %s", HOME_ENV_VAR, Path(home) / ".env", exc_info=True
+            )
+            failed.append(Path(home))
+    return failed
 
 
 def register(ctx: Any) -> bool:
@@ -507,8 +547,15 @@ def register(ctx: Any) -> bool:
         logger.warning("gots: this Hermes refused the Gots platform; routines stay local", exc_info=True)
         return False
     # A bare `deliver: gots` has no legal target without a home channel, so registering the platform
-    # is when the profile is given one.
-    name_channel()
+    # is when the profile it is loaded into is given one. The homes this process serves past its own
+    # are named where the adapter is in hand (`_wire_api_server`).
+    failed = name_channel([home_of(current_path())])
+    if failed:
+        logger.warning(
+            "gots: %s is missing from %s, so a bare `deliver: gots` is refused there",
+            HOME_ENV_VAR,
+            ", ".join(str(home) for home in failed),
+        )
     logger.info("gots: a routine delivers to %s, and its run is a row of this bot's chats", NAME)
     return True
 

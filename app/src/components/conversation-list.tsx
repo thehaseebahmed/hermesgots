@@ -16,6 +16,7 @@ import {
   SearchIcon,
   ShieldAlertIcon,
   TelescopeIcon,
+  TimerIcon,
   TriangleAlertIcon,
   UserIcon,
 } from "lucide-react"
@@ -711,6 +712,17 @@ export function ConversationList({
             >
               <AudioLinesIcon className="size-5 text-muted-foreground" />
               {!collapsed && "Meetings"}
+            </RootLink>
+          )}
+          {legacy === true && (
+            <RootLink
+              to="/routines"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Routines" : undefined}
+              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+            >
+              <TimerIcon className="size-5 text-muted-foreground" />
+              {!collapsed && "Routines"}
             </RootLink>
           )}
           <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />

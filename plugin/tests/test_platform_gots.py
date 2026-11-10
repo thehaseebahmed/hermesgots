@@ -161,6 +161,31 @@ class RoutineRow(unittest.TestCase):
         env = (self.home / ".env").read_text(encoding="utf-8")
         self.assertIn("GOTS_HOME_CHANNEL=gots", env)
 
+    def test_the_channel_is_named_in_every_home_it_is_given(self):
+        # A multiplexed host serves more than the profile it was launched as, and each home has its
+        # own `.env`: a line written into one leaves every other profile's bare `gots` with no legal
+        # target (`link.served_homes`, the list the wiring pass and `resume` both publish for).
+        others = [Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())]
+        failed = platform_gots.name_channel([self.home, *others])
+        self.assertEqual(failed, [])
+        for home in (self.home, *others):
+            self.assertIn("GOTS_HOME_CHANNEL=gots", (home / ".env").read_text(encoding="utf-8"))
+
+    def test_a_home_that_refuses_the_line_is_reported_and_the_rest_are_named(self):
+        # A file that can't be written is not a reason to leave every other profile without a
+        # channel, and it is not something to swallow either: the caller is told which homes missed
+        # it, and the log names the file.
+        broken = Path(tempfile.mkdtemp())
+        (broken / ".env").mkdir()
+        other = Path(tempfile.mkdtemp())
+        with self.assertLogs("plugin.platform_gots", level="WARNING") as logs:
+            failed = platform_gots.name_channel([broken, other])
+        self.assertEqual(failed, [broken], "the home that refused it is answered, not dropped")
+        self.assertIn("GOTS_HOME_CHANNEL=gots", (other / ".env").read_text(encoding="utf-8"))
+        self.assertTrue(
+            any("GOTS_HOME_CHANNEL" in line for line in logs.output), "and the file is named"
+        )
+
     def test_the_adapter_cannot_promise_a_turn(self):
         adapter = platform_gots.adapter_factory(mock.Mock())
         self.assertFalse(adapter.supports_async_delivery)
@@ -255,7 +280,7 @@ class RoutineRow(unittest.TestCase):
         )
 
     # -- the boundary: a delivery an older plugin queued -------------------
-    def _queue(self, job_id=JOB, run_session=RUN, text=LINE, at=1_760_000_000_000):
+    def _queue(self, job_id=JOB, run_session=RUN, text=LINE, at=1_760_000_000_000, notify=1):
         conn = sqlite3.connect(self.store, isolation_level=None)
         conn.executescript(
             """CREATE TABLE IF NOT EXISTS routine_messages (
@@ -267,8 +292,8 @@ class RoutineRow(unittest.TestCase):
         conn.execute(
             "INSERT INTO routine_messages (execution, session_id, chat_id, job_id, title, run_session,"
             " text, at, row, notify) VALUES (?, 'gots-main', 'main', ?, 'Morning watch', ?, ?, ?,"
-            " NULL, 1)",
-            (f"{job_id}:{run_session}", job_id, run_session, text, at),
+            " NULL, ?)",
+            (f"{job_id}:{run_session}", job_id, run_session, text, at, notify),
         )
         conn.close()
 
@@ -302,6 +327,33 @@ class RoutineRow(unittest.TestCase):
 
     def test_a_home_with_no_store_has_nothing_to_publish(self):
         self.assertEqual(platform_gots.publish_waiting(Path(tempfile.mkdtemp())), 0)
+
+    def test_a_delivery_published_at_the_upgrade_is_announced_like_a_live_one(self):
+        # A row queued before the plugin upgraded reaches the app as a row like any other, so the
+        # device is told about it the way a delivery landing now tells it — otherwise the first
+        # anyone hears of that run is a list they happened to open.
+        self._queue()
+        platform_gots.publish_waiting(self.home)
+        self.assertEqual(self.pushes, [(platform_gots.KIND, RUN)])
+
+    def test_a_queued_row_stored_as_not_notifying_is_published_silently(self):
+        self._queue(notify=0)
+        self.assertEqual(platform_gots.publish_waiting(self.home), 1)
+        self.assertEqual(self.pushes, [], "the queue said not to announce this one")
+
+    def test_a_queued_row_nothing_can_publish_keeps_the_table_and_is_named(self):
+        # A row with no routine, or no run, is one nothing can open: publishing it would be a row
+        # whose chat is empty. It is kept — the table is the only place it exists — and said out
+        # loud, rather than deleted along with the queue that held it.
+        self._queue()
+        self._queue(job_id=None, run_session="cron_job-1_98")
+        self._queue(run_session=None, job_id="job-2")
+        with self.assertLogs("plugin.platform_gots", level="WARNING") as logs:
+            published = platform_gots.publish_waiting(self.home)
+        self.assertEqual(published, 1, "the row that can be published still is")
+        self.assertIn("routine_messages", self._tables(), "the queue is kept while a row is in it")
+        self.assertEqual(len(logs.output), 2, "each row that could not be published is named")
+        self.assertTrue(all("kept" in line for line in logs.output))
 
     # -- the push ---------------------------------------------------------
     def test_a_delivery_tells_the_device_about_the_run(self):

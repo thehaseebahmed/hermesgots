@@ -1800,7 +1800,10 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     if (conversation && !remote) {
       await db.tombstones.put({
         id: `chat:${id}`,
-        deletedAt: Date.now(),
+        // Stamped past the record it kills, the way the host's own tombstone is (`chats.tombstone`):
+        // the merge keeps only a strictly newer record, and a record written from a host clock ahead
+        // of this device's would otherwise outlive the deletion and draw the row again.
+        deletedAt: Math.max(Date.now(), conversation.changedAt + 1),
         profileId: conversation.profileId,
       })
     }

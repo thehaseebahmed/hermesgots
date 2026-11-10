@@ -261,7 +261,9 @@ export function SearchField({
         <InputGroupAddon align="inline-end">
           <InputGroupButton
             size="icon-sm"
-            className="size-8 rounded-full"
+            // A full 44px target: the field is 44 tall, and a clear control a thumb has to find is
+            // the one place a smaller icon would cost the tap.
+            className="size-11 rounded-full"
             onClick={() => onChange("")}
             aria-label="Clear search"
           >
