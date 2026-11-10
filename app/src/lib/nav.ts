@@ -16,9 +16,9 @@ export const stayHere = (current: boolean) =>
 export const BACK_ON_LIST = { listed: true }
 
 /**
- * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Routines, Settings) is
- * the first entry, and each entry after it is a child of the one before. So back from a top-level
- * screen leaves the app, and back from a deeper one returns to its parent.
+ * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
+ * entry, and each entry after it is a child of the one before. So back from a top-level screen
+ * leaves the app, and back from a deeper one returns to its parent.
  */
 export const depth = () => (window.history.state as { idx?: number } | null)?.idx ?? 0
 

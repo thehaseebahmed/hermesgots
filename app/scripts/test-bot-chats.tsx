@@ -236,6 +236,11 @@ test("the header's title is the bot's name, and it is the way to its settings", 
       2,
       "the drawer and the search: no '...' and no list control",
     )
+    assert.equal(
+      findAll('header a[aria-label="Routines"]').length,
+      1,
+      "and the routine control stands apart from the drawer and the search",
+    )
   })
 })
 

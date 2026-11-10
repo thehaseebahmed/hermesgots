@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { Navigate, useParams } from "react-router"
 import {
   ChevronRightIcon,
   CircleAlertIcon,
   EllipsisIcon,
-  MenuIcon,
   PauseIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -13,9 +13,9 @@ import {
 import { toast } from "sonner"
 
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
+import { BackButton } from "@/components/back-button"
 import { Bot } from "@/components/bot"
 import { CopyBlock } from "@/components/copy-block"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -35,8 +35,12 @@ import {
   type CronRun,
   type CronState,
 } from "@/lib/cron"
-import { listEnabledProfiles, type Profile } from "@/lib/db"
+import { db, getActiveProfile, type Profile } from "@/lib/db"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { useChanges, useLive } from "@/lib/live"
+import { useNav } from "@/lib/nav"
+import { setBackGuard } from "@/lib/native"
+import { useBotChatsPane } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
@@ -44,10 +48,21 @@ import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
 import { INSTALL_PLUGIN } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
-/** Hermes cron jobs, grouped by bot, each with its recent runs as Gatus-style bars. */
+/** A bot's routines: its jobs and their runs, folded one bot at a time, at `/b/<bot>/routines`. */
 export function RoutinesPage() {
-  const openDrawer = useOpenDrawer()
-  const profiles = useLiveQuery(listEnabledProfiles, [])
+  const { profileId = "" } = useParams()
+  // The answer names the address it ran for, so one bot's row can never pass for another's.
+  const answered = useLiveQuery(async () => {
+    const bot = profileId ? await db.profiles.get(profileId) : undefined
+    return { profileId, bot: bot ?? null }
+  }, [profileId])
+  const bot = answered && answered.profileId === profileId ? answered.bot : undefined
+  // The bot's list stands beside its routines where there is room (`useBotChatsPane`), so the page
+  // has nothing to lead back to; below that width the list pushed it and is what back returns to.
+  const beside = Boolean(useBotChatsPane(useLegacyChat() === false))
+  const { up } = useNav()
+  const back = useCallback(() => up(`/b/${profileId}`), [up, profileId])
+  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
   const [collapsed, setOpen] = useCollapsedBots()
@@ -57,19 +72,16 @@ export function RoutinesPage() {
   // Coming back reads everything, not just what's due.
   usePoll(refresh, false, [], { immediate: false })
 
+  if (bot === undefined) return null
+  // A bot that is gone — deleted here or on another device — lands home rather than on a page it
+  // cannot fill.
+  if (!bot) return <Navigate to="/" replace />
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
+          {!beside && <BackButton label="Back to chats" onClick={back} />}
           <h1 className="flex-1 text-xl font-semibold tracking-tight">Routines</h1>
           <Button
             variant="outline"
@@ -84,19 +96,26 @@ export function RoutinesPage() {
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {profiles?.map((profile) => (
-          <BotRoutines
-            key={profile.id}
-            profile={profile}
-            tick={tick}
-            pollTick={pollTick}
-            open={!collapsed.has(profile.id)}
-            onOpenChange={(open) => setOpen(profile.id, open)}
-          />
-        ))}
+        <BotRoutines
+          profile={bot}
+          tick={tick}
+          pollTick={pollTick}
+          open={!collapsed.has(bot.id)}
+          onOpenChange={(open) => setOpen(bot.id, open)}
+        />
       </div>
     </div>
   )
+}
+
+/**
+ * `/routines`, from before a bot's routines had an address under the bot: it lands on the active
+ * bot's, which is somewhere sensible for an address this device kept (G7).
+ */
+export function RoutinesHome() {
+  const active = useLiveQuery(async () => (await getActiveProfile()) ?? null, [])
+  if (active === undefined) return null
+  return active ? <Navigate to={`/b/${active.id}/routines`} replace /> : <Navigate to="/" replace />
 }
 
 function describeError(error: unknown) {

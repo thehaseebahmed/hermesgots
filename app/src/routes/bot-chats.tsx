@@ -2,7 +2,7 @@ import type { CSSProperties } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MenuIcon, MessageCircleIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { MenuIcon, MessageCircleIcon, PlusIcon, SearchIcon, TimerIcon } from "lucide-react"
 import {
   Link,
   Navigate,
@@ -239,6 +239,16 @@ function ChatList({
               <span className="truncate text-xl font-semibold tracking-tight">{bot.name}</span>
             </Link>
           </h1>
+          {/* The bot's routines are the bot's own, so its list is where they are opened (G7). */}
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 shrink-0 rounded-full text-muted-foreground"
+            nativeButton={false}
+            render={<Link to={`/b/${bot.id}/routines`} aria-label="Routines" />}
+          >
+            <TimerIcon />
+          </Button>
           <Button
             ref={searchToggle}
             variant="ghost"

@@ -405,7 +405,7 @@ export const FLOWS = {
   screens: {
     script: "e2e/screens.mjs",
     about:
-      "Projects, a project, Code, Routines, a chat and a started session load at 390 and 1024px, light and dark, the session's header centred with its repositories and no bot picture",
+      "Projects, a project, Code, a bot's routines opened from its list's control, a chat and a started session load at 390 and 1024px, light and dark, the session's header centred with its repositories and no bot picture",
   },
   "sidebar-collapse": {
     script: "e2e/sidebar-collapse.mjs",

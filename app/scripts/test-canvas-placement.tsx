@@ -88,8 +88,8 @@ test("a pinned canvas has a sidebar row and an archived one is folded", async ()
       const nav = find('nav[aria-label="Main"]')!
       const rows = [...nav.querySelectorAll("a")]
       assert.ok(
-        rows.indexOf(pinnedRow()!) > rows.indexOf(find('a[href="/routines"]')!),
-        "the row sits after Routines",
+        rows.indexOf(pinnedRow()!) > rows.indexOf(find('a[href="/canvas"]')!),
+        "the row sits after the nav's screens",
       )
       assert.equal(
         pinnedRow()!.className.includes("pl-8"),

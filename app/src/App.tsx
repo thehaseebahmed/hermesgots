@@ -47,6 +47,10 @@ const MissionPage = lazy(() =>
 const RoutinesPage = lazy(() =>
   import("@/routes/routines").then((m) => ({ default: m.RoutinesPage })),
 )
+/** The address the sidebar's row used to open: the active bot's routines, in its place. */
+const RoutinesHome = lazy(() =>
+  import("@/routes/routines").then((m) => ({ default: m.RoutinesHome })),
+)
 const SharePage = lazy(() => import("@/routes/share").then((m) => ({ default: m.SharePage })))
 const SettingsPage = lazy(() =>
   import("@/routes/settings").then((m) => ({ default: m.SettingsPage })),
@@ -119,6 +123,8 @@ function AppRoutes() {
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
         <Route path="b/:profileId" element={<BotChatsPage />} />
+        {/* A bot's routines, opened by the control in its list's header (G7). */}
+        <Route path="b/:profileId/routines" element={<RoutinesPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}
         <Route path="new-room" element={<NewRoomScreen slot="route" />} />
@@ -130,7 +136,7 @@ function AppRoutes() {
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:id" element={<MeetingPage />} />
         <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
-        <Route path="routines" element={<RoutinesPage />} />
+        <Route path="routines" element={<RoutinesHome />} />
         <Route path="canvas" element={<CanvasPage />} />
         <Route path="canvas/:id" element={<CanvasView />} />
         <Route path="research" element={<ResearchPage />} />
