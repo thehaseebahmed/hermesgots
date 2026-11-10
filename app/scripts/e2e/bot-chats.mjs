@@ -38,25 +38,39 @@ await flow(
         return title?.textContent?.trim() ?? ""
       })
     const back = () => page.getByRole("button", { name: "Back to Test bot" })
+    // The rooms this device seats the bot in: they are rows of its list, beside its chats.
+    const rooms = () =>
+      page.evaluate(async () => {
+        const { db } = await import("/src/lib/db.ts")
+        return (await db.conversations.filter((chat) => Boolean(chat.room)).toArray()).map(
+          (chat) => `/c/${chat.id}`,
+        )
+      })
 
-    // A bot this device has never opened: nothing is remembered, so its list is what draws — empty,
-    // since the bot has no chat yet — and it stands alone in the history.
+    // A bot this device has never opened: nothing is remembered, so its list is what draws — the
+    // rooms it is seated in are already rows of it — and it stands alone in the history.
     await until(async () => here() === list, 20_000, "the bot's own address")
-    await page.getByText("No chats yet.").waitFor({ timeout: 20_000 })
+    await until(async () => (await rows()).length > 0, 20_000, "the list's rows")
+    assert.deepEqual(
+      (await rows()).sort(),
+      (await rooms()).sort(),
+      "a room the bot is seated in is a row of its list",
+    )
     assert.equal(await rung(), 0, "a bot opens at the app's only entry")
     await shot("empty-list")
-    pass("a bot this device has never opened draws its list, with nothing to open")
+    pass("a bot this device has never opened draws its list, the rooms it seats among the rows")
 
     await seed(CHATS)
+    const expected = [...CHATS.map((one) => `/c/${one.id}`), ...(await rooms())]
     await until(
-      async () => (await rows()).length === CHATS.length,
+      async () => (await rows()).length === expected.length,
       20_000,
       "the bot's chats in its list",
     )
     assert.deepEqual(
       (await rows()).sort(),
-      CHATS.map((one) => `/c/${one.id}`).sort(),
-      "every chat of the bot's is a row of its list",
+      [...expected].sort(),
+      "every chat of the bot's is a row of its list, beside the rooms it seats",
     )
     await shot("list")
     pass("the list draws the bot's chats")
@@ -72,7 +86,7 @@ await flow(
     // is the app's to take.
     await back().click()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === CHATS.length, 20_000, "the list again")
+    await until(async () => (await rows()).length === expected.length, 20_000, "the list again")
     assert.equal(await rung(), 0, "and nothing stands behind the list")
     pass("back from a chat lands the list, and the list is the app's first entry")
 
@@ -95,7 +109,7 @@ await flow(
     // and the list is where the app's history begins, so the next press takes the page off the app.
     await page.goBack()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === CHATS.length, 20_000, "the list behind it")
+    await until(async () => (await rows()).length === expected.length, 20_000, "the list behind it")
     assert.equal(await rung(), 0, "the list is the app's first entry")
     await shot("behind")
     pass("the browser's back walks the chat to its bot's list")
