@@ -2943,182 +2943,143 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             ),
         )
 
-    # The bot's LLM providers, each key as the mask the host made of it (llm_providers.py): the
-    # page is drawn from the host's own catalog and its own custom-endpoint list, so a provider
-    # Hermes adds later is a row without an app release. The read opens config.yaml only to find the
-    # `key_env` an endpoint's entry names; a provider's presence is the host's own env read.
-    async def read_llm_providers(request: "web.Request") -> "web.Response":
-        """The page's one read: every provider and endpoint, each key as the host's own mask.
+    # The bot's LLM providers, each key as the mask the host made of it (llm_providers.py): the page
+    # is drawn from the host's own catalog and its own custom-endpoint list, so a provider Hermes
+    # adds later is a row without an app release. All five routes answer the one block, so the page
+    # has one loading state, one refusal banner and no cache.
+    def llm_route(
+        *,
+        action: Callable[..., Dict[str, Any]],
+        unavailable: str,
+        failed: str,
+        logged: str,
+        needs_body: Optional[str] = None,
+        whole: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        target: bool = False,
+    ):
+        """One LLM Providers route: the page's own ladder, and the block every answer carries.
 
-        The failure sentence is this route's, not the settings pages': what is read here is the host's
-        catalog, its env and its endpoint list, so the app is told that the providers couldn't be
-        listed — never the host's exception text, which the page promises never to draw.
+        ``action`` is the domain call. It is handed the profile's ``config.yaml`` and then what the
+        route reads — the body, where ``needs_body`` is the sentence for one this route can't use
+        and ``whole`` what a body has to carry for it; or the target its address names (``target``);
+        or nothing at all. Everything else is the same on all five, so it is written once: the API
+        server's own auth check, the profile's scope, the thread the work runs on, a ``ValueError``
+        as the 400 in the domain's sentence, an ``EndpointInUse`` as the plan's 409 under
+        ``endpoint_in_use``, an ``ImportError`` as the 501 that says this host can't do it at all,
+        and anything else as this route's own 502 (``logged`` is the warning it leaves behind) —
+        never the host's exception text, which the app promises never to draw.
         """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        config_path = host_config_path()
-        scope = profile_scope()
 
-        def run() -> Dict[str, Any]:
-            with scope():
-                return llm_providers.read(config_path)
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            given: Optional[Dict[str, Any]] = None
+            if needs_body is not None:
+                given = await json_body(request)
+                if not given or (whole is not None and not whole(given)):
+                    return _error(web, needs_body, 400)
+            segment = str(request.match_info.get("target") or "").strip() if target else ""
+            config_path = host_config_path()
+            scope = profile_scope()
 
-        try:
-            payload = await asyncio.to_thread(run)
-        except ImportError:
-            return _error(web, "This Hermes version can't show its API-key providers.", 501)
-        except Exception:
-            logger.warning("gots: couldn't read the host's API-key providers", exc_info=True)
-            return _error(web, "The host couldn't list its API-key providers.", 502)
-        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+            def run() -> Dict[str, Any]:
+                with scope():
+                    if needs_body is not None:
+                        return action(config_path, given)
+                    if target:
+                        return action(config_path, segment)
+                    return action(config_path)
 
-    app.router.add_get(f"{PREFIX}/llm-providers", read_llm_providers)
+            try:
+                payload = await asyncio.to_thread(run)
+            except llm_providers.EndpointInUse as error:
+                return _error(web, str(error), 409, code="endpoint_in_use")
+            except ValueError as error:
+                return _error(web, str(error), 400)
+            except ImportError:
+                return _error(web, unavailable, 501)
+            except Exception:
+                logger.warning(logged, exc_info=True)
+                return _error(web, failed, 502)
+            return web.json_response({"object": "gots.llm_providers", "llm": payload})
 
-    async def set_llm_provider_key(request: "web.Request") -> "web.Response":
-        """Writes one key and answers the fresh block.
+        return handler
 
-        The target is a catalog slug, or an endpoint's `custom:<id>` — one address, one key, whatever
-        kind of row owns it — and the key is the typed one. A body whose key is a mask is refused by
-        the domain's own host rule, in its sentence: a mask never reaches a write. The key is not
-        logged and not echoed — the 502's sentence is the plugin's, never the host's own words, which
-        could hold the value.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        target = body.get("target") if body else None
-        key = body.get("key") if body else None
-        if not isinstance(target, str) or not target.strip() or not isinstance(key, str):
-            return _error(web, "Body needs a target and a key.", 400)
-        config_path = host_config_path()
-        scope = profile_scope()
+    # The page's one read. The 502 is this route's own sentence: what is read is the host's catalog,
+    # its env and its endpoint list, not the bot's General config the settings pages' read speaks of.
+    app.router.add_get(
+        f"{PREFIX}/llm-providers",
+        llm_route(
+            action=llm_providers.read,
+            unavailable="This Hermes version can't show its API-key providers.",
+            failed="The host couldn't list its API-key providers.",
+            logged="gots: couldn't read the host's API-key providers",
+        ),
+    )
 
-        def run() -> Dict[str, Any]:
-            with scope():
-                return llm_providers.write_key(config_path, target, key)
+    # One key replaced, addressed by a catalog slug or an endpoint's `custom:<id>`: one address, one
+    # key, whatever kind of row owns it. A body whose key is a mask is refused by the domain's own
+    # host rule, and the key is neither logged nor echoed — this route's 502 is the plugin's
+    # sentence, since the host's own could hold the value.
+    app.router.add_post(
+        f"{PREFIX}/llm-providers/key",
+        llm_route(
+            action=lambda config_path, body: llm_providers.write_key(
+                config_path, body["target"], body["key"]
+            ),
+            needs_body="Body needs a target and a key.",
+            whole=lambda one: isinstance(one.get("target"), str)
+            and bool(one["target"].strip())
+            and isinstance(one.get("key"), str),
+            unavailable="This Hermes version can't write an API key from here.",
+            failed="The host couldn't save the key.",
+            logged="gots: couldn't write this bot's provider key",
+        ),
+    )
 
-        try:
-            payload = await asyncio.to_thread(run)
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        except ImportError:
-            return _error(web, "This Hermes version can't write an API key from here.", 501)
-        except Exception:
-            logger.warning("gots: couldn't write this bot's provider key", exc_info=True)
-            return _error(web, "The host couldn't save the key.", 502)
-        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+    # One provider's key removed: the address names it and there is no body, since a removal has no
+    # key in it to send, log or echo. The lifecycle's own removal is idempotent, so a key that was
+    # already absent answers the block rather than a refusal.
+    app.router.add_delete(
+        f"{PREFIX}/llm-providers/key/{{target}}",
+        llm_route(
+            action=llm_providers.remove_key,
+            target=True,
+            unavailable="This Hermes version can't remove an API key from here.",
+            failed="The host couldn't remove the key.",
+            logged="gots: couldn't remove this bot's provider key",
+        ),
+    )
 
-    app.router.add_post(f"{PREFIX}/llm-providers/key", set_llm_provider_key)
+    # One custom endpoint added: the page's four fields, and the host's own `upsert_custom_endpoint`
+    # is what writes them — it validates the URL, slugs the id, writes `providers.<id>` and puts the
+    # key in `.env` behind the entry's `key_env`. So a refusal (a URL with no host, a name an
+    # endpoint already carries) is the host's own sentence, answered as a 400 the user can read.
+    app.router.add_post(
+        f"{PREFIX}/llm-providers/endpoints",
+        llm_route(
+            action=llm_providers.add_endpoint,
+            needs_body="Body needs a name, a base URL, a model and a key.",
+            unavailable="This Hermes version can't add a custom endpoint from here.",
+            failed="The host couldn't add that endpoint.",
+            logged="gots: couldn't add this bot's custom endpoint",
+        ),
+    )
 
-    async def remove_llm_provider_key(request: "web.Request") -> "web.Response":
-        """Removes one provider's key and answers the fresh block.
-
-        The target is the address's own segment — a catalog slug — and there is no body at all: a
-        removal has no key in it to send, log or echo. The domain resolves the slug and asks the
-        host's credential lifecycle, whose own removal is idempotent, so removing a key that was
-        already absent answers the block rather than a refusal. A refusal's sentence is the
-        plugin's own, never the host's, which could hold a value.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        target = str(request.match_info.get("target") or "").strip()
-        config_path = host_config_path()
-        scope = profile_scope()
-
-        def run() -> Dict[str, Any]:
-            with scope():
-                return llm_providers.remove_key(config_path, target)
-
-        try:
-            payload = await asyncio.to_thread(run)
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        except ImportError:
-            return _error(web, "This Hermes version can't remove an API key from here.", 501)
-        except Exception:
-            logger.warning("gots: couldn't remove this bot's provider key", exc_info=True)
-            return _error(web, "The host couldn't remove the key.", 502)
-        return web.json_response({"object": "gots.llm_providers", "llm": payload})
-
-    app.router.add_delete(f"{PREFIX}/llm-providers/key/{{target}}", remove_llm_provider_key)
-
-    async def add_llm_endpoint(request: "web.Request") -> "web.Response":
-        """Adds one custom endpoint and answers the fresh block.
-
-        The body is the page's four fields — a name, a base URL, a model and the typed key — and the
-        host's own ``upsert_custom_endpoint`` is what writes: it validates the URL, slugs the id,
-        writes ``providers.<id>`` and puts the key in ``.env`` behind the entry's ``key_env``. So the
-        sentence a refusal carries is the host's own (a URL with no host, a body short a field, a
-        name an endpoint already carries) and the route answers it as a 400 the user can read. The
-        key is not logged and not echoed: the 502's sentence is the plugin's, never the host's own
-        words, which could hold the value.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if not body:
-            return _error(web, "Body needs a name, a base URL, a model and a key.", 400)
-        config_path = host_config_path()
-        scope = profile_scope()
-
-        def run() -> Dict[str, Any]:
-            with scope():
-                return llm_providers.add_endpoint(config_path, body)
-
-        try:
-            payload = await asyncio.to_thread(run)
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        except ImportError:
-            return _error(web, "This Hermes version can't add a custom endpoint from here.", 501)
-        except Exception:
-            logger.warning("gots: couldn't add this bot's custom endpoint", exc_info=True)
-            return _error(web, "The host couldn't add that endpoint.", 502)
-        return web.json_response({"object": "gots.llm_providers", "llm": payload})
-
-    app.router.add_post(f"{PREFIX}/llm-providers/endpoints", add_llm_endpoint)
-
-    async def remove_llm_endpoint(request: "web.Request") -> "web.Response":
-        """Removes one custom endpoint and answers the fresh block.
-
-        The target is the address's own segment — the endpoint's id — and there is no body: a
-        removal has nothing in it to send. The domain resolves it through the host's own list and
-        refuses the row the bot's model runs on, in a sentence naming the endpoint and saying to
-        switch the model first; that refusal is the plan's 409 under `endpoint_in_use`, so a client
-        reads what to do from the code as well as from the sentence the app draws. Any other
-        endpoint goes through the host's own delete, which takes the key with it, and any other
-        refusal is a 400 like every other one this page makes. Nothing here is logged: the route
-        never sees a key at all.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        target = str(request.match_info.get("target") or "").strip()
-        config_path = host_config_path()
-        scope = profile_scope()
-
-        def run() -> Dict[str, Any]:
-            with scope():
-                return llm_providers.remove_endpoint(config_path, target)
-
-        try:
-            payload = await asyncio.to_thread(run)
-        except llm_providers.EndpointInUse as error:
-            return _error(web, str(error), 409, code="endpoint_in_use")
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        except ImportError:
-            return _error(web, "This Hermes version can't remove a custom endpoint from here.", 501)
-        except Exception:
-            logger.warning("gots: couldn't remove this bot's custom endpoint", exc_info=True)
-            return _error(web, "The host couldn't remove that endpoint.", 502)
-        return web.json_response({"object": "gots.llm_providers", "llm": payload})
-
-    app.router.add_delete(f"{PREFIX}/llm-providers/endpoints/{{target}}", remove_llm_endpoint)
+    # One custom endpoint removed, its id in the address and no body at all. The row the bot's model
+    # runs on is the plan's 409 under `endpoint_in_use` — switching a model is Hermes's own picker's
+    # decision — and every other refusal is a 400. The route never sees a key.
+    app.router.add_delete(
+        f"{PREFIX}/llm-providers/endpoints/{{target}}",
+        llm_route(
+            action=llm_providers.remove_endpoint,
+            target=True,
+            unavailable="This Hermes version can't remove a custom endpoint from here.",
+            failed="The host couldn't remove that endpoint.",
+            logged="gots: couldn't remove this bot's custom endpoint",
+        ),
+    )
 
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)

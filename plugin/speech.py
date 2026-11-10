@@ -40,10 +40,9 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from . import config_keys, dictation, dictation_cleanup, speech_probe
-from .credentials import KEY_ENV, present
+from . import config_keys, credentials, dictation, dictation_cleanup, speech_probe
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -382,13 +381,15 @@ def _pick_names(providers: List[str], explicit: Optional[str], resolved: str) ->
     return names
 
 
-def _provider_entries(names: Sequence[str]) -> List[Dict[str, Any]]:
+def _provider_entries(
+    names: Sequence[str], lookup: Optional[Callable[[str], Any]]
+) -> List[Dict[str, Any]]:
     """Providers as the page reads them. A provider with no key to check carries no ``key_set``, so
     "needs none" is not spelled the same way as "this host couldn't ask"."""
     entries: List[Dict[str, Any]] = []
     for name in names:
         entry: Dict[str, Any] = {"name": name}
-        keyed = _key_set(name)
+        keyed = _key_set(name, lookup)
         if keyed is not None:
             entry["key_set"] = keyed
         entries.append(entry)
@@ -411,18 +412,19 @@ def _catalogues() -> Dict[str, List[str]]:
     }
 
 
-def _key_set(provider: str) -> Optional[bool]:
+def _key_set(provider: str, lookup: Optional[Callable[[str], Any]]) -> Optional[bool]:
     """Whether the host holds this provider's key — a boolean, never the value, None where unknown.
 
-    The presence read is ``credentials.present``, the one credential read the plugin has; a host
-    that can't answer it (no credential pool) leaves the entry saying nothing about a key rather
-    than claiming there is none.
+    ``lookup`` is the host's own dotenv-aware env read, resolved once by the caller and handed down:
+    the rows and the pick ask about the same names, and a read per provider would import the same
+    function for each of them. A host with no credential pool at all (``lookup`` is ``None``) leaves
+    the entry saying nothing about a key rather than claiming there is none.
     """
-    variable = KEY_ENV.get(provider)
-    if variable is None:
+    variable = credentials.KEY_ENV.get(provider)
+    if variable is None or lookup is None:
         return None
     try:
-        return present(variable)
+        return bool(lookup(variable))
     except Exception:
         logger.debug("gots: couldn't ask for %s's key", provider, exc_info=True)
         return None
@@ -463,6 +465,13 @@ def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) ->
     resolved = _resolved(section)
     providers = _provider_names(defaults_section)
     explicit = pick.strip() if isinstance(pick, str) and pick.strip() else None
+    # One credential read for the whole answer: the rows and the pick ask the same names of the same
+    # host, so the host's env read is resolved here and handed down rather than imported per provider.
+    try:
+        lookup = credentials.env_lookup()
+    except Exception:
+        logger.debug("gots: no credential read on this host", exc_info=True)
+        lookup = None
     return {
         "values": values,
         "defaults": defaults,
@@ -470,9 +479,9 @@ def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) ->
             **resolved,
             "explicit": explicit,
         },
-        "providers": _provider_entries(providers),
+        "providers": _provider_entries(providers, lookup),
         "choices": _provider_entries(
-            _pick_names(providers, explicit, resolved["name"])
+            _pick_names(providers, explicit, resolved["name"]), lookup
         ),
         "models": catalogues,
     }

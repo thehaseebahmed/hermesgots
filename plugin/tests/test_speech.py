@@ -656,6 +656,18 @@ class SttReadTest(TempStore):
         self.assertIs(rows["deepinfra"]["key_set"], False)
         self.assertNotIn(secret, json.dumps(block), "the value is never anywhere in the answer")
 
+    def test_one_credential_read_answers_every_provider(self) -> None:
+        # The rows and the pick both ask whether a key is set, and each name used to cost its own
+        # import of the host's env read: one per read answers every provider, both lists included.
+        with SttHost({}, keys={"GROQ_API_KEY": "gsk_live_never_shown"}):
+            with mock.patch.object(
+                speech.credentials, "env_lookup", wraps=speech.credentials.env_lookup
+            ) as asked:
+                block = speech.stt_settings(self.config)
+        self.assertEqual(asked.call_count, 1, "one lookup for the whole read, not one per provider")
+        rows = {row["name"]: row for row in block["providers"]}
+        self.assertIs(rows["groq"]["key_set"], True, "and the answer is still the host's own")
+
     def test_a_host_that_declares_no_defaults_has_no_page(self) -> None:
         with SttHost({}, defaults={}):
             self.assertFalse(speech.stt_available(), "the feature is absent, not broken")

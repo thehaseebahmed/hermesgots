@@ -6,9 +6,9 @@ both ask the same two questions of the same table: which variable a provider's k
 this host reads it. The answers live here once, so the provider list and the read behind it cannot
 drift apart.
 
-Nothing here ever hands back a whole key: ``present`` answers a boolean, and ``masked`` answers
-``mask_secret``'s own output — the first four and last four characters, and ``***`` under that
-function's floor — which is the one form of a key a screen is ever given.
+Nothing here ever hands back a whole key: ``present`` answers a boolean, and ``masked`` and
+``mask`` answer ``mask_secret``'s own output — the first four and last four characters, and ``***``
+under that function's floor — which is the one form of a key a screen is ever given.
 
 The imports of Hermes's own modules stay inside the functions that use them, as everywhere in this
 plugin, and neither is softened into a default: a host without them raises ImportError, which a
@@ -52,15 +52,26 @@ def present(name: str) -> bool:
     return bool(env_lookup()(name))
 
 
+def mask(value: str) -> str:
+    """``value`` as ``mask_secret`` masks it — the one import of the host's own mask.
+
+    A key usually reaches a caller as the *name* of the variable that holds it, which ``masked``
+    reads. A value that is already in hand — an endpoint entry an older release left a plaintext
+    ``api_key`` in — goes through the same function, so the two ways a key arrives are one shape on
+    the screen.
+    """
+    from agent.redact import mask_secret
+
+    return mask_secret(value)
+
+
 def masked(name: str) -> Optional[str]:
     """``name``'s value as ``mask_secret`` masks it, or ``None`` where the variable is unset.
 
     ``agent.redact`` is imported before the read, so a host without it raises ImportError whatever
     this bot's ``.env`` holds: the page is absent rather than drawn from an unmasked answer.
     """
-    from agent.redact import mask_secret
-
     value = env_lookup()(name)
     if not value:
         return None
-    return mask_secret(str(value))
+    return mask(str(value))

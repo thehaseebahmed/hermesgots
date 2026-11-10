@@ -80,13 +80,6 @@ def _catalog() -> List[Any]:
     return list(provider_catalog())
 
 
-def _mask() -> Callable[[str], str]:
-    """The host's own mask, imported where it is used: a screen is never handed a mask it made."""
-    from agent.redact import mask_secret
-
-    return mask_secret
-
-
 # The prefix one address spells an endpoint's key with: `custom:<id>`, so a provider's slug and an
 # endpoint's id can never be mistaken for each other.
 ENDPOINT_PREFIX = "custom:"
@@ -128,12 +121,18 @@ def _entry_mask(entry: Any) -> Optional[str]:
         return credentials.masked(key_env)
     plaintext = str(entry.get("api_key") or "").strip()
     if plaintext:
-        return _mask()(plaintext)
+        return credentials.mask(plaintext)
     return None
 
 
-def _endpoints(config_path: Path) -> List[Dict[str, Any]]:
+def _endpoints(
+    config_path: Path, listed: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """The page's endpoint rows: what the host lists, each key as the mask its own entry names.
+
+    ``listed`` is the list a write already fetched and left as it was (a key write changes no row),
+    so that write reads the host's list once rather than twice; an add or a removal passes none,
+    since only the host's fresh list holds the row the answer must show.
 
     The profile's ``config.yaml`` is opened once, and only where the host listed something: it is
     the one place an endpoint's ``key_env`` can be read — the list says a key exists but never which
@@ -146,8 +145,8 @@ def _endpoints(config_path: Path) -> List[Dict[str, Any]]:
     reads its mask rather than *Not set* until a key write converts it (the host's own writer pops
     the legacy row and writes a ``providers`` one).
     """
-    listed = _endpoint_list()
-    if not listed:
+    rows_listed = _endpoint_list() if listed is None else listed
+    if not rows_listed:
         return []
     from . import config_keys
 
@@ -157,7 +156,7 @@ def _endpoints(config_path: Path) -> List[Dict[str, Any]]:
     legacy = config.get("custom_providers")
     legacy = [one for one in legacy if isinstance(one, dict)] if isinstance(legacy, list) else []
     rows: List[Dict[str, Any]] = []
-    for raw in listed:
+    for raw in rows_listed:
         endpoint_id = str(raw.get("id") or "").strip()
         if not endpoint_id:
             # A row with no id has no address to write to and no entry to read: it is no row.
@@ -193,17 +192,19 @@ def _entry_of(
     return None
 
 
-def _endpoint_of(endpoint_id: str) -> Dict[str, Any]:
-    """One endpoint's row, as the host's own list answers it, or a ``ValueError`` naming the id.
+def _endpoint_of(endpoint_id: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """One endpoint's row and the list it was read from, or a ``ValueError`` naming the id.
 
     The list is asked every time, never restated: an id this host doesn't hold is a refusal, in a
-    sentence that says which id it was.
+    sentence that says which id it was. It comes back with the row because the list is the one a
+    write already paid for — a key write leaves it unchanged, and its answer is drawn from it.
     """
     if not endpoint_id:
         raise ValueError("No custom endpoint was named.")
-    for raw in _endpoint_list():
+    listed = _endpoint_list()
+    for raw in listed:
         if str(raw.get("id") or "") == endpoint_id:
-            return raw
+            return raw, listed
     raise ValueError(f"{endpoint_id} isn't a custom endpoint this Hermes knows.")
 
 
@@ -219,6 +220,23 @@ def _host_refusal(error: BaseException) -> Optional[str]:
     if not isinstance(status, int) or not isinstance(detail, str):
         return None
     return detail.strip() or None
+
+
+def _ask_host(call: Callable[..., Any], *args: Any) -> None:
+    """Ask one of the host's own custom-endpoint verbs, its refusal read as the sentence it carries.
+
+    A body or an id the host won't take arrives as FastAPI's ``HTTPException``, and every caller here
+    wants the same thing of that: the sentence as a ``ValueError``, which the route answers as the
+    400 the user reads. Anything else is left to raise as it came — a host that is simply broken is
+    the route's 502, not a refusal the reader could act on.
+    """
+    try:
+        call(*args)
+    except Exception as error:
+        detail = _host_refusal(error)
+        if detail is None:
+            raise
+        raise ValueError(detail) from error
 
 
 class EndpointInUse(ValueError):
@@ -241,8 +259,10 @@ def available() -> Optional[str]:
     """
     try:
         _catalog()
-        credentials.env_lookup()
-        _mask()
+        # The rows read a key through ``credentials.masked``; asking it here is what makes this gate
+        # the same read rather than a second one that could drift — the empty name answers no mask,
+        # and the import of the host's own mask behind it is the whole of what is being proved.
+        credentials.masked("")
         _endpoint_list()
     except Exception:
         logger.debug("gots: this Hermes can't list its API-key providers", exc_info=True)
@@ -284,20 +304,23 @@ def _slot(entry: Any) -> str:
     return str(env_vars[0]).strip() if env_vars else ""
 
 
-def _slot_of(target: str) -> str:
-    """The env variable a slug's key is written to, or a ``ValueError`` naming the slug.
+def _slot_of(target: str) -> Tuple[str, List[Any]]:
+    """The env variable a slug's key is written to and the catalog read, or a ``ValueError``.
 
     The catalog is asked every time, never restated: a slug this Hermes doesn't list — and one it
-    lists with no slot — is a refusal, in a sentence that says which slug it was.
+    lists with no slot — is a refusal, in a sentence that says which slug it was. It comes back with
+    the slot because the catalog is the one a write already paid for, and the answer's rows are
+    drawn from it rather than read again.
     """
     if not target:
         raise ValueError("No provider was named.")
-    for entry in _catalog():
+    entries = _catalog()
+    for entry in entries:
         if str(getattr(entry, "slug", "") or "") != target:
             continue
         slot = _slot(entry)
         if slot:
-            return slot
+            return slot, entries
         raise ValueError(f"{target} takes no API key, so there is nothing this page could write.")
     raise ValueError(f"{target} isn't an API-key provider this Hermes knows.")
 
@@ -338,11 +361,13 @@ def write_key(config_path: Path, target: str, key: str) -> Dict[str, Any]:
     spelled = str(target or "").strip()
     if spelled.startswith(ENDPOINT_PREFIX):
         return _write_endpoint_key(config_path, spelled[len(ENDPOINT_PREFIX) :].strip(), key)
-    slot = _slot_of(spelled)
+    slot, entries = _slot_of(spelled)
     from hermes_cli.credential_lifecycle import save_provider_env_credential
 
     save_provider_env_credential(slot, key)
-    return read(config_path)
+    # The catalog the slot was read from is the catalog the answer's rows are drawn from: a key write
+    # changes no provider and no endpoint, so only the config its masks come from is read again.
+    return read(config_path, catalog=entries)
 
 
 def _write_endpoint_key(config_path: Path, endpoint_id: str, key: str) -> Dict[str, Any]:
@@ -363,7 +388,7 @@ def _write_endpoint_key(config_path: Path, endpoint_id: str, key: str) -> Dict[s
     ``HTTPException`` and leaves here as a ``ValueError`` carrying its sentence, which the route
     answers as a 400 the user can read.
     """
-    row = _endpoint_of(endpoint_id)
+    row, listed = _endpoint_of(endpoint_id)
     from hermes_cli.web_models import CustomEndpointUpdate
     from hermes_cli.web_routers.config_env import upsert_custom_endpoint
 
@@ -375,14 +400,10 @@ def _write_endpoint_key(config_path: Path, endpoint_id: str, key: str) -> Dict[s
         api_key=key,
         discover_models=bool(row.get("discover_models", True)),
     )
-    try:
-        upsert_custom_endpoint(body)
-    except Exception as error:
-        detail = _host_refusal(error)
-        if detail is None:
-            raise
-        raise ValueError(detail) from error
-    return read(config_path)
+    _ask_host(upsert_custom_endpoint, body)
+    # The list the row came from is unchanged by a key: the answer is drawn from it, and only the
+    # config its masks are read from is opened again.
+    return read(config_path, listed=listed)
 
 
 def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -428,13 +449,9 @@ def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
         model=model,
         api_key=key or None,
     )
-    try:
-        upsert_custom_endpoint(update)
-    except Exception as error:
-        detail = _host_refusal(error)
-        if detail is None:
-            raise
-        raise ValueError(detail) from error
+    _ask_host(upsert_custom_endpoint, update)
+    # The host's list is read again here, unlike a key write's: the row this add made is only in the
+    # fresh list, and those are the rows the answer has to draw.
     return read(config_path)
 
 
@@ -477,11 +494,12 @@ def remove_key(config_path: Path, target: str) -> Dict[str, Any]:
     Raises ``ValueError`` for a target this host can't write, and ``ImportError`` where this host has
     no lifecycle, which the route answers with a 501.
     """
-    slot = _slot_of(str(target or "").strip())
+    slot, entries = _slot_of(str(target or "").strip())
     from hermes_cli.credential_lifecycle import remove_provider_env_credential
 
     remove_provider_env_credential(slot)
-    return read(config_path)
+    # A removal changes no row the page lists, so the catalog it was resolved in is the one drawn.
+    return read(config_path, catalog=entries)
 
 
 def remove_endpoint(config_path: Path, target: str) -> Dict[str, Any]:
@@ -507,36 +525,44 @@ def remove_endpoint(config_path: Path, target: str) -> Dict[str, Any]:
     ``ImportError`` where this host has no endpoint list or no delete, which the route answers with a
     501.
     """
-    row = _endpoint_of(str(target or "").strip())
+    row, _ = _endpoint_of(str(target or "").strip())
     endpoint_id = str(row.get("id") or target).strip()
     name = str(row.get("name") or endpoint_id)
     if bool(row.get("is_current")):
         raise EndpointInUse(f"This bot's model runs on {name}. Switch the model first.")
     from hermes_cli.web_routers.config_env import delete_custom_endpoint
 
-    try:
-        delete_custom_endpoint(endpoint_id)
-    except Exception as error:
-        detail = _host_refusal(error)
-        if detail is None:
-            raise
-        raise ValueError(detail) from error
+    _ask_host(delete_custom_endpoint, endpoint_id)
+    # The list is read again, as an add's is: the row that went is only gone from the host's fresh
+    # one, and the answer draws the rows the host holds now.
     return read(config_path)
 
 
-def read(config_path: Path) -> Dict[str, Any]:
+def read(
+    config_path: Path,
+    *,
+    catalog: Optional[List[Any]] = None,
+    listed: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """The page's one read: every provider and endpoint this bot can be given a key for, masked.
 
-    ``config_path`` is the profile's ``config.yaml``, opened only to find the ``key_env`` an
-    endpoint's entry names (``_endpoints``): a provider's key lives in the bot's env, which the host
-    reads for itself, and the endpoints come from the host's own list rather than from the file.
+    ``catalog`` and ``listed`` are the rows a write already fetched and left as they were — the
+    host's provider catalog, which no write changes, and its endpoint list, which a key write
+    doesn't touch. Handed over, they cost one read each rather than two; a write that changed the
+    list (an add, a removal) passes none, since only the host's fresh list holds the rows the answer
+    must show. The answer is the same block either way.
+
+    ``config_path`` is the profile's ``config.yaml``, opened once, and only to find the ``key_env``
+    an endpoint's entry names (``_endpoints``): a provider's key lives in the bot's env, which the
+    host reads for itself, and the endpoints come from the host's own list rather than the file.
 
     Raises ImportError where this host has no catalog, mask or endpoint list, which the route answers
     with a 501 rather than with a page of *Not set* rows.
     """
+    entries = _catalog() if catalog is None else catalog
     providers: List[Dict[str, Any]] = []
-    for entry in _catalog():
+    for entry in entries:
         row = _row(entry)
         if row is not None:
             providers.append(row)
-    return {"providers": providers, "endpoints": _endpoints(config_path)}
+    return {"providers": providers, "endpoints": _endpoints(config_path, listed)}

@@ -33,7 +33,7 @@ from typing import Any, Dict, Optional
 from unittest import mock
 
 import plugin
-from plugin import llm_providers
+from plugin import config_keys, llm_providers
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 # The planted keys. One is long enough for the mask to show its first and last four; one sits under
@@ -556,6 +556,16 @@ class ReadTest(unittest.TestCase):
             [name for name, _ in llm_providers.FEATURES], ["llm_providers"], "the page's one feature"
         )
 
+    def test_the_gate_asks_the_one_mask_read_the_rows_ask(self) -> None:
+        # A host that can't mask a key can't answer a row either, and the gate has to be the same
+        # read rather than a second one that could drift from it.
+        with host_modules({}):
+            with mock.patch.object(
+                llm_providers.credentials, "masked", side_effect=ImportError("no mask")
+            ) as asked:
+                self.assertIsInstance(llm_providers.available(), str)
+        self.assertTrue(asked.called, "the gate asks `credentials.masked`, which is what a row asks")
+
 
 class EndpointReadTest(unittest.TestCase):
     """The custom endpoints, as the host lists them, each key as the mask its own entry names."""
@@ -1050,6 +1060,67 @@ class AddEndpointTest(unittest.TestCase):
             with self.assertRaises(ValueError) as refused:
                 llm_providers.add_endpoint(CONFIG, dict(NEW_ENDPOINT))
         self.assertEqual(str(refused.exception), "base_url must include scheme and host")
+
+
+class WriteReadsTest(unittest.TestCase):
+    """A write answers the block from the rows it already read, rather than reading them twice."""
+
+    def counts(self, work) -> Dict[str, int]:
+        """What one write costs: the host's catalog, its endpoint list and the profile's config."""
+        catalog, listed = llm_providers._catalog, llm_providers._endpoint_list
+        with mock.patch.object(llm_providers, "_catalog", wraps=catalog) as asked_catalog, (
+            mock.patch.object(llm_providers, "_endpoint_list", wraps=listed)
+        ) as asked_list, mock.patch("plugin.config_keys.load", wraps=config_keys.load) as asked_config:
+            work()
+        return {
+            "catalog": asked_catalog.call_count,
+            "list": asked_list.call_count,
+            "config": asked_config.call_count,
+        }
+
+    def test_a_provider_key_write_reads_each_one_once(self) -> None:
+        values = {"OPENAI_API_KEY": OPENAI_KEY}
+        save = mock.MagicMock(side_effect=lambda env_var, key: values.__setitem__(env_var, key))
+        with host_modules(values, endpoints_list=endpoints(), config=endpoint_config(), save=save):
+            counts = self.counts(lambda: llm_providers.write_key(CONFIG, "openai", TYPED_KEY))
+        self.assertEqual(
+            counts,
+            {"catalog": 1, "list": 1, "config": 1},
+            "the catalog the slot was resolved in is the block's own: one read of it, not two",
+        )
+
+    def test_an_endpoint_key_write_reads_each_one_once(self) -> None:
+        values = {"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY}
+        with host_modules(values, endpoints_list=endpoints(), config=endpoint_config()):
+            counts = self.counts(
+                lambda: llm_providers.write_key(CONFIG, "custom:local-llama", TYPED_KEY)
+            )
+        self.assertEqual(
+            counts,
+            {"catalog": 1, "list": 1, "config": 1},
+            "a key changes no row, so the list the row came from is the block's own",
+        )
+
+    def test_a_key_removal_reads_each_one_once(self) -> None:
+        remove = mock.MagicMock()
+        with host_modules({}, endpoints_list=endpoints(), config=endpoint_config(), remove=remove):
+            counts = self.counts(lambda: llm_providers.remove_key(CONFIG, "openai"))
+        self.assertEqual(counts, {"catalog": 1, "list": 1, "config": 1})
+
+    def test_an_add_reads_the_list_again_only_because_it_changed_it(self) -> None:
+        # The row an add made is only in the host's fresh list, so that one read is not a re-read of
+        # what the write already held: the catalog and the config are each asked once all the same.
+        values: Dict[str, str] = {}
+        config: Dict[str, Any] = {}
+        listed: list = []
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            upsert=adding_host(values, listed, config, []),
+        ):
+            counts = self.counts(lambda: llm_providers.add_endpoint(CONFIG, dict(NEW_ENDPOINT)))
+        self.assertEqual(counts, {"catalog": 1, "list": 2, "config": 1})
 
 
 class RouteTest(unittest.TestCase):
