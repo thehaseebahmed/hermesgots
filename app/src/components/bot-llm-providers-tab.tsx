@@ -6,6 +6,7 @@ import { Banner } from "@/components/banner"
 import {
   Caption,
   ConfirmDestructive,
+  EditForm,
   FormActions,
   Group,
   ValueRow,
@@ -21,6 +22,7 @@ import { botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { useLarge } from "@/lib/media"
 import {
   addLlmEndpoint,
   getLlmProviders,
@@ -167,8 +169,11 @@ export function LlmProvidersTab({ profile }: { profile: Profile }) {
  */
 export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; target: string }) {
   const navigate = useNavigate()
+  const large = useLarge()
   const { block, problem, keep } = useLlmProviders(profile)
-  const [draft, setDraft] = useState("")
+  // What the form is made again by: a write that landed, so its field holds nothing afterwards —
+  // even the same key written twice changes no mask, and the field is emptied all the same.
+  const [written, setWritten] = useState(0)
   const [saving, setSaving] = useState(false)
   const [refusal, setRefusal] = useState<string>()
   // The removal's own question, and the write it is holding open: `busy` keeps the dialog up while
@@ -200,15 +205,16 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
       </div>
     )
 
-  const submit = () => {
+  const submit = (draft: string) => {
     if (!submittableKey(draft) || saving) return
     setSaving(true)
     setRefusal(undefined)
     void setLlmProviderKey(profile, target, draft.trim())
       .then((next) => {
-        // The block the write answered is the one the screen draws now, mask and all.
+        // The block the write answered is the one the screen draws now, mask and all — and the form
+        // is made again holding nothing, so the key that was typed is not left in the field.
         if (next) keep(next)
-        setDraft("")
+        setWritten((count) => count + 1)
       })
       .catch((error: unknown) => {
         // Said where it was read: the host's own sentence, with the field kept so a retry is a tap.
@@ -298,37 +304,21 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         ) : null}
       </Group>
       <Caption>Replace key</Caption>
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          submit()
-        }}
-      >
-        <div className="flex flex-col gap-2">
-          <label htmlFor="llm-provider-key" className={fieldLabelClass}>
-            New key
-          </label>
-          <Input
-            id="llm-provider-key"
-            value={draft}
-            type="password"
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder={endpoint ? "The endpoint's API key" : "The provider's API key"}
-            onChange={(event) => setDraft(event.target.value)}
-            className={fieldInputClass}
-            data-llm-key-field
-          />
-          <p className="px-1 text-sm text-muted-foreground">
-            Saved on this bot&apos;s Hermes. The key is never shown again — only its first and last
-            four.
-          </p>
-        </div>
-        <FormActions disabled={!submittableKey(draft)} busy={saving} />
-      </form>
+      {/* The app's own edit form, so the field is the one every secret in Settings is typed into: a
+          show/hide toggle, the screen's unsaved-changes guard, and a Save that waits. `saveable` is
+          `submittableKey` rather than "anything typed", since a mask is a thing this field must
+          never write. */}
+      <EditForm
+        key={`llm-key-${written}`}
+        label="New key"
+        value=""
+        placeholder={endpoint ? "The endpoint's API key" : "The provider's API key"}
+        kind="secret"
+        surface={large ? "card" : "screen"}
+        saveable={submittableKey}
+        busy={saving}
+        onSave={submit}
+      />
       {provider?.masked && (
         // Below Replace, and only where there is a key to remove: a control that writes nothing
         // isn't offered. The mask is the presence — there is no second flag to disagree with it.
@@ -536,10 +526,6 @@ export function LlmEndpointAddScreen({
             className={fieldInputClass}
             data-llm-endpoint-key
           />
-          <p className="px-1 text-sm text-muted-foreground">
-            Saved on this bot&apos;s Hermes. The key is never shown again — only its first and last
-            four.
-          </p>
         </div>
         <FormActions onCancel={close} disabled={!ready} busy={saving} />
       </form>

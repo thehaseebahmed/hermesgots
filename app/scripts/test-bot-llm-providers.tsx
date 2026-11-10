@@ -233,7 +233,11 @@ const maskRow = () => find('[data-setting="llm-provider-mask"]')
 /** An endpoint's facts on its slot screen: the base URL and the model, neither of them ours. */
 const baseUrlRow = () => find('[data-setting="llm-endpoint-base-url"]')
 const modelRow = () => find('[data-setting="llm-endpoint-model"]')
-const keyField = () => find("[data-llm-key-field]") as HTMLInputElement | null
+/**
+ * The key field: the app's own `EditForm`, whose field's id is its label's — `New key` — so the
+ * form the page uses is the one with the show/hide toggle and the unsaved-changes guard.
+ */
+const keyField = () => find("#edit-new-key") as HTMLInputElement | null
 /** The page's own `+`, and the form it opens: one field per thing a new endpoint needs. */
 const addButton = () => find("[data-llm-add-endpoint]")
 const addForm = () => find("[data-llm-endpoint-add]")
@@ -326,6 +330,12 @@ test("a row opens its slot screen: the provider's line, its mask, and a Save tha
     )
     assert.equal(keyField()?.value, "", "the field starts empty: a mask is never offered as a key")
     assert.equal(saveButton()?.disabled, true, "and Save waits for something typed")
+    // The app's own edit form, so the field carries what every secret the app edits carries.
+    assert.ok(find('[aria-label="Show key"]'), "a show/hide toggle, because the form is `EditForm`")
+    assert.ok(
+      !text().includes("Saved on this bot's Hermes"),
+      "and no footnote explaining the field: a setting's subtitle is the only place it says",
+    )
   })
 })
 
@@ -480,6 +490,10 @@ test("the plus opens a form and the endpoint lands as a row", async () => {
     assert.ok(
       findAll("h1").some((heading) => heading.textContent === "Add custom endpoint"),
       "and a title saying what it does",
+    )
+    assert.ok(
+      !text().includes("Saved on this bot's Hermes"),
+      "and no footnote under the key: the field's label is what it says",
     )
 
     // Save is dead until the form holds a whole endpoint: a name, a base URL, a model and a key.

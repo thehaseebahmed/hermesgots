@@ -563,6 +563,7 @@ export function EditForm({
   note,
   busy,
   surface,
+  saveable,
   onSave,
   onReset,
   onCancel,
@@ -585,11 +586,18 @@ export function EditForm({
    * fact — the container chose it — and it decides both how the form fills and whether a back asks.
    */
   surface?: "screen" | "card"
+  /**
+   * Whether Save is offered for what the field holds. The default is the whole of an ordinary edit —
+   * a value that differs from the one it started at — and a form whose field may hold something
+   * that must not be written passes its own rule, as the key form does with a mask.
+   */
+  saveable?: (next: string) => boolean
 }) {
   const [draft, setDraft] = useState(value)
   const [shown, setShown] = useState(false)
   const id = `edit-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   const next = kind === "text" ? draft.trim() : draft
+  const offers = saveable ?? ((held: string) => held !== value)
   // What a back would throw away — only where the form is the screen. A card is a pop-up, and closing
   // a pop-up is the whole of saying no: nothing is asked.
   useUnsavedChanges(surface === "screen" && next !== value)
@@ -638,7 +646,7 @@ export function EditForm({
         className="mt-auto"
         onCancel={onCancel}
         onReset={onReset}
-        disabled={next === value}
+        disabled={!offers(next)}
         busy={busy}
       />
     </form>

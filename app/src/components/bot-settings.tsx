@@ -128,7 +128,7 @@ type PageMeta = {
  * Every page's own row: what it wears and, where a plugin can withhold it, the feature it is gated
  * on. One table, so a page can gain neither without the other being written beside it.
  */
-const PAGE_META = {
+const PAGE_META: Record<BotTab, PageMeta> = {
   bot: { icon: BotIcon },
   // General mirrors the bot's own Hermes, so it needs a plugin that can read the host's schema. A
   // host without it draws no General row, and a general address lands on the bot's own page.
@@ -142,27 +142,19 @@ const PAGE_META = {
   mcps: { icon: PlugZapIcon, feature: MCP_FEATURES.list },
   skills: { icon: WrenchIcon, feature: SKILL_FEATURES.list },
   delegation: { icon: NetworkIcon, feature: DELEGATION_PAGE },
-} satisfies Record<BotTab, PageMeta>
-
-/** The pages a plugin can withhold: those `PAGE_META` gives a feature. */
-type GatedPage = {
-  [P in BotTab]: (typeof PAGE_META)[P] extends { feature: string } ? P : never
-}[BotTab]
-
-/** What a page is gated on, where a plugin can withhold it. */
-function gateOf(page: BotTab): string | undefined {
-  const meta: PageMeta = PAGE_META[page]
-  return meta.feature
 }
 
 /** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
-const PAGE_FEATURES = Object.fromEntries(
-  (Object.keys(PAGE_META) as BotTab[])
-    .filter((page) => gateOf(page) !== undefined)
-    .map((page) => [page, gateOf(page)]),
-) as Record<GatedPage, string>
+const PAGE_FEATURES = gatedFeatures(PAGE_META)
 
-function gated(page: BotTab): page is GatedPage {
+/** That table, read off `PAGE_META` alone: a page with no feature in it is always there. */
+function gatedFeatures(meta: Record<BotTab, PageMeta>): Record<string, string> {
+  const features: Record<string, string> = {}
+  for (const [page, one] of Object.entries(meta)) if (one.feature) features[page] = one.feature
+  return features
+}
+
+function gated(page: BotTab): boolean {
   return page in PAGE_FEATURES
 }
 
