@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { EllipsisIcon, FrameIcon, MenuIcon, PencilIcon, Undo2Icon } from "lucide-react"
-import { Link, Navigate, useNavigate, useParams } from "react-router"
+import {
+  CrosshairIcon,
+  EllipsisIcon,
+  FrameIcon,
+  MenuIcon,
+  PencilIcon,
+  Undo2Icon,
+} from "lucide-react"
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
@@ -29,6 +36,7 @@ import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
 import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
+import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
   callCanvasCall,
   canvasData,
@@ -350,6 +358,12 @@ export function CanvasView() {
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
   const large = useLarge()
+  // The address asks for a point to be picked on the page: the edit screen has no page of its own,
+  // so it sends the reader here with `?point=1` and takes the chip back when they return.
+  const [params] = useSearchParams()
+  const picking = params.get("point") === "1"
+  // The first version is what makes there be a page at all, so it is also what there is to point at.
+  const versioned = hasVersion(canvas)
   // How many times the frame has been drawn for this version (a document that left is drawn again),
   // and whether that one redraw was already spent.
   const [escapedFor, setEscapedFor] = useState("")
@@ -469,6 +483,34 @@ export function CanvasView() {
     if (answers.current.size) tellPage(true)
   }
 
+  /** The reader changing their mind: back to the chat they came from, with nothing kept for it. */
+  const cancelPick = () => void navigate(`/canvas/${id}/edit`, { replace: true })
+  /**
+   * A point asked for by the address, picked on the page and carried back to the chat that asked for
+   * it. The arm goes through this screen's own `listen` — the same arm the chat beside the page uses —
+   * so the page outlines the element under the finger, a tap answers it, and an arm posted before the
+   * page's script ran is said again when the page says it is ready. The answer is kept for the chat
+   * (one trip only) and the address becomes the chat's own, replacing this one so back never returns
+   * to a page that was only ever a visit.
+   *
+   * A wide screen has the chat beside the page, so nothing needs pointing from here, and a canvas with
+   * no page has nothing to point at: both replace the address with what it would have been without the
+   * ask, so an old link leaves no banner waiting over a page that isn't there.
+   */
+  useEffect(() => {
+    if (!picking) return
+    if (large) {
+      void navigate(`/canvas/${id}`, { replace: true })
+      return
+    }
+    // A canvas with no version is already answered by the edit address below: it has no page to arm.
+    if (!versioned) return
+    return points.listen((point) => {
+      keepPoint(id, point)
+      void navigate(`/canvas/${id}/edit`, { replace: true })
+    })
+  }, [picking, large, versioned, id, navigate, points])
+
   // A page that leaves the document it was drawn from — `location` to an outside URL, or a reload —
   // is refused by the app's own `frame-src 'self'`, and the browser leaves its error page in the
   // frame. The same version is drawn again where the reader is: the refusal is the boundary, and
@@ -533,7 +575,6 @@ export function CanvasView() {
   // edit one — a replacement, never a push, so back cannot land here and be sent there again
   // (ADR 0130). A wide screen keeps the lane, which is already where a canvas is built, and a
   // redirect there would chase its own address for ever.
-  const versioned = hasVersion(canvas)
   if (canvas && !versioned && !large) return <Navigate to={`/canvas/${id}/edit`} replace />
 
   return (
@@ -608,7 +649,22 @@ export function CanvasView() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <div className="relative min-h-0 flex-1 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          {/* What the address asked for, said where the reader is looking: the page is armed, and one
+              tap on an element is the answer. The row is the page's own line, so the frame below it
+              keeps the whole of the rest of the screen. */}
+          {picking && versioned && !large && !missing ? (
+            <div
+              data-point-banner
+              className="mb-2 flex items-center gap-2 rounded-xl border bg-muted/60 py-1.5 pr-1.5 pl-3 text-sm"
+            >
+              <CrosshairIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="flex-1">Tap an element on the page</span>
+              <Button variant="ghost" size="sm" className="h-9 rounded-lg" onClick={cancelPick}>
+                Cancel
+              </Button>
+            </div>
+          ) : null}
           {missing ? (
             <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">{GONE}</p>
           ) : drawn?.error ? (
@@ -625,7 +681,7 @@ export function CanvasView() {
               sandbox="allow-scripts"
               srcDoc={shownDocument}
               onLoad={frameLoaded}
-              className="size-full rounded-2xl border bg-background"
+              className="min-h-0 w-full flex-1 rounded-2xl border bg-background"
               data-canvas-frame
             />
           ) : (
@@ -686,7 +742,10 @@ export function CanvasView() {
  * is gone, and a canvas whose bot isn't answering says so rather than calling itself a page being
  * built, since the header is one row and the body is where the reader is looking.
  *
- * Nothing here points at the page: a point is a tap on a page, and the page is the other screen's.
+ * A point is a tap on a page, and the page is this screen's other half — so pointing here means going
+ * to it: the chat's Point row replaces this address with the page's pointing one, and the element the
+ * reader taps there comes back as a chip through `takePoint`. A canvas with no version has no page,
+ * so its chat is given no provider and offers no Point at all.
  */
 export function CanvasEdit() {
   const { id = "" } = useParams()
@@ -699,6 +758,21 @@ export function CanvasEdit() {
   const { grant, update, remove } = useCanvasManagement(id)
   // The first version is what makes there be a page at all, so it is also what the corners follow.
   const versioned = hasVersion(canvas)
+  /**
+   * Pointing from a screen that draws no page. `listen` and `answer` are the bridge's, which only runs
+   * beside a page, so they have nothing to do here; the row has somewhere else to go instead, and the
+   * element picked there is waiting in `takePoint` when this chat is drawn again. It is handed over
+   * once, so a chip the reader already sent or took off never comes back.
+   */
+  const points = useMemo<CanvasPoints>(
+    () => ({
+      listen: () => () => {},
+      answer: () => {},
+      onArm: () => void navigate(`/canvas/${id}?point=1`, { replace: true }),
+      take: () => takePoint(id),
+    }),
+    [id, navigate],
+  )
   // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading.
   const reading = !canvas && !loaded
   // The guard is per screen and its own: a canvas with a version is answered at its own address, one
@@ -798,6 +872,7 @@ export function CanvasEdit() {
       <CanvasChat
         canvas={canvas}
         bot={profile}
+        points={versioned ? points : undefined}
         reread={refreshCanvases}
         className="flex min-h-0 flex-1 flex-col"
       />
@@ -827,8 +902,9 @@ const FLIP = {
  * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's
  * thread asks for, the body itself, and the page re-read at every settled turn (ADR 0113). Where it
  * stands — in the desktop lane, or filling the edit screen — is the screen's, handed in as its own
- * classes; a canvas with no chat or no bot draws nothing at all. A chat beside no page (`points`
- * left out) offers no Point control, since a point is a tap on a page (ADR 0130).
+ * classes; a canvas with no chat or no bot draws nothing at all. A chat handed no provider at all
+ * (`points` left out) offers no Point control — a canvas with no page has nothing to point at — while a
+ * screen whose page is another address hands one whose `onArm` takes the reader there (ADR 0130).
  *
  * The usage sheet is drawn here, beside the body, because its numbers are this chat's own: the
  * composer's limit line asks for it, and the sheet's portals are where the popup lands whatever it
@@ -844,7 +920,7 @@ function CanvasChat({
 }: {
   canvas: Canvas | undefined
   bot: Profile | undefined
-  /** The page this chat can point at; none for a screen that draws no page. */
+  /** What this chat can point at; none for a canvas with no page to point at. */
   points?: CanvasPoints
   /** What a settled turn reads again: the page this chat sits beside, or the record of a screen that
    * draws none — so a canvas's chat on the edit screen never asks for a document either. */

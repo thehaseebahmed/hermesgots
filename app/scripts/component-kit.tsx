@@ -618,8 +618,14 @@ export const sendPress = () => pressEnter({ ctrlKey: true })
 export const Path = () => <p data-path>{useLocation().pathname}</p>
 export const path = () => find("[data-path]")?.textContent ?? ""
 
-/** The address on screen and the move that landed it, so a test reads a push from a replace. */
-export const Nav = () => <p data-nav>{`${useNavigationType()}:${useLocation().pathname}`}</p>
+/**
+ * The address on screen and the move that landed it, so a test reads a push from a replace. The query
+ * is part of the address a screen reads, so it is drawn too: an address that means something by its
+ * query (`?point=1`) is no different from one that doesn't.
+ */
+export const Nav = () => (
+  <p data-nav>{`${useNavigationType()}:${useLocation().pathname}${useLocation().search}`}</p>
+)
 export const nav = () => find("[data-nav]")?.textContent ?? ""
 
 /**

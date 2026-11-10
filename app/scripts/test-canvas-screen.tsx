@@ -6,11 +6,12 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
+import { StrictMode, act } from "react"
 import { Link, MemoryRouter, Route, Routes } from "react-router"
 
-import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
+import { BRIDGE_MESSAGE, POINT_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
+import { takePoint, keepPoint } from "@/lib/canvas-point-pick"
 import { refreshCanvas, refreshCanvases, startCanvas } from "@/lib/canvases"
 import { db } from "@/lib/db"
 import { pressBack } from "@/lib/native"
@@ -262,6 +263,28 @@ async function drawCanvas(
     draw,
   )
 }
+
+/** What a page's own script says when its half of the bridge has run, as a frame hands it over. */
+const saysReady = (inside: Window) =>
+  act(async () => {
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        data: { type: POINT_MESSAGE, ready: true },
+        source: inside,
+      }),
+    )
+  })
+
+/** A tap on the page: the element the frame answered, from the frame's own window and no other. */
+const taps = (inside: Window, label: string, selector: string) =>
+  act(async () => {
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        data: { type: POINT_MESSAGE, point: { label, selector } },
+        source: inside,
+      }),
+    )
+  })
 
 test(
   "a cold edit address says it is reading the canvas",
@@ -1298,5 +1321,188 @@ test(
       serveCanvases({ version: 3, undos: 0 })
       await refreshCanvas(CANVAS.id)
     }
+  }),
+)
+
+/**
+ * Pointing from the edit screen (flow F6, the phone's half): the edit screen draws no page, so its
+ * Point row sends the reader to the page with pointing armed; the page answers the element under the
+ * finger, and the chat that asked comes back holding it as a chip it can send or take off.
+ */
+test(
+  "the edit screen's + sheet sends the reader to the page to point",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(composerField()), "the edit screen to draw")
+      assert.ok(find('[data-canvas-flip="preview"]'), "its corner is the way to the page")
+      await click(find('button[aria-label="Add context"]'))
+      await until(
+        () => Boolean(find('button[aria-label="Point at the page"]')),
+        "the + sheet to offer Point",
+      )
+      await click(find('button[aria-label="Point at the page"]'))
+      // The row is not a flip: the address is replaced by the page's pointing one, so the reader
+      // lands on the page with pointing armed and no step of this screen's left behind.
+      assert.equal(
+        nav(),
+        `REPLACE:/canvas/${CANVAS.id}?point=1`,
+        "the press replaces this screen with the page's pointing address",
+      )
+      await until(() => Boolean(find("[data-point-banner]")), "the page, waiting for a tap")
+      assert.ok(find("iframe[data-canvas-frame]"), "the page itself is drawn")
+      assert.ok(
+        missing('[data-canvas-flip="preview"]'),
+        "and the edit screen's corner went with the screen it belonged to",
+      )
+    })
+  }),
+)
+
+test(
+  "the page opened to point says so, and answers with the chat's address",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    // Cancel is the reader changing their mind: the chat they came from, and nothing kept.
+    await drawCanvas([`/canvas/${CANVAS.id}?point=1`], async () => {
+      await until(() => Boolean(find("[data-point-banner]")), "the line the address asks for")
+      assert.match(wordsOf(find("[data-point-banner]")), /Tap an element on the page/)
+      const inside = find("iframe[data-canvas-frame]")!.contentWindow!
+      // The page is armed through the chat's own listener, and an arm that went out before its
+      // script ran is said again when the page says it is ready.
+      const told: { type?: string; watch?: boolean }[] = []
+      ;(inside as unknown as { postMessage: unknown }).postMessage = (data: {
+        type?: string
+        watch?: boolean
+      }) => told.push(data)
+      await saysReady(inside)
+      await until(
+        () => told.some((one) => one.type === POINT_MESSAGE && one.watch === true),
+        "the page to be told a point is armed",
+      )
+      await click(find("[data-point-banner] button")!)
+      await until(() => nav() === `REPLACE:/canvas/${CANVAS.id}/edit`, "Cancel to leave for the chat")
+      assert.equal(takePoint(CANVAS.id), undefined, "and to keep nothing")
+      assert.ok(missing("[data-point-banner]"), "with no banner left on the chat")
+    })
+    // A tap on the page is the answer: the chat it was picked for is drawn again, in its place.
+    await drawCanvas([`/canvas/${CANVAS.id}?point=1`], async () => {
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+      await taps(find("iframe[data-canvas-frame]")!.contentWindow!, "The total", "#total")
+      await until(
+        () => nav() === `REPLACE:/canvas/${CANVAS.id}/edit`,
+        "the answered element to leave for the chat",
+      )
+    })
+    // A wide screen has the chat beside the page, so the ask names no screen to go to: the address is
+    // put back to the canvas's own, and an old link leaves no banner over the lane's page.
+    await atWidth(1440, async () => {
+      await drawCanvas([`/canvas/${CANVAS.id}?point=1`], async () => {
+        await until(() => nav() === `REPLACE:/canvas/${CANVAS.id}`, "the ask dropped where it is moot")
+        assert.ok(missing("[data-point-banner]"), "with no banner over the page")
+        assert.ok(composerField(), "and the chat beside it still the place to point from")
+      })
+    })()
+  }),
+)
+
+test(
+  "an element picked on the page is the edit screen's chip, which can be taken off",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(composerField()), "the edit screen to draw")
+      await click(find('button[aria-label="Add context"]'))
+      await until(
+        () => Boolean(find('button[aria-label="Point at the page"]')),
+        "the + sheet to offer Point",
+      )
+      await click(find('button[aria-label="Point at the page"]'))
+      await until(() => Boolean(find("[data-point-banner]")), "the page opened to point")
+      await taps(find("iframe[data-canvas-frame]")!.contentWindow!, "The total", "#total")
+      // Back on the edit screen the element is already the field's chip — the reader keeps typing
+      // around it, and the send takes it, which is what the chip on the field is for.
+      await until(() => Boolean(composerField()), "the edit screen, drawn again")
+      await until(
+        () => find("[data-draft-point]")?.textContent?.includes("The total") ?? false,
+        "the picked element to be the field's chip",
+      )
+      assert.equal(
+        find("[data-draft-point]")!.getAttribute("title"),
+        "#total",
+        "with the selector that finds it again",
+      )
+      assert.ok(
+        find('button[aria-label="Send"]')?.hasAttribute("disabled") === false,
+        "a message carrying only a point can be sent",
+      )
+      await click(find('button[aria-label="Remove the point on The total"]'))
+      await settle()
+      assert.ok(missing("[data-draft-point]"), "the chip's cross takes it off the field")
+      assert.ok(
+        find('button[aria-label="Send"]')?.hasAttribute("disabled"),
+        "and an empty field with no point has nothing to send",
+      )
+    })
+  }),
+)
+
+test(
+  "a canvas with no page offers no Point at all",
+  atWidth(390, async () => {
+    // There is nothing to point at until a version is drawn, so the edit screen — the only screen a
+    // phone draws of a canvas with no version — offers no row that could only lead to an empty page.
+    serveCanvases({ version: 0, undos: 0, listed: [CANVAS.id] })
+    await seedCanvasChat(CANVAS.id)
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(() => Boolean(composerField()), "the edit screen to draw")
+        await click(find('button[aria-label="Add context"]'))
+        await until(() => Boolean(findText("button", "Camera")), "the + sheet to draw")
+        assert.ok(
+          missing('button[aria-label="Point at the page"]'),
+          "a canvas with no page offers no Point",
+        )
+      })
+    } finally {
+      // The store outlives a test: the rest of the file draws c1 at the version the host holds.
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
+
+test(
+  "a chip taken on arrival survives the dev double render",
+  atWidth(390, async () => {
+    // The app draws under StrictMode in development, where a state initialiser is called twice: React
+    // keeps the first answer, and the hand-over is one trip — the second call finds nothing and is
+    // thrown away. A composer that drew its field from the second call would arrive empty in
+    // development and full in a build, which is exactly the kind of difference no test in this tier
+    // would otherwise see.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    keepPoint(CANVAS.id, { label: "The total", selector: "#total" })
+    await mount(
+      <StrictMode>
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}/edit`]}>
+          <Routes>
+            <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>,
+      async () => {
+        await until(() => Boolean(composerField()), "the edit screen to draw")
+        await until(
+          () => Boolean(find("[data-draft-point]")),
+          "the chip the chat arrived with, drawn once",
+        )
+        assert.match(find("[data-draft-point]")!.textContent ?? "", /The total/)
+        assert.equal(takePoint(CANVAS.id), undefined, "and the hand-over is spent, not re-readable")
+      },
+    )
   }),
 )
