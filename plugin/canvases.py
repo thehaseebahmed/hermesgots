@@ -1398,11 +1398,11 @@ def _canvas_of_session_strict(
     found = value.get("canvasId") if isinstance(value, dict) else None
     if isinstance(found, str) and found:
         return found
-    if entry is not None and chats.closed(entry):
-        # A chat the user is done with that names no canvas is a canvas's whose record is gone —
-        # deleting a canvas tombstones its chat — and the run is the deleted canvas's. Nothing can
-        # say which canvas that was, so this refuses rather than leaving the run free to name one.
-        raise CanvasError("The chat this session belongs to is over and names no canvas.")
+    if entry is not None and entry.get("value") is None:
+        # A tombstone keeps no value: deleting a canvas tombstones its chat, and a run left over from
+        # it can't be told apart from a plain one. Nothing can say which canvas that was, so this
+        # refuses rather than leaving the run free to name one.
+        raise CanvasError("The chat this session belongs to is gone.")
     return None
 
 

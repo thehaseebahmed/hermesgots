@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import plugin
-from plugin import canvases, chats, openui, outbox, page_calls, triage
+from plugin import canvases, chats, openui, outbox, page_calls, sessions, triage
 from plugin.store import connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
@@ -1041,6 +1041,28 @@ class SessionTest(unittest.TestCase):
         for call in ({"canvas": other["id"]}, {}):
             gone = json.loads(canvases.handle_data_read(call, session_id=self.session))
             self.assertIn("couldn't tell", gone["error"])
+
+    def test_a_plain_chat_the_user_is_done_with_keeps_its_data_tools(self) -> None:
+        # Done or swiped away is how a thread ends, not a canvas's: the run still knows the chat
+        # named no canvas, so it may name one.
+        now = int(time.time() * 1000) + 1
+        chats.merge(
+            self.path,
+            {
+                self.plain.replace(sessions.GOTS_ID_PREFIX, "", 1): {
+                    "at": now,
+                    "value": {"hermesSessionId": self.plain, "resolvedAt": now},
+                }
+            },
+        )
+        written = json.loads(
+            canvases.handle_data_write(
+                {"canvas": self.canvas["id"], "collection": "runs", "id": "a", "doc": 1},
+                session_id=self.plain,
+            )
+        )
+        self.assertEqual(written["doc"], 1)
+        self.assertNotIn("error", json.loads(canvases.handle_list({}, session_id=self.plain)))
 
     def test_a_name_that_is_one_canvases_id_and_anothers_title_is_refused(self) -> None:
         other = canvases.create(
