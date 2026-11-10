@@ -179,6 +179,42 @@ _REMOTE = re.compile(
     r"|<link\b[^>]*\bhref\s*=\s*[\"']?\s*(?:https?:)?//"
     r"|url\(\s*[\"']?\s*(?:https?:)?//)"
 )
+# An image the frame may load from outside (ADR 0132): an `<img>`'s `src` or `srcset`, or a
+# `<picture>`'s `<source srcset>`, every URL of which is `https://`. The policy's `img-src https:`
+# lets those in; a plain `http:` or scheme-relative URL is still refused, and so is every other load
+# from outside — a script, a stylesheet, a font or background in CSS, a poster, a form's target.
+_IMAGE_TAG = re.compile(r"(?is)<(img|source)\b[^>]*>")
+_IMAGE_ATTRIBUTE = re.compile(
+    r"(?is)\b(src|srcset)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"
+)
+_HTTPS = re.compile(r"(?i)^https://")
+_ANY_REMOTE = re.compile(r"(?i)^(?:https?:)?//")
+
+
+def _remote_image(tag: str, name: str, value: str) -> bool:
+    """Whether one attribute of an `<img>` or `<source>` names only images over https."""
+    name = name.lower()
+    if name == "src":
+        return tag == "img" and bool(_HTTPS.match(value.strip()))
+    candidates = [part.strip().split()[0] for part in value.split(",") if part.strip()]
+    remote = [url for url in candidates if _ANY_REMOTE.match(url)]
+    return bool(remote) and all(_HTTPS.match(url) for url in remote)
+
+
+def _without_remote_images(markup: str) -> str:
+    """The markup with the https images it may load cut out, so what is left is read for loads."""
+
+    def tag(found: "re.Match[str]") -> str:
+        kind = found.group(1).lower()
+        return _IMAGE_ATTRIBUTE.sub(
+            lambda attribute: " "
+            if _remote_image(kind, attribute.group(1), next(v for v in attribute.groups()[1:] if v is not None))
+            else attribute.group(0),
+            found.group(0),
+        )
+
+    return _IMAGE_TAG.sub(tag, markup)
+
 
 
 def _markup(html: str) -> str:
@@ -245,7 +281,7 @@ def scan(html: Any) -> None:
         ("a <script src>", _SCRIPT_SRC),
         ("a URL it loads from outside itself", _REMOTE),
     ):
-        if pattern.search(markup):
+        if pattern.search(_without_remote_images(markup) if pattern is _REMOTE else markup):
             raise CanvasError(
                 f"The canvas holds {name}, which a canvas can't use: everything it loads has to be "
                 "written into the document."

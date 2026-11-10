@@ -50,9 +50,10 @@ that one is CSS to paste, not to import.
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
 - An `http(s)` link opens in the app on tap: use one when the reader should leave.
-- Nothing loads from outside: no `<script src>`, `<link href>` to a CDN, remote image,
-  `<iframe>`, `<object>`, `<embed>`, `<base>`, meta refresh or `url(https://…)`, or the write is
-  refused whole. No `RTCPeerConnection`: the sandbox removes it.
+- Remote images over https are allowed (`<img src="https://…">`, `srcset`, `<picture><source
+  srcset>`); nothing else loads from outside: no `<script src>`, `<link href>` to a CDN, `http://`
+  image, `<iframe>`, `<object>`, `<embed>`, `<base>`, meta refresh or `url(https://…)`, or the write
+  is refused whole. No `RTCPeerConnection`: the sandbox removes it.
 
 ## The document
 

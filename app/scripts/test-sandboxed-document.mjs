@@ -35,3 +35,21 @@ test("a head mentioned in a comment is not the head", () => {
 test("markup with no head gets one prepended, so the policy still comes first", () => {
   assert.equal(sandboxedDocument(`<p>hi</p>`, { policy: "p" }), `<head>${PREFIX("p")}</head><p>hi</p>`)
 })
+
+test("a sandboxed page allows https images and blocks everything else remote", () => {
+  const rules = Object.fromEntries(
+    SANDBOX_CSP.split(";").map((rule) => {
+      const [name, ...sources] = rule.trim().split(/\s+/)
+      return [name, sources]
+    }),
+  )
+  assert.deepEqual(rules["img-src"], ["data:", "blob:", "https:"])
+  assert.deepEqual(rules["default-src"], ["'none'"])
+  assert.deepEqual(rules["script-src"], ["'unsafe-inline'"])
+  assert.deepEqual(rules["style-src"], ["'unsafe-inline'"])
+  assert.deepEqual(rules["font-src"], ["data:"])
+  assert.deepEqual(rules["connect-src"], ["'none'"])
+  assert.deepEqual(rules["frame-src"], ["'none'"])
+  assert.deepEqual(rules["form-action"], ["'none'"])
+  assert.ok(!/\bhttp:/.test(SANDBOX_CSP))
+})

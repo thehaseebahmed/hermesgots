@@ -642,11 +642,34 @@ class WriteTest(unittest.TestCase):
             '<meta http-equiv="refresh" content="0;url=https://example.com">',
             '<base href="https://example.com/">',
             '<div style="background: url(https://example.com/x.png)"></div>',
+            '<img src="http://example.com/x.png">',
+            '<img srcset="https://example.com/a.png 1x, http://example.com/b.png 2x">',
+            '<picture><source srcset="//example.com/x.webp"></picture>',
+            '<video poster="https://example.com/x.png"></video>',
+            '<script src="https://cdn.example.com/x.js" data-alt="<img src=https://x>"></script>',
+            '<form action="https://example.com/post"></form>',
         ):
             with self.subTest(hole=hole):
                 with self.assertRaises(canvases.CanvasError):
                     canvases.write(self.path, self.canvas["id"], DOCUMENT.replace("<body>", hole + "<body>"))
         self.assertEqual(canvases.record(self.path, self.canvas["id"])["version"], 0)
+
+    def test_a_remote_image_over_https_is_accepted(self) -> None:
+        # ADR 0132: the frame's policy lets an https image in, so the scan does too — and only that.
+        for image in (
+            '<img src="https://example.com/x.png" alt="x">',
+            "<img alt='x' src='https://example.com/x.png'>",
+            '<img src="https://example.com/a.png" srcset="https://example.com/a.png 1x, https://example.com/b.png 2x" alt="x">',
+            '<picture><source srcset="https://example.com/x.webp" type="image/webp"><img src="https://example.com/x.png" alt="x"></picture>',
+        ):
+            with self.subTest(image=image):
+                html = DOCUMENT.replace("<body>", "<body>" + image)
+                canvases.scan(html)
+
+    def test_the_prompt_says_https_images_and_nothing_else_load(self) -> None:
+        prompt = (Path(canvases.__file__).parent / "canvas" / "prompt.txt").read_text()
+        self.assertIn("Remote images over https are allowed", prompt)
+        self.assertIn("nothing else loads from outside", prompt)
 
     def test_a_link_the_reader_could_tap_is_not_a_resource(self) -> None:
         html = DOCUMENT.replace("<body>", '<body><a href="https://example.com">Read more</a>')

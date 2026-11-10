@@ -11,9 +11,12 @@
  * it as a pure rule.
  */
 
-/** The policy a canvas is drawn under: nothing leaves the frame, nothing loads from outside it. */
+/**
+ * The policy a sandboxed document is drawn under: nothing leaves the frame, and nothing loads from
+ * outside it but an image over https (ADR 0132).
+ */
 export const SANDBOX_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; " +
   "font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'"
 
 /**
