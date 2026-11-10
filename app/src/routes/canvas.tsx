@@ -659,6 +659,7 @@ interface ChatSurfaceUsage {
  */
 export function CanvasEdit() {
   const { id = "" } = useParams()
+  const navigate = useNavigate()
   const { up, step } = useNav()
   // The guard is per screen, so this one is its own: without it the hardware back would leave the
   // canvas for the list while the header's Preview steps to the canvas's own address.
@@ -687,7 +688,10 @@ export function CanvasEdit() {
         onBack={versioned ? undefined : () => up("/canvas")}
         undo={false}
         flip={versioned ? "preview" : undefined}
-        onFlip={versioned ? () => up(`/canvas/${id}`) : undefined}
+        // A navigation, never a step back: the screen behind this one may be the list — a canvas the
+        // list made opens here directly, and a page with no version replaces its address with this
+        // one — so stepping back would leave the canvas instead of drawing the page it names.
+        onFlip={versioned ? () => navigate(`/canvas/${id}`) : undefined}
       />
       {/* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
           preview's empty frame uses, and the first version takes them away (ADR 0130). */}

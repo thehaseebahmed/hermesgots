@@ -388,6 +388,41 @@ test(
 )
 
 test(
+  "the flip draws the page even when the list is the screen behind it",
+  atWidth(390, async () => {
+    // A canvas the list made opens on its edit screen with the list behind it, and so does one whose
+    // address the preview replaced: Preview must draw the page it names rather than step back to the
+    // list, which is where a step back lands when no page was ever pushed (`navigate`, ADR 0130).
+    serveCanvases({ version: 2, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await mount(
+      <MemoryRouter initialEntries={["/canvas", `/canvas/${CANVAS.id}/edit`]} initialIndex={1}>
+        <Routes>
+          <Route path="/canvas" element={<div data-canvas-list />} />
+          <Route path="/canvas/:id" element={<CanvasView />} />
+          <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
+        </Routes>
+        <Nav />
+      </MemoryRouter>,
+      async () => {
+        await until(() => Boolean(composerField()), "the edit screen to draw")
+        // The list is behind this screen, which is the shape a step back cannot leave: the press has
+        // to navigate, and a press that goes back lands on the list with no page ever drawn.
+        const history = atDepth(1)
+        try {
+          await click(find('[data-canvas-flip="preview"]'))
+          await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to be drawn")
+          assert.deepEqual(history.backs, [], "Preview navigates rather than stepping back")
+          assert.ok(missing("[data-canvas-list]"), "Preview does not fall back to the list")
+        } finally {
+          history.restore()
+        }
+      },
+    )
+  }),
+)
+
+test(
   "a canvas with no version opens on Edit and gains Preview when the first version lands",
   async () => {
     // Nothing to preview is said honestly (ADR 0130): a phone replaces the canvas's own address with
