@@ -29,9 +29,7 @@ A canvas also keeps data of its own: JSON documents in collections (``data``, ``
 ``canvas_data_read`` and ``canvas_data_write``. The data is the canvas's, not a version's — a
 write or an undo never touches it — so a page keeps its state through a version the user walks
 back, and the whole of it is capped at ``DATA_BYTES`` because every open and every device's copy
-carries it. Those two tools answer every session of the bot, because keeping a canvas's data is not
-writing its page: a call outside the canvas's own session names the canvas by its name or its id
-(``resolve_canvas``), and a canvas's session keeps that canvas's data and no other's.
+carries it.
 
 A page calls a tool on the host only when the version it is drawn from declared that tool, and only
 once the user has answered for it: ``may_call`` reads the version's list and the canvas's own grant
@@ -360,8 +358,6 @@ def listing(path: Path) -> List[Dict[str, Any]]:
     return [_row(row) for row in rows]
 
 
-# What the list tool answers: a name and its flags, and neither the picture a tile draws nor a
-# version's document. The app's own list reads `listing`, which carries the picture.
 _SUMMARY = ("id", "title", "pinned", "archived", "version", "at")
 
 
@@ -387,11 +383,8 @@ def summaries(path: Path) -> List[Dict[str, Any]]:
 def resolve_canvas(path: Path, name: Any) -> str:
     """The canvas a name stands for: its id, or a title only one canvas carries.
 
-    A name is how a bot that is not in a canvas's session reaches one, so it takes what a user says
-    about a canvas and what the app's own address carries. An id answers first and alone, a title
-    exact before the case and the spaces around it are forgiven, and a title two canvases share is
-    refused with both ids — a guess there would write to whichever row sorted first. One connection
-    answers both questions, and neither reads a picture or a version: a name is two short columns.
+    A title two canvases share is refused with both ids: a guess there writes to whichever row
+    sorted first.
     """
     if not isinstance(name, str) or not name.strip():
         raise CanvasError("A canvas is named by its name or its id.")
@@ -1389,13 +1382,13 @@ def create(
     }
 
 
-def edits(path: Path, home: Path, session_id: Optional[str]) -> Optional[str]:
+def canvas_of_session_or_raise(
+    path: Path, home: Path, session_id: Optional[str]
+) -> Optional[str]:
     """The canvas a run's session edits, or None when that session isn't a canvas's.
 
-    A run may be keyed on a session compression moved the chat on to, so the chat is found from the
-    root the walk answers and its record names the canvas. A store this can't read raises rather
-    than answering None: a caller that keeps a canvas's session to its own data has to tell "no
-    canvas" from "couldn't tell", or a locked store silently widens the rule.
+    Where ``canvas_of_session`` answers None for a store it can't read, this raises: a caller that
+    keeps a canvas's session to its own data has to tell "no canvas" from "couldn't tell".
     """
     if not isinstance(session_id, str) or not session_id:
         return None
@@ -1408,11 +1401,10 @@ def edits(path: Path, home: Path, session_id: Optional[str]) -> Optional[str]:
 def canvas_of_session(path: Path, home: Path, session_id: Optional[str]) -> Optional[str]:
     """The canvas a run's session edits, or None when that session isn't a canvas's.
 
-    A store this can't read is no canvas: the caller then equips nothing, which is the safe way to
-    be wrong wherever nothing stronger is being decided.
+    A store this can't read is no canvas: the caller equips nothing.
     """
     try:
-        return edits(path, home, session_id)
+        return canvas_of_session_or_raise(path, home, session_id)
     except Exception:
         logger.debug("gots: couldn't resolve a canvas for %s", session_id, exc_info=True)
         return None
@@ -1449,11 +1441,10 @@ def _canvas_of_call(task_id: Optional[str], session_id: Optional[str]) -> Option
 def _editing(
     task_id: Optional[str], session_id: Optional[str]
 ) -> tuple[Optional[str], Optional[Path], bool]:
-    """The canvas a call's run edits, the store it lives in, and whether that could be learned.
+    """The canvas a call's run edits, the store it lives in, and whether the host could answer.
 
-    ``False`` is a store or a chat record this host couldn't read, which is not the same as a
-    session without a canvas: the tools that keep a canvas's session to its own data have to tell
-    them apart, or a store that is away hands that session any canvas at all.
+    ``False`` is a store or a chat record this host couldn't read, and not a session without a
+    canvas: a caller that keeps a canvas's session to its own data must refuse, not widen.
     """
     try:
         path, home = sessions._paths()
@@ -1465,7 +1456,7 @@ def _editing(
         if not key:
             continue
         try:
-            found = edits(path, home, key)
+            found = canvas_of_session_or_raise(path, home, key)
         except Exception:
             logger.debug("gots: couldn't read which canvas %s edits", key, exc_info=True)
             return None, path, False
@@ -1643,11 +1634,7 @@ def _tool_answer(
     answer: Callable[[Dict[str, Any]], Dict[str, Any]],
     canvas_of: Optional[Callable[[], tuple[str, Path]]] = None,
 ) -> str:
-    """One canvas tool's answer: its canvas found or refused, and the payload it runs to.
-
-    The page tools find their canvas the only way there is, from the session that made the call;
-    the data tools pass ``canvas_of`` because a call may name its canvas instead.
-    """
+    """One canvas tool's answer: its canvas found or refused, and the payload it runs to."""
 
     def session_only() -> tuple[str, Path]:
         canvas_id, path = _call_canvas(task_id, session_id)
@@ -1666,11 +1653,7 @@ def _tool_answer(
 def _data_canvas(
     tool: str, args: Dict[str, Any], task_id: Optional[str], session_id: Optional[str]
 ) -> tuple[str, Path]:
-    """The canvas a data tool acts on: the one it names, else the one its session edits.
-
-    The data is the canvas's rather than its page's, so every session of the bot may keep it, while
-    the session that belongs to a canvas works on that canvas and no other.
-    """
+    """The canvas a data tool acts on: the one it names, else the one its session edits."""
     name = args.get("canvas")
     mine, path, answered = _editing(task_id, session_id)
     if path is None:
@@ -1684,7 +1667,6 @@ def _data_canvas(
         if mine is None:
             raise CanvasError(f"{tool} needs the canvas to work on: name it with `canvas`.")
         return mine, path
-    # Its own canvas needs no lookup, and the name it sends is the id it is already.
     found = mine if isinstance(name, str) and name.strip() == mine else resolve_canvas(path, name)
     if mine is not None and found != mine:
         raise CanvasError(
@@ -1880,11 +1862,7 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives every agent the canvas's data tools, and a canvas's own session its page tools too.
-
-    The data is the canvas's rather than its page's, so a chat, a routine or a delegated run may
-    keep it by naming a canvas; the page is written from the canvas's own session and nowhere else.
-    """
+    """Gives every agent the canvas's data tools, and a canvas's own session its page tools too."""
     global adapter, _wired
     adapter = api_adapter
 
@@ -1902,8 +1880,6 @@ def wire(api_adapter: Any) -> bool:
     ):
         if not tools_common.wire_tool(api_adapter, tool, schema, tool):
             took = False
-    # A canvas's session works on its own canvas, so the list would only offer it names the next
-    # call refuses.
     if not tools_common.wire_tool(
         api_adapter, TOOL_LIST, LIST_SCHEMA, TOOL_LIST, when=lambda session: not is_canvas(session)
     ):

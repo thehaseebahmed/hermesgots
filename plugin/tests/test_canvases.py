@@ -777,8 +777,6 @@ class SessionTest(unittest.TestCase):
             ],
         )
         self.assertEqual(len(canvas_agent.tools), 5)
-        # A session that is not the canvas's keeps the canvas's data and never its page, and can
-        # find the canvas it was not told about.
         self.assertEqual(
             sorted(plain_agent.valid_tool_names),
             [canvases.TOOL_DATA_READ, canvases.TOOL_DATA_WRITE, canvases.TOOL_LIST],
@@ -879,8 +877,7 @@ class SessionTest(unittest.TestCase):
             )
 
     def test_a_session_that_is_not_the_canvases_reads_and_creates_its_data(self) -> None:
-        # The data is the canvas's rather than a version's, and it is not the page: a chat, a routine
-        # or a delegated run may name a canvas and keep its data, where the page stays the session's.
+        # Keeping a canvas's data is not writing its page: any session may name the canvas.
         canvas_id = self.canvas["id"]
         with mock.patch.object(canvases, "_session_canvas", return_value=None):
             written = json.loads(
@@ -906,8 +903,7 @@ class SessionTest(unittest.TestCase):
             self.assertEqual(one["document"]["doc"], {"km": 5})
 
     def test_a_name_that_is_two_canvases_or_none_is_refused(self) -> None:
-        # A name is how a user says which canvas, and a title two canvases carry names neither: the
-        # refusal hands back both ids, which is the one thing that tells them apart.
+        # A title two canvases carry names neither; the ids are what tells them apart.
         again = make_canvas(self.path)
         self.assertEqual(again["title"], self.canvas["title"])
         with mock.patch.object(canvases, "_session_canvas", return_value=None):
@@ -916,7 +912,6 @@ class SessionTest(unittest.TestCase):
             )
             self.assertIn(self.canvas["id"], two["error"])
             self.assertIn(again["id"], two["error"])
-            # An id, though, is one canvas however many titles answer to one name.
             one = json.loads(
                 canvases.handle_data_read({"canvas": again["id"]}, session_id=self.plain)
             )
@@ -925,7 +920,6 @@ class SessionTest(unittest.TestCase):
                 canvases.handle_data_read({"canvas": "No such canvas"}, session_id=self.plain)
             )
             self.assertIn("No such canvas", never["error"])
-            # A call that names no canvas from a session that has none says what is missing.
             unnamed = json.loads(canvases.handle_data_read({}, session_id=self.plain))
             self.assertIn("canvas", unnamed["error"])
 
@@ -971,11 +965,10 @@ class SessionTest(unittest.TestCase):
         finally:
             conn.close()
         listed = json.loads(canvases.handle_list({}, session_id=self.plain))
-        # Newest first, as the app's own list reads them.
         self.assertEqual(
             [row["id"] for row in listed["canvases"]], [again["id"], self.canvas["id"]]
         )
-        # Each row carries what a data call needs and no picture: that is one page's screen.
+        # A data call takes an id and a title; a picture is one page's own screen.
         self.assertEqual(
             sorted(listed["canvases"][0]),
             ["archived", "at", "id", "pinned", "title", "version"],
@@ -991,17 +984,14 @@ class SessionTest(unittest.TestCase):
         )
 
     def test_a_canvas_session_is_refused_the_list_as_well_as_left_unwired(self) -> None:
-        # register() puts the tool in the plugin's toolset for every agent, so the wiring is not the
-        # only door: the handler refuses a canvas's session too.
+        # register() puts the tool in the plugin's toolset too, so the handler refuses as well.
         refused = json.loads(canvases.handle_list({}, session_id=self.session))
         self.assertIn("own canvas", refused["error"])
-        # A plain thread of the same bot is answered.
         allowed = json.loads(canvases.handle_list({}, session_id=self.plain))
         self.assertEqual([row["id"] for row in allowed["canvases"]], [self.canvas["id"]])
 
     def test_a_store_that_cannot_be_read_does_not_hand_a_canvas_session_another(self) -> None:
-        # The session's own canvas is how a canvas's session is kept to its own data. A store that
-        # can't be read is not a session without a canvas: it must refuse, not widen.
+        # A store that can't be read is not a session without a canvas: it must refuse, not widen.
         other = canvases.create(
             self.path, request_profile="default", bot_id="bot-1", prompt="A weather page", body=BODY
         )
