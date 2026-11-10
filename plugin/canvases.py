@@ -9,10 +9,11 @@ write is a row of ``canvas_versions``, the newest ``KEEP_VERSIONS`` kept. A canv
 from its own session: ``canvas_write``, ``canvas_edit`` and ``canvas_read`` are equipped there and
 nowhere else, and the canvas is found from a run's session by walking the chat's compression lineage
 (``sessions.chat_session``), so a chat that has been compacted still reaches its canvas.
-``canvas_list`` and ``canvas_data_read`` reach every session — a session with no canvas of its own
-is exactly who has to look one up, and a chat that wants a canvas's data shouldn't have to become
-that canvas's session — while the data write stays with the document tools. Both name a canvas by
-its title or its id (``resolve``) and answer ``names``, never a record's picture.
+``canvas_list``, ``canvas_data_read`` and ``canvas_data_write`` reach every session — a session
+with no canvas of its own is exactly who has to look one up, and a chat that wants a canvas's data
+shouldn't have to become that canvas's session — while ``canvas_write``, ``canvas_edit`` and
+``canvas_read`` are equipped in the canvas's own session and nowhere else. The three name a canvas
+by its title or its id (``resolve``) and answer ``names``, never a record's picture.
 
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
 it is archived out of the list — are the host's record too (``update``), so every device draws the same
@@ -1600,13 +1601,21 @@ DATA_READ_SCHEMA = {
 DATA_WRITE_SCHEMA = {
     "name": TOOL_DATA_WRITE,
     "description": (
-        "Canvas sessions only: stores one document in the canvas's data, or removes it. A write "
+        "Stores one document in a canvas's data, or removes it. Name the canvas by its title or "
+        "its id; in the canvas's own session leave `canvas` out to mean this canvas. A write "
         "replaces the document with that collection and id, and the whole of a canvas's data is "
         "capped at 1 MB, so a write past it is refused whole."
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "canvas": {
+                "type": "string",
+                "description": (
+                    "The canvas to write, by its title or its id. Leave it out in the canvas's own "
+                    "session, where it means this canvas."
+                ),
+            },
             "collection": {
                 "type": "string",
                 "description": "The collection the document belongs to.",
@@ -1680,7 +1689,7 @@ def _data_canvas(
         return path, canvas_id
     if not isinstance(named, str) or not named.strip():
         raise CanvasError(
-            f"{tool} needs the canvas whose data it reads: name it by its title or its id. "
+            f"{tool} needs the canvas it works on: name it by its title or its id. "
             f"{TOOL_LIST} names every canvas this bot has."
         )
     return path, resolve(path, named)
@@ -1806,10 +1815,12 @@ def handle_data_read(
 def handle_data_write(
     args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
 ) -> str:
-    """The tool: stores one of the canvas's documents, or removes one."""
+    """The tool: stores one of the named canvas's documents, or removes one — or, in that canvas's
+    own session, this canvas's."""
     args = args if isinstance(args, dict) else {}
-    return _tool_answer(
+    return _data_answer(
         TOOL_DATA_WRITE,
+        args.get("canvas"),
         task_id,
         session_id,
         lambda path, canvas_id: write_call(path, canvas_id, args),
@@ -1839,8 +1850,8 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's six tools — the list and the data read every
-    session carries, and the four more a canvas's own session is given."""
+    """Keeps the context and registers the canvas's six tools — the list and the two data tools
+    every session carries, and the three more a canvas's own session is given."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -1866,11 +1877,12 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives every agent the list and the data read, and a canvas's agents the rest.
+    """Gives every agent the list and the two data tools, and a canvas's agents the rest.
 
-    Those two are wired with no ``when``: a session with no canvas of its own is exactly who needs
-    to look one up, and one that isn't a canvas's reads a canvas's data by naming it. The three
-    document tools and the data write stay in the session the canvas is edited in.
+    Those three are wired with no ``when``: a session with no canvas of its own is exactly who needs
+    to look one up, one that isn't a canvas's reads or writes a canvas's data by naming it, and a
+    canvas's own session leaves the name out to mean itself. The three document tools stay in the
+    session the canvas is edited in.
     """
     global adapter, _wired
     adapter = api_adapter
@@ -1880,15 +1892,13 @@ def wire(api_adapter: Any) -> bool:
     took = tools_common.wire_tool(api_adapter, TOOL_LIST, LIST_SCHEMA, TOOL_LIST)
     if not tools_common.wire_tool(api_adapter, TOOL_DATA_READ, DATA_READ_SCHEMA, TOOL_DATA_READ):
         took = False
+    if not tools_common.wire_tool(api_adapter, TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, TOOL_DATA_WRITE):
+        took = False
     if not tools_common.wire_tool(api_adapter, TOOL_WRITE, WRITE_SCHEMA, TOOL_WRITE, when=is_canvas):
         took = False
     if not tools_common.wire_tool(api_adapter, TOOL_EDIT, EDIT_SCHEMA, TOOL_EDIT, when=is_canvas):
         took = False
     if not tools_common.wire_tool(api_adapter, TOOL_READ, READ_SCHEMA, TOOL_READ, when=is_canvas):
-        took = False
-    if not tools_common.wire_tool(
-        api_adapter, TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, TOOL_DATA_WRITE, when=is_canvas
-    ):
         took = False
     _wired = took
     return took
