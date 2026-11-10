@@ -28,9 +28,10 @@ finishes with the app closed:
 **Its data is not its page** (amended 2026-11-10). Keeping a canvas's data writes nothing the user
 looks at, so `data_read` and `data_write` answer every session of the bot — a chat, a routine, a
 delegated run — naming the canvas by its title or its id, and a title two canvases share is refused
-with both ids. The session that belongs to a canvas keeps that canvas's data and no other's, and
-`list` names the canvases with the id a data call takes, in every session but a canvas's own, which
-already knows its own. The document itself — `read`, `edit`, `write` — stays the canvas session's
+with both ids. The session that belongs to a canvas keeps that canvas's data and no other's, and so
+does a run that session delegates — a delegate is another conversation for the page, not for the
+data — and `list` names the canvases with the id a data call takes, in every session but a canvas's
+own, which already knows its own. The document itself — `read`, `edit`, `write` — stays the canvas session's
 alone.
 
 The session is an ordinary synced chat record carrying `canvasId` and titled with the canvas's name.

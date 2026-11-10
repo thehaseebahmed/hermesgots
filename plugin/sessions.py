@@ -774,6 +774,36 @@ def _may_hold_labelled_rows(home: Path) -> bool:
         return True
 
 
+def delegated_from(home: Path, session_id: str) -> Optional[str]:
+    """The session a run was delegated from, or None when it is not a delegation.
+
+    A subagent's row carries ``_delegate_from`` in its model config, which is how Hermes records
+    the parent; ``chat_session`` stops at that marker, so a caller that wants the parent has to ask
+    for it here. Never raises: an unreadable store is no delegation, which is the safe way to be
+    wrong where nothing stronger is being decided.
+    """
+    if not session_id:
+        return None
+    conn = _open_state(home)
+    if conn is None:
+        return None
+    try:
+        with closing(conn):
+            row = conn.execute(
+                "SELECT model_config FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+    except sqlite3.Error:
+        logger.debug("gots: couldn't read %s's delegation", session_id, exc_info=True)
+        return None
+    if row is None or not row[0]:
+        return None
+    try:
+        value = json.loads(row[0]).get("_delegate_from")
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, str) and value else None
+
+
 def chat_session(
     home: Path, session_id: str, roots: Optional[Dict[str, str]] = None
 ) -> str:

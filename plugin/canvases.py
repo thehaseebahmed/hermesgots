@@ -1430,14 +1430,32 @@ def _session_canvas(session_id: Optional[str]) -> Optional[str]:
 def _call_canvas(
     task_id: Optional[str], session_id: Optional[str]
 ) -> tuple[Optional[str], Optional[Path]]:
-    """The canvas a tool call edits and the store it lives in, from either id Hermes gives it."""
-    where = _editing(task_id, session_id)
+    """The canvas a page tool's call edits and the store it lives in, from either id Hermes gives."""
+    where = _editing(task_id, session_id, delegated=False)
     return where.canvas, where.path
 
 
 def _canvas_of_call(task_id: Optional[str], session_id: Optional[str]) -> Optional[str]:
     """The canvas a tool call edits, from either id Hermes gives it."""
     return _call_canvas(task_id, session_id)[0]
+
+
+def _delegated_canvas(path: Path, home: Path, session_id: Optional[str]) -> Optional[str]:
+    """The canvas a delegated run belongs to, walking up from the session it was given.
+
+    A canvas's session may delegate its work, and the run that comes back is another conversation
+    with no chat of its own; keeping it to the canvas it was asked by is what stops the rule being
+    one ``delegate_task`` wide.
+    """
+    parent = sessions.delegated_from(home, session_id) if session_id else None
+    for _ in range(4):
+        if not parent:
+            return None
+        found = canvas_of_session(path, home, parent)
+        if found:
+            return found
+        parent = sessions.delegated_from(home, parent)
+    return None
 
 
 class _Where(NamedTuple):
@@ -1452,11 +1470,15 @@ class _Where(NamedTuple):
     known: bool
 
 
-def _editing(task_id: Optional[str], session_id: Optional[str]) -> _Where:
+def _editing(
+    task_id: Optional[str], session_id: Optional[str], delegated: bool = True
+) -> _Where:
     """The canvas a call's run edits, resolved from either id Hermes gives it.
 
     A hook and a tool are handed a task id that is the run's own, which is not always the session's
     (``sessions.record_for_call`` copes the same way), so both are asked rather than the first one.
+    ``delegated`` counts a run delegated by a canvas's session as that canvas's: the data tools
+    keep it there, while the page tools treat a delegate as the other conversation it is.
     """
     try:
         path, home = sessions._paths()
@@ -1469,6 +1491,8 @@ def _editing(task_id: Optional[str], session_id: Optional[str]) -> _Where:
             continue
         try:
             found = _canvas_of_session_strict(path, home, key)
+            if not found and delegated:
+                found = _delegated_canvas(path, home, key)
         except Exception:
             logger.debug("gots: couldn't read which canvas %s edits", key, exc_info=True)
             return _Where(None, path, False)

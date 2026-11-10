@@ -1042,6 +1042,38 @@ class SessionTest(unittest.TestCase):
             gone = json.loads(canvases.handle_data_read(call, session_id=self.session))
             self.assertIn("couldn't tell", gone["error"])
 
+    def test_a_delegated_run_of_a_canvas_session_keeps_that_canvas(self) -> None:
+        other = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt="A weather page", body=BODY
+        )
+        worker = self.session + "-worker"
+        conn = sqlite3.connect(self.home / "state.db")
+        try:
+            conn.execute(
+                "INSERT INTO sessions VALUES (?, ?, ?, ?, ?)",
+                (worker, self.session, None, json.dumps({"_delegate_from": self.session}), "tool"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        # The page is not its work: a delegate is another conversation, with no guide and no page
+        # tools, as it was.
+        self.assertIsNone(canvases.canvas_of_session(self.path, self.home, worker))
+        # The data is, so the one delegate_task does not widen the canvas's own rule.
+        refused = json.loads(
+            canvases.handle_data_read({"canvas": other["id"]}, session_id=worker)
+        )
+        self.assertIn("own canvas", refused["error"])
+        own = json.loads(
+            canvases.handle_data_write(
+                {"collection": "c", "id": "i", "doc": 1}, session_id=worker
+            )
+        )
+        self.assertEqual(own["doc"], 1)
+        self.assertIn(
+            "own canvas", json.loads(canvases.handle_list({}, session_id=worker))["error"]
+        )
+
     def test_a_plain_chat_the_user_is_done_with_keeps_its_data_tools(self) -> None:
         # Done or swiped away is how a thread ends, not a canvas's: the run still knows the chat
         # named no canvas, so it may name one.
