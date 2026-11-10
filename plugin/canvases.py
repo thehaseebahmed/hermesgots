@@ -1714,9 +1714,10 @@ def _data_canvas(
 ) -> tuple[Path, str]:
     """The store and the canvas one data call reaches, or a ``CanvasError`` saying why it can't.
 
-    A canvas's own session is asked first, and its own name costs no lookup of the bot's canvases.
-    Every other session has to name one, since no canvas is its own — and the refusal says what to
-    name and where the names are, because a caller who knows no title has only ``canvas_list``.
+    A canvas's own session is asked first, so a call that names nothing costs no lookup; a name it
+    does give is resolved by the same rule every other session resolves one by. A session with no
+    canvas of its own has to name one, and the refusal says what to name and where the names are,
+    because a caller who knows no title has only ``canvas_list``.
     """
     canvas_id, path = _call_canvas(task_id, session_id)
     if path is None:
