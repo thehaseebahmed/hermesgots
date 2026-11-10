@@ -84,6 +84,7 @@ test("an endpoint's row is its name, the URL and model it runs, and its mask", (
         name: "Local Llama",
         base_url: "http://127.0.0.1:8080/v1",
         model: "llama-3.1-8b",
+        key_env: "HERMES_CUSTOM_LOCAL_LLAMA_API_KEY",
         masked: "llam...0a1f",
       },
       {
@@ -318,6 +319,7 @@ test("an endpoint read carries its transport and its affinity header", () => {
         model: "llama-3.1-8b",
         transport: "chat_completions",
         affinity: "x-litellm-session-id",
+        key_env: "HERMES_CUSTOM_LOCAL_LLAMA_API_KEY",
         masked: "llam...0a1f",
       },
       { id: "bare", name: "Bare", base_url: "https://bare.example.com/v1", model: "bare-1" },
@@ -330,11 +332,13 @@ test("an endpoint read carries its transport and its affinity header", () => {
     model: "llama-3.1-8b",
     transport: "chat_completions",
     affinity: "x-litellm-session-id",
+    key_env: "HERMES_CUSTOM_LOCAL_LLAMA_API_KEY",
     masked: "llam...0a1f",
   })
   // An answer from a host that names neither reads as an endpoint that pins nothing and carries no
   // header: the form is filled from the row, so a missing field must not fill it with a guess.
   assert.equal(block.endpoints[1].transport, "")
   assert.equal(block.endpoints[1].affinity, "")
+  assert.equal(block.endpoints[1].key_env, "", "a host that names no variable leaves the label blank")
   assert.equal(block.endpoints[1].masked, null)
 })

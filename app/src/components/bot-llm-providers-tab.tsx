@@ -54,6 +54,7 @@ import {
   saveableEndpointEdit,
   submittableEndpoint,
   submittableKey,
+  customKeyEnv,
   TRANSPORTS,
   transportLabel,
   type LlmEndpoint,
@@ -251,6 +252,10 @@ export function LlmProviderKeyScreen({
   // the host is asked, so a refusal is read before the question is dismissed by hand.
   const [asking, setAsking] = useState(false)
   const [removing, setRemoving] = useState(false)
+  // The heading carries the verb and names whose key this is; the route knows only the slug. Asked
+  // before the early returns, since a hook after one would run only once the block landed.
+  const provider = block?.providers.find((one) => one.slug === target)
+  useHeaderTitle(block ? `Edit ${provider?.label ?? target}` : undefined)
 
   if (!block)
     return problem ? (
@@ -261,7 +266,6 @@ export function LlmProviderKeyScreen({
       </div>
     )
 
-  const provider = block.providers.find((one) => one.slug === target)
   // The address is reachable by hand, so a target this host doesn't list says so rather than drawing
   // a form whose write the host would refuse.
   if (!provider)
@@ -341,7 +345,7 @@ export function LlmProviderKeyScreen({
           Cancel instead, which the back arrow already promises. */}
       <EditForm
         key={`llm-key-${written}`}
-        label={`${provider.label} API key`}
+        label={provider.env || "API_KEY"}
         value=""
         placeholder={masked ?? NO_KEY_HINT}
         kind="secret"
@@ -357,7 +361,7 @@ export function LlmProviderKeyScreen({
               }
             : undefined
         }
-        resetLabel="Delete key"
+        resetLabel="Delete"
         resetDestructive
         onCancel={masked ? undefined : close}
       />
@@ -403,8 +407,9 @@ export function LlmEndpointScreen({
   const { block, problem, keep } = useLlmProviders(profile)
   const [written, setWritten] = useState(0)
   const endpoint = block?.endpoints.find((one) => one.id === id)
-  // The route knows the id and not the name; the block it reads knows both.
-  useHeaderTitle(endpoint?.name)
+  // A form's heading carries the verb, and names what it edits: a provider by its label, an endpoint
+  // as the custom provider it is — the route knows only the id, and the id is not a name.
+  useHeaderTitle("Edit Custom Provider")
   // A removal that landed leaves this screen with nothing to report: the page draws the block that
   // removal answered, with no read in between.
   const removed = useCallback(
@@ -560,7 +565,7 @@ function EndpointForm({
         <div className="flex flex-col gap-4">
           <Field
             name="name"
-            label="Name"
+            label="NAME"
             autoComplete="off"
             placeholder="Home box"
             value={draft.name}
@@ -568,7 +573,7 @@ function EndpointForm({
           />
           <Field
             name="base-url"
-            label="API base URL"
+            label="API"
             type="url"
             inputMode="url"
             autoComplete="off"
@@ -581,7 +586,7 @@ function EndpointForm({
           />
           <Field
             name="model"
-            label="Model"
+            label="DEFAULT_MODEL"
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
@@ -593,7 +598,7 @@ function EndpointForm({
           <TransportField value={draft.transport} onChange={set("transport")} />
           <Field
             name="affinity"
-            label="Session affinity header"
+            label="SESSION_AFFINITY_HEADER"
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
@@ -604,7 +609,7 @@ function EndpointForm({
           />
           <KeyField
             id="llm-endpoint-key"
-            label="API key"
+            label={endpoint.key_env || "API_KEY"}
             attribute="data-llm-endpoint-key"
             placeholder={masked ?? NO_KEY_HINT}
             value={key}
@@ -617,7 +622,7 @@ function EndpointForm({
               setRefusal(undefined)
               setAsking(true)
             }}
-            resetLabel="Delete endpoint"
+            resetLabel="Delete"
             destructive
             disabled={!ready}
             busy={saving}
@@ -716,7 +721,7 @@ export function LlmEndpointAddScreen({
           <div className="flex flex-col gap-4">
             <Field
               name="name"
-              label="Name"
+              label="NAME"
               autoComplete="off"
               placeholder="Home box"
               value={draft.name}
@@ -724,7 +729,7 @@ export function LlmEndpointAddScreen({
             />
             <Field
               name="base-url"
-              label="API base URL"
+              label="API"
               type="url"
               inputMode="url"
               autoComplete="off"
@@ -737,7 +742,7 @@ export function LlmEndpointAddScreen({
             />
             <Field
               name="model"
-              label="Model"
+              label="DEFAULT_MODEL"
               autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
@@ -752,7 +757,7 @@ export function LlmEndpointAddScreen({
             />
             <Field
               name="affinity"
-              label="Session affinity header"
+              label="SESSION_AFFINITY_HEADER"
               autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
@@ -763,7 +768,7 @@ export function LlmEndpointAddScreen({
             />
             <KeyField
               id="llm-endpoint-key"
-              label="API key"
+              label={customKeyEnv(draft.name)}
               attribute="data-llm-endpoint-key"
               placeholder="The endpoint's API key"
               value={draft.key}
@@ -874,7 +879,7 @@ function TransportField({
   return (
     <div className="flex flex-col gap-2">
       <span id="llm-endpoint-transport-label" className={fieldLabelClass}>
-        Transport
+        TRANSPORT
       </span>
       <button
         type="button"

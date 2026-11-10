@@ -21,6 +21,8 @@ export interface LlmProvider {
   label: string
   /** The host's own line about the provider. */
   description: string
+  /** The variable this key is written to — `OPENAI_API_KEY` — which the form labels its field with. */
+  env: string
   /** `mask_secret`'s output — `sk-o...c123`, or `***` under its floor — or `null` where unset. */
   masked: string | null
 }
@@ -39,6 +41,8 @@ export interface LlmEndpoint {
   transport: string
   /** The header a proxy carries the conversation on (`session_affinity_header`), or `""`. */
   affinity: string
+  /** The variable this endpoint's key is held in, which the form labels its field with. */
+  key_env: string
   masked: string | null
 }
 
@@ -95,6 +99,20 @@ export function customTarget(id: string): string {
 /** The endpoint an address names, or `""` for a target that names a provider instead. */
 export function customEndpointId(target: string): string {
   return target.startsWith(CUSTOM_TARGET) ? target.slice(CUSTOM_TARGET.length) : ""
+}
+
+/**
+ * The variable Hermes names a custom endpoint's key by, from the name typed for it:
+ * `HERMES_CUSTOM_HOME_BOX_API_KEY`. It mirrors the host's own `custom_endpoint_key_env`, so the add
+ * form can label its key field with the name the key will actually live under.
+ */
+export function customKeyEnv(name: string): string {
+  const slug = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+  return `HERMES_CUSTOM_${slug || "ENDPOINT"}_API_KEY`
 }
 
 /**
@@ -311,6 +329,9 @@ function providerOf(raw: unknown): LlmProvider[] {
       slug: row.slug,
       label: typeof row.label === "string" && row.label ? row.label : row.slug,
       description: typeof row.description === "string" ? row.description : "",
+      // The variable the key is written to, as the host names it; a host that named none leaves the
+      // form's label blank rather than inventing one.
+      env: typeof row.env === "string" ? row.env : "",
       // The mask as it arrived, or nothing: a host that sent no string has no key to show.
       masked: typeof row.masked === "string" && row.masked ? row.masked : null,
     },
@@ -331,6 +352,7 @@ function endpointOf(raw: unknown): LlmEndpoint[] {
       // the row says, so a silence becomes the host's own default rather than a guess at one.
       transport: typeof row.transport === "string" ? row.transport : "",
       affinity: typeof row.affinity === "string" ? row.affinity : "",
+      key_env: typeof row.key_env === "string" ? row.key_env : "",
       masked: typeof row.masked === "string" && row.masked ? row.masked : null,
     },
   ]

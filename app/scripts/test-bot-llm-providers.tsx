@@ -11,7 +11,7 @@
  * base URL, model, transport, the session-affinity header and the key — filled with the values the
  * row holds, and it posts the fields that differ plus the endpoint's id.
  *
- * The actions stand at the screen's foot on a phone: `Delete key` / `Delete endpoint` on the left,
+ * The actions stand at the screen's foot on a phone: `Delete` / `Delete` on the left,
  * because the row holds something to delete, and `Cancel` in its place on a provider that holds no
  * key — where the back arrow is the only way out. `Delete` asks first; the answer is the host's
  * fresh block, or the host's own sentence when it refuses.
@@ -43,7 +43,14 @@ import {
   until,
 } from "./component-kit.tsx"
 
-type Provider = { slug: string; label: string; description: string; masked: string | null }
+type Provider = {
+  slug: string
+  label: string
+  description: string
+  /** The variable its key is written to — the form's field label. */
+  env: string
+  masked: string | null
+}
 /** One custom endpoint, as the host's list answers it: every setting a form can change. */
 type Endpoint = {
   id: string
@@ -54,6 +61,8 @@ type Endpoint = {
   transport: string
   /** The header a proxy carries the conversation on, `""` for none. */
   affinity: string
+  /** The variable its key is held in — the form's key field label. */
+  key_env: string
   masked: string | null
 }
 type Block = { providers: Provider[]; endpoints: Endpoint[] }
@@ -65,12 +74,14 @@ const BLOCK: Block = {
       slug: "openai",
       label: "OpenAI",
       description: "GPT models, straight from OpenAI.",
+      env: "OPENAI_API_KEY",
       masked: "sk-o...c123",
     },
     {
       slug: "groq",
       label: "Groq",
       description: "Fast inference on Groq's hardware.",
+      env: "GROQ_API_KEY",
       masked: null,
     },
   ],
@@ -90,6 +101,7 @@ const ENDPOINTS: Endpoint[] = [
     model: "llama-3.1-8b",
     transport: "chat_completions",
     affinity: "",
+    key_env: "HERMES_CUSTOM_LOCAL_LLAMA_API_KEY",
     masked: "llam...0a1f",
   },
   {
@@ -99,6 +111,7 @@ const ENDPOINTS: Endpoint[] = [
     model: "gpt-4o-mini",
     transport: "",
     affinity: "x-litellm-session-id",
+    key_env: "HERMES_CUSTOM_WORK_GATEWAY_API_KEY",
     masked: null,
   },
 ]
@@ -405,8 +418,8 @@ test("a provider's form holds its key alone, its mask as the placeholder, and no
     )
     assert.equal(
       findAll("h1").map((heading) => heading.textContent).at(-1),
-      "API key",
-      "the screen is titled for what it does",
+      "Edit OpenAI",
+      "the screen's heading carries the verb and names whose key it is",
     )
     // The mask is the field's own placeholder: what is there is what the field says, and typing
     // over it is the only way to replace it.
@@ -416,9 +429,10 @@ test("a provider's form holds its key alone, its mask as the placeholder, and no
       "sk-o...c123",
       "and its placeholder is the key the host holds, masked",
     )
-    assert.ok(
-      Boolean(find("[data-llm-provider-slot] label")?.textContent?.includes("OpenAI")),
-      "the field's label names the provider whose key it is",
+    assert.equal(
+      find("[data-llm-provider-slot] label")?.textContent?.trim(),
+      "OPENAI_API_KEY",
+      "the field is labelled with the variable the key is written to",
     )
     assert.equal(saveButton()?.disabled, true, "Save is dead until something is typed over it")
     // The app's own edit form, so the field carries what every secret the app edits carries.
@@ -460,7 +474,7 @@ test("a typed key is posted and the row reads the mask the host makes of it", as
     )
     assert.equal(keyField()?.value, "", "and the field is empty again, holding no key")
     assert.equal(saveButton()?.disabled, true, "with nothing to send until the next key is typed")
-    assert.equal(leftAction(), "Delete key", "and the key it just set is the one that can be deleted")
+    assert.equal(leftAction(), "Delete", "and the key it just set is the one that can be deleted")
   })
 })
 
@@ -479,8 +493,8 @@ test("an endpoint's form holds every setting with the values the row does", asyn
     )
     assert.equal(
       findAll("h1").map((heading) => heading.textContent).at(-1),
-      "Local Llama",
-      "and the screen is titled for the endpoint, so a reader knows which one they are editing",
+      "Edit Custom Provider",
+      "and the heading carries the verb over the endpoint's whole shape",
     )
     assert.equal(field("name")?.value, "Local Llama", "its name")
     assert.equal(field("base-url")?.value, "http://127.0.0.1:8080/v1", "the base URL it runs on")
@@ -586,7 +600,7 @@ test("Delete stands where the slot holds something to delete, and asks before it
     // back arrow — so no Cancel is offered beside it.
     await click(providerRow("openai"))
     await until(async () => Boolean(keyField()), "the key's field")
-    assert.equal(leftAction(), "Delete key", "Delete key leads the bar")
+    assert.equal(leftAction(), "Delete", "Delete leads the bar")
     assert.ok(
       !findAll("[data-form-actions] button").some((one) => one.textContent?.trim() === "Cancel"),
       "and no Cancel stands beside it",
@@ -594,7 +608,7 @@ test("Delete stands where the slot holds something to delete, and asks before it
     assert.ok(bar()?.closest("form"), "the bar is inside the form whose Save it presses")
 
     const asked = host.asks.length
-    await click(findText("[data-form-actions] button", "Delete key"))
+    await click(findText("[data-form-actions] button", "Delete"))
     await until(async () => Boolean(dialog()), "the question")
     assert.equal(dialogTitle(), "Remove OpenAI's key?", "which names the provider")
     await click(inDialog("Cancel"))
@@ -606,7 +620,7 @@ test("Delete stands where the slot holds something to delete, and asks before it
       "the key is still the one that was there",
     )
 
-    await click(findText("[data-form-actions] button", "Delete key"))
+    await click(findText("[data-form-actions] button", "Delete"))
     await until(async () => Boolean(dialog()), "the question again")
     await click(inDialog("Remove"))
     await until(
@@ -619,18 +633,18 @@ test("Delete stands where the slot holds something to delete, and asks before it
     assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
     assert.equal(leftAction(), "Cancel", "and with nothing left to delete the bar offers Cancel")
 
-    // An endpoint's form: the slot holds the endpoint and its key together, so Delete endpoint is
+    // An endpoint's form: the slot holds the endpoint and its key together, so Delete is
     // the left action wherever the endpoint is, and the back arrow is the way out.
     await click(back())
     await until(async () => Boolean(page()), "the page again")
     await click(endpointRow("work-gateway"))
     await until(async () => Boolean(endpointForm()), "the endpoint's form")
-    assert.equal(leftAction(), "Delete endpoint", "Delete endpoint leads the bar")
+    assert.equal(leftAction(), "Delete", "Delete leads the bar")
     assert.ok(
       !findAll("[data-form-actions] button").some((one) => one.textContent?.trim() === "Cancel"),
       "and no Cancel beside it",
     )
-    await click(findText("[data-form-actions] button", "Delete endpoint"))
+    await click(findText("[data-form-actions] button", "Delete"))
     await until(async () => Boolean(dialog()), "the question")
     assert.equal(dialogTitle(), "Remove Work gateway?", "naming the endpoint it removes")
     await click(inDialog("Remove"))
@@ -705,7 +719,7 @@ test("removing the endpoint the model runs on is refused and deletes nothing", a
     await click(endpointRow("local-llama"))
     await until(async () => Boolean(endpointForm()), "the endpoint's form")
 
-    await click(findText("[data-form-actions] button", "Delete endpoint"))
+    await click(findText("[data-form-actions] button", "Delete"))
     await until(async () => Boolean(dialog()), "the question")
     assert.equal(dialogTitle(), "Remove Local Llama?", "and the question names the endpoint")
     await click(inDialog("Remove"))
@@ -754,7 +768,7 @@ test("the plus opens a form that adds an endpoint's whole shape", async () => {
       "the form has an address of its own",
     )
     assert.ok(
-      findAll("h1").some((heading) => heading.textContent === "Add custom endpoint"),
+      findAll("h1").some((heading) => heading.textContent === "Add Custom Provider"),
       "and a title saying what it does",
     )
     assert.ok(
@@ -868,7 +882,7 @@ test("a removal the host answers without its block keeps its question up", async
     await until(async () => Boolean(keyField()), "the key's field")
 
     host.answersNoBlock()
-    await click(findText("[data-form-actions] button", "Delete key"))
+    await click(findText("[data-form-actions] button", "Delete"))
     await until(async () => Boolean(dialog()), "the question")
     await click(inDialog("Remove"))
     await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
@@ -893,7 +907,7 @@ test("an endpoint removal the host answers without its block stays on the screen
     await until(async () => Boolean(endpointForm()), "the endpoint's form")
 
     host.answersNoBlock()
-    await click(findText("[data-form-actions] button", "Delete endpoint"))
+    await click(findText("[data-form-actions] button", "Delete"))
     await until(async () => Boolean(dialog()), "the question")
     await click(inDialog("Remove"))
     await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")

@@ -89,7 +89,7 @@ test("the LLM Providers page holds a key for each provider it lists", () => {
   assert.equal(sub.id, "key", "the page's own detail")
   assert.equal(sub.kind, "detail", "a pushed screen below 1024px and the pane's from it")
   assert.equal(sub.item, "openai", "over the provider the address names")
-  assert.equal(sub.title, "API key", "titled for what the screen does")
+  assert.equal(sub.title, "Edit Provider", "titled with the verb the form performs")
   assert.equal(botSubOf("llm-providers", "key", ""), undefined, "an empty leaf names no provider")
   assert.equal(botSubOf("llm-providers", "key"), undefined, "the list itself is the page")
 })

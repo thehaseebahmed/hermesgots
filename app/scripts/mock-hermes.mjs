@@ -3487,9 +3487,9 @@ const llmKeyOf = (profile, slug) => llmKeys.get(`${profile}\n${slug}`) ?? LLM_SE
 const llmEndpointKeyOf = (profile, id) =>
   llmKeys.get(`${profile}\ncustom:${id}`) ?? LLM_ENDPOINT_SEEDED[id]
 const llmBlock = (profile) => ({
-  providers: LLM_PROVIDERS.map(({ slug, label, description }) => {
+  providers: LLM_PROVIDERS.map(({ slug, label, description, env }) => {
     const secret = llmKeyOf(profile, slug)
-    return { slug, label, description, masked: secret ? maskSecret(secret) : null }
+    return { slug, label, description, env, masked: secret ? maskSecret(secret) : null }
   }),
   endpoints: LLM_ENDPOINTS.map(({ id, name, base_url, model, transport, affinity }) => {
     const secret = llmEndpointKeyOf(profile, id)
@@ -3500,6 +3500,8 @@ const llmBlock = (profile) => ({
       model,
       transport: transport ?? "",
       affinity: affinity ?? "",
+      // The variable the key is held in, as the host names it: the form labels its field with it.
+      key_env: `HERMES_CUSTOM_${id.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`,
       masked: secret ? maskSecret(secret) : null,
     }
   }),

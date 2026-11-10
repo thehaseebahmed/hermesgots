@@ -75,21 +75,20 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
   ],
   // The LLM Providers page's rows are the host's catalog, which this table can't read: any slug is
   // an address, and the page says in its own words where the host lists no such provider. Every
-  // slot's screen is titled for what it does — *API key*, or *Endpoint* for the slot that holds a
-  // custom one's whole setting — and the screen names the row itself once the block it reads has
-  // landed, since a slug or an id is not a name a reader knows.
+  // slot's screen carries a verb — the screen names the provider itself once the block it reads has
+  // landed, since a slug is not a name a reader knows.
   "llm-providers": [
     // The page's own `+`, which adds an endpoint: a fixed id, since it is no endpoint of the host's
     // and so has no slug to be named by. FIXED is matched before the page's items, so this can never
     // be mistaken for one.
-    { id: "add", kind: "detail", title: "Add custom endpoint" },
+    { id: "add", kind: "detail", title: "Add Custom Provider" },
     {
       id: "key",
       kind: "detail",
-      title: "API key",
+      title: "Edit Provider",
       holds: "items",
       hasPage: (name) => name.trim().length > 0,
-      titleOf: (name) => (customEndpointId(name) ? "Endpoint" : "API key"),
+      titleOf: (name) => (customEndpointId(name) ? "Edit Custom Provider" : "Edit Provider"),
     },
   ],
 }

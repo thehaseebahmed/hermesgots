@@ -144,6 +144,19 @@ def _entry_mask(entry: Any) -> Optional[str]:
     return None
 
 
+def _entry_key_env(endpoint_id: str, entry: Any) -> str:
+    """The variable an endpoint's key is held in, as the entry names it or as this plugin would.
+
+    A form labels its key field with this, so a reader sees `HERMES_CUSTOM_HOME_BOX_API_KEY` rather
+    than prose — the same way a provider's field is labelled with its own env var.
+    """
+    if isinstance(entry, dict):
+        key_env = str(entry.get("key_env") or "").strip()
+        if key_env:
+            return key_env
+    return _endpoint_key_env(endpoint_id)
+
+
 def _entry_transport(entry: Any) -> str:
     """One entry's transport, under either spelling this host reads, or ``""`` where it pins none.
 
@@ -210,6 +223,9 @@ def _endpoints(
                 "model": str(raw.get("model") or ""),
                 "transport": _entry_transport(entry),
                 "affinity": _entry_affinity(entry),
+                # The variable this endpoint's key is held in, so the form can label its field with
+                # it the way a provider's form does.
+                "key_env": _entry_key_env(endpoint_id, entry),
                 "masked": _entry_mask(entry),
             }
         )
@@ -331,6 +347,9 @@ def _row(entry: Any) -> Optional[Dict[str, Any]]:
         "slug": slug,
         "label": label or slug,
         "description": str(getattr(entry, "description", "") or ""),
+        # The variable the key is written to. A form labels its field with it, so a reader sees
+        # `OPENAI_API_KEY` rather than prose, and so the page names exactly what it writes.
+        "env": slot,
         "masked": credentials.masked(slot),
     }
 
