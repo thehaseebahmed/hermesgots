@@ -351,6 +351,16 @@ test("the header's title is the bot's name, and it is the way to its settings", 
       "a link to a screen announced as the link it is, not as a button",
     )
     assert.ok((routines?.className ?? "").includes("size-11"), "and still a full touch target")
+    // The list's bar is the app's bar in its pinned form (ADR 0140) — the same row, slots and controls
+    // the chat's header draws, so a change to one row is a change to both screens.
+    const header = find("header")
+    assert.ok(header?.className.includes("sticky"), "pinned in the list's scroll, not floating")
+    assert.ok(header?.querySelector('[data-slot="header-row"]'), "the bar's own row")
+    assert.ok(header?.querySelector('[data-slot="header-middle"]'), "the title's slot in it")
+    assert.ok(
+      (routines?.className ?? "").includes("bg-background/80"),
+      "and the routine control a frosted outline circle, like the chat's back and its options",
+    )
   })
 })
 

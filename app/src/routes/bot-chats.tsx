@@ -1,7 +1,7 @@
-import type { CSSProperties, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MenuIcon, MessageCircleIcon, PlusIcon, SearchIcon, TimerIcon, UsersIcon } from "lucide-react"
+import { MessageCircleIcon, PlusIcon, SearchIcon, TimerIcon, UsersIcon } from "lucide-react"
 import {
   Link,
   Navigate,
@@ -12,7 +12,7 @@ import {
 } from "react-router"
 
 import { Bot } from "@/components/bot"
-import { useOpenDrawer } from "@/components/drawer-context"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { RoomFaces } from "@/components/room/room-faces"
@@ -21,6 +21,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
 import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
+import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { BACK_ON_LIST } from "@/lib/nav"
@@ -173,7 +174,6 @@ function ChatList({
   rows: ChatListRow[]
   selected?: string
 }) {
-  const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const marks = useReadMarks()
   // A room is made on a Host that advertises it, so the control is offered only where it can be used
@@ -206,49 +206,41 @@ function ChatList({
   }
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      style={
-        {
-          "--list-header-pt": "max(0.75rem, env(safe-area-inset-top))",
-          "--list-header-h": "calc(var(--list-header-pt) + 3.5rem)",
-        } as CSSProperties
-      }
-    >
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[var(--list-header-pt)] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 shrink-0 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {/*
+        The bot's bar, as the app draws it (ADR 0140): the pinned form, because this screen's content
+        scrolls under it. The drawer control on a phone, the bot's picture and name as the screen's
+        heading and the way to its settings, and the routine control — the one screen a bot's list
+        opens that is not a chat (ADR 0139) — as the bar's own action.
+      */}
+      <ChatHeader
+        pinned
+        showBot={false}
+        title={
+          <Link
+            to={botPath(bot.id)}
+            className="-ml-2 flex min-h-11 min-w-0 items-center gap-2 rounded-full px-2 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <MenuIcon />
-          </Button>
-          <h1 className="min-w-0 flex-1">
-            <Link
-              to={botPath(bot.id)}
-              className="-ml-2 flex min-h-11 min-w-0 items-center gap-2 rounded-full px-2 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span aria-hidden className="shrink-0">
-                <Bot id={bot.botId} className="size-9" />
-              </span>
-              <span className="truncate text-xl font-semibold tracking-tight">{bot.name}</span>
-            </Link>
-          </h1>
+            <span aria-hidden className="shrink-0">
+              <Bot id={bot.botId} className="size-9" />
+            </span>
+            <span className="truncate">{bot.name}</span>
+          </Link>
+        }
+        actions={
           <Link
             to={botRoutinesPath(bot.id)}
             aria-label="Routines"
             className={cn(
-              buttonVariants({ variant: "ghost", size: "icon-lg" }),
-              "size-11 shrink-0 rounded-full text-muted-foreground",
+              buttonVariants({ variant: "outline", size: "icon-lg" }),
+              HEADER_BUTTON,
+              "shrink-0 text-muted-foreground",
             )}
           >
             <TimerIcon />
           </Link>
-        </div>
-      </header>
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {searching && (
