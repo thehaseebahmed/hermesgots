@@ -238,7 +238,7 @@ class CreationTest(unittest.TestCase):
         self.assertEqual(item["text"], PROMPT)
         self.assertEqual(item["attachments"], [])
 
-    def test_a_files_that_is_no_list_is_refused_before_anything_is_made(self) -> None:
+    def test_files_that_are_no_list_are_refused_before_anything_is_made(self) -> None:
         path = store_of(self)
         with self.assertRaises(canvases.CanvasError):
             canvases.create(
@@ -287,6 +287,79 @@ class CreationTest(unittest.TestCase):
         self.assertEqual(canvases.listing(path), [])
         self.assertEqual(chats.read(path), {})
 
+    def test_a_chat_id_no_upload_could_save_under_is_refused_before_the_canvas(self) -> None:
+        path = store_of(self)
+        # A canvas's files live under `gots-<chat id>`, and the attachments route refuses a session
+        # id outside its own shape: a chat id that leaves that room is a canvas whose files could
+        # never be saved for it, so the start is refused rather than made on a chat of its own.
+        for named in (
+            "a" * 130,
+            "3f6a 1c2e",
+            "3f6a/1c2e",
+            "..",
+        ):
+            with self.subTest(named=named[:16]):
+                with self.assertRaises(canvases.CanvasError):
+                    canvases.create(
+                        path,
+                        request_profile="default",
+                        bot_id="bot-1",
+                        prompt=PROMPT,
+                        body=MARKED_BODY,
+                        chat_id=named,
+                        files=START_FILES,
+                    )
+        self.assertEqual(canvases.listing(path), [])
+        self.assertEqual(chats.read(path), {})
+
+    def test_a_chat_id_a_chat_already_holds_is_refused_and_left_alone(self) -> None:
+        path = store_of(self)
+        # A thread somebody is reading: its own title, the message that began it and the model it was
+        # pinned to at the first send.
+        held, _ = triage.open_thread(
+            path,
+            "bot-1",
+            {"provider": "anthropic", "model": "claude-opus-5-5"},
+            opener="Where's the receipt?",
+            title="Receipts",
+        )
+        before = chats.one(path, held)
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=BODY,
+                chat_id=held,
+            )
+        self.assertIn("a chat of its own", str(refused.exception))
+        # The thread is untouched: a create on it would have retitled it, dropped its pinned model
+        # and marked it a canvas's chat, and none of those is a canvas's to do.
+        self.assertEqual(chats.one(path, held), before)
+        value = chats.one(path, held)["value"]
+        self.assertEqual(value["title"], "Receipts")
+        self.assertEqual(value["opener"], "Where's the receipt?")
+        self.assertEqual(value["modelChoice"], {"provider": "anthropic", "model": "claude-opus-5-5"})
+        self.assertNotIn("canvasId", value)
+        self.assertEqual(canvases.listing(path), [])
+
+        # A canvas's own chat is a chat too: a second canvas on it is refused the same way, and the
+        # first keeps the one chat it was made on.
+        made = make_canvas(path)
+        with self.assertRaises(canvases.CanvasError):
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=BODY,
+                chat_id=made["chat_id"],
+                files=START_FILES,
+            )
+        self.assertEqual([row["id"] for row in canvases.listing(path)], [made["id"]])
+        self.assertEqual(chats.one(path, made["chat_id"])["value"]["canvasId"], made["id"])
+
     def test_more_files_than_a_start_carries_is_refused(self) -> None:
         path = store_of(self)
         # The queue keeps at most 20 files per item and drops the rest without a word, so a start
@@ -319,6 +392,72 @@ class CreationTest(unittest.TestCase):
             )
         self.assertEqual(canvases.listing(path), [])
         self.assertEqual(chats.read(path), {})
+
+    def test_a_files_list_holding_what_is_no_file_is_refused_before_anything_is_made(self) -> None:
+        path = store_of(self)
+        # The queue keeps the objects in a list and drops the rest without a word, so a start holding
+        # anything else is refused rather than answered with a turn missing one of its files.
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=MARKED_BODY,
+                chat_id=START_CHAT,
+                files=[START_FILES[0], "two.png"],
+            )
+        self.assertIn("object", str(refused.exception))
+        self.assertEqual(canvases.listing(path), [])
+        self.assertEqual(chats.read(path), {})
+
+    def test_no_files_is_the_same_start_as_none(self) -> None:
+        path = store_of(self)
+        # An empty list is no files, not files without a chat: a caller that staged everything and
+        # then took every tile off sends the start a caller that staged nothing does.
+        found = canvases.create(
+            path,
+            request_profile="default",
+            bot_id="bot-1",
+            prompt=PROMPT,
+            body=BODY,
+            files=[],
+        )
+        self.assertEqual(found["session_id"], f"gots-{found['chat_id']}")
+        item = outbox.read(path, found["session_id"])["items"][0]
+        self.assertEqual(item["attachments"], [])
+
+    def test_the_start_file_cap_is_the_queues_own(self) -> None:
+        path = store_of(self)
+        # One number, in the queue that keeps it: the guard here and `clean_files`' trim read the
+        # same constant, so a canvas can never hand over more than a queued turn keeps.
+        trimmed = outbox.clean_files(
+            [{**START_FILES[0], "name": f"p{index}.png"} for index in range(outbox.MAX_FILES + 5)]
+        )
+        self.assertEqual(len(trimmed), outbox.MAX_FILES)
+        files = [{**START_FILES[0], "name": f"photo-{index}.png"} for index in range(outbox.MAX_FILES)]
+        found = canvases.create(
+            path,
+            request_profile="default",
+            bot_id="bot-1",
+            prompt=PROMPT,
+            body=BODY,
+            chat_id=START_CHAT,
+            files=files,
+        )
+        queued = outbox.read(path, found["session_id"])["items"][0]["attachments"]
+        self.assertEqual(len(queued), outbox.MAX_FILES)
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=BODY,
+                chat_id="one-more-chat",
+                files=files + [files[0]],
+            )
+        self.assertIn(str(outbox.MAX_FILES), str(refused.exception))
 
     def test_a_rename_is_the_canvas_and_its_chat(self) -> None:
         found = canvases.write(self.path, self.canvas["id"], DOCUMENT, title="Tip splitter")

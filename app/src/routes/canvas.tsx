@@ -242,8 +242,6 @@ export function CanvasPage() {
                 <BotPicker profile={profile} />
               </div>
             )}
-            {/* A file staged for the start, above the field it will be sent with: a photo or a
-                document, each one movable before the press. */}
             {attachments.length > 0 && (
               <div className="flex gap-2.5 overflow-x-auto pb-1" aria-label="Files to start it with">
                 {attachments.map((attachment) => (

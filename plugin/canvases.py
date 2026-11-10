@@ -85,9 +85,14 @@ NAME_CHARS = 64
 # A version's declared tools are the options sheet's rows: every one is a switch, so a version that
 # declared thousands would be a list nobody could read and a dialog nobody could answer.
 TOOLS_MAX = 50
-# A start's files are one queued turn's attachments, and the queue keeps twenty of them
-# (`outbox.clean_files`); a longer list is refused rather than trimmed without a word.
-START_FILES_MAX = 20
+# A start's files are one queued turn's attachments, and the queue keeps `outbox.MAX_FILES` of
+# them; a longer list is refused rather than trimmed without a word.
+
+# A chat id a start may name. Its session is `gots-<chat id>`, and the upload route saves a file
+# under a session id of the app's own shape — up to 128 letters, digits, dots, dashes and
+# underscores — so this leaves room for the prefix inside that length. Dots are out: a session is a
+# folder, and `.` and `..` are not names in one.
+CHAT_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
 # A tool's name rides a stored grant, an option row and a dialog's title, so it stays a name.
 TOOL_NAME_CHARS = 64
 # The picture a canvas's tile draws. It rides every device's list as the page rides one screen, so it
@@ -1179,18 +1184,36 @@ def _drop(path: Path, canvas_id: str) -> None:
         conn.close()
 
 
-def _named_chat(value: Any) -> Optional[str]:
+def _named_chat(path: Path, value: Any) -> Optional[str]:
     """The chat id a caller made for its canvas, as it named it; None for a caller that named none.
 
     A canvas's chat is an id the caller mints and hands back so the canvas opens on it, and its
     session is derived from it — so a value that isn't a name would become half a session and half a
-    link. Refused before anything is written, in the same voice as the rest of the create.
+    link. The name has to be one the upload route can save under, since a start's files are saved
+    under ``gots-<chat id>`` before the canvas exists: a chat id outside that shape is a canvas whose
+    own files could never reach it.
+
+    A chat id a chat already holds is refused too. A canvas's chat is opened for it whole, so
+    opening one on a live thread would retitle it, drop the model it was pinned to and mark it as a
+    canvas's chat — a canvas needs a chat of its own, and the app mints one per canvas. Both are
+    refused before anything is written, in the same voice as the rest of the create.
     """
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
         raise CanvasError(
             "A canvas's chat is the id its caller made, as a string; this is not one."
+        )
+    if not CHAT_ID.fullmatch(value):
+        raise CanvasError(
+            f"A canvas's chat id is 1 to 120 letters, digits, dashes and underscores; {value!r} is "
+            "not one. Its session is gots-<chat id>, and its files are saved there by the upload "
+            "route, so the name has to be one that route keeps."
+        )
+    if chats.one(path, value) is not None:
+        raise CanvasError(
+            "A canvas needs a chat of its own, and this one is already a chat's. Start it on a "
+            "chat you made for it."
         )
     return value
 
@@ -1200,15 +1223,16 @@ def _saved(files: Any, chat_id: Optional[str]) -> List[Dict[str, Any]]:
 
     A caller that made the chat itself saved the files under that chat's session before it called —
     the session is named after the chat (`gots-<chat id>`) — so the records come in with the create
-    and ride the first turn as any message's attachments do. A caller that saved none hands nothing,
-    which is no files rather than a refusal; anything but a list is refused here, before the canvas,
-    its chat or its run exists.
+    and ride the first turn as any message's attachments do. A caller that saved none hands nothing
+    — ``None`` or an empty list, which are the same start — and that is no files rather than a
+    refusal; anything but a list is refused here, before the canvas, its chat or its run exists.
 
-    The two only mean anything together: files with no chat name a session no canvas can have, and
-    the queue keeps at most ``outbox.clean_files``' twenty files per item, dropping the rest without
-    a word — so a longer list is refused rather than handed back a turn missing some of them.
+    The list is the queue's own list, so it is held to the queue's own rules: each record has to be
+    an object, since ``outbox.clean_files`` keeps the objects and drops anything else without a word,
+    and the list is at most ``outbox.MAX_FILES`` long, since the queue trims a longer one silently.
+    The two mean anything together: files with no chat name a session no canvas can have.
     """
-    if files is None:
+    if files is None or (isinstance(files, list) and not files):
         return []
     if not isinstance(files, list):
         raise CanvasError(
@@ -1218,9 +1242,14 @@ def _saved(files: Any, chat_id: Optional[str]) -> List[Dict[str, Any]]:
         raise CanvasError(
             "A canvas's files are saved under the session its chat names; this start names no chat."
         )
-    if len(files) > START_FILES_MAX:
+    if len(files) > outbox.MAX_FILES:
         raise CanvasError(
-            f"A start carries at most {START_FILES_MAX} files; this one carries {len(files)}."
+            f"A start carries at most {outbox.MAX_FILES} files; this one carries {len(files)}."
+        )
+    if any(not isinstance(file, dict) for file in files):
+        raise CanvasError(
+            "A canvas's files are the records its caller saved, each an object; this list holds "
+            "something else, which the queue would drop without a word."
         )
     return outbox.clean_files(files)
 
@@ -1256,7 +1285,7 @@ def create(
         raise CanvasError("body must be the run request that builds the canvas.")
     # Both are read before anything is written: the chat the caller made, and the files it saved
     # under that chat's session.
-    named = _named_chat(chat_id)
+    named = _named_chat(path, chat_id)
     saved = _saved(files, named)
     run = body
     now = int(time.time() * 1000)
