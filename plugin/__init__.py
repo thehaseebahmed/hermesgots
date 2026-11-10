@@ -643,7 +643,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # sign for one, and the app would ask a route that isn't there.
                     "media_url",
                     # A page's folder, signed beside its URL and served under `media/page/<token>/`,
-                    # so the Previewer's page loads its own files (ADR 0133).
+                    # so the Previewer's page loads its own files (ADR 0135).
                     "media_page",
                     "profile_routes",
                     "pr_tool",
@@ -2696,7 +2696,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         }
         if answer["type"] == "text/html":
             # A page also gets its folder's address, which the Previewer puts in its `<base href>` so
-            # the page loads its own files from there and below (ADR 0133). Same life as the URL.
+            # the page loads its own files from there and below (ADR 0135). Same life as the URL.
             answer["folder"], _ = media.page_url(
                 request, key, file.parent.resolve(), _request_profile() or ""
             )
@@ -2721,7 +2721,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return await served_file(request, media.media_file)
 
     async def serve_page_file(request: "web.Request") -> "web.StreamResponse":
-        """A page's own file: one under the folder its token was signed for (ADR 0133).
+        """A page's own file: one under the folder its token was signed for (ADR 0135).
 
         The token is the address's own segment, so the page's ``<base href>`` resolves every relative
         URL — the ones its markup names and the ones its scripts build — to a request here. Nothing

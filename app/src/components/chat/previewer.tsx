@@ -56,7 +56,7 @@ export interface PreviewItem {
   src?: string
   /**
    * A page's folder on the host, where its own stylesheets, scripts and images are loaded from
-   * (ADR 0133). A staged page isn't on the host yet, so it has none and draws without them.
+   * (ADR 0135). A staged page isn't on the host yet, so it has none and draws without them.
    */
   folder?: string
   state: MediaStage
@@ -439,7 +439,7 @@ function Retry({
 }
 
 /**
- * A page, drawn as the one rule for an untrusted document says (ADR 0114, 0132): its text is read,
+ * A page, drawn as the one rule for an untrusted document says (ADR 0114, 0134): its text is read,
  * the sandbox head is put first in it, and it runs in an opaque-origin frame — `allow-scripts`, never
  * `allow-same-origin` — so its own scripts work and reach nothing of the app's. No zoom or swipe
  * handlers sit over it, so the page keeps its own gestures; the stepping buttons are outside it.

@@ -1,6 +1,6 @@
 # A previewed page loads its own folder's files, and nothing above it
 
-**Amends [ADR 0132](0132-a-sandboxed-page-may-load-images-over-https.md)** (2026-11-10).
+**Amends [ADR 0134](0134-a-sandboxed-page-may-load-images-over-https.md)** (2026-11-10).
 
 An HTML file the Previewer draws is usually one of several: a stylesheet beside it, a script, an
 `img/` folder, a font. Drawn by `srcdoc` alone, with nothing but inline sources allowed, every one of
@@ -33,7 +33,7 @@ So the page gets its folder:
 
 **Consequences:** the page and its scripts can read every file in that folder and below for the
 token's lifetime, including ones unrelated to the page. They can show them but can't send them
-anywhere except encoded into a remote image URL (ADR 0132). The token is visible to the page's
+anywhere except encoded into a remote image URL (ADR 0134). The token is visible to the page's
 scripts. It covers one folder, one profile, and minutes. Allowing the host's origin in the policy
 also lets a page name other host routes, but every other route needs the bot's key or a signature
 over a different path, so the origin grants nothing the token doesn't.

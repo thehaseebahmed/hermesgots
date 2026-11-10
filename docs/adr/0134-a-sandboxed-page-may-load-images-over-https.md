@@ -26,4 +26,4 @@ into an image URL it builds. `connect-src 'none'` still stops every other way ou
 
 A page previewed from the host also loads its own folder's files — scripts, styles, images and fonts
 under it, never above it — through a folder-signed route; that is
-[ADR 0133](0133-a-previewed-page-loads-its-own-folders-files.md). A canvas loads none.
+[ADR 0135](0135-a-previewed-page-loads-its-own-folders-files.md). A canvas loads none.

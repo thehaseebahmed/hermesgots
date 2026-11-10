@@ -24,7 +24,7 @@ export interface HostFileOpen {
  * Opens a file the host holds by the rule ADR 0071 wrote, for a screen that isn't a thread — a
  * library's tree, and whatever lists files next: a photo, a clip, a recording or a page opens in the
  * app's own **Previewer**, from a URL the bot signs for the file (a page drawn in its sandboxed frame,
- * ADR 0132), and anything the Previewer can't draw — a note, an archive, a photo no browser decodes —
+ * ADR 0134), and anything the Previewer can't draw — a note, an archive, a photo no browser decodes —
  * is handed to the platform, which shows it or saves it under its own name. `drawnCell` is that rule
  * and `openAttachment` is the hand-over, so neither is written twice here.
  *

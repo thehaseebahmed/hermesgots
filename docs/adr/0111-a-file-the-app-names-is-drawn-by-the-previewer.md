@@ -1,8 +1,8 @@
 # A file the app names is drawn by the previewer, and a tag with no file draws nothing
 
-**Amended by [ADR 0133](0133-a-previewed-page-loads-its-own-folders-files.md)** (2026-11-10): an HTML
+**Amended by [ADR 0135](0135-a-previewed-page-loads-its-own-folders-files.md)** (2026-11-10): an HTML
 file is a **page** and the Previewer draws it in a sandboxed frame (`sandbox="allow-scripts"`, the
-policy of [ADR 0132](0132-a-sandboxed-page-may-load-images-over-https.md)) rather than handing it to
+policy of [ADR 0134](0134-a-sandboxed-page-may-load-images-over-https.md)) rather than handing it to
 the platform. Every other file the app can't show is still handed over.
 
 Two reports, one seam. A reply's text sometimes read `MEDIA:/opt/data/…` verbatim in the thread, and

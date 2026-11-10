@@ -655,7 +655,7 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(canvases.record(self.path, self.canvas["id"])["version"], 0)
 
     def test_a_remote_image_over_https_is_accepted(self) -> None:
-        # ADR 0132: the frame's policy lets an https image in, so the scan does too — and only that.
+        # ADR 0134: the frame's policy lets an https image in, so the scan does too — and only that.
         for image in (
             '<img src="https://example.com/x.png" alt="x">',
             "<img alt='x' src='https://example.com/x.png'>",

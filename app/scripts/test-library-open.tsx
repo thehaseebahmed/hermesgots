@@ -1,5 +1,5 @@
 /**
- * A library's files open the way the app opens any file it holds (ADR 0071, ADR 0111, ADR 0132): a
+ * A library's files open the way the app opens any file it holds (ADR 0071, ADR 0111, ADR 0134): a
  * photo, a clip, a recording or a page in the app's own Previewer from a URL the bot signs, and
  * anything else handed to the platform, which shows or saves it. Nothing is fetched into this app as
  * bytes first, and no object URL of this device's making is drawn from.

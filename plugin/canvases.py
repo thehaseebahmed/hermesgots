@@ -179,7 +179,7 @@ _REMOTE = re.compile(
     r"|<link\b[^>]*\bhref\s*=\s*[\"']?\s*(?:https?:)?//"
     r"|url\(\s*[\"']?\s*(?:https?:)?//)"
 )
-# An image the frame may load from outside (ADR 0132): an `<img>`'s `src` or `srcset`, or a
+# An image the frame may load from outside (ADR 0134): an `<img>`'s `src` or `srcset`, or a
 # `<picture>`'s `<source srcset>`, every URL of which is `https://`. The policy's `img-src https:`
 # lets those in; a plain `http:` or scheme-relative URL is still refused, and so is every other load
 # from outside — a script, a stylesheet, a font or background in CSS, a poster, a form's target.

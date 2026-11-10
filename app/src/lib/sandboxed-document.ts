@@ -13,7 +13,7 @@
 
 /**
  * The policy a sandboxed document is drawn under: nothing leaves the frame, and nothing loads from
- * outside it but an image over https (ADR 0132).
+ * outside it but an image over https (ADR 0134).
  */
 export const SANDBOX_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; " +
@@ -60,7 +60,7 @@ export function findHead(html: string): { index: number; length: number } | null
 }
 
 /**
- * The policy a page the Previewer draws from a folder on the host is held to (ADR 0133): the
+ * The policy a page the Previewer draws from a folder on the host is held to (ADR 0135): the
  * sandbox's, with the host's origin let in for its scripts, styles, images and fonts. The origin is
  * all a policy can name and still survive a redirect; what the page reaches on it is the folder its
  * token covers, which the host's route enforces. Connections, frames and form posts stay shut.

@@ -337,7 +337,7 @@ def media_file(path_str: str) -> Path:
     return _validated_path(path_str, "No such file.")
 
 
-# A page's folder (ADR 0133): one token over the folder an HTML file lies in, so the page the
+# A page's folder (ADR 0135): one token over the folder an HTML file lies in, so the page the
 # Previewer draws can load its own stylesheets, scripts, images and fonts by relative path — those its
 # markup names and those its scripts build — from that folder and below, and nothing above it.
 #

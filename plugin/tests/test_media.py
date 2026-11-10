@@ -455,7 +455,7 @@ class FolderTokenTest(unittest.TestCase):
 
 @unittest.skipIf(_web is None, "needs aiohttp")
 class PageFolderRouteTest(unittest.TestCase):
-    """The route a previewed page's ``<base href>`` points at (ADR 0133)."""
+    """The route a previewed page's ``<base href>`` points at (ADR 0135)."""
 
     def test_a_folder_token_serves_files_under_its_folder_and_refuses_up_a_link_out_and_another_folder(
         self,
