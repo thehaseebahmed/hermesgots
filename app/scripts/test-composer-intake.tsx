@@ -555,3 +555,33 @@ test("a staged file this device holds is handed to the platform from its own byt
     window.open = real.open
   }
 })
+
+test("a staged .html opens in the Previewer before it is sent", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL, fetch: globalThis.fetch }
+  URL.createObjectURL = () => "blob:page"
+  URL.revokeObjectURL = () => {}
+  const read: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    read.push(String(input instanceof Request ? input.url : input))
+    return new Response("<p>hi</p>", { headers: { "content-type": "text/html" } })
+  }) as typeof fetch
+  try {
+    await mount(<PreviewerProvider>{composer(sent)}</PreviewerProvider>, async () => {
+      await drop([new File(["<p>hi</p>"], "report.html", { type: "text/html", lastModified: 6 })])
+      await click(
+        findAll("button").find((one) => one.getAttribute("aria-label") === "Open report.html"),
+      )
+      const frame = () => document.querySelector<HTMLIFrameElement>('[role="dialog"] iframe')
+      await until(async () => frame() !== null, "the staged page in the Previewer")
+      assert.equal(frame()!.getAttribute("sandbox"), "allow-scripts")
+      assert.ok((frame()!.getAttribute("srcdoc") ?? "").includes("<p>hi</p>"))
+      assert.ok(read.includes("blob:page"), "read from the bytes this device holds")
+      assert.deepEqual(sent, [], "nothing was sent")
+    })
+  } finally {
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+    globalThis.fetch = real.fetch
+  }
+})

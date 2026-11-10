@@ -693,6 +693,7 @@ const SERVED: Record<string, string> = {
   ".pdf": "application/pdf",
   ".txt": "text/plain",
   ".md": "text/markdown",
+  ".html": "text/html",
 }
 
 /** One of the host's own keys, in the shape a bot's General page reads (the schema's own kinds). */
