@@ -3462,6 +3462,13 @@ const LLM_ENDPOINTS = [
 const LLM_ENDPOINT_SEEDED = { "local-llama": "llam-3.1-local-0a1f" }
 const maskSecret = (value) =>
   value.length < 12 ? "***" : `${value.slice(0, 4)}...${value.slice(-4)}`
+// The id the host slugs from an endpoint's name, and the one its `providers.<id>` entry lands under.
+const slugEndpoint = (name) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
 // The shapes a page is handed rather than a key: the host refuses one on its own rule, so a stale
 // screen or a `curl` can't write the mask back.
 const looksMasked = (value) =>
@@ -4827,6 +4834,44 @@ http
           error: { message: "That is a masked key, not a key. Type the key itself." },
         })
       llmKeys.set(`${key}\n${target}`, typed)
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      url.pathname === "/api/plugins/gots/llm-providers/endpoints" &&
+      req.method === "POST"
+    ) {
+      // A custom endpoint added (plugin/llm_providers.py): a name, a base URL and a model are all
+      // required, a name an endpoint already carries is refused — the host's upsert would merge onto
+      // that entry rather than add a second one — and the id is the one the host slugs from the name.
+      // A mask sent back as a key is refused, as every write here refuses one.
+      const key = pluginProfile ?? ""
+      const body = await readBody(req)
+      const name = typeof body?.name === "string" ? body.name.trim() : ""
+      const baseUrl = typeof body?.base_url === "string" ? body.base_url.trim() : ""
+      const model = typeof body?.model === "string" ? body.model.trim() : ""
+      const typed = typeof body?.key === "string" ? body.key.trim() : ""
+      if (!(name && baseUrl && model))
+        return json(res, 400, {
+          error: { message: "A custom endpoint needs a name, a base URL and a model." },
+        })
+      if (typed && looksMasked(typed))
+        return json(res, 400, {
+          error: { message: "That is a masked key, not a key. Type the key itself." },
+        })
+      const held = LLM_ENDPOINTS.find((one) => one.name.toLowerCase() === name.toLowerCase())
+      if (held)
+        return json(res, 400, {
+          error: {
+            message:
+              `This Hermes already has a custom endpoint named ${held.name}. ` +
+              "Adding one with that name would replace it instead of adding a new one.",
+          },
+        })
+      const id = slugEndpoint(name)
+      LLM_ENDPOINTS.push({ id, name, base_url: baseUrl, model })
+      if (typed) llmKeys.set(`${key}\ncustom:${id}`, typed)
       return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers") {

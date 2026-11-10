@@ -12,6 +12,7 @@ import {
   customEndpointId,
   customTarget,
   endpointRows,
+  submittableEndpoint,
   submittableKey,
 } from "../src/lib/llm-providers.ts"
 
@@ -80,4 +81,29 @@ test("a key's address is one target: custom:<id> for an endpoint, a slug for a p
   assert.equal(customEndpointId("custom:local-llama"), "local-llama")
   assert.equal(customEndpointId("openai"), "", "a provider's slug names no endpoint")
   assert.equal(customEndpointId(""), "")
+})
+
+test("a new endpoint is only worth saving once it holds all four of its fields", () => {
+  const whole = {
+    name: "Home box",
+    base_url: "http://10.0.0.5:8080/v1",
+    model: "qwen2.5",
+    key: "home-box-key-0000-abcd",
+  }
+  assert.equal(submittableEndpoint(whole), true, "a name, a URL, a model and a typed key")
+
+  // Each of the three is this page's own text, and a field holding only spaces says nothing.
+  for (const field of ["name", "base_url", "model"]) {
+    assert.equal(
+      submittableEndpoint({ ...whole, [field]: "   " }),
+      false,
+      `${field} has to say something`,
+    )
+  }
+  assert.equal(submittableEndpoint({ ...whole, key: "" }), false, "and there is nothing to send")
+  assert.equal(
+    submittableEndpoint({ ...whole, key: "sk-o...c123" }),
+    false,
+    "a mask is never a key to send, however new the endpoint is",
+  )
 })

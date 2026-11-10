@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
-import { useNavigate } from "react-router"
-import { Trash2Icon } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { useLocation, useNavigate } from "react-router"
+import { PlusIcon, Trash2Icon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import {
@@ -11,20 +11,29 @@ import {
   ValueRow,
   fieldInputClass,
   fieldLabelClass,
+  useHeaderAction,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { botSubPath } from "@/lib/bot-subs"
+import { botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { getLlmProviders, removeLlmProviderKey, setLlmProviderKey } from "@/lib/hermes"
+import {
+  addLlmEndpoint,
+  getLlmProviders,
+  removeLlmProviderKey,
+  setLlmProviderKey,
+} from "@/lib/hermes"
 import {
   customEndpointId,
   endpointRows,
   providerRows,
+  submittableEndpoint,
   submittableKey,
+  type LlmEndpointDraft,
   type LlmProviders,
 } from "@/lib/llm-providers"
 
@@ -40,12 +49,33 @@ import {
  * form under the endpoint's own name, with the base URL and model it runs reported muted above it;
  * its target is spelled `custom:<id>`, so one address names one key.
  *
+ * The header's `+` adds one: a form of its own, drawn as a detail sub-screen, whose four fields are
+ * an endpoint's whole shape. Its write is the host's own upsert, its refusals are the host's own
+ * sentences, and the block it answers is the block the page draws — no second read between them.
+ *
  * The page is only ever reached where the host advertises `llm_providers` (the gate is the route's
  * own, `bot-settings.tsx`'s `PAGE_META`), so a host that can't list them draws no page at all.
  */
 export function LlmProvidersTab({ profile }: { profile: Profile }) {
   const navigate = useNavigate()
   const { block, problem } = useLlmProviders(profile)
+  // The page's own way to add one: the header's `+`, which opens the form as a sub-screen. Its
+  // handler is `navigate` — stable across renders — because the header draws the node it was
+  // published with and never re-renders for a change on the page below it.
+  useHeaderAction(
+    "llm-endpoint-add",
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label="Add a custom endpoint"
+      title="Add a custom endpoint"
+      data-llm-add-endpoint
+      onClick={() => navigate(botSubPath(profile.id, "llm-providers", "add"))}
+    >
+      <PlusIcon />
+    </Button>,
+  )
 
   if (!block)
     return problem ? (
@@ -307,19 +337,178 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
 }
 
 /**
+ * A custom endpoint added: the form the page's `+` opens, drawn as a sub-screen of its own.
+ *
+ * The four fields are the endpoint's whole shape — a name, the base URL and model it runs, and the
+ * key — and Save is dead until each of them says something a write could use (`submittableEndpoint`,
+ * so a mask the page was handed is never one of them). The write is the host's own: it validates the
+ * URL, slugs the id, writes the entry and puts the key in the bot's `.env`, so a refusal (a URL with
+ * no host, a name an endpoint already carries) is the host's sentence, shown here in place with the
+ * fields kept so a retry is one tap.
+ *
+ * On success the form leaves and the block that write answered is handed to the page with the
+ * navigation: the page draws the new row — its id as the host slugged it, its key as the host masked
+ * it — rather than asking again for what it was just told.
+ */
+export function LlmEndpointAddScreen({
+  profile,
+  close,
+}: {
+  profile: Profile
+  /** The page's own address: where the form's Cancel and a finished write both go. */
+  close: () => void
+}) {
+  const navigate = useNavigate()
+  const [draft, setDraft] = useState<LlmEndpointDraft>({
+    name: "",
+    base_url: "",
+    model: "",
+    key: "",
+  })
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<string>()
+  const ready = submittableEndpoint(draft)
+
+  const field = (key: keyof LlmEndpointDraft) => ({
+    value: draft[key],
+    onChange: (event: { target: { value: string } }) =>
+      setDraft((held) => ({ ...held, [key]: event.target.value })),
+  })
+
+  const submit = () => {
+    if (!ready || saving) return
+    setSaving(true)
+    setRefusal(undefined)
+    void addLlmEndpoint(profile, draft)
+      .then((next) => {
+        // The block the write answered is the one the page draws: it rides this navigation, so no
+        // read of the page's own can stand between the write and the row it added.
+        navigate(botTabPath(profile.id, "llm-providers"), {
+          replace: true,
+          state: next ? { llm: next } : undefined,
+        })
+      })
+      .catch((error: unknown) => {
+        // Said where it was read: the host's own sentence, with the fields kept.
+        setRefusal(error instanceof Error ? error.message : "Couldn't add that endpoint.")
+        setSaving(false)
+      })
+  }
+
+  return (
+    <div className="flex flex-col gap-4" data-llm-endpoint-add>
+      {refusal && (
+        <Banner tone="error">
+          <span role="alert">{refusal}</span>
+        </Banner>
+      )}
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit()
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <label htmlFor="llm-endpoint-name" className={fieldLabelClass}>
+            Name
+          </label>
+          <Input
+            id="llm-endpoint-name"
+            autoComplete="off"
+            placeholder="Home box"
+            {...field("name")}
+            className={fieldInputClass}
+            data-llm-endpoint-name
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="llm-endpoint-base-url" className={fieldLabelClass}>
+            Base URL
+          </label>
+          <Input
+            id="llm-endpoint-base-url"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="http://127.0.0.1:8080/v1"
+            {...field("base_url")}
+            className={fieldInputClass}
+            data-llm-endpoint-base-url
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="llm-endpoint-model" className={fieldLabelClass}>
+            Model
+          </label>
+          <Input
+            id="llm-endpoint-model"
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="The model this endpoint serves"
+            {...field("model")}
+            className={fieldInputClass}
+            data-llm-endpoint-model
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="llm-endpoint-key" className={fieldLabelClass}>
+            API key
+          </label>
+          <Input
+            id="llm-endpoint-key"
+            type="password"
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="The endpoint's API key"
+            {...field("key")}
+            className={fieldInputClass}
+            data-llm-endpoint-key
+          />
+          <p className="px-1 text-sm text-muted-foreground">
+            Saved on this bot&apos;s Hermes. The key is never shown again — only its first and last
+            four.
+          </p>
+        </div>
+        <FormActions onCancel={close} disabled={!ready} busy={saving} />
+      </form>
+    </div>
+  )
+}
+
+/**
  * The page's block, and a write's answer folded into it: one read on the connection the page belongs
  * to, and the block a write answers kept where the screen is already drawing.
  *
  * The block a page draws belongs to the read that answered it: a page asked again draws nothing
- * until its own answer lands, so a failure never stands over the rows of the answer before it.
+ * until its own answer lands, so a failure never stands over the rows of the answer before it. A
+ * block a write answered is the exception and the point — it rides the navigation that returns to
+ * the page, and is drawn once instead of read again.
  */
 function useLlmProviders(profile: Profile) {
-  const [block, setBlock] = useState<LlmProviders>()
+  const location = useLocation()
+  // The block a screen that wrote one hands over: read once, then let go of, so a page returned to
+  // later asks for itself and a stale answer can never be drawn twice.
+  const handed = useRef((location.state as { llm?: LlmProviders } | null)?.llm)
+  const [block, setBlock] = useState<LlmProviders | undefined>(handed.current)
   const [problem, setProblem] = useState<string>()
   const connection = connectionKey(profile)
 
   useEffect(() => {
     let cancelled = false
+    if (handed.current) {
+      // Already the host's answer, and a newer one than any read could give: asking again would
+      // draw the answer to a read over the answer to the write.
+      handed.current = undefined
+      return
+    }
     setBlock(undefined)
     void getLlmProviders(profile, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {

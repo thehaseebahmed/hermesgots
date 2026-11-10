@@ -120,6 +120,28 @@ export function submittableKey(value: string): boolean {
 }
 
 /**
+ * The four fields the add form holds, as the page sends them: the name the host slugs an id from,
+ * the base URL and model the endpoint runs, and the key typed into the form.
+ */
+export interface LlmEndpointDraft {
+  name: string
+  base_url: string
+  model: string
+  key: string
+}
+
+/**
+ * Whether the add form holds a whole endpoint: a name, a base URL, a model, and a key worth
+ * submitting. Every field but the key is this page's own text and has to say something; the key is
+ * `submittableKey`'s, so a mask can never be sent back as one. Nothing here checks the URL's shape —
+ * the host validates that itself, and its refusal is the sentence the user reads.
+ */
+export function submittableEndpoint(draft: LlmEndpointDraft): boolean {
+  const named = Boolean(draft.name.trim() && draft.base_url.trim() && draft.model.trim())
+  return named && submittableKey(draft.key)
+}
+
+/**
  * The block a host answered, read forgivingly: a row that names no provider is dropped rather than
  * drawn blank, and an answer that isn't the block is no block at all — so a host that answered 501
  * or a shape this build doesn't know draws no page over nothing.

@@ -12,7 +12,10 @@ isn't set), never a second boolean beside it. A write is read too: a body whose 
 refused on the host's own rule — before any slot is resolved, and with the lifecycle's writer never
 asked — while a typed key goes to that provider's own env var through `save_provider_env_credential`
 and answers the fresh block, which holds no key. The route and the feature are read too: a Hermes
-without the catalog advertises nothing and answers 501.
+without the catalog advertises nothing and answers 501. An endpoint added is read the same way: its
+four fields — the name, the base URL, the model, the typed key — reach the host's own writer, a body
+short one of them writes nothing, a name an endpoint already carries is refused (the host would merge
+onto that entry), and a mask is refused before the writer is asked at all.
 
 Run: python3 -m unittest plugin.tests.test_llm_providers -v
 """
@@ -269,6 +272,7 @@ def host_modules(
     upsert: Optional[Any] = None,
     config: Optional[Dict[str, Any]] = None,
     config_write: Optional[mock.MagicMock] = None,
+    update_class: Optional[type] = None,
 ):
     """The host's own modules, planted where a lazy import finds them.
 
@@ -283,7 +287,8 @@ def host_modules(
     and ``config`` is the profile's ``config.yaml`` as ``gateway.run`` loads it, which is where an
     endpoint's ``key_env`` is read. ``upsert`` stands in for the host's writer (``apply_custom_endpoint``
     by default, so the write really lands), and ``config_write`` is the plugin's own ``config.yaml``
-    writer, planted so a test can prove an endpoint's key never reaches it.
+    writer, planted so a test can prove an endpoint's key never reaches it. ``update_class`` replaces
+    the body class the plugin builds, so a case can read back exactly which fields it filled.
     """
     agent = ModuleType("agent")
     pool = ModuleType("agent.credential_pool")
@@ -323,7 +328,7 @@ def host_modules(
     )
     routers.config_env = config_env
     web_models = ModuleType("hermes_cli.web_models")
-    web_models.CustomEndpointUpdate = CustomEndpointUpdate
+    web_models.CustomEndpointUpdate = update_class or CustomEndpointUpdate
     hermes.web_models = web_models
     # The profile's `config.yaml`, as `gateway.run._load_gateway_config` loads it, and the
     # round-trip writer the plugin must never reach with an endpoint's key.
@@ -649,6 +654,186 @@ class EndpointWriteTest(unittest.TestCase):
         self.assertEqual(str(refused.exception), "base_url must include scheme and host")
 
 
+def slug_of(name: str) -> str:
+    """The id the host slugs from an endpoint's name: lower case, a run of non-alphanumerics as one
+    ``-``, and none at either end."""
+    return re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+
+
+class RecordedUpdate(CustomEndpointUpdate):
+    """The host's body class, keeping the keywords the plugin filled it with.
+
+    A case reads back which fields were handed over — the four the page fills and nothing else — and
+    that ``discover_models`` was left to the model's own default rather than written by the plugin.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.kwargs = kwargs
+
+
+def adding_host(
+    values: Dict[str, str], listed: list, config: Dict[str, Any], asked: list
+) -> Any:
+    """``upsert_custom_endpoint`` as the host writes a *new* endpoint.
+
+    The id is the one the host slugs from the name, the entry lands under ``providers.<id>`` with the
+    key in ``.env`` behind its ``key_env``, and the host's own list answers the row afterwards — which
+    is what the fresh read the plugin answers with is drawn from.
+    """
+
+    def upsert(body: Any) -> None:
+        asked.append(body)
+        body.id = body.id or slug_of(body.name)
+        apply_custom_endpoint(body, values, config)
+        if not any(row.get("id") == body.id for row in listed):
+            listed.append(
+                {
+                    "id": body.id,
+                    "name": body.name,
+                    "base_url": body.base_url,
+                    "model": body.model,
+                    "has_api_key": True,
+                    "is_current": False,
+                }
+            )
+
+    return upsert
+
+
+# A key the page types for an endpoint it is adding: long enough for the mask to show its ends, and
+# holding no dot, so it is no mask's shape.
+NEW_KEY = "home-box-key-0000-abcd"
+NEW_ENDPOINT = {
+    "name": "Home box",
+    "base_url": "http://10.0.0.5:8080/v1",
+    "model": "qwen2.5",
+    "key": NEW_KEY,
+}
+
+
+class AddEndpointTest(unittest.TestCase):
+    """An endpoint added: the host's own writer, its own defaults, and a name that can't collide."""
+
+    def add(
+        self,
+        body: Dict[str, Any],
+        *,
+        listed: Optional[list] = None,
+        config: Optional[Dict[str, Any]] = None,
+        values: Optional[Dict[str, str]] = None,
+        update_class: Optional[type] = None,
+    ) -> Any:
+        """One ``add_endpoint`` over a host of this case's own: the block, the bodies, and the state.
+
+        Fresh state per case, since a write lands on the config and on the list the read then draws.
+        """
+        values = {} if values is None else values
+        config = {} if config is None else config
+        listed = [] if listed is None else listed
+        asked: list = []
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            upsert=adding_host(values, listed, config, asked),
+            update_class=update_class,
+        ):
+            block = llm_providers.add_endpoint(CONFIG, body)
+        return block, asked, config, listed, values
+
+    def test_an_added_endpoint_reaches_the_host_s_writer_with_its_four_fields(self) -> None:
+        block, asked, config, listed, values = self.add(
+            dict(NEW_ENDPOINT), update_class=RecordedUpdate
+        )
+
+        self.assertEqual(len(asked), 1, "one write, through the host's own upsert")
+        body = asked[0]
+        self.assertEqual(
+            (body.name, body.base_url, body.model, body.api_key),
+            ("Home box", "http://10.0.0.5:8080/v1", "qwen2.5", NEW_KEY),
+            "the name, the base URL, the model and the key that was typed",
+        )
+        self.assertEqual(
+            sorted(body.kwargs),
+            ["api_key", "base_url", "model", "name"],
+            "and nothing else: the host slugs the id and validates the URL itself",
+        )
+        self.assertIs(
+            body.discover_models, True, "discovery is left to the body's own default, not named here"
+        )
+
+        # The host's write is what lands: the entry under the id it slugged, the key in `.env`
+        # behind the `key_env` it named, and no plaintext key in the entry.
+        entry = config["providers"]["home-box"]
+        self.assertEqual(entry["base_url"], "http://10.0.0.5:8080/v1")
+        self.assertEqual(entry["key_env"], "HERMES_CUSTOM_HOME_BOX_API_KEY")
+        self.assertEqual(values[entry["key_env"]], NEW_KEY)
+        self.assertNotIn("api_key", entry, "the key lives in .env, never in the entry")
+
+        row = next(one for one in block["endpoints"] if one["id"] == "home-box")
+        self.assertEqual(row["name"], "Home box")
+        self.assertEqual(row["masked"], mask_secret(NEW_KEY), "the answer is the fresh read")
+        self.assertNotIn(NEW_KEY, json.dumps(block), "and the key itself is nowhere in it")
+        self.assertEqual(
+            [one["id"] for one in listed],
+            ["home-box"],
+            "the host's own list is what the fresh read is drawn from",
+        )
+
+    def test_a_missing_base_url_writes_nothing_and_says_so(self) -> None:
+        # Each of the three fields a new endpoint can't do without: a body short one of them is
+        # refused before the host's writer is asked, in a sentence naming them all.
+        for field in ("name", "base_url", "model"):
+            body = dict(NEW_ENDPOINT)
+            body[field] = "   "
+            config: Dict[str, Any] = {}
+            listed: list = []
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError) as refused:
+                    self.add(body, config=config, listed=listed)
+                self.assertIn("name, a base URL and a model", str(refused.exception))
+                self.assertEqual(config, {}, "nothing was written to the profile's config")
+                self.assertEqual(listed, [], "and the host's list gained no row")
+
+    def test_a_duplicate_name_is_refused_with_nothing_written(self) -> None:
+        # The host's upsert merges onto an entry it already holds, so a second endpoint with a name
+        # it already carries would silently rewrite that one's URL and model. The name is compared
+        # the way a person reads it, whatever its case.
+        listed = endpoints()
+        config = endpoint_config()
+        for name in ("Local Llama", "local llama", "  LOCAL LLAMA  "):
+            body = dict(NEW_ENDPOINT, name=name)
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as refused:
+                    _, asked, config, _, _ = self.add(body, listed=listed, config=config)
+                sentence = str(refused.exception)
+                self.assertIn("already has a custom endpoint", sentence)
+                self.assertIn("Local Llama", sentence, "the sentence names the endpoint it would merge")
+                self.assertEqual(config, endpoint_config(), "nothing was written")
+                self.assertEqual(len(listed), 3, "and no endpoint was added")
+
+    def test_a_mask_body_is_refused_before_the_host_writer(self) -> None:
+        # First of all: a body whose key is a mask is refused even when it is short a name too, so
+        # the mask rule is never the second thing looked at.
+        writer = mock.MagicMock()
+        with host_modules({}, endpoints_list=[], upsert=writer):
+            with self.assertRaises(ValueError) as refused:
+                llm_providers.add_endpoint(CONFIG, {"name": "", "key": "sk-o...c123"})
+        self.assertIn("masked key", str(refused.exception))
+        self.assertNotIn("sk-o...c123", str(refused.exception), "and never repeats the mask")
+        writer.assert_not_called()
+
+    def test_a_host_refusal_becomes_a_value_error_in_its_words(self) -> None:
+        def refuse(body: Any) -> None:
+            raise HTTPException(400, "base_url must include scheme and host")
+
+        with host_modules({}, endpoints_list=[], config={}, upsert=refuse):
+            with self.assertRaises(ValueError) as refused:
+                llm_providers.add_endpoint(CONFIG, dict(NEW_ENDPOINT))
+        self.assertEqual(str(refused.exception), "base_url must include scheme and host")
+
+
 class RouteTest(unittest.TestCase):
     def setUp(self) -> None:
         temp_hermes_home(self)
@@ -705,6 +890,28 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(refused["status"], 400)
         self.assertIn("masked key", refused["payload"]["error"]["message"])
         save.assert_not_called()
+
+    def test_an_added_endpoint_answers_the_fresh_block(self) -> None:
+        values: Dict[str, str] = {}
+        config: Dict[str, Any] = {}
+        listed: list = []
+        with host_modules(
+            values, endpoints_list=listed, config=config,
+            upsert=adding_host(values, listed, config, []),
+        ):
+            added = self.call("/llm-providers/endpoints", dict(NEW_ENDPOINT))
+        self.assertEqual(added["status"], 200)
+        self.assertEqual(added["payload"]["object"], "gots.llm_providers")
+        row = next(one for one in added["payload"]["llm"]["endpoints"] if one["id"] == "home-box")
+        self.assertEqual(row["masked"], mask_secret(NEW_KEY), "the row the answer draws is the new one")
+
+    def test_an_added_endpoint_short_a_field_is_refused_with_its_sentence(self) -> None:
+        writer = mock.MagicMock()
+        with host_modules({}, endpoints_list=[], upsert=writer):
+            refused = self.call("/llm-providers/endpoints", dict(NEW_ENDPOINT, base_url=""))
+        self.assertEqual(refused["status"], 400)
+        self.assertIn("base URL", refused["payload"]["error"]["message"])
+        writer.assert_not_called()
 
     def remove(self, target: str) -> Dict[str, Any]:
         """One `DELETE llm-providers/key/{target}`, as the app calls it."""

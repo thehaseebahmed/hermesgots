@@ -76,6 +76,10 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
   // an address, and the page says in its own words where the host lists no such provider. The leaf
   // titles the screen until the block lands, as a keyed page's edit is titled from its key.
   "llm-providers": [
+    // The page's own `+`, which adds an endpoint: a fixed id, since it is no endpoint of the host's
+    // and so has no slug to be named by. FIXED is matched before the page's items, so this can never
+    // be mistaken for one — an endpoint a host slugs `add` is still `key/add`, a segment deeper.
+    { id: "add", kind: "detail", title: "Add custom endpoint" },
     {
       id: "key",
       kind: "detail",

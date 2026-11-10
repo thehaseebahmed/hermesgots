@@ -34,7 +34,7 @@ import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
-import { readLlmProviders } from "@/lib/llm-providers"
+import { readLlmProviders, type LlmEndpointDraft } from "@/lib/llm-providers"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -1395,6 +1395,34 @@ export async function removeLlmProviderKey(
     `${pluginRoot(config.baseUrl)}/llm-providers/key/${encodeURIComponent(target)}`,
     { method: "DELETE", headers: headers(config), signal },
   )
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
+/**
+ * Adds one custom endpoint — the name, base URL and model the form was given, and the key typed into
+ * it — and answers the block with the new row in it, which is how the page learns the id the host
+ * slugged and the mask it made of the key. The host validates the URL, writes `providers.<id>` and
+ * puts the key in `.env` behind the entry's `key_env`; its refusal (a URL with no host, a name an
+ * endpoint already carries) is the sentence the screen shows. The key is never logged here: it rides
+ * the request body and nothing else.
+ */
+export async function addLlmEndpoint(
+  config: HermesConfig,
+  body: LlmEndpointDraft,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers/endpoints`, {
+    method: "POST",
+    headers: headers(config),
+    // The form's own four fields, trimmed: the host slugs the id and validates the URL itself.
+    body: JSON.stringify({
+      name: body.name.trim(),
+      base_url: body.base_url.trim(),
+      model: body.model.trim(),
+      key: body.key.trim(),
+    }),
+    signal,
+  })
   return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
 }
 

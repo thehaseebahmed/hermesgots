@@ -22,7 +22,11 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
-import { LlmProviderKeyScreen, LlmProvidersTab } from "@/components/bot-llm-providers-tab"
+import {
+  LlmEndpointAddScreen,
+  LlmProviderKeyScreen,
+  LlmProvidersTab,
+} from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
@@ -535,6 +539,9 @@ function PageSub({
   const large = useLarge()
   // A detail is a screen of its own, and the one this page holds is the chain after its model.
   if (tab === "general" && sub.kind === "detail") return <FallbacksPage profile={profile} />
+  // The page's own `+`: the form that adds a custom endpoint, which is a screen of its own.
+  if (tab === "llm-providers" && sub.id === "add")
+    return <LlmEndpointAddScreen profile={profile} close={close} />
   // One provider's key: the page's own detail, named by the slug the address carries.
   if (tab === "llm-providers" && sub.kind === "detail" && sub.item)
     return <LlmProviderKeyScreen profile={profile} target={sub.item} />

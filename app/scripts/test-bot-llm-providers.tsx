@@ -14,6 +14,10 @@
  * answered block again, where the row reads *Not set*. Nothing of either write is a key: the only
  * key the page ever holds is the typed one, in the field it was typed in.
  *
+ * The page's `+` adds an endpoint: the form asks for a name, a base URL, a model and a key, its Save
+ * waits until it holds all four, and one POST carries exactly what was typed while the page then
+ * draws the block the write answered — the new row, with the key as the host masked it.
+ *
  * A host on an older plugin advertises no `llm_providers`, so the page draws no row and its address
  * lands on the bot's own page — the gate every page over a host's own feature wears.
  */
@@ -102,6 +106,14 @@ type Asked = { method: string; path: string; body: Record<string, unknown> | nul
  */
 const maskOf = (key: string) => (key.length < 12 ? "***" : `${key.slice(0, 4)}...${key.slice(-4)}`)
 
+/** The id the host slugs from an endpoint's name: lower case, a run of spaces as one `-`. */
+const slugOf = (name: string) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
 /**
  * A bot of this test's own over a faked host: what a connection's plugin answered is remembered for
  * the page, so each case names its own host and no answer leaks into the next. A key write lands on
@@ -151,8 +163,27 @@ async function seed(name: string, features: string[], block: Block = BLOCK) {
           }
       return json({ object: "gots.llm_providers", llm: current })
     }
-    if (pathname.endsWith("/plugins/gots/llm-providers"))
+    if (pathname.endsWith("/plugins/gots/llm-providers") && method === "GET")
       return json({ object: "gots.llm_providers", llm: current })
+    if (pathname.endsWith("/plugins/gots/llm-providers/endpoints") && method === "POST") {
+      // A custom endpoint added (plugin/llm_providers.py): the host slugs the id, keeps the key as
+      // the mask it makes, and answers the block with the new row in it. The read above keeps
+      // answering what this host held *before* the write, deliberately: a page that asked again
+      // instead of drawing the block the write answered would show no new row at all.
+      const name = String(body?.name ?? "").trim()
+      const id = slugOf(name)
+      const added: Endpoint = {
+        id,
+        name,
+        base_url: String(body?.base_url ?? ""),
+        model: String(body?.model ?? ""),
+        masked: maskOf(String(body?.key ?? "")),
+      }
+      return json({
+        object: "gots.llm_providers",
+        llm: { ...current, endpoints: [...current.endpoints, added] },
+      })
+    }
     return json({}, 404)
   }) as typeof fetch
   return { asks, block: () => current }
@@ -168,6 +199,13 @@ const maskRow = () => find('[data-setting="llm-provider-mask"]')
 const baseUrlRow = () => find('[data-setting="llm-endpoint-base-url"]')
 const modelRow = () => find('[data-setting="llm-endpoint-model"]')
 const keyField = () => find("[data-llm-key-field]") as HTMLInputElement | null
+/** The page's own `+`, and the form it opens: one field per thing a new endpoint needs. */
+const addButton = () => find("[data-llm-add-endpoint]")
+const addForm = () => find("[data-llm-endpoint-add]")
+const nameField = () => find("[data-llm-endpoint-name]") as HTMLInputElement | null
+const urlField = () => find("[data-llm-endpoint-base-url]") as HTMLInputElement | null
+const endpointModelField = () => find("[data-llm-endpoint-model]") as HTMLInputElement | null
+const newKeyField = () => find("[data-llm-endpoint-key]") as HTMLInputElement | null
 const saveButton = () =>
   findAll("[data-form-actions] button").find((one) => one.textContent?.trim() === "Save") ?? null
 /** The slot screen's own way to remove the key, and the question it asks first. */
@@ -385,6 +423,69 @@ test("an endpoint row shows its base URL and its key masked, and its key can be 
     await until(
       async () => valueOf(maskRow()) === "endp...0a1f",
       "the screen to read the block the write answered",
+    )
+  })
+})
+
+test("the plus opens a form and the endpoint lands as a row", async () => {
+  const host = await seed("add", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+
+    // The page's own way in: one `+` in the header, which opens the form as a sub-screen of its own.
+    await click(addButton())
+    await until(async () => Boolean(addForm()), "the add form")
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/llm-providers/add",
+      "the form has an address of its own",
+    )
+    assert.ok(
+      findAll("h1").some((heading) => heading.textContent === "Add custom endpoint"),
+      "and a title saying what it does",
+    )
+
+    // Save is dead until the form holds a whole endpoint: a name, a base URL, a model and a key.
+    assert.equal(saveButton()?.disabled, true, "Save waits for a whole endpoint")
+    await type(nameField(), "Home box")
+    assert.equal(saveButton()?.disabled, true, "a name alone is no endpoint")
+    await type(urlField(), "http://10.0.0.5:8080/v1")
+    assert.equal(saveButton()?.disabled, true, "nor is a name and a URL")
+    await type(endpointModelField(), "qwen2.5")
+    assert.equal(saveButton()?.disabled, true, "and nothing is saved without a key")
+    await type(newKeyField(), "home-box-key-0000-abcd")
+    await until(async () => saveButton()?.disabled === false, "Save to wake for a whole endpoint")
+
+    await click(saveButton())
+    await until(async () => Boolean(endpointRow("home-box")), "the new endpoint's row")
+
+    const posts = host.asks.filter((one) => one.method === "POST")
+    assert.equal(posts.length, 1, "one write, and no second")
+    assert.deepEqual(
+      posts[0].body,
+      {
+        name: "Home box",
+        base_url: "http://10.0.0.5:8080/v1",
+        model: "qwen2.5",
+        key: "home-box-key-0000-abcd",
+      },
+      "the four fields the form holds, and nothing else",
+    )
+    // The row is the block the write answered: this host's read still answers the page as it was
+    // before the write, so a page that asked again rather than drawing that block would show no row.
+    assert.equal(
+      host.asks.filter(
+        (one) => one.method === "GET" && one.path.endsWith("/plugins/gots/llm-providers"),
+      ).length,
+      1,
+      "the page asked nothing more: the block the write answered is what it drew",
+    )
+    assert.equal(path(), "/settings/bots/bot-1/llm-providers", "and the form is left behind")
+    assert.ok(missing("[data-llm-endpoint-add]"), "nothing of it is on the screen")
+    assert.deepEqual(
+      lines(endpointRow("home-box")),
+      ["Home box", "http://10.0.0.5:8080/v1 · qwen2.5", "home...abcd"],
+      "the new row: its name, the URL and model it runs, and its key as the host masked it",
     )
   })
 })

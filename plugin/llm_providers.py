@@ -35,6 +35,10 @@ host's own ``upsert_custom_endpoint`` — the plugin composes no ``providers`` e
 kind of row owns it. A body whose key *is* a mask — the shape the page was handed — is refused on
 the host's own rule before any of that is asked.
 
+An endpoint is added through that same writer, with the four fields a form holds — so the plugin
+slugs no id and composes no ``providers`` entry there either — and a name an endpoint already carries
+is refused before it, because the writer would merge onto that entry rather than add a second one.
+
 A key is removed through the same lifecycle (``remove_provider_env_credential``), never its
 ``remove_env_value``: dropping the value from ``.env`` alone leaves the value-matched ``config.yaml``
 mirror and the pool entry behind, still authenticating with a key the page says is gone. A removal of
@@ -324,6 +328,77 @@ def _write_endpoint_key(config_path: Path, endpoint_id: str, key: str) -> Dict[s
             raise
         raise ValueError(detail) from error
     return read(config_path)
+
+
+def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Add one custom endpoint through the host's own writer, and answer the page as it now reads.
+
+    The body is the page's four fields — a name, a base URL, a model and the typed key — and nothing
+    else is composed here: ``upsert_custom_endpoint`` validates the URL, slugs the id from the name,
+    writes ``providers.<id>``, puts the key in ``.env`` behind the entry's ``key_env`` and clears or
+    migrates a legacy plaintext ``api_key`` on the same write. So the plugin writes no config and
+    makes no id, and an endpoint Hermes adds later is added the same way.
+
+    ``discover_models`` is left at the body's own default: this is a new entry, so the host's default
+    is the answer a person would give — there is no stored value a body could contradict.
+
+    The key is the page's and may be absent: a local server that takes no key is an endpoint Hermes
+    holds too, and a write with no key is that. A key that *is* a mask is refused first of all, before
+    anything else in the body is read or written, on the host's own rule.
+
+    Three fields are required, and each has to hold something: a body short one of them is refused in
+    a sentence naming all three. A name an endpoint already carries is refused too —
+    ``upsert_custom_endpoint`` would merge onto that entry rather than add a second one, so a form
+    that said "add" would rewrite an endpoint its user never touched.
+
+    A host refusal (a base URL with no host) arrives as FastAPI's ``HTTPException`` and leaves here as
+    a ``ValueError`` carrying its sentence, which the route answers as a 400 the user can read.
+    """
+    fields = body if isinstance(body, dict) else {}
+    submitted = fields.get("key")
+    key = submitted.strip() if isinstance(submitted, str) else ""
+    _refuse_preview(key)
+    name = str(fields.get("name") or "").strip()
+    base_url = str(fields.get("base_url") or "").strip()
+    model = str(fields.get("model") or "").strip()
+    if not (name and base_url and model):
+        raise ValueError("A custom endpoint needs a name, a base URL and a model.")
+    _refuse_duplicate(name)
+    from hermes_cli.web_models import CustomEndpointUpdate
+    from hermes_cli.web_routers.config_env import upsert_custom_endpoint
+
+    update = CustomEndpointUpdate(
+        name=name,
+        base_url=base_url,
+        model=model,
+        api_key=key or None,
+    )
+    try:
+        upsert_custom_endpoint(update)
+    except Exception as error:
+        detail = _host_refusal(error)
+        if detail is None:
+            raise
+        raise ValueError(detail) from error
+    return read(config_path)
+
+
+def _refuse_duplicate(name: str) -> None:
+    """Refuse a name an endpoint already carries, in a sentence naming that endpoint.
+
+    The host's writer merges onto the entry the body's id names, and the id is slugged from the
+    name: a second endpoint called what one is already called would quietly rewrite that one's base
+    URL and model rather than add anything. The two names are compared the way a person reading them
+    would — case-folded, since ``Home box`` and ``home box`` are one endpoint to anyone but a diff.
+    """
+    wanted = name.casefold()
+    for row in _endpoint_list():
+        held = str(row.get("name") or row.get("id") or "").strip()
+        if held.casefold() == wanted:
+            raise ValueError(
+                f"This Hermes already has a custom endpoint named {held}. Adding one with that name "
+                "would replace it instead of adding a new one."
+            )
 
 
 def remove_key(config_path: Path, target: str) -> Dict[str, Any]:

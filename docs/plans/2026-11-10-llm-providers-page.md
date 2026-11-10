@@ -301,6 +301,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    plugin HTTP API, mock host, `app` lib, `app` UI. Check: `test_llm_providers.py` — "an added
    endpoint lands in providers.<id> with its key in .env" and "a missing base URL writes nothing" —
    and "the plus opens a form and the endpoint lands as a row".
+
+   Done.
+
 9. **An endpoint can be removed, refused while it runs the model.** `remove_endpoint` answers 409
    `endpoint_in_use` when the list says the row is current, else calls the host's delete; the page
    shows the host's sentence in place and keeps the row. An ADR records why a credential is a page

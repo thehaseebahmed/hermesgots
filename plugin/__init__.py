@@ -3028,6 +3028,43 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_delete(f"{PREFIX}/llm-providers/key/{{target}}", remove_llm_provider_key)
 
+    async def add_llm_endpoint(request: "web.Request") -> "web.Response":
+        """Adds one custom endpoint and answers the fresh block.
+
+        The body is the page's four fields — a name, a base URL, a model and the typed key — and the
+        host's own ``upsert_custom_endpoint`` is what writes: it validates the URL, slugs the id,
+        writes ``providers.<id>`` and puts the key in ``.env`` behind the entry's ``key_env``. So the
+        sentence a refusal carries is the host's own (a URL with no host, a body short a field, a
+        name an endpoint already carries) and the route answers it as a 400 the user can read. The
+        key is not logged and not echoed: the 502's sentence is the plugin's, never the host's own
+        words, which could hold the value.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if not body:
+            return _error(web, "Body needs a name, a base URL, a model and a key.", 400)
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return llm_providers.add_endpoint(config_path, body)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't add a custom endpoint from here.", 501)
+        except Exception:
+            logger.warning("gots: couldn't add this bot's custom endpoint", exc_info=True)
+            return _error(web, "The host couldn't add that endpoint.", 502)
+        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+
+    app.router.add_post(f"{PREFIX}/llm-providers/endpoints", add_llm_endpoint)
+
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)
         runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))
