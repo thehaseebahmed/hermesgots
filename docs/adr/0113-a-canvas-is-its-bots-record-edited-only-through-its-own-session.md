@@ -25,6 +25,14 @@ finishes with the app closed:
 - `write` writes the whole document.
 - The data tools read and write the canvas's data.
 
+**Its data is not its page** (amended 2026-11-10). Keeping a canvas's data writes nothing the user
+looks at, so `data_read` and `data_write` answer every session of the bot — a chat, a routine, a
+delegated run — naming the canvas by its title or its id, and a title two canvases share is refused
+with both ids. The session that belongs to a canvas keeps that canvas's data and no other's, and
+`list` names the canvases with the id a data call takes, in every session but a canvas's own, which
+already knows its own. The document itself — `read`, `edit`, `write` — stays the canvas session's
+alone.
+
 The session is an ordinary synced chat record carrying `canvasId` and titled with the canvas's name.
 That keeps the send path a chat already has: the model pin (ADR 0059), the queue, steer and drafts.
 One rule keeps it out of every list, out of Main's cards and out of triage. The rejected alternative,
