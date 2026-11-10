@@ -49,7 +49,10 @@ assert len(SHORT_KEY) == 11
 # typed into the page.
 ENDPOINT_KEY = "endpoint-key-0000-0a1f"
 ENDPOINT_PLAIN = "plain-key-1111-9999"
-assert len(ENDPOINT_KEY) >= 12 and len(ENDPOINT_PLAIN) >= 12
+# The key of an endpoint the migration left in the legacy ``custom_providers`` list, in ``.env``
+# behind the variable that entry's own ``key_env`` names.
+LEGACY_KEY = "legacy-key-2222-7c7c"
+assert len(ENDPOINT_KEY) >= 12 and len(ENDPOINT_PLAIN) >= 12 and len(LEGACY_KEY) >= 12
 
 
 def catalog() -> list:
@@ -158,6 +161,19 @@ def endpoints() -> list:
             "api_key_preview": None,
             "is_current": True,
         },
+        # The row the v11→v12 migration never converted: the host still routes it out of the legacy
+        # `custom_providers` list, so its key is named by that list's own entry and no `providers`
+        # one — the row a read that only opened `providers` would draw as *Not set*.
+        {
+            "id": "legacy-box",
+            "name": "Legacy box",
+            "base_url": "https://legacy.example.com/v1",
+            "model": "legacy-1",
+            "has_api_key": True,
+            "api_key_preview": "${LEGACY_BOX_API_KEY}",
+            "is_current": False,
+            "source": "custom_providers",
+        },
     ]
 
 
@@ -166,7 +182,8 @@ def endpoint_config() -> Dict[str, Any]:
 
     ``local-llama``'s key is in ``.env`` behind ``key_env``; ``old-plain`` still carries a plaintext
     ``api_key`` and asks that its ``discover_models`` stay false — the field a body's own default
-    would silently flip; ``bare`` has neither.
+    would silently flip; ``bare`` has neither. ``legacy-box`` is a legacy ``custom_providers`` list
+    entry the migration never converted, and it is only there that its ``key_env`` is named.
     """
     return {
         "providers": {
@@ -189,7 +206,17 @@ def endpoint_config() -> Dict[str, Any]:
                 "base_url": "https://bare.example.com/v1",
                 "model": "bare-1",
             },
-        }
+        },
+        # The legacy list the migration left behind: one entry, keyed by the name the host slugs an
+        # id from, and its key in `.env` behind the `key_env` it names.
+        "custom_providers": [
+            {
+                "name": "Legacy box",
+                "base_url": "https://legacy.example.com/v1",
+                "model": "legacy-1",
+                "key_env": "LEGACY_BOX_API_KEY",
+            }
+        ],
     }
 
 
@@ -271,6 +298,7 @@ def host_modules(
     endpoints_list: Optional[list] = None,
     upsert: Optional[Any] = None,
     config: Optional[Dict[str, Any]] = None,
+    config_read: Optional[Any] = None,
     config_write: Optional[mock.MagicMock] = None,
     update_class: Optional[type] = None,
     delete: Optional[Any] = None,
@@ -329,6 +357,11 @@ def host_modules(
         lambda body: apply_custom_endpoint(body, values, cfg)
     )
     config_env.delete_custom_endpoint = delete or mock.MagicMock()
+    # The id the host slugs from an endpoint's name — the very rule `upsert_custom_endpoint` files
+    # `providers.<id>` under, so a row's id and a name's slug are one spelling.
+    config_env._custom_endpoint_id = lambda raw: (
+        re.sub(r"[^A-Za-z0-9_-]+", "-", str(raw or "").strip()).strip("-_").lower() or "custom"
+    )
     routers.config_env = config_env
     web_models = ModuleType("hermes_cli.web_models")
     web_models.CustomEndpointUpdate = update_class or CustomEndpointUpdate
@@ -336,7 +369,7 @@ def host_modules(
     # The profile's `config.yaml`, as `gateway.run._load_gateway_config` loads it, and the
     # round-trip writer the plugin must never reach with an endpoint's key.
     run = ModuleType("gateway.run")
-    run._load_gateway_config = lambda config_path=None: cfg
+    run._load_gateway_config = config_read or (lambda config_path=None: cfg)
     gateway = ModuleType("gateway")
     gateway.run = run
     utils = ModuleType("utils")
@@ -537,7 +570,7 @@ class EndpointReadTest(unittest.TestCase):
         block = self.read({"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY})
         self.assertEqual(
             [row["id"] for row in block["endpoints"]],
-            ["local-llama", "old-plain", "bare"],
+            ["local-llama", "old-plain", "bare", "legacy-box"],
             "a row per endpoint, in the host's own order",
         )
         self.assertEqual(
@@ -566,6 +599,37 @@ class EndpointReadTest(unittest.TestCase):
         self.assertNotIn(ENDPOINT_PLAIN, payload, "and the value itself is nowhere in the answer")
         self.assertNotIn(ENDPOINT_PLAIN[4:-4], payload)
         self.assertNotIn("${LOCAL_LLAMA_API_KEY}", payload, "the list's preview is no mask either")
+
+    def test_a_legacy_row_reads_the_key_its_own_entry_names(self) -> None:
+        # A row the migration never converted has no `providers` entry at all: its key is the one the
+        # legacy `custom_providers` entry's `key_env` names, so a read that opened `providers` alone
+        # would draw an endpoint the bot really authenticated as *Not set*.
+        block = self.read({"LEGACY_BOX_API_KEY": LEGACY_KEY})
+        legacy = next(row for row in block["endpoints"] if row["id"] == "legacy-box")
+        self.assertEqual(
+            legacy["masked"],
+            mask_secret(LEGACY_KEY),
+            "a legacy row's key reads as its mask, not as *Not set*",
+        )
+        self.assertNotIn(LEGACY_KEY, json.dumps(block), "and the value itself is nowhere in the answer")
+
+    def test_the_config_is_read_strictly(self) -> None:
+        # A soft read answers an empty mapping, which would draw every endpoint as *Not set* — a fact
+        # about a file nobody could read, told as a fact about the bot's keys. `config_keys.load`'s
+        # own `strict` is what makes the failure reach the route's 502 instead.
+        with mock.patch("plugin.config_keys.load", return_value={}) as loaded:
+            self.read({"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY})
+        self.assertEqual(
+            loaded.call_args.kwargs, {"strict": True}, "the profile's config.yaml is read strictly"
+        )
+
+    def test_an_unreadable_config_is_no_block_at_all(self) -> None:
+        def unreadable(config_path=None):
+            raise OSError("config.yaml cannot be read")
+
+        with host_modules({}, endpoints_list=endpoints(), config_read=unreadable):
+            with self.assertRaises(OSError):
+                llm_providers.read(CONFIG)
 
 
 class EndpointWriteTest(unittest.TestCase):
@@ -760,7 +824,9 @@ class RemoveEndpointTest(unittest.TestCase):
 
         self.assertEqual(asked, ["local-llama"], "one removal, through the host's own delete")
         self.assertEqual(
-            [row["id"] for row in block["endpoints"]], ["old-plain", "bare"], "the answer is the fresh read"
+            [row["id"] for row in block["endpoints"]],
+            ["old-plain", "bare", "legacy-box"],
+            "the answer is the fresh read",
         )
         self.assertNotIn("local-llama", config["providers"], "the entry is gone from the config")
         self.assertNotIn("LOCAL_LLAMA_API_KEY", values, "and its key is gone from .env")
@@ -792,7 +858,7 @@ class RemoveEndpointTest(unittest.TestCase):
             remove_env_value=remove_env_value,
             config_write=write,
         ):
-            with self.assertRaises(ValueError) as refused:
+            with self.assertRaises(llm_providers.EndpointInUse) as refused:
                 llm_providers.remove_endpoint(CONFIG, "bare")
 
         self.assertEqual(str(refused.exception), IN_USE, "the sentence the page draws, exactly")
@@ -938,7 +1004,32 @@ class AddEndpointTest(unittest.TestCase):
                 self.assertIn("already has a custom endpoint", sentence)
                 self.assertIn("Local Llama", sentence, "the sentence names the endpoint it would merge")
                 self.assertEqual(config, endpoint_config(), "nothing was written")
-                self.assertEqual(len(listed), 3, "and no endpoint was added")
+                self.assertEqual(len(listed), 4, "and no endpoint was added")
+
+    def test_a_name_that_slugs_to_a_held_id_is_refused_with_nothing_written(self) -> None:
+        # The host slugs the id from the name and merges onto the entry that id names, so a name is
+        # compared the way the host spells it: `Home box!` slugs to `home-box`, which is the endpoint
+        # `Home box` already is. A comparison of the words alone would let it rewrite that one.
+        held = [
+            {
+                "id": "home-box",
+                "name": "Home box",
+                "base_url": "http://10.0.0.5:8080/v1",
+                "model": "qwen2.5",
+                "has_api_key": True,
+                "is_current": False,
+            }
+        ]
+        for name in ("Home box", "Home box!", "  HOME BOX  "):
+            listed = list(held)
+            body = dict(NEW_ENDPOINT, name=name)
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as refused:
+                    self.add(body, listed=listed, config={})
+                sentence = str(refused.exception)
+                self.assertIn("already has a custom endpoint", sentence)
+                self.assertIn("Home box", sentence, "the sentence names the endpoint it would merge")
+                self.assertEqual(len(listed), 1, "and no endpoint was added")
 
     def test_a_mask_body_is_refused_before_the_host_writer(self) -> None:
         # First of all: a body whose key is a mask is refused even when it is short a name too, so
@@ -997,6 +1088,21 @@ class RouteTest(unittest.TestCase):
         self.assertNotIn("llm_providers", advertised["payload"]["features"])
         self.assertEqual(read["status"], 501)
 
+    def test_a_read_that_fails_answers_the_route_s_own_sentence(self) -> None:
+        # The read is a catalog and env read, not the bot's own General settings: the page promises
+        # the host's exception text never reaches the app, so the 502 says what this route failed to
+        # do rather than borrowing `keyed_settings_read`'s "couldn't read its config" wording.
+        def unreadable(config_path=None):
+            raise OSError("config.yaml at /secret/path cannot be read")
+
+        with host_modules({}, endpoints_list=endpoints(), config_read=unreadable):
+            refused = self.call("/llm-providers")
+        self.assertEqual(refused["status"], 502)
+        message = refused["payload"]["error"]["message"]
+        self.assertEqual(message, "The host couldn't list its API-key providers.")
+        self.assertNotIn("config", message, "no wording about a file this route never read")
+        self.assertNotIn("/secret/path", message, "and never the host's own exception text")
+
     def test_a_key_write_answers_the_fresh_block(self) -> None:
         values = {"OPENAI_API_KEY": "sk-old-0000-old0"}
         save = mock.MagicMock(side_effect=lambda env_var, key: values.__setitem__(env_var, key))
@@ -1007,6 +1113,18 @@ class RouteTest(unittest.TestCase):
         save.assert_called_once_with("OPENAI_API_KEY", TYPED_KEY)
         row = next(one for one in written["payload"]["llm"]["providers"] if one["slug"] == "openai")
         self.assertEqual(row["masked"], "sk-t...zyxw", "the row wears the key it was just handed")
+
+    def test_a_write_that_fails_answers_the_route_s_own_sentence(self) -> None:
+        # A failure the domain didn't name is the route's 502, in this page's words: the host's own
+        # exception could hold the key it was handed, so none of it is ever echoed back.
+        def refuse(env_var: str, key: str) -> None:
+            raise RuntimeError(f"couldn't write {key}")
+
+        with host_modules({}, save=refuse):
+            failed = self.call("/llm-providers/key", {"target": "openai", "key": TYPED_KEY})
+        self.assertEqual(failed["status"], 502)
+        self.assertEqual(failed["payload"]["error"]["message"], "The host couldn't save the key.")
+        self.assertNotIn(TYPED_KEY, failed["payload"]["error"]["message"], "never the host's own words")
 
     def test_a_mask_body_is_refused_with_its_sentence(self) -> None:
         # The route is reachable by a curl as easily as by the page: a body whose key is the mask
@@ -1101,14 +1219,14 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(removed["payload"]["object"], "gots.llm_providers")
         self.assertEqual(
             [row["id"] for row in removed["payload"]["llm"]["endpoints"]],
-            ["old-plain", "bare"],
+            ["old-plain", "bare", "legacy-box"],
             "the row the page draws is the fresh block, without the endpoint that went",
         )
 
     def test_removing_the_endpoint_the_model_runs_on_is_refused_in_its_sentence(self) -> None:
         # The refusal is the whole point of the route: a delete would unpick the bot's model, so the
-        # sentence arrives with a status the page already reads for every refusal on this page, and
-        # it is the sentence the page draws — not a rewording of it here.
+        # plan's own 409 answers it, under a code a client can act on — and the sentence is the one
+        # the page draws, not a rewording of it here.
         values: Dict[str, str] = {}
         config = endpoint_config()
         listed = endpoints()
@@ -1120,7 +1238,8 @@ class RouteTest(unittest.TestCase):
             delete=deleting_host(values, listed, config, asked),
         ):
             refused = self.remove_endpoint("bare")
-        self.assertEqual(refused["status"], 400)
+        self.assertEqual(refused["status"], 409)
+        self.assertEqual(refused["payload"]["error"]["code"], "endpoint_in_use")
         self.assertEqual(refused["payload"]["error"]["message"], IN_USE)
         self.assertEqual(asked, [], "and nothing was deleted")
 

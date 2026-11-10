@@ -4860,8 +4860,11 @@ http
         })
       const held = LLM_ENDPOINTS[at]
       if (held.current)
-        return json(res, 400, {
-          error: { message: `This bot's model runs on ${held.name}. Switch the model first.` },
+        return json(res, 409, {
+          error: {
+            message: `This bot's model runs on ${held.name}. Switch the model first.`,
+            code: "endpoint_in_use",
+          },
         })
       LLM_ENDPOINTS.splice(at, 1)
       llmKeys.delete(`${key}\ncustom:${id}`)

@@ -2947,16 +2947,33 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     # page is drawn from the host's own catalog and its own custom-endpoint list, so a provider
     # Hermes adds later is a row without an app release. The read opens config.yaml only to find the
     # `key_env` an endpoint's entry names; a provider's presence is the host's own env read.
-    app.router.add_get(
-        f"{PREFIX}/llm-providers",
-        keyed_settings_read(
-            read=llm_providers.read,
-            object_name="gots.llm_providers",
-            field="llm",
-            no_schema="This Hermes version can't show its API-key providers.",
-            failed="gots: couldn't read the host's API-key providers",
-        ),
-    )
+    async def read_llm_providers(request: "web.Request") -> "web.Response":
+        """The page's one read: every provider and endpoint, each key as the host's own mask.
+
+        The failure sentence is this route's, not the settings pages': what is read here is the host's
+        catalog, its env and its endpoint list, so the app is told that the providers couldn't be
+        listed — never the host's exception text, which the page promises never to draw.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return llm_providers.read(config_path)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except ImportError:
+            return _error(web, "This Hermes version can't show its API-key providers.", 501)
+        except Exception:
+            logger.warning("gots: couldn't read the host's API-key providers", exc_info=True)
+            return _error(web, "The host couldn't list its API-key providers.", 502)
+        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+
+    app.router.add_get(f"{PREFIX}/llm-providers", read_llm_providers)
 
     async def set_llm_provider_key(request: "web.Request") -> "web.Response":
         """Writes one key and answers the fresh block.
@@ -3071,10 +3088,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         The target is the address's own segment — the endpoint's id — and there is no body: a
         removal has nothing in it to send. The domain resolves it through the host's own list and
         refuses the row the bot's model runs on, in a sentence naming the endpoint and saying to
-        switch the model first; that refusal is answered as a 400 like every other one this page
-        makes, so the app reads one status for a sentence it draws. Any other endpoint goes through
-        the host's own delete, which takes the key with it. Nothing here is logged: the route never
-        sees a key at all.
+        switch the model first; that refusal is the plan's 409 under `endpoint_in_use`, so a client
+        reads what to do from the code as well as from the sentence the app draws. Any other
+        endpoint goes through the host's own delete, which takes the key with it, and any other
+        refusal is a 400 like every other one this page makes. Nothing here is logged: the route
+        never sees a key at all.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -3089,6 +3107,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
         try:
             payload = await asyncio.to_thread(run)
+        except llm_providers.EndpointInUse as error:
+            return _error(web, str(error), 409, code="endpoint_in_use")
         except ValueError as error:
             return _error(web, str(error), 400)
         except ImportError:

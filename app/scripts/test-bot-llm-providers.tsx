@@ -139,6 +139,9 @@ async function seed(
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
   const asks: Asked[] = []
+  // The refusals this host answered, by the status and the code it sent: the endpoint its model
+  // runs on is the plan's 409 under `endpoint_in_use`, and the page draws its sentence anyway.
+  const refusals: { status: number; code: string }[] = []
   let current = structuredClone(block)
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const pathname = new URL(String(input)).pathname
@@ -190,7 +193,10 @@ async function seed(
       const held = current.endpoints.find((one) => one.id === id)
       if (!held)
         return json({ error: { message: `${id} isn't a custom endpoint this Hermes knows.` } }, 400)
-      if (id === runningOn) return json({ error: { message: IN_USE } }, 400)
+      if (id === runningOn) {
+        refusals.push({ status: 409, code: "endpoint_in_use" })
+        return json({ error: { message: IN_USE, code: "endpoint_in_use" } }, 409)
+      }
       current = { ...current, endpoints: current.endpoints.filter((one) => one.id !== id) }
       return json({ object: "gots.llm_providers", llm: current })
     }
@@ -215,7 +221,7 @@ async function seed(
     }
     return json({}, 404)
   }) as typeof fetch
-  return { asks, block: () => current }
+  return { asks, refusals, block: () => current }
 }
 
 /** The page itself, one provider's row on it, and the slot screen a row opens. */
@@ -541,6 +547,12 @@ test("removing the endpoint the model runs on is refused and deletes nothing", a
     await until(async () => Boolean(dialog()), "the question again")
     await click(inDialog("Remove"))
     await until(async () => text().includes(IN_USE), "the host's sentence")
+
+    assert.deepEqual(
+      host.refusals,
+      [{ status: 409, code: "endpoint_in_use" }],
+      "the host refused under the plan's own status and code, and the page drew its sentence",
+    )
 
     // The one removal, and the answer to it is the host's own words rather than the app's. Nothing
     // was deleted, so the screen and the row it draws are exactly what they were.

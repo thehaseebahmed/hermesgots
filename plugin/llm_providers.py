@@ -101,6 +101,19 @@ def _endpoint_list() -> List[Dict[str, Any]]:
     return [row for row in (rows or ()) if isinstance(row, dict)]
 
 
+def _slug(name: str) -> str:
+    """The id the host slugs from an endpoint's name, imported where it is used.
+
+    ``upsert_custom_endpoint`` writes ``providers.<id>`` under this function's own answer, and the
+    list reports each row by that id — so the plugin asks it rather than restating the rule: the id
+    a legacy entry is filed under and the id a new name would collide with are then one spelling by
+    construction, and ``Home box!`` cannot land on a ``Home box`` that is already there.
+    """
+    from hermes_cli.web_routers.config_env import _custom_endpoint_id
+
+    return _custom_endpoint_id(name)
+
+
 def _entry_mask(entry: Any) -> Optional[str]:
     """One entry's key as its mask, or ``None`` where it names none.
 
@@ -126,17 +139,23 @@ def _endpoints(config_path: Path) -> List[Dict[str, Any]]:
     the one place an endpoint's ``key_env`` can be read — the list says a key exists but never which
     value it is, and its ``api_key_preview`` is the host's ``"${KEY_ENV}"`` display, not a mask.
 
-    A legacy ``custom_providers`` row — one the host still routes but the migration never converted —
-    has no ``providers`` entry here, so it reads *Not set* until a key write converts it (the host's
-    own writer pops the legacy row and writes a ``providers`` one).
+    An entry lives under ``providers.<id>`` — for a row in either kind of endpoint, since a
+    ``providers`` entry is what the host's writer makes of one. A legacy ``custom_providers`` row —
+    one the host still routes but the migration never converted — has no such entry, so its key is
+    the one *that* list's entry names: the two are read where the host lists them, so a legacy row
+    reads its mask rather than *Not set* until a key write converts it (the host's own writer pops
+    the legacy row and writes a ``providers`` one).
     """
     listed = _endpoint_list()
     if not listed:
         return []
     from . import config_keys
 
-    providers = config_keys.load(config_path).get("providers")
+    config = config_keys.load(config_path, strict=True)
+    providers = config.get("providers")
     entries = providers if isinstance(providers, dict) else {}
+    legacy = config.get("custom_providers")
+    legacy = [one for one in legacy if isinstance(one, dict)] if isinstance(legacy, list) else []
     rows: List[Dict[str, Any]] = []
     for raw in listed:
         endpoint_id = str(raw.get("id") or "").strip()
@@ -149,10 +168,29 @@ def _endpoints(config_path: Path) -> List[Dict[str, Any]]:
                 "name": str(raw.get("name") or endpoint_id),
                 "base_url": str(raw.get("base_url") or ""),
                 "model": str(raw.get("model") or ""),
-                "masked": _entry_mask(entries.get(endpoint_id)),
+                "masked": _entry_mask(_entry_of(endpoint_id, entries, legacy)),
             }
         )
     return rows
+
+
+def _entry_of(
+    endpoint_id: str, entries: Dict[str, Any], legacy: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """The config entry behind one listed row: its ``providers`` one, else the legacy it came from.
+
+    The legacy list is keyed by the name the host slugs an endpoint's id from, so the row's own id
+    is the way back to it — and a row the host lists from nowhere else finds nothing, which is the
+    *Not set* a bare endpoint reads.
+    """
+    entry = entries.get(endpoint_id)
+    if isinstance(entry, dict):
+        return entry
+    for one in legacy:
+        named = str(one.get("name") or "").strip()
+        if named and _slug(named) == endpoint_id:
+            return one
+    return None
 
 
 def _endpoint_of(endpoint_id: str) -> Dict[str, Any]:
@@ -181,6 +219,16 @@ def _host_refusal(error: BaseException) -> Optional[str]:
     if not isinstance(status, int) or not isinstance(detail, str):
         return None
     return detail.strip() or None
+
+
+class EndpointInUse(ValueError):
+    """A removal the bot's own model runs on: the plan's 409, not the page's ordinary 400.
+
+    Every other refusal this page makes is a 400 in a sentence the reader can act on in place. This
+    one is different — the endpoint can only be let go once the model runs somewhere else, which is
+    Hermes's own model picker's decision — so it carries a code a client can read, under the status
+    the plan's route table names.
+    """
 
 
 def available() -> Optional[str]:
@@ -391,20 +439,25 @@ def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _refuse_duplicate(name: str) -> None:
-    """Refuse a name an endpoint already carries, in a sentence naming that endpoint.
+    """Refuse a name whose id an endpoint already carries, in a sentence naming that endpoint.
 
-    The host's writer merges onto the entry the body's id names, and the id is slugged from the
-    name: a second endpoint called what one is already called would quietly rewrite that one's base
-    URL and model rather than add anything. The two names are compared the way a person reading them
-    would — case-folded, since ``Home box`` and ``home box`` are one endpoint to anyone but a diff.
+    The host's writer merges onto the entry the body's id names, and that id is slugged from the
+    name: a second endpoint whose name slugs what one is already filed under — ``Home box!`` and
+    ``Home box`` are one id — would quietly rewrite that one's base URL and model rather than add
+    anything. So the two are compared by id, each through the host's own slug, rather than by their
+    words, which is the spelling the writer itself would resolve.
     """
-    wanted = name.casefold()
+    wanted = _slug(name)
+    if not name.strip() or not wanted:
+        return
     for row in _endpoint_list():
-        held = str(row.get("name") or row.get("id") or "").strip()
-        if held.casefold() == wanted:
+        held = str(row.get("id") or "").strip()
+        if not held:
+            continue
+        if wanted in (held, _slug(held)):
             raise ValueError(
-                f"This Hermes already has a custom endpoint named {held}. Adding one with that name "
-                "would replace it instead of adding a new one."
+                f"This Hermes already has a custom endpoint named {str(row.get('name') or held)}. "
+                "Adding one with that name would replace it instead of adding a new one."
             )
 
 
@@ -458,7 +511,7 @@ def remove_endpoint(config_path: Path, target: str) -> Dict[str, Any]:
     endpoint_id = str(row.get("id") or target).strip()
     name = str(row.get("name") or endpoint_id)
     if bool(row.get("is_current")):
-        raise ValueError(f"This bot's model runs on {name}. Switch the model first.")
+        raise EndpointInUse(f"This bot's model runs on {name}. Switch the model first.")
     from hermes_cli.web_routers.config_env import delete_custom_endpoint
 
     try:
