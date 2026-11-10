@@ -1,4 +1,4 @@
-import { app, assert, basemapOf, centreOf, dragBy, flow, pass, settled, swipeBy } from "./lib.mjs"
+import { app, assert, basemapOf, mockJson, centreOf, dragBy, flow, pass, settled, swipeBy } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const MAP = "[data-slot=map]"
@@ -93,6 +93,7 @@ const view = (seen) => seen.labels.map((label) => `${label.left},${label.top}`).
 await flow(
   "openui-map",
   async ({ page, send, lastReply, until, shot }) => {
+    await mockJson("/api/plugins/gots/openui", { enabled: true })
     await page.goto(app)
     await send("draw the map")
     await page.waitForURL("**/c/**", { timeout: 15_000 })

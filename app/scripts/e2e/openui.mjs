@@ -1,4 +1,4 @@
-import { app, assert, flow, pass, settled } from "./lib.mjs"
+import { app, assert, mockJson, flow, pass, settled } from "./lib.mjs"
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
 const TO_END = "[data-slot=message-scroller-button][data-direction=end]"
@@ -98,6 +98,7 @@ const geometry = (page) =>
 await flow(
   "openui",
   async ({ page, send, lastReply, until, shot }) => {
+    await mockJson("/api/plugins/gots/openui", { enabled: true })
     await page.goto(app)
     await send("draw the interface")
     await page.waitForURL("**/c/**", { timeout: 15_000 })

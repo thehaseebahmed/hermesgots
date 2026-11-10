@@ -3304,7 +3304,8 @@ function providerModel(name) {
 }
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
-let openuiOn = true
+// plugin/openui.py: the switch is off until someone turns it on, so a flow that draws an interface posts it on first.
+let openuiOn = false
 const OPENUI_VERSION = "1.0.1"
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
 // the newest plain thread of the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
