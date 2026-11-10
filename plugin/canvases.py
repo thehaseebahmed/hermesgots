@@ -393,18 +393,16 @@ def resolve_canvas(path: Path, name: Any) -> str:
         raise CanvasError("There is no such canvas.", 404)
     conn = connect(path)
     try:
-        if conn.execute("SELECT 1 FROM canvases WHERE id = ?", (name,)).fetchone():
-            return name
         rows = conn.execute("SELECT id, title FROM canvases ORDER BY at DESC").fetchall()
     finally:
         conn.close()
-    matches = [row for row in rows if row[1] == name]
+    matches = [row for row in rows if row[0] == name or row[1] == name]
     if not matches:
         raise CanvasError(f"There is no canvas called {name!r}.", 404)
     if len(matches) > 1:
         held = ", ".join(f"{title} ({row_id})" for row_id, title in matches)
         raise CanvasError(
-            f"More than one canvas is called {name!r}: {held}. Name the one you mean by its id."
+            f"More than one canvas is named {name!r}: {held}. Name the one you mean by its id."
         )
     return matches[0][0]
 
@@ -1391,9 +1389,21 @@ def _canvas_of_session_strict(
     if not isinstance(session_id, str) or not session_id:
         return None
     root = sessions.chat_session(home, session_id)
-    value = (chats.by_session(path, root) or {}).get("value")
+    entry = chats.standing(path, root)
+    if entry is None and root.startswith(sessions.GOTS_ID_PREFIX):
+        # An app-made chat's record is keyed by the id its session is named after, and a tombstone
+        # keeps no value for the session-keyed read to find.
+        entry = chats.one(path, root[len(sessions.GOTS_ID_PREFIX) :])
+    value = (entry or {}).get("value")
     found = value.get("canvasId") if isinstance(value, dict) else None
-    return found if isinstance(found, str) and found else None
+    if isinstance(found, str) and found:
+        return found
+    if entry is not None and chats.closed(entry):
+        # A chat the user is done with that names no canvas is a canvas's whose record is gone —
+        # deleting a canvas tombstones its chat — and the run is the deleted canvas's. Nothing can
+        # say which canvas that was, so this refuses rather than leaving the run free to name one.
+        raise CanvasError("The chat this session belongs to is over and names no canvas.")
+    return None
 
 
 def canvas_of_session(path: Path, home: Path, session_id: Optional[str]) -> Optional[str]:

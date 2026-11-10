@@ -1006,6 +1006,53 @@ class SessionTest(unittest.TestCase):
         self.assertIn("couldn't tell", refused["error"])
         self.assertNotIn("documents", refused)
 
+    def test_a_canvas_chat_the_user_is_done_with_keeps_it_to_its_own_canvas(self) -> None:
+        other = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt="A weather page", body=BODY
+        )
+        now = int(time.time() * 1000) + 1
+        chats.merge(
+            self.path,
+            {
+                self.canvas["chat_id"]: {
+                    "at": now,
+                    "value": {
+                        "canvasId": self.canvas["id"],
+                        "hermesSessionId": self.session,
+                        "resolvedAt": now,
+                    },
+                }
+            },
+        )
+        # Resolved, and still the canvas's: it reads and writes its own data, and no other canvas's.
+        refused = json.loads(
+            canvases.handle_data_read({"canvas": other["id"]}, session_id=self.session)
+        )
+        self.assertIn("own canvas", refused["error"])
+        own = json.loads(
+            canvases.handle_data_write(
+                {"collection": "c", "id": "i", "doc": 1}, session_id=self.session
+            )
+        )
+        self.assertEqual(own["doc"], 1)
+        # A deleted canvas tombstones its chat, and the tombstone names no canvas: a run left over
+        # from it can't be told apart from a plain one, so it is refused rather than set free.
+        chats.tombstone(self.path, self.canvas["chat_id"])
+        for call in ({"canvas": other["id"]}, {}):
+            gone = json.loads(canvases.handle_data_read(call, session_id=self.session))
+            self.assertIn("couldn't tell", gone["error"])
+
+    def test_a_name_that_is_one_canvases_id_and_anothers_title_is_refused(self) -> None:
+        other = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt="A weather page", body=BODY
+        )
+        canvases.update(self.path, self.canvas["id"], {"title": other["id"]})
+        refused = json.loads(
+            canvases.handle_data_read({"canvas": other["id"]}, session_id=self.plain)
+        )
+        self.assertIn(self.canvas["id"], refused["error"])
+        self.assertIn(other["id"], refused["error"])
+
     def test_a_store_that_cannot_be_read_withholds_the_list_too(self) -> None:
         with mock.patch.object(
             canvases.sessions, "chat_session", side_effect=sqlite3.OperationalError("locked")

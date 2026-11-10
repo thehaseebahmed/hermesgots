@@ -130,23 +130,31 @@ def one(path: Path, chat_id: str) -> Optional[Dict[str, Any]]:
     return {"at": at, "deleted": True} if deleted else {"at": at, "value": json.loads(value)}
 
 
-def by_session(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
-    """A chat's record, read by the Hermes session it is about; None when no open chat is that one.
+def standing(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """A chat's record read by the Hermes session it is about, closed or not; None when no chat is.
 
     Two keys exist and a caller holding only a session id can't tell which it has: AFK's record is
     keyed by the session id itself, and one the app made is keyed by the chat id with the session in
     its ``hermesSessionId``. So the cheap read comes first, and the value-keyed one after it — a
     single query against ``chat_session``, SQLite's own reader of the JSON, rather than a walk of
-    the whole list, because the delegation sweep asks this per conversation on every look. A closed
-    record is no chat: a resolved or discarded session is over, and nothing posts a run of it.
+    the whole list, because the delegation sweep asks this per conversation on every look. A caller
+    asking what a finished chat *was* — a canvas's, say — needs the record a closed chat still has.
     """
     if not session_id:
         return None
     found = one(path, session_id)
     if found is None:
-        found = next(
-            (entry for entry in _naming_session(path, session_id) if not closed(entry)), None
-        )
+        found = next(iter(_naming_session(path, session_id)), None)
+    return found
+
+
+def by_session(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """A chat's record, read by the Hermes session it is about; None when no open chat is that one.
+
+    A closed record is no chat: a resolved or discarded session is over, and nothing posts a run of
+    it. ``standing`` is the same record without that rule.
+    """
+    found = standing(path, session_id)
     return None if closed(found) else found
 
 
