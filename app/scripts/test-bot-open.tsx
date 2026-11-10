@@ -36,7 +36,7 @@ const remember = (profileId: string, chat: string) =>
   localStorage.setItem(`gots:last-chat:${profileId}`, chat)
 
 /** The chats a device holds: `at` is the chat's own clock, which is what "newest" is read by. */
-async function seed(chats: { id: string; at: number; bot?: string }[]) {
+async function seed(chats: { id: string; at: number; bot?: string; routine?: boolean }[]) {
   await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot, other])
@@ -52,6 +52,7 @@ async function seed(chats: { id: string; at: number; bot?: string }[]) {
       createdAt: chat.at - 50,
       updatedAt: chat.at,
       changedAt: chat.at,
+      ...(chat.routine ? { routine: true } : {}),
     })),
   )
   globalThis.fetch = async () => json({})
@@ -130,6 +131,18 @@ test("a chat that has gone falls to the newest chat the bot has left", async () 
   await mount(screen(), async () => {
     await click(theBot())
     await until(async () => path() === "/c/b", "the newest chat left")
+  })
+})
+
+test("a routine's run is never the chat its bot opens on", async () => {
+  await seed([
+    { id: "chat", at: 100 },
+    { id: "run", at: 300, routine: true },
+  ])
+  remember(bot.id, "run")
+  await mount(screen(), async () => {
+    await click(theBot())
+    await until(async () => path() === "/c/chat", "the newest chat it can open")
   })
 })
 

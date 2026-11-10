@@ -256,7 +256,8 @@ const roomsDrawn = new Set<string>()
 function useRememberedChat(id: string | undefined) {
   const chat = useLiveQuery(async () => (id ? await db.conversations.get(id) : undefined), [id])
   useEffect(() => {
-    if (!chat || chat.id !== id || !listsAsChat(chat)) return
+    // A routine's run is read-only, so it is never the chat its bot opens on.
+    if (!chat || chat.id !== id || !listsAsChat(chat) || chat.routine) return
     rememberLastChat(chat.profileId, chat.id)
   }, [chat, id])
 }

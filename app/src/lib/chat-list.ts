@@ -60,8 +60,13 @@ export function waitsOnUser(newest: ChatTail | undefined): boolean {
   return Boolean(newest.approval && !newest.approval.resolved)
 }
 
-/** One chat's row, from its record and the newest message this device holds for it. */
-export function chatRowOf(chat: ChatRecord, newest?: ChatTail): ChatListRow {
+/**
+ * One chat's row, from its record and the newest message this device holds for it. `waits` is the row
+ * a question or an approval can sit on, which is the newest *reply*: a list whose read is the newest
+ * message of any role still asks this of the reply under the reader's own last message, or typing in
+ * a chat would clear a mark the answer is still owed.
+ */
+export function chatRowOf(chat: ChatRecord, newest?: ChatTail, waits = newest): ChatListRow {
   // A routine's delivery: the run's line and the delivery's time are on the record, because the words
   // are in the run's own session and this device holds no message of the row at all.
   if (chat.routine)
@@ -80,7 +85,7 @@ export function chatRowOf(chat: ChatRecord, newest?: ChatTail): ChatListRow {
     line: newest ? oneLine(newest.content) : undefined,
     at: newest?.createdAt ?? chat.updatedAt,
     pinned: Boolean(chat.pinned),
-    waiting: waitsOnUser(newest),
+    waiting: waitsOnUser(waits),
   }
 }
 

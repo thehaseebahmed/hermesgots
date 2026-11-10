@@ -53,6 +53,20 @@ test("a reply that waits on the reader marks its row", () => {
   assert.equal(chatRowOf(chat("a", 100)).waiting, false, "a chat with nothing said is not waiting")
 })
 
+test("a chat whose newest row is the reader's own still waits on the reply above it", () => {
+  const asking = said("Shall I?", 240, {
+    clarify: { runId: "r", clarifyId: "c", questions: [{ id: "q", question: "Shall I?" }] },
+  })
+  const mine = said("yes, go on", 300, { role: "user" })
+  assert.equal(
+    chatRowOf(chat("a", 100), mine, asking).waiting,
+    true,
+    "typing does not answer the reply that asked",
+  )
+  assert.equal(chatRowOf(chat("a", 100), mine).waiting, false, "a row with no reply named asks its newest one")
+  assert.equal(chatRowOf(chat("a", 100), mine, asking).line, "yes, go on", "and the line is still the newest words")
+})
+
 test("pinned rows come first, and the rest by their last message", () => {
   const rows = [
     chatRowOf(chat("older", 100)),

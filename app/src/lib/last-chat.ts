@@ -13,9 +13,12 @@ import { listsAsChat } from "./lists-as-chat.ts"
 /** Where this device keeps the chat a bot was last in. */
 export const lastChatKey = (profileId: string) => `gots:last-chat:${profileId}`
 
-/** One of a bot's own chats: not a project session, a room or a canvas, whatever its record holds. */
+/**
+ * One of a bot's own chats: not a project session, a room, a canvas or a routine's run, whatever its
+ * record holds. A run is read-only, so it is never the chat a bot opens on.
+ */
 const isChatOf = (chat: Conversation, profileId: string) =>
-  chat.profileId === profileId && listsAsChat(chat)
+  chat.profileId === profileId && listsAsChat(chat) && !chat.routine
 
 /** The chat this device last had open for a bot, or nothing. */
 export function lastChatOf(profileId: string): string | null {
@@ -46,6 +49,9 @@ export async function landingChat(profileId: string): Promise<string | undefined
   if (!kept) return undefined
   const found = await db.conversations.get(kept)
   if (found && isChatOf(found, profileId)) return found.id
-  const newest = await conversationsOf(profileId).reverse().filter(listsAsChat).first()
+  const newest = await conversationsOf(profileId)
+    .reverse()
+    .filter((chat) => isChatOf(chat, profileId))
+    .first()
   return newest?.id
 }

@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
-import { conversationsOf, db, newestMessage, type Profile } from "@/lib/db"
+import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { BACK_ON_LIST } from "@/lib/nav"
@@ -137,9 +137,15 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
       .toArray()
     const rows = await Promise.all(
       // A routine's row reads its line and time off the record, so its tail isn't asked for at all.
-      chats.map(async (chat) =>
-        chatRowOf(chat, chat.routine ? undefined : await newestMessage(chat.id)),
-      ),
+      chats.map(async (chat) => {
+        if (chat.routine) return chatRowOf(chat)
+        const newest = await newestMessage(chat.id)
+        // A question or an approval sits on a reply, so a chat whose newest row is the reader's own
+        // still waits while the reply above it does.
+        const waits =
+          newest && !isReply(newest) ? await newestMessage(chat.id, isReply) : undefined
+        return chatRowOf(chat, newest, waits)
+      }),
     )
     return { profileId, bot, rows }
   }, [profileId])
