@@ -163,9 +163,13 @@ export type ThreadEvent =
    * way to learn it.
    */
   | { type: "waiting"; waiting: Waiting }
-  /** The card goes; `answer` is what the question got, where the user gave one. */
+  /**
+   * The card goes; `answer` is what the question got, where the user gave one. `promptId` names the
+   * prompt it answered: the host may have raised the next one before this answer's response landed.
+   */
   | {
       type: "answered"
+      promptId?: string
       answer?: { question: string; choicesOffered: string[] | null; value: string }
     }
   | { type: "ended" }
@@ -836,15 +840,22 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // page's own turn does not hold yet; the answer goes onto that one, and onto the record.
       const call = wrote?.call ?? (answer ? answeredOnScreen(state, answer) : undefined)
       const answers = call?.result ? { ...state.answers, [call.id]: call.result } : state.answers
+      // Hermes settles an answer and raises the call's next question before the answer's own
+      // response lands, so the prompt on screen may already be the next one: only the prompt this
+      // answer named leaves it.
+      const gone =
+        state.waiting && (!event.promptId || event.promptId === state.waiting.promptId)
+          ? state.waiting
+          : undefined
       // An answer that changed nothing on screen and nothing in the record is no state at all.
-      if (state.waiting === undefined && live === held && answers === state.answers) return state
+      if (gone === undefined && live === held && answers === state.answers) return state
       return {
         ...state,
-        waiting: undefined,
-        ...(state.waiting
+        ...(gone
           ? {
+              waiting: undefined,
               settled: settledWith(state),
-              answeredPrompts: [...(state.answeredPrompts ?? []), state.waiting.promptId],
+              answeredPrompts: [...(state.answeredPrompts ?? []), gone.promptId],
             }
           : {}),
         ...(live ? { live } : {}),

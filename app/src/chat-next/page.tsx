@@ -1618,6 +1618,7 @@ export function ChatNextThread({
       await respond({ server, key }, waiting, value)
       dispatch({
         type: "answered",
+        promptId: waiting.promptId,
         ...(waiting.kind === "question"
           ? {
               answer: {
