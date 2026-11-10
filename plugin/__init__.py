@@ -3065,6 +3065,41 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_post(f"{PREFIX}/llm-providers/endpoints", add_llm_endpoint)
 
+    async def remove_llm_endpoint(request: "web.Request") -> "web.Response":
+        """Removes one custom endpoint and answers the fresh block.
+
+        The target is the address's own segment — the endpoint's id — and there is no body: a
+        removal has nothing in it to send. The domain resolves it through the host's own list and
+        refuses the row the bot's model runs on, in a sentence naming the endpoint and saying to
+        switch the model first; that refusal is answered as a 400 like every other one this page
+        makes, so the app reads one status for a sentence it draws. Any other endpoint goes through
+        the host's own delete, which takes the key with it. Nothing here is logged: the route never
+        sees a key at all.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        target = str(request.match_info.get("target") or "").strip()
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return llm_providers.remove_endpoint(config_path, target)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't remove a custom endpoint from here.", 501)
+        except Exception:
+            logger.warning("gots: couldn't remove this bot's custom endpoint", exc_info=True)
+            return _error(web, "The host couldn't remove that endpoint.", 502)
+        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+
+    app.router.add_delete(f"{PREFIX}/llm-providers/endpoints/{{target}}", remove_llm_endpoint)
+
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)
         runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))

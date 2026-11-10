@@ -24,6 +24,7 @@ import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   addLlmEndpoint,
   getLlmProviders,
+  removeLlmEndpoint,
   removeLlmProviderKey,
   setLlmProviderKey,
 } from "@/lib/hermes"
@@ -152,10 +153,20 @@ export function LlmProvidersTab({ profile }: { profile: Profile }) {
  * whose question names the provider, because a removal is the one write here that can't be undone
  * from this screen. Cancel writes nothing at all, and the answer is again the fresh block, where the
  * row reads *Not set* and the action goes with the key it removed. A removal refused is said in the
- * question, which stays up, so a retry is one tap. An endpoint's removal is its own step: nothing
- * on this screen offers it, so no endpoint is ever deleted by a key write.
+ * question, which stays up, so a retry is one tap.
+ *
+ * An endpoint's own removal is the other resource: *Remove endpoint* takes the endpoint and its key
+ * together, behind a question naming the endpoint. The host refuses the endpoint its model runs on —
+ * deleting it would unpick the model — and that sentence stands on this screen, with the endpoint
+ * still drawn and the question done, since nothing here can switch a model. A removal that lands
+ * leaves this screen with nothing to report, so it returns to the page with the block that removal
+ * answered: the row is gone from what the page draws, with no read in between.
+ *
+ * The two removals are never the same write: no key write on this screen deletes an endpoint, and no
+ * endpoint removal touches another row's key.
  */
 export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; target: string }) {
+  const navigate = useNavigate()
   const { block, problem, keep } = useLlmProviders(profile)
   const [draft, setDraft] = useState("")
   const [saving, setSaving] = useState(false)
@@ -206,7 +217,7 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
       .finally(() => setSaving(false))
   }
 
-  const remove = () => {
+  const removeKey = () => {
     if (removing) return
     setRemoving(true)
     setRefusal(undefined)
@@ -220,6 +231,29 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         // Said in the question itself, which stays up: the host's words are read before it is
         // dismissed, and a retry is one tap.
         setRefusal(error instanceof Error ? error.message : "Couldn't remove that key.")
+      })
+      .finally(() => setRemoving(false))
+  }
+
+  const removeEndpoint = () => {
+    if (!endpoint || removing) return
+    setRemoving(true)
+    setRefusal(undefined)
+    void removeLlmEndpoint(profile, endpoint.id)
+      .then((next) => {
+        // The endpoint is gone, so this screen has nothing left to report: the page it returns to
+        // draws the block the removal answered, without this row.
+        navigate(botTabPath(profile.id, "llm-providers"), {
+          replace: true,
+          state: next ? { llm: next } : undefined,
+        })
+      })
+      .catch((error: unknown) => {
+        // The host's sentence, on the screen rather than in the question: the model this endpoint
+        // runs has to be switched somewhere this page can't reach, so a retry from here could only
+        // fail the same way. The question is done and the endpoint is drawn as it was.
+        setRefusal(error instanceof Error ? error.message : "Couldn't remove that endpoint.")
+        setAsking(false)
       })
       .finally(() => setRemoving(false))
   }
@@ -315,6 +349,25 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
           </Button>
         </Group>
       )}
+      {endpoint && (
+        // The endpoint's own resource, removed whole: its entry and its key go together, so this is
+        // offered wherever the endpoint is, key or no key.
+        <Group>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-11 w-full justify-start rounded-full text-destructive"
+            onClick={() => {
+              setRefusal(undefined)
+              setAsking(true)
+            }}
+            data-llm-remove-endpoint
+          >
+            <Trash2Icon data-icon="inline-start" />
+            Remove endpoint
+          </Button>
+        </Group>
+      )}
       {provider && (
         <ConfirmDestructive
           open={asking}
@@ -329,7 +382,18 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
           confirmLabel="Remove"
           busy={removing}
           onOpenChange={setAsking}
-          onConfirm={remove}
+          onConfirm={removeKey}
+        />
+      )}
+      {endpoint && (
+        <ConfirmDestructive
+          open={asking}
+          title={`Remove ${endpoint.name}?`}
+          description="The endpoint and its key are deleted from this bot's Hermes. Anything pinned to it stops working."
+          confirmLabel="Remove"
+          busy={removing}
+          onOpenChange={setAsking}
+          onConfirm={removeEndpoint}
         />
       )}
     </div>

@@ -1426,6 +1426,24 @@ export async function addLlmEndpoint(
   return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
 }
 
+/**
+ * Removes one custom endpoint — the endpoint and the key it was given, together — and answers the
+ * fresh block, which no longer holds that row. The endpoint's id rides the address alone: there is
+ * no body, and nothing here ever held the key. The host refuses the endpoint its model runs on, in
+ * its own sentence ("switch the model first"), which is what the screen shows.
+ */
+export async function removeLlmEndpoint(
+  config: HermesConfig,
+  target: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/llm-providers/endpoints/${encodeURIComponent(target)}`,
+    { method: "DELETE", headers: headers(config), signal },
+  )
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
 // `/delegation` is the subagent model's own route, so the tab's path is separate.
 export const GENERAL_ROUTES = {
   general: { path: "general", field: "general", label: "General" },

@@ -3444,13 +3444,17 @@ const LLM_PROVIDERS = [
 const LLM_SEEDED = { openai: "sk-o-0000-0000-c123" }
 const llmKeys = new Map()
 // The custom endpoints this mock's Hermes holds, and the keys a page has written to them. One is a
-// local server with a key of its own, the other a gateway with none — the two a page has to draw.
+// local server with a key of its own — and the one the bot's model runs on, which is the endpoint no
+// page can remove — the other a gateway with none: the two a page has to draw.
 const LLM_ENDPOINTS = [
   {
     id: "local-llama",
     name: "Local Llama",
     base_url: "http://127.0.0.1:8080/v1",
     model: "llama-3.1-8b",
+    // The host's own `is_current`: the model this bot runs on, so a removal of it is refused. It is
+    // the mock's fact and not the page's — `llmBlock` sends only the four fields a row draws.
+    current: true,
   },
   {
     id: "work-gateway",
@@ -4834,6 +4838,33 @@ http
           error: { message: "That is a masked key, not a key. Type the key itself." },
         })
       llmKeys.set(`${key}\n${target}`, typed)
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "DELETE" &&
+      url.pathname.startsWith("/api/plugins/gots/llm-providers/endpoints/")
+    ) {
+      // A custom endpoint removed (plugin/llm_providers.py): the address names it and there is no
+      // body. The one the bot's model runs on is refused in the plugin's own sentence — deleting it
+      // would unpick the model, which is a picker's decision, not this page's — and nothing is
+      // touched; any other endpoint goes with the key it was given, and the answer is the fresh
+      // block without its row.
+      const key = pluginProfile ?? ""
+      const id = decodeURIComponent(url.pathname.split("/").pop() ?? "")
+      const at = LLM_ENDPOINTS.findIndex((one) => one.id === id)
+      if (at < 0)
+        return json(res, 400, {
+          error: { message: `${id} isn't a custom endpoint this Hermes knows.` },
+        })
+      const held = LLM_ENDPOINTS[at]
+      if (held.current)
+        return json(res, 400, {
+          error: { message: `This bot's model runs on ${held.name}. Switch the model first.` },
+        })
+      LLM_ENDPOINTS.splice(at, 1)
+      llmKeys.delete(`${key}\ncustom:${id}`)
       return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
     }
     if (

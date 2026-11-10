@@ -313,6 +313,8 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    endpoint the model runs on is refused and deletes nothing"; then `python3 -m unittest
    plugin.tests.test_plugin_versions` — green.
 
+   Done.
+
 ## Decisions
 
 - **The mask is made on the host; a mask is never a write; replace and remove go through the

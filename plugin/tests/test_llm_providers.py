@@ -273,6 +273,7 @@ def host_modules(
     config: Optional[Dict[str, Any]] = None,
     config_write: Optional[mock.MagicMock] = None,
     update_class: Optional[type] = None,
+    delete: Optional[Any] = None,
 ):
     """The host's own modules, planted where a lazy import finds them.
 
@@ -286,7 +287,8 @@ def host_modules(
     ``endpoints_list`` is what ``list_custom_endpoints()`` answers — empty where a case has none —
     and ``config`` is the profile's ``config.yaml`` as ``gateway.run`` loads it, which is where an
     endpoint's ``key_env`` is read. ``upsert`` stands in for the host's writer (``apply_custom_endpoint``
-    by default, so the write really lands), and ``config_write`` is the plugin's own ``config.yaml``
+    by default, so the write really lands), ``delete`` for the host's own removal (empty by default,
+    so a test can say one was never asked), and ``config_write`` is the plugin's own ``config.yaml``
     writer, planted so a test can prove an endpoint's key never reaches it. ``update_class`` replaces
     the body class the plugin builds, so a case can read back exactly which fields it filled.
     """
@@ -326,6 +328,7 @@ def host_modules(
     config_env.upsert_custom_endpoint = upsert or (
         lambda body: apply_custom_endpoint(body, values, cfg)
     )
+    config_env.delete_custom_endpoint = delete or mock.MagicMock()
     routers.config_env = config_env
     web_models = ModuleType("hermes_cli.web_models")
     web_models.CustomEndpointUpdate = update_class or CustomEndpointUpdate
@@ -701,6 +704,130 @@ def adding_host(
     return upsert
 
 
+# The refusal a removal answers with while the bot's model runs on the endpoint: the plan's own
+# sentence, naming the endpoint, because switching a model is a model-picking decision the page
+# can't make. `bare` is the row the fixture's list marks `is_current`.
+IN_USE = "This bot's model runs on Bare. Switch the model first."
+
+
+def deleting_host(
+    values: Dict[str, str], listed: list, config: Dict[str, Any], asked: list
+) -> Any:
+    """``delete_custom_endpoint`` as the host performs it.
+
+    The entry goes from ``providers``, the endpoint's own key goes from ``.env`` behind the
+    ``key_env`` that entry named, and the host's list stops answering the row — which is what the
+    fresh read the plugin answers with is drawn from. The host also detaches a main-model mirror
+    here; nothing in these cases sets one, so there is none to detach.
+    """
+
+    def delete(endpoint_id: str, profile: Optional[str] = None) -> None:
+        asked.append(endpoint_id)
+        providers = config.get("providers")
+        entry = providers.pop(endpoint_id, None) if isinstance(providers, dict) else None
+        if isinstance(entry, dict):
+            env_var = str(entry.get("key_env") or "").strip()
+            if env_var:
+                values.pop(env_var, None)
+        listed[:] = [row for row in listed if str(row.get("id") or "") != endpoint_id]
+
+    return delete
+
+
+class RemoveEndpointTest(unittest.TestCase):
+    """An endpoint removed: the host's own delete, and the one row it must never be asked about."""
+
+    def test_another_endpoint_is_deleted_with_its_key(self) -> None:
+        # `bare` is the row the list marks current, so this is the other case: the entry goes, and
+        # the key it put in `.env` goes with it — which is the whole of "and its key".
+        values = {"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY}
+        config = endpoint_config()
+        listed = endpoints()
+        asked: list = []
+        remove = mock.MagicMock()
+        remove_env_value = mock.MagicMock()
+        write = mock.MagicMock()
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            delete=deleting_host(values, listed, config, asked),
+            remove=remove,
+            remove_env_value=remove_env_value,
+            config_write=write,
+        ):
+            block = llm_providers.remove_endpoint(CONFIG, "local-llama")
+
+        self.assertEqual(asked, ["local-llama"], "one removal, through the host's own delete")
+        self.assertEqual(
+            [row["id"] for row in block["endpoints"]], ["old-plain", "bare"], "the answer is the fresh read"
+        )
+        self.assertNotIn("local-llama", config["providers"], "the entry is gone from the config")
+        self.assertNotIn("LOCAL_LLAMA_API_KEY", values, "and its key is gone from .env")
+        self.assertNotIn(ENDPOINT_KEY, json.dumps(block), "no key is anywhere in the answer")
+        # The removal is the host's own: the plugin reaches neither the lifecycle's key removal nor
+        # the `.env` writer, which would leave the config mirror and the pool entry behind.
+        remove.assert_not_called()
+        remove_env_value.assert_not_called()
+        write.assert_not_called()
+
+    def test_removing_the_endpoint_the_model_runs_on_raises_and_deletes_nothing(self) -> None:
+        # `bare` is `is_current`: a delete would silently unpick the bot's model, so the refusal
+        # comes first and not one writer is asked. The sentence names the endpoint and says what to
+        # do about it, because that decision is the model picker's.
+        values: Dict[str, str] = {}
+        config = endpoint_config()
+        listed = endpoints()
+        asked: list = []
+        delete = deleting_host(values, listed, config, asked)
+        remove = mock.MagicMock()
+        remove_env_value = mock.MagicMock()
+        write = mock.MagicMock()
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            delete=delete,
+            remove=remove,
+            remove_env_value=remove_env_value,
+            config_write=write,
+        ):
+            with self.assertRaises(ValueError) as refused:
+                llm_providers.remove_endpoint(CONFIG, "bare")
+
+        self.assertEqual(str(refused.exception), IN_USE, "the sentence the page draws, exactly")
+        self.assertEqual(asked, [], "delete_custom_endpoint was never asked")
+        remove.assert_not_called()
+        remove_env_value.assert_not_called()
+        write.assert_not_called()
+        self.assertEqual(config, endpoint_config(), "nothing was written to the config")
+        self.assertEqual(listed, endpoints(), "and the host's list still holds the endpoint")
+
+    def test_an_unknown_endpoint_is_refused_by_name(self) -> None:
+        asked: list = []
+        values: Dict[str, str] = {}
+        config = endpoint_config()
+        listed = endpoints()
+        remove = mock.MagicMock()
+        remove_env_value = mock.MagicMock()
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            delete=deleting_host(values, listed, config, asked),
+            remove=remove,
+            remove_env_value=remove_env_value,
+        ):
+            with self.assertRaises(ValueError) as unknown:
+                llm_providers.remove_endpoint(CONFIG, "nope")
+
+        self.assertIn("nope", str(unknown.exception), "the sentence says which endpoint it was")
+        self.assertEqual(asked, [], "nothing was deleted")
+        remove.assert_not_called()
+        remove_env_value.assert_not_called()
+        self.assertEqual(config, endpoint_config(), "and nothing was written")
+
+
 # A key the page types for an endpoint it is adding: long enough for the mask to show its ends, and
 # holding no dot, so it is no mask's shape.
 NEW_KEY = "home-box-key-0000-abcd"
@@ -947,5 +1074,64 @@ class RouteTest(unittest.TestCase):
         with host_modules({}):
             with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": None}):
                 refused = self.remove("openai")
+        self.assertEqual(refused["status"], 501)
+        self.assertNotIn("Traceback", refused["payload"]["error"]["message"])
+
+    def remove_endpoint(self, target: str) -> Dict[str, Any]:
+        """One `DELETE llm-providers/endpoints/{target}`, as the app calls it."""
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {"target": target}, {}
+
+        return asyncio.run(
+            route(self.app, plugin.PREFIX + "/llm-providers/endpoints/{target}", "DELETE")(request)
+        )
+
+    def test_an_endpoint_removal_answers_the_fresh_block(self) -> None:
+        values = {"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY}
+        config = endpoint_config()
+        listed = endpoints()
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            delete=deleting_host(values, listed, config, []),
+        ):
+            removed = self.remove_endpoint("local-llama")
+        self.assertEqual(removed["status"], 200)
+        self.assertEqual(removed["payload"]["object"], "gots.llm_providers")
+        self.assertEqual(
+            [row["id"] for row in removed["payload"]["llm"]["endpoints"]],
+            ["old-plain", "bare"],
+            "the row the page draws is the fresh block, without the endpoint that went",
+        )
+
+    def test_removing_the_endpoint_the_model_runs_on_is_refused_in_its_sentence(self) -> None:
+        # The refusal is the whole point of the route: a delete would unpick the bot's model, so the
+        # sentence arrives with a status the page already reads for every refusal on this page, and
+        # it is the sentence the page draws — not a rewording of it here.
+        values: Dict[str, str] = {}
+        config = endpoint_config()
+        listed = endpoints()
+        asked: list = []
+        with host_modules(
+            values,
+            endpoints_list=listed,
+            config=config,
+            delete=deleting_host(values, listed, config, asked),
+        ):
+            refused = self.remove_endpoint("bare")
+        self.assertEqual(refused["status"], 400)
+        self.assertEqual(refused["payload"]["error"]["message"], IN_USE)
+        self.assertEqual(asked, [], "and nothing was deleted")
+
+    def test_a_host_without_the_endpoint_writer_answers_501(self) -> None:
+        # A host that can list its endpoints but has no delete: the page is drawn and the removal is
+        # refused in this plugin's own words rather than the host's.
+        values: Dict[str, str] = {}
+        config = endpoint_config()
+        listed = endpoints()
+        with host_modules(values, endpoints_list=listed, config=config):
+            with mock.patch.dict(sys.modules, {"hermes_cli.web_routers.config_env": None}):
+                refused = self.remove_endpoint("local-llama")
         self.assertEqual(refused["status"], 501)
         self.assertNotIn("Traceback", refused["payload"]["error"]["message"])

@@ -39,6 +39,7 @@ import {
   mount,
   path,
   seedSettings,
+  text,
   type,
   until,
 } from "./component-kit.tsx"
@@ -115,11 +116,25 @@ const slugOf = (name: string) =>
     .replace(/^-+|-+$/g, "")
 
 /**
+ * The endpoint this fake host's model runs on, and the sentence it refuses to remove it with
+ * (`llm_providers.remove_endpoint`): the endpoint by name, and the one thing that would let the
+ * removal through. The plugin's own sentence, so the page is drawn exactly what a host sends.
+ */
+const RUNNING_ON = "local-llama"
+const IN_USE = "This bot's model runs on Local Llama. Switch the model first."
+
+/**
  * A bot of this test's own over a faked host: what a connection's plugin answered is remembered for
  * the page, so each case names its own host and no answer leaks into the next. A key write lands on
- * the block that host answers next, and every request is recorded.
+ * the block that host answers next, an endpoint's removal takes its row off it, and every request is
+ * recorded.
  */
-async function seed(name: string, features: string[], block: Block = BLOCK) {
+async function seed(
+  name: string,
+  features: string[],
+  block: Block = BLOCK,
+  runningOn = RUNNING_ON,
+) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
@@ -165,6 +180,20 @@ async function seed(name: string, features: string[], block: Block = BLOCK) {
     }
     if (pathname.endsWith("/plugins/gots/llm-providers") && method === "GET")
       return json({ object: "gots.llm_providers", llm: current })
+    const endpointRemoval = pathname.match(/\/plugins\/gots\/llm-providers\/endpoints\/([^/]+)$/)
+    if (endpointRemoval && method === "DELETE") {
+      // A custom endpoint removed (plugin/llm_providers.py): the address names it, and the model
+      // the bot runs on is the one refusal — deleting it would unpick the bot's model, so the
+      // sentence says what to do first and nothing is deleted. Any other goes, key and all, and the
+      // answer is the fresh block without its row.
+      const id = decodeURIComponent(endpointRemoval[1])
+      const held = current.endpoints.find((one) => one.id === id)
+      if (!held)
+        return json({ error: { message: `${id} isn't a custom endpoint this Hermes knows.` } }, 400)
+      if (id === runningOn) return json({ error: { message: IN_USE } }, 400)
+      current = { ...current, endpoints: current.endpoints.filter((one) => one.id !== id) }
+      return json({ object: "gots.llm_providers", llm: current })
+    }
     if (pathname.endsWith("/plugins/gots/llm-providers/endpoints") && method === "POST") {
       // A custom endpoint added (plugin/llm_providers.py): the host slugs the id, keeps the key as
       // the mask it makes, and answers the block with the new row in it. The read above keeps
@@ -210,6 +239,8 @@ const saveButton = () =>
   findAll("[data-form-actions] button").find((one) => one.textContent?.trim() === "Save") ?? null
 /** The slot screen's own way to remove the key, and the question it asks first. */
 const removeKey = () => find("[data-llm-remove-key]")
+/** An endpoint's own removal, on its slot screen, and the question that names it. */
+const removeEndpoint = () => find("[data-llm-remove-endpoint]")
 const dialog = () => find('[role="alertdialog"]')
 const dialogTitle = () => find('[data-slot="alert-dialog-title"]')?.textContent?.trim() ?? ""
 const inDialog = (label: string) => findText('[role="alertdialog"] button', label)
@@ -486,6 +517,85 @@ test("the plus opens a form and the endpoint lands as a row", async () => {
       lines(endpointRow("home-box")),
       ["Home box", "http://10.0.0.5:8080/v1 · qwen2.5", "home...abcd"],
       "the new row: its name, the URL and model it runs, and its key as the host masked it",
+    )
+  })
+})
+
+test("removing the endpoint the model runs on is refused and deletes nothing", async () => {
+  const host = await seed("remove-endpoint", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
+    await click(endpointRow("local-llama"))
+    await until(async () => Boolean(removeEndpoint()), "the Remove endpoint action")
+
+    // A question, not a write: the endpoint is named, and the way out of it sends nothing at all.
+    await click(removeEndpoint())
+    assert.ok(dialog(), "Remove endpoint asks first")
+    assert.equal(dialogTitle(), "Remove Local Llama?", "and the question names the endpoint")
+    const asked = host.asks.length
+    await click(inDialog("Cancel"))
+    await until(async () => !dialog(), "the question to shut")
+    assert.equal(host.asks.length, asked, "Cancel makes no request at all")
+
+    await click(removeEndpoint())
+    await until(async () => Boolean(dialog()), "the question again")
+    await click(inDialog("Remove"))
+    await until(async () => text().includes(IN_USE), "the host's sentence")
+
+    // The one removal, and the answer to it is the host's own words rather than the app's. Nothing
+    // was deleted, so the screen and the row it draws are exactly what they were.
+    const deletes = host.asks.filter((one) => one.method === "DELETE")
+    assert.equal(deletes.length, 1, "exactly one removal asked")
+    assert.equal(
+      deletes[0].path,
+      "/api/plugins/gots/llm-providers/endpoints/local-llama",
+      "for that endpoint, by its id",
+    )
+    assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
+    assert.ok(!dialog(), "the question is done — a retry can't succeed from this screen")
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/llm-providers/key/custom%3Alocal-llama",
+      "the screen stays where it was",
+    )
+    assert.deepEqual(
+      lines(maskRow()),
+      ["Local Llama", "llam...0a1f"],
+      "and the endpoint's row is still drawn, key and all",
+    )
+    assert.ok(
+      host.block().endpoints.some((one) => one.id === "local-llama"),
+      "nothing was deleted on the host either",
+    )
+  })
+})
+
+test("removing another endpoint takes its row off the page", async () => {
+  const host = await seed("remove-endpoint-other", ["llm_providers"], {
+    ...BLOCK,
+    endpoints: ENDPOINTS,
+  })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("work-gateway")), "the host's custom endpoints")
+    await click(endpointRow("work-gateway"))
+    await until(async () => Boolean(removeEndpoint()), "the Remove endpoint action")
+
+    await click(removeEndpoint())
+    await until(async () => Boolean(dialog()), "the question")
+    assert.equal(dialogTitle(), "Remove Work gateway?", "naming the endpoint it removes")
+    await click(inDialog("Remove"))
+    await until(async () => Boolean(page()), "the page the removal answers")
+
+    // The page here is the block the removal answered, drawn once: no read stands between the write
+    // and the rows it left, and the endpoint that stayed is still one of them.
+    assert.equal(path(), "/settings/bots/bot-1/llm-providers", "and the screen is left behind")
+    assert.ok(missing(endpointRow("work-gateway")), "the endpoint that went draws no row")
+    assert.ok(endpointRow("local-llama"), "and the one that stayed still does")
+    const removedAt = host.asks.findIndex((one) => one.method === "DELETE")
+    assert.ok(removedAt >= 0, "the removal was asked")
+    assert.ok(
+      !host.asks.slice(removedAt + 1).some((one) => one.method === "GET"),
+      "and the page asked nothing after it: the block the removal answered is what it drew",
     )
   })
 })

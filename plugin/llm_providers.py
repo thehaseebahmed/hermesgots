@@ -39,6 +39,13 @@ An endpoint is added through that same writer, with the four fields a form holds
 slugs no id and composes no ``providers`` entry there either — and a name an endpoint already carries
 is refused before it, because the writer would merge onto that entry rather than add a second one.
 
+It is removed through the host's own ``delete_custom_endpoint``, which drops the ``providers`` entry,
+detaches any main-model mirror from it and takes its key out of ``.env`` — the same entry, in one
+writer, so the plugin composes no removal of its own. Not while the bot's model runs on it, though:
+the list's ``is_current`` row is refused before that writer is asked, because deleting it would
+silently unpick a model the reader chose somewhere this page can't. Switching one is a model-picking
+decision, so the refusal says to make it there first.
+
 A key is removed through the same lifecycle (``remove_provider_env_credential``), never its
 ``remove_env_value``: dropping the value from ``.env`` alone leaves the value-matched ``config.yaml``
 mirror and the pool entry behind, still authenticating with a key the page says is gone. A removal of
@@ -421,6 +428,46 @@ def remove_key(config_path: Path, target: str) -> Dict[str, Any]:
     from hermes_cli.credential_lifecycle import remove_provider_env_credential
 
     remove_provider_env_credential(slot)
+    return read(config_path)
+
+
+def remove_endpoint(config_path: Path, target: str) -> Dict[str, Any]:
+    """Remove one custom endpoint — its entry and its key — and answer the page as it now reads.
+
+    The endpoint is resolved through the host's own ``list_custom_endpoints()``, so an id this host
+    doesn't list is refused in a sentence naming it, and the row that comes back says whether the
+    bot's model runs on it. That one is refused before any writer is asked: the host's delete would
+    detach the main-model mirror, which is to say it would quietly unpick the model the reader chose
+    in Hermes's own model picker. Switching one is that picker's decision, so the sentence says to
+    make it there first — and nothing is written or deleted on the way.
+
+    Any other endpoint goes through the host's own ``delete_custom_endpoint``: it drops the
+    ``providers`` entry, detaches whatever main-model mirror a legacy row left behind, and removes
+    the key from ``.env`` behind the entry's ``key_env``. So the plugin composes no entry removal and
+    writes no ``config.yaml`` of its own, exactly as it composes none of an add.
+
+    A host refusal (an endpoint its own list held but its writer won't) arrives as FastAPI's
+    ``HTTPException`` and leaves here as a ``ValueError`` carrying its sentence, as the other writes
+    do.
+
+    Raises ``ValueError`` for an unknown id and for the endpoint the model runs on, and
+    ``ImportError`` where this host has no endpoint list or no delete, which the route answers with a
+    501.
+    """
+    row = _endpoint_of(str(target or "").strip())
+    endpoint_id = str(row.get("id") or target).strip()
+    name = str(row.get("name") or endpoint_id)
+    if bool(row.get("is_current")):
+        raise ValueError(f"This bot's model runs on {name}. Switch the model first.")
+    from hermes_cli.web_routers.config_env import delete_custom_endpoint
+
+    try:
+        delete_custom_endpoint(endpoint_id)
+    except Exception as error:
+        detail = _host_refusal(error)
+        if detail is None:
+            raise
+        raise ValueError(detail) from error
     return read(config_path)
 
 
