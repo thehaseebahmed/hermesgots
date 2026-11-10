@@ -359,5 +359,77 @@ class SignatureTest(unittest.TestCase):
         self.assertEqual(media.signing_key(store), first, "a second ask keeps the same secret")
 
 
+try:
+    from aiohttp import web as _web
+    from aiohttp.test_utils import TestClient as _TestClient, TestServer as _TestServer
+except ImportError:  # CI installs no aiohttp; the case runs wherever the host's own is on the path.
+    _web = None
+
+
+APP_ORIGIN = "https://app.test"
+
+
+@unittest.skipIf(_web is None, "needs aiohttp")
+class PageReadCorsTest(unittest.TestCase):
+    """The app reads an HTML file's text with ``fetch`` from its own origin, so the signed media
+    route's answer has to carry the adapter's CORS headers for that origin.
+
+    The headers are the adapter's CORS middleware's, which decorates a response once its handler
+    returns — the route answers a plain file response rather than a stream it prepared itself (which
+    is why ``stream.sse_headers`` puts CORS in up front and this route needn't). The middleware here
+    stands in for Hermes's own ``cors_middleware``, as it reads the adapter.
+    """
+
+    def test_a_signed_html_get_from_the_app_origin_carries_its_cors_headers(self) -> None:
+        import asyncio
+
+        import plugin
+        from plugin.tests._helpers import Context, RouteAdapter, temp_hermes_home
+
+        home = temp_hermes_home(self)
+        page = home / "report.html"
+        page.write_text("<!doctype html><p>hi</p>")
+
+        class Adapter(RouteAdapter):
+            def _cors_headers_for_origin(self, origin: str):
+                if origin != APP_ORIGIN:
+                    return None
+                return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+
+        @_web.middleware
+        async def cors_middleware(request, handler):
+            adapter = request.app["api_server_adapter"]
+            headers = adapter._cors_headers_for_origin(request.headers.get("Origin", ""))
+            response = await handler(request)
+            if headers is not None:
+                response.headers.update(headers)
+            return response
+
+        adapter = Adapter()
+        app = _web.Application(middlewares=[cors_middleware])
+        app["api_server_adapter"] = adapter
+        for module in (plugin.sessions, plugin.approvals):
+            self.addCleanup(setattr, module, "adapter", getattr(module, "adapter", None))
+        context = Context()
+        plugin.register(context)
+        context.platforms["api_server"](app, adapter)
+
+        async def asked():
+            async with _TestClient(_TestServer(app)) as client:
+                minted = await client.post(plugin.PREFIX + "/media/url", json={"path": str(page)})
+                url = urlsplit((await minted.json())["url"])
+                served = await client.get(
+                    f"{url.path}?{url.query}", headers={"Origin": APP_ORIGIN}
+                )
+                return served.status, served.headers, await served.text()
+
+        with mock.patch.dict(sys.modules, gateway_stub(lambda path: path)):
+            status, headers, text = asyncio.run(asked())
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["access-control-allow-origin"], APP_ORIGIN)
+        self.assertTrue(headers["content-type"].startswith("text/html"))
+        self.assertEqual(text, "<!doctype html><p>hi</p>")
+
+
 if __name__ == "__main__":
     unittest.main()
