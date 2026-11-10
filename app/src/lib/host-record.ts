@@ -4,6 +4,7 @@ import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { hasPluginFeature } from "@/lib/hermes"
+import { cachedHost, keepHost } from "@/lib/host-cache"
 import { noteFailure } from "@/lib/report"
 
 type Server = Pick<Profile, "baseUrl" | "apiKey">
@@ -24,6 +25,12 @@ async function readHost<T>(server: Server, route: HostRoute<T>): Promise<Held<T>
   return { supported: true, held }
 }
 
+/** Reads a route once and keeps the answer for the page's first open (ADR 0132). */
+export async function warmHostRecord<T>(server: Server, route: HostRoute<T>) {
+  const held = await readHost(server, route)
+  if (held.supported) await keepHost(server, route.feature, { value: held.held })
+}
+
 /**
  * Whether the host ran out of time rather than answering. The one failure that may still have
  * landed: a write the host refused hasn't.
@@ -40,13 +47,23 @@ export function useHostRecord<T>(
   const key = connectionKey({ baseUrl, apiKey })
   const [state, setState] = useState<{ key: string; held: Held<T> }>()
   const [pending, setPending] = useState<{ key: string; value: T }>()
+  const [copy, setCopy] = useState<{ key: string; value: T }>()
 
   useEffect(() => {
     if (!baseUrl) return
     let cancelled = false
+    let landed = false
+    // The field opens on the last answer this host gave this device (ADR 0132), shut until the
+    // host's own answer lands.
+    void cachedHost<{ value: T }>({ baseUrl, apiKey }, route.feature).then((held) => {
+      if (!cancelled && !landed && held) setCopy({ key, value: held.value })
+    })
     void readHost({ baseUrl, apiKey }, route)
       .then((held) => {
-        if (!cancelled) setState({ key, held })
+        landed = true
+        if (cancelled) return
+        setState({ key, held })
+        if (held.supported) void keepHost({ baseUrl, apiKey }, route.feature, { value: held.held })
       })
       .catch((error: unknown) => {
         // A read that fails leaves the field off; the rest of the bot's settings still work.
@@ -59,6 +76,7 @@ export function useHostRecord<T>(
   }, [key, baseUrl, apiKey, route])
 
   const held = state?.key === key ? state.held : undefined
+  const copyHere = !held && copy?.key === key ? copy : undefined
   const pendingHere = pending?.key === key ? pending : undefined
 
   const save = useCallback(
@@ -71,6 +89,7 @@ export function useHostRecord<T>(
           AbortSignal.timeout(WRITE_TIMEOUT_MS),
         )
         setState({ key, held: { supported: true, held: stored } })
+        void keepHost({ baseUrl, apiKey }, route.feature, { value: stored })
       } catch (error) {
         // A write that ran out of time may still have landed, so read what the host holds now: the
         // field must not sit on a value it may not have, and the control comes back either way.
@@ -89,13 +108,22 @@ export function useHostRecord<T>(
   )
 
   return {
-    value: pendingHere ? pendingHere.value : held?.supported ? held.held : initial,
-    /** Shown only once the host has answered: a bot whose plugin predates the route shows nothing. */
-    supported: Boolean(held?.supported),
+    value: pendingHere
+      ? pendingHere.value
+      : held?.supported
+        ? held.held
+        : copyHere
+          ? copyHere.value
+          : initial,
+    /**
+     * Shown once the host has answered, or from the copy this device kept of its last answer: a bot
+     * whose plugin predates the route shows nothing.
+     */
+    supported: Boolean(held?.supported) || Boolean(copyHere),
     /** The host's first read is over, whether it answered or failed. */
     settled: !baseUrl || state?.key === key,
-    /** A write is on its way to the host: the field greys out until its answer lands. */
-    saving: pendingHere !== undefined,
+    /** A write is on its way, or only the device's copy is drawn: the field greys out until the host's answer lands. */
+    saving: pendingHere !== undefined || copyHere !== undefined,
     save,
   }
 }

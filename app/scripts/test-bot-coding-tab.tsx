@@ -28,6 +28,7 @@ import {
   missing,
   mount,
   seedSettings,
+  until,
 } from "./component-kit.tsx"
 
 function LiveEditor() {
@@ -366,5 +367,21 @@ test("a host older than the threshold draws no figure, since there is no number 
       0,
       "Off reads no account at all",
     )
+  })
+})
+
+test("opened again with the host away, the page draws the budget the host last gave, shut", async () => {
+  await seed("coding-held", ["general_page", "afk", "afk_switch", "afk_picks"], { pickBudget: 3 })
+  const live = globalThis.fetch
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    await until(async () => shown() === "3 tasks", "the first open")
+    await until(async () => (await db.hostCache.count()) > 0, "the copy kept")
+  })
+  const hung = new Promise<Response>(() => {})
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith("/plugins/gots/afk") ? hung : live(input, init)) as typeof fetch
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    await until(async () => shown() === "3 tasks", "the held budget")
+    assert.equal(step("Increase pick budget")?.hasAttribute("disabled"), true, "shut until fresh")
   })
 })

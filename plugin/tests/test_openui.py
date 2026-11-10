@@ -72,8 +72,11 @@ class RegistrationTest(SectionState):
         openui.register(ctx)
         told = ctx.calls[0]["content"]
         text = ARTIFACT.read_text(encoding="utf-8")
-        self.assertEqual(told({"session_id": "s", "profile_name": "default", "cwd": "/tmp"}), text)
-        self.assertEqual(told(), text)
+        with mock.patch.object(openui, "enabled", return_value=True):
+            self.assertEqual(
+                told({"session_id": "s", "profile_name": "default", "cwd": "/tmp"}), text
+            )
+            self.assertEqual(told(), text)
         self.assertIn("openui-lang", text)
         # Over its cap the host drops a section whole rather than truncating it, so the section it
         # was handed has to be under the one the generator and the app's test hold it to.

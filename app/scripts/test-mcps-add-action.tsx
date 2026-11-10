@@ -180,7 +180,10 @@ test("a Host with mcps_add but no Catalogue has the +, offering only a custom se
     assert.ok(addButton(), "the + is there for a server typed in by hand")
     await click(addButton())
     await until(async () => Boolean(find('[data-mcp-source="custom"]')), "the Add sheet to open")
-    assert.ok(missing('[data-mcp-source="catalogue"]'), "and offers no way into a Catalogue this Host can't read")
+    assert.ok(
+      missing('[data-mcp-source="catalogue"]'),
+      "and offers no way into a Catalogue this Host can't read",
+    )
   })
 })
 
@@ -299,3 +302,26 @@ test(
     })
   }),
 )
+
+test("opened again with the host away, the page draws the servers the host last listed, shut", async () => {
+  await seed("mcp-held", ["mcps", "mcps_write", "mcps_add"])
+  const live = globalThis.fetch
+  await mount(settings(), async () => {
+    await until(async () => Boolean(find('[data-mcp-section="config"]')), "the first open")
+    await until(
+      async () => (await db.hostCache.toArray()).some((row) => row.key.endsWith("\ninfo")),
+      "the list and the features kept",
+    )
+  })
+  const keys = (await db.hostCache.toArray()).map((row) => row.key.split("\n").pop())
+  assert.ok(keys.includes("mcp") && keys.includes("info"), `both answers are kept: ${keys}`)
+  const hung = new Promise<Response>(() => {})
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    new URL(String(input)).pathname.endsWith("/plugins/gots/mcp")
+      ? hung
+      : live(input, init)) as typeof fetch
+  await mount(settings(), async () => {
+    await until(async () => Boolean(find('[data-mcp-section="config"]')), "the held servers")
+    assert.ok(missing('[aria-label="github on"]'), "no switch until the host answers")
+  })
+})

@@ -35,8 +35,8 @@ SKILLS = ("impeccable", "web-design-guidelines", "transitions-dev")
 SKILLS_ROOT = Path(__file__).parent / "skills"
 # A skill's own description, as its frontmatter writes it — the line Hermes lists it by.
 _DESCRIPTION = re.compile(r"^description:\s*(.+)$", re.M)
-# The key the switch is kept under in the profile's `host_settings` (store.py). Absent means on, so
-# only an off ever writes a row.
+# The key the switch is kept under in the profile's `host_settings` (store.py). Absent means off, so
+# only an on ever writes a row.
 SETTING = "openui"
 OBJECT = "gots.openui"
 
@@ -111,28 +111,28 @@ def path_for(profile_name: Optional[str] = None) -> Optional[Path]:
 
 
 def enabled(path: Optional[Path]) -> bool:
-    """The switch as the host holds it: on unless a stored value says off.
+    """The switch as the host holds it: off unless a stored value says on.
 
-    A store that can't be read leaves it on, the way a failed read fails open everywhere else here:
-    a host that can't answer must not take the library away from every new chat.
+    A store that can't be read leaves it off: the library is opt-in, so a host that can't answer
+    never tells it to a chat that didn't ask for it.
     """
     if path is None:
-        return True
+        return False
     try:
         from .store import get_setting
 
         value = get_setting(path, SETTING)
     except Exception:
         logger.debug("gots: couldn't read the openui switch", exc_info=True)
-        return True
-    return True if value is None else bool(value)
+        return False
+    return False if value is None else bool(value)
 
 
 def set_enabled(path: Path, value: bool) -> bool:
     """Stores the switch and answers what the store now holds.
 
-    ``put_setting(path, key, None)`` deletes the row, so off is written as the boolean it is: a
-    missing row reads as on, and an off kept as None would come back as the default.
+    ``put_setting(path, key, None)`` deletes the row, so a value is written as the boolean it is: a
+    missing row reads as off, and an on kept as None would come back as the default.
     """
     from .store import put_setting
 

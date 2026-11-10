@@ -6,7 +6,13 @@
  * the next time a screen needs it.
  */
 import { connectionKey, serverConfig } from "@/lib/connection"
-import { forgetPluginAnswer, getPluginAnswer, type HermesConfig, type PluginInfo } from "@/lib/hermes"
+import { cachedHost, keepHost } from "@/lib/host-cache"
+import {
+  forgetPluginAnswer,
+  getPluginAnswer,
+  type HermesConfig,
+  type PluginInfo,
+} from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { createStore } from "@/lib/store"
 
@@ -31,6 +37,10 @@ const answered = createStore<ReadonlyMap<string, PluginInfo>>(new Map())
  * short-circuit every later read (ADR 0128).
  */
 const generations = new Map<string, number>()
+
+// The connections whose remembered answer came from the Host in this page, as against one this
+// device kept from an earlier open (ADR 0132): the latter draws at once and is read again.
+const confirmed = new Set<string>()
 const generationOf = (key: string) => generations.get(key) ?? 0
 
 /**
@@ -38,18 +48,24 @@ const generationOf = (key: string) => generations.get(key) ?? 0
  * neither said nothing, and saying it again must not become final — an older Host answers no
  * features, and a roster on its own is still a real answer (ADR 0128).
  */
-const worthKeeping = (info: PluginInfo) =>
-  info.features !== null || info.rooms.seatable !== null
+const worthKeeping = (info: PluginInfo) => info.features !== null || info.rooms.seatable !== null
 
 async function readAnswer(config: HermesConfig, reread = false) {
   const key = connectionKey(config)
-  if (!reread && answered.get().has(key)) return
+  if (!reread && confirmed.has(key)) return
   const generation = generationOf(key)
+  if (!answered.get().has(key))
+    void cachedHost<PluginInfo>(config, "info").then((held) => {
+      if (!held || answered.get().has(key) || generation !== generationOf(key)) return
+      answered.set(new Map(answered.get()).set(key, held))
+    })
   const info = await getPluginAnswer(config)
   // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
   if (!info || !worthKeeping(info)) return
   if (generation !== generationOf(key)) return
+  confirmed.add(key)
   answered.set(new Map(answered.get()).set(key, info))
+  void keepHost(config, "info", info)
 }
 
 /**
@@ -66,6 +82,7 @@ export function refreshAnswer(server: PluginServer) {
   // with the roster the Host just refused.
   forgetPluginAnswer(config)
   generations.set(key, generationOf(key) + 1)
+  confirmed.delete(key)
   void readAnswer(config, true)
 }
 
@@ -139,7 +156,9 @@ export function usePluginAnswersByServer(servers: PluginServer[]): {
 } {
   const configs = servers.map((server) => serverConfig(server))
   const held = answered.use()
-  const keys = configs.map((config) => (config.baseUrl && config.apiKey ? connectionKey(config) : ""))
+  const keys = configs.map((config) =>
+    config.baseUrl && config.apiKey ? connectionKey(config) : "",
+  )
   const live = keys.filter(Boolean)
   usePoll(
     () => {

@@ -25,8 +25,14 @@ class SwitchTest(unittest.TestCase):
         """The store the section reads, as the module resolves one for a profile."""
         return mock.patch.object(openui, "path_for", return_value=db_path(home))
 
-    def test_on_until_it_is_turned_off(self) -> None:
-        self.assertIs(openui.enabled(self.path), True)
+    def test_off_until_it_is_turned_on(self) -> None:
+        self.assertIs(openui.enabled(self.path), False)
+        with self.home_for(self.home):
+            self.assertEqual(openui.content(), "")
+
+    def test_on_is_stored_and_tells_the_section(self) -> None:
+        self.assertIs(openui.set_enabled(self.path, True), True)
+        self.assertIs(get_setting(self.path, openui.SETTING), True)
         with self.home_for(self.home):
             self.assertEqual(openui.content(), openui.TEXT)
 
@@ -41,6 +47,7 @@ class SwitchTest(unittest.TestCase):
 
     def test_off_withholds_the_section_and_on_tells_it(self) -> None:
         with self.home_for(self.home):
+            openui.set_enabled(self.path, True)
             self.assertEqual(openui.content(), openui.TEXT)
             openui.set_enabled(self.path, False)
             self.assertEqual(openui.content({"session_id": "s", "profile_name": "default"}), "")
@@ -52,10 +59,14 @@ class SwitchTest(unittest.TestCase):
             openui.content({"session_id": "s", "profile_name": "coder"})
         asked.assert_called_once_with("coder")
 
-    def test_a_profile_that_cannot_be_resolved_leaves_it_on(self) -> None:
+    def test_a_profile_that_cannot_be_resolved_leaves_it_off(self) -> None:
         with mock.patch.object(openui, "path_for", return_value=None):
-            self.assertEqual(openui.content({"profile_name": "coder"}), openui.TEXT)
-        self.assertIs(openui.enabled(None), True)
+            self.assertEqual(openui.content({"profile_name": "coder"}), "")
+        self.assertIs(openui.enabled(None), False)
+
+    def test_a_store_that_cannot_be_read_leaves_it_off(self) -> None:
+        with mock.patch("plugin.store.get_setting", side_effect=OSError("locked")):
+            self.assertIs(openui.enabled(self.path), False)
 
     def test_the_answer_names_the_object_the_switch_and_the_version(self) -> None:
         self.assertEqual(

@@ -3305,7 +3305,8 @@ function providerModel(name) {
   const value = typeof written === "string" && written.trim() ? written : STT_DEFAULTS[key]
   return typeof value === "string" && value.trim() ? value.trim() : ""
 }
-let openuiOn = true
+// plugin/openui.py: the switch is off until someone turns it on, so a flow that draws an interface posts it on first.
+let openuiOn = false
 const OPENUI_VERSION = "1.0.1"
 // MOCK_PRS_FAIL=1 is a host that can't reach GitHub: the plugin's read of a session's pull requests
 // answers an error instead of a list, so the app must keep the pull requests it already knows.

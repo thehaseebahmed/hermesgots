@@ -860,6 +860,12 @@ export interface DictationStats {
  * model that host last reported (ADR 0082). It is this device's own copy: nothing syncs it, and one
  * bot's answer is only ever drawn on that bot's screens.
  */
+export interface HostCacheRow {
+  /** `<connectionKey>\n<route>`: one bot's host, one settings page's answer. */
+  key: string
+  value: unknown
+}
+
 export interface SpeechCacheRow {
   /** The `connectionKey` of the bot whose host answered. */
   key: string
@@ -1123,6 +1129,7 @@ export const db = new Dexie("gots") as Dexie & {
   sentFiles: SessionDb["sentFiles"]
   mediaCache: EntityTable<MediaCacheRow, "key">
   speechCache: EntityTable<SpeechCacheRow, "key">
+  hostCache: EntityTable<HostCacheRow, "key">
   netLog: EntityTable<NetRequest, "id">
   roomLog: Table<RoomLogRow, [string, number]>
   canvasCss: EntityTable<CanvasCssRow, "key">
@@ -1523,6 +1530,9 @@ db.version(39).stores({ canvasCache: "key, connection, canvasId" })
 // v40: a chat's streaming turn is read by the chat and its status together — Share asks it of the
 // chat it is about to open — so the pair is indexed rather than the status set filtered in JS.
 db.version(40).stores({ messages: MESSAGE_STORES })
+// v41: the last answer each bot's host gave a Settings > Bot page, one row per connection and route
+// (ADR 0132), so a page opens on it before a fresh read lands. A new table: nothing older moves.
+db.version(41).stores({ hostCache: "key" })
 
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
@@ -1696,6 +1706,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.meetingRecordings,
     db.mediaCache,
     db.speechCache,
+    db.hostCache,
     db.netLog,
     db.roomLog,
     db.canvasCache,
@@ -1725,6 +1736,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
       await db.dictationStats.delete(key)
       await db.mediaCache.where("key").startsWith(mediaKeyPrefix(profile.baseUrl)).delete()
       await db.speechCache.delete(key)
+      await db.hostCache.where("key").startsWith(`${key}\n`).delete()
       // The pages it answered go with it, unless a twin on the same connection is still here.
       await forgetCanvases(key, id)
       // Its requests go with it: every row that names this bot, including the ones a twin on the same
@@ -1935,6 +1947,7 @@ export async function clearAllData() {
     db.sentFiles,
     db.mediaCache,
     db.speechCache,
+    db.hostCache,
     db.netLog,
     db.roomLog,
     db.canvasCss,
