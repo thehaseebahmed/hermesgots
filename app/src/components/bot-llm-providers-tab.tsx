@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { PlusIcon, Trash2Icon } from "lucide-react"
 
@@ -176,6 +176,26 @@ function ProvidersPage({ profile }: { profile: Profile }) {
 }
 
 /**
+ * The one removal a slot screen offers, derived from the slot the screen is showing: a provider's
+ * key, or a custom endpoint and its key together. One descriptor rather than a button and a dialog
+ * per resource — the action and the question it asks are the same fact, said once.
+ */
+type Removal = {
+  /** Which resource goes: what the action is called, and the mark the screen is read by. */
+  kind: "key" | "endpoint"
+  /** The action's own words, under Replace key. */
+  label: string
+  /** The question's heading, naming what goes. */
+  title: string
+  /** What the question says: what is deleted, or the host's refusal of the removal. */
+  description: ReactNode
+  /** The write the confirmation asks for. */
+  confirm: () => void
+  /** Whether there is a removal to offer: an endpoint always has one, a provider only with a key. */
+  canRemove: boolean
+}
+
+/**
  * One key, as the page's slot screen draws it (ADR 0055): a provider's own label and line, or an
  * endpoint's name over the base URL and model it runs, its key as the host masked it, and the one
  * form that replaces it. The target the address carried says which: a catalog slug, or `custom:<id>`.
@@ -318,6 +338,38 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
       .finally(() => setRemoving(false))
   }
 
+  // The one removal this slot offers, said once: a provider's key, or an endpoint and its key
+  // together. The target says which of the two screens this is, so the action and the question it
+  // asks are derived from the same fact and can never say different things.
+  const removal: Removal | undefined = provider
+    ? {
+        kind: "key",
+        label: "Remove key",
+        title: `Remove ${provider.label}'s key?`,
+        // A removal the host refused says so in the question, which stays up, so a retry is one tap.
+        description: refusal ? (
+          <span role="alert">{refusal}</span>
+        ) : (
+          "Its key is deleted from this bot's Hermes, and anything using it stops working until a new one is set."
+        ),
+        confirm: removeKey,
+        // The mask is the presence of a key: no key, nothing to remove.
+        canRemove: Boolean(provider.masked),
+      }
+    : endpoint
+      ? {
+          kind: "endpoint",
+          label: "Remove endpoint",
+          title: `Remove ${endpoint.name}?`,
+          description:
+            "The endpoint and its key are deleted from this bot's Hermes. Anything pinned to it stops working.",
+          confirm: removeEndpoint,
+          // The endpoint's own resource, removed whole: its entry and its key go together, so this is
+          // offered wherever the endpoint is, key or no key.
+          canRemove: true,
+        }
+      : undefined
+
   return (
     <div className="flex flex-col gap-4" data-llm-provider-slot={target}>
       {refusal && (
@@ -373,72 +425,39 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         busy={saving}
         onSave={submit}
       />
-      {provider?.masked && (
-        // Below Replace, and only where there is a key to remove: a control that writes nothing
-        // isn't offered. The mask is the presence — there is no second flag to disagree with it.
-        // An endpoint's key is a step of its own, so no removal is drawn on this screen.
-        <Group>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-11 w-full justify-start rounded-full text-destructive"
-            onClick={() => {
-              setRefusal(undefined)
-              setAsking(true)
-            }}
-            data-llm-remove-key
-          >
-            <Trash2Icon data-icon="inline-start" />
-            Remove key
-          </Button>
-        </Group>
-      )}
-      {endpoint && (
-        // The endpoint's own resource, removed whole: its entry and its key go together, so this is
-        // offered wherever the endpoint is, key or no key.
-        <Group>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-11 w-full justify-start rounded-full text-destructive"
-            onClick={() => {
-              setRefusal(undefined)
-              setAsking(true)
-            }}
-            data-llm-remove-endpoint
-          >
-            <Trash2Icon data-icon="inline-start" />
-            Remove endpoint
-          </Button>
-        </Group>
-      )}
-      {provider && (
-        <ConfirmDestructive
-          open={asking}
-          title={`Remove ${provider.label}'s key?`}
-          description={
-            refusal ? (
-              <span role="alert">{refusal}</span>
-            ) : (
-              "Its key is deleted from this bot's Hermes, and anything using it stops working until a new one is set."
-            )
-          }
-          confirmLabel="Remove"
-          busy={removing}
-          onOpenChange={setAsking}
-          onConfirm={removeKey}
-        />
-      )}
-      {endpoint && (
-        <ConfirmDestructive
-          open={asking}
-          title={`Remove ${endpoint.name}?`}
-          description="The endpoint and its key are deleted from this bot's Hermes. Anything pinned to it stops working."
-          confirmLabel="Remove"
-          busy={removing}
-          onOpenChange={setAsking}
-          onConfirm={removeEndpoint}
-        />
+      {removal?.canRemove && (
+        <>
+          {/* Below Replace, and only where there is something to remove: a control that writes
+              nothing isn't offered. A provider's mask is the presence of a key — there is no second
+              flag to disagree with it — and an endpoint is offered wherever it is, key or no key,
+              since its entry and its key are one resource. */}
+          <Group>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-11 w-full justify-start rounded-full text-destructive"
+              onClick={() => {
+                setRefusal(undefined)
+                setAsking(true)
+              }}
+              // The mark this slot's action is read by, one of the two the screen's tests know.
+              data-llm-remove-key={removal.kind === "key" ? true : undefined}
+              data-llm-remove-endpoint={removal.kind === "endpoint" ? true : undefined}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              {removal.label}
+            </Button>
+          </Group>
+          <ConfirmDestructive
+            open={asking}
+            title={removal.title}
+            description={removal.description}
+            confirmLabel="Remove"
+            busy={removing}
+            onOpenChange={setAsking}
+            onConfirm={removal.confirm}
+          />
+        </>
       )}
     </div>
   )
