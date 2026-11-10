@@ -870,6 +870,33 @@ class SessionTest(unittest.TestCase):
                 ),
             )
 
+    def test_a_session_that_is_not_the_canvases_reads_and_creates_its_data(self) -> None:
+        # The data is the canvas's rather than a version's, and it is not the page: a chat, a routine
+        # or a delegated run may name a canvas and keep its data, where the page stays the session's.
+        canvas_id = self.canvas["id"]
+        with mock.patch.object(canvases, "_session_canvas", return_value=None):
+            written = json.loads(
+                canvases.handle_data_write(
+                    {"canvas": canvas_id, "collection": "runs", "id": "today", "doc": {"km": 5}},
+                    session_id=self.plain,
+                )
+            )
+            self.assertEqual(
+                (written.get("collection"), written.get("id"), written.get("doc")),
+                ("runs", "today", {"km": 5}),
+            )
+            every = json.loads(
+                canvases.handle_data_read({"canvas": canvas_id}, session_id=self.plain)
+            )
+            self.assertEqual([row["doc"] for row in every["documents"]], [{"km": 5}])
+            one = json.loads(
+                canvases.handle_data_read(
+                    {"canvas": canvas_id, "collection": "runs", "id": "today"},
+                    session_id=self.plain,
+                )
+            )
+            self.assertEqual(one["document"]["doc"], {"km": 5})
+
 
 class EditTest(unittest.TestCase):
     """A small change is find and replace, and undo walks the pointer back a version."""
