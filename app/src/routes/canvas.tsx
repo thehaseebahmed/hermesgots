@@ -480,6 +480,13 @@ export function CanvasView() {
     up("/canvas")
   }
 
+  // A canvas with no version has nothing to preview: on a phone its own address is replaced by the
+  // edit one — a replacement, never a push, so back cannot land here and be sent there again
+  // (ADR 0130). A wide screen keeps the lane, which is already where a canvas is built, and a
+  // redirect there would chase its own address for ever.
+  if (canvas && canvas.version === 0 && !large)
+    return <Navigate to={`/canvas/${id}/edit`} replace />
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <CanvasHeader
@@ -579,6 +586,10 @@ interface ChatSurfaceUsage {
  * the hardware back both going to the canvas's own address (ADR 0130). A wide screen already has the
  * chat beside the page, so there the address folds into the canvas's own and draws no flip at all.
  *
+ * The version decides the corners: with one, Preview is the flip and there is no arrow, since the
+ * corner already goes to the page; without one there is nothing to preview, so no flip is drawn and
+ * a leading arrow is the way back to the list instead (ADR 0130).
+ *
  * Nothing here points at the page: a point is a tap on a page, and the page is the other screen's.
  */
 export function CanvasEdit() {
@@ -595,6 +606,8 @@ export function CanvasEdit() {
   const large = useLarge()
   const [usageOpen, setUsageOpen] = useState(false)
   const [surface, setSurface] = useState<ChatSurfaceUsage | null>(null)
+  // The first version is what makes there be a page at all, so it is also what the corners follow.
+  const versioned = (canvas?.version ?? 0) >= 1
   // A wide screen's lane is the same chat, so this address has nowhere of its own to be: it is the
   // canvas's address in its place, never a step, and back cannot return here.
   if (large) return <Navigate to={`/canvas/${id}`} replace />
@@ -605,10 +618,17 @@ export function CanvasEdit() {
         profile={profile}
         awayWords={undefined}
         awayNow={false}
+        backLabel={versioned ? undefined : "All canvases"}
+        onBack={versioned ? undefined : () => up("/canvas")}
         undo={false}
-        flip="preview"
-        onFlip={() => up(`/canvas/${id}`)}
+        flip={versioned ? "preview" : undefined}
+        onFlip={versioned ? () => up(`/canvas/${id}`) : undefined}
       />
+      {/* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
+          preview's empty frame uses, and the first version takes them away (ADR 0130). */}
+      {canvas && !versioned && (
+        <p className="p-4 text-center text-sm text-muted-foreground">Your bot is building it…</p>
+      )}
       <CanvasChat
         canvas={canvas}
         bot={profile}

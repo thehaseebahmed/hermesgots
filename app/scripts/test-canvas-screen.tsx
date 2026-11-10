@@ -32,6 +32,7 @@ import {
   nav,
   seedSettings,
   settle,
+  text,
   until,
 } from "./component-kit.tsx"
 
@@ -80,7 +81,13 @@ const canvasAt = (version: number, id = CANVAS.id, data?: CanvasDoc[]) => ({
   session_id: `gots-chat-${id.slice(1)}`,
   chat_id: `chat-${id.slice(1)}`,
   version,
-  html: id === CANVAS.id ? (VERSIONS.get(version) ?? PAGE) : versionPage(`Canvas ${id}`),
+  // A canvas with no version has nothing to preview: its host answers no document at all.
+  html:
+    version === 0
+      ? ""
+      : id === CANVAS.id
+        ? (VERSIONS.get(version) ?? PAGE)
+        : versionPage(`Canvas ${id}`),
   can_undo: version > 1,
   ...(data ? { data } : {}),
 })
@@ -377,6 +384,81 @@ test(
     }
     await atWidth(390, phone)()
     await atWidth(1440, wide)()
+  },
+)
+
+test(
+  "a canvas with no version opens on Edit and gains Preview when the first version lands",
+  async () => {
+    // Nothing to preview is said honestly (ADR 0130): a phone replaces the canvas's own address with
+    // the edit one — a replace, never a push — and the header's Preview is drawn only once a version
+    // is, from the same live record the frame is drawn from.
+    const phone = async () => {
+      const host: Host = { version: 0, undos: 0 }
+      serveCanvases(host)
+      await seedCanvasChat(CANVAS.id)
+      const bot = (await db.profiles.get("bot-1"))!
+      await mount(
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+            <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
+          </Routes>
+          <Nav />
+        </MemoryRouter>,
+        async () => {
+          await until(
+            () => nav() === `REPLACE:/canvas/${CANVAS.id}/edit`,
+            "the canvas to open on its edit address",
+          )
+          assert.ok(composerField(), "the chat is what that address draws")
+          assert.match(text(), /Your bot is building it…/, "and it says the bot is building it")
+          assert.ok(missing("[data-canvas-flip]"), "with nothing to flip to")
+          const back = find('[aria-label="All canvases"]')
+          assert.ok(back, "the way back to the list is drawn")
+          assert.ok(
+            back.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+            "and it leads the header",
+          )
+
+          // The first version lands through the live record: Preview appears where it was absent and
+          // the words go, with nothing reloaded.
+          host.version = 1
+          await act(async () => noteChange(connectionKey(bot), "canvas"))
+          await until(() => Boolean(find('[data-canvas-flip="preview"]')), "Preview to appear")
+          assert.doesNotMatch(text(), /Your bot is building it…/)
+        },
+      )
+    }
+    const wide = async () => {
+      // A wide screen already has the chat beside the page, so the lane is where a canvas is built:
+      // no address is replaced, and no flip is drawn.
+      serveCanvases({ version: 0, undos: 0 })
+      await seedCanvasChat(CANVAS.id)
+      await mount(
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+            <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
+          </Routes>
+          <Nav />
+        </MemoryRouter>,
+        async () => {
+          await until(() => Boolean(composerField()), "the lane's chat")
+          assert.equal(nav(), `POP:/canvas/${CANVAS.id}`, "a wide screen keeps the canvas's address")
+          assert.ok(missing("[data-canvas-flip]"), "and the lane draws no flip")
+        },
+      )
+    }
+    try {
+      await atWidth(390, phone)()
+      await atWidth(1440, wide)()
+    } finally {
+      // The canvas store outlives a test, and the rest of this file opens c1 on a versioned page:
+      // leave the version the host really holds behind.
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
   },
 )
 
