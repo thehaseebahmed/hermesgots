@@ -2,10 +2,12 @@
 // screen of its own with one flip between them — a canvas made from a prompt opens on its chat
 // while the bot builds, Preview appears with the first version and draws the page, a box ticked on
 // the page is kept by the host, an edit sent from the chat lands as a new version, Preview is where
-// Undo is pressed, and a page that asks to leave is refused and drawn again. A browser is the tier
-// that holds it: the page is a sandboxed `srcdoc` document with an opaque origin of its own, the
-// refusal of an outside navigation is the browser's own policy, and the versions land from the
-// mock's clock rather than a component test's single step.
+// Undo is pressed, a page that asks to leave is refused and drawn again, and the chat's Point row
+// sends the reader to the page and takes the element they tap back as the field's chip. A browser is
+// the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque origin of its own,
+// the refusal of an outside navigation is the browser's own policy, the outline and the tap that
+// answer a point are that document's own script, and the versions land from the mock's clock rather
+// than a component test's single step.
 import { app, assert, flow, pass, SEND_CHORD } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
@@ -148,6 +150,43 @@ await flow(
     await until(() => frame().locator("#done").isChecked(), 10_000, "Undo to keep the box ticked")
     await shot("undone")
     pass("the preview screen: Undo draws the first version with the box still ticked")
+
+    // Pointing is the phone's round trip: the edit screen draws no page, so its Point row sends the
+    // reader to the page with pointing armed, and the tap that answers happens inside the sandboxed
+    // document — the outline under the finger and the element's words are the page's own script
+    // talking to the app through the bridge, which no DOM without a frame can produce.
+    await flip("edit").click()
+    await page.waitForURL(new RegExp(`/canvas/${id}/edit$`), { timeout: 20_000 })
+    await page.getByRole("button", { name: "Add context" }).click()
+    await page.getByRole("button", { name: "Point at the page", exact: true }).click()
+    await page.waitForURL(new RegExp(`/canvas/${id}\\?point=1$`), { timeout: 20_000 })
+    await page.getByText("Tap an element on the page", { exact: true }).waitFor({ timeout: 20_000 })
+    await shot("point-armed")
+    pass("the edit screen: Point at the page sends the reader to the page, armed")
+
+    // The page's own half: a pointer over an element outlines it, and a tap answers that element.
+    const headed = frame().locator("h1")
+    await headed.hover()
+    await until(
+      async () => (await headed.getAttribute("data-gots-point")) === "",
+      10_000,
+      "the page to outline the element under the pointer",
+    )
+    await headed.click()
+    await page.waitForURL(new RegExp(`/canvas/${id}/edit$`), { timeout: 20_000 })
+    const chip = page.locator("[data-draft-point]")
+    await chip.waitFor({ timeout: 20_000 })
+    assert.equal(
+      (await chip.innerText()).trim(),
+      "Deck checklist",
+      "the chip is the tapped element's own words",
+    )
+    await shot("point-chip")
+    pass("the preview screen: a tap on the page's h1 comes back as the chat's chip")
+
+    await page.getByRole("button", { name: "Remove the point on Deck checklist" }).click()
+    await chip.waitFor({ state: "detached", timeout: 10_000 })
+    pass("the edit screen: the chip's cross takes the point off the field")
   },
   { viewport: { width: 390, height: 844 }, touch: true },
 )
