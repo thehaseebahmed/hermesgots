@@ -723,7 +723,8 @@ class WriteTest(unittest.TestCase):
 
 
 class SessionTest(unittest.TestCase):
-    """The tools and the guide reach a canvas's session and no other, a compacted one included."""
+    """A canvas's page tools reach only its session, while the list of canvases reaches every one —
+    a compacted session included."""
 
     def setUp(self) -> None:
         self.home = temp_hermes_home(self)
@@ -769,13 +770,15 @@ class SessionTest(unittest.TestCase):
                 canvases.TOOL_DATA_READ,
                 canvases.TOOL_DATA_WRITE,
                 canvases.TOOL_EDIT,
+                canvases.TOOL_LIST,
                 canvases.TOOL_READ,
                 canvases.TOOL_WRITE,
             ],
         )
-        self.assertEqual(len(canvas_agent.tools), 5)
-        self.assertEqual(plain_agent.tools, [])
-        self.assertEqual(plain_agent.valid_tool_names, set())
+        self.assertEqual(len(canvas_agent.tools), 6)
+        # A session with no canvas of its own is exactly who needs to look one up.
+        self.assertEqual(plain_agent.valid_tool_names, {canvases.TOOL_LIST})
+        self.assertEqual(len(plain_agent.tools), 1)
 
         # The guide is the canvas's, and the component library's is withheld from that session.
         self.assertEqual(openui.canvas_content({"session_id": self.session + "-c1"}), openui.CANVAS_TEXT)
@@ -869,6 +872,61 @@ class SessionTest(unittest.TestCase):
                     )
                 ),
             )
+
+
+class ListTest(unittest.TestCase):
+    """A bot's canvases, named by any session: id, title, whether archived, and the clock.
+
+    A caller who knows no title is who the list is for, so it answers every canvas the bot has —
+    archived ones included and flagged, newest first — and never the picture a tile draws, which is
+    up to 192 KB a row.
+    """
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.path = db_path(self.home)
+        # An archived canvas, whose tile carries a picture, then one made after it: the list is
+        # newest first and the picture is no part of a name.
+        self.archived = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt="A run log", body=BODY
+        )
+        canvases.update(self.path, self.archived["id"], {"archived": True})
+        canvases.write(
+            self.path,
+            self.archived["id"],
+            DOCUMENT,
+            image="data:image/png;base64," + "A" * 32,
+        )
+        time.sleep(0.005)
+        self.newest = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt=PROMPT, body=BODY
+        )
+        self.plain = triage.open_thread(self.path, "bot-1")[1]
+
+    def test_canvas_list_names_every_canvas_without_its_picture(self) -> None:
+        # A plain session and a canvas's own session are answered the same list.
+        for session_id in (self.plain, self.archived["session_id"]):
+            with self.subTest(session=session_id):
+                listed = json.loads(canvases.handle_list({}, session_id=session_id))
+                self.assertEqual(list(listed), ["canvases"])
+                rows = listed["canvases"]
+                self.assertEqual(
+                    [row["id"] for row in rows], [self.newest["id"], self.archived["id"]]
+                )
+                self.assertEqual([row["archived"] for row in rows], [False, True])
+                self.assertEqual(
+                    [row["title"] for row in rows],
+                    [canvases.title_of(PROMPT), "A run log"],
+                )
+                for row in rows:
+                    self.assertEqual(list(row), ["id", "title", "archived", "at"])
+        # It takes no arguments: the caller who knows no name asks it as it is.
+        self.assertEqual(canvases.LIST_SCHEMA["parameters"], {"type": "object", "properties": {}})
+        # A caller that sends nothing at all is answered the same list.
+        self.assertEqual(
+            json.loads(canvases.handle_list(None, session_id=self.plain))["canvases"][0]["id"],
+            self.newest["id"],
+        )
 
 
 class EditTest(unittest.TestCase):

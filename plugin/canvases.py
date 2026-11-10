@@ -9,6 +9,8 @@ write is a row of ``canvas_versions``, the newest ``KEEP_VERSIONS`` kept. A canv
 from its own session: ``canvas_write``, ``canvas_edit`` and ``canvas_read`` are equipped there and
 nowhere else, and the canvas is found from a run's session by walking the chat's compression lineage
 (``sessions.chat_session``), so a chat that has been compacted still reaches its canvas.
+``canvas_list`` is the one tool every session is given, since a session with no canvas of its own is
+who has to look one up; it answers the names (``names``), never a record's picture.
 
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
 it is archived out of the list — are the host's record too (``update``), so every device draws the same
@@ -100,6 +102,7 @@ TOOL_NAME_CHARS = 64
 # itself — and a picture past the cap is refused rather than trimmed.
 IMAGE_CHARS = 192 * 1024
 
+TOOL_LIST = "canvas_list"
 TOOL_WRITE = "canvas_write"
 TOOL_EDIT = "canvas_edit"
 TOOL_READ = "canvas_read"
@@ -355,6 +358,33 @@ def listing(path: Path) -> List[Dict[str, Any]]:
     finally:
         conn.close()
     return [_row(row) for row in rows]
+
+
+# --- the names -----------------------------------------------------------------------------------
+
+# What a canvas is called and where it sits in a list, and nothing of what it holds: a record's
+# picture rides the record, and no name is read by parsing up to ``IMAGE_CHARS`` of one.
+_NAMES = "id, title, archived, at"
+
+
+def names(path: Path) -> List[Dict[str, Any]]:
+    """Every canvas this bot has, as a name — its id, its title, whether it is archived and the
+    clock the list is ordered by — the one written to last first.
+
+    The list reads this rather than ``listing``: a record's picture is up to 192 KB a row and names
+    nothing, so a name is never parsed out of one.
+    """
+    if not path.exists():
+        return []
+    conn = connect(path)
+    try:
+        rows = conn.execute(f"SELECT {_NAMES} FROM canvases ORDER BY at DESC").fetchall()
+    finally:
+        conn.close()
+    return [
+        {"id": raw_id, "title": title, "archived": bool(archived), "at": at}
+        for raw_id, title, archived, at in rows
+    ]
 
 
 def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[Dict[str, Any]]:
@@ -1387,6 +1417,16 @@ def _tool_canvas(session_id: Optional[str]) -> tuple[Optional[str], Optional[Pat
 
 # --- the tools -----------------------------------------------------------------------------------
 
+LIST_SCHEMA = {
+    "name": TOOL_LIST,
+    "description": (
+        "Lists every canvas this bot has — each one's id, its title, whether it is archived and "
+        "when it last changed, newest first — so a canvas can be named by its title or its id. It "
+        "takes no arguments, and it works in any of this bot's sessions."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
 WRITE_SCHEMA = {
     "name": TOOL_WRITE,
     "description": (
@@ -1541,6 +1581,23 @@ def _tool_answer(
     return json.dumps(answer(found))
 
 
+def handle_list(
+    args: Any = None, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: every canvas this bot has, newest first, archived ones included and flagged.
+
+    The one canvas tool that reaches every session: a caller who knows no title is who needs to look
+    one up, and a session with no canvas of its own has no other way to learn what there is. It reads
+    the store's names, never a record's picture.
+    """
+    _canvas, path = _call_canvas(task_id, session_id)
+    if path is None:
+        return json.dumps(
+            {"error": f"{TOOL_LIST} can't read this bot's store, so it can't name its canvases."}
+        )
+    return json.dumps({"canvases": names(path)})
+
+
 def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: writes the canvas whose session made the call."""
     args = args if isinstance(args, dict) else {}
@@ -1657,7 +1714,8 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's five tools."""
+    """Keeps the context and registers the canvas's tools — the list every session carries, and the
+    five a canvas's own session is given."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -1665,6 +1723,7 @@ def register(plugin_ctx: Any) -> bool:
         return False
     took = True
     for tool, schema, handler in (
+        (TOOL_LIST, LIST_SCHEMA, handle_list),
         (TOOL_WRITE, WRITE_SCHEMA, handle_write),
         (TOOL_EDIT, EDIT_SCHEMA, handle_edit),
         (TOOL_READ, READ_SCHEMA, handle_read),
@@ -1682,14 +1741,19 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives a canvas's agents its five tools, and only them: every other session would carry
-    tools it can't use."""
+    """Gives a canvas's agents its five page and data tools, and every agent the list.
+
+    The list is wired with no ``when``: a session with no canvas of its own is exactly who needs to
+    look one up. The five that read or change a canvas stay in the session that canvas is edited in.
+    """
     global adapter, _wired
     adapter = api_adapter
     def is_canvas(session: Optional[str]) -> bool:
         return _session_canvas(session) is not None
 
-    took = tools_common.wire_tool(api_adapter, TOOL_WRITE, WRITE_SCHEMA, TOOL_WRITE, when=is_canvas)
+    took = tools_common.wire_tool(api_adapter, TOOL_LIST, LIST_SCHEMA, TOOL_LIST)
+    if not tools_common.wire_tool(api_adapter, TOOL_WRITE, WRITE_SCHEMA, TOOL_WRITE, when=is_canvas):
+        took = False
     if not tools_common.wire_tool(api_adapter, TOOL_EDIT, EDIT_SCHEMA, TOOL_EDIT, when=is_canvas):
         took = False
     if not tools_common.wire_tool(api_adapter, TOOL_READ, READ_SCHEMA, TOOL_READ, when=is_canvas):
