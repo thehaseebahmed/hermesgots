@@ -136,14 +136,14 @@ function ProvidersPage({ profile }: { profile: Profile }) {
         <Group>
           {rows.map((row) => (
             <ValueRow
-              key={row.slug}
+              key={row.target}
               title={row.title}
-              purpose={row.description || undefined}
+              purpose={row.purpose || undefined}
               // The mask, or nothing: `ValueRow` draws an empty value as *Not set*, which is the
               // truth about a provider with no key — there is no separate flag to disagree with it.
               value={row.value}
-              onClick={() => navigate(botSubPath(profile.id, "llm-providers", "key", row.slug))}
-              data-setting={`llm-provider-${row.slug}`}
+              onClick={() => navigate(botSubPath(profile.id, "llm-providers", "key", row.target))}
+              data-setting={`llm-provider-${row.target}`}
             />
           ))}
         </Group>
@@ -156,18 +156,23 @@ function ProvidersPage({ profile }: { profile: Profile }) {
         <>
           <Caption>Custom endpoints</Caption>
           <Group>
-            {endpoints.map((endpoint) => (
-              <ValueRow
-                key={endpoint.id}
-                title={endpoint.title}
-                purpose={endpoint.purpose || undefined}
-                value={endpoint.value}
-                onClick={() =>
-                  navigate(botSubPath(profile.id, "llm-providers", "key", endpoint.target))
-                }
-                data-setting={`llm-endpoint-${endpoint.id}`}
-              />
-            ))}
+            {endpoints.map((endpoint) => {
+              // The endpoint's own id, read back out of the address its key is written to: the row's
+              // target is one fact, and the name this page knows the endpoint by is that fact read.
+              const id = customEndpointId(endpoint.target)
+              return (
+                <ValueRow
+                  key={id}
+                  title={endpoint.title}
+                  purpose={endpoint.purpose || undefined}
+                  value={endpoint.value}
+                  onClick={() =>
+                    navigate(botSubPath(profile.id, "llm-providers", "key", endpoint.target))
+                  }
+                  data-setting={`llm-endpoint-${id}`}
+                />
+              )
+            })}
           </Group>
         </>
       )}

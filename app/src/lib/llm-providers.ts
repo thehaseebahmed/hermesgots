@@ -41,11 +41,25 @@ export interface LlmProviders {
   endpoints: LlmEndpoint[]
 }
 
-/** One provider's row: its label, the host's line about it, and the mask as the value. */
+/**
+ * One row the page draws, whatever kind of key it holds: the address that key is written to, the row's
+ * title, the muted line under it, and the mask as the value. One shape for both lists, so the page's
+ * row is drawn once — a provider's address is its catalog slug and its line the host's own
+ * description, and an endpoint's address is `custom:<id>` and its line the base URL and model it runs.
+ */
 export interface LlmProviderRow {
-  slug: string
+  /**
+   * The address its key is written to: a provider's catalog slug, or an endpoint's `custom:<id>`. One
+   * address, one key, whatever kind of row owns it.
+   */
+  target: string
+  /** The row's title: a provider's label, or an endpoint's name. */
   title: string
-  description: string
+  /**
+   * The host's muted line under the title: a provider's own description, or an endpoint's base URL and
+   * model. Neither is the page's to change, so neither is the row's value.
+   */
+  purpose: string
   /**
    * The mask, or `""` where no key is set: an empty value is what `ValueRow` already draws as
    * *Not set*, so the page says a key is missing the way every other row says it.
@@ -56,9 +70,9 @@ export interface LlmProviderRow {
 /** The providers' rows, in the host's order: a label over its line, its mask as the value. */
 export function providerRows(block: LlmProviders): LlmProviderRow[] {
   return block.providers.map((provider) => ({
-    slug: provider.slug,
+    target: provider.slug,
     title: provider.label,
-    description: provider.description,
+    purpose: provider.description,
     value: provider.masked ?? "",
   }))
 }
@@ -76,25 +90,13 @@ export function customEndpointId(target: string): string {
   return target.startsWith(CUSTOM_TARGET) ? target.slice(CUSTOM_TARGET.length) : ""
 }
 
-/** One endpoint's row: its name, the URL and model it runs, and its mask as the value. */
-export interface LlmEndpointRow {
-  id: string
-  /** The address its key is written to, `custom:<id>`. */
-  target: string
-  title: string
-  purpose: string
-  /** The mask, or `""` where no key is set — which `ValueRow` draws as *Not set*. */
-  value: string
-}
-
 /**
  * The endpoints' rows, in the host's order: the endpoint's name, the base URL and model it runs on
- * one line, and its mask as the value. Neither the URL nor the model is the page's to change, so
- * they are the row's line rather than its value.
+ * one line, and its mask as the value — the same row a provider draws, under the address its key is
+ * written to.
  */
-export function endpointRows(block: LlmProviders): LlmEndpointRow[] {
+export function endpointRows(block: LlmProviders): LlmProviderRow[] {
   return block.endpoints.map((endpoint) => ({
-    id: endpoint.id,
     target: customTarget(endpoint.id),
     title: endpoint.name,
     purpose: [endpoint.base_url, endpoint.model].filter(Boolean).join(" · "),

@@ -12,6 +12,7 @@ import {
   customEndpointId,
   customTarget,
   endpointRows,
+  providerRows,
   submittableEndpoint,
   submittableKey,
 } from "../src/lib/llm-providers.ts"
@@ -90,7 +91,6 @@ test("an endpoint's row is its name, the URL and model it runs, and its mask", (
   assert.deepEqual(
     rows[0],
     {
-      id: "local-llama",
       target: "custom:local-llama",
       title: "Local Llama",
       purpose: "http://127.0.0.1:8080/v1 · llama-3.1-8b",
@@ -100,6 +100,42 @@ test("an endpoint's row is its name, the URL and model it runs, and its mask", (
   )
   assert.equal(rows[1].value, "", "an endpoint with no key draws as Not set")
   assert.equal(rows[1].purpose, "https://bare.example.com/v1 · bare-1")
+})
+
+test("both lists are one row: an address, a title, the line under it, and the mask", () => {
+  // The two kinds of key differ in what its address is and what its line says, not in the shape a row
+  // has — so the page draws either list with one row, and neither can grow a field the other lacks.
+  const block = {
+    providers: [
+      { slug: "openai", label: "OpenAI", description: "GPT models.", masked: "sk-o...c123" },
+    ],
+    endpoints: [
+      {
+        id: "local-llama",
+        name: "Local Llama",
+        base_url: "http://127.0.0.1:8080/v1",
+        model: "llama-3.1-8b",
+        masked: null,
+      },
+    ],
+  }
+  const [provider] = providerRows(block)
+  const [endpoint] = endpointRows(block)
+  assert.deepEqual(
+    Object.keys(provider).sort(),
+    Object.keys(endpoint).sort(),
+    "one shape for a provider's row and an endpoint's",
+  )
+  assert.deepEqual(
+    provider,
+    {
+      target: "openai",
+      title: "OpenAI",
+      purpose: "GPT models.",
+      value: "sk-o...c123",
+    },
+    "a provider's row: its slug as the address, its label, the host's line, and its mask",
+  )
 })
 
 test("a key's address is one target: custom:<id> for an endpoint, a slug for a provider", () => {
