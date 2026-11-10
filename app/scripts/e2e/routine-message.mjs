@@ -16,7 +16,7 @@ const NOTE = "[data-slot=routine-note]"
 const TITLE = "Morning watch"
 const SAID = "The tide turns at 06:40"
 /** The run's own prompt: the transcript on its screen is its session, read whole. */
-const ASKED = "Watch the tide and tell me in Main when it turns."
+const ASKED = "Watch the tide and tell me in a chat when it turns."
 
 /** The same claims at every look: the list's row, then the run read-only where the row leads. */
 async function drive({ page, profileId, send, newChat, lastReply, until, shot }) {

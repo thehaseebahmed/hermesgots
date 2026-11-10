@@ -1672,7 +1672,7 @@ function recordRoutine(req, body) {
       session_id: runSession,
       timestamp: Date.now() / 1000,
       role: "user",
-      content: "Watch the tide and tell me in Main when it turns.",
+      content: "Watch the tide and tell me in a chat when it turns.",
     },
     {
       id: ++lastRowId,

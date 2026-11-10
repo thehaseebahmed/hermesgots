@@ -39,9 +39,12 @@ for (const width of [390, 1024]) {
         await page.goto(`${app}/code`)
         await page.getByRole("button", { name: "New session" }).first().waitFor({ timeout: 15_000 })
         await shot("code")
-        // A bot's routines are the bot's own screen: its list's control opens it, at both widths.
+        // A bot's routines are the bot's own screen: its list's control opens it, at both widths. The
+        // control is the link it is, not a button wearing a link's clothes.
         await page.goto(`${app}/b/${profileId}`)
-        await page.getByRole("button", { name: "Routines" }).first().click()
+        await page.getByRole("link", { name: "Routines" }).first().waitFor({ timeout: 15_000 })
+        await shot("bot-chats")
+        await page.getByRole("link", { name: "Routines" }).first().click()
         await page.waitForURL(`**/b/${profileId}/routines`, { timeout: 15_000 })
         await page.getByText("Inbox triage").first().waitFor({ timeout: 15_000 })
         await shot("routines")
