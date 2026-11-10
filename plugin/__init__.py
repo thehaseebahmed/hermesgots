@@ -3052,15 +3052,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         ),
     )
 
-    # One custom endpoint added: the page's four fields, and the host's own `upsert_custom_endpoint`
-    # is what writes them — it validates the URL, slugs the id, writes `providers.<id>` and puts the
-    # key in `.env` behind the entry's `key_env`. So a refusal (a URL with no host, a name an
-    # endpoint already carries) is the host's own sentence, answered as a 400 the user can read.
+    # One custom endpoint added or edited: the body's name, base URL and model, with the transport and
+    # affinity header where it sends them and its id where the page is editing one. The entry is built
+    # by the host's own builder and laid over the one stored (llm_providers.py), so a refusal — a URL
+    # with no host, a name an endpoint already carries, an id this host doesn't list — is answered as a
+    # 400 the user can read. The key is optional, and an absent one leaves the stored key alone.
     app.router.add_post(
         f"{PREFIX}/llm-providers/endpoints",
         llm_route(
             action=llm_providers.add_endpoint,
-            needs_body="Body needs a name, a base URL, a model and a key.",
+            needs_body="Body needs a name, a base URL and a model.",
             unavailable="This Hermes version can't add a custom endpoint from here.",
             failed="The host couldn't add that endpoint.",
             logged="gots: couldn't add this bot's custom endpoint",

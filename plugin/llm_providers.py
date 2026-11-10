@@ -26,33 +26,50 @@ indirection — so the entry's own ``key_env`` is read from the profile's ``conf
 masked, and a plaintext ``api_key`` an older release left in the entry is masked the same way. A
 legacy row's entry is the ``custom_providers`` one its name slugs to, so a row the migration never
 converted reads the key it really authenticates with rather than *Not set*. An entry with neither
-reads *Not set*.
+reads *Not set*. That same entry is where a row's ``transport`` and ``affinity`` come from — the
+transport under either spelling this host accepts (``transport``, or the older ``api_mode``) and the
+affinity header under ``session_affinity_header``, both empty where the entry names neither — so the
+two settings the form edits are drawn from the one block the form writes.
 
 A key is written through Hermes's credential lifecycle (``save_provider_env_credential``), never its
 ``config.yaml`` writer: the lifecycle also reconciles the config mirrors, the env-seeded
 credential-pool entries and the provider's model-cache rows, which would otherwise keep
-authenticating with the key that was just replaced. An endpoint's key goes the same way through the
-host's own ``upsert_custom_endpoint`` — the plugin composes no ``providers`` entry and writes no
-``config.yaml`` — and its target is spelled ``custom:<id>`` so one address names one key whatever
-kind of row owns it. A body whose key *is* a mask — the shape the page was handed — is refused on
-the host's own rule before any of that is asked.
+authenticating with the key that was just replaced. An endpoint's key is that same write, behind the
+``key_env`` its entry names — ``custom:<id>`` is one address for one key whatever kind of row owns it
+— so a key replace rewrites no entry at all. A body whose key *is* a mask — the shape the page was
+handed — is refused on the host's own rule before any of it is asked.
 
-An endpoint is added through that same writer, with the four fields a form holds — so the plugin
-slugs no id and composes no ``providers`` entry there either — and a name an endpoint already carries
-is refused before it, because the writer would merge onto that entry rather than add a second one.
+An entry written here is the shape this Hermes stores one in — ``api``, ``key_env``,
+``transport``, ``session_affinity_header`` and ``default_model`` beside whatever else the block
+carries — and the plugin composes none of it: the entry is built by the host's own builder,
+``hermes_cli.config_providers._custom_provider_entry_to_provider_config``, which is the function the
+host's own writers and migration use, so a field Hermes teaches it about later is written here
+without a plugin release. The plugin's own part is the merge: the builder's answer is laid over the
+entry already there, so only the fields the page's form sends move, and every key the form has no
+field for — ``extra_headers``, the ``ssl_*`` pair, ``catalog_provider``, ``models``, ``extra_body``,
+``rate_limit_delay`` — survives exactly as it was written.
 
-It is removed through the host's own ``delete_custom_endpoint``, which drops the ``providers`` entry,
-detaches any main-model mirror from it and takes its key out of ``.env`` — the same entry, in one
-writer, so the plugin composes no removal of its own. Not while the bot's model runs on it, though:
-the list's ``is_current`` row is refused before that writer is asked, because deleting it would
-silently unpick a model the reader chose somewhere this page can't. Switching one is a model-picking
-decision, so the refusal says to make it there first.
+A POST is one endpoint's write, whether or not that endpoint is there yet: a body carrying an id
+edits that endpoint — keeping the id and its ``key_env`` — and a body without one creates an
+endpoint under the id the host slugs from its name, which is also why a name an endpoint already
+carries is refused rather than allowed to take over that endpoint's entry. A body that carries no
+key leaves the stored one exactly as it is: an empty key field is what the page hands back for a key
+it drew as a mask, so reading it as *clear* would delete a key nobody asked about.
 
 A key is removed through the same lifecycle (``remove_provider_env_credential``), never its
 ``remove_env_value``: dropping the value from ``.env`` alone leaves the value-matched ``config.yaml``
 mirror and the pool entry behind, still authenticating with a key the page says is gone. A removal of
 a key that is already absent is not an error — the lifecycle's own removal is idempotent, so a stale
-screen and a ``curl`` both get the fresh block, in which the row simply reads *Not set*.
+screen and a ``curl`` both get the fresh block, in which the row simply reads *Not set*. It is the
+provider's key that is removed there: an endpoint's key goes with the endpoint, in the one host
+writer that removes both.
+
+An endpoint itself is removed through the host's own ``delete_custom_endpoint``, which drops the
+``providers`` entry, detaches any main-model mirror from it and takes its key out of ``.env`` — the
+same entry, in one writer, so the plugin composes no removal of its own. Not while the bot's model
+runs on it, though: the list's ``is_current`` row is refused before that writer is asked, because
+deleting it would silently unpick a model the reader chose somewhere this page can't. Switching one
+is a model-picking decision, so the refusal says to make it there first.
 
 Every Hermes import stays inside the function that uses it, as everywhere in this plugin, and none
 is softened into a default: a host without the catalog raises ImportError, which the route answers
@@ -66,7 +83,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import credentials
+from . import config_keys, credentials
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +116,10 @@ def _endpoint_list() -> List[Dict[str, Any]]:
 def _slug(name: str) -> str:
     """The id the host slugs from an endpoint's name, imported where it is used.
 
-    ``upsert_custom_endpoint`` writes ``providers.<id>`` under this function's own answer, and the
-    list reports each row by that id — so the plugin asks it rather than restating the rule: the id
-    a legacy entry is filed under and the id a new name would collide with are then one spelling by
-    construction, and ``Home box!`` cannot land on a ``Home box`` that is already there.
+    A new endpoint is filed under this function's own answer — the id ``providers.<id>`` is named by,
+    and the id the host's list reports each row by — so the plugin asks it rather than restating the
+    rule: the id a legacy entry is filed under and the id a new name would collide with are then one
+    spelling by construction, and ``Home box!`` cannot land on a ``Home box`` that is already there.
     """
     from hermes_cli.web_routers.config_env import _custom_endpoint_id
 
@@ -127,30 +144,51 @@ def _entry_mask(entry: Any) -> Optional[str]:
     return None
 
 
+def _entry_transport(entry: Any) -> str:
+    """One entry's transport, under either spelling this host reads, or ``""`` where it pins none.
+
+    ``api_mode`` is the spelling the Dashboard's own writer emits and the normalizer reads first;
+    ``transport`` is the v12 one this instance's ``providers.litellm`` is written in. Both are the
+    same setting, so a row reports whichever the entry carries rather than restating the order in
+    the page — and an entry that pins nothing says so with an empty string, which is what the
+    runtime's auto-detect is.
+    """
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("transport") or entry.get("api_mode") or "").strip()
+
+
+def _entry_affinity(entry: Any) -> str:
+    """One entry's session-affinity header, or ``""`` where it names none."""
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("session_affinity_header") or "").strip()
+
+
 def _endpoints(
     config_path: Path, listed: Optional[List[Dict[str, Any]]] = None
 ) -> List[Dict[str, Any]]:
     """The page's endpoint rows: what the host lists, each key as the mask its own entry names.
 
     ``listed`` is the list a write already fetched and left as it was (a key write changes no row),
-    so that write reads the host's list once rather than twice; an add or a removal passes none,
-    since only the host's fresh list holds the row the answer must show.
+    so that write reads the host's list once rather than twice; an add, an edit or a removal passes
+    none, since only the host's fresh list holds the row the answer must show.
 
     The profile's ``config.yaml`` is opened once, and only where the host listed something: it is
-    the one place an endpoint's ``key_env`` can be read — the list says a key exists but never which
-    value it is, and its ``api_key_preview`` is the host's ``"${KEY_ENV}"`` display, not a mask.
+    the one place an endpoint's ``key_env``, ``transport`` and ``session_affinity_header`` can be
+    read — the list says a key exists but never which value it is, its ``api_key_preview`` is the
+    host's ``"${KEY_ENV}"`` display rather than a mask, and it carries no affinity header at all.
 
     An entry lives under ``providers.<id>`` — for a row in either kind of endpoint, since a
-    ``providers`` entry is what the host's writer makes of one. A legacy ``custom_providers`` row —
-    one the host still routes but the migration never converted — has no such entry, so its key is
-    the one *that* list's entry names: the two are read where the host lists them, so a legacy row
-    reads its mask rather than *Not set* until a key write converts it (the host's own writer pops
-    the legacy row and writes a ``providers`` one).
+    ``providers`` entry is what a write here makes of one. A legacy ``custom_providers`` row — one
+    the host still routes but the migration never converted — has no such entry, so its key is the
+    one *that* list's entry names: the two are read where the host lists them, so a legacy row reads
+    its mask rather than *Not set* until a write here converts it (which pops the legacy row and
+    writes a ``providers`` one).
     """
     rows_listed = _endpoint_list() if listed is None else listed
     if not rows_listed:
         return []
-    from . import config_keys
 
     config = config_keys.load(config_path, strict=True)
     providers = config.get("providers")
@@ -163,13 +201,16 @@ def _endpoints(
         if not endpoint_id:
             # A row with no id has no address to write to and no entry to read: it is no row.
             continue
+        entry = _entry_of(endpoint_id, entries, legacy)
         rows.append(
             {
                 "id": endpoint_id,
                 "name": str(raw.get("name") or endpoint_id),
                 "base_url": str(raw.get("base_url") or ""),
                 "model": str(raw.get("model") or ""),
-                "masked": _entry_mask(_entry_of(endpoint_id, entries, legacy)),
+                "transport": _entry_transport(entry),
+                "affinity": _entry_affinity(entry),
+                "masked": _entry_mask(entry),
             }
         )
     return rows
@@ -213,9 +254,9 @@ def _endpoint_of(endpoint_id: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]
 def _host_refusal(error: BaseException) -> Optional[str]:
     """The sentence a host's own HTTP refusal carries, or ``None`` for any other exception.
 
-    ``upsert_custom_endpoint`` raises FastAPI's ``HTTPException`` for a body it won't take (``model
-    required``, a base URL with no host). The plugin reads it by its two attributes rather than
-    importing FastAPI for it: the host that raises one is the host that imported it.
+    ``delete_custom_endpoint`` raises FastAPI's ``HTTPException`` for an id its own writer won't
+    remove. The plugin reads it by its two attributes rather than importing FastAPI for it: the host
+    that raises one is the host that imported it.
     """
     status = getattr(error, "status_code", None)
     detail = getattr(error, "detail", None)
@@ -225,12 +266,12 @@ def _host_refusal(error: BaseException) -> Optional[str]:
 
 
 def _ask_host(call: Callable[..., Any], *args: Any) -> None:
-    """Ask one of the host's own custom-endpoint verbs, its refusal read as the sentence it carries.
+    """Ask the host's own custom-endpoint removal, its refusal read as the sentence it carries.
 
-    A body or an id the host won't take arrives as FastAPI's ``HTTPException``, and every caller here
-    wants the same thing of that: the sentence as a ``ValueError``, which the route answers as the
-    400 the user reads. Anything else is left to raise as it came — a host that is simply broken is
-    the route's 502, not a refusal the reader could act on.
+    An id the host won't remove arrives as FastAPI's ``HTTPException``, and the caller wants the
+    sentence as a ``ValueError``, which the route answers as the 400 the user reads. Anything else is
+    left to raise as it came — a host that is simply broken is the route's 502, not a refusal the
+    reader could act on.
     """
     try:
         call(*args)
@@ -353,18 +394,229 @@ def _refuse_preview(key: str) -> None:
         raise ValueError("That is a masked key, not a key. Type the key itself.")
 
 
+# The sentence the host's own endpoint writer uses for a URL it won't take. The builder refuses one
+# by answering no entry at all rather than by raising, so the words are carried here — the host's own,
+# not a rewording a reader would have to reconcile with what the Dashboard says.
+_BAD_URL = "base_url must include scheme and host"
+
+# The sentence a body short one of the three fields an endpoint is refuses with. The page's form draws
+# all three as required, so this is a stale screen or a `curl` rather than a control offering nothing.
+_MISSING_FIELDS = "A custom endpoint needs a name, a base URL and a model."
+
+# The fields this page's form owns: the form's own name for one, the key the host's builder writes it
+# as, and the older spellings of that same setting. The normalizer reads those *first*, so a stale one
+# left beside the new value would shadow it — an edit therefore clears every spelling before it writes.
+_FORM_FIELDS: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
+    ("name", "name", ()),
+    ("base_url", "api", ("base_url", "url")),
+    ("model", "default_model", ("model",)),
+    ("transport", "transport", ("api_mode",)),
+    ("affinity", "session_affinity_header", ()),
+)
+
+
+def _entry_builder() -> Callable[..., Optional[Dict[str, Any]]]:
+    """The host's own builder: an entry in the older shape in, the ``providers.<id>`` shape out.
+
+    ``_custom_provider_entry_to_provider_config`` is the function Hermes's own endpoint writer and its
+    v11→v12 migration use, so the entry this page lands is the one the Dashboard, ``hermes model`` and
+    the runtime already read — a field Hermes teaches it later needs no release here. Its private name
+    is the cost of that: a rename is an ImportError the route answers with a 501.
+    """
+    from hermes_cli.config_providers import _custom_provider_entry_to_provider_config
+
+    return _custom_provider_entry_to_provider_config
+
+
+def _endpoint_key_env(endpoint_id: str) -> str:
+    """The variable this host names a custom endpoint's key by, imported where it is used.
+
+    ``HERMES_CUSTOM_<ID>_API_KEY`` — the name this instance's own ``providers.litellm`` holds its key
+    behind — so a key written here lands where the host's own setup would have put it.
+    """
+    from hermes_cli.config import custom_endpoint_key_env
+
+    return custom_endpoint_key_env(endpoint_id)
+
+
+def _raw_config(config_path: Path) -> Dict[str, Any]:
+    """The profile's ``config.yaml`` exactly as written, for a write to merge onto.
+
+    Not ``config_keys.load``'s view: that expands ``${VAR}`` references, and an entry whose ``api_key``
+    is one would come back as the secret itself and be written into the file by the merge. This is the
+    host's own guarded read for a read-then-write, which refuses a file it cannot parse rather than
+    letting a partial mapping replace it.
+    """
+    from hermes_cli.config import require_readable_config_before_write
+
+    config = require_readable_config_before_write(config_path)
+    return config if isinstance(config, dict) else {}
+
+
+def _canonical_entry(fields: Dict[str, str]) -> Dict[str, Any]:
+    """The form's fields as the host's own builder writes them, or the host's refusal.
+
+    The builder reads the older spelling — ``base_url`` for the URL it emits as ``api``, ``model`` for
+    ``default_model``, ``api_mode`` for ``transport`` — and it answers no entry at all for a URL with
+    no scheme or host. That ``None`` is the host's refusal and leaves here as its own sentence.
+    """
+    built = _entry_builder()(
+        {
+            "name": fields["name"],
+            "base_url": fields["base_url"],
+            "model": fields["model"],
+            "api_mode": fields.get("transport", ""),
+            "session_affinity_header": fields.get("affinity", ""),
+        },
+        provider_key=fields["id"],
+    )
+    if not isinstance(built, dict):
+        raise ValueError(_BAD_URL)
+    return built
+
+
+def _form_entry(entry: Dict[str, Any], fields: Dict[str, str]) -> Dict[str, Any]:
+    """The form's fields laid over an entry: only what the body sent moves, and all of it moves.
+
+    ``_custom_provider_entry_to_provider_config`` answers what those fields *are*, not what the entry
+    already holds — so its answer is laid over the stored block rather than replacing it, and every
+    key the form has no field for (``extra_headers``, ``ssl_verify``/``ssl_ca_cert``,
+    ``catalog_provider``, ``models``, ``extra_body``, ``rate_limit_delay``, ``key_env``) is left
+    exactly as it was written.
+
+    A field the body did not send is not a field the form changed, so the entry keeps its own; a field
+    the body sent empty is a field the form cleared, so its every spelling goes — the builder drops an
+    empty ``transport``/affinity, and the merge would otherwise leave the stored value, or worse an
+    older spelling of it, standing where the reader just cleared it.
+    """
+    built = _canonical_entry(fields)
+    merged = dict(entry)
+    for field, name, older in _FORM_FIELDS:
+        if field not in fields:
+            continue
+        for spelling in older:
+            merged.pop(spelling, None)
+        if name in built:
+            merged[name] = built[name]
+        else:
+            merged.pop(name, None)
+    return merged
+
+
+def _stored_value(entry: Dict[str, Any], names: Tuple[str, ...]) -> str:
+    """One of an entry's fields, under any of the spellings it may hold it in, or ``""``."""
+    for name in names:
+        value = str(entry.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _complete(entry: Dict[str, Any], fields: Dict[str, str]) -> Dict[str, str]:
+    """The form's fields with the three every entry needs, taken from the entry where none was sent.
+
+    An edit sends only what it changed — the page writes each field whose value differs and no other —
+    so a save that moved the model alone carries no name and no base URL. The builder answers an entry
+    only from all three, and the ones the body left out are the ones already stored, read under either
+    spelling the entry may hold them in. A field equal to what was stored is no change at all: laying
+    it back over the entry writes the same value.
+    """
+    complete = dict(fields)
+    for field, names in (
+        ("name", ("name",)),
+        ("base_url", ("base_url", "url", "api")),
+        ("model", ("model", "default_model")),
+    ):
+        if field not in complete:
+            complete[field] = _stored_value(entry, names)
+    return complete
+
+
+def _write_entry(
+    config_path: Path,
+    endpoint_id: str,
+    *,
+    fields: Optional[Dict[str, str]] = None,
+    key: str = "",
+) -> None:
+    """Write one endpoint's entry — and its key — the way this Hermes stores one.
+
+    ``fields`` are what the form sent, or ``None`` for a write that changes no field (a key replace);
+    ``key`` is a typed key, or ``""`` for one the body did not carry. The entry is the one already
+    stored — converted through the builder first where it came from the legacy ``custom_providers``
+    list, so it lands in the v12 shape rather than carrying its older spelling into ``providers`` —
+    with the form's fields laid over it and the ``key_env`` a key needs named where it has none.
+
+    The entry is written before the key: the entry is the address the key is found by, so a key whose
+    write failed leaves an endpoint that reads *Not set* rather than a value in ``.env`` nothing names.
+    A plaintext ``api_key`` an older release left in the entry goes when a key is written here, since
+    the one place a key is stored is ``.env``.
+
+    ``config.yaml`` is opened only where something about the entry changes: a key replace on an entry
+    that already names its ``key_env`` writes the key and nothing else, and no entry at all is touched.
+    """
+    config = _raw_config(config_path)
+    providers = config.get("providers")
+    providers = providers if isinstance(providers, dict) else {}
+    legacy = config.get("custom_providers")
+    legacy = [one for one in legacy if isinstance(one, dict)] if isinstance(legacy, list) else []
+    stored = _entry_of(endpoint_id, providers, legacy)
+    converted = isinstance(stored, dict) and not isinstance(providers.get(endpoint_id), dict)
+    if not isinstance(stored, dict):
+        entry: Dict[str, Any] = {}
+    elif converted:
+        # A legacy row is converted through the builder, not copied: `base_url`/`model` are what the
+        # entry it came from spells, and `api`/`default_model` are what a `providers` entry holds.
+        entry = dict(_canonical_entry_of(stored, endpoint_id) or stored)
+    else:
+        entry = dict(stored)
+    wrote = converted
+    if fields is not None:
+        entry = _form_entry(entry, _complete(entry, fields))
+        wrote = True
+    if key:
+        key_env = str(entry.get("key_env") or "").strip() or _endpoint_key_env(endpoint_id)
+        if entry.get("key_env") != key_env:
+            entry["key_env"] = key_env
+            wrote = True
+        if "api_key" in entry:
+            entry.pop("api_key", None)
+            wrote = True
+    if wrote:
+        config_keys.write(config_path, f"providers.{endpoint_id}", entry)
+        if converted:
+            config["custom_providers"] = [
+                one for one in legacy if _slug(str(one.get("name") or "")) != endpoint_id
+            ]
+            config_keys.write(config_path, "custom_providers", config["custom_providers"])
+    if key:
+        from hermes_cli.credential_lifecycle import save_provider_env_credential
+
+        save_provider_env_credential(str(entry.get("key_env") or "").strip(), key)
+
+
+def _canonical_entry_of(entry: Dict[str, Any], endpoint_id: str) -> Optional[Dict[str, Any]]:
+    """One stored entry as the host's builder rewrites it, or ``None`` where it won't take it.
+
+    The entry's own ``key_env`` rides through the builder, so a legacy row's key stays named by the
+    variable it already used rather than being renamed behind the reader's back.
+    """
+    return _entry_builder()(dict(entry), provider_key=endpoint_id)
+
+
 def write_key(config_path: Path, target: str, key: str) -> Dict[str, Any]:
     """Write one key — a provider's or an endpoint's — and answer the page as it now reads.
 
-    A target spelled ``custom:<id>`` is a custom endpoint's key and goes through the host's own
-    ``upsert_custom_endpoint``; anything else is a catalog slug, whose write is Hermes's credential
-    lifecycle rather than its ``config.yaml`` writer (the lifecycle also reconciles the config
-    mirrors, the env-seeded credential-pool entries and the provider's model-cache rows, which would
-    otherwise keep authenticating with the key that was just replaced). The key is stripped once, at
-    the top, and that one string is what the mask rule reads and what would be stored — the same
-    helper an added endpoint's key goes through, so the two writes can't disagree about it. A mask is
-    refused before either is asked, and the key is never logged, echoed back or named in a refusal:
-    what a caller gets is the fresh block, in which the key is only ever its mask.
+    A target spelled ``custom:<id>`` is a custom endpoint's key and goes to ``.env`` behind the
+    ``key_env`` its entry names; anything else is a catalog slug, whose key goes to that provider's own
+    slot. Either way the write is Hermes's credential lifecycle rather than its ``config.yaml`` writer
+    (the lifecycle also reconciles the config mirrors, the env-seeded credential-pool entries and the
+    provider's model-cache rows, which would otherwise keep authenticating with the key that was just
+    replaced). The key is stripped once, at the top, and that one string is what the mask rule reads and
+    what would be stored — the same helper an added endpoint's key goes through, so the two writes can't
+    disagree about it. A mask is refused before either is asked, and the key is never logged, echoed
+    back or named in a refusal: what a caller gets is the fresh block, in which the key is only ever
+    its mask.
 
     Raises ``ValueError`` for a mask, an empty key or a target this host can't write, and
     ``ImportError`` where this host has no rule, lifecycle or endpoint list, which the route answers
@@ -388,98 +640,96 @@ def write_key(config_path: Path, target: str, key: str) -> Dict[str, Any]:
 
 
 def _write_endpoint_key(config_path: Path, endpoint_id: str, key: str) -> Dict[str, Any]:
-    """Replace one endpoint's key through the host's own writer, and answer the fresh block.
+    """Write one endpoint's key behind the ``key_env`` its entry names, and answer the fresh block.
 
-    The body is the host's ``CustomEndpointUpdate``, and the fields are the host's own: ``id``, the
-    stored ``name``, ``base_url`` and ``model`` come from the row its list answered, so the app can
-    never rewrite a field it does not own, and only the key is the caller's. The host writes the key
-    to ``.env`` behind the entry's ``key_env``, keeps the entry's other fields, and clears or
-    migrates a legacy plaintext ``api_key`` itself — which is why nothing is composed here and
-    ``config.yaml`` is never written.
+    The endpoint is resolved through the host's own list, so an id this host doesn't hold is refused in
+    a sentence naming it. Nothing of the entry's own is the caller's: the name, the base URL, the model
+    and the transport stay exactly as they are stored, and the key goes where every other key in this
+    plugin goes — ``.env``, through the credential lifecycle, so the config mirrors and the pool entry
+    are reconciled with it.
 
-    ``discover_models`` is carried on the body with the row's own answer: the model's default is
-    ``True``, and the host writes whatever the body says over the entry's stored value, so a body
-    that named none would quietly switch discovery back on for an endpoint that had turned it off.
+    The one entry field a key write can change is the ``key_env`` an entry has not named yet: that is
+    where the key is found by, so an entry with none is given the name this host gives one, and the
+    write that follows is the only reason ``config.yaml`` is opened here at all.
 
-    A host refusal (a base URL with no host, a model it won't take) arrives as FastAPI's
-    ``HTTPException`` and leaves here as a ``ValueError`` carrying its sentence, which the route
-    answers as a 400 the user can read.
+    The list the row came from is the answer's list: a key changes no row of it.
     """
     row, listed = _endpoint_of(endpoint_id)
-    from hermes_cli.web_models import CustomEndpointUpdate
-    from hermes_cli.web_routers.config_env import upsert_custom_endpoint
-
-    body = CustomEndpointUpdate(
-        id=str(row.get("id") or endpoint_id),
-        name=str(row.get("name") or endpoint_id),
-        base_url=str(row.get("base_url") or ""),
-        model=str(row.get("model") or ""),
-        api_key=key,
-        discover_models=bool(row.get("discover_models", True)),
-    )
-    _ask_host(upsert_custom_endpoint, body)
-    # The list the row came from is unchanged by a key: the answer is drawn from it, and only the
-    # config its masks are read from is opened again.
+    endpoint_id = str(row.get("id") or endpoint_id).strip()
+    _write_entry(config_path, endpoint_id, key=key)
     return read(config_path, listed=listed)
 
 
 def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Add one custom endpoint through the host's own writer, and answer the page as it now reads.
+    """Add or edit one custom endpoint, and answer the page as it now reads.
 
-    The body is the page's four fields — a name, a base URL, a model and the typed key — and nothing
-    else is composed here: ``upsert_custom_endpoint`` validates the URL, slugs the id from the name,
-    writes ``providers.<id>``, puts the key in ``.env`` behind the entry's ``key_env`` and clears or
-    migrates a legacy plaintext ``api_key`` on the same write. So the plugin writes no config and
-    makes no id, and an endpoint Hermes adds later is added the same way.
+    A body carrying an ``id`` is an edit of the endpoint this host lists under it: the entry stays
+    where it is, under that id and its ``key_env``, and the fields the body sends — its name, its base
+    URL, its model, and the transport and affinity header where it sends those — take the new value.
+    Only what it sends: the page writes the fields whose value differs from the row it opened, so an
+    edit that moved the model alone carries no name and no base URL, and the entry's own stand in for
+    them. A body without an id is a new endpoint, filed under the id the host slugs from its name; a
+    name an endpoint already carries is refused, because a second endpoint under that id would take
+    over the first one's entry rather than be added beside it.
 
-    ``discover_models`` is left at the body's own default: this is a new entry, so the host's default
-    is the answer a person would give — there is no stored value a body could contradict.
+    Nothing here composes a ``providers`` field: the entry is the host's own builder's answer for these
+    fields, laid over the block already stored, so an edit keeps every key the form has no field for and
+    an endpoint this page never knew about a field of is written the way Hermes writes it.
 
-    The key may be absent: a local server that takes no key is an endpoint Hermes holds too, and the
-    API tolerates a write with no key for one. (The page's form requires a key before it offers Save,
-    which is the form's rule, not this one.) A key that *is* a mask is refused first of all, before
-    anything else in the body is read or written, on the host's own rule.
+    The key is the form's if it typed one: it goes to ``.env`` behind the entry's ``key_env`` through the
+    credential lifecycle, and a key that *is* a mask is refused first of all, before anything else in
+    the body is read or written. A body with no key — or an empty one, which is what the page hands back
+    for a key it drew as a mask — leaves the stored key exactly as it is. A local server that takes no
+    key is an endpoint Hermes holds too, and a new one may be saved without one.
 
-    Three fields are required, and each has to hold something: a body short one of them is refused in
-    a sentence naming all three. A name an endpoint already carries is refused too —
-    ``upsert_custom_endpoint`` would merge onto that entry rather than add a second one, so a form
-    that said "add" would rewrite an endpoint its user never touched.
-
-    A host refusal (a base URL with no host) arrives as FastAPI's ``HTTPException`` and leaves here as
-    a ``ValueError`` carrying its sentence, which the route answers as a 400 the user can read.
+    A new endpoint needs all three of its fields, and each has to hold something: a body short one of
+    them is refused in a sentence naming all three. An edit needs none of them, but one it sends must
+    hold something — a save that blanked an endpoint's name is refused rather than written. A base URL
+    this host won't take is its own refusal, in its own words, which the route answers as a 400.
     """
     fields = body if isinstance(body, dict) else {}
     key = _typed_key(fields.get("key"))
     _refuse_preview(key)
-    name = str(fields.get("name") or "").strip()
-    base_url = str(fields.get("base_url") or "").strip()
-    model = str(fields.get("model") or "").strip()
-    if not (name and base_url and model):
-        raise ValueError("A custom endpoint needs a name, a base URL and a model.")
-    _refuse_duplicate(name)
-    from hermes_cli.web_models import CustomEndpointUpdate
-    from hermes_cli.web_routers.config_env import upsert_custom_endpoint
-
-    update = CustomEndpointUpdate(
-        name=name,
-        base_url=base_url,
-        model=model,
-        api_key=key or None,
-    )
-    _ask_host(upsert_custom_endpoint, update)
-    # The host's list is read again here, unlike a key write's: the row this add made is only in the
-    # fresh list, and those are the rows the answer has to draw.
+    given: Dict[str, str] = {}
+    for field in ("name", "base_url", "model"):
+        value = fields.get(field)
+        if isinstance(value, str):
+            given[field] = value.strip()
+    endpoint_id = str(fields.get("id") or "").strip()
+    if endpoint_id:
+        row, _ = _endpoint_of(endpoint_id)
+        endpoint_id = str(row.get("id") or endpoint_id).strip()
+        if any(not value for value in given.values()):
+            # A field the body sent and left empty: an endpoint is these three, so there is no
+            # `providers` entry to write without one.
+            raise ValueError(_MISSING_FIELDS)
+    elif not all(given.get(field) for field in ("name", "base_url", "model")):
+        raise ValueError(_MISSING_FIELDS)
+    else:
+        endpoint_id = _slug(given["name"])
+        _refuse_duplicate(given["name"])
+    sent = {"id": endpoint_id, **given}
+    for field in ("transport", "affinity"):
+        # Only a string is the form saying what the setting is now. A field the body leaves out — or
+        # sends null for, which is a client's way of saying it has none — is one the form didn't send,
+        # and an edit that quietly cleared a transport a reader never touched would break the endpoint.
+        if isinstance(fields.get(field), str):
+            sent[field] = fields[field].strip()
+    _write_entry(config_path, endpoint_id, fields=sent, key=key)
+    # The host's list is read again here, unlike a key write's: an add's row and an edit's new name,
+    # URL and model are only in the fresh list, and those are the rows the answer has to draw.
     return read(config_path)
 
 
 def _refuse_duplicate(name: str) -> None:
     """Refuse a name whose id an endpoint already carries, in a sentence naming that endpoint.
 
-    The host's writer merges onto the entry the body's id names, and that id is slugged from the
-    name: a second endpoint whose name slugs what one is already filed under — ``Home box!`` and
-    ``Home box`` are one id — would quietly rewrite that one's base URL and model rather than add
-    anything. So the two are compared by id, each through the host's own slug, rather than by their
-    words, which is the spelling the writer itself would resolve.
+    A new endpoint is filed under the id this host slugs from its name, and that id is what names the
+    ``providers`` entry: a second endpoint whose name slugs what one is already filed under — ``Home
+    box!`` and ``Home box`` are one id — would take over that one's entry rather than be added beside
+    it. So the two are compared by id, each through the host's own slug, rather than by their words,
+    which is the spelling the write itself would resolve. An edit names its own id and so never comes
+    here: renaming an endpoint moves no entry.
     """
     wanted = _slug(name)
     if not name.strip() or not wanted:
@@ -531,8 +781,8 @@ def remove_endpoint(config_path: Path, target: str) -> Dict[str, Any]:
 
     Any other endpoint goes through the host's own ``delete_custom_endpoint``: it drops the
     ``providers`` entry, detaches whatever main-model mirror a legacy row left behind, and removes
-    the key from ``.env`` behind the entry's ``key_env``. So the plugin composes no entry removal and
-    writes no ``config.yaml`` of its own, exactly as it composes none of an add.
+    the key from ``.env`` behind the entry's ``key_env`` — one host writer for both, so the plugin
+    composes no removal of its own, exactly as it composes none of an entry.
 
     A host refusal (an endpoint its own list held but its writer won't) arrives as FastAPI's
     ``HTTPException`` and leaves here as a ``ValueError`` carrying its sentence, as the other writes
