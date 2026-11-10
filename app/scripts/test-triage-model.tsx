@@ -10,7 +10,7 @@ import { act } from "react"
 import { toast } from "sonner"
 
 import { TriageModelSetting } from "@/components/chat/model-picker"
-import { saveChatThreads } from "@/lib/db"
+import { db, saveChatThreads } from "@/lib/db"
 import {
   botProfile,
   click,
@@ -202,5 +202,24 @@ test("turning chat threads on gives the field back, holding the pick the host ke
       fake.state.calls.some((path) => path.endsWith("/triage-model")),
       "and the host was asked once it may be",
     )
+  })
+})
+
+test("opened again with the host away, the field shows the last pick the host gave", async () => {
+  await seedSettings({ chatThreads: true })
+  const fake = host({ held: { provider: "openrouter", model: "own-model" } })
+  globalThis.fetch = fake.fetch
+  const profile = botProfile("triage-held")
+  await mount(<TriageModelSetting profile={profile} />, async () => {
+    await until(async () => /own-model/.test(opener()?.textContent ?? ""), "the first open")
+    await until(async () => (await db.hostCache.count()) > 0, "the copy kept")
+  })
+  const hung = new Promise<Response>(() => {})
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith("/plugins/gots/info")
+      ? fake.fetch(input, init)
+      : hung) as typeof globalThis.fetch
+  await mount(<TriageModelSetting profile={profile} />, async () => {
+    await until(async () => /own-model/.test(opener()?.textContent ?? ""), "the held pick")
   })
 })
