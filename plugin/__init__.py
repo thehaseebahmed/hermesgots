@@ -432,7 +432,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     library.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
     research.wire(adapter)
-    # A canvas's session writes and reads its own page, and no other session does; see canvases.py.
+    # A canvas's own session writes and reads its page; every session of the bot keeps its data,
+    # naming the canvas; see canvases.py.
     canvases.wire(adapter)
     meetings.wire(adapter)
 

@@ -990,6 +990,30 @@ class SessionTest(unittest.TestCase):
             (self.canvas["title"], 1, False, False),
         )
 
+    def test_a_canvas_session_is_refused_the_list_as_well_as_left_unwired(self) -> None:
+        # register() puts the tool in the plugin's toolset for every agent, so the wiring is not the
+        # only door: the handler refuses a canvas's session too.
+        refused = json.loads(canvases.handle_list({}, session_id=self.session))
+        self.assertIn("own canvas", refused["error"])
+        # A plain thread of the same bot is answered.
+        allowed = json.loads(canvases.handle_list({}, session_id=self.plain))
+        self.assertEqual([row["id"] for row in allowed["canvases"]], [self.canvas["id"]])
+
+    def test_a_store_that_cannot_be_read_does_not_hand_a_canvas_session_another(self) -> None:
+        # The session's own canvas is how a canvas's session is kept to its own data. A store that
+        # can't be read is not a session without a canvas: it must refuse, not widen.
+        other = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt="A weather page", body=BODY
+        )
+        with mock.patch.object(
+            canvases.sessions, "chat_session", side_effect=sqlite3.OperationalError("locked")
+        ):
+            refused = json.loads(
+                canvases.handle_data_read({"canvas": other["id"]}, session_id=self.session)
+            )
+        self.assertIn("couldn't tell", refused["error"])
+        self.assertNotIn("documents", refused)
+
 
 class EditTest(unittest.TestCase):
     """A small change is find and replace, and undo walks the pointer back a version."""
