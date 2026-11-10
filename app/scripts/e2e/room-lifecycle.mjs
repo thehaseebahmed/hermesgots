@@ -1,5 +1,5 @@
-// A room's whole life from the app, which until now only read rooms: the sidebar's footer opens a
-// blank room, its seats are picked above the composer and its first message makes it on the Host, the
+// A room's whole life from the app, which until now only read rooms: a bot's chat list opens a blank
+// room, its seats are picked above the composer and its first message makes it on the Host, the
 // members answer it, its own header menu renames it, and the same menu disbands it behind a question —
 // after which the row is gone from every list and stays gone across a reload.
 //
@@ -12,7 +12,7 @@ const RENAMED = "Release plan"
 const SENT = "Plan the next release."
 const FIRST = "I'll take the API and the routes."
 
-await flow("room-lifecycle", async ({ page, until, shot }) => {
+await flow("room-lifecycle", async ({ page, profileId, until, shot }) => {
   // A room's members are Hermes profiles, so this device holds a bot for each of them: the bot the
   // flow set up is the Host's own profile, and a second one stands for the other member.
   await page.evaluate(async (baseUrl) => {
@@ -29,8 +29,10 @@ await flow("room-lifecycle", async ({ page, until, shot }) => {
     })
   }, mock)
 
-  await page.goto(`${app}/`)
-  const start = page.getByRole("link", { name: "New room" })
+  // A room is started from a bot's chat list, where it stands beside New chat: the drawer's bot row
+  // opens the list, and the foot of it is where the control is.
+  await page.goto(`${app}/b/${profileId}`)
+  const start = page.getByRole("button", { name: "New room" })
   await start.waitFor({ timeout: 20_000 })
   await shot("list")
   await start.click()
@@ -117,9 +119,10 @@ await flow("room-lifecycle", async ({ page, until, shot }) => {
     "the room's screen and row to go",
   )
 
-  // The Host's own projection carries the deletion, so a reload finds no row either.
+  // The Host's own projection carries the deletion, so a reload finds no row either: the bot's list
+  // is where the room stood, and the control that makes one is still there.
   await page.reload()
-  await page.getByRole("link", { name: "New room" }).waitFor({ timeout: 20_000 })
+  await page.getByRole("button", { name: "New room" }).waitFor({ timeout: 20_000 })
   await settled(page)
   assert.equal(
     await page.getByRole("link", { name: new RegExp(RENAMED) }).count(),

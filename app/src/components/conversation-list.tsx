@@ -30,18 +30,16 @@ import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
 import { usePinnedCanvases } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
-import { connectionKey } from "@/lib/connection"
-import { usePluginFeatureByServer } from "@/lib/features"
+import { compareChatOrder } from "@/lib/chat-list"
 import { presence } from "@/lib/registry"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
-import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
-import { roomFaces, needsYouLine, roomMembersLine } from "@/lib/rooms"
+import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
+import { roomFaces, roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
-import { ROOM_SORTS, sortRooms, useRoomSort } from "@/lib/room-order"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -100,18 +98,6 @@ function RowAge({ at, now }: { at: number; now: number }) {
       {formatRelative(at, now)}
     </span>
   )
-}
-
-/**
- * What a room's row says it needs the user for: the member whose reply ended addressed to them, and
- * nothing once this device has drawn that reply. A reading of the page the row's room keeps —
- * `roomNeeds` is what the log this device holds ends asking for, `roomSeenSeq` what it has shown —
- * so a room nobody has opened still says it, and opening it is the move that clears the mark.
- */
-function roomNeedsText(chat: Conversation): string | undefined {
-  const asked = chat.roomNeeds
-  if (!asked?.seq || asked.seq <= (chat.roomSeenSeq ?? 0)) return undefined
-  return needsYouLine(asked.name)
 }
 
 /**
@@ -307,7 +293,7 @@ function Recents({
       faces: chat.room
         ? roomFaces(chat.room, profiles, bots.get(chat.profileId))
         : undefined,
-      reason: chat.room ? roomNeedsText(chat) : undefined,
+      reason: chat.room ? roomNeedsOf(chat) : undefined,
       local: local.get(chat.id),
     }))
   }, [])
@@ -474,96 +460,84 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
 }
 
 /**
- * The sidebar's Rooms section: the Host's rooms, ranked by the section's own order, with the one
- * control a room is started from at its end (ADR 0127).
+ * The legacy layout's Rooms section: the Host's rooms, ranked as every list here ranks a row, with the
+ * one control a room is started from at its end.
  *
- * A room used to be a row of Recents and of the bots list — unordered, and after the bots — because a
- * room was nobody's thread. It is a section now, drawn by the same row it always was: the rows are
- * rooms alone, the heading says how they rank, and New room takes the place of the link row that
- * ended the bots list. The section is drawn even with no rooms in it: an empty room list is where
- * someone who has never made a room finds the control.
+ * Recents is the only list that layout has, and it holds chats alone, so this is where a room stands
+ * (ADR 0115). The bot layout has no section of its own: a room is a row of every bot's chat list,
+ * among the chats, so it needs neither a place here nor an order of its own. The section is drawn even
+ * with no rooms in it: an empty room list is where someone who has never made a room finds the control.
  */
-function Rooms({
-  onNavigate,
-  collapsed = false,
-  rows,
-}: {
-  onNavigate?: () => void
-  collapsed?: boolean
-  /** The Host's rooms, read once by `useRoomNeeds` and shared with the badges the list draws. */
-  rows?: RoomNeedsRow[]
-}) {
-  const [sort, setSort] = useRoomSort()
+function Rooms({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const now = useNow()
-  const ordered = rows ? sortRooms(rows, sort) : []
-  const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
-  const answers = usePluginFeatureByServer(bots, "rooms_write")
-  // A Host that cannot make a room offers no control, rather than one that can only come back refused.
-  const canMake = bots.some(
-    (bot) => bot.hermesProfile && !bot.disabled && answers[connectionKey(bot)] === "yes",
-  )
+  const rows = useRoomNeeds()
+  const canMake = useCanMakeRoom()
+  if (!rows) return null
+  // A room's place is the chat list's own: pinned first, then by what was last said in it.
+  const ordered = [...rows].sort((one, two) => compareChatOrder(placeOf(one), placeOf(two)))
   return (
-    <nav
-      className="flex flex-col gap-0.5"
-      aria-labelledby={collapsed ? undefined : "rooms-heading"}
-      aria-label={collapsed ? "Rooms" : undefined}
-    >
-      {!collapsed && (
-        <div className="-mt-2 flex items-center justify-between gap-2 pl-3">
-          <h2 id="rooms-heading" className="text-sm font-medium text-muted-foreground">
+    <>
+      <Separator className="mx-1 my-3 data-horizontal:w-auto" />
+      <nav
+        className="flex flex-col gap-0.5"
+        aria-labelledby={collapsed ? undefined : "rooms-heading"}
+        aria-label={collapsed ? "Rooms" : undefined}
+      >
+        {!collapsed && (
+          <h2 id="rooms-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
             Rooms
           </h2>
-          <SortMenu
-            by="rooms"
-            label="Sort rooms by"
-            options={ROOM_SORTS}
-            value={sort}
-            onSort={setSort}
-          />
-        </div>
-      )}
-      <ul
-        data-band="rooms"
-        className={cn("flex flex-col gap-0.5", collapsed && "items-center")}
-      >
-        {ordered.map(({ chat, bot, faces }) => (
-          <li key={chat.id}>
-            <ChatRow
-              chat={chat}
-              bot={bot}
-              faces={faces}
-              reason={roomNeedsText(chat)}
-              now={now}
-              collapsed={collapsed}
-              onNavigate={onNavigate}
-            />
-          </li>
-        ))}
-        {canMake && (
-          <li>
-            <RootLink
-              to="/new-room"
-              onClick={onNavigate}
-              aria-label={collapsed ? "New room" : undefined}
-              data-slot="new-room"
-              className={({ isActive }) =>
-                cn(
-                  collapsed ? railClass({ isActive }) : rowClass({ isActive }),
-                  "text-muted-foreground",
-                )
-              }
-            >
-              <span className="flex size-9 items-center justify-center">
-                <PlusIcon className="size-5" />
-              </span>
-              {!collapsed && "New room"}
-            </RootLink>
-          </li>
         )}
-      </ul>
-    </nav>
+        <ul
+          data-band="rooms"
+          className={cn("flex flex-col gap-0.5", collapsed && "items-center")}
+        >
+          {ordered.map(({ chat, bot, faces }) => (
+            <li key={chat.id}>
+              <ChatRow
+                chat={chat}
+                bot={bot}
+                faces={faces}
+                reason={roomNeedsOf(chat)}
+                now={now}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+              />
+            </li>
+          ))}
+          {canMake && (
+            <li>
+              <RootLink
+                to="/new-room"
+                onClick={onNavigate}
+                aria-label={collapsed ? "New room" : undefined}
+                data-slot="new-room"
+                className={({ isActive }) =>
+                  cn(
+                    collapsed ? railClass({ isActive }) : rowClass({ isActive }),
+                    "text-muted-foreground",
+                  )
+                }
+              >
+                <span className="flex size-9 items-center justify-center">
+                  <PlusIcon className="size-5" />
+                </span>
+                {!collapsed && "New room"}
+              </RootLink>
+            </li>
+          )}
+        </ul>
+      </nav>
+    </>
   )
 }
+
+/** The three facts the one list order reads, off a room's row. */
+const placeOf = ({ chat }: RoomNeedsRow) => ({
+  id: chat.id,
+  at: chat.updatedAt,
+  pinned: Boolean(chat.pinned),
+})
 
 /** Project sessions, across every project, that wait on the user. Hidden when there are none. */
 function Waiting({
@@ -674,9 +648,6 @@ export function ConversationList({
   const { root } = useNav()
   const legacy = useLegacyChat()
   const meetings = useMeetingsEnabled()
-  // The rooms this device lists, read from their Hosts so a row can say a room needs the user
-  // without opening it: one read a room, and none for a room at rest.
-  const rooms = useRoomNeeds()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -776,13 +747,12 @@ export function ConversationList({
         {legacy === false ? (
           <Bots onNavigate={onNavigate} collapsed={collapsed} />
         ) : (
-          legacy === true && <Recents onNavigate={onNavigate} collapsed={collapsed} />
-        )}
-        {rooms && (
-          <>
-            <Separator className="mx-1 my-3 data-horizontal:w-auto" />
-            <Rooms onNavigate={onNavigate} collapsed={collapsed} rows={rooms} />
-          </>
+          legacy === true && (
+            <>
+              <Recents onNavigate={onNavigate} collapsed={collapsed} />
+              <Rooms onNavigate={onNavigate} collapsed={collapsed} />
+            </>
+          )
         )}
       </div>
 

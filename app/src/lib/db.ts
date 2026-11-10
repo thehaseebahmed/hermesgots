@@ -23,9 +23,6 @@ import type { SortDir } from "@/lib/sort"
 
 export type BotSort = "recent" | "waiting" | "name" | "added"
 
-/** The keys the sidebar's Rooms section ranks by (ADR 0127). */
-export type RoomSort = "recent" | "name" | "added"
-
 export type LibrarySort = "date" | "name"
 
 /** How the Code list orders each of its groups. */
@@ -80,12 +77,6 @@ export interface Settings {
    */
   botSort?: BotSort
   botSortDir?: SortDir
-  /**
-   * How the sidebar's Rooms section orders the rooms — the key it ranks by and the arrow it reads in;
-   * unset is `recent`, newest first (ADR 0091, ADR 0127). Local.
-   */
-  roomSort?: RoomSort
-  roomSortDir?: SortDir
   /** Whether the sidebar is shrunk to icons on tablet and wider; unset is expanded. Local. */
   sidebarCollapsed?: boolean
   /** How the Library tab orders folders and files; unset is newest first. Local. */

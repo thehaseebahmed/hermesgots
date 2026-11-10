@@ -1,7 +1,8 @@
 import { hostKey } from "./connection.ts"
 import { memberLabel } from "./room-log.ts"
 import { randomId } from "./utils.ts"
-import type { Profile, Room, RoomMember } from "./db.ts"
+import type { ChatListRow } from "./chat-list.ts"
+import type { Conversation, Profile, Room, RoomMember } from "./db.ts"
 
 /**
  * The seats a set of bots would make, one per bot: the member id this app minted for it, its handle
@@ -101,6 +102,53 @@ export function roomMembersLine(room: Room): string {
  */
 export function needsYouLine(name?: string): string {
   return name ? `${name} needs you — reply in the room.` : "The room needs you — reply."
+}
+
+/**
+ * What a room's row says it needs the user for: the member whose reply ended addressed to them, and
+ * nothing once this device has drawn that reply.
+ *
+ * It is a reading of the page the room keeps — `roomNeeds` is what the log this device holds ends
+ * asking for, `roomSeenSeq` what it has shown — so a room nobody has opened still says it, and
+ * opening the room is the move that clears the mark.
+ */
+export function roomNeedsOf(
+  chat: Pick<Conversation, "roomNeeds" | "roomSeenSeq">,
+): string | undefined {
+  const asked = chat.roomNeeds
+  if (!asked?.seq || asked.seq <= (chat.roomSeenSeq ?? 0)) return undefined
+  return needsYouLine(asked.name)
+}
+
+/**
+ * A room's row in a list: its name, its members as its line and as the pictures it wears, and the
+ * sentence its log ends asking the reader for.
+ *
+ * It is aged and ordered by the record's own clock, because a room's words live on its Host and
+ * nothing of its transcript syncs (ADR 0116), and its pin is this device's (ADR 0121) — so a room
+ * takes its place among the chats by the same rule every other row does.
+ *
+ * `faces` is what the list that draws it read for the room (`roomFaces`, off the same roster), so a
+ * screen with the row already in hand draws it without resolving the members twice.
+ */
+export function roomRowOf(
+  chat: Pick<
+    Conversation,
+    "id" | "title" | "pinned" | "updatedAt" | "room" | "roomNeeds" | "roomSeenSeq"
+  >,
+  faces: { shown: string[]; more: number },
+): ChatListRow {
+  const needs = roomNeedsOf(chat)
+  return {
+    id: chat.id,
+    title: chat.title,
+    line: chat.room ? roomMembersLine(chat.room) : undefined,
+    at: chat.updatedAt,
+    pinned: Boolean(chat.pinned),
+    waiting: Boolean(needs),
+    room: faces,
+    needs,
+  }
 }
 
 /**

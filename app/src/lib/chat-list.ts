@@ -20,6 +20,10 @@ export type ChatTail = Pick<Message, "content" | "createdAt" | "clarify" | "appr
 /**
  * One row of a bot's chat list: the chat's title, the newest thing said in it cut to a line, the clock
  * the row is ordered and aged by, and whether a reply in it is waiting on the reader.
+ *
+ * A room is one of these rows too. It wears its members' pictures where a chat wears its bot's, and
+ * what its own log ends asking the reader for, since a room has no tail on this device to read
+ * (ADR 0115, ADR 0116).
  */
 export interface ChatListRow {
   id: string
@@ -28,6 +32,10 @@ export interface ChatListRow {
   at: number
   pinned: boolean
   waiting: boolean
+  /** The room this row is, wearing its members' pictures: nothing at all for a chat (ADR 0126). */
+  room?: { shown: string[]; more: number }
+  /** The sentence a room's row says it needs the reader for, while its log ends asking. */
+  needs?: string
 }
 
 /** Whether the newest reply in a chat asked the reader something they have not answered. */
@@ -50,14 +58,23 @@ export function chatRowOf(chat: ChatRecord, newest?: ChatTail): ChatListRow {
 }
 
 /**
- * The list's one order: a pinned chat first, then by what was last said in it, newest on top. One
- * flat band — a second ordering rule would move rows under the reader. Ties keep one order on every
- * device, by id.
+ * A row's place in the list's one order: a pinned row first, then by what was last said in it, newest
+ * on top, ties by id so every device draws them alike. Named on its own so a list that draws the same
+ * rows for another screen — the legacy layout's Rooms section — ranks them by the same rule.
+ */
+export function compareChatOrder(
+  a: Pick<ChatListRow, "id" | "at" | "pinned">,
+  b: Pick<ChatListRow, "id" | "at" | "pinned">,
+): number {
+  return Number(b.pinned) - Number(a.pinned) || b.at - a.at || (a.id < b.id ? -1 : 1)
+}
+
+/**
+ * The list's one order, applied: one flat band — a second ordering rule would move rows under the
+ * reader.
  */
 export function orderChatRows(rows: readonly ChatListRow[]): ChatListRow[] {
-  return [...rows].sort(
-    (a, b) => Number(b.pinned) - Number(a.pinned) || b.at - a.at || (a.id < b.id ? -1 : 1),
-  )
+  return [...rows].sort(compareChatOrder)
 }
 
 /**

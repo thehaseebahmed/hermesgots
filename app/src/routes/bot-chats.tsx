@@ -15,6 +15,7 @@ import {
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
+import { RoomFaces } from "@/components/room/room-faces"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { botPath } from "@/lib/bot-tabs"
@@ -25,6 +26,8 @@ import { listsAsChat } from "@/lib/lists-as-chat"
 import { BACK_ON_LIST } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
+import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
+import { roomRowOf } from "@/lib/rooms"
 import { isUnread } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
@@ -128,8 +131,14 @@ function newestIn(conversationId: string) {
     .first()
 }
 
-/** A bot's chats, each with the one read of its newest message that a row's line and time come from. */
+/**
+ * A bot's chats, each with the one read of its newest message that a row's line and time come from,
+ * and the rooms it is a participant of: one list, one order (G3).
+ */
 function BotChatsList({ profileId, selected }: { profileId: string; selected?: string }) {
+  // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
+  // every bot its roster seats, whatever bot carried the record here (ADR 0115).
+  const rooms = useRoomNeeds()
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
   const answer = useLiveQuery(async () => {
     if (!profileId) return { profileId, bot: null, rows: [] }
@@ -152,7 +161,10 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
   // A bot that is gone — deleted here or on another device — lands home rather than on a list it
   // cannot fill.
   if (!fresh.bot) return <Navigate to="/" replace />
-  return <ChatList bot={fresh.bot} rows={fresh.rows} selected={selected} />
+  const seated = (rooms ?? [])
+    .filter((room) => room.seated.includes(profileId))
+    .map((room) => roomRowOf(room.chat, room.faces))
+  return <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} />
 }
 
 function ChatList({
@@ -167,6 +179,9 @@ function ChatList({
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const marks = useReadMarks()
+  // A room is made on a Host that advertises it, so the control is offered only where it can be used
+  // — the same rule the legacy layout's Rooms section keeps (ADR 0124).
+  const canMakeRoom = useCanMakeRoom()
   const now = useNow()
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
@@ -278,15 +293,17 @@ function ChatList({
 
       <div className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto flex w-full max-w-2xl items-center justify-end gap-2">
-          <Button
-            data-toast-above
-            variant="outline"
-            size="lg"
-            className="pointer-events-auto h-12 rounded-full px-5"
-            onClick={() => navigate("/new-room")}
-          >
-            New room
-          </Button>
+          {canMakeRoom && (
+            <Button
+              data-toast-above
+              variant="outline"
+              size="lg"
+              className="pointer-events-auto h-12 rounded-full px-5"
+              onClick={() => navigate("/new-room")}
+            >
+              New room
+            </Button>
+          )}
           <Button
             data-toast-above
             size="lg"
@@ -302,10 +319,15 @@ function ChatList({
 }
 
 /**
- * One chat's row: a chat's icon — every row here is the same bot's, so the bot's face would say
+ * One row of the list: a chat's icon — every row here is the same bot's, so the bot's face would say
  * nothing — its title, its last line, its age, and the dot this device's read mark decides. A reply
  * that waits on the reader wears the warning tone and says so beside the title; its line stays. The
  * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
+ *
+ * A room is one of these rows, drawn by the same rule: it wears its members' pictures where a chat
+ * wears its icon and names them in its line, and while its own log ends asking the reader for
+ * something its line is that sentence, in the warning tone, because the line is where the room's own
+ * screen says it too (ADR 0115, ADR 0126).
  *
  * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
  */
@@ -325,11 +347,12 @@ export function BotChatItem({
   return (
     <ItemRow
       icon={<MessageCircleIcon />}
-      tone={row.waiting ? "warning" : undefined}
+      avatar={row.room ? <RoomFaces shown={row.room.shown} more={row.room.more} /> : undefined}
+      tone={row.room ? undefined : row.waiting ? "warning" : undefined}
       unread={isUnread(row.at, mark)}
       selected={selected}
       badge={
-        row.waiting ? (
+        row.waiting && !row.room ? (
           <Badge data-waiting className="bg-warning/15 text-warning">
             Needs you
           </Badge>
@@ -337,7 +360,8 @@ export function BotChatItem({
       }
       title={row.title}
       when={chatAge(row.at, now)}
-      line={pinnedLine(row.pinned, row.line)}
+      line={pinnedLine(row.pinned, row.needs ?? row.line)}
+      warn={Boolean(row.needs)}
       link={{ to: `/c/${row.id}`, state: { bot: profileId } }}
     />
   )

@@ -100,9 +100,15 @@ const TONES: Record<RowTone, string> = {
 /**
  * One row of a list: the feature's icon with the bot in its corner, the title and time, one status
  * line, and anything below it. The open item is tinted.
+ *
+ * A row whose mark is not one glyph — a room, wearing its members' pictures — hands it over as
+ * `avatar`, which stands in the icon's place with no disc behind it: a cluster of four faces is wider
+ * than the icon's circle, and the cluster is the app's own mark for a room wherever it is drawn
+ * (ADR 0126).
  */
 export function ItemRow({
   icon,
+  avatar,
   tone,
   unread,
   botId,
@@ -117,6 +123,8 @@ export function ItemRow({
   link,
 }: {
   icon: ReactNode
+  /** A mark of its own in the icon's place, for a row that is more than one thing (a room's members). */
+  avatar?: ReactNode
   /**
    * The icon's colour, when the list picks it per row (Code: warning for what waits, success for
    * done or healthy, muted for at rest).
@@ -144,14 +152,16 @@ export function ItemRow({
   const body = (
     <>
       <span className="relative mt-0.5 shrink-0">
-        <span
-          className={cn(
-            "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
-            tone ? TONES[tone] : TONES.success,
-          )}
-        >
-          {icon}
-        </span>
+        {avatar ?? (
+          <span
+            className={cn(
+              "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
+              tone ? TONES[tone] : TONES.success,
+            )}
+          >
+            {icon}
+          </span>
+        )}
         {botId && (
           <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-full bg-background ring-2 ring-background">
             <Bot id={botId} className="size-[85%]" />

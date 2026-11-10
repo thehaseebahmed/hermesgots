@@ -25,13 +25,18 @@ import {
   mount,
   path,
   seedSettings,
+  settle,
   type,
   until,
   wordsOf,
 } from "./component-kit.tsx"
 
-const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly" })
-const MAIN = "main-bot-1"
+const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
+
+/** What this bot's Host says its plugin offers: a room may be made where the Host advertises it. */
+let offers = ["chats", "rooms", "rooms_write"]
+/** How many times a Host was asked what its plugin offers, so a case can wait for its answer. */
+let infoReads = 0
 
 interface Seed {
   id: string
@@ -60,16 +65,21 @@ function message(chat: string, content: string, at: number, patch: Partial<Messa
   }
 }
 
-async function seed(chats: Seed[]) {
-  await seedSettings({ developer: true, activeProfileId: bot.id })
+async function seed(
+  chats: Seed[],
+  { rooms = true, host = bot }: { rooms?: boolean; host?: typeof bot } = {},
+) {
+  offers = rooms ? ["chats", "rooms", "rooms_write"] : ["chats", "rooms"]
+  infoReads = 0
+  await seedSettings({ developer: true, activeProfileId: host.id })
   await db.profiles.clear()
-  await db.profiles.put(bot)
+  await db.profiles.put(host)
   await db.conversations.clear()
   await db.messages.clear()
   await db.conversations.bulkPut(
     chats.map((one) => ({
       id: one.id,
-      profileId: bot.id,
+      profileId: host.id,
       title: one.title,
       pinned: one.pinned,
       hermesSessionId: `gots-${one.id}`,
@@ -98,7 +108,14 @@ async function seed(chats: Seed[]) {
       return [...rows, message(one.id, one.said, at, waits)]
     }),
   )
-  globalThis.fetch = async () => json({})
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/plugins/gots/info")) {
+      infoReads += 1
+      return json({ name: "gots", features: offers })
+    }
+    return json({})
+  }) as typeof fetch
 }
 
 /** The chats the list draws, in the order it draws them. */
@@ -251,11 +268,10 @@ test("the search narrows the rows to the chats whose title or line it finds", as
   })
 })
 
-test("the foot starts a chat of this bot's, and a room", async () => {
+test("the foot starts a chat of this bot's, and a room where the Host makes one", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
-    await until(async () => Boolean(control("New chat")), "the foot")
-    assert.ok(control("New room"), "New room stands beside it")
+    await until(async () => Boolean(control("New room")), "New room beside New chat")
     await click(control("New chat"))
     await until(async () => path() !== `/b/${bot.id}`, "the address of the chat it made")
     const made = (await db.conversations.toArray()).find((one) => one.id === path().slice(3))
@@ -267,6 +283,26 @@ test("the foot starts a chat of this bot's, and a room", async () => {
     await until(async () => Boolean(control("New room")), "the foot")
     await click(control("New room"))
     await until(async () => path() === "/new-room", "the room screen")
+  })
+})
+
+test("a Host that cannot make a room offers no control for one", async () => {
+  // A Host of its own, so the answer about rooms is that Host's and no other case's remembered one.
+  const plain = botProfile("bot-chats-no-rooms", {
+    id: "bot-1",
+    name: "Mainly",
+    hermesProfile: "default",
+  })
+  await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }], { rooms: false, host: plain })
+  await mount(screen(`/b/${plain.id}`), async () => {
+    await until(async () => Boolean(control("New chat")), "the foot")
+    // The answer about its plugin is what the control waits on, so the absence is read after it.
+    await until(async () => infoReads > 0, "the Host's answer about its plugin")
+    await settle()
+    assert.ok(
+      control("New room") === null,
+      "no New room where the Host would only refuse it — the control never moved here to fail",
+    )
   })
 })
 
