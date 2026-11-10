@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import config_keys, dictation, dictation_cleanup, speech_probe
+from .credentials import KEY_ENV, present
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -290,16 +291,6 @@ PROVIDER_KEY = "stt.provider"
 # Hermes declares these per provider and this page does not carry them: a URL typed on a phone that
 # silently breaks transcription, and a secret this app never holds (ADR 0063).
 HIDDEN = frozenset({"base_url", "api_key"})
-# The variable Hermes reads each provider's key from. Only its presence is asked for, never its
-# value: the check answers a boolean and nothing else.
-KEY_ENV = {
-    "groq": "GROQ_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "xai": "XAI_API_KEY",
-    "elevenlabs": "ELEVENLABS_API_KEY",
-    "deepinfra": "DEEPINFRA_API_KEY",
-}
 TURNED_OFF = "Speech-to-text is turned off on this host."
 NOTHING_USABLE = dictation.NO_PROVIDER
 
@@ -391,13 +382,13 @@ def _pick_names(providers: List[str], explicit: Optional[str], resolved: str) ->
     return names
 
 
-def _provider_entries(names: Sequence[str], lookup: Optional[Callable[[str], Any]]) -> List[Dict[str, Any]]:
+def _provider_entries(names: Sequence[str]) -> List[Dict[str, Any]]:
     """Providers as the page reads them. A provider with no key to check carries no ``key_set``, so
     "needs none" is not spelled the same way as "this host couldn't ask"."""
     entries: List[Dict[str, Any]] = []
     for name in names:
         entry: Dict[str, Any] = {"name": name}
-        keyed = _key_set(name, lookup)
+        keyed = _key_set(name)
         if keyed is not None:
             entry["key_set"] = keyed
         entries.append(entry)
@@ -420,23 +411,18 @@ def _catalogues() -> Dict[str, List[str]]:
     }
 
 
-def _env_lookup() -> Optional[Callable[[str], Any]]:
-    """The host's dotenv-aware env read, where it has one."""
-    try:
-        from agent.credential_pool import get_env_prefer_dotenv
-    except Exception:
-        logger.debug("gots: no credential pool: provider keys unknown", exc_info=True)
-        return None
-    return get_env_prefer_dotenv
+def _key_set(provider: str) -> Optional[bool]:
+    """Whether the host holds this provider's key — a boolean, never the value, None where unknown.
 
-
-def _key_set(provider: str, lookup: Optional[Callable[[str], Any]]) -> Optional[bool]:
-    """Whether the host holds this provider's key — a boolean, never the value, None where unknown."""
+    The presence read is ``credentials.present``, the one credential read the plugin has; a host
+    that can't answer it (no credential pool) leaves the entry saying nothing about a key rather
+    than claiming there is none.
+    """
     variable = KEY_ENV.get(provider)
-    if variable is None or lookup is None:
+    if variable is None:
         return None
     try:
-        return bool(lookup(variable))
+        return present(variable)
     except Exception:
         logger.debug("gots: couldn't ask for %s's key", provider, exc_info=True)
         return None
@@ -475,7 +461,6 @@ def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) ->
     pick = values.get(PROVIDER_KEY)
     catalogues = _catalogues()
     resolved = _resolved(section)
-    lookup = _env_lookup()
     providers = _provider_names(defaults_section)
     explicit = pick.strip() if isinstance(pick, str) and pick.strip() else None
     return {
@@ -485,9 +470,9 @@ def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) ->
             **resolved,
             "explicit": explicit,
         },
-        "providers": _provider_entries(providers, lookup),
+        "providers": _provider_entries(providers),
         "choices": _provider_entries(
-            _pick_names(providers, explicit, resolved["name"]), lookup
+            _pick_names(providers, explicit, resolved["name"])
         ),
         "models": catalogues,
     }

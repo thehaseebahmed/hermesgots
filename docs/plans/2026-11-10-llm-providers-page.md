@@ -243,6 +243,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    `env_lookup()`, `present(name)` and `masked(name)`; `speech.py` imports `present` and its `stt`
    payload keeps `key_set` and gains nothing. Prepares: 4–9. After: none. Layers: plugin domain.
    Check: `python3 -m unittest plugin.tests.test_speech` — green before and after.
+
+   Done.
+
 3. **Preparatory refactor (app): a page that holds items names its own test.** `botSubOf`'s
    `holds: "items"` branch stops calling Speech-to-text's `providerHasPage` for every page and takes
    the test from the page's own entry, so a second page can hold items. Prepares: 4. After: none.
