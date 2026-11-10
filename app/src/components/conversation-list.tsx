@@ -34,7 +34,7 @@ import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureByServer } from "@/lib/features"
 import { presence } from "@/lib/registry"
 import type { Conversation, Message, Profile } from "@/lib/db"
-import { db, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomFaces, needsYouLine, roomMembersLine } from "@/lib/rooms"
@@ -418,7 +418,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
           return (
             <li key={bot.id}>
               <RootLink
-                to={`/c/${mainThreadId(bot.id)}`}
+                to={`/b/${bot.id}`}
                 onClick={onNavigate}
                 aria-label={collapsed ? bot.name : undefined}
                 className={({ isActive }) =>

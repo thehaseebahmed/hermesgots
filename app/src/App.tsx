@@ -15,8 +15,8 @@ import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
 
 // Only a chat is on the startup path; every other screen loads when it's first opened.
-const BotThreadsPage = lazy(() =>
-  import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
+const BotChatsPage = lazy(() =>
+  import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPage })),
 )
 const BotsPage = lazy(() => import("@/routes/bots").then((m) => ({ default: m.BotsPage })))
 const OpenSessionPage = lazy(() =>
@@ -117,7 +117,7 @@ function AppRoutes() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
-        <Route path="b/:profileId" element={<BotThreadsPage />} />
+        <Route path="b/:profileId" element={<BotChatsPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}
         <Route path="new-room" element={<NewRoomScreen slot="route" />} />

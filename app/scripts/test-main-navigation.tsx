@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { Home } from "@/App"
 import { ConversationList } from "@/components/conversation-list"
-import { BotThreadsPage } from "@/routes/bot-threads"
+import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 
@@ -68,7 +68,15 @@ const staleScreen = (
   <MemoryRouter initialEntries={["/b/bot-1"]}>
     <Routes>
       <Route index element={<Where />} />
-      <Route path="b/:profileId" element={<BotThreadsPage />} />
+      <Route
+        path="b/:profileId"
+        element={
+          <>
+            <BotChatsPage />
+            <Where />
+          </>
+        }
+      />
       <Route
         path="c/:id"
         element={
@@ -183,7 +191,7 @@ test("with nothing stored the app is the bot-first layout", async () => {
     </MemoryRouter>,
     async () => {
       await until(
-        async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        async () => findAll("a").some((row) => row.getAttribute("href") === `/b/${bot.id}`),
         "the bot row",
       )
       assert.ok(!findText("button", "New chat"), "no New chat button beside the bots")
@@ -203,16 +211,20 @@ test("home opens the bot's Main thread", async () => {
   })
 })
 
-test("a stale link to the old bot screen lands on Main", async () => {
+test("a link to a bot's screen draws the bot's list, and makes no Main", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(staleScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    assert.equal(await db.conversations.count(), 1, "only Main, never a card screen's thread")
+    await until(async () => where() === `/b/${bot.id}`, "the bot's own address")
+    assert.equal(
+      await db.conversations.count(),
+      0,
+      "the list reads the chats it has rather than making one",
+    )
   })
 })
 
-test("the Chats list's bot row opens the bot's Main thread", async () => {
+test("the Chats list's bot row opens the bot's screen", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(
@@ -221,12 +233,12 @@ test("the Chats list's bot row opens the bot's Main thread", async () => {
     </MemoryRouter>,
     async () => {
       await until(
-        async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        async () => findAll("a").some((row) => row.getAttribute("href") === `/b/${bot.id}`),
         "the bot row",
       )
       assert.ok(
-        !findAll("a").some((row) => row.getAttribute("href") === "/b/bot-1"),
-        "no row points at the old screen",
+        !findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        "and no row opens Main over the list's head",
       )
     },
   )

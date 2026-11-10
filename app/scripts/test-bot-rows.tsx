@@ -70,7 +70,7 @@ async function seed(thread: { id: string; at: number; sessionAt?: number }) {
 }
 
 /** The bot's own row: the one the sidebar's bot list draws, by the address it leads to. */
-const botRow = () => find(`a[href="/c/${MAIN}"]`)
+const botRow = () => find(`a[href="/b/${bot.id}"]`)
 /** Whether a row is drawn as the one the reader is in, the way its tinting says it. */
 const selected = (row: Element | null) => Boolean(row?.className.split(/\s+/).includes("bg-muted"))
 /** The row's unread mark, as the list draws it. */
@@ -183,7 +183,7 @@ test("with the switch off the sidebar lists chats, and no bot row is drawn", asy
     await until(async () => findAll("nav").length > 0, "the sidebar")
     // `absent`, not `assert.equal` against null: a DOM element compared to null builds a diff of the
     // whole element, and a run that should have said one sentence instead ate the machine.
-    absent(`a[href="/c/${MAIN}"]`, "no bots layout, no bot row")
+    absent(`a[href="/b/${bot.id}"]`, "no bots layout, no bot row")
   })
 })
 

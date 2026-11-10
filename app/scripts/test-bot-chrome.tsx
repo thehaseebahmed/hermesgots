@@ -162,8 +162,9 @@ async function seedSidebar() {
   return now
 }
 
+/** The sidebar's row for a bot, by the screen it opens. */
 const row = (botId: string) =>
-  findAll("a").find((one) => one.getAttribute("href") === `/c/main-${botId}`) ?? null
+  findAll("a").find((one) => one.getAttribute("href") === `/b/${botId}`) ?? null
 
 test("the sidebar's bot row previews Main's latest line, not its newest thread's", async () => {
   const now = await seedSidebar()
@@ -179,7 +180,7 @@ test("the sidebar's bot row previews Main's latest line, not its newest thread's
       assert.ok(!line.includes("A newer thread"), "not the newest thread's title")
       assert.ok(
         line.includes(formatRelative(now - 5 * HOUR, Date.now())),
-        "aged by Main, since Main is what it opens",
+        "aged by Main, since Main is what it previews",
       )
     },
   )

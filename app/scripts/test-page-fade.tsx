@@ -3,6 +3,7 @@ import test from "node:test"
 import { Route } from "react-router"
 
 import { mainThreadId } from "@/lib/db"
+import { BotChatsPage } from "@/routes/bot-chats"
 import { lastThreadKey } from "@/lib/threads"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { FADE_MS as COPY_FADE_MS } from "@/components/pane-transition"
@@ -81,7 +82,7 @@ test("a switch in place fades the chat it lands, never the one it left", async (
 })
 
 test(
-  "a bot switch fades the pane once, as the bot asked for lands",
+  "a bot's row opens that bot's screen, and the chat it left is not faded over it",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
@@ -98,29 +99,29 @@ test(
       ],
       { bots: [bot, other], active: bot.id },
     )
-    await mount(phone(`/c/${MAIN}`, `/c/${MAIN_OTHER}`), async () => {
-      await until(async () => text().includes("alpha one"), "the bot on screen")
-      const spy = spyAnimate()
-      try {
-        await click(findText("a", "Otherly"))
-        await until(async () => text().includes("beta one"), "the bot asked for")
-        await settle()
-      } finally {
-        spy.restore()
-      }
+    await mount(
+      phone(`/c/${MAIN}`, `/c/${MAIN}`, {
+        routes: <Route path="b/:profileId" element={<BotChatsPage />} />,
+      }),
+      async () => {
+        await until(async () => text().includes("alpha one"), "the bot on screen")
+        const spy = spyAnimate()
+        try {
+          await click(findText("a", "Otherly"))
+          await until(async () => find("h1")?.textContent === "Otherly", "the bot asked for")
+          await settle()
+        } finally {
+          spy.restore()
+        }
 
-      assert.deepEqual(
-        spy.overHeld().map((one) => one.pane),
-        [],
-        "no transition plays over the bot the switch left",
-      )
-      const played = spy.onPanes()
-      assert.equal(played.length, 1, "one bot changing into the next is one transition")
-      assert.equal(played[0].pane, "main", "on the bot's own pane, where the chat was swapped")
-      assert.deepEqual(played[0].keyframes, FADE)
-      assert.equal(played[0].options.duration, 200)
-      assert.ok(played[0].shown.includes("beta one"), "played as the bot asked for lands")
-    })
+        assert.deepEqual(
+          spy.overHeld().map((one) => one.pane),
+          [],
+          "no transition plays over the chat the switch left",
+        )
+        assert.equal(path(), `/b/${other.id}`, "the address is the bot's own screen")
+      },
+    )
   }),
 )
 

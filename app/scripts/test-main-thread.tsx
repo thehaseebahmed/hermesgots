@@ -3,7 +3,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
-import { BotThreadsPage } from "@/routes/bot-threads"
+import { BotChatsPage } from "@/routes/bot-chats"
 import { db, deleteConversation, ensureMainThread, mainThreadId } from "@/lib/db"
 import { useThreads } from "@/lib/threads"
 import {
@@ -45,23 +45,22 @@ async function seed(chats: { id: string; projectId?: string }[] = []) {
 const botScreen = (
   <MemoryRouter initialEntries={["/b/bot-1"]}>
     <Routes>
-      <Route path="b/:profileId" element={<BotThreadsPage />} />
+      <Route path="b/:profileId" element={<BotChatsPage />} />
       <Route path="c/:id" element={<ChatPage slot="route" />} />
     </Routes>
   </MemoryRouter>
 )
 
-test("the bot's old address opens Main, which is made once", async () => {
+test("the bot's address draws its list, and makes no Main to land on", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(botScreen, async () => {
+    await until(async () => Boolean(find("h1")), "the bot's own screen")
     const mains = await db.conversations.filter((c) => Boolean(c.main)).toArray()
-    assert.equal(mains.length, 1)
-    assert.equal(mains[0].id, mainThreadId(bot.id))
-    assert.equal(mains[0].changedAt, 0, "an empty copy never wins a merge over a synced one")
+    assert.equal(mains.length, 0, "a list of chats makes no chat of its own")
   })
   await mount(botScreen, async () => {
-    assert.equal(await db.conversations.count(), 1, "a second visit makes no second one")
+    assert.equal(await db.conversations.count(), 0, "and a second visit still makes none")
   })
 })
 
