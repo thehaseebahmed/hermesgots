@@ -49,7 +49,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Optional
 
 from . import (
     chats,
@@ -1380,13 +1380,13 @@ def create(
     }
 
 
-def canvas_of_session_or_raise(
+def _canvas_of_session_strict(
     path: Path, home: Path, session_id: Optional[str]
 ) -> Optional[str]:
     """The canvas a run's session edits, or None when that session isn't a canvas's.
 
-    Where ``canvas_of_session`` answers None for a store it can't read, this raises: a caller that
-    keeps a canvas's session to its own data has to tell "no canvas" from "couldn't tell".
+    Where ``canvas_of_session`` answers None for a store it can't read, this raises, so a caller
+    that keeps a canvas's session to its own data can tell "no canvas" from "couldn't tell".
     """
     if not isinstance(session_id, str) or not session_id:
         return None
@@ -1402,7 +1402,7 @@ def canvas_of_session(path: Path, home: Path, session_id: Optional[str]) -> Opti
     A store this can't read is no canvas: the caller equips nothing.
     """
     try:
-        return canvas_of_session_or_raise(path, home, session_id)
+        return _canvas_of_session_strict(path, home, session_id)
     except Exception:
         logger.debug("gots: couldn't resolve a canvas for %s", session_id, exc_info=True)
         return None
@@ -1414,21 +1414,15 @@ def _session_canvas(session_id: Optional[str]) -> Optional[str]:
     Never raises: it is asked on every tool call of a session and inside the agent wrapper, and a
     store or a home this can't read is no canvas rather than a turn that dies.
     """
-    return _tool_canvas(session_id)[0]
+    return _editing(None, session_id).canvas
 
 
 def _call_canvas(
     task_id: Optional[str], session_id: Optional[str]
 ) -> tuple[Optional[str], Optional[Path]]:
-    """The canvas a tool call edits and the store it lives in, from either id Hermes gives it.
-
-    A hook and a tool are handed a task id that is the run's own, which is not always the session's
-    (``sessions.record_for_call`` copes the same way), so both are asked rather than the first one.
-    """
-    canvas_id, path = _tool_canvas(task_id)
-    if canvas_id is None and session_id != task_id:
-        canvas_id, path = _tool_canvas(session_id)
-    return canvas_id, path
+    """The canvas a tool call edits and the store it lives in, from either id Hermes gives it."""
+    where = _editing(task_id, session_id)
+    return where.canvas, where.path
 
 
 def _canvas_of_call(task_id: Optional[str], session_id: Optional[str]) -> Optional[str]:
@@ -1436,37 +1430,41 @@ def _canvas_of_call(task_id: Optional[str], session_id: Optional[str]) -> Option
     return _call_canvas(task_id, session_id)[0]
 
 
-def _editing(
-    task_id: Optional[str], session_id: Optional[str]
-) -> tuple[Optional[str], Optional[Path], bool]:
+class _Where(NamedTuple):
     """The canvas a call's run edits, the store it lives in, and whether the host could answer.
 
-    ``False`` is a store or a chat record this host couldn't read, and not a session without a
-    canvas: a caller that keeps a canvas's session to its own data must refuse, not widen.
+    ``known`` is False for a store or a chat record this host couldn't read, and not a session
+    without a canvas: a caller that keeps a canvas's session to its own data must refuse, not widen.
+    """
+
+    canvas: Optional[str]
+    path: Optional[Path]
+    known: bool
+
+
+def _editing(task_id: Optional[str], session_id: Optional[str]) -> _Where:
+    """The canvas a call's run edits, resolved from either id Hermes gives it.
+
+    A hook and a tool are handed a task id that is the run's own, which is not always the session's
+    (``sessions.record_for_call`` copes the same way), so both are asked rather than the first one.
     """
     try:
         path, home = sessions._paths()
     except Exception:
         logger.debug("gots: couldn't find the store a canvas lives in", exc_info=True)
-        return None, None, False
+        return _Where(None, None, False)
     keys = [task_id] if session_id == task_id else [task_id, session_id]
     for key in keys:
         if not key:
             continue
         try:
-            found = canvas_of_session_or_raise(path, home, key)
+            found = _canvas_of_session_strict(path, home, key)
         except Exception:
             logger.debug("gots: couldn't read which canvas %s edits", key, exc_info=True)
-            return None, path, False
+            return _Where(None, path, False)
         if found:
-            return found, path, True
-    return None, path, True
-
-
-def _tool_canvas(session_id: Optional[str]) -> tuple[Optional[str], Optional[Path]]:
-    """The canvas a run edits and the store it lives in, resolved once for the tool that asks."""
-    canvas_id, path, _answered = _editing(None, session_id)
-    return canvas_id, path
+            return _Where(found, path, True)
+    return _Where(None, path, True)
 
 
 # --- the tools -----------------------------------------------------------------------------------
@@ -1653,26 +1651,30 @@ def _data_canvas(
 ) -> tuple[str, Path]:
     """The canvas a data tool acts on: the one it names, else the one its session edits."""
     name = args.get("canvas")
-    mine, path, answered = _editing(task_id, session_id)
-    if path is None:
+    where = _editing(task_id, session_id)
+    if where.path is None:
         raise CanvasError(f"{tool} couldn't find the store this host keeps its canvases in.")
-    if not answered:
+    if not where.known:
         raise CanvasError(
             f"The host couldn't tell which canvas this session belongs to, so {tool} can't keep "
             "this canvas's data apart from it. Try again once it answers."
         )
     if name is None:
-        if mine is None:
+        if where.canvas is None:
             raise CanvasError(f"{tool} needs the canvas to work on: name it with `canvas`.")
-        return mine, path
-    found = mine if isinstance(name, str) and name.strip() == mine else resolve_canvas(path, name)
-    if mine is not None and found != mine:
-        own = (record(path, mine) or {}).get("title") or mine
+        return where.canvas, where.path
+    found = (
+        where.canvas
+        if isinstance(name, str) and name.strip() == where.canvas
+        else resolve_canvas(where.path, name)
+    )
+    if where.canvas is not None and found != where.canvas:
+        own = (record(where.path, where.canvas) or {}).get("title") or where.canvas
         raise CanvasError(
             f"This is a canvas's session: it keeps its own canvas's data and no other's. Its own "
-            f"is {own!r} ({mine})."
+            f"is {own!r} ({where.canvas})."
         )
-    return found, path
+    return found, where.path
 
 
 def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
@@ -1797,21 +1799,23 @@ def handle_list(
     A canvas's own session is refused here as well as left unwired, since ``register`` puts the tool
     in the plugin's toolset for every agent and that toolset can carry it to one.
     """
-    mine, path, answered = _editing(task_id, session_id)
-    if answered and mine is not None:
-        return json.dumps(
-            {
-                "error": (
-                    "This is a canvas's session: it works on its own canvas, and the list is not "
-                    f"offered there. Its data is {TOOL_DATA_READ} and {TOOL_DATA_WRITE}."
-                )
-            }
-        )
-    if path is None:
-        return json.dumps(
-            {"error": f"{TOOL_LIST} couldn't find the store this host keeps its canvases in."}
-        )
-    return json.dumps({"canvases": summaries(path)})
+    try:
+        where = _editing(task_id, session_id)
+        if where.path is None:
+            raise CanvasError(f"{TOOL_LIST} couldn't find the store this host keeps its canvases in.")
+        if not where.known:
+            raise CanvasError(
+                "The host couldn't tell which canvas this session belongs to, so the list is "
+                "withheld. Try again once it answers."
+            )
+        if where.canvas is not None:
+            raise CanvasError(
+                "This is a canvas's session: it works on its own canvas, and the list is not "
+                f"offered there. Its data is {TOOL_DATA_READ} and {TOOL_DATA_WRITE}."
+            )
+        return json.dumps({"canvases": summaries(where.path)})
+    except CanvasError as error:
+        return json.dumps({"error": str(error)})
 
 
 # A canvas is edited by its session and nowhere else: work that leaves the host, files itself in a

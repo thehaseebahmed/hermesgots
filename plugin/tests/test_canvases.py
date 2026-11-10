@@ -1,6 +1,6 @@
 """A canvas: the run its prompt starts, the chat record that carries it, the scan every write
 passes, the data it keeps of its own, and the session — compression's children included — that is
-the only one told its tools and guide.
+told the page's tools and guide, and the data every session keeps by naming a canvas.
 
 Run: python3 -m unittest plugin.tests.test_canvases -v
 """
@@ -876,7 +876,7 @@ class SessionTest(unittest.TestCase):
                 ),
             )
 
-    def test_a_session_that_is_not_the_canvases_reads_and_creates_its_data(self) -> None:
+    def test_a_session_outside_the_canvas_reads_and_creates_its_data(self) -> None:
         # Keeping a canvas's data is not writing its page: any session may name the canvas.
         canvas_id = self.canvas["id"]
         with mock.patch.object(canvases, "_session_canvas", return_value=None):
@@ -1005,6 +1005,14 @@ class SessionTest(unittest.TestCase):
             )
         self.assertIn("couldn't tell", refused["error"])
         self.assertNotIn("documents", refused)
+
+    def test_a_store_that_cannot_be_read_withholds_the_list_too(self) -> None:
+        with mock.patch.object(
+            canvases.sessions, "chat_session", side_effect=sqlite3.OperationalError("locked")
+        ):
+            refused = json.loads(canvases.handle_list({}, session_id=self.plain))
+        self.assertIn("couldn't tell", refused["error"])
+        self.assertNotIn("canvases", refused)
 
 
 class EditTest(unittest.TestCase):
