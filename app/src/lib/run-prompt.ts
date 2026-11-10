@@ -7,6 +7,7 @@
  * `approval` while the run waits on one), and among `pending_controls`. Reading it here keeps one
  * account of where the fields are, whichever screen wants the prompt.
  */
+import { questionAt } from "./clarify.ts"
 
 /** A prompt the run waits on. Each question is a prompt of its own, one at a time. */
 export type RunPrompt =
@@ -91,7 +92,13 @@ function askedOf(entry: Record<string, unknown>): Record<string, unknown> {
   const named = trimmedQuestion(entry)
   const listed = heldAll(entry.questions)
   if (!named) return listed[0] ?? entry
-  const twin = listed.find((one) => trimmedQuestion(one) === named)
+  const twin =
+    listed[
+      questionAt(
+        listed.map((one) => ({ question: trimmedQuestion(one) })),
+        named,
+      )
+    ]
   if (!twin) return entry
   return {
     ...entry,

@@ -302,3 +302,20 @@ test("a prompt that names its own question asks it, off the status and off the e
     multiSelect: false,
   })
 })
+
+test("a prompt Hermes words with its skip hint still takes its row off the call's list", () => {
+  const asked = {
+    event: "clarify.request",
+    run_id: "run_hint",
+    prompt_id: "p-hint",
+    execution_generation: 1,
+    questions: [
+      { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+      { id: "q1", question: "Which services?", choices: ["api", "worker"], multi_select: true },
+    ],
+    question: 'Which services?\nReply "skip" to skip this question.',
+  }
+  const prompt = promptFrom(asked, "run_hint")
+  assert.deepEqual(prompt?.choices, ["api", "worker"])
+  assert.equal(prompt?.multiSelect, true)
+})

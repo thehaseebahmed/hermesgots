@@ -1172,3 +1172,13 @@ test("an answer that lands after the next question's request leaves that questio
   const status = reduce(after, { type: "waiting", waiting: { ...after.waiting! } })
   assert.equal(status.waiting?.promptId, "p2", "and a status read still carrying it keeps it")
 })
+
+test("a question Hermes asks with its skip hint is found in the call that asked it", () => {
+  let state = play([
+    { event: "tool.started", run_id: "r", tool: "clarify", tool_call_id: "call_1" } as RunEvent,
+    askedLive("p1", "Which colour?"),
+  ])
+  state = reduce(state, { type: "transcript", rows: LIVE_CALL })
+  assert.equal(state.questionSet?.length, 3, "the card holds the call's three questions")
+  assert.equal(questionAt(state.questionSet!, state.waiting!.question), 0, "on the first page")
+})
