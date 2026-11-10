@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { botsByProfile, roomFaces } from "../src/lib/rooms.ts"
+import { botsByProfile, roomAnswerer, roomAnswerers, roomFaces } from "../src/lib/rooms.ts"
 
 /** A bot of one Host, reached by the link `hostId` names. */
 const bot = (id, profile, baseUrl, hostId) => ({
@@ -59,4 +59,34 @@ test("another gateway's bot of the same name is not the room's", () => {
 test("a room with no anchor narrows to nothing", () => {
   const ada = bot("ada", "ada", "http://one.test/v1", "link-1")
   assert.equal(botsByProfile([ada], undefined).get("ada")?.id, "ada")
+})
+
+test("a room of two bots lists in both their lists, in member order", () => {
+  const ada = bot("ada", "ada", "http://one.test/v1", "link-1")
+  const bo = bot("bo", "bo", "http://one.test/v1", "link-2")
+  const room = roomOf("bo", "ada")
+  const bots = new Map([
+    [ada.id, ada],
+    [bo.id, bo],
+  ])
+  const ids = (listed) => listed.map((one) => one.id)
+  assert.deepEqual(
+    ids(roomAnswerers(room, bots, ada)),
+    ["bo", "ada"],
+    "both bots the roster seats name the room, in the order it seats them",
+  )
+  const boOff = new Map([
+    [ada.id, ada],
+    [bo.id, { ...bo, disabled: true }],
+  ])
+  assert.deepEqual(
+    ids(roomAnswerers(room, boOff, ada)),
+    ["ada"],
+    "a member whose bot is turned off is left out",
+  )
+  assert.equal(
+    roomAnswerer(room, boOff, ada)?.id,
+    "ada",
+    "and the one answerer is still the first bot that answers",
+  )
 })
