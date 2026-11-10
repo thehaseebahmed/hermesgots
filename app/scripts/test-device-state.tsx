@@ -70,7 +70,7 @@ async function seed(patch: { legacyChat?: boolean } = {}) {
 
 test("the device state names a bot's chats and its host's answers, with no secrets", async () => {
   await seed()
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage", "moves"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue", "pending"] })
   const device = await readDeviceDiagnostics()
   assert.equal(device.botThreads, true, "nothing stored means the bot-first layout")
   assert.equal(device.developer, true)
@@ -85,12 +85,12 @@ test("the device state names a bot's chats and its host's answers, with no secre
   assert.equal(found.lastThread, "t1", "the chat its own screen opens rides along")
   assert.equal(found.lastStored, "t1", "and so does what storage holds")
   assert.equal(found.plugin, "0.99.0", "the host's plugin version was read")
-  assert.deepEqual(found.features, ["triage", "moves"], "the host's features were read")
+  assert.deepEqual(found.features, ["queue", "pending"], "the host's features were read")
 })
 
 test("the dump reports the layout the device is on, not the switch's stored key", async () => {
   await seed({ legacyChat: true })
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   const device = await readDeviceDiagnostics()
   assert.equal(device.botThreads, false, "the legacy layout is reported as bot threads off")
   assert.equal("legacyChat" in device, false, "and the switch itself never rides along")
@@ -98,7 +98,7 @@ test("the dump reports the layout the device is on, not the switch's stored key"
 
 test("the sheet shows the state as a copy block, with no message text or key in it", async () => {
   await seed()
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   const sheet = <DeviceStateSheet open onOpenChange={() => {}} />
   await mount(sheet, async () => {
     await until(
@@ -115,7 +115,7 @@ test("the sheet shows the state as a copy block, with no message text or key in 
 
 test("the dump and the sheet carry a return's stage offsets", async () => {
   await seed()
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   startResumeTrace({ at: 1_000, started: 10_000 })
   markResume("sync-start", { now: 10_400 })
   markResume("chats-merge-end", { requests: 1, now: 10_800 })

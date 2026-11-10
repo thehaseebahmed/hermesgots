@@ -19,7 +19,7 @@ import { conversationsOf, db, getSettings, listProfiles, type Profile } from "@/
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
 import { resumeTrace } from "@/lib/resume-trace"
-import { botThreadsOn } from "@/lib/chat-threads"
+import { legacyChatOn } from "@/lib/legacy-chat"
 import { landingChat, lastChatOf } from "@/lib/last-chat"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
@@ -77,8 +77,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     route: window.location.pathname,
     schema: db.verno,
     developer: Boolean(settings?.developer),
-    botThreads: botThreadsOn(settings),
-    chatThreads: Boolean(settings?.chatThreads),
+    botThreads: !legacyChatOn(settings),
     ...(trace ? { resume: diagResume(trace) } : {}),
     bots,
   }

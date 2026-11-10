@@ -10,7 +10,7 @@ import { connectionKey, hasServer } from "@/lib/connection"
 import { equal } from "@/lib/equal"
 import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
-import type { Compaction, ModelChange, Move, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
+import type { Compaction, ModelChange, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
 import type { PromptEntry } from "@/lib/prompt-library"
 import type { SpeechSettings } from "@/lib/speech"
 import type { ReasoningRun } from "@/lib/thinking"
@@ -40,15 +40,6 @@ export interface Settings {
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
   /**
-   * Whether a bot may start a new thread at all: Developer's switch, off by default, and the one
-   * fact that decides it. It rides the account's `settings` document as a record of its own, with
-   * `chatThreadsAt` as its clock, so a device that has not pulled yet cannot carry a stale value
-   * over it by saving an Appearance switch (ADR 0120).
-   */
-  chatThreads?: boolean
-  /** When this account last changed `chatThreads`: its own clock, apart from `appearanceAt`. */
-  chatThreadsAt?: number
-  /**
    * Enter sends the message instead of starting a new line; off by default, and then Ctrl+Enter
    * sends. Local, and never in `APPEARANCE_FIELDS`: it describes this device's keyboard, so a phone
    * and a laptop answer it separately (ADR 0078).
@@ -65,9 +56,9 @@ export interface Settings {
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /**
-   * The layout the app drew before bot threads: Recents in the sidebar and a New chat screen. Local
-   * and off by default, since bot threads — bots in the sidebar, each chat a thread in its bot — are
-   * the layout a device gets; on is the opt-out, read by `useBotThreads` in `threads.ts`.
+   * The layout the app drew before a bot's screen became the list of its chats: Recents in the
+   * sidebar and a New chat screen. Local and off by default; on is the opt-out, read by
+   * `useLegacyChat` in `legacy-chat.ts`.
    */
   legacyChat?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
@@ -235,11 +226,6 @@ export interface Conversation {
    * only; every device reads the same list.
    */
   compactions?: Compaction[]
-  /**
-   * The messages triage moved out of this Main thread, oldest first, for its Moved markers. Local
-   * only; every device reads the same list from the host.
-   */
-  moves?: Move[]
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**
@@ -606,7 +592,7 @@ export interface Seam {
 }
 
 /** `queued` is a user message waiting for the current reply to finish. */
-export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
+export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
 
 /**
  * A progress reminder a thread keeps behind *Show progress reminders* (`progress-reminder.ts`,
@@ -930,7 +916,6 @@ export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
-  chatThreads: false,
   sendOnEnter: false,
 }
 
@@ -1373,9 +1358,17 @@ db.version(22).stores({ prompts: "id" })
  * `botThreads` is the layout's old switch: bot threads became the default and the switch now stores
  * `legacyChat`, so a row that still says `botThreads` says nothing and is shed the same way.
  * `chatNext` is the chat screen's old switch: a chat now opens on chat-next whenever its bot can be
- * called, so a row that still says `chatNext` decides nothing.
+ * called, so a row that still says `chatNext` decides nothing. `chatThreads` and its clock are the
+ * account's old "may a bot start a thread" record: a chat is a plain chat now, so the pair decides
+ * nothing, and leaving it behind would keep a switch this build has lost alive on every save.
  */
-const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault", "botThreads", "chatNext"] as const
+const RETIRED_SETTINGS_KEYS = [
+  "foldThinkingByDefault",
+  "botThreads",
+  "chatNext",
+  "chatThreads",
+  "chatThreadsAt",
+] as const
 
 // v23: "Fold thinking by default" is retired — a reply's thinking opens in a sheet now, so nothing
 // opens on its own and there is nothing left to fold. The key goes from every device's settings
@@ -1573,22 +1566,6 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
 export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
-}
-
-/**
- * Saves Developer's **Chat threads** switch. It keeps a clock of its own — its own record in the
- * `settings` document — because a device that has not pulled yet would otherwise carry its stale
- * value over the account's when it saves any Appearance switch, and the account would lose the
- * choice for good (ADR 0120).
- */
-export async function saveChatThreads(on: boolean) {
-  await saveSettings({ chatThreads: on, chatThreadsAt: Date.now() })
-}
-
-/** Takes the chat threads record another device wrote, clock and all. */
-export async function adoptChatThreads(value: unknown, at: number) {
-  if (typeof value !== "boolean") return
-  await saveSettings({ chatThreads: value, chatThreadsAt: at })
 }
 
 /**

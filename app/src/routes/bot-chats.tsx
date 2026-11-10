@@ -26,7 +26,8 @@ import { BACK_ON_LIST } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { isUnread } from "@/lib/session-work"
-import { beginChat, useBotThreads, useNow } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
+import { beginChat, useNow } from "@/lib/threads"
 
 /** How many of a bot's newest chats its screen reads, the bound the sidebar holds them to as well. */
 const CHATS = 50
@@ -44,12 +45,13 @@ const SEARCH_FIELD_ID = "chats-search"
  */
 export function BotChatsPage() {
   const { profileId } = useParams()
-  const enabled = useBotThreads()
+  const legacy = useLegacyChat()
+  const enabled = legacy === false
   const pane = useBotChatsPane(enabled)
   const landing = useLanding(profileId, enabled)
-  // Nothing is drawn before the switches answer, and a device on the legacy layout — where a bot has
+  // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
-  if (enabled === undefined) return null
+  if (legacy === undefined) return null
   if (!enabled || !profileId) return <Navigate to="/" replace />
   // The chat the address opens is on its way, so neither the list it is leaving nor an empty pane is
   // drawn for a frame.

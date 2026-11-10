@@ -3302,13 +3302,8 @@ function providerModel(name) {
   const value = typeof written === "string" && written.trim() ? written : STT_DEFAULTS[key]
   return typeof value === "string" && value.trim() ? value.trim() : ""
 }
-// plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
-const moves = new Map()
 let openuiOn = true
 const OPENUI_VERSION = "1.0.1"
-// plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
-// the newest plain thread of the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
-const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
 // MOCK_PRS_FAIL=1 is a host that can't reach GitHub: the plugin's read of a session's pull requests
 // answers an error instead of a list, so the app must keep the pull requests it already knows.
 let PRS_FAIL = process.env.MOCK_PRS_FAIL === "1"
@@ -3504,7 +3499,6 @@ const GENERAL_FIELDS = [
   },
 ]
 const delegationsOf = new Map()
-const triageModelsOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
 // `percent=`: a dev-only override, so an e2e flow can move an account from approaching to out
 // without restarting the mock (which the env alone can't do mid-run).
@@ -3629,24 +3623,6 @@ function queueOf(sessionId) {
   return queues.get(sessionId)
 }
 const sessionRuns = (sessionId) => [...runs.values()].filter((run) => run.sessionId === sessionId)
-/** plugin/moves.py `phase` and `undoable`: open until the thread's reply to the message finishes. */
-function moveUndoable({ target, item, undone }) {
-  if (undone) return false
-  const queue = queues.get(target)
-  if (queue?.items.some((i) => i.id === item)) return true
-  const sent = queue?.sent.find((i) => i.id === item)
-  const status = sent && runs.get(sent.run_id)?.status
-  return [
-    "queued",
-    "running",
-    "waiting_for_approval",
-    "stopping",
-    "cancelled",
-    "failed",
-    "interrupted",
-  ].includes(status)
-}
-
 function pumpQueue(sessionId) {
   const queue = queues.get(sessionId)
   if (!queue) return
@@ -4108,7 +4084,6 @@ http
           "fallbacks",
           "delegation_model",
           "delegation_page",
-          ...(TRIAGE !== "off" ? ["triage_model"] : []),
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
           // The queue Hermes itself keeps for a session, and the turn a restart lost under it
@@ -4130,7 +4105,6 @@ http
           "afk_switch",
           "afk_prompt",
           "afk_picks",
-          ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
           ...(RESEARCH
             ? ["research", "research_followup", "research_rewrite", "research_compare"]
             : []),
@@ -4809,40 +4783,6 @@ http
         }
         delegationsOf.delete(key)
         return json(res, 200, { object: "gots.delegation", delegation: null })
-      }
-    }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/triage-model") {
-      const key = pluginProfile ?? ""
-      if (req.method === "GET") {
-        return json(res, 200, {
-          object: "gots.triage_model",
-          triage_model: triageModelsOf.get(key) ?? null,
-        })
-      }
-      if (req.method === "POST") {
-        const body = await readBody(req)
-        if (!("triage_model" in body)) {
-          return json(res, 400, {
-            error: { message: "Body needs a triage_model key: an object, or null to clear it" },
-          })
-        }
-        if (body.triage_model != null) {
-          // The override is the host's to allow, as it is for a Research rewrite.
-          if (!RESEARCH_WRITERS) {
-            return json(res, 403, {
-              error: {
-                message:
-                  "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`.",
-              },
-            })
-          }
-          const { saved, error } = checkedPick(body.triage_model, "Triage model")
-          if (error) return json(res, 400, { error: { message: error } })
-          triageModelsOf.set(key, saved)
-          return json(res, 200, { object: "gots.triage_model", triage_model: saved })
-        }
-        triageModelsOf.delete(key)
-        return json(res, 200, { object: "gots.triage_model", triage_model: null })
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/openui") {
@@ -5712,148 +5652,6 @@ http
         name: basename(path),
         path,
         size: data.length,
-      })
-    }
-    const movesRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/moves$/.exec(url.pathname)
-    if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "GET" && movesRoute)
-      return json(res, 200, {
-        object: "gots.moves",
-        moves: (moves.get(decodeURIComponent(movesRoute[1])) ?? []).map(
-          ({ target, item, body: _body, attachments: _attachments, ...move }) => ({
-            ...move,
-            undoable: moveUndoable({ target, item, undone: move.undone }),
-          }),
-        ),
-      })
-    const undoRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/moves\/([^/]+)\/undo$/.exec(
-      url.pathname,
-    )
-    if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && undoRoute) {
-      const id = decodeURIComponent(undoRoute[1])
-      const move = (moves.get(id) ?? []).find((m) => m.id === decodeURIComponent(undoRoute[2]))
-      if (!move) return json(res, 404, { error: { message: "No such move." } })
-      if (move.undone) return json(res, 200, { object: "gots.move.undone", undone: true })
-      if (!moveUndoable(move))
-        return json(res, 409, {
-          error: { message: "The thread has already replied to this message." },
-        })
-      const queue = queueOf(move.target)
-      const waiting = queue.items.findIndex((item) => item.id === move.item)
-      if (waiting >= 0) queue.items.splice(waiting, 1)
-      else {
-        const sent = queue.sent.findIndex((item) => item.id === move.item)
-        const [gone] = sent >= 0 ? queue.sent.splice(sent, 1) : []
-        const run = gone && runs.get(gone.run_id)
-        if (run && ["running", "waiting_for_approval"].includes(run.status))
-          run.status = "cancelled"
-      }
-      move.undone = true
-      // Back in Main without a second triage, as the plugin queues it.
-      const main = queueOf(id)
-      main.items.push({
-        id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
-        text: move.text,
-        attachments: move.attachments,
-        created_at: Date.now(),
-        body: move.body,
-      })
-      if (move.new) {
-        const left = queueOf(move.target)
-        if (!left.items.length && !left.sent.length) {
-          const key = pluginProfile ?? ""
-          const chatList = pluginChatLists.get(key) ?? pluginChats
-          chatList.set(move.thread, { at: Date.now() + 1, deleted: true })
-          noteEvent("chats", undefined, key)
-        }
-      }
-      noteEvent("session", id)
-      noteEvent("session", move.target)
-      setTimeout(() => pumpQueue(id), 50)
-      return json(res, 200, { object: "gots.move.undone", undone: true })
-    }
-    const triageRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
-    if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && triageRoute) {
-      const id = decodeURIComponent(triageRoute[1])
-      const { id: askId, text, attachments, body, at } = await readBody(req)
-      if (TRIAGE === "fail") return json(res, 500, { error: { message: "Triage failed." } })
-      if (TRIAGE === "slow") await new Promise((resolve) => setTimeout(resolve, 10_000))
-      const entries = [...(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).entries()]
-      const mainEntry = entries.find(([, e]) => e.value?.main && e.value.hermesSessionId === id)
-      const thread = entries
-        .filter(([cid, e]) => {
-          const v = e.value
-          return (
-            v && !e.deleted && cid !== mainEntry?.[0] && !v.main && !v.projectId && !v.discardedAt
-          )
-        })
-        .sort((a, b) => (b[1].value.updatedAt ?? 0) - (a[1].value.updatedAt ?? 0))[0]
-      if (!["thread", "new"].includes(TRIAGE) || !mainEntry || !Array.isArray(body?.input))
-        return json(res, 200, { object: "gots.triage", decision: "main" })
-      if (TRIAGE === "thread" && !thread)
-        return json(res, 200, { object: "gots.triage", decision: "main" })
-      const sentAt = Number.isInteger(at) && at > 0 ? at : Date.now()
-      let made
-      if (TRIAGE === "new") {
-        const chatId = randomUUID()
-        const now = Date.now()
-        made = {
-          id: chatId,
-          value: {
-            id: chatId,
-            profileId: mainEntry[1].value.profileId,
-            title: "New chat",
-            hermesSessionId: `gots-${chatId}`,
-            createdAt: now,
-            updatedAt: now,
-            changedAt: now,
-            ...(text ? { opener: oneLine(text, MAX_OPENER), openerAt: sentAt } : {}),
-          },
-        }
-        ;(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).set(chatId, {
-          at: now,
-          value: made.value,
-        })
-        noteEvent("chats", chatId)
-      }
-      const target = made ? made.value.hermesSessionId : thread[1].value.hermesSessionId
-      const queue = queueOf(target)
-      const { input: _input, ...template } = body
-      queue.template = { ...template, session_id: target }
-      queue.authorization = req.headers.authorization
-      queue.url = req.url
-      const item = {
-        id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
-        text: String(text ?? ""),
-        attachments: attachments ?? [],
-        created_at: Date.now(),
-        body: { ...body, session_id: target },
-      }
-      queue.items.push(item)
-      const moved = moves.get(id) ?? []
-      if (!moved.some((m) => m.id === askId))
-        moved.push({
-          id: String(askId ?? randomUUID()),
-          text: String(text ?? ""),
-          thread: made ? made.id : thread[0],
-          at: sentAt,
-          undone: false,
-          // As plugin/moves.py records it: the host opened this thread for the message.
-          new: Boolean(made),
-          target,
-          item: item.id,
-          body: { ...(body ?? {}), session_id: id },
-          attachments: attachments ?? [],
-        })
-      moves.set(id, moved)
-      noteEvent("session", id)
-      noteEvent("session", target)
-      setTimeout(() => pumpQueue(target), 50)
-      return json(res, 200, {
-        object: "gots.triage",
-        decision: made ? "new" : "thread",
-        thread: made ? made.id : thread[0],
-        session_id: target,
-        item: { ...item, body: undefined, run_id: null, sent_at: null, error: null },
       })
     }
     const pendingRoute =

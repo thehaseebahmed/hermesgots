@@ -30,9 +30,6 @@ while IFS= read -r file; do
     # package an APK.
     app/android/* | app/capacitor.config.ts) native=true ;;
     app/*) app=true ;;
-    # A table both sides read: the plugin's test holds one column and the app's holds the other, so
-    # a change to it is a change to both.
-    plugin/tests/thread-rule-cases.json) plugin=true app=true ;;
     plugin/*) plugin=true ;;
     website/*) website=true ;;
     # The app site's own build and deploy configuration: it changes how the app is published.

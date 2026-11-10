@@ -38,18 +38,12 @@ import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomFaces, needsYouLine, roomMembersLine } from "@/lib/rooms"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
 import { ROOM_SORTS, sortRooms, useRoomSort } from "@/lib/room-order"
 import { useSyncState } from "@/lib/sync"
-import {
-  BOT_SORTS,
-  sortBots,
-  useBotSort,
-  useBotSummaries,
-  useBotThreads,
-  useNow,
-} from "@/lib/threads"
+import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
@@ -678,7 +672,7 @@ export function ConversationList({
   onToggleCollapsed?: () => void
 }) {
   const { root } = useNav()
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const meetings = useMeetingsEnabled()
   // The rooms this device lists, read from their Hosts so a row can say a room needs the user
   // without opening it: one read a room, and none for a room at rest.
@@ -779,10 +773,10 @@ export function ConversationList({
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
-        {botThreads ? (
+        {legacy === false ? (
           <Bots onNavigate={onNavigate} collapsed={collapsed} />
         ) : (
-          botThreads === false && <Recents onNavigate={onNavigate} collapsed={collapsed} />
+          legacy === true && <Recents onNavigate={onNavigate} collapsed={collapsed} />
         )}
         {rooms && (
           <>
@@ -800,7 +794,7 @@ export function ConversationList({
       >
         <ProfileButton onNavigate={onNavigate} />
         <div className={cn("flex items-center gap-2", collapsed && "flex-col gap-2")}>
-          {botThreads === false && (
+          {legacy === true && (
             <Button
               size="lg"
               className={cn("h-11 rounded-full", collapsed ? "w-11 px-0" : "px-5")}

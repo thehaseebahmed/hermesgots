@@ -74,8 +74,6 @@ import {
   HOST_QUEUE_SETTLE_MS,
   refreshQueue,
   reattachRun,
-  sendFromMain,
-  settleTriaging,
   sendMessage,
   steerText,
   stopMessage,
@@ -125,7 +123,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { beginThread, takeHandover, useBotThreads } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { EmptyChatState, MissingThread } from "@/components/chat/empty-states"
 import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
@@ -134,7 +132,6 @@ import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
 import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
-import { announceMove } from "@/lib/triage"
 import { chatFlow } from "@/lib/chat-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
@@ -340,11 +337,7 @@ export function ChatPage(props: ChatPageProps) {
   )
 }
 
-/**
- * A chat drawn by chat-next, under the chat's own header. A bot's Main opens here as an ordinary chat
- * — its own title, its own messages — but for the one thing only it has: every message it sends is
- * triaged by the host first (ADR 0029), since a thread may start from it.
- */
+/** A chat drawn by chat-next, under the chat's own header: a bot's chat is a chat, Main among them. */
 function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
   const bot = useLiveQuery(
@@ -352,21 +345,16 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const { state: address } = useLocation()
   const { root, up } = useNav()
   // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
   const upRef = useRef(up)
   upRef.current = up
-  // A thread Main opened with `/thread` is handed the message it was opened for, by its own id: taken
-  // once, here, so the screen that draws this thread is the one that sends it (ADR 0096).
-  const [start] = useState(() => takeHandover(id))
-  const isMain = Boolean(chat?.main)
-  const mainOn = Boolean(botThreads && isMain)
   // A chat of a bot answers its bot's list: where its own control and Android's back step when
   // nothing stands behind it, and — since a row opens the chat from that list — where they land
   // after one (G5). A Main is one of the bot's chats, so it answers the same address.
-  const listPath = botThreads && chat && listsAsChat(chat) ? `/b/${chat.profileId}` : undefined
+  const listPath = !legacy && chat && listsAsChat(chat) ? `/b/${chat.profileId}` : undefined
   const xl = useXLarge()
   const wide = useWide()
   // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
@@ -497,8 +485,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             bot={bot}
             summaries={summaries}
             blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
-            main={mainOn}
-            start={start}
             onAway={setAway}
             limit={limit}
           />
@@ -520,16 +506,12 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const params = useParams()
   const { state: address } = useLocation()
   const id = params.id
-  // A message left triaging by a page that closed mid-triage was never sent.
-  useEffect(() => {
-    if (id) void settleTriaging(id)
-  }, [id])
   const navigate = useNavigate()
   const { root, up } = useNav()
   // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
   // rather than the `undefined` a query that has not run hands back.
   const settings = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
@@ -597,7 +579,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const flow = useMemo(() => chatFlow({ thread, compacted }), [thread, compacted])
   const answered =
     settings !== undefined &&
-    botThreads !== undefined &&
+    legacy !== undefined &&
     (id === undefined || conversation !== undefined) &&
     profile !== undefined &&
     messages !== undefined
@@ -980,10 +962,9 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     if (ownedBy) void setActiveProfile(ownedBy)
   }, [ownedBy])
 
-  const isMain = Boolean(conversation?.main)
   // A chat of a bot answers its bot's list, Main among them (G5).
   const listPath =
-    botThreads && conversation && !session && listsAsChat(conversation)
+    !legacy && conversation && !session && listsAsChat(conversation)
       ? `/b/${conversation.profileId}`
       : undefined
   // A session opens beside Code's list where there's room, and is then a top-level screen with
@@ -1027,15 +1008,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     })
   }, [listPath, up])
 
-  // Main's messages are triaged even while its reply runs, so one for another thread goes there at
-  // once; the rest steer or queue behind the reply.
-  const sendMidReply = (id: string, steer: boolean, text: string, attachments: Attachment[] = []) =>
-    sendFromMain(id, text, attachments, { steer })
-      .then(announceMove)
-      .catch((error: unknown) => {
-        toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
-      })
-
   const send = async (text: string, attachments: Attachment[] = [], at?: number) => {
     if (!id) return
     try {
@@ -1043,46 +1015,12 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       // that caught up a moment ago doesn't wait again.
       if (!caughtUpWithin(id, SEND_CAUGHT_UP_MS))
         await Promise.race([reconcileHistory(id).catch(() => undefined), wait(1500)])
-      // Main's messages are triaged by the host first; a thread never is.
-      if (conversation?.main) await announceMove(await sendFromMain(id, text, attachments))
-      else await sendMessage(id, text, { attachments, at })
+      await sendMessage(id, text, { attachments, at })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
     }
   }
-
-  // The thread opens on the message the reader typed with `/thread`, and sends it from its own
-  // screen — the same handover chat-next's Main makes (ADR 0096).
-  const startThread = async (text: string, attachments: Attachment[] = []) => {
-    if (!profile || !conversation?.main) return
-    try {
-      // A pick made in Main comes with the thread; the Default row's marker doesn't, or the thread
-      // would follow the default without ever fixing the model it started on.
-      const thread = await beginThread(profile.id, {
-        modelChoice: chosenOf(keptModel),
-        text,
-        attachments,
-      })
-      navigate(`/c/${thread.id}`, { state: { bot: profile.id } })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
-      throw error
-    }
-  }
-
-  // The message Main handed this thread with `/thread`, sent here as the thread's first turn: the
-  // same handover chat-next's screen takes, so the thread draws its message as it opens (ADR 0096).
-  // Read by the address's id, because this screen keeps its instance as the address moves from Main
-  // to the thread it just made; the take is once, so a second run of this effect finds nothing.
-  useEffect(() => {
-    if (!ready || !id) return
-    const first = takeHandover(id)
-    if (!first) return
-    void send(first.text, first.attachments, first.at).catch(
-      quietly("Sending a thread's first message"),
-    )
-  }, [ready, id, send])
 
   const actions = conversation && (
     <ChatActions
@@ -1260,7 +1198,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
             </div>
           </div>
         )}
-        {!id && profile && !botThreads && (
+        {!id && profile && legacy && (
           <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={profile} />
           </div>
@@ -1315,31 +1253,22 @@ function CurrentChatPage({ slot }: ChatPageProps) {
             onSend={send}
             onQueue={(text, attachments) => {
               if (!id) return send(text, attachments)
-              if (conversation?.main) return sendMidReply(id, false, text, attachments)
               void queueMessage(id, text, attachments)
             }}
             steerByDefault={resolved.steerByDefault}
             sendOnEnter={resolved.sendOnEnter}
             canSteer={steerable}
             onSteer={(text, attachments) =>
-              id
-                ? conversation?.main
-                  ? sendMidReply(id, true, text, attachments)
-                  : steerText(id, text, attachments)
-                : send(text, attachments)
+              id ? steerText(id, text, attachments) : send(text, attachments)
             }
             filesFeature={filesFeature}
             imagesAvailable={profile?.imageInput !== false}
             subagentsRunning={subagentsRunning}
             onStop={stopEverything}
             runId={runId}
-            main={Boolean(botThreads && isMain)}
-            onCommand={(command, message) => {
+
+            onCommand={(command) => {
               switch (command) {
-                case "thread":
-                  return startThread(message?.text ?? "", message?.attachments ?? [])
-                case "new":
-                  return root("/")
                 case "settings":
                   return navigate("/settings")
                 case "cheatsheet":

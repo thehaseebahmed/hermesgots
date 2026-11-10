@@ -3,16 +3,14 @@
  * the switch off lands back on the menu rather than drawing a screen the device cannot use. The menu
  * row is gated separately, which is why this reads the address rather than the list.
  *
- * The page's own switches are read here too: the layout is bot threads unless **Enable legacy chat
- * UX** says otherwise, and hiding Developer must not flip the layout back under the user.
+ * The page's own switches are read here too: **Enable legacy chat UX** is the layout's one switch,
+ * and hiding Developer must not flip the layout back under the user.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { AppearanceSettings } from "@/components/settings/appearance"
-import { adoptAppearance, adoptChatThreads, db, getSettings } from "@/lib/db"
-import { mergeDocs } from "@/lib/merge"
+import { adoptAppearance, db, getSettings } from "@/lib/db"
 import { DeveloperSettings, SettingsPage } from "@/routes/settings"
 import {
   Path,
@@ -143,88 +141,4 @@ test("the hide button takes Remove server's shape, and Device state sits with Sy
     assert.ok(sync && device, "both rows are drawn")
     assert.equal(sync, device, "and one group holds them")
   })
-})
-
-const CHAT_THREADS = "Chat threads"
-const chatThreadsRow = () => find("label[for='chat-threads']")
-const chatThreadsSwitch = () => find("label[for='chat-threads'] [data-slot='switch']")
-
-test("the Chat threads row ships off, writes chatThreads, and moves the clock the account rides", async () => {
-  const THEN = 1
-  await seedSettings({ developer: true, appearanceAt: THEN })
-  await mount(developerPage, async () => {
-    const row = chatThreadsRow()
-    assert.ok(row, "the switch is on the Developer screen")
-    assert.match(row.textContent ?? "", new RegExp(CHAT_THREADS), "under its own name")
-    assert.ok(
-      row.textContent?.includes("Start a thread from a bot's Main"),
-      "with its line",
-    )
-    const first = findAll("[data-settings-group]")[0]
-    assert.equal(
-      first?.querySelector("label")?.getAttribute("for"),
-      "chat-threads",
-      "and as the first row of Developer's first group",
-    )
-    assert.equal(
-      chatThreadsSwitch()?.getAttribute("aria-checked"),
-      "false",
-      "off until it is turned on",
-    )
-    await click(chatThreadsSwitch())
-    await until(
-      async () => (await db.settings.get("settings"))?.chatThreads === true,
-      "the chatThreads setting",
-    )
-    assert.equal(chatThreadsSwitch()?.getAttribute("aria-checked"), "true", "and on once it is")
-  })
-  const stored = await db.settings.get("settings")
-  assert.equal(stored?.chatThreads, true, "the device kept it")
-  assert.ok(
-    (stored?.chatThreadsAt ?? 0) > 0,
-    "and its own clock moved, so the account carries that record",
-  )
-  assert.equal(stored?.appearanceAt, THEN, "while the Appearance clock is left alone")
-})
-
-test("the Chat threads switch draws no row in the Appearance section", async () => {
-  // The section asks its bot about Interfaces, so a host that answers nothing is stubbed in.
-  globalThis.fetch = (async () =>
-    json({ error: { message: "no route" } }, 404)) as unknown as typeof globalThis.fetch
-  await db.profiles.clear()
-  await seedSettings({ developer: true })
-  await mount(<AppearanceSettings />, async () => {
-    await settle()
-    assert.ok(missing("label[for='chat-threads']"), "Developer's switch is not repeated here")
-    assert.doesNotMatch(text(), /Chat threads/, "and nothing on the screen names it")
-  })
-})
-
-test("the chat threads record another device wrote is adopted, and a word that is not one is not", async () => {
-  const AT = 5
-  await adoptChatThreads(true, AT)
-  let settings = await getSettings()
-  assert.equal(settings.chatThreads, true, "the account's switch is adopted")
-  assert.equal(settings.chatThreadsAt, AT, "with the clock it was written at")
-
-  await adoptChatThreads("on", AT + 1)
-  settings = await getSettings()
-  assert.equal(settings.chatThreadsAt, AT, "a record that is not a boolean leaves the switch alone")
-})
-
-test("a stale device's Appearance write cannot revert the chat threads switch", async () => {
-  // The two are separate records with separate clocks, so the newer Appearance write wins its own
-  // record and loses this one: without that, a device that had not pulled yet would carry its stale
-  // `false` over the account and no flip could bring it back (ADR 0120).
-  const mine = {
-    appearance: { at: 1, value: { steerByDefault: false, breakReminders: true, navShortcuts: false } },
-    threads: { at: 1000, value: true },
-  }
-  const stale = {
-    appearance: { at: 2000, value: { steerByDefault: true, breakReminders: true, navShortcuts: false } },
-    threads: { at: 0, value: false },
-  }
-  const { merged } = mergeDocs(mine, stale)
-  assert.equal(merged.threads?.value, true, "the switch the account holds survives")
-  assert.equal(merged.appearance?.value.steerByDefault, true, "and the newer Appearance write wins")
 })

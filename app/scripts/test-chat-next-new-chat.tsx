@@ -188,30 +188,6 @@ test("a blank chat's first send makes a chat of the bot's", async () => {
   })
 })
 
-test("with chat threads on, a blank chat's first send still makes a thread", async () => {
-  await seedChats([], { bots: [bot], settings: { chatThreads: true } })
-  const host = anySession()
-  await mount(blankScreen, async () => {
-    await until(() => Boolean(find("[data-blank]")), "the blank surface")
-    await type(composerField(), "Plan the trip")
-    await click(find('button[aria-label="Send"]'))
-    await until(async () => (await db.conversations.count()) === 1, "the thread the send made")
-    const [thread] = await db.conversations.toArray()
-    assert.ok(!thread.main, "a plain chat, with no Main mark on it")
-    await until(
-      () => nav() === `REPLACE:/c/${thread.id}:true`,
-      "the address replaced by the thread's",
-    )
-    const session = host.hostFor(thread.hermesSessionId)
-    await until(() => session.asked.runs === 1, "the thread sent the message as a turn")
-    assert.equal(
-      session.latest.body?.session_id,
-      thread.hermesSessionId,
-      "on the thread's own session",
-    )
-  })
-})
-
 test("a keyless bot keeps the current screen and writes nothing", async () => {
   await seedChats([], { bots: [{ ...bot, baseUrl: "", apiKey: undefined }], legacyChat: true })
   globalThis.fetch = async () => json({})

@@ -25,7 +25,7 @@ import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
-import { beginChat, useNow, useThreadSwitches } from "@/lib/threads"
+import { beginChat, useNow } from "@/lib/threads"
 
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
@@ -65,8 +65,8 @@ function SharedFiles({
 }
 
 /**
- * What another app shared into Gots: add a note, pick the bot and a chat (or thread) of it, or a
- * new one, and send. The message goes like one typed in that chat, images as its attachments.
+ * What another app shared into Gots: add a note, pick the bot and a chat of it, or a new one, and
+ * send. The message goes like one typed in that chat, images as its attachments.
  */
 export function SharePage() {
   const navigate = useNavigate()
@@ -75,10 +75,6 @@ export function SharePage() {
   const webId = params.get("id")
   const share = useIncomingShare()
   const [opening, setOpening] = useState(Boolean(webId))
-  // A label is not a permission: an unanswered read leaves the screen as it stands.
-  const switches = useThreadSwitches()
-  const botThreads = switches?.botThreads ?? true
-  const noun = botThreads ? "thread" : "chat"
   const now = useNow()
 
   // The installed PWA's share target lands here with the service worker's id for it.
@@ -306,9 +302,9 @@ export function SharePage() {
           </section>
 
           <section className="flex flex-col gap-2">
-            <SectionLabel>{botThreads ? "Thread" : "Chat"}</SectionLabel>
+            <SectionLabel>Chat</SectionLabel>
             <div
-              aria-label={noun}
+              aria-label="Chat"
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
               {option(
@@ -316,7 +312,7 @@ export function SharePage() {
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                   <PlusIcon className="size-5" />
                 </span>,
-                `New ${noun}`,
+                "New chat",
               )}
               {shown?.map((chat) =>
                 option(

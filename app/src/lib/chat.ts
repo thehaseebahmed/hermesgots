@@ -48,7 +48,6 @@ import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
 import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
-import { NOT_SENT } from "@/lib/words"
 import type { PendingQueue } from "@/lib/pending"
 import { retireDraft } from "@/lib/drafts"
 import { refreshContext } from "@/lib/context"
@@ -64,14 +63,13 @@ import {
 } from "@/lib/history"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { modelOf, pickOf, wantsPin } from "@/lib/model-pick"
-import { askTriage, canTriage, triaging } from "@/lib/triage"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { clarifyResult } from "@/lib/clarify"
 import { quietly } from "@/lib/report"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { canSteer, midReply } from "@/lib/steer"
+import { canSteer } from "@/lib/steer"
 import { forgetTail } from "@/lib/session-tail"
 import { actionOfPreview, callOutcome } from "@/lib/tools"
 import { isCountedPreview, needsTranscriptWords } from "@/lib/tool-preview"
@@ -1451,112 +1449,6 @@ async function queueOnHost(
     await pin.release?.()
     throw error
   }
-}
-
-/**
- * Sends a message typed in a bot's Main thread. The host triages it first when it can: the message
- * wears a triaging state meanwhile, and it stays in Main — sent as any message is — unless the host
- * answers in time that it belongs to an older thread or opens a new one, where the plugin has then
- * queued it. A timeout, a failure or a bot without the feature is just a send to Main. Returns the
- * thread it moved to, and whether the host made that thread for it.
- *
- * It is triaged while Main's own reply runs too, so a message for another thread goes there at once
- * and only one that stays waits in Main, steering the reply or queued as `steer` says (a thread that
- * is mid-reply takes it the same way).
- */
-export async function sendFromMain(
-  conversationId: string,
-  text: string,
-  attachments: Attachment[] = [],
-  options: { steer?: boolean } = {},
-): Promise<{ threadId: string; created: boolean } | undefined> {
-  const content = text.trim()
-  const host = await hostOf(conversationId)
-  // One typed while another is being triaged waits in the queue behind it, untriaged.
-  const triaged =
-    host?.conversation.main &&
-    content &&
-    !triaging.has(conversationId) &&
-    (await canTriage(host.config))
-  if (!host || !triaged) {
-    if (triaging.has(conversationId) && content)
-      await queueMessage(conversationId, text, attachments)
-    else if (content && controllers.has(conversationId))
-      await steerOrQueue(conversationId, content, attachments, options.steer)
-    else await sendMessage(conversationId, text, { attachments })
-    return undefined
-  }
-  triaging.add(conversationId)
-  let heldId: string | undefined
-  try {
-    // Saved on the host before the ask, as any send does, so whichever thread the message lands in
-    // reads them from the paths the message names.
-    const sent = attachments.length
-      ? await uploadAttachments(host.config, host.conversation.hermesSessionId, attachments, true)
-      : attachments
-    const held: Message = {
-      id: randomId(),
-      conversationId,
-      role: "user",
-      content,
-      ...(sent.length ? { attachments: sent } : {}),
-      status: "triaging",
-      createdAt: nextAt(await getMessages(conversationId)),
-    }
-    heldId = held.id
-    await db.messages.add(held)
-    const moved = await askTriage(host, {
-      content,
-      sent,
-      steer: options.steer,
-      id: held.id,
-      at: held.createdAt,
-    })
-    if (moved) return moved
-    triaging.delete(conversationId)
-    if (controllers.has(conversationId)) {
-      // A reply started while the host decided: this goes after it.
-      await steerOrQueue(conversationId, content, sent, options.steer)
-      await db.messages.delete(held.id)
-    } else {
-      await sendMessage(conversationId, text, { queuedId: held.id, attachments: sent })
-    }
-    return undefined
-  } finally {
-    triaging.delete(conversationId)
-    // Whatever happened, the held row doesn't outlive the attempt.
-    if (heldId)
-      await db.messages
-        .where("id")
-        .equals(heldId)
-        .filter((m) => m.status === "triaging")
-        .delete()
-  }
-}
-
-/** A message sent mid-reply: a steer when the send asked to and it can be one, else queued. */
-function steerOrQueue(
-  conversationId: string,
-  content: string,
-  attachments: Attachment[],
-  steer?: boolean,
-) {
-  return midReply(attachments, { steer: Boolean(steer), running: true }) === "steer"
-    ? steerText(conversationId, content, attachments)
-    : queueMessage(conversationId, content, attachments)
-}
-
-/**
- * A triaging message that nothing here is deciding on (the page reloaded or closed mid-triage) was
- * never sent: it becomes a failed message to send again or take back.
- */
-export async function settleTriaging(conversationId: string) {
-  if (triaging.has(conversationId)) return
-  await db.messages
-    .where("conversationId")
-    .equals(conversationId)
-    .filter((m) => m.status === "triaging")
-    .modify({ status: "error", statusText: NOT_SENT })
 }
 
 /** Holds a message until the current reply finishes, and answers the row it added. */

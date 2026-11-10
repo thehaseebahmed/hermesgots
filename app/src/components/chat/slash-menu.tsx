@@ -3,8 +3,6 @@ import {
   CornerDownRightIcon,
   KeyboardIcon,
   ListPlusIcon,
-  MessageSquarePlusIcon,
-  PlusIcon,
   SettingsIcon,
   SparklesIcon,
   type LucideIcon,
@@ -16,8 +14,6 @@ import { optionId, type LocalCommand, type SendMode, type SlashItem } from "@/li
 import type { SkillsState } from "@/lib/skills"
 
 const COMMAND_ICONS: Record<LocalCommand | SendMode, LucideIcon> = {
-  new: PlusIcon,
-  thread: MessageSquarePlusIcon,
   settings: SettingsIcon,
   cheatsheet: KeyboardIcon,
   steer: CornerDownRightIcon,

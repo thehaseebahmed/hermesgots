@@ -9,7 +9,6 @@ import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
-import { useThreads } from "@/lib/threads"
 import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { ChatPage, SETUP_COPY } from "@/routes/chat"
 import {
@@ -473,44 +472,5 @@ test("a long chat switched to draws its last rows first, then every row", async 
     )
     assert.ok(paneText().includes(`beta row ${LONG - 1}`), "and its newest row is among them")
     assert.equal(drawn.at(-1), LONG, "and every row lands after it")
-  })
-})
-
-const answers: string[] = []
-
-function ThreadAnswer({ profileId }: { profileId?: string }) {
-  const threads = useThreads(profileId)
-  const answer = threads === undefined ? "unknown" : String(threads.length)
-  answers.push(`${profileId ?? "none"}:${answer}`)
-  return <p data-answer>{answer}</p>
-}
-
-function Asked({ first, then }: { first?: string; then?: string }) {
-  const [asking, setAsking] = useState(first)
-  return (
-    <>
-      <button type="button" data-ask onClick={() => setAsking(then)}>
-        ask
-      </button>
-      <ThreadAnswer profileId={asking} />
-    </>
-  )
-}
-
-test("a thread list asked for another bot is unknown, never no threads", async () => {
-  await seedChats([{ id: "t-a", title: "Thread t-a", messages: ["alpha one"] }], {
-    bots: [bot, other],
-    active: bot.id,
-  })
-  await mount(<Asked first={other.id} then={bot.id} />, async () => {
-    await until(async () => find("[data-answer]")?.textContent === "0", "a bot with no threads")
-    answers.length = 0
-    await click(find("[data-ask]"))
-    await until(async () => find("[data-answer]")?.textContent === "1", "the bot's one thread")
-    assert.deepEqual(
-      answers.filter((answer) => answer === `${bot.id}:0`),
-      [],
-      "the bot asked for is never answered with another bot's empty list",
-    )
   })
 })

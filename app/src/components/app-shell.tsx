@@ -26,7 +26,7 @@ import {
   useResearchPane,
 } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
-import { useBotThreads } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { cn } from "@/lib/utils"
 import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
 import { PaneTransition } from "@/components/pane-transition"
@@ -198,7 +198,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Code is asked first: a session's address is a chat's too, and the pane it belongs to is Code's
   // list, never the list of the bot that happens to hold its record (ADR 0115).
   const code = useCodePane()
-  const bot = useBotChatsPane(useBotThreads())
+  const bot = useBotChatsPane(useLegacyChat() === false)
   const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()

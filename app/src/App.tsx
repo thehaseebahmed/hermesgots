@@ -9,7 +9,7 @@ import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
 import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
-import { useBotThreads } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
@@ -85,12 +85,12 @@ function ThemeColor() {
 
 /** Home is the selected bot's screen: the list of its chats, which opens where the reader left it. */
 export function Home() {
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const active = useLiveQuery(
-    async () => (botThreads ? ((await getActiveProfile()) ?? null) : null),
-    [botThreads],
+    async () => (legacy === false ? ((await getActiveProfile()) ?? null) : null),
+    [legacy],
   )
-  if (botThreads === undefined || (botThreads && active === undefined)) return null
+  if (legacy === undefined || (legacy === false && active === undefined)) return null
   return active ? (
     <Navigate to={`/b/${active.id}`} replace />
   ) : (

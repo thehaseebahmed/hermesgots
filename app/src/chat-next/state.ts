@@ -153,8 +153,6 @@ export type ThreadEvent =
   | { type: "steered"; text: string }
   /** A read the host answered with something other than the rows: said as a toast, drawn nowhere. */
   | { type: "read-failed" }
-  /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
-  | { type: "moved" }
   /** `run` is the run being joined: a wait this page already read for it is that run's own. */
   | { type: "attach"; run: string }
   /**
@@ -769,8 +767,6 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     }
     case "read-failed":
       return state.status === "loading" ? { ...state, status: "ready" } : state
-    case "moved":
-      return { ...state, live: undefined, running: false }
     case "attach": {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing — but the wait this page read off the run's own status is the run's, and

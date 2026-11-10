@@ -1,91 +1,36 @@
 import Dexie from "dexie"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   createConversation,
   db,
-  getSettings,
   listEnabledProfiles,
   type BotSort,
   type Conversation,
   type ModelChoice,
   type Profile,
-  type Unsent,
 } from "@/lib/db"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { byName } from "@/lib/compare"
 import { oneLine } from "@/lib/words"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
-import { isUnread, threadState, type ThreadState } from "@/lib/session-work"
+import { isUnread } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
-import type { StartCommand } from "@/lib/slash"
-import { botThreadsOn, chatThreadsOn, opensInMain, startCommandFor } from "@/lib/chat-threads"
-import {
-  useAllLiveRuns,
-  useLiveSubagents,
-  useLiveWaking,
-  useWaiting,
-  type WaitingReason,
-} from "@/lib/waiting"
+import { useWaiting } from "@/lib/waiting"
 
-/** How many of a bot's newest threads its screen lists, and Main draws as cards. */
-const THREADS = 50
+/** How many of a bot's newest chats the sidebar reads to preview one. */
+const CHATS = 50
 
 /**
- * The message a bot's Main hands a thread it opens with `/thread`, and that thread's screen sends:
- * its words, its files, and when the reader sent it — so a thread opened a minute later still stamps
- * its opener, and stands its card, at the moment the words were typed.
- */
-export type ThreadStart = Pick<Unsent, "text" | "attachments" | "at">
-
-/**
- * Messages Main has handed the threads it opened, by thread id, until each thread's own screen takes
- * its own. Kept beside the address rather than in it: the address is one for every screen mounted at
- * once (a bot's Main beside its thread reads the same one), and a handover taken from it would be
- * taken by whichever screen rendered first — stripping it before the thread could send, or sending
- * it twice from two instances after a remount (ADR 0096).
- */
-const handed = new Map<string, ThreadStart>()
-
-export function handOver(threadId: string, start: ThreadStart) {
-  handed.set(threadId, start)
-}
-
-/** The message this thread was opened to send, once: the caller that takes it is the one that sends. */
-export function takeHandover(threadId: string): ThreadStart | undefined {
-  const start = handed.get(threadId)
-  handed.delete(threadId)
-  return start
-}
-
-/**
- * A thread a bot's Main starts with `/thread`: its record, made with the model the composer holds,
- * and the message its own screen is to send as the thread's first turn.
- */
-export async function beginThread(profileId: string, message: NewChat = {}) {
-  const thread = await createConversation(profileId, { modelChoice: message.modelChoice })
-  handOverIfSaid(thread.id, message)
-  return thread
-}
-
-/** The chat a new chat opens, and the message it is opened with when there is one. */
-export type NewChat = { modelChoice?: ModelChoice } & Partial<
-  Pick<ThreadStart, "text" | "attachments">
->
-
-/**
- * The chat a new chat opens: a plain chat, whichever layout, since nothing makes a Main any more — a
- * bot's chats are its own, made when one is started (G1).
+ * The chat a new chat opens: a plain chat of the bot's, since a bot's screen is the list of its chats
+ * (G1). Both layouts ask this, so a new chat is the same record either way.
  *
- * The pick a blank surface held rides into the chat it makes, where it is the chat's own.
+ * `modelChoice` is the pick a blank surface was holding, which rides into the chat it makes, where it
+ * is the chat's own.
  */
-export async function beginChat(profileId: string, message: NewChat = {}) {
-  return beginThread(profileId, message)
-}
-
-function handOverIfSaid(chatId: string, { text = "", attachments = [] }: NewChat) {
-  if (text.trim() || attachments.length) handOver(chatId, { text, attachments, at: Date.now() })
+export async function beginChat(profileId: string, message: { modelChoice?: ModelChoice } = {}) {
+  return createConversation(profileId, { modelChoice: message.modelChoice })
 }
 
 /** The time, moved on each minute, for "5 min ago" labels. */
@@ -98,165 +43,6 @@ export function useNow() {
   return now
 }
 
-export function useBotThreads() {
-  return useLiveQuery(async () => botThreadsOn(await getSettings()), [])
-}
-
-/**
- * The switches a screen draws two answers from — the layout's noun, and whether this bot has only its
- * Main to offer — live, and as one string so a settings write that changes neither redraws nothing.
- * `undefined` until the settings row answers.
- */
-export function useThreadSwitches():
-  { botThreads: boolean; chatThreads: boolean; opensInMain: boolean } | undefined {
-  const key = useLiveQuery(async () => {
-    const settings = await getSettings()
-    return `${botThreadsOn(settings) ? 1 : 0}${chatThreadsOn(settings) ? 1 : 0}${
-      opensInMain(settings) ? 1 : 0
-    }`
-  }, [])
-  return useMemo(
-    () =>
-      key === undefined
-        ? undefined
-        : {
-            botThreads: key[0] === "1",
-            chatThreads: key[1] === "1",
-            opensInMain: key[2] === "1",
-          },
-    [key],
-  )
-}
-
-/**
- * `startCommandFor`, kept live from the settings row, so a flip of the switch redraws a composer that is
- * already on screen. `null` until settings answer: nothing is offered that may not run. `botChat` is
- * false for a project session, a canvas or a room, where `/new` is a home shortcut rather than a
- * chat this switch decides.
- */
-export function useStartCommandFor(main: boolean | undefined, botChat = true): StartCommand | null {
-  return (
-    useLiveQuery(
-      async () => (botChat ? startCommandFor(main, await getSettings()) : "new"),
-      [main, botChat],
-    ) ?? null
-  )
-}
-
-export interface Thread {
-  chat: Conversation
-  /** What the user opened it with, when this device has the transcript. */
-  opener?: string
-  /** The bot's latest reply, cut to a line. */
-  last?: string
-  replies: number
-  state: ThreadState
-  reason?: WaitingReason
-}
-
-const line = (text?: string) => (text === undefined ? undefined : oneLine(text))
-
-async function latestLine(conversationId: string) {
-  const newest = await db.messages
-    .where("[conversationId+createdAt]")
-    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
-    .reverse()
-    .filter((message) => Boolean(message.content.trim()))
-    .first()
-  return line(newest?.content)
-}
-
-/**
- * A bot's chats as threads, oldest started first so the newest sits at the bottom by the composer.
- * They keep the order they were started in, so a new message doesn't move a thread.
- *
- * `undefined` is "not answered yet": the hook hands back the answer it already had while the next
- * one lands, so a list read for another bot is no answer at all rather than no threads.
- */
-export function useThreads(profileId: string | undefined): Thread[] | undefined {
-  const live = useWaiting()
-  const subagents = useLiveSubagents()
-  const wakes = useLiveWaking()
-  // The host's own account of which threads have a run in flight: a card shows a spinner for a run
-  // started on another device too, where this device has no reply of its own to stream.
-  const runs = useAllLiveRuns()
-  const answer = useLiveQuery(async () => {
-    if (!profileId) return { profileId, rows: [] }
-    const chats = await db.conversations
-      .where("[profileId+updatedAt]")
-      .between([profileId, -Infinity], [profileId, Infinity])
-      .reverse()
-      .filter(listsAsChat)
-      .limit(THREADS)
-      .toArray()
-    // Each thread reads only what its card shows: its opener, its newest replies and how many.
-    const rows = await Promise.all(
-      chats.map(async (chat) => {
-        const range = db.messages
-          .where("[conversationId+createdAt]")
-          .between([chat.id, Dexie.minKey], [chat.id, Dexie.maxKey])
-        const [opener, latest, last, replies] = await Promise.all([
-          range
-            .clone()
-            .filter((m) => m.role === "user")
-            .first(),
-          range
-            .clone()
-            .reverse()
-            .filter((m) => m.role === "assistant")
-            .first(),
-          range
-            .clone()
-            .reverse()
-            .filter((m) => m.role === "assistant" && Boolean(m.content.trim()))
-            .first(),
-          db.messages.where("[conversationId+role]").equals([chat.id, "assistant"]).count(),
-        ])
-        const local: WaitingReason | undefined =
-          latest?.clarify && !latest.clarify.resolved
-            ? { kind: "question", count: latest.clarify.questions.length || 1 }
-            : latest?.approval && !latest.approval.resolved
-              ? { kind: "approval", command: latest.approval.command }
-              : undefined
-        return {
-          chat,
-          opener: line(opener?.content) ?? line(chat.opener),
-          last: line(last?.content),
-          replies,
-          streaming: latest?.status === "streaming",
-          failed: latest?.status === "error",
-          local,
-        }
-      }),
-    )
-    // Main stays first, whenever it was made.
-    return {
-      profileId,
-      rows: rows.sort(
-        (a, b) =>
-          Number(Boolean(b.chat.main)) - Number(Boolean(a.chat.main)) ||
-          a.chat.createdAt - b.chat.createdAt,
-      ),
-    }
-  }, [profileId])
-
-  return useMemo(() => {
-    if (!answer || answer.profileId !== profileId) return undefined
-    return answer.rows.map(({ chat, opener, last, replies, streaming, failed, local }) => {
-      const reason = local ?? live[chat.hermesSessionId]
-      const state = threadState({
-        waiting: Boolean(reason),
-        streaming,
-        live: runs[chat.hermesSessionId],
-        failed,
-        subagents: subagents[chat.hermesSessionId],
-        waking: wakes[chat.hermesSessionId],
-      })
-      return { chat, opener, last, replies, state, reason }
-    })
-  }, [answer, profileId, live, runs, subagents, wakes])
-}
-
 export interface BotSummary {
   bot: Profile
   /** Its newest chat. */
@@ -265,8 +51,7 @@ export interface BotSummary {
   preview?: string
   /** Chats waiting on the user. */
   waiting: number
-  /** A chat this device holds past its read mark — Main among them, and never a coding session's
-   * (ADR 0110). */
+  /** A chat this device holds past its read mark, and never a coding session's (ADR 0110). */
   unread: boolean
 }
 
@@ -289,8 +74,8 @@ const byAdded = (a: BotSummary, b: BotSummary) => a.bot.createdAt - b.bot.create
 const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.name)
 
 /**
- * `recent`: the newest thread first, bots without one last. `waiting`: the most threads waiting on
- * the user first, then recent. `name`: A to Z. `added`: the order the bots were linked in. The arrow
+ * `recent`: the newest chat first, bots without one last. `waiting`: the most chats waiting on the
+ * user first, then recent. `name`: A to Z. `added`: the order the bots were linked in. The arrow
  * turns the result round, and each key keeps its own tie-break, which the arrow turns with it.
  */
 export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] {
@@ -301,6 +86,18 @@ export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] 
     return byAdded(a, b)
   }
   return [...bots].sort((a, b) => withDir(rank(a, b), sort.dir))
+}
+
+const line = (text?: string) => (text === undefined ? undefined : oneLine(text))
+
+async function latestLine(conversationId: string) {
+  const newest = await db.messages
+    .where("[conversationId+createdAt]")
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+    .reverse()
+    .filter((message) => Boolean(message.content.trim()))
+    .first()
+  return line(newest?.content)
 }
 
 /**
@@ -320,7 +117,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
           .between([bot.id, -Infinity], [bot.id, Infinity])
           .reverse()
           .filter(listsAsChat)
-          .limit(THREADS)
+          .limit(CHATS)
           .toArray()
         // Only a chat's newest reply can wait on the user, so only that one is read.
         const newest = await Promise.all(

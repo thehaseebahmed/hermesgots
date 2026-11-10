@@ -74,12 +74,6 @@ def clean_delegation(body: Any) -> Optional[Dict[str, str]]:
     return _slot(body, "delegation", "Delegation")
 
 
-def clean_triage_model(body: Any) -> Optional[Dict[str, str]]:
-    """The triage model of a ``{"triage_model": ...}`` body (see ``_slot``); None clears it, so the
-    bot's own model decides."""
-    return _slot(body, "triage_model", "Triage model")
-
-
 def _slot(body: Any, key: str, label: str) -> Optional[Dict[str, str]]:
     """``{"provider", "model"}`` from a ``{key: {...}}`` body, or None for ``{key: null}``, which
     clears the slot. ValueError names what the entry is missing, or that the key itself is absent: a

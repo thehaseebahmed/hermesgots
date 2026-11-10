@@ -23,16 +23,14 @@ const MOCKS = {
   polling: { port: MOCK_BASE + 1, env: { MOCK_NO_EVENTS: "1" } },
   legacy: { port: MOCK_BASE + 2, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
   "no-dictation": { port: MOCK_BASE + 3, env: { MOCK_DICTATION: "off" } },
-  "triage-new": { port: MOCK_BASE + 4, env: { MOCK_TRIAGE: "new" } },
-  "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
-  withheld: { port: MOCK_BASE + 6, env: { MOCK_WITHHOLD_PROMPT: "1" } },
+  withheld: { port: MOCK_BASE + 4, env: { MOCK_WITHHOLD_PROMPT: "1" } },
   dropped: {
-    port: MOCK_BASE + 7,
+    port: MOCK_BASE + 5,
     env: { MOCK_WITHHOLD_PROMPT: "1", MOCK_DROP_EVENTS_MS: "1500" },
   },
-  muted: { port: MOCK_BASE + 8, env: { MOCK_MUTE_PROMPT: "1", MOCK_LIVE_CLARIFY: "1" } },
+  muted: { port: MOCK_BASE + 6, env: { MOCK_MUTE_PROMPT: "1", MOCK_LIVE_CLARIFY: "1" } },
   // The shape Hermes's own route asks: one prompt per question, no plugin batch fields.
-  "live-clarify": { port: MOCK_BASE + 9, env: { MOCK_LIVE_CLARIFY: "1" } },
+  "live-clarify": { port: MOCK_BASE + 7, env: { MOCK_LIVE_CLARIFY: "1" } },
 }
 // How many ports a lane's mocks take, and so how far apart two lanes' sets start.
 const LANE_PORTS = Object.keys(MOCKS).length

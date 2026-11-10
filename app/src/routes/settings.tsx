@@ -18,7 +18,6 @@ import {
   GitPullRequestArrowIcon,
   GitPullRequestIcon,
   MessageCircleQuestionIcon,
-  MessageSquarePlusIcon,
   SlidersHorizontalIcon,
   TerminalIcon,
   DatabaseIcon,
@@ -86,7 +85,6 @@ import {
   db,
   getSettings,
   listProfiles,
-  saveChatThreads,
   saveSettings,
   type Profile,
 } from "@/lib/db"
@@ -643,14 +641,6 @@ export function DeveloperSettings() {
   return (
     <>
       <Group>
-        <SwitchRow
-          id="chat-threads"
-          icon={MessageSquarePlusIcon}
-          title="Chat threads"
-          subtitle="Start a thread from a bot's Main"
-          checked={Boolean(settings?.chatThreads)}
-          onCheckedChange={(checked) => saveChatThreads(checked)}
-        />
         <SwitchRow
           id="legacy-chat"
           icon={MessagesSquareIcon}

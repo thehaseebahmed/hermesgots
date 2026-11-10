@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import plugin
-from plugin import canvases, chats, openui, outbox, page_calls, triage
+from plugin import canvases, chats, new_chats, openui, outbox, page_calls
 from plugin.store import connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
@@ -125,7 +125,7 @@ class CreationTest(unittest.TestCase):
         self.assertEqual(found["version"], 0)
         self.assertEqual(found["html"], "")
         # The prompt is the first turn of the canvas's own session, so it is built with the app
-        # closed — the same queue a triaged thread's first message rides.
+        # closed — the same queue a chat's first message rides.
         queued = outbox.read(self.path, found["session_id"])
         self.assertEqual(len(queued["items"]), 1)
         item = queued["items"][0]
@@ -151,11 +151,10 @@ class CreationTest(unittest.TestCase):
         self.assertEqual(value["canvasId"], self.canvas["id"])
         self.assertEqual(value["hermesSessionId"], self.canvas["session_id"])
         self.assertEqual(value["profileId"], "bot-1")
-        # The model is pinned at the first send (ADR 0059), as a thread's is.
+        # The model is pinned at the first send (ADR 0059), as a chat's is.
         self.assertEqual(value["modelChoice"], {"provider": "anthropic", "model": "claude-opus-5-5"})
         self.assertEqual(value["opener"], PROMPT)
-        # And it is no plain thread: no list draws it and triage never continues it.
-        self.assertFalse(triage.is_plain_thread(value))
+        # `canvasId` is what keeps it out of every list: no list draws a canvas's chat.
 
     def test_a_prompt_that_never_got_queued_leaves_no_canvas(self) -> None:
         path = store_of(self)
@@ -438,7 +437,7 @@ class SessionTest(unittest.TestCase):
         self.canvas = make_canvas(self.path)
         self.session = self.canvas["session_id"]
         # A plain thread of the same bot, which must be told and given nothing of the canvas's.
-        self.plain = triage.open_thread(self.path, "bot-1")[1]
+        self.plain = new_chats.open_thread(self.path, "bot-1")[1]
         sessions_db(
             self.home,
             [

@@ -500,7 +500,6 @@ export function CanvasView() {
             chat={chat}
             bot={profile}
             summaries={summaries}
-            start={undefined}
             limit={limit}
             afterSettled={() => {
               // Every turn's end re-reads the page: a stream can be open and silent (a buffering

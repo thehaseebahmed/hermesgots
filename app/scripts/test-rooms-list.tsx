@@ -24,8 +24,9 @@ import { db, chatTombstones, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { connectionKey, noteChange } from "@/lib/live"
 import { syncNow } from "@/lib/sync"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { useBotChatsPane } from "@/lib/pane"
-import { useBotThreads, useThreads } from "@/lib/threads"
+
 import {
   Path,
   atWidth,
@@ -284,32 +285,6 @@ test("Recents draws the room once, with its name, its members and its last activ
   })
 })
 
-function Threads({ profileId }: { profileId: string }) {
-  const threads = useThreads(profileId) ?? []
-  return <span data-threads={profileId}>{threads.map((thread) => thread.chat.id).join(",")}</span>
-}
-
-test("no bot's Main lists the room as one of its threads", async () => {
-  await fresh()
-  await merged()
-  await mount(
-    <>
-      <Threads profileId={CARRIER} />
-      <Threads profileId={CODER} />
-    </>,
-    async () => {
-      await settle()
-      for (const held of findAll("[data-threads]")) {
-        const ids = (held.textContent ?? "").split(",").filter(Boolean)
-        assert.ok(
-          !ids.includes(ROOM),
-          `${held.getAttribute("data-threads")}'s Main must not list a room among its threads`,
-        )
-      }
-    },
-  )
-})
-
 test("a second merge of an unchanged record writes nothing", async () => {
   await fresh()
   await merged()
@@ -363,7 +338,7 @@ test(
 )
 
 function Pane() {
-  const pane = useBotChatsPane(useBotThreads())
+  const pane = useBotChatsPane(useLegacyChat() === false)
   return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId } : null)}</span>
 }
 

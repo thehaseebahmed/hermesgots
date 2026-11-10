@@ -1,13 +1,11 @@
 /**
  * A bot's models, over a seeded device database and a faked host (ADR 0055, ADR 0104): the Models
- * page's Gots triage row and its own model pick, and — on General, where Hermes's Dashboard keeps
- * them — the host's main model and the chain it falls back on, the chain drilling into a screen of
- * its own. Every setting is a title over the line saying what it is for and the value it holds in
+ * page's model a chat runs, and — on General, where Hermes's Dashboard keeps them — the host's main
+ * model and the chain it falls back on, the chain drilling into a screen of its own. Every setting is a title over the line saying what it is for and the value it holds in
  * the accent colour, each value opening its pick as a bottom sheet.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
@@ -16,7 +14,7 @@ import { Screen } from "@/components/settings-chrome"
 import { botPageOf } from "@/lib/bot-tabs"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
-import { db, saveSettings } from "@/lib/db"
+import { db } from "@/lib/db"
 import {
   Path,
   absent,
@@ -32,9 +30,6 @@ import {
   until,
   wordsOf,
 } from "./component-kit.tsx"
-
-/** The triage row's purpose line, as the page words it. */
-const TRIAGE = "Whether a message from Main starts a new thread or continues one"
 
 type Choice = { provider: string; model: string }
 type Sent = { method: string; path: string; body: Record<string, unknown> | null }
@@ -65,26 +60,20 @@ const page = (entry: string) => (
 )
 
 /**
- * A host answering the plugin's `info` (its features, version, and whether it lets Gots pick the
- * model), the triage and fallback routes, its model list and the write that makes a model its main
- * one — and recording every request, so a test can read what a pick wrote.
+ * A host answering the plugin's `info` (its features and version), the fallback route, its model
+ * list and the write that makes a model its main one — and recording every request, so a test can
+ * read what a pick wrote.
  */
 function host({
-  features = ["general_page", "triage_model", "fallbacks", "host_model"],
-  writers = true,
+  features = ["general_page", "fallbacks", "host_model"],
   models = ["own-model", "cheap-model"],
-  triage = null as Choice | null,
   fallbacks = [] as Choice[],
 }: {
   features?: string[]
-  /** Whether the host lets Gots pick the model: its `research.writers` answer. */
-  writers?: boolean
   models?: string[]
-  triage?: Choice | null
   fallbacks?: Choice[]
 } = {}) {
   const calls: Sent[] = []
-  let pick = triage
   let chain = fallbacks
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -96,12 +85,7 @@ function host({
         name: "gots",
         version: "0.81.0",
         features,
-        research: { writers: { model: writers, provider: writers } },
       })
-    if (url.pathname.endsWith("/plugins/gots/triage-model")) {
-      if (method === "POST") pick = body?.triage_model ?? null
-      return json({ triage_model: pick })
-    }
     if (url.pathname.endsWith("/plugins/gots/fallbacks")) {
       if (method === "POST") chain = body?.fallbacks ?? []
       return json({ fallbacks: chain })
@@ -127,12 +111,8 @@ function host({
 }
 
 /** A bot of this test's own: its connection names a host, so no other test's answers are read. */
-async function seed(
-  name: string,
-  options: Parameters<typeof host>[0] = {},
-  { chatThreads = true }: { chatThreads?: boolean } = {},
-) {
-  await seedSettings({ chatThreads })
+async function seed(name: string, options: Parameters<typeof host>[0] = {}) {
+  await seedSettings({})
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
   const server = host(options)
@@ -195,47 +175,21 @@ async function addReady() {
   return addFallback()
 }
 
-test("the Models page is the Gots triage row and the model a chat runs", async () => {
+test("the Models page is the model a chat runs, under the bot's Hermes", async () => {
   await seed("chat-groups")
   await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.deepEqual(headings(), [], "no headings: the captions name the cards")
-    assert.equal(
-      caption("Gots")?.textContent?.trim(),
-      "Gots",
-      "the triage pick is Gots's, under its own caption",
-    )
+    assert.deepEqual(headings(), [], "no headings: the caption names the card")
     assert.equal(
       caption("Hermes")?.textContent?.trim(),
       "Hermes",
-      "the rest are the bot's Hermes's",
+      "the bot's Hermes owns the page's one card",
     )
-    assert.deepEqual(
-      rows(),
-      ["triage-model", "model"],
-      "every setting, in the order the page draws them, under the owner it belongs to",
-    )
-    assert.ok(
-      wordsOf(root()).indexOf("Gots") < wordsOf(root()).indexOf("Hermes"),
-      "Gots's caption comes before the Hermes card it does not name",
-    )
+    assert.deepEqual(rows(), ["model"], "every setting it draws, the model a chat runs")
     assert.doesNotMatch(
       wordsOf(root()),
       /Subagent model/,
       "Subagent model is General's, not this page's",
     )
-  })
-})
-
-test("the triage row says what the model decides, and no pop-up explains it", async () => {
-  await seed("chat-triage-copy")
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.equal(
-      rowText("triage-model"),
-      `Triage model${TRIAGE}Default model`,
-      "the explanation is the row's own line, word for word, over the value it holds",
-    )
-    assert.equal(accent("triage-model"), "Default model")
-    assert.ok(missing('[aria-label^="About the"]'), "and nothing explains it in a pop-up")
   })
 })
 
@@ -317,52 +271,8 @@ test("the model pick marks the model the page already shows as the value", async
   })
 })
 
-test("a host that withholds the model keeps the triage row and its words", async () => {
-  await seed("chat-withheld", { writers: false })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.ok(row("triage-model"), "the triage row is still there")
-    assert.ok(rowText("triage-model").includes(TRIAGE), "and its line is unchanged")
-    assert.equal(accent("triage-model"), "Default model", "over the value it holds")
-  })
-})
-
-test("a host without the triage route draws no Gots caption, and its Hermes card alone", async () => {
-  await seed("chat-no-triage", { features: ["fallbacks", "host_model"] })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.ok(headings().length === 0, "no heading over an empty card either")
-    assert.ok(!caption("Gots"), "no caption over a card with no row in it")
-    assert.ok(caption("Hermes"), "the Hermes card is the page's own")
-    absent('[data-setting="triage-model"]', "and no triage row")
-    assert.deepEqual(rows(), ["model"], "and the model a chat runs is still there")
-  })
-})
-
-test("with chat threads off, no Gots section is drawn and the Hermes models still are", async () => {
-  await seed("chat-threads-off", {}, { chatThreads: false })
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.ok(!caption("Gots"), "no caption over a card with no row in it")
-    absent('[data-setting="triage-model"]', "and no triage row")
-    assert.equal(caption("Hermes")?.textContent?.trim(), "Hermes", "the Hermes card is still drawn")
-    assert.deepEqual(rows(), ["model"], "with the model a chat runs")
-  })
-})
-
-test("turning chat threads on draws the Gots section again, holding the host's pick", async () => {
-  await seed(
-    "chat-threads-flip",
-    { triage: { provider: "openrouter", model: "cheap-model" } },
-    { chatThreads: false },
-  )
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    assert.ok(!row("triage-model"), "off, no triage row")
-    await act(async () => saveSettings({ chatThreads: true }))
-    await until(async () => Boolean(row("triage-model")), "the Gots row")
-    assert.equal(accent("triage-model"), "openrouter/cheap-model", "holding the pick the host kept")
-  })
-})
-
 test("a host without the fallback route leaves the chain's row off General", async () => {
-  await seed("chat-no-fallbacks", { features: ["general_page", "triage_model", "host_model"] })
+  await seed("chat-no-fallbacks", { features: ["general_page", "host_model"] })
   await mount(page("/settings/bots/bot-1/general"), async () => {
     await drawn()
     assert.deepEqual(rows(), ["model"], "and the model stays")
@@ -478,24 +388,6 @@ test("picking a model on the Models page writes it to the bot", async () => {
     )
     await until(async () => !find("[aria-pressed]"), "the sheet to close behind the pick")
     assert.equal(accent("model"), "cheap-model", "and the row shows the model it now runs")
-  })
-})
-
-test("picking a triage model writes it to the host", async () => {
-  const calls = await seed("chat-triage-pick")
-  await mount(page("/settings/bots/bot-1/models"), async () => {
-    await openPick("triage-model")
-    await click(modelOption("cheap-model"))
-
-    const write = calls.find(
-      (one) => one.method === "POST" && one.path.endsWith("/plugins/gots/triage-model"),
-    )
-    assert.deepEqual(
-      write?.body,
-      { triage_model: { provider: "openrouter", model: "cheap-model" } },
-      "the triage model the host is sent",
-    )
-    assert.equal(accent("triage-model"), "openrouter/cheap-model", "and the row the pick set")
   })
 })
 

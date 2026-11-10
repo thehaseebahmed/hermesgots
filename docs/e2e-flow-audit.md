@@ -408,8 +408,9 @@ what it described or to a test that already held it:
 - **The compaction seam.** `scripts/test-chat-flow.mjs` holds where the divider stands, and the
   chat-next component tests the seam a reply draws inside itself
   (`test-chat-next-compaction-matrix.tsx`, `test-chat-next-archive.tsx`).
-- **`/thread` with text, and the thread it opens.** `scripts/test-thread-command.tsx` presses the
-  composer's own pick, and `scripts/test-chat-next-new-chat.tsx` a blank chat's first send.
+- **`/thread` with text, and the thread it opens.** Gone with the command, and
+  `scripts/test-thread-command.tsx` with it. A blank chat's first send — the one path a new chat is
+  made by now, in either layout — is `scripts/test-chat-next-new-chat.tsx`'s.
 - **The pane, and every painted frame of a switch.** `scripts/test-switch-hold.tsx` holds that a
   pane-switch never paints the chat it left, and `bot-chats` walks the browser's history — the entry
   a page stands on, the address a press walks to, and the stack a reload leaves.
@@ -431,9 +432,8 @@ makes, so it never reached the card it asserted.
 ## The twenty-two that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. With `bot-settings`, `bot-threads` and `question-card`, whose rows are in their
-own families above — #584, #422 and this branch's question card landed after this page counted
-them — they are what the end-to-end registry holds once the other 59 keys leave (#314).
+replaced by itself. With `bot-settings` and `question-card`, whose rows are in their own families above — #584 and this
+branch's question card landed after this page counted them — they are what the end-to-end registry holds once the other 59 keys leave (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
 | ---------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

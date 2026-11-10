@@ -5,7 +5,6 @@ import { retireDraft } from "@/lib/drafts"
 import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
 import { modelOf, wantsPin } from "@/lib/model-pick"
 import { pointsIn } from "@/lib/point-marker"
-import { announceMove, askTriage, canTriage, triaging } from "@/lib/triage"
 import { quietly } from "@/lib/report"
 import { openerFor, pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
 
@@ -142,41 +141,5 @@ export async function steerTurn(
   } catch {
     toast.error("Couldn't steer this reply, so it's queued.")
     return false
-  }
-}
-
-/**
- * Asks a bot's host where a message sent from its Main belongs (ADR 0029), as the current screen
- * does (`lib/triage.ts`): its files saved on the host first, so whichever thread it lands in reads
- * them. Answers the attachments to send it to Main with, saved, or nothing when the host queued it
- * on a thread. Unsure is Main: a host without the feature, a message with no words, one typed while
- * another is being decided and any failure all stay.
- */
-export async function triageTurn(
-  chatId: string,
-  text: string,
-  attachments: Attachment[],
-  { steer = false }: { steer?: boolean } = {},
-): Promise<Attachment[] | undefined> {
-  const content = text.trim()
-  const conversation = await db.conversations.get(chatId)
-  const profile = conversation && (await db.profiles.get(conversation.profileId))
-  if (!conversation?.main || !profile || !content || triaging.has(chatId)) return attachments
-  const config = serverConfig(profile)
-  if (!(await canTriage(config))) return attachments
-  triaging.add(chatId)
-  try {
-    const sent = attachments.length
-      ? await uploadAttachments(config, conversation.hermesSessionId, attachments, true)
-      : attachments
-    const moved = await askTriage(
-      { conversation, profile, config },
-      { content, sent, steer, at: Date.now() },
-    )
-    if (!moved) return sent
-    void announceMove(moved)
-    return undefined
-  } finally {
-    triaging.delete(chatId)
   }
 }

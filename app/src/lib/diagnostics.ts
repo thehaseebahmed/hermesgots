@@ -20,8 +20,6 @@ export interface DiagChat {
   changedAt: string
   /** This device holds only part of the host's transcript for it. */
   older?: boolean
-  /** The moves triage recorded on the host for it (a Main thread's Moved markers). */
-  moves?: number
   messages?: { user: number; assistant: number }
 }
 
@@ -59,10 +57,8 @@ export interface DiagDevice {
   /** The Dexie schema version this device is on. */
   schema: number
   developer: boolean
-  /** Whether the bot-first layout is the one this device draws: false under the legacy switch. */
+  /** Whether the bot-chats layout is the one this device draws: false under the legacy switch. */
   botThreads: boolean
-  /** Developer's chat threads switch: whether a bot may start one at all. */
-  chatThreads: boolean
   /** The latest return to the foreground, timed; absent before this launch's first one. */
   resume?: DiagResume
   bots: DiagBot[]
@@ -97,7 +93,6 @@ export function diagChat(
   }
   if (chat.main) built.main = true
   if (chat.olderThan) built.older = true
-  if (chat.moves?.length) built.moves = chat.moves.length
   if (messages) built.messages = messages
   return built
 }
