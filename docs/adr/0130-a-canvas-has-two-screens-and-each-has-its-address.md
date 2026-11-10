@@ -29,6 +29,12 @@ bot has not finished has a session to read and no page to look at, so a phone fo
 address and a wide screen stays on the lane. One owner decides, so the create cannot disagree with a
 link.
 
+The one thing a phone cannot do on a single screen is tap the page, so pointing is a round trip. The
+edit screen's `+` sends the reader to the page with pointing armed, the page outlines the element
+under the finger, one tap answers it, and the app returns them to the chat with that element as a chip
+above the field — removable with its own cross, or carried by the next message. The element rides a
+small hand-over keyed by the canvas and taken once, so a point the reader removed cannot come back.
+
 ## Considered and rejected
 
 - **A mode on one screen, held in state or a query parameter.** Cheaper, and it fails the thing the
@@ -42,16 +48,17 @@ link.
 - **A back arrow on the edit screen once the canvas has a version.** The corner control already goes
   to the preview; two controls for one move is a header with a dead button. A canvas with no version
   has no corner control, so that case does keep one, to the list.
-- **Pointing at the page from the edit screen.** A point is a tap on a page, and the page is on the
-  other screen. It stays where the page is.
+- **Arming the page under the chat.** Keeping the frame behind the edit screen, outlined and tappable,
+  would save the trip — and it is the sheet again: a page half-covered by the screen that exists to
+  replace it.
 
 ## Consequences
 
 - Flipping unmounts the frame, so anything a canvas kept only inside its own page — a half-typed
   field, not its data on the host — is gone when the reader returns. The version and the reader's
   scroll position are what return.
-- A phone loses pointing at the page for as long as its session is on the edit screen; a wide screen
-  keeps it, since the page is still beside the session.
+- Pointing from the edit screen costs that trip, and the page is drawn again on the way back: the
+  frame's own unsaved state does not survive it, as it does not survive a flip.
 - The phone's header now carries back, the title, Undo, the flip and the menu in one row, which
   crowds a 320px screen.
 - A reader holding the address of a canvas that never got a version now lands on its session rather
