@@ -73,8 +73,9 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
     },
   ],
   // The LLM Providers page's rows are the host's catalog, which this table can't read: any slug is
-  // an address, and the page says in its own words where the host lists no such provider. The leaf
-  // titles the screen until the block lands, as a keyed page's edit is titled from its key.
+  // an address, and the page says in its own words where the host lists no such provider. Every
+  // slot's screen is titled for what it does — *API key* — and the block it reads names whose key
+  // it is, since a slug is not a name a reader knows.
   "llm-providers": [
     // The page's own `+`, which adds an endpoint: a fixed id, since it is no endpoint of the host's
     // and so has no slug to be named by. FIXED is matched before the page's items, so this can never
@@ -83,10 +84,12 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
     {
       id: "key",
       kind: "detail",
-      title: "Key",
+      title: "API key",
       holds: "items",
       hasPage: (name) => name.trim().length > 0,
-      titleOf: (name) => name,
+      // The screen is named for what it does, not for the leaf: which provider's key it is, the
+      // block the screen reads says in its own row, and a slug is not a name a reader knows.
+      titleOf: () => "API key",
     },
   ],
 }
