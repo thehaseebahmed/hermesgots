@@ -24,6 +24,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   path,
   seedSettings,
@@ -342,6 +343,6 @@ test("a page opened again with the host away draws the rows the host last gave, 
       : hung) as typeof globalThis.fetch
   await mount(page(), async () => {
     await until(async () => Boolean(find('[data-setting="timezone"]')), "the held rows")
-    assert.equal(find("[data-general-loading]"), null, "no spinner stands over them")
+    assert.ok(missing("[data-general-loading]"), "no spinner stands over them")
   })
 })

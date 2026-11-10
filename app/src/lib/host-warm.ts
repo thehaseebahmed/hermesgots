@@ -19,10 +19,9 @@ export async function warmBotSettings(server: Server) {
   if (warming.has(key)) return
   warming.add(key)
   try {
-    const [hermes, host, mcps, delegation, fallbacks, reminders, triage] = await Promise.all([
+    const [hermes, host, delegation, fallbacks, reminders, triage] = await Promise.all([
       import("@/lib/hermes"),
       import("@/lib/host-record"),
-      import("@/lib/mcps"),
       import("@/lib/delegation"),
       import("@/lib/fallbacks"),
       import("@/lib/reminders"),

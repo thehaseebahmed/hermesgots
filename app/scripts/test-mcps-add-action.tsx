@@ -322,6 +322,6 @@ test("opened again with the host away, the page draws the servers the host last 
       : live(input, init)) as typeof fetch
   await mount(settings(), async () => {
     await until(async () => Boolean(find('[data-mcp-section="config"]')), "the held servers")
-    assert.equal(find('[aria-label="github on"]'), null, "no switch until the host answers")
+    assert.ok(missing('[aria-label="github on"]'), "no switch until the host answers")
   })
 })
