@@ -107,6 +107,7 @@ TOOL_EDIT = "canvas_edit"
 TOOL_READ = "canvas_read"
 TOOL_DATA_READ = "canvas_data_read"
 TOOL_DATA_WRITE = "canvas_data_write"
+TOOL_LIST = "canvas_list"
 
 # Set by register() and _wire_api_server, and what `ready` answers with.
 ctx: Any = None
@@ -1724,6 +1725,49 @@ def handle_data_write(
     )
 
 
+LIST_SCHEMA = {
+    "name": TOOL_LIST,
+    "description": (
+        "Names the canvases this bot has, the one written to last first, each with the id and the "
+        "title a data call takes — so a canvas the user named can be found without knowing its id. "
+        "It reads and writes nothing, and a canvas's session is not offered it: that session works "
+        "on its own canvas."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
+
+def _listed(row: Dict[str, Any]) -> Dict[str, Any]:
+    """One canvas as the list answers it: what a call needs to name it, and no picture.
+
+    The record's picture is one page's own screen, and it rides every device's list already; a
+    tool that answered it would hand a model a data URL of the page it is about to be asked about.
+    Clocks are the host's milliseconds, as every other answer carries them.
+    """
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "pinned": row["pinned"],
+        "archived": row["archived"],
+        "version": row["version"],
+        "at": row["at"],
+    }
+
+
+def handle_list(
+    args: Any = None, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: every canvas this bot has, that a data call may name."""
+    try:
+        path, _home = sessions._paths()
+    except Exception:
+        logger.debug("gots: couldn't find the store a canvas lives in", exc_info=True)
+        return json.dumps(
+            {"error": f"{TOOL_LIST} couldn't find the store this host keeps its canvases in."}
+        )
+    return json.dumps({"canvases": [_listed(row) for row in listing(path)]})
+
+
 # A canvas is edited by its session and nowhere else: work that leaves the host, files itself in a
 # project's library or takes a task is not a canvas's.
 BLOCKED_TOOLS = {"pull_request", "library_add", "afk_gate"}
@@ -1746,7 +1790,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's five tools."""
+    """Keeps the context and registers the canvas's six tools."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -1759,6 +1803,7 @@ def register(plugin_ctx: Any) -> bool:
         (TOOL_READ, READ_SCHEMA, handle_read),
         (TOOL_DATA_READ, DATA_READ_SCHEMA, handle_data_read),
         (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, handle_data_write),
+        (TOOL_LIST, LIST_SCHEMA, handle_list),
     ):
         try:
             if register_tool(name=tool, toolset="gots", schema=schema, handler=handler, emoji="🖼️") is False:
@@ -1793,6 +1838,12 @@ def wire(api_adapter: Any) -> bool:
     ):
         if not tools_common.wire_tool(api_adapter, tool, schema, tool):
             took = False
+    # A canvas's session works on its own canvas, so the list would only offer it names the next
+    # call refuses.
+    if not tools_common.wire_tool(
+        api_adapter, TOOL_LIST, LIST_SCHEMA, TOOL_LIST, when=lambda session: not is_canvas(session)
+    ):
+        took = False
     _wired = took
     return took
 

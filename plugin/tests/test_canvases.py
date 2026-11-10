@@ -777,12 +777,13 @@ class SessionTest(unittest.TestCase):
             ],
         )
         self.assertEqual(len(canvas_agent.tools), 5)
-        # A session that is not the canvas's keeps the canvas's data and never its page.
+        # A session that is not the canvas's keeps the canvas's data and never its page, and can
+        # find the canvas it was not told about.
         self.assertEqual(
             sorted(plain_agent.valid_tool_names),
-            [canvases.TOOL_DATA_READ, canvases.TOOL_DATA_WRITE],
+            [canvases.TOOL_DATA_READ, canvases.TOOL_DATA_WRITE, canvases.TOOL_LIST],
         )
-        self.assertEqual(len(plain_agent.tools), 2)
+        self.assertEqual(len(plain_agent.tools), 3)
 
         # The guide is the canvas's, and the component library's is withheld from that session.
         self.assertEqual(openui.canvas_content({"session_id": self.session + "-c1"}), openui.CANVAS_TEXT)
@@ -957,6 +958,37 @@ class SessionTest(unittest.TestCase):
                     canvases.handle_data_read({"canvas": name}, session_id=self.session)
                 )
                 self.assertIn("own canvas", refused["error"])
+
+    def test_a_session_outside_a_canvas_lists_the_canvases_it_may_name(self) -> None:
+        # A bot told only a canvas's name has to find the id a data call takes.
+        again = make_canvas(self.path)
+        with mock.patch.object(canvases, "_session_canvas", return_value=self.canvas["id"]):
+            canvases.handle_write({"html": DOCUMENT}, session_id=self.session)
+        conn = connect(self.path)
+        try:
+            conn.execute("UPDATE canvases SET at = 1 WHERE id = ?", (self.canvas["id"],))
+            conn.commit()
+        finally:
+            conn.close()
+        listed = json.loads(canvases.handle_list({}, session_id=self.plain))
+        # Newest first, as the app's own list reads them.
+        self.assertEqual(
+            [row["id"] for row in listed["canvases"]], [again["id"], self.canvas["id"]]
+        )
+        # Each row carries what a data call needs and no picture: that is one page's screen.
+        self.assertEqual(
+            sorted(listed["canvases"][0]),
+            ["archived", "at", "id", "pinned", "title", "version"],
+        )
+        self.assertEqual(
+            (
+                listed["canvases"][1]["title"],
+                listed["canvases"][1]["version"],
+                listed["canvases"][1]["pinned"],
+                listed["canvases"][1]["archived"],
+            ),
+            (self.canvas["title"], 1, False, False),
+        )
 
 
 class EditTest(unittest.TestCase):
