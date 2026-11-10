@@ -10,10 +10,12 @@ else on arrival.**
 
 A chat's screen answers the thread it draws: the Hermes session its row runs in or, for a room, the
 room's own id, which is what the Host pushes a room under. A research mission's screen and a
-meeting's screen answer the ids their pushes name. A push that names nothing a screen opens — a
-routine's last run failed, a project couldn't be set up — is answered by the tap that came from it,
-in the notification-action listener, since a tap is the only thing that names it. Nothing reads the
-tray on launch, on `resume`, or when the window comes back to the front.
+meeting's screen — and a meeting's topic screen, which is that meeting's notes — answer the ids
+their pushes name. A push about a routine's last run or a project that couldn't be set up names a job
+or a project that no screen opens, so the tap that came from it is what answers it: its tag names
+that id, but only the tap says the user answered. Nothing reads the tray for its own sake on launch,
+on `resume` or on focus: only the screen on display answers, and a launch lands on the chat the app
+opens to.
 
 The identity is one both surfaces already write. A push is tagged `<group>:<subject>` — the session
 or the kind on the web (`public/push-sw.js`), the category on Android (`netlify/lib/fcm.ts`) — and
@@ -44,5 +46,10 @@ a dismissal needs no new field in the payload, the registry or the phone.
 - **An APK whose plugin predates `getDeliveredNotifications()`** keeps its tray: the call throws and
   the dismissal is swallowed, which is no dismissal rather than the wrong one.
 - **A push that arrives while the app is hidden on the thread it is about** is dismissed when the app
-  comes back to that screen, since the hook runs again on `visibilitychange`. The plugin skips a
-  device whose stream is open, so only a hidden app can be reached that way.
+  comes back to that screen, since the hook runs again on `visibilitychange` and a hidden screen
+  answers nothing. The plugin skips a device whose stream is open, so only a hidden app can be
+  reached that way.
+- **The phone's branch is pinned, not run.** The component tier has no Android, so
+  `getDeliveredNotifications()` and `removeDeliveredNotifications()` are held by a source-text test
+  (`app/scripts/test-push-tray.mjs`) — the fallback ADR 0019 allows where driving the phone is the
+  only way to see it.

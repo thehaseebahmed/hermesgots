@@ -1685,6 +1685,7 @@ function TopicScreen() {
   const { meeting } = useMeeting(id)
   const topic = meeting?.notes?.topics.find((t) => t.id === topicId)
   useRememberOpened("meetings", meeting?.id)
+  useDismissPushes(meeting?.id)
   if (!meeting?.notes || !topic) return <Gone />
   return <TopicView key={topic.id} meeting={meeting} notes={meeting.notes} topic={topic} />
 }
