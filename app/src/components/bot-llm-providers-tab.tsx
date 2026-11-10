@@ -426,6 +426,9 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         placeholder={endpoint ? "The endpoint's API key" : "The provider's API key"}
         kind="secret"
         surface={large ? "card" : "screen"}
+        // The mask's own row stands above this form, so the form is not the whole screen: filling
+        // the height here would put its Save and the Remove action below the fold on a phone.
+        fill={false}
         saveable={(next) => submittableKey(next, drawn)}
         busy={saving}
         onSave={submit}

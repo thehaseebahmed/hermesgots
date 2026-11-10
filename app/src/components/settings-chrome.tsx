@@ -564,6 +564,7 @@ export function EditForm({
   busy,
   surface,
   saveable,
+  fill = true,
   onSave,
   onReset,
   onCancel,
@@ -587,6 +588,12 @@ export function EditForm({
    */
   surface?: "screen" | "card"
   /**
+   * Whether the form is the whole of what the screen shows. It is, for an edit the route pushed on
+   * its own; a screen with rows above the form passes `false`, since filling the height there would
+   * stand the form's own foot — its Save — below the fold.
+   */
+  fill?: boolean
+  /**
    * Whether Save is offered for what the field holds. The default is the whole of an ordinary edit —
    * a value that differs from the one it started at — and a form whose field may hold something
    * that must not be written passes its own rule, as the key form does with a mask.
@@ -603,7 +610,10 @@ export function EditForm({
   useUnsavedChanges(surface === "screen" && next !== value)
   return (
     <form
-      className={cn("flex flex-col gap-6", surface === "screen" && "min-h-[calc(100dvh-7rem)]")}
+      className={cn(
+        "flex flex-col gap-6",
+        fill && surface === "screen" && "min-h-[calc(100dvh-7rem)]",
+      )}
       onSubmit={(event) => {
         event.preventDefault()
         onSave(next)
