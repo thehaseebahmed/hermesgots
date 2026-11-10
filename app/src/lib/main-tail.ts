@@ -1,6 +1,7 @@
-import type { Compaction, Move } from "@/lib/hermes"
+import type { Move } from "@/lib/hermes"
 import type { Thread } from "@/lib/threads"
 
+import type { CompactionEntry } from "./chat-flow.ts"
 import { compactionAt } from "./compactions.ts"
 import { byTimeThenId } from "./placement.ts"
 import { cardAt } from "./thread-cards.ts"
@@ -13,7 +14,7 @@ import { moveAt } from "./move-marks.ts"
 export type TailItem =
   | { kind: "card"; at: number; thread: Thread }
   | { kind: "move"; at: number; move: Move }
-  | { kind: "compaction"; at: number; compaction: Compaction }
+  | CompactionEntry
 
 /** An item's id: how the order keeps two items at one moment apart, and how its row is keyed. */
 export const tailId = (item: TailItem) =>
@@ -25,25 +26,21 @@ export const tailId = (item: TailItem) =>
 
 /**
  * The items a set of producers hands over, each carrying its own clock: a card the time its thread
- * began (`cardAt`), a marker the time the reader sent the message (`moveAt`), a divider the host's
- * own `at`. The one place the three become flow items, so a fourth producer, or a clock that reads
- * differently, is a change here and nowhere else (ADR 0097).
+ * began (`cardAt`), a marker the time the reader sent the message (`moveAt`). A compaction's divider
+ * is `chatFlow`'s to place above its message, and joins these here as an item like any other, so a
+ * fourth producer, or a clock that reads differently, is a change in one place (ADR 0097).
  */
 export function tailItems({
   cards,
   moves,
-  compaction,
 }: {
   cards?: readonly Thread[]
   moves?: readonly Move[]
-  compaction?: Compaction
 }): TailItem[] {
-  const items: TailItem[] = [
+  return [
     ...(cards ?? []).map((thread): TailItem => ({ kind: "card", at: cardAt(thread), thread })),
     ...(moves ?? []).map((move): TailItem => ({ kind: "move", at: moveAt(move), move })),
   ]
-  if (compaction) items.push({ kind: "compaction", at: compactionAt(compaction), compaction })
-  return items
 }
 
 /**

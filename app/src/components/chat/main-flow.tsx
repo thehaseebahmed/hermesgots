@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { Compacted } from "@/components/chat/model-change"
 import { MovedMarker } from "@/components/chat/moved-marker"
+import { chatFlow, type CompactionEntry } from "@/lib/chat-flow"
 import { db, type Message } from "@/lib/db"
 import type { Move } from "@/lib/hermes"
 import { type CompactionMarks } from "@/lib/compactions"
@@ -74,6 +75,9 @@ export function useMainFlow({
     [cards, marks],
   )
   const now = useNow()
+  // The thread's own entries — its messages, a compaction's divider above the message it sits over —
+  // which is all a chat draws; the cards, markers and headings below are Main's alone.
+  const chat = useMemo(() => chatFlow({ thread, compacted }), [thread, compacted])
   const flow = useMemo(() => {
     const entries: FlowEntry[] = []
     let day: number | undefined
@@ -84,33 +88,40 @@ export function useMainFlow({
       day = key
       entries.push({ kind: "heading", day: dayOf(at, now), at })
     }
+    /** The dividers the chat's flow placed above the message being read, carried to it. */
+    let pending: CompactionEntry[] = []
     /**
      * What stands above one message: the cards, the markers and a divider each producer placed
      * there, in the one order their own times give — three lists stacked is a card begun after a
      * move drawn above it (ADR 0097).
      */
-    const above = (message: Message): TailItem[] => {
+    const above = (message: Message, dividers: CompactionEntry[]): TailItem[] => {
       const items = tailItems({
         cards: cards?.before.get(message.id),
         moves: marks.before.get(message.id),
-        compaction: thread ? compacted?.before.get(message.id) : undefined,
       })
-      return items.length > 1 ? orderTail(items) : items
+      const all: TailItem[] = [...items, ...dividers]
+      return all.length > 1 ? orderTail(all) : all
     }
-    for (const message of thread ?? NO_ROWS) {
-      for (const item of above(message)) {
+    for (const entry of chat) {
+      if (entry.kind === "compaction") {
+        pending.push(entry)
+        continue
+      }
+      for (const item of above(entry.message, pending)) {
         heading(item.at)
         entries.push(item)
       }
-      heading(message.createdAt)
-      entries.push({ kind: "message", message })
+      pending = []
+      heading(entry.message.createdAt)
+      entries.push(entry)
     }
     for (const item of tail) {
       heading(item.at)
       entries.push(item)
     }
     return entries
-  }, [cards, compacted, marks, thread, tail, now])
+  }, [cards, chat, marks, tail, now])
   const moveThatOpenedThread = useMemo(() => {
     const found = new Map<string, Move>()
     for (const move of moves ?? []) {
