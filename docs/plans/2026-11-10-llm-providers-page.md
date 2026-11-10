@@ -273,6 +273,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    submitted preview is refused and nothing is written" — and "replacing posts the typed key and the
    row reads the new mask", whose faked boundary asserts the body holds the typed key and never the
    mask that was on screen.
+
+   Done.
+
 6. **A provider's key is removed.** `remove_key` goes through `remove_provider_env_credential` and
    answers the block; the slot screen asks first with `ConfirmDestructive`. Goals: G3. After: 4.
    Layers: plugin domain, plugin HTTP API, mock host, `app` lib, `app` UI. Check:

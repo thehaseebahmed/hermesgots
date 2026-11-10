@@ -3433,6 +3433,30 @@ const fallbacksOf = new Map()
 // The bot's own General settings: what its `config.yaml` holds, per profile, and the keys this mock's
 // Hermes keeps — one of each kind the page draws, and one filed under a section of its own.
 const generalValues = new Map()
+// The API-key providers this mock's Hermes knows, and the keys a page has written to them, per
+// profile. The mask is made here the way `mask_secret` makes it — first four and last four, and
+// `***` under its twelve-character floor — because a mask is the host's to make, never the app's.
+const LLM_PROVIDERS = [
+  { slug: "openai", label: "OpenAI", description: "GPT models, straight from OpenAI.", env: "OPENAI_API_KEY" },
+  { slug: "groq", label: "Groq", description: "Fast inference on Groq's hardware.", env: "GROQ_API_KEY" },
+]
+// The key OpenAI starts with here, so its row reads `sk-o...c123` until a page replaces it.
+const LLM_SEEDED = { openai: "sk-o-0000-0000-c123" }
+const llmKeys = new Map()
+const maskSecret = (value) =>
+  value.length < 12 ? "***" : `${value.slice(0, 4)}...${value.slice(-4)}`
+// The shapes a page is handed rather than a key: the host refuses one on its own rule, so a stale
+// screen or a `curl` can't write the mask back.
+const looksMasked = (value) =>
+  value === "***" || value.startsWith("«redacted") || /^\S{4}\.\.\.\S{4}$/.test(value)
+const llmKeyOf = (profile, slug) => llmKeys.get(`${profile}\n${slug}`) ?? LLM_SEEDED[slug]
+const llmBlock = (profile) => ({
+  providers: LLM_PROVIDERS.map(({ slug, label, description }) => {
+    const secret = llmKeyOf(profile, slug)
+    return { slug, label, description, masked: secret ? maskSecret(secret) : null }
+  }),
+  endpoints: [],
+})
 const GENERAL_DEFAULTS = {
   // The window a bot's model runs with: a number whose 0 is Hermes's own "detect it".
   model_context_length: 0,
@@ -4734,6 +4758,26 @@ http
         },
       })
     }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers/key" && req.method === "POST") {
+      // A provider's key replaced (plugin/llm_providers.py): the mask a page draws is refused as a
+      // key, and a typed one lands on the block the answer carries — the same block the read gives.
+      const key = pluginProfile ?? ""
+      const body = await readBody(req)
+      const target = body?.target
+      const typed = body?.key
+      if (typeof target !== "string" || typeof typed !== "string")
+        return json(res, 400, { error: { message: "Body needs a target and a key." } })
+      if (!LLM_PROVIDERS.some((one) => one.slug === target))
+        return json(res, 400, {
+          error: { message: `${target} isn't an API-key provider this Hermes knows.` },
+        })
+      if (looksMasked(typed))
+        return json(res, 400, {
+          error: { message: "That is a masked key, not a key. Type the key itself." },
+        })
+      llmKeys.set(`${key}\n${target}`, typed)
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers") {
       // The bot's LLM providers (plugin/llm_providers.py): the host's catalog filtered to the
       // providers that take a key, each key as the mask `mask_secret` makes of it — first four and
@@ -4741,23 +4785,7 @@ http
       // until the custom endpoints are written here; it is on the answer from the first release.
       return json(res, 200, {
         object: "gots.llm_providers",
-        llm: {
-          providers: [
-            {
-              slug: "openai",
-              label: "OpenAI",
-              description: "GPT models, straight from OpenAI.",
-              masked: "sk-o...c123",
-            },
-            {
-              slug: "groq",
-              label: "Groq",
-              description: "Fast inference on Groq's hardware.",
-              masked: null,
-            },
-          ],
-          endpoints: [],
-        },
+        llm: llmBlock(pluginProfile ?? ""),
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/delegation-settings") {

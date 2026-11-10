@@ -22,7 +22,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
-import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
+import { LlmProviderKeyScreen, LlmProvidersTab } from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
@@ -478,8 +478,9 @@ export function BotSettingsPage({
   if (shown === "coding") return <CodingTab profile={profile} />
   if (shown === "skills") return <SkillsTab profile={profile} sub={own} />
   // Above the Models fall-through below, which draws for any page this chain doesn't name: a page
-  // without its branch here silently draws Models.
-  if (shown === "llm-providers") return <LlmProvidersTab profile={profile} />
+  // without its branch here silently draws Models. A detail of this page's own is drawn by `PageSub`
+  // below, in the pane the page would have taken.
+  if (shown === "llm-providers" && !own) return <LlmProvidersTab profile={profile} />
 
   // General is the host's own page: its rows come from the bot's Hermes, so it draws its own edit —
   // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
@@ -534,6 +535,9 @@ function PageSub({
   const large = useLarge()
   // A detail is a screen of its own, and the one this page holds is the chain after its model.
   if (tab === "general" && sub.kind === "detail") return <FallbacksPage profile={profile} />
+  // One provider's key: the page's own detail, named by the slug the address carries.
+  if (tab === "llm-providers" && sub.kind === "detail" && sub.item)
+    return <LlmProviderKeyScreen profile={profile} target={sub.item} />
   const edit = botEdit(sub.id)
   // A segment the router refused never reaches here; one the table doesn't name holds no field, so
   // no id can fall through to a write the page doesn't mean.

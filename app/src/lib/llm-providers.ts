@@ -61,6 +61,23 @@ export function providerRows(block: LlmProviders): LlmProviderRow[] {
 }
 
 /**
+ * The shapes a mask arrives in, as the page must never send one back: `mask_secret`'s `***`, its
+ * first-four/last-four elision, and the `«redacted…»` sentinel a Dashboard copy carries. The host
+ * refuses a mask on its own (longer) rule; this is the screen's half, so no Save is even offered.
+ */
+const MASKED_KEY = /^(?:\*{3,}|«redacted[^»]*»|\S{0,4}\.{3}\S{0,4})$/
+
+/**
+ * Whether a key form holds something worth submitting: a typed key, and never a mask. A field left
+ * empty (or holding only spaces) has nothing to write, and the mask the page drew is the host's
+ * string rather than a key — sending it back would be a write of nothing at all.
+ */
+export function submittableKey(value: string): boolean {
+  const key = value.trim()
+  return Boolean(key) && !MASKED_KEY.test(key)
+}
+
+/**
  * The block a host answered, read forgivingly: a row that names no provider is dropped rather than
  * drawn blank, and an answer that isn't the block is no block at all — so a host that answered 501
  * or a shape this build doesn't know draws no page over nothing.

@@ -2958,6 +2958,42 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         ),
     )
 
+    async def set_llm_provider_key(request: "web.Request") -> "web.Response":
+        """Writes one provider's key and answers the fresh block.
+
+        The target is a catalog slug and the key is the typed one. A body whose key is a mask is
+        refused by the domain's own host rule, in its sentence: a mask never reaches a write. The
+        key is not logged and not echoed — the 502's sentence is the plugin's, never the host's own
+        words, which could hold the value.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        target = body.get("target") if body else None
+        key = body.get("key") if body else None
+        if not isinstance(target, str) or not target.strip() or not isinstance(key, str):
+            return _error(web, "Body needs a target and a key.", 400)
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return llm_providers.write_key(config_path, target, key)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't write an API key from here.", 501)
+        except Exception:
+            logger.warning("gots: couldn't write this bot's provider key", exc_info=True)
+            return _error(web, "The host couldn't save the key.", 502)
+        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+
+    app.router.add_post(f"{PREFIX}/llm-providers/key", set_llm_provider_key)
+
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)
         runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))

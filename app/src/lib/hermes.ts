@@ -1360,6 +1360,27 @@ export async function getLlmProviders(config: HermesConfig, signal?: AbortSignal
   return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
 }
 
+/**
+ * Replaces one provider's key — the catalog slug the row names, and the key the user typed — and
+ * answers the fresh block, which is the only way the page learns the new mask. The host refuses a
+ * body whose key is a mask, and its sentence is what the screen shows. The key is never logged here:
+ * it rides the request body and nothing else.
+ */
+export async function setLlmProviderKey(
+  config: HermesConfig,
+  target: string,
+  key: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers/key`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ target, key }),
+    signal,
+  })
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
 // `/delegation` is the subagent model's own route, so the tab's path is separate.
 export const GENERAL_ROUTES = {
   general: { path: "general", field: "general", label: "General" },

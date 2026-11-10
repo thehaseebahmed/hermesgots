@@ -6,7 +6,10 @@ The page is the host's own catalog filtered to the providers that hold an API ke
 catalog entry with no key env var is no row, and neither is one that authenticates by an account; the
 value a key is never leaves the host — the planted key is absent from the serialized payload — and a
 row's presence is the mask itself (``***`` for a key under the mask's floor, ``None`` for one that
-isn't set), never a second boolean beside it. The route and the feature are read too: a Hermes
+isn't set), never a second boolean beside it. A write is read too: a body whose key is a mask is
+refused on the host's own rule — before any slot is resolved, and with the lifecycle's writer never
+asked — while a typed key goes to that provider's own env var through `save_provider_env_credential`
+and answers the fresh block, which holds no key. The route and the feature are read too: a Hermes
 without the catalog advertises nothing and answers 501.
 
 Run: python3 -m unittest plugin.tests.test_llm_providers -v
@@ -16,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -28,9 +32,11 @@ from plugin import llm_providers
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 # The planted keys. One is long enough for the mask to show its first and last four; one sits under
-# `mask_secret`'s twelve-character floor, where the whole of it is `***`.
+# `mask_secret`'s twelve-character floor, where the whole of it is `***`. The typed key is a write's
+# own: it holds no dot, so it is no mask's shape.
 OPENAI_KEY = "sk-live-0123456789abcdefghij"
 SHORT_KEY = "groq-11char"
+TYPED_KEY = "sk-t-0000-zyxw"
 assert len(SHORT_KEY) == 11
 
 
@@ -91,11 +97,30 @@ def mask_secret(
     return placeholder if len(value) < floor else f"{value[:head]}...{value[-tail:]}"
 
 
-def host_modules(values: Dict[str, str], providers: Optional[list] = None):
+def is_redacted_credential_preview(value: str) -> bool:
+    """``hermes_cli.web_routers._common.is_redacted_credential_preview``, as this host spells it.
+
+    The three shapes the host's rule knows: ``mask_secret``'s ``***``, its first-four/last-four
+    elision, and the ``«redacted…»`` sentinel a Dashboard copy carries.
+    """
+    return (
+        value == "***"
+        or value.startswith("«redacted")
+        or bool(re.fullmatch(r"\S{4}\.\.\.\S{4}", value))
+    )
+
+
+def host_modules(
+    values: Dict[str, str],
+    providers: Optional[list] = None,
+    save: Optional[mock.MagicMock] = None,
+):
     """The host's own modules, planted where a lazy import finds them.
 
     ``values`` is what the bot's ``.env`` holds, as ``get_env_prefer_dotenv`` answers it; ``providers``
-    overrides the catalog for the few cases that need another one.
+    overrides the catalog for the few cases that need another one; ``save`` stands in for the
+    credential lifecycle's writer, so a test can say what it was handed — and that it was never
+    called at all. The mask rule is the host's own, planted rather than restated.
     """
     agent = ModuleType("agent")
     pool = ModuleType("agent.credential_pool")
@@ -109,6 +134,14 @@ def host_modules(values: Dict[str, str], providers: Optional[list] = None):
     rows = catalog() if providers is None else providers
     catalog_module.provider_catalog = lambda: rows
     hermes.provider_catalog = catalog_module
+    lifecycle = ModuleType("hermes_cli.credential_lifecycle")
+    lifecycle.save_provider_env_credential = save or mock.MagicMock()
+    hermes.credential_lifecycle = lifecycle
+    routers = ModuleType("hermes_cli.web_routers")
+    common = ModuleType("hermes_cli.web_routers._common")
+    common.is_redacted_credential_preview = is_redacted_credential_preview
+    routers._common = common
+    hermes.web_routers = routers
     return mock.patch.dict(
         sys.modules,
         {
@@ -117,11 +150,52 @@ def host_modules(values: Dict[str, str], providers: Optional[list] = None):
             "agent.redact": redact,
             "hermes_cli": hermes,
             "hermes_cli.provider_catalog": catalog_module,
+            "hermes_cli.credential_lifecycle": lifecycle,
+            "hermes_cli.web_routers": routers,
+            "hermes_cli.web_routers._common": common,
         },
     )
 
 
 CONFIG = Path("/fake/hermes_home/config.yaml")
+
+
+class WriteTest(unittest.TestCase):
+    """A provider's key replaced: one slot, one write, and a mask never among them."""
+
+    def test_a_submitted_preview_is_refused_and_nothing_is_written(self) -> None:
+        # Every shape a mask arrives in — the floor's placeholder, a first-four/last-four elision
+        # and a sentinel — is refused on the host's own rule, before any slot is resolved.
+        save = mock.MagicMock()
+        previews = ("***", "sk-o...c123", "«redacted:sk-o...c123»")
+        for preview in previews:
+            with host_modules({}, save=save):
+                with self.assertRaises(ValueError) as refused:
+                    llm_providers.write_key(CONFIG, "openai", preview)
+            self.assertIn("masked key", str(refused.exception), f"the refusal names what it saw: {preview}")
+            self.assertNotIn(preview, str(refused.exception), "and never repeats it")
+        save.assert_not_called()
+
+    def test_a_typed_key_is_written_to_the_provider_s_env_var(self) -> None:
+        values = {"OPENAI_API_KEY": "sk-old-0000-old0"}
+        save = mock.MagicMock(side_effect=lambda env_var, key: values.__setitem__(env_var, key))
+        with host_modules(values, save=save):
+            block = llm_providers.write_key(CONFIG, "openai", TYPED_KEY)
+        save.assert_called_once_with("OPENAI_API_KEY", TYPED_KEY)
+        row = next(one for one in block["providers"] if one["slug"] == "openai")
+        self.assertEqual(row["masked"], "sk-t...zyxw", "the answer is the fresh read, key masked")
+        self.assertNotIn(TYPED_KEY, json.dumps(block), "and the key itself is nowhere in it")
+
+    def test_an_unknown_slug_is_refused_by_name(self) -> None:
+        save = mock.MagicMock()
+        with host_modules({}, save=save):
+            with self.assertRaises(ValueError) as unknown:
+                llm_providers.write_key(CONFIG, "nope", TYPED_KEY)
+            with self.assertRaises(ValueError) as keyless:
+                llm_providers.write_key(CONFIG, "virtual", TYPED_KEY)
+        self.assertIn("nope", str(unknown.exception), "the sentence says which slug it was")
+        self.assertIn("virtual", str(keyless.exception), "and a provider with no slot is no target")
+        save.assert_not_called()
 
 
 class ReadTest(unittest.TestCase):
@@ -207,10 +281,16 @@ class RouteTest(unittest.TestCase):
         temp_hermes_home(self)
         self.app = wire(self, RouteAdapter())
 
-    def call(self, path: str) -> Dict[str, Any]:
+    def call(self, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         request = FakeWeb.Request()
         request.match_info, request.headers = {}, {}
-        return asyncio.run(route(self.app, plugin.PREFIX + path)(request))
+
+        async def read() -> Optional[Dict[str, Any]]:
+            return body
+
+        request.json = read
+        method = "POST" if body is not None else None
+        return asyncio.run(route(self.app, plugin.PREFIX + path, method)(request))
 
     def test_the_route_answers_the_block_and_the_feature_is_advertised(self) -> None:
         with host_modules({"OPENAI_API_KEY": OPENAI_KEY}):
@@ -231,3 +311,24 @@ class RouteTest(unittest.TestCase):
         read = self.call("/llm-providers")
         self.assertNotIn("llm_providers", advertised["payload"]["features"])
         self.assertEqual(read["status"], 501)
+
+    def test_a_key_write_answers_the_fresh_block(self) -> None:
+        values = {"OPENAI_API_KEY": "sk-old-0000-old0"}
+        save = mock.MagicMock(side_effect=lambda env_var, key: values.__setitem__(env_var, key))
+        with host_modules(values, save=save):
+            written = self.call("/llm-providers/key", {"target": "openai", "key": TYPED_KEY})
+        self.assertEqual(written["status"], 200)
+        self.assertEqual(written["payload"]["object"], "gots.llm_providers")
+        save.assert_called_once_with("OPENAI_API_KEY", TYPED_KEY)
+        row = next(one for one in written["payload"]["llm"]["providers"] if one["slug"] == "openai")
+        self.assertEqual(row["masked"], "sk-t...zyxw", "the row wears the key it was just handed")
+
+    def test_a_mask_body_is_refused_with_its_sentence(self) -> None:
+        # The route is reachable by a curl as easily as by the page: a body whose key is the mask
+        # that was on the screen is refused, and the host's writer is never asked.
+        save = mock.MagicMock()
+        with host_modules({}, save=save):
+            refused = self.call("/llm-providers/key", {"target": "openai", "key": "sk-o...c123"})
+        self.assertEqual(refused["status"], 400)
+        self.assertIn("masked key", refused["payload"]["error"]["message"])
+        save.assert_not_called()

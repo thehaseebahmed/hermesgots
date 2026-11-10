@@ -72,6 +72,19 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
       titleOf: providerLabel,
     },
   ],
+  // The LLM Providers page's rows are the host's catalog, which this table can't read: any slug is
+  // an address, and the page says in its own words where the host lists no such provider. The leaf
+  // titles the screen until the block lands, as a keyed page's edit is titled from its key.
+  "llm-providers": [
+    {
+      id: "key",
+      kind: "detail",
+      title: "Key",
+      holds: "items",
+      hasPage: (name) => name.trim().length > 0,
+      titleOf: (name) => name,
+    },
+  ],
 }
 
 /** The pages whose sub-screens are named by an item they hold. */
