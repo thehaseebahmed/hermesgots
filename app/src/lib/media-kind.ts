@@ -4,14 +4,19 @@
  * `scripts/test-media-kind.mjs` runs it as a pure rule.
  */
 
-export type MediaKind = "image" | "video" | "audio" | "file"
-/** Where a kind draws: side by side in the Gallery, its own row, or a row to download. */
-export type MediaCell = "gallery" | "audio" | "file"
+export type MediaKind = "image" | "video" | "audio" | "page" | "file"
+/**
+ * Where a kind draws: side by side in the Gallery, a recording's row, a page's row (a page has no
+ * thumbnail worth painting, and a running page in a cell would run scripts for every message on
+ * screen), or a row to download.
+ */
+export type MediaCell = "gallery" | "audio" | "page" | "file"
 
 const CELLS: Record<MediaKind, MediaCell> = {
   image: "gallery",
   video: "gallery",
   audio: "audio",
+  page: "page",
   file: "file",
 }
 
@@ -19,7 +24,7 @@ const CELLS: Record<MediaKind, MediaCell> = {
 // The image list carries a phone's or a camera's own formats (HEIC, HEIF, ICO, TIFF), which the route
 // hands over as a binary: the thread draws what the device can show and saves the rest, so a HEIC is
 // a kind here and still a download row in `drawnCell`.
-const KIND_EXTS: Record<Exclude<MediaKind, "file">, readonly string[]> = {
+const KIND_EXTS: Record<Exclude<MediaKind, "file" | "page">, readonly string[]> = {
   image: [
     "png",
     "jpg",
@@ -41,6 +46,9 @@ const KIND_EXTS: Record<Exclude<MediaKind, "file">, readonly string[]> = {
 const IMAGE_EXTS = new Set(KIND_EXTS.image)
 const VIDEO_EXTS = new Set(KIND_EXTS.video)
 const AUDIO_EXTS = new Set(KIND_EXTS.audio)
+// A page: HTML, the one text format the Previewer draws (as a sandboxed frame).
+const PAGE_TYPES = new Set(["text/html"])
+const PAGE_EXTS = new Set(["html", "htm"])
 
 // Types a browser draws in an <img> as it is; a HEIC needs the scaled copy instead.
 const DRAWN_IMAGES = new Set([
@@ -78,10 +86,15 @@ function extension(name?: string) {
 export function mediaKind(type?: string, name?: string): MediaKind {
   const family = familyOf(type)
   if (family) return family as MediaKind
+  const named = (type ?? "").trim().toLowerCase().split(";")[0].trim()
+  if (PAGE_TYPES.has(named)) return "page"
   const ext = extension(name)
   if (IMAGE_EXTS.has(ext)) return "image"
   if (VIDEO_EXTS.has(ext)) return "video"
   if (AUDIO_EXTS.has(ext)) return "audio"
+  // Only where the type names nothing at all, or a generic binary: `text/plain` on a `.html` is
+  // what its writer said it is.
+  if (PAGE_EXTS.has(ext) && (!named || named === "application/octet-stream")) return "page"
   return "file"
 }
 

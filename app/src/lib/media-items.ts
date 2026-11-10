@@ -27,6 +27,7 @@ export function previewItem(item: MediaItem, extra: Partial<PreviewItem> = {}): 
     type: item.type,
     size: item.size,
     kind: item.kind === "file" ? "image" : item.kind,
+    // A page is carried through as one: the Previewer draws it (ADR 0132).
     src: item.src,
     state: item.state,
     note: item.note,

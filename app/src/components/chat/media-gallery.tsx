@@ -417,7 +417,8 @@ export function MediaItems({
   }
   const cells = items.filter((item) => item.cell === "gallery")
   const recordings = items.filter((item) => item.cell === "audio")
-  const files = items.filter((item) => item.cell === "file")
+  // A page keeps the file row until it gets a row of its own (plan step 6).
+  const files = items.filter((item) => item.cell === "file" || item.cell === "page")
   const playable = [...cells, ...recordings]
   // What the Previewer draws changes as each URL comes in, so the list it was opened on is kept
   // current rather than frozen at the tap: the signature says when something in it moved.

@@ -32,7 +32,7 @@ import {
   type ZoomView,
 } from "@/lib/zoom"
 
-/** One piece of media the Previewer can draw: a photo, a clip or a recording. */
+/** One piece of media the Previewer can draw: a photo, a clip, a recording or a page. */
 export interface PreviewItem {
   /** Stable within the message: an attachment's id, or the place a tag was written at. */
   key: string
@@ -40,7 +40,7 @@ export interface PreviewItem {
   /** The file's own type, which is what the player is told it is. */
   type: string
   size?: number
-  kind: Extract<MediaKind, "image" | "video" | "audio">
+  kind: Extract<MediaKind, "image" | "video" | "audio" | "page">
   /** Where it is read from, once the host has answered; a staged file's own bytes before that. */
   src?: string
   state: MediaStage
@@ -410,6 +410,18 @@ function Shown({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewI
   if (item.state === "failed" || (item.state === "ready" && !item.src))
     return <Retry item={item} onRetry={onRetry} />
   if (!item.src || item.state === "reading") return <Skeleton className="h-2/3 w-2/3 rounded-2xl" />
+  // A page is drawn as its name over a loading box for now; the sandboxed frame that draws it
+  // comes with the page read (plan step 5).
+  if (item.kind === "page")
+    return (
+      <div
+        data-slot="previewer-page"
+        className="flex h-2/3 w-2/3 flex-col items-center justify-center gap-3"
+      >
+        <span className="text-sm break-all text-muted-foreground">{item.name}</span>
+        <Skeleton className="h-full w-full rounded-2xl" />
+      </div>
+    )
   if (item.kind === "image") return <Zoomed key={item.key} item={item} onRetry={onRetry} />
   // A player the platform draws: it starts paused because nothing here asks it to play, and it
   // streams, seeks and buffers by its own rules rather than by anything this app holds.
