@@ -710,7 +710,7 @@ _Avoid_: gallery, component gallery, library page, showcase
 ## Canvases
 
 **Canvas**:
-A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. It has data of its own and is changed only by talking to its bot in its canvas session; a page that tries to leave for somewhere else is refused and drawn again once, and told so if it keeps leaving.
+A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. Its page is changed only by talking to its bot in its canvas session, while its data is readable and writable from any of its bot's sessions, naming the canvas by its title or its id; a page that tries to leave for somewhere else is refused and drawn again once, and told so if it keeps leaving.
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
