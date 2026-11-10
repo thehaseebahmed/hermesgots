@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { PlusIcon, Trash2Icon } from "lucide-react"
 
@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { botSubPath } from "@/lib/bot-subs"
+import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
@@ -55,6 +55,32 @@ const UNREAD_ANSWER =
  * never leaves the host, so nothing here derives, reveals or compares one — a row's value is the
  * string that arrived, and an empty one is the *Not set* `ValueRow` already draws.
  *
+ * The page draws its own sub-screens, the way every page of a bot's settings does: the address tells
+ * this component which of them is on screen, and a sub-screen takes the page's place at either width
+ * — below 1024px the route pushed it there, and from 1024px it is the pane the page would have
+ * drawn in (ADR 0055). So the page's own screens are the page's business, and the settings screen
+ * above it holds nothing of what this one holds.
+ */
+export function LlmProvidersTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
+  const navigate = useNavigate()
+  // The page's own address, which is where its sub-screens return to: a form's Cancel, and a write
+  // that leaves the screen behind.
+  const close = useCallback(
+    () => navigate(botTabPath(profile.id, "llm-providers"), { replace: true }),
+    [navigate, profile.id],
+  )
+
+  // The page's own `+`: the form that adds a custom endpoint, which is a screen of its own.
+  if (sub?.id === "add") return <LlmEndpointAddScreen profile={profile} close={close} />
+  // One provider's key: the page's own detail, named by the target the address carried.
+  if (sub?.kind === "detail" && sub.item)
+    return <LlmProviderKeyScreen profile={profile} target={sub.item} />
+  return <ProvidersPage profile={profile} />
+}
+
+/**
+ * The page itself: the providers the host's catalog knows and the custom endpoints it holds.
+ *
  * A row opens its slot screen, whose one write is a key: the field starts empty, Save is dead until
  * the field holds something a key could be (`submittableKey`), and the screen then draws the block
  * that write answered — the row's new mask, made by the host. An endpoint's slot screen is the same
@@ -68,7 +94,7 @@ const UNREAD_ANSWER =
  * The page is only ever reached where the host advertises `llm_providers` (the gate is the route's
  * own, `bot-settings.tsx`'s `PAGE_META`), so a host that can't list them draws no page at all.
  */
-export function LlmProvidersTab({ profile }: { profile: Profile }) {
+function ProvidersPage({ profile }: { profile: Profile }) {
   const navigate = useNavigate()
   const { block, problem } = useLlmProviders(profile)
   // The page's own way to add one: the header's `+`, which opens the form as a sub-screen. Its

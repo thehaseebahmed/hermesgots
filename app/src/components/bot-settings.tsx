@@ -22,11 +22,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
-import {
-  LlmEndpointAddScreen,
-  LlmProviderKeyScreen,
-  LlmProvidersTab,
-} from "@/components/bot-llm-providers-tab"
+import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
@@ -433,11 +429,11 @@ function botPage({ profile, sub, close, large }: PageBody) {
   // own page. Where a pane sits beside this one, that page is already in it — drawing it again
   // would put two cards, two trash buttons and two feature reads on one screen.
   if (!sub) return large ? null : <BotSettingsList profile={profile} />
-  if (!large) return <PageSub profile={profile} tab="bot" sub={sub} close={close} />
+  if (!large) return <BotEditScreen profile={profile} sub={sub} close={close} />
   // From 1024px the bot's page is the pane beside this one, so the pane holds its edit alone.
   return (
     <EditCard title={sub.title} onClose={close}>
-      <PageSub profile={profile} tab="bot" sub={sub} close={close} />
+      <BotEditScreen profile={profile} sub={sub} close={close} />
     </EditCard>
   )
 }
@@ -451,12 +447,11 @@ function botPage({ profile, sub, close, large }: PageBody) {
  */
 const PAGE_BODIES: Record<BotTab, (page: PageBody) => ReactNode> = {
   bot: botPage,
-  // General is the host's own page, and its one detail — the chain it falls back on — is a screen of
-  // its own in the pane the page would have taken. Every other sub it holds is one of the host's
-  // keys, which its own page draws.
   general: ({ profile, sub, close }) =>
+    // General's one detail — the chain it falls back on — is a screen of its own; every other sub it
+    // holds is one of the host's keys, which its own page draws.
     sub?.kind === "detail" ? (
-      <PageSub profile={profile} tab="general" sub={sub} close={close} />
+      <FallbacksPage profile={profile} />
     ) : (
       <GeneralPage
         key={`${profile.id}:general`}
@@ -467,12 +462,7 @@ const PAGE_BODIES: Record<BotTab, (page: PageBody) => ReactNode> = {
       />
     ),
   models: ({ profile }) => <ModelsPage profile={profile} />,
-  "llm-providers": ({ profile, sub, close }) =>
-    sub ? (
-      <PageSub profile={profile} tab="llm-providers" sub={sub} close={close} />
-    ) : (
-      <LlmProvidersTab profile={profile} />
-    ),
+  "llm-providers": ({ profile, sub }) => <LlmProvidersTab profile={profile} sub={sub} />,
   coding: ({ profile }) => <CodingTab profile={profile} />,
   "speech-to-text": ({ profile, sub }) => <DictationTab profile={profile} sub={sub} />,
   mcps: ({ profile, sub }) => <McpsTab profile={profile} sub={sub} />,
@@ -533,27 +523,20 @@ export function BotSettingsPage({
   return PAGE_BODIES[shown]({ profile, sub: own, close, large })
 }
 
-/** The body of one of the bot's own edits, wherever it is drawn: a pushed screen or a card. */
-function PageSub({
+/**
+ * One of the bot's own edits, wherever it is drawn: the screen the route pushed, or the card over the
+ * bot's page where a pane sits beside it.
+ */
+function BotEditScreen({
   profile,
-  tab,
   sub,
   close,
 }: {
   profile: Profile
-  tab: BotTab
   sub: BotSub
   close: () => void
 }) {
   const large = useLarge()
-  // A detail is a screen of its own, and the one this page holds is the chain after its model.
-  if (tab === "general" && sub.kind === "detail") return <FallbacksPage profile={profile} />
-  // The page's own `+`: the form that adds a custom endpoint, which is a screen of its own.
-  if (tab === "llm-providers" && sub.id === "add")
-    return <LlmEndpointAddScreen profile={profile} close={close} />
-  // One provider's key: the page's own detail, named by the target the address carried.
-  if (tab === "llm-providers" && sub.kind === "detail" && sub.item)
-    return <LlmProviderKeyScreen profile={profile} target={sub.item} />
   const edit = botEdit(sub.id)
   // A segment the router refused never reaches here; one the table doesn't name holds no field, so
   // no id can fall through to a write the page doesn't mean.
