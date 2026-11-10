@@ -15,7 +15,7 @@ import { db } from "@/lib/db"
 import { pressBack } from "@/lib/native"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { connectionKey, noteChange } from "@/lib/live"
-import { CanvasView } from "@/routes/canvas"
+import { CanvasEdit, CanvasView } from "@/routes/canvas"
 import { ChatPage } from "@/routes/chat"
 
 import {
@@ -24,6 +24,7 @@ import {
   atWidth,
   botProfile,
   click,
+  composerField,
   find,
   json,
   missing,
@@ -266,7 +267,7 @@ test(
       </MemoryRouter>,
       async () => {
         await until(() => drawn().includes("<h1>Tip</h1>"), "the version on screen")
-        assert.ok(find("[data-canvas-edit-pill]"), "a phone raises the canvas's chat from a pill")
+        assert.ok(find('[data-canvas-flip="edit"]'), "a phone's header offers Edit")
         // The page says where the reader is, as its own frame; the next version opens there.
         const frame = find("iframe[data-canvas-frame]")!
         await act(async () => {
@@ -287,6 +288,96 @@ test(
       },
     )
   }),
+)
+
+test(
+  "a phone's canvas opens on Preview and Edit is an address with a way back",
+  async () => {
+    // The phone holds one screen at a time: the page, with Edit in the header, or the chat at its own
+    // address with Preview. A wide screen has room for both, so the edit address folds into the
+    // canvas's own and no flip is drawn there (ADR 0130).
+    const phone = async () => {
+      serveCanvases({ version: 3, undos: 0 })
+      await seedCanvasChat(CANVAS.id)
+      const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
+      await mount(
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+            <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
+          </Routes>
+          <Nav />
+        </MemoryRouter>,
+        async () => {
+          await until(() => drawn().includes("<h1>Tip</h1>"), "the canvas's page")
+          // The page says where the reader is. Edit unmounts it, and the address that comes back
+          // draws the page where they left it.
+          const frame = find("iframe[data-canvas-frame]")!
+          await act(async () => {
+            window.dispatchEvent(
+              new window.MessageEvent("message", {
+                data: { type: SCROLL_MESSAGE, scroll: 450 },
+                source: frame.contentWindow,
+              }),
+            )
+          })
+          const edit = find('[data-canvas-flip="edit"]')
+          assert.ok(edit, "a canvas with a version opens on the page, with Edit in the header")
+          assert.equal(
+            edit.getAttribute("aria-label"),
+            "Edit",
+            "the control names the screen it goes to",
+          )
+          assert.ok(missing("[data-canvas-edit-pill]"), "the pill is gone")
+
+          await click(edit)
+          assert.equal(nav(), `PUSH:/canvas/${CANVAS.id}/edit`, "Edit is a step, pushed")
+          await until(() => Boolean(composerField()), "the chat to draw")
+          assert.ok(missing("iframe[data-canvas-frame]"), "the edit screen draws no page")
+          assert.ok(find('[data-canvas-flip="preview"]'), "its header offers Preview")
+          assert.ok(missing('[data-canvas-flip="edit"]'), "and no Edit, which is the screen it is")
+
+          // Back is the edit screen's own: it steps to the canvas's address, not the list.
+          const history = atDepth(1)
+          try {
+            assert.equal(pressBack(), "screen", "the edit screen takes the press")
+            assert.deepEqual(history.backs, [1], "and steps back to the canvas's own address")
+          } finally {
+            history.restore()
+          }
+
+          await click(find('[data-canvas-flip="preview"]'))
+          await until(() => nav().endsWith(`/canvas/${CANVAS.id}`), "the preview's address again")
+          await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page drawn again")
+          assert.match(drawn(), /var at=450/, "the page comes back where the reader left it")
+        },
+      )
+    }
+    const wide = async () => {
+      serveCanvases({ version: 3, undos: 0 })
+      await seedCanvasChat(CANVAS.id)
+      await mount(
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}/edit`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+            <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
+          </Routes>
+          <Nav />
+        </MemoryRouter>,
+        async () => {
+          await until(
+            () => nav() === `REPLACE:/canvas/${CANVAS.id}`,
+            "the edit address to fold into the canvas's own",
+          )
+          await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+          assert.ok(composerField(), "the lane draws the chat beside it")
+          assert.ok(missing("[data-canvas-flip]"), "a wide screen draws no flip")
+        },
+      )
+    }
+    await atWidth(390, phone)()
+    await atWidth(1440, wide)()
+  },
 )
 
 test(

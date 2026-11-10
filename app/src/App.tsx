@@ -38,6 +38,7 @@ const CanvasPage = lazy(() =>
   import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })),
 )
 const CanvasView = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasView })))
+const CanvasEdit = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasEdit })))
 const ResearchPage = lazy(() =>
   import("@/routes/research").then((m) => ({ default: m.ResearchPage })),
 )
@@ -132,6 +133,7 @@ function AppRoutes() {
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="canvas" element={<CanvasPage />} />
         <Route path="canvas/:id" element={<CanvasView />} />
+        <Route path="canvas/:id/edit" element={<CanvasEdit />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />
         <Route path="settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />

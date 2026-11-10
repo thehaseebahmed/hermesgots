@@ -8,7 +8,7 @@ import {
   PencilIcon,
   Undo2Icon,
 } from "lucide-react"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, Navigate, useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
@@ -27,7 +27,6 @@ import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -240,12 +239,21 @@ export function CanvasPage() {
   )
 }
 
-const SNAPS = [0.5, 1]
+/**
+ * Where each canvas's page was last left, a place per canvas: the preview is unmounted while the
+ * reader is on the edit screen, so the position has to outlive the screen that heard it (ADR 0130).
+ * Module-level for that reason alone.
+ */
+const SCROLLS = new Map<string, number>()
 
-/** One canvas, drawn from the version its record points at, with its chat beside it or raised over it. */
+/**
+ * One canvas, drawn from the version its record points at, with its chat beside it on a wide screen
+ * and the header's Edit for the chat's own page on a phone.
+ */
 export function CanvasView() {
   const { id = "" } = useParams()
   const { up, step } = useNav()
+  const navigate = useNavigate()
   useEffect(() => setBackGuard(step("/canvas")), [step])
   const { canvas, missing, loaded, away } = useCanvas(id)
   const online = useOnline()
@@ -257,7 +265,6 @@ export function CanvasView() {
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
   const large = useLarge()
-  const [editing, setEditing] = useState(false)
   // How many times the frame has been drawn for this version (a document that left is drawn again),
   // and whether that one redraw was already spent.
   const [escapedFor, setEscapedFor] = useState("")
@@ -266,11 +273,6 @@ export function CanvasView() {
   const [surface, setSurface] = useState<ChatSurfaceUsage | null>(null)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
-  // Where the frame's page last said it was, and which canvas said it. Read when the document is
-  // built, never per scroll: a scroll is news for the next draw, not a reason to draw again. The id
-  // rides it because this screen draws every canvas's address — it isn't keyed on one — so a second
-  // canvas opens at its own top rather than at the offset the first one was left at.
-  const scrolled = useRef<{ id: string; at: number }>({ id, at: 0 })
   // The page's classes compiled, kept with the version they were compiled for: an answer that lands
   // after the screen has moved to another version is no CSS to draw with, and no CSS at all keeps
   // the frame off the page until there is one.
@@ -323,7 +325,9 @@ export function CanvasView() {
     [html, mode, css],
   )
   const drawn = useMemo(
-    () => documentAt(scrolled.current.id === id ? scrolled.current.at : 0),
+    // Where this canvas was left, read when the document is built and never per scroll: a scroll is
+    // news for the next draw, not a reason to draw again.
+    () => documentAt(SCROLLS.get(id) ?? 0),
     [documentAt, id],
   )
 
@@ -334,7 +338,7 @@ export function CanvasView() {
       if (event.source !== frame.current?.contentWindow) return
       const at = readScroll(event.data)
       if (at === null) return
-      scrolled.current = { id, at }
+      SCROLLS.set(id, at)
     }
     window.addEventListener("message", hear)
     return () => window.removeEventListener("message", hear)
@@ -424,8 +428,7 @@ export function CanvasView() {
     if (loads.current.count === 1 || !shownDocument) return
     if (redrawn?.key === frameKey) return setEscapedFor(frameKey)
     // A new frame is what draws the page again — the same version, at the reader's own position.
-    const document =
-      documentAt(scrolled.current.id === id ? scrolled.current.at : 0)?.document ?? ""
+    const document = documentAt(SCROLLS.get(id) ?? 0)?.document ?? ""
     loads.current = { document, count: 0 }
     setRedrawn({ key: frameKey, document })
   }
@@ -486,6 +489,9 @@ export function CanvasView() {
         awayNow={awayNow}
         backLabel="All canvases"
         onBack={() => up("/canvas")}
+        // A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130).
+        flip={large ? undefined : "edit"}
+        onFlip={() => navigate(`/canvas/${id}/edit`)}
         onOptions={() => setOptionsOpen(true)}
       />
 
@@ -521,19 +527,6 @@ export function CanvasView() {
                   : "Reading the canvas…"}
             </p>
           )}
-          {/* A phone has room for the page or its chat, not both: the chat is raised over the page
-              from here, so an edit is asked for with the page in sight. */}
-          {!large && (
-            <Button
-              size="lg"
-              data-canvas-edit-pill
-              className="absolute right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] rounded-full shadow-lg"
-              onClick={() => setEditing(true)}
-            >
-              <PencilIcon />
-              Edit
-            </Button>
-          )}
         </div>
         {/* The house's list lane: 412px, the width the app already asks its text to read in
             (`w-103`, `SPLIT_FLOOR` in `lib/split.ts`), with the page beside it never narrower. */}
@@ -549,25 +542,6 @@ export function CanvasView() {
         )}
       </div>
 
-      {!large && (
-        <Popup open={editing} onOpenChange={setEditing} snapPoints={SNAPS}>
-          <PopupContent bare>
-            <PopupHeader className="pb-2">
-              <PopupTitle>Edit with {profile?.name || "your bot"}</PopupTitle>
-            </PopupHeader>
-            {editing && (
-              <CanvasChat
-                canvas={canvas}
-                bot={profile}
-                points={points}
-                className="flex min-h-0 flex-1 flex-col"
-                onView={() => setUsageOpen(true)}
-                onUsage={setSurface}
-              />
-            )}
-          </PopupContent>
-        </Popup>
-      )}
       <CanvasConsentDialog
         canvasTitle={canvas?.title ?? "Canvas"}
         ask={consent.current}
@@ -601,9 +575,67 @@ interface ChatSurfaceUsage {
 }
 
 /**
- * A canvas's header, as both of its screens draw it: the way back, the page's name over the one line
- * that says whose it is and where it stands, Undo while a version sits under this one, and the menu
- * last so the one button that opens a sheet is where a hand reaches for it.
+ * A canvas's edit screen, at `/canvas/:id/edit`: its chat, full screen, with the header's Preview and
+ * the hardware back both going to the canvas's own address (ADR 0130). A wide screen already has the
+ * chat beside the page, so there the address folds into the canvas's own and draws no flip at all.
+ *
+ * Nothing here points at the page: a point is a tap on a page, and the page is the other screen's.
+ */
+export function CanvasEdit() {
+  const { id = "" } = useParams()
+  const { up, step } = useNav()
+  // The guard is per screen, so this one is its own: without it the hardware back would leave the
+  // canvas for the list while the header's Preview steps to the canvas's own address.
+  useEffect(() => setBackGuard(step(`/canvas/${id}`)), [step, id])
+  const { canvas } = useCanvas(id)
+  const profile = useLiveQuery(
+    () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
+    [canvas?.profileId],
+  )
+  const large = useLarge()
+  const [usageOpen, setUsageOpen] = useState(false)
+  const [surface, setSurface] = useState<ChatSurfaceUsage | null>(null)
+  // A wide screen's lane is the same chat, so this address has nowhere of its own to be: it is the
+  // canvas's address in its place, never a step, and back cannot return here.
+  if (large) return <Navigate to={`/canvas/${id}`} replace />
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <CanvasHeader
+        canvas={canvas}
+        profile={profile}
+        awayWords={undefined}
+        awayNow={false}
+        undo={false}
+        flip="preview"
+        onFlip={() => up(`/canvas/${id}`)}
+      />
+      <CanvasChat
+        canvas={canvas}
+        bot={profile}
+        className="flex min-h-0 flex-1 flex-col"
+        onView={() => setUsageOpen(true)}
+        onUsage={setSurface}
+      />
+      {surface && (
+        <UsageSheet
+          open={usageOpen}
+          onOpenChange={setUsageOpen}
+          usage={surface.usage}
+          providerUsage={surface.providerUsage}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * A canvas's header, as both of its screens draw it: the way back where the screen has one, the
+ * page's name over the one line that says whose it is and where it stands, the flip named for the
+ * screen it goes to, Undo while a version sits under this one, and the menu last so the one button
+ * that opens a sheet is where a hand reaches for it (ADR 0130).
+ *
+ * What a screen doesn't draw it isn't given: no `flip` is no flip, no `onBack` is no arrow, and the
+ * edit screen offers no Undo, since the page is what a version redraws.
  */
 function CanvasHeader({
   canvas,
@@ -612,6 +644,9 @@ function CanvasHeader({
   awayNow,
   backLabel,
   onBack,
+  undo = true,
+  flip,
+  onFlip,
   onOptions,
 }: {
   canvas: Canvas | undefined
@@ -619,12 +654,17 @@ function CanvasHeader({
   /** What the header says of a host that isn't answering, or a device with no network (ADR 0071). */
   awayWords: string | undefined
   awayNow: boolean
-  backLabel: string
-  onBack: () => void
-  onOptions: () => void
+  backLabel?: string
+  onBack?: () => void
+  /** Whether Undo is offered at all, where a version sits below this one to walk back to. */
+  undo?: boolean
+  /** The screen this header's one control goes to, named on it: `edit` or `preview`. */
+  flip?: "edit" | "preview"
+  onFlip?: () => void
+  onOptions?: () => void
 }) {
   const [undoing, setUndoing] = useState(false)
-  const undo = async () => {
+  const undoVersion = async () => {
     if (!canvas || undoing) return
     setUndoing(true)
     await attempt("undo the canvas", () => undoCanvas(canvas.id))
@@ -632,7 +672,9 @@ function CanvasHeader({
   }
   return (
     <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-      <BackButton label={backLabel} variant="ghost" onClick={onBack} />
+      {backLabel && onBack ? (
+        <BackButton label={backLabel} variant="ghost" onClick={onBack} />
+      ) : null}
       <div className="flex min-w-0 flex-1 flex-col">
         <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
         {/* A place's header, as a coding session's is: the name over the one line that says where
@@ -655,21 +697,33 @@ function CanvasHeader({
           ) : null}
         </p>
       </div>
-      {canvas?.canUndo && !awayNow ? (
+      {flip ? (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 rounded-full"
+          data-canvas-flip={flip}
+          aria-label={flip === "edit" ? "Edit" : "Preview"}
+          onClick={onFlip}
+        >
+          {flip === "edit" ? <PencilIcon /> : <FrameIcon />}
+        </Button>
+      ) : null}
+      {undo && canvas?.canUndo && !awayNow ? (
         <Button
           variant="ghost"
           size="icon-lg"
           className="size-11 rounded-full"
           aria-label="Undo"
           disabled={undoing}
-          onClick={() => void undo()}
+          onClick={() => void undoVersion()}
         >
           <Undo2Icon />
         </Button>
       ) : null}
       {/* The menu is the row's last control, so the one button that opens a sheet is always where a
           hand reaches for it, whatever else the canvas offers today. */}
-      {canvas ? (
+      {canvas && onOptions ? (
         <Button
           variant="ghost"
           size="icon-lg"
@@ -687,11 +741,12 @@ function CanvasHeader({
 /**
  * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's
  * thread asks for, the body itself, and the page re-read at every settled turn (ADR 0113). Where it
- * stands — in the desktop lane, or filling the phone's sheet — is the screen's, handed in as its
- * own classes; a canvas with no chat or no bot draws nothing at all.
+ * stands — in the desktop lane, or filling the edit screen — is the screen's, handed in as its own
+ * classes; a canvas with no chat or no bot draws nothing at all. A chat beside no page (`points`
+ * left out) offers no Point control, since a point is a tap on a page (ADR 0130).
  *
  * The numbers its usage sheet draws are handed up rather than drawn here: the canvas's sheet stands
- * at its screen's root, and a sheet opened inside the phone's edit sheet would stack in it.
+ * at its screen's root, and a sheet opened inside the chat would stack in it.
  */
 function CanvasChat({
   canvas,
@@ -703,7 +758,8 @@ function CanvasChat({
 }: {
   canvas: Canvas | undefined
   bot: Profile | undefined
-  points: CanvasPoints
+  /** The page this chat can point at; none for a screen that draws no page. */
+  points?: CanvasPoints
   className: string
   /** Opens the usage sheet the composer's limit line asks for, which the screen draws. */
   onView: () => void
@@ -720,25 +776,26 @@ function CanvasChat({
     onUsage({ usage: { tracked, tokens, window: windowSize, model }, providerUsage })
   }, [onUsage, tracked, tokens, windowSize, model, providerUsage])
   if (!canvas || !chat || !bot) return null
+  const body = (
+    <PreviewerProvider>
+      <ChatBody
+        chat={chat}
+        bot={bot}
+        summaries={summaries}
+        start={undefined}
+        limit={limit}
+        afterSettled={() => {
+          // Every turn's end re-reads the page: a stream can be open and silent (a buffering
+          // proxy), so the event is never the only news. A read already in flight is joined and
+          // one more is owed, so the edit's event and this cost one GET between them.
+          void refreshCanvas(canvas.id).catch(() => undefined)
+        }}
+      />
+    </PreviewerProvider>
+  )
   return (
     <div className={className}>
-      <CanvasPointsProvider points={points}>
-        <PreviewerProvider>
-          <ChatBody
-            chat={chat}
-            bot={bot}
-            summaries={summaries}
-            start={undefined}
-            limit={limit}
-            afterSettled={() => {
-              // Every turn's end re-reads the page: a stream can be open and silent (a buffering
-              // proxy), so the event is never the only news. A read already in flight is joined and
-              // one more is owed, so the edit's event and this cost one GET between them.
-              void refreshCanvas(canvas.id).catch(() => undefined)
-            }}
-          />
-        </PreviewerProvider>
-      </CanvasPointsProvider>
+      {points ? <CanvasPointsProvider points={points}>{body}</CanvasPointsProvider> : body}
     </div>
   )
 }
