@@ -19,6 +19,13 @@ import { cn } from "@/lib/utils"
  * it.
  * `heading` draws the title as the screen's `<h1>` rather than a conversation's span, for a screen
  * whose whole page is one thing — a canvas — while every other caller keeps the span.
+ * `pinned` is the same bar in its other form — see ADR 0140. A screen whose content is a list scrolls
+ * its own rows, so its bar cannot float over them: it stands sticky and opaque in that flow, its title
+ * is the screen's `<h1>` at the list's step, and `below` holds what the screen pins under the row (the
+ * routines page's state chips). The row is the same row either way — the leading control, the title and
+ * its line, the actions, every icon control a frosted outline circle.
+ * `title` takes a node as well as a string, for a screen whose heading is also its way somewhere: the
+ * chat list's name is the link to the bot's settings.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -29,31 +36,42 @@ export function ChatHeader({
   showBot = true,
   centered = false,
   heading = false,
+  pinned = false,
   leading,
   actions,
+  below,
   className,
 }: {
-  title: string
+  title: ReactNode
   botId?: string
   muted?: boolean
   showBot?: boolean
   centered?: boolean
   heading?: boolean
+  pinned?: boolean
   subtitle?: ReactNode
   leading?: ReactNode
   actions?: ReactNode
+  /** What a pinned bar holds under its row, inside the same sticky box. */
+  below?: ReactNode
   className?: string
 }) {
   const openDrawer = useOpenDrawer()
   const mark = muted && (
     <BellOffIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" />
   )
-  const titleClass = cn("min-w-0 truncate text-sm font-semibold", centered && "max-w-full")
+  const titleClass = cn(
+    "min-w-0",
+    pinned ? "text-xl font-semibold tracking-tight" : "truncate text-sm font-semibold",
+    centered && "max-w-full",
+  )
 
   return (
     <header
       className={cn(
-        "pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-background from-75% to-transparent px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-6",
+        pinned
+          ? "sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur"
+          : "pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-background from-75% to-transparent px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-6",
         className,
       )}
     >
@@ -95,7 +113,7 @@ export function ChatHeader({
         >
           <div className={cn("flex min-w-0 flex-col", centered && "items-center")}>
             {title &&
-              (heading ? (
+              (pinned || heading ? (
                 <h1 data-slot="header-title" className={titleClass}>
                   {title}
                 </h1>
@@ -133,6 +151,7 @@ export function ChatHeader({
           {actions}
         </div>
       </div>
+      {pinned && below && <div className="mx-auto max-w-2xl pt-3">{below}</div>}
     </header>
   )
 }
