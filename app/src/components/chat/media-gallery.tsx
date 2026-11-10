@@ -35,6 +35,8 @@ export interface MediaItem {
   path?: string
   /** The URL the host signed for it, once its answer is in. */
   src?: string
+  /** A page's folder on the host, signed with its URL, which its own files load from (ADR 0133). */
+  folder?: string
   state: MediaItemState
   /** What the host answered when it refused the file — its name and the cap it met. */
   note?: string

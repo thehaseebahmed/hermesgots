@@ -2802,6 +2802,11 @@ export interface MediaUrlAnswer {
   size: number
   /** When the signature runs out, in unix seconds; `null` where the host named no life at all. */
   expires: number | null
+  /**
+   * A page's folder, signed beside its URL (ADR 0133): the address its `<base href>` points at, so it
+   * loads its own files from there and below. Only an HTML file has one, and only on a host that serves it.
+   */
+  folder?: string
 }
 
 /**
@@ -2832,6 +2837,7 @@ export async function getPluginMediaUrl(
     size: Number(body.size ?? 0),
     // An older plugin's mint names no life for the URL it hands over.
     expires: Number(body.expires) > 0 ? Number(body.expires) : null,
+    ...(typeof body.folder === "string" && body.folder ? { folder: body.folder } : {}),
   }
 }
 

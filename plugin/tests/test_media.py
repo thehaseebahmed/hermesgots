@@ -431,5 +431,113 @@ class PageReadCorsTest(unittest.TestCase):
         self.assertEqual(text, "<!doctype html><p>hi</p>")
 
 
+class FolderTokenTest(unittest.TestCase):
+    """A page's folder token: one folder, one profile, minutes long, and never a file's token."""
+
+    KEY = b"\x01" * 32
+
+    def test_a_folder_token_names_its_folder_and_nothing_else(self) -> None:
+        folder = Path("/home/h/site")
+        token, expires = media.mint_folder(self.KEY, folder, "work", now=1000)
+        self.assertEqual(media.folder_covered(self.KEY, token, "work", now=1001), folder)
+        self.assertIsNone(media.folder_covered(self.KEY, token, "default", now=1001))
+        self.assertIsNone(media.folder_covered(self.KEY, token, "work", now=expires))
+        other = media._encode_folder("/home/h") + token[token.index("."):]
+        self.assertIsNone(media.folder_covered(self.KEY, other, "work", now=1001))
+        for mangled in ("", ".", "abc", "abc.1000.x"):
+            self.assertIsNone(media.folder_covered(self.KEY, mangled, "work", now=1001), mangled)
+
+    def test_a_files_token_never_covers_its_folder(self) -> None:
+        signed, _ = media.mint(self.KEY, "/home/h/site", "work", now=1000)
+        token = media._encode_folder("/home/h/site") + "." + signed
+        self.assertIsNone(media.folder_covered(self.KEY, token, "work", now=1001))
+
+
+@unittest.skipIf(_web is None, "needs aiohttp")
+class PageFolderRouteTest(unittest.TestCase):
+    """The route a previewed page's ``<base href>`` points at (ADR 0133)."""
+
+    def test_a_folder_token_serves_files_under_its_folder_and_refuses_up_a_link_out_and_another_folder(
+        self,
+    ) -> None:
+        import asyncio
+
+        import plugin
+        from plugin.tests._helpers import Context, RouteAdapter, temp_hermes_home
+
+        home = temp_hermes_home(self)
+        site = home / "site"
+        (site / "img").mkdir(parents=True)
+        (site / "report.html").write_text("<link rel=stylesheet href=style.css>")
+        (site / "style.css").write_text("body{color:red}")
+        (site / "img" / "a b.png").write_bytes(b"\x89PNG")
+        (site / "font.woff2").write_bytes(b"wOF2")
+        (home / "secret.txt").write_text("above")
+        (site / "out.txt").symlink_to(home / "secret.txt")
+        other = home / "other"
+        other.mkdir()
+        (other / "o.html").write_text("<p>o</p>")
+        (other / "x.css").write_text("x")
+
+        adapter = RouteAdapter()
+        app = _web.Application()
+        app["api_server_adapter"] = adapter
+        for module in (plugin.sessions, plugin.approvals):
+            self.addCleanup(setattr, module, "adapter", getattr(module, "adapter", None))
+        context = Context()
+        plugin.register(context)
+        context.platforms["api_server"](app, adapter)
+
+        async def folder_of(client, path: Path) -> str:
+            minted = await client.post(plugin.PREFIX + "/media/url", json={"path": str(path)})
+            body = await minted.json()
+            return urlsplit(body["folder"]).path
+
+        async def get(client, url: str):
+            served = await client.get(url)
+            return served.status, served.headers, await served.read()
+
+        async def asked():
+            async with _TestClient(_TestServer(app)) as client:
+                base = await folder_of(client, site / "report.html")
+                theirs = await folder_of(client, other / "o.html")
+                plain = await client.post(
+                    plugin.PREFIX + "/media/url", json={"path": str(site / "style.css")}
+                )
+                return {
+                    "base": base,
+                    "plain": await plain.json(),
+                    "css": await get(client, base + "style.css"),
+                    "img": await get(client, base + "img/a%20b.png"),
+                    "font": await get(client, base + "font.woff2"),
+                    "up": await get(client, base + "..%2Fsecret.txt"),
+                    "up_raw": await get(client, base + "img/%2E%2E/%2E%2E/secret.txt"),
+                    "link": await get(client, base + "out.txt"),
+                    "folder": await get(client, base),
+                    "forged": await get(client, base.replace("/page/", "/page/x") + "style.css"),
+                    "theirs": await get(client, theirs + "x.css"),
+                    "theirs_mine": await get(client, theirs + "style.css"),
+                }
+
+        with mock.patch.dict(sys.modules, gateway_stub(lambda path: path)):
+            got = asyncio.run(asked())
+        self.assertTrue(got["base"].endswith("/"), got["base"])
+        self.assertIn("/media/page/", got["base"])
+        self.assertNotIn("folder", got["plain"], "only a page is handed its folder")
+        status, headers, body = got["css"]
+        self.assertEqual((status, body), (200, b"body{color:red}"))
+        self.assertTrue(headers["content-type"].startswith("text/css"))
+        self.assertEqual(headers["access-control-allow-origin"], "*")
+        self.assertEqual(got["img"][0], 200)
+        self.assertTrue(got["img"][1]["content-type"].startswith("image/png"))
+        self.assertEqual(got["font"][0], 200)
+        self.assertTrue(got["font"][1]["content-type"].startswith("font/woff2"))
+        for refused in ("up", "up_raw", "link", "folder", "theirs_mine"):
+            self.assertEqual(got[refused][0], 404, refused)
+            self.assertNotIn(b"above", got[refused][2], refused)
+        self.assertEqual(got["forged"][0], 401)
+        self.assertEqual(got["theirs"][0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

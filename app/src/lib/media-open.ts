@@ -63,6 +63,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
                 size: read.size,
                 path: file.path,
                 src: read.url,
+                folder: read.folder,
                 state: "ready",
               }),
             ],

@@ -1,7 +1,15 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { NO_PEER, SANDBOX_CSP, SUBMIT_IN_PLACE, findHead, sandboxedDocument } from "../src/lib/sandboxed-document.ts"
+import {
+  NO_PEER,
+  SANDBOX_CSP,
+  SUBMIT_IN_PLACE,
+  findHead,
+  folderPolicy,
+  previewerPage,
+  sandboxedDocument,
+} from "../src/lib/sandboxed-document.ts"
 
 const PREFIX = (policy) =>
   `<meta http-equiv="Content-Security-Policy" content="${policy}">` +
@@ -52,4 +60,48 @@ test("a sandboxed page allows https images and blocks everything else remote", (
   assert.deepEqual(rules["frame-src"], ["'none'"])
   assert.deepEqual(rules["form-action"], ["'none'"])
   assert.ok(!/\bhttp:/.test(SANDBOX_CSP))
+})
+
+const rulesOf = (policy) =>
+  Object.fromEntries(
+    policy.split(";").map((rule) => {
+      const [name, ...sources] = rule.trim().split(/\s+/)
+      return [name, sources]
+    }),
+  )
+
+test("a previewer page has its base and host origin, and a canvas has neither", async () => {
+  const folder = "https://host.test/api/plugins/gots/media/page/Zm9v.1.abc/"
+  const html = previewerPage(`<html><head><link rel="stylesheet" href="style.css"></head></html>`, folder)
+  const policy = folderPolicy(folder)
+  assert.equal(
+    html,
+    `<html><head><meta http-equiv="Content-Security-Policy" content="${policy}">` +
+      `<base href="${folder}"><script>${NO_PEER}</script><script>${SUBMIT_IN_PLACE}</script>` +
+      `<link rel="stylesheet" href="style.css"></head></html>`,
+  )
+  const rules = rulesOf(policy)
+  for (const name of ["script-src", "style-src", "img-src", "font-src"])
+    assert.ok(rules[name].includes("https://host.test"), name)
+  assert.deepEqual(rules["connect-src"], ["'none'"])
+  assert.deepEqual(rules["frame-src"], ["'none'"])
+  assert.deepEqual(rules["form-action"], ["'none'"])
+  assert.deepEqual(rules["default-src"], ["'none'"])
+
+  // A staged page has no folder: the plain sandbox, no base.
+  const staged = previewerPage(`<head></head>`)
+  assert.ok(!staged.includes("<base"))
+  assert.ok(staged.includes(`content="${SANDBOX_CSP}"`))
+
+  // A canvas has neither.
+  const { canvasDocument, TOKENS } = await import("../src/lib/canvas-document.ts")
+  const tokens = Object.fromEntries(TOKENS.map((name) => [name, "#000"]))
+  const canvas = canvasDocument(`<html><head></head><body></body></html>`, { mode: "light", tokens })
+  assert.ok(!canvas.includes("<base"))
+  assert.ok(canvas.includes(`content="${SANDBOX_CSP}"`))
+})
+
+test("a folder that would break out of its attribute is escaped", () => {
+  const html = previewerPage(`<head></head>`, `https://host.test/a"><script>x</script>/`)
+  assert.ok(!html.includes(`"><script>x`))
 })

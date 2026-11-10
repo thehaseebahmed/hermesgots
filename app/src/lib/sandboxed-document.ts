@@ -60,6 +60,37 @@ export function findHead(html: string): { index: number; length: number } | null
 }
 
 /**
+ * The policy a page the Previewer draws from a folder on the host is held to (ADR 0133): the
+ * sandbox's, with the host's origin let in for its scripts, styles, images and fonts. The origin is
+ * all a policy can name and still survive a redirect; what the page reaches on it is the folder its
+ * token covers, which the host's route enforces. Connections, frames and form posts stay shut.
+ */
+export function folderPolicy(folder: string): string {
+  const source = new URL(folder).origin
+  return SANDBOX_CSP.replace("script-src 'unsafe-inline'", `script-src 'unsafe-inline' ${source}`)
+    .replace("style-src 'unsafe-inline'", `style-src 'unsafe-inline' ${source}`)
+    .replace("img-src data: blob: https:", `img-src data: blob: https: ${source}`)
+    .replace("font-src data:", `font-src data: ${source}`)
+}
+
+const attribute = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")
+
+/**
+ * A page as the Previewer draws it: the sandbox head first, and — where the page lies in a folder the
+ * host signed — a `<base href>` at that folder right after the policy, ahead of any of the page's
+ * own markup, so every relative URL it names or its scripts build resolves there. A page with no
+ * folder (one staged and not yet sent) is drawn under the plain sandbox policy, without its files.
+ */
+export function previewerPage(html: string, folder?: string): string {
+  if (!folder || !/^https?:\/\//i.test(folder)) return sandboxedDocument(html, { policy: SANDBOX_CSP })
+  return sandboxedDocument(html, {
+    policy: folderPolicy(folder),
+    afterPolicy: `<base href="${attribute(folder)}">`,
+  })
+}
+
+/**
  * The markup with the sandbox head put first in its head: the policy, then `afterPolicy` (styles a
  * caller wants ahead of the scripts), then the safety scripts, then `afterSafety` (scripts a caller
  * hands the page). A meta policy only governs what follows it, so markup with no head of its own gets

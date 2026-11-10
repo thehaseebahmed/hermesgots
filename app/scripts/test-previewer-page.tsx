@@ -6,7 +6,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { Previewer, type PreviewItem } from "@/components/chat/previewer"
-import { SANDBOX_CSP } from "@/lib/sandboxed-document"
+import { SANDBOX_CSP, folderPolicy } from "@/lib/sandboxed-document"
 
 import { click, findText, labelled, mount, spyOpen, until } from "./component-kit.tsx"
 
@@ -100,4 +100,47 @@ test("a page that fails to read shows Retry and Open elsewhere", async () => {
   } finally {
     tabs.restore()
   }
+})
+
+test("a previewed page loads its folder's files and nothing above it", async () => {
+  const folder = "https://host.test/plugins/gots/media/page/Zm9v.1.abc/"
+  serve(`<html><head><link rel="stylesheet" href="style.css"></head><body><img src="img/a.png"></body></html>`)
+  await mount(
+    <Previewer request={{ items: [page({ folder })], index: 0 }} open onIndex={() => {}} />,
+    async () => {
+      await until(async () => frame() !== null, "the page's frame")
+      const drawn = frame()!
+      assert.equal(drawn.getAttribute("sandbox"), "allow-scripts")
+      const doc = drawn.getAttribute("srcdoc") ?? ""
+      // The policy, then the base, before any of the page's own markup.
+      assert.ok(
+        doc.startsWith(
+          `<html><head><meta http-equiv="Content-Security-Policy" content="${folderPolicy(folder)}">` +
+            `<base href="${folder}">`,
+        ),
+        doc.slice(0, 300),
+      )
+      assert.ok(doc.indexOf("<base") < doc.indexOf(`href="style.css"`))
+      // The folder's own files resolve under its token; a `../` climbs out of the token, where the
+      // host refuses it, never to a file above the folder.
+      const base = new URL(folder)
+      assert.equal(new URL("style.css", base).href, folder + "style.css")
+      assert.equal(new URL("img/a.png", base).href, folder + "img/a.png")
+      assert.ok(!new URL("../../secret.txt", base).href.startsWith(folder))
+      assert.match(folderPolicy(folder), /connect-src 'none'/)
+    },
+  )
+})
+
+test("a staged page has no folder and draws without one", async () => {
+  serve(`<head></head><p>staged</p>`)
+  await mount(
+    <Previewer request={{ items: [page({ src: "blob:app/1" })], index: 0 }} open onIndex={() => {}} />,
+    async () => {
+      await until(async () => frame() !== null, "the page's frame")
+      const doc = frame()!.getAttribute("srcdoc") ?? ""
+      assert.ok(!doc.includes("<base"))
+      assert.ok(doc.includes(`content="${SANDBOX_CSP}"`))
+    },
+  )
 })

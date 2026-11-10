@@ -373,6 +373,8 @@ def mirror_for_profiles(app: Any, web: Any) -> None:
 
     for route in list(app.router.routes()):
         path = route.resource.canonical if route.resource else ""
+        # A canonical path drops a variable's pattern: a page's file route takes the rest of the path.
+        path = path.replace("{rest}", "{rest:.*}")
         if route.method == "HEAD" or not path.startswith(PREFIX + "/"):
             continue
         app.router.add_route(
@@ -640,6 +642,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # apart from `media` because a host from before it serves the file but can't
                     # sign for one, and the app would ask a route that isn't there.
                     "media_url",
+                    # A page's folder, signed beside its URL and served under `media/page/<token>/`,
+                    # so the Previewer's page loads its own files (ADR 0133).
+                    "media_page",
                     "profile_routes",
                     "pr_tool",
                     "close",
@@ -2681,16 +2686,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         url, expires = media.signed_url(
             request, key, path, _request_profile() or "", {"path": path}
         )
-        return web.json_response(
-            {
-                "object": "gots.media_url",
-                "path": path,
-                "url": url,
-                "expires": expires,
-                "type": media.content_type(file),
-                "size": await asyncio.to_thread(lambda: file.stat().st_size),
-            }
-        )
+        answer = {
+            "object": "gots.media_url",
+            "path": path,
+            "url": url,
+            "expires": expires,
+            "type": media.content_type(file),
+            "size": await asyncio.to_thread(lambda: file.stat().st_size),
+        }
+        if answer["type"] == "text/html":
+            # A page also gets its folder's address, which the Previewer puts in its `<base href>` so
+            # the page loads its own files from there and below (ADR 0133). Same life as the URL.
+            answer["folder"], _ = media.page_url(
+                request, key, file.parent.resolve(), _request_profile() or ""
+            )
+        return web.json_response(answer)
 
     async def serve_media(request: "web.Request") -> "web.StreamResponse":
         """The media route: this bot's key, or — where an element can't carry one — a URL it signed."""
@@ -2710,7 +2720,43 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 return denied
         return await served_file(request, media.media_file)
 
+    async def serve_page_file(request: "web.Request") -> "web.StreamResponse":
+        """A page's own file: one under the folder its token was signed for (ADR 0133).
+
+        The token is the address's own segment, so the page's ``<base href>`` resolves every relative
+        URL — the ones its markup names and the ones its scripts build — to a request here. Nothing
+        above the folder is served, and nothing through a link out of it. The answer says ``*`` for
+        CORS: the frame asking has an opaque origin (``null``), a font or a module script is only
+        read with CORS, and the token, not the origin, is what lets a request in.
+        """
+        key = await asyncio.to_thread(media.signing_key, store_path())
+        folder = await asyncio.to_thread(
+            media.folder_covered, key, request.match_info.get("token", ""), _request_profile() or ""
+        )
+        cors = {"Access-Control-Allow-Origin": "*"}
+        if folder is None:
+            response = _error(web, "Unauthorized", 401)
+            response.headers.update(cors)
+            return response
+        try:
+            file = await asyncio.to_thread(
+                media.folder_file, folder, request.match_info.get("rest", "")
+            )
+        except media.MediaError as error:
+            response = _error(web, str(error), error.status)
+            response.headers.update(cors)
+            return response
+        headers = {
+            "content-type": media.page_content_type(file),
+            "accept-ranges": "bytes",
+            "cache-control": f"private, max-age={media.URL_LIFETIME_S}",
+            "x-content-type-options": "nosniff",
+            **cors,
+        }
+        return web.FileResponse(file, headers=headers)
+
     app.router.add_get(f"{PREFIX}/media", serve_media)
+    app.router.add_get(f"{PREFIX}/media/{media.PAGE_SEGMENT}/{{token}}/{{rest:.*}}", serve_page_file)
     app.router.add_post(f"{PREFIX}/media/url", sign_media_url)
 
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)

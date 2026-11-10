@@ -29,7 +29,7 @@ import type { MediaKind } from "@/lib/media-kind"
 import type { MediaStage } from "@/lib/media-stage"
 import { ask } from "@/lib/net-watch"
 import { readPage, type PageRead } from "@/lib/page-read"
-import { SANDBOX_CSP, sandboxedDocument } from "@/lib/sandboxed-document"
+import { previewerPage } from "@/lib/sandboxed-document"
 import { cn } from "@/lib/utils"
 import {
   UNZOOMED,
@@ -54,6 +54,11 @@ export interface PreviewItem {
   kind: Extract<MediaKind, "image" | "video" | "audio" | "page">
   /** Where it is read from, once the host has answered; a staged file's own bytes before that. */
   src?: string
+  /**
+   * A page's folder on the host, where its own stylesheets, scripts and images are loaded from
+   * (ADR 0133). A staged page isn't on the host yet, so it has none and draws without them.
+   */
+  folder?: string
   state: MediaStage
   /** What the host said when it refused the file, drawn beside the retry. */
   note?: string
@@ -456,9 +461,8 @@ function Page({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewIt
   }, [src, attempt])
   const answer = read && read.src === src && read.attempt === attempt ? read.answer : null
   const page = useMemo(
-    () =>
-      answer?.state === "ready" ? sandboxedDocument(answer.html, { policy: SANDBOX_CSP }) : null,
-    [answer],
+    () => (answer?.state === "ready" ? previewerPage(answer.html, item.folder) : null),
+    [answer, item.folder],
   )
   if (!answer)
     return (
