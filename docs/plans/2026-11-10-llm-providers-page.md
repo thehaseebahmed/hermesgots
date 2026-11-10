@@ -263,6 +263,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    and never sends a key" (the planted value is absent from the serialized payload; eleven characters
    mask as `***`) — and `test-bot-llm-providers.tsx` — "a provider with a key shows its first and
    last four, one without shows Not set" and "an older plugin draws no LLM Providers row".
+
+   Done.
+
 5. **A provider's key is replaced.** `write_key` refuses a mask shape, routes the write through
    `save_provider_env_credential` and answers the fresh block; the slot screen's Replace form starts
    empty and its Save is dead until the field holds a non-mask. Goals: G2. After: 4. Layers: plugin

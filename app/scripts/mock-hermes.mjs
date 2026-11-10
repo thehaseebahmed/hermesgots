@@ -4119,6 +4119,9 @@ http
           "progress_reminders",
           // The Dashboard's General tab, as a plugin that carries it advertises it (general.py).
           "general_page",
+          // The bot's API-key providers, each key as the mask the host makes of it
+          // (llm_providers.py): the page is absent where this host can't list or mask them.
+          "llm_providers",
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
@@ -4728,6 +4731,32 @@ http
             model_context_length: 200000,
           },
           defaults: GENERAL_DEFAULTS,
+        },
+      })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers") {
+      // The bot's LLM providers (plugin/llm_providers.py): the host's catalog filtered to the
+      // providers that take a key, each key as the mask `mask_secret` makes of it — first four and
+      // last four, or `***` under its floor — and `null` where none is set. `endpoints` is empty
+      // until the custom endpoints are written here; it is on the answer from the first release.
+      return json(res, 200, {
+        object: "gots.llm_providers",
+        llm: {
+          providers: [
+            {
+              slug: "openai",
+              label: "OpenAI",
+              description: "GPT models, straight from OpenAI.",
+              masked: "sk-o...c123",
+            },
+            {
+              slug: "groq",
+              label: "Groq",
+              description: "Fast inference on Groq's hardware.",
+              masked: null,
+            },
+          ],
+          endpoints: [],
         },
       })
     }

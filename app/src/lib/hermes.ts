@@ -34,6 +34,7 @@ import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
+import { readLlmProviders } from "@/lib/llm-providers"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -1344,6 +1345,19 @@ export async function setSttSetting(
     signal,
   })
   return readStt(((await response.json())?.stt ?? null) as unknown)
+}
+
+/**
+ * The API-key providers and custom endpoints this bot's Hermes holds, each key as the host masked
+ * it (`llm_providers.py`): one read for the page, and every write answers this same block again.
+ * Nothing here asks for a key, and nothing builds a mask — the string drawn is the host's own.
+ */
+export async function getLlmProviders(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers`, {
+    headers: headers(config),
+    signal,
+  })
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
 }
 
 // `/delegation` is the subagent model's own route, so the tab's path is separate.

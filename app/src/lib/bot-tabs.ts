@@ -27,6 +27,11 @@ export const BOT_PAGES = [
     subtitle: "The model this bot's chats run",
   },
   {
+    segment: "llm-providers",
+    title: "LLM Providers",
+    subtitle: "The API keys this bot's providers use",
+  },
+  {
     segment: "coding",
     title: "Coding",
     subtitle: "Away From Keyboard and this bot's pick budget",

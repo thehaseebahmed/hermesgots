@@ -4,6 +4,7 @@ import {
   AudioLinesIcon,
   BotIcon,
   CodeXmlIcon,
+  KeyRoundIcon,
   MessagesSquareIcon,
   NetworkIcon,
   PlusIcon,
@@ -21,6 +22,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
+import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
@@ -89,6 +91,7 @@ import {
   type ReminderLevel,
 } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
+import { LLM_PROVIDERS } from "@/lib/llm-providers"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
@@ -127,6 +130,9 @@ const PAGE_META = {
   // host without it draws no General row, and a general address lands on the bot's own page.
   general: { icon: SlidersHorizontalIcon, feature: GENERAL_PAGE },
   models: { icon: MessagesSquareIcon },
+  // The host's API-key providers: a Hermes whose catalog can't be read withholds the page, so an
+  // older plugin draws no row and the address lands on the bot's own page.
+  "llm-providers": { icon: KeyRoundIcon, feature: LLM_PROVIDERS },
   coding: { icon: CodeXmlIcon, feature: AFK_PICKS_FEATURE },
   "speech-to-text": { icon: AudioLinesIcon, feature: DICTATION },
   mcps: { icon: PlugZapIcon, feature: MCP_FEATURES.list },
@@ -471,6 +477,9 @@ export function BotSettingsPage({
   if (shown === "mcps") return <McpsTab profile={profile} sub={own} />
   if (shown === "coding") return <CodingTab profile={profile} />
   if (shown === "skills") return <SkillsTab profile={profile} sub={own} />
+  // Above the Models fall-through below, which draws for any page this chain doesn't name: a page
+  // without its branch here silently draws Models.
+  if (shown === "llm-providers") return <LlmProvidersTab profile={profile} />
 
   // General is the host's own page: its rows come from the bot's Hermes, so it draws its own edit —
   // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a

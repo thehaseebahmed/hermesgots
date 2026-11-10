@@ -37,7 +37,15 @@ import {
 } from "./component-kit.tsx"
 
 /** Every feature the gated pages need, so a test starts from a host that has them all. */
-const ALL = ["general_page", "dictation", "mcps", "afk_picks", "skills", "delegation_page"]
+const ALL = [
+  "general_page",
+  "llm_providers",
+  "dictation",
+  "mcps",
+  "afk_picks",
+  "skills",
+  "delegation_page",
+]
 
 const settings = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -85,12 +93,32 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(
       rows(),
-      ["general", "models", "coding", "speech-to-text", "mcps", "skills", "delegation"],
+      [
+        "general",
+        "models",
+        "llm-providers",
+        "coding",
+        "speech-to-text",
+        "mcps",
+        "skills",
+        "delegation",
+      ],
       "the settings in list order",
     )
     assert.deepEqual(
       cards(),
-      [["general", "models", "coding", "speech-to-text", "mcps", "skills", "delegation"]],
+      [
+        [
+          "general",
+          "models",
+          "llm-providers",
+          "coding",
+          "speech-to-text",
+          "mcps",
+          "skills",
+          "delegation",
+        ],
+      ],
       "one card of every setting, under the bot's own rows",
     )
     assert.deepEqual(
@@ -103,6 +131,7 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
       [
         "GeneralModel, limits, session timeouts and update settings",
         "ModelsThe model this bot's chats run",
+        "LLM ProvidersThe API keys this bot's providers use",
         "CodingAway From Keyboard and this bot's pick budget",
         "Speech-to-textVocabulary, cleanup model and speech model",
         "MCPThe servers this bot works with",
@@ -113,7 +142,7 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
     )
     assert.deepEqual(
       iconsPerRow(),
-      [1, 1, 1, 1, 1, 1, 1],
+      [1, 1, 1, 1, 1, 1, 1, 1],
       "one icon a row, and no chevron beside it",
     )
     assert.deepEqual(
@@ -141,6 +170,7 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
 
 /** The page each feature gates, and the row that page would have drawn. */
 const GATED = [
+  { feature: "llm_providers", segment: "llm-providers", name: "LLM Providers" },
   { feature: "mcps", segment: "mcps", name: "MCP" },
   { feature: "skills", segment: "skills", name: "Skills" },
   { feature: "afk_picks", segment: "coding", name: "Coding" },
@@ -217,7 +247,7 @@ test("an out-of-date plugin's banner leads the list, in the words the design set
       `This bot's plugin is out of date! Update it to ${MIN_PLUGIN_VERSION} or newer.`,
       "the banner is the first thing on the list",
     )
-    assert.equal(rows().length, 7, "and every row follows it")
+    assert.equal(rows().length, 8, "and every row follows it")
   })
 })
 
@@ -225,7 +255,7 @@ test("a plugin that isn't out of date has no banner over the list", async () => 
   await seed("banner-current", ALL, { pluginVersion: MIN_PLUGIN_VERSION })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.doesNotMatch(text(), /out of date/, "nothing says the plugin is old")
-    assert.equal(rows().length, 7, "and the list is all there is")
+    assert.equal(rows().length, 8, "and the list is all there is")
   })
 })
 
@@ -233,7 +263,7 @@ test("a disabled bot has no banner, however old its plugin", async () => {
   await seed("banner-disabled", ALL, { pluginVersion: "0.1.0", disabled: true })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.doesNotMatch(text(), /out of date/, "a bot that is off is not told to update")
-    assert.equal(rows().length, 7, "and its pages are still listed")
+    assert.equal(rows().length, 8, "and its pages are still listed")
   })
 })
 

@@ -50,6 +50,7 @@ from . import (
     host_model,
     library,
     link,
+    llm_providers,
     mcp,
     media,
     model_changes,
@@ -562,6 +563,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The General page mirrors this Hermes's own Dashboard form; a host that has no schema to
         # copy advertises nothing, and the app keeps the page it has (general.py's gate).
         general_features = await asyncio.to_thread(_advertised, general.FEATURES)
+        # The LLM Providers page is drawn from this Hermes's own provider catalog, and a key is only
+        # ever shown as the mask that Hermes makes of it; a host with neither withholds the page
+        # (llm_providers.py's gate), so an older plugin keeps the settings list it has.
+        llm_features = await asyncio.to_thread(_advertised, llm_providers.FEATURES)
         # The session's own queue is read through Hermes's admission ledger and cleared through the
         # authority that owns it; a host with either missing offers no card at all, rather than an
         # empty one that reads as "nothing is waiting" (pending.available says which moved).
@@ -583,6 +588,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "chats",
                     *rooms_features,
                     *general_features,
+                    *llm_features,
                     "draft_text",
                     "context",
                     "todos",
@@ -2936,6 +2942,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 failed="The host couldn't save that setting",
             ),
         )
+
+    # The bot's LLM providers, each key as the mask the host made of it (llm_providers.py): the
+    # page is drawn from the host's own catalog, so a provider Hermes adds later is a row without an
+    # app release. The read opens no config.yaml — a key's presence is the host's own env read — and
+    # `endpoints` rides on the same answer, empty until the custom endpoints' step.
+    app.router.add_get(
+        f"{PREFIX}/llm-providers",
+        keyed_settings_read(
+            read=llm_providers.read,
+            object_name="gots.llm_providers",
+            field="llm",
+            no_schema="This Hermes version can't show its API-key providers.",
+            failed="gots: couldn't read the host's API-key providers",
+        ),
+    )
 
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)
