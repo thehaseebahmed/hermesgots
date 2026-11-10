@@ -1,8 +1,6 @@
 /**
- * What the device's tray is holding, and what an opened screen has answered. The rules are pure, so
- * the unit tier drives them; the wiring around them is pinned as text elsewhere in this file's
- * suite, because reading a tray needs a browser or a phone (`push-source.mjs`). A push about a
- * thread leaves the tray when that thread is opened, and one about anything else stays where it is.
+ * The tray rules, driven exhaustively; the wiring around them is pinned as text, because reading a
+ * real tray needs a browser or a phone (`push-source.mjs`).
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -11,37 +9,37 @@ import test from "node:test"
 import { aboutSubject, chatSubject, pushSubject } from "../src/lib/push-kinds.ts"
 import { body, read } from "./push-source.mjs"
 
-/** A screen's own file, as text: the route modules the screens live in. */
 const route = (name) => readFileSync(new URL(`../src/routes/${name}.tsx`, import.meta.url), "utf8")
 
-/** A push the web's service worker is showing, tagged and carried the way it writes them. */
 const web = (session, group = "session") => ({
   tag: `${group}:${session}`,
   data: { sessionId: session, screen: `/c/${session}` },
 })
 
-/** The same push on Android: Firebase's tag is the category and the session, and no data rides. */
+// Android's tag is the category and the session, and no data rides: the tag is all there is to read.
 const android = (category, session) => ({ tag: `${category}:${session}`, data: {} })
 
 test("a push names the subject its tag or its data carries", () => {
   assert.equal(pushSubject(web("gots-chat-1")), "gots-chat-1")
   assert.equal(pushSubject(android("chat_input", "gots-chat-1")), "gots-chat-1")
-  // A room, a mission and a meeting are subjects too: each has a screen that opens it.
   assert.equal(pushSubject(android("room_input", "room-1")), "room-1")
   assert.equal(pushSubject(android("research_done", "mission-1")), "mission-1")
   assert.equal(pushSubject(android("meeting_done", "meeting-1")), "meeting-1")
+  // A routine's failure and a project that couldn't be set up name their own id, which no screen
+  // opens: the tap is what answers them.
+  assert.equal(pushSubject(android("routine_failed", "job-1")), "job-1")
+  assert.equal(pushSubject(android("code_setup_failed", "project-1")), "project-1")
   // The web's notification carries it in its data, so a tag that was rewritten still names it.
   assert.equal(pushSubject({ tag: "gots", data: { sessionId: "gots-chat-1" } }), "gots-chat-1")
 })
 
-test("a push about nothing a screen opens names no subject", () => {
-  // A routine's failure and a project that couldn't be set up: no thread, no screen of their own.
+test("a push carrying no id names nothing", () => {
+  // The test notification, and a push a service worker showed under no session at all.
+  assert.equal(pushSubject({ tag: "test:", data: {} }), undefined)
   assert.equal(
     pushSubject({ tag: "gots", data: { sessionId: "", screen: "/routines" } }),
     undefined,
   )
-  assert.equal(pushSubject({ tag: "routine_failed:", data: {} }), undefined)
-  assert.equal(pushSubject({ tag: "code_setup_failed:", data: {} }), undefined)
   assert.equal(pushSubject({}), undefined)
   assert.equal(pushSubject({ tag: null, data: null }), undefined)
 })

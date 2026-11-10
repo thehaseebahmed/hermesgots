@@ -198,10 +198,8 @@ function useWebPush() {
 }
 
 /**
- * Dismisses what the device's tray holds about these subjects, and leaves every other push where it
- * is: a screen answers its own, since a push about a thread the user has not opened is still news
- * (ADR 0132). A push that names nothing openable is answered by its tap alone. Nothing to read (no
- * registration, push never turned on) is a no-op.
+ * A screen answers only its own pushes: one about a thread the user has not opened is still news
+ * (ADR 0132). A push whose id no screen opens is answered by its tap alone.
  */
 async function dismiss(subjects: readonly string[]) {
   if (!subjects.length) return
@@ -241,9 +239,8 @@ export function useDismissPushes(subject: string | undefined) {
 }
 
 /**
- * A chat's screen answers the pushes about it: the session its row runs in, or a room's own id. The
- * row is followed rather than read once, so a session written after the screen opened is answered
- * too.
+ * The row is followed rather than read once, so a session written after the screen opened is
+ * answered too.
  */
 export function useDismissChatPushes(chatId: string | undefined) {
   const subject = useLiveQuery(async () => {
@@ -453,8 +450,7 @@ async function listen(push: Push) {
   })
   await push.addListener("pushNotificationActionPerformed", ({ notification }) => {
     const path = pushPath(notification.data?.kind, notification.data?.session_id)
-    // The push that was tapped has been answered, whatever screen it opens: a chat this device
-    // holds, one it doesn't yet, a mission's, or a list no screen answers.
+    // A tap answers its own push, even where the screen it opens answers nothing.
     const subject = pushSubject(notification)
     if (subject) void dismiss([subject])
     if (path) void openPush(path)

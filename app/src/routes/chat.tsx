@@ -265,7 +265,6 @@ const roomsDrawn = new Set<string>()
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = props.chatId ?? params.id
-  // The chat on screen answers the pushes about it, and a chat it has not opened keeps its own.
   useDismissChatPushes(id)
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined

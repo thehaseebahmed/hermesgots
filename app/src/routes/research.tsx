@@ -464,7 +464,6 @@ export function MissionPage() {
   // Beside the list a mission is the top-level screen, so back leaves the app.
   useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   useRememberOpened("research", mission?.id)
-  // The mission on screen answers the pushes about it, and every other push stays in the tray.
   useDismissPushes(mission?.id)
 
   if (!mission)

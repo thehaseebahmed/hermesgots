@@ -989,7 +989,6 @@ function Gone() {
 /** One meeting: the bot at work on it, then its notes and transcript. */
 export function MeetingPage() {
   const { id = "" } = useParams()
-  // The meeting on screen answers the pushes about it, and every other push stays in the tray.
   useDismissPushes(id)
   // A fresh view for each meeting: the tab and the line a note cited belong to one.
   return (

@@ -1,17 +1,10 @@
-/**
- * What the device's tray keeps when the app opens. A push about a thread is answered by that
- * thread's own screen, so opening it dismisses its pushes and leaves every other one where it is;
- * the app coming to the front on a chat it did not open answers nothing. The bug was the opposite:
- * every arrival emptied the whole tray, so a push about a thread the user had not read was taken
- * away with the ones they had.
- */
+/** What the device's tray keeps when the app opens: only the screen a push is about answers it. */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { startPush } from "@/lib/push"
 import { botProfile, chatScreen, mount, seedChats, settle, until } from "./component-kit.tsx"
 
-/** A push the tray is holding, and whether the app has dismissed it. */
 interface Shown {
   tag: string
   data?: Record<string, unknown>
@@ -50,9 +43,7 @@ function browser() {
 
 const bot = botProfile("push-dismiss", { id: "bot-1", name: "Pusher", apiKey: "test-key" })
 
-/** A push about a chat, tagged the way both surfaces tag it: the group, a colon, the session. */
 const about = (chat: string, session = `gots-${chat}`) => ({
-  // The web's tag is `session:<session>` for what waits on the user; Android's is the category.
   tag: `session:${session}`,
   data: { sessionId: session, screen: `/c/${chat}` },
 })
@@ -90,8 +81,7 @@ test("opening a chat dismisses the pushes about it, and only those", async () =>
 test("an Android push is matched by the tag Firebase shows it under", async () => {
   browser()
   await seedChats([{ id: "chat-a" }, { id: "chat-b" }], { bots: [bot] })
-  // Android's tag is `<category>:<session>` (netlify/lib/fcm.ts), and the data rides along only
-  // where the phone hands it over, so the tag is what a dismissal has to read.
+  // The phone hands over no data, so the tag is all a dismissal has to read by.
   const shown = trayOf([{ tag: "chat_input:gots-chat-a" }, { tag: "chat_input:gots-chat-b" }])
   await mount(chatScreen("chat-a"), async () => {
     await until(async () => dismissed(shown).length > 0, "the opened chat's push is dismissed")
