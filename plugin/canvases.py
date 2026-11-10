@@ -85,6 +85,9 @@ NAME_CHARS = 64
 # A version's declared tools are the options sheet's rows: every one is a switch, so a version that
 # declared thousands would be a list nobody could read and a dialog nobody could answer.
 TOOLS_MAX = 50
+# A start's files are one queued turn's attachments, and the queue keeps twenty of them
+# (`outbox.clean_files`); a longer list is refused rather than trimmed without a word.
+START_FILES_MAX = 20
 # A tool's name rides a stored grant, an option row and a dialog's title, so it stays a name.
 TOOL_NAME_CHARS = 64
 # The picture a canvas's tile draws. It rides every device's list as the page rides one screen, so it
@@ -1176,19 +1179,48 @@ def _drop(path: Path, canvas_id: str) -> None:
         conn.close()
 
 
-def _saved(files: Any) -> List[Dict[str, Any]]:
+def _named_chat(value: Any) -> Optional[str]:
+    """The chat id a caller made for its canvas, as it named it; None for a caller that named none.
+
+    A canvas's chat is an id the caller mints and hands back so the canvas opens on it, and its
+    session is derived from it — so a value that isn't a name would become half a session and half a
+    link. Refused before anything is written, in the same voice as the rest of the create.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise CanvasError(
+            "A canvas's chat is the id its caller made, as a string; this is not one."
+        )
+    return value
+
+
+def _saved(files: Any, chat_id: Optional[str]) -> List[Dict[str, Any]]:
     """The records of the files a caller saved for a canvas, as the first turn's item keeps them.
 
-    A caller that made the chat itself saved the files under that chat's session before it called,
-    so the records come in with the create and ride the first turn as any message's attachments do.
-    A caller that saved none hands nothing, which is no files rather than a refusal; anything but a
-    list is refused here, before the canvas, its chat or its run exists.
+    A caller that made the chat itself saved the files under that chat's session before it called —
+    the session is named after the chat (`gots-<chat id>`) — so the records come in with the create
+    and ride the first turn as any message's attachments do. A caller that saved none hands nothing,
+    which is no files rather than a refusal; anything but a list is refused here, before the canvas,
+    its chat or its run exists.
+
+    The two only mean anything together: files with no chat name a session no canvas can have, and
+    the queue keeps at most ``outbox.clean_files``' twenty files per item, dropping the rest without
+    a word — so a longer list is refused rather than handed back a turn missing some of them.
     """
     if files is None:
         return []
     if not isinstance(files, list):
         raise CanvasError(
             "A canvas's files are the records its caller saved, as a list; this is not one."
+        )
+    if not chat_id:
+        raise CanvasError(
+            "A canvas's files are saved under the session its chat names; this start names no chat."
+        )
+    if len(files) > START_FILES_MAX:
+        raise CanvasError(
+            f"A start carries at most {START_FILES_MAX} files; this one carries {len(files)}."
         )
     return outbox.clean_files(files)
 
@@ -1222,7 +1254,10 @@ def create(
         raise CanvasError("A canvas needs a prompt to build it from.")
     if not isinstance(body, dict) or not isinstance(body.get("input"), list) or not body["input"]:
         raise CanvasError("body must be the run request that builds the canvas.")
-    saved = _saved(files)
+    # Both are read before anything is written: the chat the caller made, and the files it saved
+    # under that chat's session.
+    named = _named_chat(chat_id)
+    saved = _saved(files, named)
     run = body
     now = int(time.time() * 1000)
     canvas_id = str(uuid.uuid4())
@@ -1234,7 +1269,7 @@ def create(
         opener=prompt,
         title=title,
         canvas_id=canvas_id,
-        chat_id=chat_id,
+        chat_id=named,
     )
     found = {
         "id": canvas_id,

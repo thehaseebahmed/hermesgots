@@ -41,7 +41,6 @@ import {
   runRequest,
   undoCanvas as undoCanvasOnHost,
   updateCanvas as updateCanvasOnHost,
-  uploadAttachment,
   type CanvasChanges,
   type CanvasFile,
 } from "@/lib/hermes"
@@ -49,6 +48,7 @@ import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { onlineNow } from "@/lib/online"
 import { usePoll } from "@/lib/poll"
 import { quietly } from "@/lib/report"
+import { uploadAttachments } from "@/lib/send-turn"
 import { createStore } from "@/lib/store"
 import { tell } from "@/lib/tell"
 import { randomId } from "@/lib/utils"
@@ -614,6 +614,8 @@ export function useCanvas(id: string) {
   )
   return {
     canvas,
+    /** The bot holding it, read here so neither screen reads the same profile a second time. */
+    profile,
     missing: Boolean(state.missing[id]),
     /** The last read got no answer, so what is drawn is this device's copy and nothing can be saved. */
     away: Boolean(state.missedAt[id]),
@@ -725,6 +727,11 @@ export async function grantCanvasTool(id: string, tool: string, allow: boolean) 
  * host itself uses), because the first turn can only carry files already on the host — and the
  * session a file belongs under is named by a chat that has to exist first (ADR 0131).
  *
+ * The saving is the house's own (`uploadAttachments`), so a start takes the files a chat takes: a
+ * photo the model reads inline needs no save, a document with no part has no other road and its
+ * refusal is fatal in the same sentence a send's is, and `uploads` is the host's own answer about
+ * whether it has an attachments route at all.
+ *
  * The prompt stays the reader's own words: the host titles a canvas, and the chat that carries it,
  * from them, so the markers naming the saved files ride only the run body. The record the host
  * answers is the canvas the screen opens — a plugin older than the chat id mints its own chat, and
@@ -733,23 +740,23 @@ export async function grantCanvasTool(id: string, tool: string, allow: boolean) 
 export async function startCanvas(
   profile: Profile,
   prompt: string,
-  choice?: ModelChoice,
-  attachments: Attachment[] = [],
+  {
+    choice,
+    attachments,
+    uploads,
+  }: { choice?: ModelChoice; attachments?: Attachment[]; uploads?: boolean } = {},
 ) {
   const chatId = randomId()
   const session = `gots-${chatId}`
-  const config = serverConfig(profile)
-  const saved: Attachment[] = []
-  const files: CanvasFile[] = []
-  for (const attachment of attachments) {
-    if (!attachment.blob) continue
-    const path = await uploadAttachment(config, session, {
-      name: attachment.name,
-      blob: attachment.blob,
-    })
-    saved.push({ ...attachment, path })
-    files.push({ name: attachment.name, type: attachment.type, size: attachment.size, path })
-  }
+  const saved = await uploadAttachments(
+    serverConfig(profile),
+    session,
+    attachments ?? [],
+    Boolean(uploads),
+  )
+  const files: CanvasFile[] = saved.flatMap((one) =>
+    one.path ? [{ name: one.name, type: one.type, size: one.size, path: one.path }] : [],
+  )
   const body = runRequest(profile, {
     messages: [{ role: "user", content: await wireContent(prompt, saved) }],
     ...(choice ? { model: choice.model, provider: choice.provider } : {}),
@@ -758,8 +765,7 @@ export async function startCanvas(
     prompt,
     profileId: profile.id,
     body,
-    chatId,
-    files,
+    start: { chatId, files },
   })
   if (!raw) throw new Error("The bot didn't make the canvas.")
   const canvas = toCanvas(raw, profile.id)

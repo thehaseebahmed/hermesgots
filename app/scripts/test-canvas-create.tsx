@@ -80,10 +80,10 @@ async function seed() {
   await db.profiles.put(botProfile("canvas-create"))
 }
 
-/** The new canvas's Edit address, drawn as a marker naming what it was opened for. */
-function EditMarker() {
+/** The new canvas's own address, drawn as a marker naming what it was opened for. */
+function ScreenMarker() {
   const { id } = useParams()
-  return <p data-canvas-edit>{`editing ${id}`}</p>
+  return <p data-canvas-screen>{`canvas ${id}`}</p>
 }
 
 /** A pick from the `+` menu's own file input, the way the browser hands one over. */
@@ -121,7 +121,8 @@ test("a canvas start saves its files under its own session and hands them to the
     <MemoryRouter initialEntries={["/canvas"]}>
       <Routes>
         <Route path="/canvas" element={<CanvasPage />} />
-        <Route path="/canvas/:id/edit" element={<EditMarker />} />
+        <Route path="/canvas/:id" element={<ScreenMarker />} />
+        <Route path="/canvas/:id/edit" element={<ScreenMarker />} />
       </Routes>
     </MemoryRouter>,
     async () => {
@@ -160,8 +161,10 @@ test("a canvas start saves its files under its own session and hands them to the
         "the run body carries the marker naming the file",
       )
 
-      await until(() => Promise.resolve(Boolean(find("[data-canvas-edit]"))), "the new canvas's edit screen")
-      assert.match(find("[data-canvas-edit]")!.textContent ?? "", /editing c9/)
+      // The canvas's own address: the preview is what decides which screen a canvas opens on, so
+      // the list hands the new one over rather than picking the chat for it (ADR 0130).
+      await until(() => Promise.resolve(Boolean(find("[data-canvas-screen]"))), "the new canvas's address")
+      assert.match(find("[data-canvas-screen]")!.textContent ?? "", /canvas c9/)
     },
   )
 })

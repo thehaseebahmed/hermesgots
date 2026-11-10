@@ -7,6 +7,7 @@ import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
+  Attachment,
   ClarifyAnswers,
   ClarifyQuestion,
   ModelChoice,
@@ -2571,17 +2572,19 @@ export async function grantCanvasTool(
 /**
  * A record of a file a caller saved for a canvas, as the plugin's first queued turn keeps one
  * (`outbox.clean_files`): the name, type and size a file bubble draws, and where the host put it.
+ * It is the attachment it came from, less its bytes, so the two cannot drift apart.
  */
-export type CanvasFile = { name: string; type: string; size: number; path: string }
+export type CanvasFile = Pick<Attachment, "name" | "type" | "size"> & { path: string }
 
 /**
  * A canvas from a prompt: the plugin writes the record and the chat, and queues the run that builds
  * it on the canvas's own session, so it is built with the app closed (ADR 0113).
  *
- * A start that carries files names the chat it made for the canvas (`chatId`) and the records it
- * saved under that chat's session (`files`): the plugin opens the thread on that chat and the first
- * turn carries those files (ADR 0131). A caller that names neither is a start with a prompt alone,
- * so both are left out of the body rather than sent empty.
+ * A start is one value on the wire: the chat the caller made for the canvas and the records it saved
+ * under that chat's session. The plugin opens the thread on that chat and its first turn carries
+ * those files (ADR 0131). The two only mean anything together — the files live under the session the
+ * chat names — so a caller that has neither leaves both out of the body rather than sending an empty
+ * half, and a create that names no start is a canvas from a prompt alone.
  */
 export async function createCanvas(
   config: HermesConfig,
@@ -2589,8 +2592,7 @@ export async function createCanvas(
     prompt: string
     profileId: string
     body?: Record<string, unknown>
-    chatId?: string
-    files?: CanvasFile[]
+    start?: { chatId: string; files: CanvasFile[] }
   },
 ) {
   const response = await request(canvasRoot(config), {
@@ -2600,8 +2602,7 @@ export async function createCanvas(
       prompt: input.prompt,
       profile_id: input.profileId,
       body: input.body,
-      ...(input.chatId ? { chat_id: input.chatId } : {}),
-      ...(input.files ? { files: input.files } : {}),
+      ...(input.start ? { chat_id: input.start.chatId, files: input.start.files } : {}),
     }),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })

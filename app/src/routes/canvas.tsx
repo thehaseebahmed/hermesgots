@@ -23,7 +23,7 @@ import { AttachMenu } from "@/components/chat/attach-menu"
 import { AttachmentTile } from "@/components/chat/attachments"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { PreviewerProvider } from "@/components/chat/previewer"
-import { UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
+import { UsageSheet } from "@/components/chat/usage-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
@@ -62,12 +62,12 @@ import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { prepareIntake } from "@/lib/attachments"
 import { usePluginFeature } from "@/lib/features"
 import type { CanvasPoint } from "@/lib/point-marker"
-import { hostAnswered, type ProviderUsage } from "@/lib/hermes"
+import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
 import { useDark } from "@/lib/theme"
-import { formatRelative } from "@/lib/format"
+import { BUILDING_ACTIVITY, formatRelative } from "@/lib/format"
 import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 
@@ -155,6 +155,10 @@ export function CanvasPage() {
   const navigate = useNavigate()
   const { visible, archived, loaded, unsupported } = useCanvases()
   const profile = useLiveQuery(getActiveProfile, [])
+  // The host's answer about its attachments route, which decides whether a staged file is saved on
+  // the host or rides the first turn inline — the same answer the `+` menu asks before it offers.
+  // Asked before a bot is read, `undefined` is no connection rather than a hook out of order.
+  const filesFeature = usePluginFeature(profile, "attachments")
   const now = useNow()
   const [prompt, setPrompt] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -166,7 +170,11 @@ export function CanvasPage() {
     setStarting(true)
     let started: Awaited<ReturnType<typeof startCanvas>> | undefined
     await attempt("start the canvas", async () => {
-      started = await startCanvas(profile, prompt.trim(), profile.modelChoice, attachments)
+      started = await startCanvas(profile, prompt.trim(), {
+        choice: profile.modelChoice,
+        attachments,
+        uploads: filesFeature === "yes",
+      })
     })
     setStarting(false)
     if (!started) return
@@ -174,7 +182,10 @@ export function CanvasPage() {
     // they were, so the reader can send again without picking everything again.
     setPrompt("")
     setAttachments([])
-    navigate(`/canvas/${started.id}/edit`)
+    // The canvas's own address, not its chat's: the preview decides which screen a canvas opens on
+    // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
+    // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
+    navigate(`/canvas/${started.id}`)
   }
 
   return (
@@ -305,11 +316,77 @@ export function CanvasPage() {
 }
 
 /**
- * Where each canvas's page was last left, a place per canvas: the preview is unmounted while the
- * reader is on the edit screen, so the position has to outlive the screen that heard it (ADR 0130).
+ * Where the page was last left: the preview is unmounted while the reader is on the edit screen, so
+ * the position has to outlive the screen that heard it (ADR 0130). One canvas is on screen at a
+ * time, so one slot is the whole of it — the id it belongs to and the position it was left at.
  * Module-level for that reason alone.
  */
-const SCROLLS = new Map<string, number>()
+let leftAt = { id: "", at: 0 }
+
+/** Where the page of `id` was left, which is no position for a canvas this slot isn't holding. */
+const scrollOf = (id: string) => (leftAt.id === id ? leftAt.at : 0)
+
+/** The words both screens use for a canvas no bot holds any more. */
+const GONE = "This canvas is gone. Its bot doesn't hold one by that name."
+
+/**
+ * What both of a canvas's screens answer through its options: the reader's answers about the tools a
+ * version declared, the canvas's own record, and its removal. One home for the three, so the preview
+ * and the chat that is a phone's only screen of a canvas with no version cannot answer them
+ * differently — and one place that says what a refusal looks like and where deleting leaves.
+ */
+function useCanvasManagement(id: string) {
+  const { up } = useNav()
+
+  /**
+   * The reader's answer about a tool is kept on the host, and the host's canvas replaces the copy
+   * the screen draws. A grant that couldn't be posted answers no — the page's own promise hears the
+   * refusal rather than being retried on a permission the host never recorded. A host that answered
+   * and refused said why (a version rewritten while the dialog was up no longer declares the tool),
+   * and that is the page's answer in the host's own words, said to the reader too; only a host that
+   * never landed answers no.
+   */
+  const grant = async (tool: string, allow: boolean) => {
+    try {
+      await grantCanvasTool(id, tool, allow)
+      return allow
+    } catch (failure) {
+      if (!hostAnswered(failure)) return false
+      tell.error(failure.message)
+      throw failure
+    }
+  }
+
+  const update = async (changes: CanvasChanges) => {
+    // A host that never answered already said so in `withHost`'s words; a refusal is this call's.
+    // Either way it is thrown on, so the sheet keeps what was typed rather than closing on nothing.
+    try {
+      await updateCanvas(id, changes)
+    } catch (failure) {
+      if (hostAnswered(failure)) {
+        tell.error(failure instanceof Error ? failure.message : "Couldn't change the canvas.")
+      }
+      throw failure
+    }
+  }
+
+  const remove = async () => {
+    try {
+      await deleteCanvas(id)
+    } catch (failure) {
+      if (hostAnswered(failure)) {
+        tell.error(failure instanceof Error ? failure.message : "Couldn't delete the canvas.")
+      }
+      // Thrown on so the question stays up: nothing was deleted.
+      throw failure
+    }
+    tell.success("Canvas deleted.")
+    // The canvas is gone, so the list is where the reader lands — from either screen.
+    up("/canvas")
+  }
+
+  return { grant, update, remove }
+}
 
 /**
  * One canvas, drawn from the version its record points at, with its chat beside it on a wide screen
@@ -320,7 +397,7 @@ export function CanvasView() {
   const { up, step } = useNav()
   const navigate = useNavigate()
   useEffect(() => setBackGuard(step("/canvas")), [step])
-  const { canvas, missing, loaded, away } = useCanvas(id)
+  const { canvas, profile, missing, loaded, away } = useCanvas(id)
   const online = useOnline()
   // A device with no network can't reach the host either, and is told so in its own words (ADR 0071)
   // rather than being told its bot is down.
@@ -333,10 +410,9 @@ export function CanvasView() {
   // How many times the frame has been drawn for this version (a document that left is drawn again),
   // and whether that one redraw was already spent.
   const [escapedFor, setEscapedFor] = useState("")
-  const [usageOpen, setUsageOpen] = useState(false)
-  // The numbers the usage sheet draws, handed up by the chat it belongs to.
-  const [surface, setSurface] = useState<ChatSurfaceUsage | null>(null)
   const [optionsOpen, setOptionsOpen] = useState(false)
+  // The page's own Undo: the header draws the control, and this screen is what asks the host.
+  const [undoing, setUndoing] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
   // The page's classes compiled, kept with the version they were compiled for: an answer that lands
   // after the screen has moved to another version is no CSS to draw with, and no CSS at all keeps
@@ -364,10 +440,7 @@ export function CanvasView() {
       live = false
     }
   }, [canvasId, version, html])
-  const profile = useLiveQuery(
-    () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
-    [canvas?.profileId],
-  )
+
   // The document at a position, built once for every draw: the reader's page, and the page drawn
   // again where they left it.
   const documentAt = useCallback(
@@ -392,7 +465,7 @@ export function CanvasView() {
   const drawn = useMemo(
     // Where this canvas was left, read when the document is built and never per scroll: a scroll is
     // news for the next draw, not a reason to draw again.
-    () => documentAt(SCROLLS.get(id) ?? 0),
+    () => documentAt(scrollOf(id)),
     [documentAt, id],
   )
 
@@ -403,28 +476,15 @@ export function CanvasView() {
       if (event.source !== frame.current?.contentWindow) return
       const at = readScroll(event.data)
       if (at === null) return
-      SCROLLS.set(id, at)
+      leftAt = { id, at }
     }
     window.addEventListener("message", hear)
     return () => window.removeEventListener("message", hear)
   }, [id])
 
-  // The reader's answer about a tool is kept on the host, and the host's canvas replaces the copy
-  // this screen draws. A grant that couldn't be posted answers no — the page's own promise hears the
-  // refusal rather than being retried on a permission the host never recorded. A host that answered
-  // and refused said why (a version rewritten while the dialog was up no longer declares the tool),
-  // and that is the page's answer in the host's own words, said to the reader too; only a host that
-  // never landed answers no.
-  const grant = async (tool: string, allow: boolean) => {
-    try {
-      await grantCanvasTool(id, tool, allow)
-      return allow
-    } catch (failure) {
-      if (!hostAnswered(failure)) return false
-      tell.error(failure.message)
-      throw failure
-    }
-  }
+  // The reader's answers about the canvas are the same three on either screen, so they are read from
+  // one place: the options sheet, the page's own consent, and the delete.
+  const { grant, update, remove } = useCanvasManagement(id)
   const consent = useCanvasConsent(grant)
   // The bridge is registered once per canvas, so the ask is read through a ref: a new ask must not
   // re-register the listener under a running page. The device's copy is read at call time from the
@@ -493,7 +553,7 @@ export function CanvasView() {
     if (loads.current.count === 1 || !shownDocument) return
     if (redrawn?.key === frameKey) return setEscapedFor(frameKey)
     // A new frame is what draws the page again — the same version, at the reader's own position.
-    const document = documentAt(SCROLLS.get(id) ?? 0)?.document ?? ""
+    const document = documentAt(scrollOf(id))?.document ?? ""
     loads.current = { document, count: 0 }
     setRedrawn({ key: frameKey, document })
   }
@@ -517,62 +577,41 @@ export function CanvasView() {
     return () => window.removeEventListener("message", hear)
   }, [id, points])
 
-  const update = async (changes: CanvasChanges) => {
-    // A host that never answered already said so in `withHost`'s words; a refusal is this call's.
-    // Either way it is thrown on, so the sheet keeps what was typed rather than closing on nothing.
-    try {
-      await updateCanvas(id, changes)
-    } catch (failure) {
-      if (hostAnswered(failure)) {
-        tell.error(failure instanceof Error ? failure.message : "Couldn't change the canvas.")
-      }
-      throw failure
-    }
-  }
-
-  const remove = async () => {
-    try {
-      await deleteCanvas(id)
-    } catch (failure) {
-      if (hostAnswered(failure)) {
-        tell.error(failure instanceof Error ? failure.message : "Couldn't delete the canvas.")
-      }
-      // Thrown on so the question stays up: nothing was deleted.
-      throw failure
-    }
-    tell.success("Canvas deleted.")
-    setOptionsOpen(false)
-    up("/canvas")
+  // Undo is the page's own: the header draws the control, and this screen asks the host to walk the
+  // record back one version (ADR 0113). The header never writes to a host itself.
+  const undoVersion = async () => {
+    if (!canvas || undoing) return
+    setUndoing(true)
+    await attempt("undo the canvas", () => undoCanvas(canvas.id))
+    setUndoing(false)
   }
 
   // A canvas with no version has nothing to preview: on a phone its own address is replaced by the
   // edit one — a replacement, never a push, so back cannot land here and be sent there again
   // (ADR 0130). A wide screen keeps the lane, which is already where a canvas is built, and a
-  // redirect there would chase its own address for ever.
-  if (canvas && canvas.version === 0 && !large)
-    return <Navigate to={`/canvas/${id}/edit`} replace />
+  // redirect there would chase its own address for ever. The one derivation of "has a version" the
+  // edit screen uses too, so neither screen can disagree about which corners exist.
+  const versioned = (canvas?.version ?? 0) >= 1
+  if (canvas && !versioned && !large) return <Navigate to={`/canvas/${id}/edit`} replace />
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <CanvasHeader
         canvas={canvas}
         profile={profile}
-        awayWords={awayWords}
-        awayNow={awayNow}
-        backLabel="All canvases"
-        onBack={() => up("/canvas")}
+        away={awayWords ? { words: awayWords, now: awayNow } : undefined}
+        back={{ label: "All canvases", on: () => up("/canvas") }}
         // A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130).
-        flip={large ? undefined : "edit"}
-        onFlip={() => navigate(`/canvas/${id}/edit`)}
+        flip={large ? undefined : { to: "edit", on: () => navigate(`/canvas/${id}/edit`) }}
+        // A host that isn't answering can't be asked to walk the record back.
+        onUndo={awayNow ? undefined : () => void undoVersion()}
         onOptions={() => setOptionsOpen(true)}
       />
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 flex-1 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {missing ? (
-            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
-              This canvas is gone. Its bot doesn't hold one by that name.
-            </p>
+            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">{GONE}</p>
           ) : drawn?.error ? (
             <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
           ) : escaped ? (
@@ -595,7 +634,7 @@ export function CanvasView() {
               {awayNow && !html
                 ? "This canvas isn't on this device, and its bot isn't answering."
                 : loaded && !html
-                  ? "Your bot is building it…"
+                  ? BUILDING_ACTIVITY
                   : "Reading the canvas…"}
             </p>
           )}
@@ -608,8 +647,6 @@ export function CanvasView() {
             bot={profile}
             points={points}
             className="flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l"
-            onView={() => setUsageOpen(true)}
-            onUsage={setSurface}
           />
         )}
       </div>
@@ -628,22 +665,8 @@ export function CanvasView() {
         onUpdate={update}
         onDelete={remove}
       />
-      {surface && (
-        <UsageSheet
-          open={usageOpen}
-          onOpenChange={setUsageOpen}
-          usage={surface.usage}
-          providerUsage={surface.providerUsage}
-        />
-      )}
     </div>
   )
-}
-
-/** The numbers a canvas's usage sheet draws, read by its chat and drawn by its screen. */
-interface ChatSurfaceUsage {
-  usage: ContextUsage
-  providerUsage?: ProviderUsage
 }
 
 /**
@@ -653,7 +676,14 @@ interface ChatSurfaceUsage {
  *
  * The version decides the corners: with one, Preview is the flip and there is no arrow, since the
  * corner already goes to the page; without one there is nothing to preview, so no flip is drawn and
- * a leading arrow is the way back to the list instead (ADR 0130).
+ * a leading arrow is the way back to the list instead (ADR 0130). Nothing is drawn from a record
+ * that hasn't landed yet, so an arrow is never flipped to a corner under the reader's thumb.
+ *
+ * A canvas with no version opens on this screen on a phone — it is the only screen it has — so this
+ * one carries the preview's options menu too, or the canvas could never be archived or deleted.
+ *
+ * The two states the preview says in its body are said here in the same words: a canvas no bot holds
+ * is gone, and a bot that isn't answering says so under the title, since the header is one row.
  *
  * Nothing here points at the page: a point is a tap on a page, and the page is the other screen's.
  */
@@ -664,14 +694,14 @@ export function CanvasEdit() {
   // The guard is per screen, so this one is its own: without it the hardware back would leave the
   // canvas for the list while the header's Preview steps to the canvas's own address.
   useEffect(() => setBackGuard(step(`/canvas/${id}`)), [step, id])
-  const { canvas } = useCanvas(id)
-  const profile = useLiveQuery(
-    () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
-    [canvas?.profileId],
-  )
+  const { canvas, profile, missing, away, loaded } = useCanvas(id)
+  const online = useOnline()
+  // The header says a host that isn't answering in the preview's own words (ADR 0071).
+  const awayNow = away || !online
+  const awayWords = awayLine(awayNow, online)
   const large = useLarge()
-  const [usageOpen, setUsageOpen] = useState(false)
-  const [surface, setSurface] = useState<ChatSurfaceUsage | null>(null)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const { grant, update, remove } = useCanvasManagement(id)
   // The first version is what makes there be a page at all, so it is also what the corners follow.
   const versioned = (canvas?.version ?? 0) >= 1
   // A wide screen's lane is the same chat, so this address has nowhere of its own to be: it is the
@@ -682,40 +712,52 @@ export function CanvasEdit() {
       <CanvasHeader
         canvas={canvas}
         profile={profile}
-        awayWords={undefined}
-        awayNow={false}
-        backLabel={versioned ? undefined : "All canvases"}
-        onBack={versioned ? undefined : () => up("/canvas")}
-        undo={false}
-        flip={versioned ? "preview" : undefined}
-        // A navigation, never a step back: the screen behind this one may be the list — a canvas the
-        // list made opens here directly, and a page with no version replaces its address with this
-        // one — so stepping back would leave the canvas instead of drawing the page it names.
-        onFlip={versioned ? () => navigate(`/canvas/${id}`) : undefined}
+        away={awayWords ? { words: awayWords, now: awayNow } : undefined}
+        // Nothing of the record has landed yet: neither the arrow nor the corner is drawn from a
+        // guess, so the header cannot be drawn twice with different controls.
+        back={loaded && !versioned ? { label: "All canvases", on: () => up("/canvas") } : undefined}
+        flip={
+          loaded && versioned
+            ? {
+                to: "preview",
+                // A navigation, never a step back: the screen behind this one may be the list — a
+                // canvas the list made opens here directly, and a page with no version replaces its
+                // address with this one — so stepping back would leave the canvas instead of
+                // drawing the page it names.
+                on: () => navigate(`/canvas/${id}`),
+              }
+            : undefined
+        }
+        onOptions={canvas ? () => setOptionsOpen(true) : undefined}
       />
-      {/* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
-          preview's empty frame uses, and the first version takes them away (ADR 0130). */}
-      {canvas && !versioned && (
-        <p className="p-4 text-center text-sm text-muted-foreground">Your bot is building it…</p>
-      )}
-      <CanvasChat
+      {missing ? (
+        <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
+      ) : loaded && !versioned ? (
+        /* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
+           preview's empty frame uses, and the first version takes them away (ADR 0130). */
+        <p className="p-4 text-center text-sm text-muted-foreground">{BUILDING_ACTIVITY}</p>
+      ) : null}
+      <CanvasChat canvas={canvas} bot={profile} className="flex min-h-0 flex-1 flex-col" />
+      <CanvasOptions
+        open={optionsOpen}
+        onOpenChange={setOptionsOpen}
         canvas={canvas}
-        bot={profile}
-        className="flex min-h-0 flex-1 flex-col"
-        onView={() => setUsageOpen(true)}
-        onUsage={setSurface}
+        onGrant={grant}
+        onUpdate={update}
+        onDelete={remove}
       />
-      {surface && (
-        <UsageSheet
-          open={usageOpen}
-          onOpenChange={setUsageOpen}
-          usage={surface.usage}
-          providerUsage={surface.providerUsage}
-        />
-      )}
     </div>
   )
 }
+
+/**
+ * The screen each flip goes to, as its control is labelled and drawn: one table rather than a pair
+ * of ternaries, so a label and its icon cannot be read from two different answers.
+ */
+const FLIP = {
+  edit: { label: "Edit", Icon: PencilIcon },
+  preview: { label: "Preview", Icon: FrameIcon },
+} as const
 
 /**
  * A canvas's header, as both of its screens draw it: the way back where the screen has one, the
@@ -723,47 +765,35 @@ export function CanvasEdit() {
  * screen it goes to, Undo while a version sits under this one, and the menu last so the one button
  * that opens a sheet is where a hand reaches for it (ADR 0130).
  *
- * What a screen doesn't draw it isn't given: no `flip` is no flip, no `onBack` is no arrow, and the
- * edit screen offers no Undo, since the page is what a version redraws.
+ * Each control is one object the screen either hands over or leaves out: no `flip` is no flip, no
+ * `back` is no arrow, no `onUndo` is no Undo, and a canvas no bot holds draws no menu. The header
+ * writes nothing to a host — the screen it belongs to is what asks for an undo (ADR 0113).
  */
 function CanvasHeader({
   canvas,
   profile,
-  awayWords,
-  awayNow,
-  backLabel,
-  onBack,
-  undo = true,
+  away,
+  back,
   flip,
-  onFlip,
+  onUndo,
   onOptions,
 }: {
   canvas: Canvas | undefined
   profile: Profile | undefined
   /** What the header says of a host that isn't answering, or a device with no network (ADR 0071). */
-  awayWords: string | undefined
-  awayNow: boolean
-  backLabel?: string
-  onBack?: () => void
-  /** Whether Undo is offered at all, where a version sits below this one to walk back to. */
-  undo?: boolean
-  /** The screen this header's one control goes to, named on it: `edit` or `preview`. */
-  flip?: "edit" | "preview"
-  onFlip?: () => void
+  away?: { words: string; now: boolean }
+  /** The way back, where the screen has one. */
+  back?: { label: string; on: () => void }
+  /** The screen this header's one control goes to, and what pressing it does. */
+  flip?: { to: "edit" | "preview"; on: () => void }
+  /** Undo, offered only where a version sits under this one and the host can be asked. */
+  onUndo?: () => void
   onOptions?: () => void
 }) {
-  const [undoing, setUndoing] = useState(false)
-  const undoVersion = async () => {
-    if (!canvas || undoing) return
-    setUndoing(true)
-    await attempt("undo the canvas", () => undoCanvas(canvas.id))
-    setUndoing(false)
-  }
+  const turn = flip ? FLIP[flip.to] : undefined
   return (
     <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-      {backLabel && onBack ? (
-        <BackButton label={backLabel} variant="ghost" onClick={onBack} />
-      ) : null}
+      {back ? <BackButton label={back.label} variant="ghost" onClick={back.on} /> : null}
       <div className="flex min-w-0 flex-1 flex-col">
         <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
         {/* A place's header, as a coding session's is: the name over the one line that says where
@@ -776,36 +806,35 @@ function CanvasHeader({
               <span className="shrink-0">v{canvas.version}</span>
             </>
           ) : null}
-          {awayWords ? (
+          {away?.now ? (
             <>
               <span aria-hidden>·</span>
               <span role="status" data-canvas-offline className="shrink-0">
-                {awayWords}
+                {away.words}
               </span>
             </>
           ) : null}
         </p>
       </div>
-      {flip ? (
+      {flip && turn ? (
         <Button
           variant="ghost"
           size="icon-lg"
           className="size-11 rounded-full"
-          data-canvas-flip={flip}
-          aria-label={flip === "edit" ? "Edit" : "Preview"}
-          onClick={onFlip}
+          data-canvas-flip={flip.to}
+          aria-label={turn.label}
+          onClick={flip.on}
         >
-          {flip === "edit" ? <PencilIcon /> : <FrameIcon />}
+          <turn.Icon />
         </Button>
       ) : null}
-      {undo && canvas?.canUndo && !awayNow ? (
+      {onUndo && canvas?.canUndo ? (
         <Button
           variant="ghost"
           size="icon-lg"
           className="size-11 rounded-full"
           aria-label="Undo"
-          disabled={undoing}
-          onClick={() => void undoVersion()}
+          onClick={onUndo}
         >
           <Undo2Icon />
         </Button>
@@ -834,36 +863,29 @@ function CanvasHeader({
  * classes; a canvas with no chat or no bot draws nothing at all. A chat beside no page (`points`
  * left out) offers no Point control, since a point is a tap on a page (ADR 0130).
  *
- * The numbers its usage sheet draws are handed up rather than drawn here: the canvas's sheet stands
- * at its screen's root, and a sheet opened inside the chat would stack in it.
+ * The usage sheet is drawn here, beside the body, because its numbers are this chat's own: the
+ * composer's limit line asks for it, and the sheet's portals are where the popup lands whatever it
+ * is nested in — so the chat that reads the numbers is the chat that draws them, and no screen has
+ * to hand them up to a root it does not own.
  */
 function CanvasChat({
   canvas,
   bot,
   points,
   className,
-  onView,
-  onUsage,
 }: {
   canvas: Canvas | undefined
   bot: Profile | undefined
   /** The page this chat can point at; none for a screen that draws no page. */
   points?: CanvasPoints
   className: string
-  /** Opens the usage sheet the composer's limit line asks for, which the screen draws. */
-  onView: () => void
-  onUsage: (surface: ChatSurfaceUsage) => void
 }) {
   const chatId = canvas?.chatId
   const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
-  const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, onView)
+  const [usageOpen, setUsageOpen] = useState(false)
+  const view = useCallback(() => setUsageOpen(true), [])
+  const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, view)
   const { tracked, tokens, window: windowSize, model } = usage
-  // The sheet is the screen's, and these are the numbers it draws: handed up as they change, since
-  // the component that reads them is the one that draws them. They are compared field by field
-  // because the usage object is read afresh on every render.
-  useEffect(() => {
-    onUsage({ usage: { tracked, tokens, window: windowSize, model }, providerUsage })
-  }, [onUsage, tracked, tokens, windowSize, model, providerUsage])
   if (!canvas || !chat || !bot) return null
   const body = (
     <PreviewerProvider>
@@ -885,6 +907,12 @@ function CanvasChat({
   return (
     <div className={className}>
       {points ? <CanvasPointsProvider points={points}>{body}</CanvasPointsProvider> : body}
+      <UsageSheet
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        usage={{ tracked, tokens, window: windowSize, model }}
+        providerUsage={providerUsage}
+      />
     </div>
   )
 }

@@ -254,6 +254,72 @@ class CreationTest(unittest.TestCase):
         self.assertEqual(canvases.listing(path), [])
         self.assertEqual(chats.read(path), {})
 
+    def test_a_chat_id_that_is_no_string_is_refused_before_the_canvas(self) -> None:
+        path = store_of(self)
+        with self.assertRaises(canvases.CanvasError):
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=MARKED_BODY,
+                chat_id=12345,
+                files=START_FILES,
+            )
+        # The chat the canvas opens on is a name the caller made: nothing is made with a number in it.
+        self.assertEqual(canvases.listing(path), [])
+        self.assertEqual(chats.read(path), {})
+
+    def test_a_chat_id_that_is_blank_is_refused_before_the_canvas(self) -> None:
+        path = store_of(self)
+        for blank in ("", "   "):
+            with self.subTest(blank=blank):
+                with self.assertRaises(canvases.CanvasError):
+                    canvases.create(
+                        path,
+                        request_profile="default",
+                        bot_id="bot-1",
+                        prompt=PROMPT,
+                        body=MARKED_BODY,
+                        chat_id=blank,
+                        files=START_FILES,
+                    )
+        self.assertEqual(canvases.listing(path), [])
+        self.assertEqual(chats.read(path), {})
+
+    def test_more_files_than_a_start_carries_is_refused(self) -> None:
+        path = store_of(self)
+        # The queue keeps at most 20 files per item and drops the rest without a word, so a start
+        # asking for more is refused rather than answered with a turn missing some of them.
+        many = [{**START_FILES[0], "name": f"photo-{index}.png"} for index in range(21)]
+        with self.assertRaises(canvases.CanvasError):
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=MARKED_BODY,
+                chat_id=START_CHAT,
+                files=many,
+            )
+        self.assertEqual(canvases.listing(path), [])
+
+    def test_files_with_no_chat_are_refused(self) -> None:
+        path = store_of(self)
+        # A start's files live under the session its chat names; a create that names no chat has no
+        # session to have saved them under, so the files and the chat go together.
+        with self.assertRaises(canvases.CanvasError):
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=MARKED_BODY,
+                files=START_FILES,
+            )
+        self.assertEqual(canvases.listing(path), [])
+        self.assertEqual(chats.read(path), {})
+
     def test_a_rename_is_the_canvas_and_its_chat(self) -> None:
         found = canvases.write(self.path, self.canvas["id"], DOCUMENT, title="Tip splitter")
         self.assertEqual(found["title"], "Tip splitter")
