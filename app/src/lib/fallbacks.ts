@@ -1,7 +1,7 @@
 import { getFallbackModels, setFallbackModels, type Fallback } from "@/lib/hermes"
 import { useHostRecord, type HostRoute } from "@/lib/host-record"
 
-const FALLBACKS: HostRoute<Fallback[]> = {
+export const FALLBACKS: HostRoute<Fallback[]> = {
   feature: "fallbacks",
   label: "the fallback models",
   read: getFallbackModels,

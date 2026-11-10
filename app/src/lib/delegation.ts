@@ -7,7 +7,7 @@ interface Delegation {
   custom?: boolean
 }
 
-const DELEGATION: HostRoute<Delegation> = {
+export const DELEGATION: HostRoute<Delegation> = {
   feature: "delegation_model",
   label: "the delegation model",
   read: async (server, signal) => {

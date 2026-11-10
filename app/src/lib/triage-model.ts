@@ -6,7 +6,7 @@ import { useHostRecord, type HostRoute } from "@/lib/host-record"
 import { noteFailure } from "@/lib/report"
 import { useThreadSwitches } from "@/lib/threads"
 
-const TRIAGE: HostRoute<ModelChoice | undefined> = {
+export const TRIAGE: HostRoute<ModelChoice | undefined> = {
   feature: "triage_model",
   label: "the triage model",
   read: async (server, signal) => (await getTriageModel(server, signal)) ?? undefined,

@@ -230,6 +230,11 @@ async function pull() {
       updatedAt: now,
       ...local,
     })
+    // The first open of each of its settings pages draws from what its host says now (ADR 0132).
+    if (!local.disabled)
+      void import("@/lib/host-warm").then(({ warmBotSettings }) =>
+        warmBotSettings({ baseUrl, apiKey: value.apiKey }),
+      )
   }
   for (const profile of await db.profiles.toArray()) {
     if (profile.hostId && !present.has(profile.id)) {

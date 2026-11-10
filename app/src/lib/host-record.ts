@@ -25,6 +25,12 @@ async function readHost<T>(server: Server, route: HostRoute<T>): Promise<Held<T>
   return { supported: true, held }
 }
 
+/** Reads a route once and keeps the answer for the page's first open (ADR 0132). */
+export async function warmHostRecord<T>(server: Server, route: HostRoute<T>) {
+  const held = await readHost(server, route)
+  if (held.supported) await keepHost(server, route.feature, { value: held.held })
+}
+
 /**
  * Whether the host ran out of time rather than answering. The one failure that may still have
  * landed: a write the host refused hasn't.
