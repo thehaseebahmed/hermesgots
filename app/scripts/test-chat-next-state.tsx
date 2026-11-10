@@ -69,10 +69,10 @@ const FINISHED: Row[] = [
 ]
 
 /** A page that has joined run `r` and read its question off the run's own status. */
-const RAISED: ThreadState = reduce(reduce(initial, { type: "attach", run: "r" }), {
-  type: "waiting",
-  waiting: PROMPT,
-})
+const RAISED: ThreadState = reduce(
+  reduce(initial, { type: "attach", run: "r" }),
+  { type: "waiting", waiting: PROMPT },
+)
 
 /** A thread that sent a turn with *Show progress reminders* read as `on`, then played `events`. */
 const playWith = (on: boolean, events: RunEvent[]) => {
@@ -405,22 +405,17 @@ test("an answer given before the replay has rebuilt the call is kept and drawn",
   let joined = reduce(initial, { type: "transcript", rows: PROMPT_ROWS })
   joined = reduce(joined, { type: "attach", run: "r" })
   joined = reduce(joined, { type: "waiting", waiting: PROMPT })
-  assert.equal(
-    calls(joined)[0]?.result,
-    undefined,
-    "the copy on screen holds the call and no answer",
-  )
+  assert.equal(calls(joined)[0]?.result, undefined, "the copy on screen holds the call and no answer")
 
   const answered = reduce(joined, {
     type: "answered",
     answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
   })
   assert.deepEqual(answers(answered), ["yes"], "the answer is drawn at once")
-  const reopened = reduce(reduce(answered, { type: "attach", run: "r" }), {
-    type: "transcript",
-    rows: PROMPT_ROWS,
-    final: true,
-  })
+  const reopened = reduce(
+    reduce(answered, { type: "attach", run: "r" }),
+    { type: "transcript", rows: PROMPT_ROWS, final: true },
+  )
   assert.deepEqual(answers(reopened), ["yes"], "and the thread keeps it when it is read again")
 })
 
@@ -450,12 +445,7 @@ test("the answers already given stand through a rejoin, before the next one", ()
   })
   state = reduce(state, {
     type: "run",
-    event: {
-      event: "tool.completed",
-      tool: "clarify",
-      tool_call_id: "c1",
-      preview: "",
-    } as RunEvent,
+    event: { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
   })
   assert.deepEqual(answers(state), ["yes"], "the first answer is still drawn after the rebuild")
 
@@ -488,12 +478,7 @@ test("a call the host filled itself keeps the host's result", () => {
       tool_call_id: "c1",
       content: JSON.stringify({
         responses: [
-          {
-            question: "Tea?",
-            choices_offered: ["yes", "no"],
-            status: "answered",
-            user_response: "no",
-          },
+          { question: "Tea?", choices_offered: ["yes", "no"], status: "answered", user_response: "no" },
         ],
       }),
     },
@@ -751,19 +736,16 @@ test("a wait outlives a read that could not see the run end, and goes when the t
     "a read that failed settles nothing",
   )
   assert.deepEqual(
-    reduce(reduce(raised, { type: "failed", error: "Can't reach the host." }), {
-      type: "waiting",
-      waiting: { ...PROMPT },
-    }).waiting,
+    reduce(
+      reduce(raised, { type: "failed", error: "Can't reach the host." }),
+      { type: "waiting", waiting: { ...PROMPT } },
+    ).waiting,
     PROMPT,
     "and the next read that finds it is not turned away as already settled",
   )
   const ended = reduce(raised, {
     type: "transcript",
-    rows: [
-      ...PROMPT_ROWS,
-      { id: 3, role: "assistant", content: "Tea it is.", finish_reason: "stop" },
-    ],
+    rows: [...PROMPT_ROWS, { id: 3, role: "assistant", content: "Tea it is.", finish_reason: "stop" }],
     final: true,
   })
   assert.equal(ended.waiting, undefined, "a finished turn waits on nothing")
@@ -775,11 +757,7 @@ test("the host naming no run ends a wait the page never saw settle", () => {
   // list of runs is the only answer — and it lists a run that still holds a prompt.
   const attached = reduce(initial, { type: "attach", run: "r" })
   const raised = RAISED
-  assert.equal(
-    reduce(attached, { type: "gone", run: "r" }),
-    attached,
-    "nothing waited, so nothing changed",
-  )
+  assert.equal(reduce(attached, { type: "gone", run: "r" }), attached, "nothing waited, so nothing changed")
   assert.equal(
     reduce(raised, { type: "gone", run: "another" }).waiting,
     PROMPT,
@@ -812,9 +790,7 @@ test("a run held on a prompt draws the transcript's copy, which carries the ques
   }
   const drawn = threadTurns(held).at(-1)!
   assert.ok(
-    drawn.parts.some(
-      (part) => part.kind === "tools" && part.calls.some((c) => c.name === "clarify"),
-    ),
+    drawn.parts.some((part) => part.kind === "tools" && part.calls.some((c) => c.name === "clarify")),
     "the question's call is drawn while the run waits",
   )
   assert.equal(
@@ -850,8 +826,7 @@ const STEER_ROW = (id: number): Row =>
     timestamp: id,
     role: "user",
     display_kind: "steer",
-    content:
-      "[OUT-OF-BAND USER MESSAGE — a direct message]\nplease slow down\n[/OUT-OF-BAND USER MESSAGE]",
+    content: "[OUT-OF-BAND USER MESSAGE — a direct message]\nplease slow down\n[/OUT-OF-BAND USER MESSAGE]",
   }) as Row
 
 test("a steer the host took stands in the reply at once, and its own row does not draw it twice", () => {
@@ -872,11 +847,7 @@ test("a steer the host took stands in the reply at once, and its own row does no
       STEER_ROW(3),
     ],
   })
-  assert.deepEqual(
-    steers(state),
-    ["please slow down"],
-    "the row is that same steer, not a second one",
-  )
+  assert.deepEqual(steers(state), ["please slow down"], "the row is that same steer, not a second one")
 })
 
 test("a steer is drawn from the transcript alone when this page draws no reply", () => {
@@ -889,9 +860,7 @@ test("a steer is drawn from the transcript alone when this page draws no reply",
     ],
   })
   const before = threadTurns(held).at(-1)!.parts
-  const after = threadTurns(reduce(held, { type: "steered", text: "please slow down" })).at(
-    -1,
-  )!.parts
+  const after = threadTurns(reduce(held, { type: "steered", text: "please slow down" })).at(-1)!.parts
   assert.deepEqual(after, before, "with no live turn there is nothing to draw it on")
   assert.deepEqual(
     after.flatMap((part) => (part.kind === "steer" ? [part.text] : [])),
@@ -1001,11 +970,7 @@ test("a rejoin replays the questions already answered, and the card stays on the
   state = reduce(state, ask("c3-1", "Which services?"))
   state = reduce(state, answered("Which services?"))
   state = reduce(state, ask("c3-2", "Who reviews it?"))
-  assert.equal(
-    questionAt(state.questionSet ?? [], "Who reviews it?"),
-    2,
-    "the host is on the third",
-  )
+  assert.equal(questionAt(state.questionSet ?? [], "Who reviews it?"), 2, "the host is on the third")
 
   // The stream is joined again: every request this call made is replayed, from its first.
   const replayed = reduce(
@@ -1052,18 +1017,10 @@ test("a chat's record of its compactions wakes the thread only when it says some
   // a new state here wakes the store's fold, and its write, for nothing.
   const none = reduce(initial, { type: "summaries", summaries: undefined })
   assert.equal(none, initial, "a chat with no compactions says nothing")
-  assert.equal(
-    reduce(none, { type: "summaries", summaries: new Set() }),
-    none,
-    "nor does an empty one",
-  )
+  assert.equal(reduce(none, { type: "summaries", summaries: new Set() }), none, "nor does an empty one")
   const one = reduce(none, { type: "summaries", summaries: new Set([4]) })
   assert.deepEqual([...(one.summaries ?? [])], [4], "the record's rows are kept")
-  assert.equal(
-    reduce(one, { type: "summaries", summaries: new Set([4]) }),
-    one,
-    "read again, unchanged",
-  )
+  assert.equal(reduce(one, { type: "summaries", summaries: new Set([4]) }), one, "read again, unchanged")
   const two = reduce(one, { type: "summaries", summaries: new Set([4, 9]) })
   assert.deepEqual([...(two.summaries ?? [])], [4, 9], "a record that moved lands")
   const emptied = reduce(two, { type: "summaries", summaries: undefined })
@@ -1072,12 +1029,7 @@ test("a chat's record of its compactions wakes the thread only when it says some
 
 test("a call streamed as a count of commands is worded whole from its transcript row, mid-run", () => {
   const streamed = play([
-    {
-      event: "tool.started",
-      tool: "terminal",
-      tool_call_id: "t1",
-      preview: "which gh + 3 commands",
-    },
+    { event: "tool.started", tool: "terminal", tool_call_id: "t1", preview: "which gh + 3 commands" },
     { event: "tool.started", tool: "terminal", tool_call_id: "t2", preview: "ls -la" },
     { event: "tool.completed", tool: "terminal", tool_call_id: "t1", preview: "" },
   ])
@@ -1092,10 +1044,7 @@ test("a call streamed as a count of commands is worded whole from its transcript
       finish_reason: "tool_calls",
       tool_calls: [
         { id: "t1", function: { name: "terminal", arguments: whole } },
-        {
-          id: "t2",
-          function: { name: "terminal", arguments: JSON.stringify({ command: "ls -la" }) },
-        },
+        { id: "t2", function: { name: "terminal", arguments: JSON.stringify({ command: "ls -la" }) } },
       ],
     },
   ]

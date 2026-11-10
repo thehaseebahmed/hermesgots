@@ -28,8 +28,7 @@ const ASKED = JSON.stringify({
       ],
     },
     {
-      question:
-        "The reason a send was refused, which the thread never shows once the toast has gone:",
+      question: "The reason a send was refused, which the thread never shows once the toast has gone:",
       choices: [
         'Keep it out: the row says "Not sent" and no more, as ADR 0071 has it',
         "Put the reason in the row under the bubble, muted and truncated, so a reader coming back later knows why",
@@ -46,17 +45,11 @@ const row = (name, argumentsText) => ({
 test("the questions a question belongs to are the call's that put it", () => {
   const questions = questionsOf(ASKED)
   assert.equal(questions.length, 3)
-  assert.equal(
-    questions[0].id,
-    "q0",
-    "a question without an id of its own is numbered by its place",
-  )
+  assert.equal(questions[0].id, "q0", "a question without an id of its own is numbered by its place")
   assert.ok(questions[0].choices?.length, "its choices come with it")
 
   assert.deepEqual(
-    questionsAround('The "Recommended" badge:', [row("clarify", ASKED)])?.map(
-      (one) => one.question,
-    ),
+    questionsAround('The "Recommended" badge:', [row("clarify", ASKED)])?.map((one) => one.question),
     [
       "The card family's two looks:",
       'The "Recommended" badge:',
