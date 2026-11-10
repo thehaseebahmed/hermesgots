@@ -4,8 +4,8 @@
  * (a sandboxed `srcdoc`, ADR 0114), so it needs the text rather than an address to point a frame at.
  *
  * It answers `ready` or `failed` with a note, never a throw, so the Previewer shows its Retry and the
- * platform hand-over the way a medium that fails to load does. Import-free, so
- * `scripts/test-page-read.mjs` runs it as a pure rule with its own `fetch`.
+ * platform hand-over the way a medium that fails to load does. Import-free: the caller hands it
+ * the request to make, which is the network log's `ask` (ADR 0086), so a test hands it its own.
  */
 
 /**
@@ -30,9 +30,9 @@ function tooLarge(limit: number): PageRead {
 /** The text of the page at `url`, or why it couldn't be read. */
 export async function readPage(
   url: string,
-  options: { fetch?: Fetch; limit?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+  options: { fetch: Fetch; limit?: number; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<PageRead> {
-  const get: Fetch = options.fetch ?? ((u, init) => fetch(u, init))
+  const get = options.fetch
   const limit = options.limit ?? PAGE_MAX_BYTES
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? PAGE_READ_TIMEOUT_MS)

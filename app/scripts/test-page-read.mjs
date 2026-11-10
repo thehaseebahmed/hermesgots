@@ -16,7 +16,7 @@ test("a page the host serves is read as its text", async () => {
 test("a staged page's blob URL is read the same way", async () => {
   const url = URL.createObjectURL(new Blob(["<p>staged</p>"], { type: "text/html" }))
   try {
-    assert.deepEqual(await readPage(url), { state: "ready", html: "<p>staged</p>" })
+    assert.deepEqual(await readPage(url, { fetch: (u, init) => fetch(u, init) }), { state: "ready", html: "<p>staged</p>" })
   } finally {
     URL.revokeObjectURL(url)
   }
