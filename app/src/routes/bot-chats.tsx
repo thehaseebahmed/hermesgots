@@ -1,7 +1,6 @@
-import type { ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MessageCircleIcon, PlusIcon, SearchIcon, TimerIcon, UsersIcon } from "lucide-react"
+import { MessageCircleIcon, TimerIcon } from "lucide-react"
 import {
   Link,
   Navigate,
@@ -14,10 +13,10 @@ import {
 import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Badge } from "@/components/ui/badge"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
 import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
@@ -33,8 +32,6 @@ import { isUnread } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-
-const SEARCH_FIELD_ID = "chats-search"
 
 /**
  * A bot's screen: the list of its chats, one flat band — the pinned ones first and the rest by what
@@ -182,10 +179,7 @@ function ChatList({
   const now = useNow()
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
-  const [starting, setStarting] = useState(false)
   const field = useRef<HTMLInputElement>(null)
-  const searchToggle = useRef<HTMLButtonElement>(null)
-  const newToggle = useRef<HTMLButtonElement>(null)
 
   const shown = useMemo(() => chatList(rows, query), [rows, query])
 
@@ -193,10 +187,11 @@ function ChatList({
     setSearching(true)
     window.requestAnimationFrame(() => field.current?.focus())
   }
+  // The foot returns the focus to its own control when it closes; this only clears what the field
+  // asked the list for.
   const closeSearch = () => {
     setSearching(false)
     setQuery("")
-    window.requestAnimationFrame(() => searchToggle.current?.focus())
   }
   // A chat is made first and the address moved after it, so back from it has the list to return to.
   // The entry says which bot it is for, so the list keeps its lane while the new row loads.
@@ -245,7 +240,7 @@ function ChatList({
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {searching && (
           <SearchField
-            id={SEARCH_FIELD_ID}
+            id={CHATS_SEARCH_FIELD_ID}
             value={query}
             // An empty field is a search that found everything, not a reason to shut: Escape and the
             // toggle are the two ways this closes, so backspacing the last character — or the
@@ -281,114 +276,15 @@ function ChatList({
         </ul>
       </div>
 
-      {/*
-        The list's two floating controls, on the one bar the app's lists give their foot. The search
-        sits at the left where a thumb reaches without crossing the list, and the one accent the
-        screen spends starts a chat or a room. The bar keeps its place in the flow (`sticky`, not
-        `fixed`), so the last row ends above it and is reachable rather than hidden behind it.
-      */}
-      <div
-        data-slot="list-foot"
-        className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
-      >
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2">
-          <Button
-            ref={searchToggle}
-            variant="outline"
-            size="icon-lg"
-            className="pointer-events-auto size-14 shrink-0 rounded-full bg-background shadow-lg"
-            onClick={() => (searching ? closeSearch() : openSearch())}
-            aria-label="Search"
-            aria-expanded={searching}
-            aria-controls={searching ? SEARCH_FIELD_ID : undefined}
-            data-search-toggle
-          >
-            <SearchIcon className="size-5" />
-          </Button>
-          <Button
-            ref={newToggle}
-            data-toast-above
-            data-new-menu
-            size="icon-lg"
-            className="pointer-events-auto size-14 shrink-0 rounded-full shadow-lg"
-            onClick={() => setStarting(true)}
-            aria-label="New"
-          >
-            <PlusIcon className="size-6" />
-          </Button>
-        </div>
-      </div>
-
-      {/*
-        A one-tap pick from the button above it, so it is the app's pop-up: a sheet on a phone and a
-        menu beside the button from 1024px, holding the two ways to start something. New room is a row
-        only where the Host makes one, and a menu left with one row is still the way this pick is
-        drawn.
-      */}
-      <Popup open={starting} onOpenChange={setStarting} anchor={newToggle}>
-        <PopupContent size="md" toastAbove>
-          <PopupHeader>
-            <PopupTitle>New</PopupTitle>
-          </PopupHeader>
-          <div className="flex flex-col gap-1 px-2 pb-2">
-            <NewRow
-              icon={<MessageCircleIcon />}
-              label="New chat"
-              detail="A chat with this bot"
-              onPick={() => {
-                setStarting(false)
-                void start()
-              }}
-            />
-            {canMakeRoom && (
-              <NewRow
-                icon={<UsersIcon />}
-                label="New room"
-                detail="Bring other bots into one chat"
-                onPick={() => {
-                  setStarting(false)
-                  navigate("/new-room")
-                }}
-              />
-            )}
-          </div>
-        </PopupContent>
-      </Popup>
+      <ListFoot
+        canMakeRoom={canMakeRoom}
+        searching={searching}
+        onSearchOpen={openSearch}
+        onSearchClose={closeSearch}
+        onNewChat={() => void start()}
+        onNewRoom={() => navigate("/new-room")}
+      />
     </div>
-  )
-}
-
-/**
- * One row of the new menu: what it starts, and what that is, as a full-width target a thumb hits at
- * either form — a sheet's row on a phone, a menu's row beside the button from 1024px.
- */
-function NewRow({
-  icon,
-  label,
-  detail,
-  onPick,
-}: {
-  icon: ReactNode
-  label: string
-  detail: string
-  onPick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      // The name is the action alone: the detail is the line under it, not part of what it is called.
-      aria-label={label}
-      onClick={onPick}
-      className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[15px] outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <span aria-hidden className="shrink-0 text-muted-foreground [&_svg]:size-5">
-        {icon}
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{label}</span>
-        <span className="text-sm text-muted-foreground">{detail}</span>
-      </span>
-    </button>
   )
 }
 
