@@ -288,8 +288,12 @@ function put(profile: Profile, canvas: Canvas, started: number) {
   delete missedAt[canvas.id]
   const superseded = held !== undefined && (held.dataWrites ?? 0) > started
   const kept = superseded || data === undefined ? held?.data : data
+  // A record with no document is no page: a canvas the bot has written no version of yet answers an
+  // empty one, and holding that as the canvas's drawn copy is what goes stale — the first version
+  // lands on the list, and the copy read before it still says there is nothing to draw. The record
+  // and the device's copy are kept either way; a page already held for it stays as it is.
   const drawn =
-    html === undefined || stale
+    html === undefined || html === "" || stale
       ? undefined
       : {
           ...current,
@@ -649,7 +653,16 @@ export function usePinnedCanvases() {
 /** One canvas, the document its record points at read and kept fresh while it is on screen. */
 export function useCanvas(id: string) {
   const state = store.use()
-  const canvas = state.details[id] ?? Object.values(state.lists).flat().find((row) => row.id === id)
+  // A held copy is served only while it is at least as new as the record the lists hold: a sweep
+  // that reports a version this device read before it landed is the newer of the two, and a copy
+  // read earlier must not shadow it — a canvas whose first version just landed would otherwise
+  // still read as one with nothing to draw, and its preview would replace its own address with the
+  // edit screen's. No copy at all is the list's record, which is all a sweep has answered.
+  const held = state.details[id]
+  const listed = Object.values(state.lists)
+    .flat()
+    .find((row) => row.id === id)
+  const canvas = held && (!listed || held.at >= listed.at) ? held : listed
   const profile = useLiveQuery(
     () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
     [canvas?.profileId],

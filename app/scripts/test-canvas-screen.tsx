@@ -11,7 +11,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
-import { refreshCanvas } from "@/lib/canvases"
+import { refreshCanvas, refreshCanvases, startCanvas } from "@/lib/canvases"
 import { db } from "@/lib/db"
 import { pressBack } from "@/lib/native"
 import { listsAsChat } from "@/lib/lists-as-chat"
@@ -77,13 +77,14 @@ const VERSIONS = new Map<number, string>([
 /** The canvas as its host answers it at one version: that version's document, and whether a version
  * sits under it to undo to. A second canvas is its own record, its own session, its own chat and its
  * own page, so a frame's text names which canvas was drawn. */
-const canvasAt = (version: number, id = CANVAS.id, data?: CanvasDoc[]) => ({
+const canvasAt = (version: number, id = CANVAS.id, data?: CanvasDoc[], at = CANVAS.at) => ({
   ...CANVAS,
   id,
   title: id === CANVAS.id ? CANVAS.title : `Canvas ${id}`,
   session_id: `gots-chat-${id.slice(1)}`,
   chat_id: `chat-${id.slice(1)}`,
   version,
+  at,
   // A canvas with no version has nothing to preview: its host answers no document at all.
   html:
     version === 0
@@ -113,6 +114,10 @@ interface Host {
   reads?: string[]
   /** The canvases the bot's list names; a canvas of its own is one this file makes for one test. */
   listed?: string[]
+  /** The record's change clock the list names, which a version the bot writes moves. */
+  at?: number
+  /** The canvas a start answers, which is the record alone: a bot writes no page with it. */
+  created?: string
 }
 
 /**
@@ -172,6 +177,25 @@ function serveCanvases(host: Host) {
       }
       return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], host.docs) })
     }
+    if (/\/canvases$/.test(url.pathname) && init?.method === "POST") {
+      // A start: the record alone, which is a canvas the bot has written no version of yet — its
+      // answer carries no page at all, as the plugin's carries none.
+      const body = JSON.parse(String(init?.body)) as { prompt?: string; chat_id?: string }
+      host.reads!.push("POST /canvases")
+      const made = canvasAt(0, host.created ?? "c9")
+      return json(
+        {
+          object: "gots.canvas",
+          canvas: {
+            ...made,
+            title: body.prompt ?? made.title,
+            chat_id: body.chat_id ?? made.chat_id,
+            session_id: `gots-${String(body.chat_id ?? made.chat_id)}`,
+          },
+        },
+        202,
+      )
+    }
     if (/\/canvases$/.test(url.pathname)) {
       host.reads!.push(url.pathname)
       // A bot that isn't answering: the list is the one read a record-only screen makes, so this is
@@ -184,7 +208,9 @@ function serveCanvases(host: Host) {
       }
       return json({
         object: "gots.canvases",
-        canvases: (host.listed ?? ["c1", "c2"]).map((id) => canvasAt(host.version, id)),
+        canvases: (host.listed ?? ["c1", "c2"]).map((id) =>
+          canvasAt(host.version, id, undefined, host.at),
+        ),
       })
     }
     return json({ error: { message: "no route" } }, 404)
@@ -573,15 +599,17 @@ test(
   async () => {
     // Nothing to preview is said honestly (ADR 0130): a phone replaces the canvas's own address with
     // the edit one — a replace, never a push — and the header's Preview is drawn only once a version
-    // is, from the same live record the frame is drawn from.
+    // is, from the same live record the frame is drawn from. A canvas of its own, which this device
+    // has drawn no copy of: the one earlier cases read at a version is not a canvas with none.
+    const BUILT = "c4"
     const phone = async () => {
-      const host: Host = { version: 0, undos: 0 }
+      const host: Host = { version: 0, undos: 0, listed: [BUILT] }
       serveCanvases(host)
-      await seedCanvasChat(CANVAS.id)
+      await seedCanvasChat(BUILT)
       const bot = (await db.profiles.get("bot-1"))!
-      await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      await drawCanvas([`/canvas/${BUILT}`], async () => {
         await until(
-          () => nav() === `REPLACE:/canvas/${CANVAS.id}/edit`,
+          () => nav() === `REPLACE:/canvas/${BUILT}/edit`,
           "the canvas to open on its edit address",
         )
         assert.ok(composerField(), "the chat is what that address draws")
@@ -605,11 +633,11 @@ test(
     const wide = async () => {
       // A wide screen already has the chat beside the page, so the lane is where a canvas is built:
       // no address is replaced, and no flip is drawn.
-      serveCanvases({ version: 0, undos: 0 })
-      await seedCanvasChat(CANVAS.id)
-      await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      serveCanvases({ version: 0, undos: 0, listed: [BUILT] })
+      await seedCanvasChat(BUILT)
+      await drawCanvas([`/canvas/${BUILT}`], async () => {
         await until(() => Boolean(composerField()), "the lane's chat")
-        assert.equal(nav(), `POP:/canvas/${CANVAS.id}`, "a wide screen keeps the canvas's address")
+        assert.equal(nav(), `POP:/canvas/${BUILT}`, "a wide screen keeps the canvas's address")
         assert.ok(missing("[data-canvas-flip]"), "and the lane draws no flip")
       })
     }
@@ -1179,3 +1207,48 @@ test(
   }),
 )
 
+test(
+  "a created canvas's page draws once the list reports its first version",
+  atWidth(390, async () => {
+    // A start answers the record alone: the bot has written no version, so the answer carries no
+    // page, and the phone lands on that canvas's chat. The bot writes version 1 next, and the list
+    // is what reports it — a copy of the start's answer held as this canvas's page would shadow that
+    // record, so the preview would read version 0, replace its own address with the edit one, and
+    // the page would never be drawn. A record with no document is no page to hold, and a copy older
+    // than the list's record is no copy to serve.
+    const host: Host = { version: 0, undos: 0, listed: ["c9"], created: "c9" }
+    serveCanvases(host)
+    await seedCanvasChat("c9")
+    const bot = (await db.profiles.get("bot-1"))!
+    const started = await startCanvas(bot, "A checklist for the deck")
+    assert.equal(started.id, "c9", "the start's own canvas is the one that is read")
+    assert.equal(started.version, 0, "a start answers a canvas with no version")
+    assert.equal(started.html, "", "and no page to draw")
+
+    // The first version lands on the host, and its record's clock with it: the list is the read that
+    // says so, as the edit screen's own (a record-only screen) never asks for a page.
+    host.version = 1
+    host.at = 6
+    await refreshCanvases()
+
+    const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
+    try {
+      await drawCanvas([`/canvas/${started.id}`], async () => {
+        await act(async () => noteChange(connectionKey(bot), "canvas"))
+        assert.equal(nav(), "POP:/canvas/c9", "the canvas's own address is never replaced by Edit")
+        await until(
+          () => drawn().includes("<h1>Canvas c9</h1>"),
+          "the first version's page to draw",
+        )
+        assert.ok(
+          find('[data-canvas-flip="edit"]'),
+          "and the header offers Edit, a version being drawn",
+        )
+      })
+    } finally {
+      // The store outlives a test: the rest of the file reads c1 at the version the host holds.
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
