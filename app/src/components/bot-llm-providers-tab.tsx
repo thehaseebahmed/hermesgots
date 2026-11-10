@@ -23,6 +23,7 @@ import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { useLarge } from "@/lib/media"
+import { useUnsavedChanges } from "@/lib/unsaved"
 import {
   addLlmEndpoint,
   getLlmProviders,
@@ -39,6 +40,14 @@ import {
   type LlmEndpointDraft,
   type LlmProviders,
 } from "@/lib/llm-providers"
+
+/**
+ * What the page says of a write whose answer carried no block: it can't say the write landed — a form
+ * emptied and a mask left as it was would read as one that did — so it says that instead, in place,
+ * with what was typed still in the field and the question still open.
+ */
+const UNREAD_ANSWER =
+  "This host's answer couldn't be read, so nothing here can say the write landed."
 
 /**
  * The LLM Providers page: the API-key providers this bot's Hermes knows and the custom endpoints it
@@ -204,15 +213,25 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
       </div>
     )
 
+  // The mask this screen drew, as the row handed it over: the field must never send back the exact
+  // string on screen, whatever shape a host made of it.
+  const drawn = provider?.masked ?? endpoint?.masked
+
   const submit = (draft: string) => {
-    if (!submittableKey(draft) || saving) return
+    if (!submittableKey(draft, drawn) || saving) return
     setSaving(true)
     setRefusal(undefined)
     void setLlmProviderKey(profile, target, draft.trim())
       .then((next) => {
+        if (!next) {
+          // No block came back, so the write may not have landed at all: say so, and keep the typed
+          // key where it is rather than emptying the form over the mask it drew before.
+          setRefusal(UNREAD_ANSWER)
+          return
+        }
         // The block the write answered is the one the screen draws now, mask and all — and the form
         // is made again holding nothing, so the key that was typed is not left in the field.
-        if (next) keep(next)
+        keep(next)
         setWritten((count) => count + 1)
       })
       .catch((error: unknown) => {
@@ -228,8 +247,14 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
     setRefusal(undefined)
     void removeLlmProviderKey(profile, target)
       .then((next) => {
+        if (!next) {
+          // An answer with no block can't say the key went, so the question stays up with the
+          // sentence that says so, and the row is still drawn as it was.
+          setRefusal(UNREAD_ANSWER)
+          return
+        }
         // The block the removal answered is the one the screen draws now: that row is *Not set*.
-        if (next) keep(next)
+        keep(next)
         setAsking(false)
       })
       .catch((error: unknown) => {
@@ -246,12 +271,16 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
     setRefusal(undefined)
     void removeLlmEndpoint(profile, endpoint.id)
       .then((next) => {
+        if (!next) {
+          // An answer with no block can't say the endpoint went, and leaving the screen would read
+          // as one that did: the sentence stands here, with the endpoint still drawn.
+          setRefusal(UNREAD_ANSWER)
+          setAsking(false)
+          return
+        }
         // The endpoint is gone, so this screen has nothing left to report: the page it returns to
         // draws the block the removal answered, without this row.
-        navigate(botTabPath(profile.id, "llm-providers"), {
-          replace: true,
-          state: next ? { llm: next } : undefined,
-        })
+        navigate(botTabPath(profile.id, "llm-providers"), { replace: true, state: { llm: next } })
       })
       .catch((error: unknown) => {
         // The host's sentence, on the screen rather than in the question: the model this endpoint
@@ -314,7 +343,7 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         placeholder={endpoint ? "The endpoint's API key" : "The provider's API key"}
         kind="secret"
         surface={large ? "card" : "screen"}
-        saveable={submittableKey}
+        saveable={(next) => submittableKey(next, drawn)}
         busy={saving}
         onSave={submit}
       />
@@ -421,6 +450,9 @@ export function LlmEndpointAddScreen({
   const [saving, setSaving] = useState(false)
   const [refusal, setRefusal] = useState<string>()
   const ready = submittableEndpoint(draft)
+  // A back would throw away what was typed, so the screen holds a draft the way every other
+  // Settings form does: whatever any one of the four fields says is a change no Save has taken.
+  useUnsavedChanges(Object.values(draft).some((held) => held.length > 0))
 
   const field = (key: keyof LlmEndpointDraft) => ({
     value: draft[key],
@@ -543,19 +575,26 @@ export function LlmEndpointAddScreen({
  */
 function useLlmProviders(profile: Profile) {
   const location = useLocation()
-  // The block a screen that wrote one hands over: read once, then let go of, so a page returned to
+  const navigate = useNavigate()
+  // The block a screen that wrote one hands over: read once, then let go of — so a page returned to
   // later asks for itself and a stale answer can never be drawn twice.
   const handed = useRef((location.state as { llm?: LlmProviders } | null)?.llm)
   const [block, setBlock] = useState<LlmProviders | undefined>(handed.current)
   const [problem, setProblem] = useState<string>()
   const connection = connectionKey(profile)
+  // This screen's own address, for the replace that takes the block off the entry it rode in on.
+  const here = `${location.pathname}${location.search}`
 
   useEffect(() => {
     let cancelled = false
     if (handed.current) {
       // Already the host's answer, and a newer one than any read could give: asking again would
-      // draw the answer to a read over the answer to the write.
+      // draw the answer to a read over the answer to the write. The entry it rode on is left holding
+      // nothing, though, because a history entry outlives this mount: a page returned to it later
+      // must read the host rather than draw the block captured when the write happened. `quiet` says
+      // the screen didn't move, so the replace doesn't animate it.
       handed.current = undefined
+      navigate(here, { replace: true, state: { quiet: true } })
       return
     }
     setBlock(undefined)

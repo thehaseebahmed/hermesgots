@@ -23,10 +23,11 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router"
 
 import { SettingsPage } from "@/routes/settings"
 import { db } from "@/lib/db"
+import { holdsUnsavedChanges } from "@/lib/unsaved"
 import {
   Path,
   botProfile,
@@ -92,11 +93,26 @@ const ENDPOINTS: Endpoint[] = [
 const settings = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
+    <BackStep />
     <Routes>
       <Route path="/settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />
     </Routes>
   </MemoryRouter>
 )
+
+/**
+ * The browser's own back, as a press: the entry before this one, its state and all. A page the app
+ * pushes over this one is entered by a row's press, so this is the walk back to it.
+ */
+function BackStep() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" data-back onClick={() => void navigate(-1)}>
+      Back
+    </button>
+  )
+}
+const back = () => find("[data-back]")
 
 /** One request the fake host was sent, so a write's body can be read back. */
 type Asked = { method: string; path: string; body: Record<string, unknown> | null }
@@ -124,6 +140,13 @@ const RUNNING_ON = "local-llama"
 const IN_USE = "This bot's model runs on Local Llama. Switch the model first."
 
 /**
+ * What the page says of a write whose answer carried no block: the write may have landed, but this
+ * screen can't say so, so it says that instead of emptying the form over the old mask.
+ */
+const UNREAD_ANSWER =
+  "This host's answer couldn't be read, so nothing here can say the write landed."
+
+/**
  * A bot of this test's own over a faked host: what a connection's plugin answered is remembered for
  * the page, so each case names its own host and no answer leaks into the next. A key write lands on
  * the block that host answers next, an endpoint's removal takes its row off it, and every request is
@@ -143,6 +166,14 @@ async function seed(
   // runs on is the plan's 409 under `endpoint_in_use`, and the page draws its sentence anyway.
   const refusals: { status: number; code: string }[] = []
   let current = structuredClone(block)
+  // Whether a write answers with the block at all: a host that answers `{object}` alone is what the
+  // page must not read as a write that landed.
+  let carriesBlock = true
+  /** A write's answer: the block, or — where a case says so — an answer carrying none. */
+  const answered = (next: Block) =>
+    carriesBlock
+      ? json({ object: "gots.llm_providers", llm: next })
+      : json({ object: "gots.llm_providers" })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const pathname = new URL(String(input)).pathname
     const method = (init?.method ?? "GET").toUpperCase()
@@ -160,7 +191,7 @@ async function seed(
           one.slug === target ? { ...one, masked: null } : one,
         ),
       }
-      return json({ object: "gots.llm_providers", llm: current })
+      return answered(current)
     }
     if (pathname.endsWith("/plugins/gots/llm-providers/key") && method === "POST") {
       const target = String(body?.target ?? "")
@@ -179,7 +210,7 @@ async function seed(
               one.slug === target ? { ...one, masked } : one,
             ),
           }
-      return json({ object: "gots.llm_providers", llm: current })
+      return answered(current)
     }
     if (pathname.endsWith("/plugins/gots/llm-providers") && method === "GET")
       return json({ object: "gots.llm_providers", llm: current })
@@ -198,7 +229,7 @@ async function seed(
         return json({ error: { message: IN_USE, code: "endpoint_in_use" } }, 409)
       }
       current = { ...current, endpoints: current.endpoints.filter((one) => one.id !== id) }
-      return json({ object: "gots.llm_providers", llm: current })
+      return answered(current)
     }
     if (pathname.endsWith("/plugins/gots/llm-providers/endpoints") && method === "POST") {
       // A custom endpoint added (plugin/llm_providers.py): the host slugs the id, keeps the key as
@@ -214,14 +245,19 @@ async function seed(
         model: String(body?.model ?? ""),
         masked: maskOf(String(body?.key ?? "")),
       }
-      return json({
-        object: "gots.llm_providers",
-        llm: { ...current, endpoints: [...current.endpoints, added] },
-      })
+      return answered({ ...current, endpoints: [...current.endpoints, added] })
     }
     return json({}, 404)
   }) as typeof fetch
-  return { asks, refusals, block: () => current }
+  return {
+    asks,
+    refusals,
+    block: () => current,
+    /** Every write answers `{object}` alone: an answer the page must not read as one that landed. */
+    answersNoBlock: () => void (carriesBlock = false),
+    /** The host's own state, changed out from under the page: what a fresh read now answers. */
+    set: (next: Block) => void (current = next),
+  }
 }
 
 /** The page itself, one provider's row on it, and the slot screen a row opens. */
@@ -623,5 +659,166 @@ test("removing another endpoint takes its row off the page", async () => {
       !host.asks.slice(removedAt + 1).some((one) => one.method === "GET"),
       "and the page asked nothing after it: the block the removal answered is what it drew",
     )
+  })
+})
+
+test("a mask pasted into the key field keeps Save dead and asks nothing", async () => {
+  const host = await seed("pasted-mask", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+    await click(providerRow("openai"))
+    await until(async () => Boolean(keyField()), "the key's field")
+
+    // Every shape a mask arrives in, pasted whole: an elision with any length at either end, the
+    // ellipsis a copy carries, the sentinel with its » lost, a redaction marker, and dots with a
+    // space either side. None of them is a key, so none of them wakes Save.
+    for (const shape of [
+      "sk-abcd...123456",
+      "sk-o\u2026c123",
+      "\u00abredacted",
+      "[redacted]",
+      "sk-o ... c123",
+    ]) {
+      await type(keyField(), shape)
+      assert.equal(saveButton()?.disabled, true, `${shape} is a mask's shape, not a key`)
+    }
+    // And the very string the row drew, pasted back, is refused as that string.
+    const drawn = valueOf(maskRow())
+    await type(keyField(), drawn)
+    assert.equal(saveButton()?.disabled, true, `the mask the row drew (${drawn}) is never a key`)
+    assert.ok(!host.asks.some((one) => one.method === "POST"), "and no write was ever asked")
+  })
+})
+
+test("a write the host answers without its block is refused in place, keeping the key", async () => {
+  const host = await seed("no-block", ["llm_providers"])
+  host.answersNoBlock()
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+    await click(providerRow("openai"))
+    await until(async () => Boolean(keyField()), "the key's field")
+
+    await type(keyField(), "new-key-0000-zyxw")
+    await until(async () => saveButton()?.disabled === false, "Save to wake for a typed key")
+    await click(saveButton())
+    await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
+
+    // The answer held no block, so this screen can't say the write landed: the field keeps what was
+    // typed, the mask under it is still the one the host last sent, and nothing is claimed.
+    assert.equal(keyField()?.value, "new-key-0000-zyxw", "the typed key stays in the field")
+    assert.equal(valueOf(maskRow()), "sk-o...c123", "and the key it drew is still the one it drew")
+    assert.equal(host.asks.filter((one) => one.method === "POST").length, 1, "one write, no retry")
+  })
+})
+
+test("a removal the host answers without its block keeps its question up", async () => {
+  const host = await seed("no-block-remove", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+    await click(providerRow("openai"))
+    await until(async () => Boolean(removeKey()), "the Remove key action")
+
+    host.answersNoBlock()
+    await click(removeKey())
+    await until(async () => Boolean(dialog()), "the question")
+    await click(inDialog("Remove"))
+    await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
+
+    assert.ok(dialog(), "the question stays up rather than reporting a removal it can't read")
+    assert.equal(valueOf(maskRow()), "sk-o...c123", "and the key is still drawn as it was")
+  })
+})
+
+test("an endpoint removal the host answers without its block stays on the screen", async () => {
+  const host = await seed("no-block-endpoint", ["llm_providers"], {
+    ...BLOCK,
+    endpoints: ENDPOINTS,
+  })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("work-gateway")), "the host's custom endpoints")
+    await click(endpointRow("work-gateway"))
+    await until(async () => Boolean(removeEndpoint()), "the Remove endpoint action")
+
+    host.answersNoBlock()
+    await click(removeEndpoint())
+    await until(async () => Boolean(dialog()), "the question")
+    await click(inDialog("Remove"))
+    await until(async () => text().includes(UNREAD_ANSWER), "the sentence that it couldn't be read")
+
+    // Leaving for the page would say the endpoint is gone; it isn't known to be, so the screen stays
+    // with the sentence and the endpoint still drawn.
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/llm-providers/key/custom%3Awork-gateway",
+      "the screen stays where it was",
+    )
+    assert.equal(titleOf(maskRow()), "Work gateway", "and the endpoint is still drawn")
+    assert.ok(!dialog(), "the question is done, since a retry asks the same thing")
+  })
+})
+
+test("a page returned to reads for itself rather than drawing the block a write left", async () => {
+  const host = await seed("stale-block", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+
+    // A write answers the page: the add form's block rides the navigation back to it.
+    await click(addButton())
+    await until(async () => Boolean(addForm()), "the add form")
+    await type(nameField(), "Home box")
+    await type(urlField(), "http://10.0.0.5:8080/v1")
+    await type(endpointModelField(), "qwen2.5")
+    await type(newKeyField(), "home-box-key-0000-abcd")
+    await until(async () => saveButton()?.disabled === false, "Save to wake for a whole endpoint")
+    await click(saveButton())
+    await until(async () => Boolean(endpointRow("home-box")), "the row the write answered")
+
+    // The page is left, and the host answers differently: its key for OpenAI was replaced somewhere
+    // else, and it holds the endpoint the add made.
+    await click(providerRow("openai"))
+    await until(async () => Boolean(slot()), "the provider's screen")
+    host.set({
+      providers: host
+        .block()
+        .providers.map((one) => (one.slug === "openai" ? { ...one, masked: "else...9876" } : one)),
+      endpoints: [
+        {
+          id: "home-box",
+          name: "Home box",
+          base_url: "http://10.0.0.5:8080/v1",
+          model: "qwen2.5",
+          masked: "home...abcd",
+        },
+      ],
+    })
+    const asked = host.asks.length
+    await click(back())
+    await until(async () => Boolean(page()), "the page again")
+
+    assert.equal(path(), "/settings/bots/bot-1/llm-providers", "back lands on the page")
+    await until(
+      async () => valueOf(providerRow("openai")) === "else...9876",
+      "the page to read for itself",
+    )
+    assert.ok(host.asks.length > asked, "it asked the host rather than drawing the block it kept")
+    assert.equal(
+      valueOf(endpointRow("home-box")),
+      "home...abcd",
+      "and the endpoint it drew is the host's, not the one the write left behind",
+    )
+  })
+})
+
+test("the add form holds a typed draft, as every other Settings form does", async () => {
+  await seed("add-draft", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+    await click(addButton())
+    await until(async () => Boolean(addForm()), "the add form")
+
+    assert.equal(holdsUnsavedChanges(), false, "an empty form holds nothing a back would lose")
+    await type(nameField(), "Home box")
+    await until(async () => holdsUnsavedChanges(), "the draft to be held")
+    assert.equal(holdsUnsavedChanges(), true, "a typed field is a draft the back would throw away")
   })
 })

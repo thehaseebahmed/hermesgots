@@ -327,6 +327,18 @@ def _slot_of(target: str) -> Tuple[str, List[Any]]:
     raise ValueError(f"{target} isn't an API-key provider this Hermes knows.")
 
 
+def _typed_key(value: Any) -> str:
+    """The key a body carries, as the one string both writes store.
+
+    ``write_key`` and ``add_endpoint`` both go through here rather than each stripping its own way,
+    so the two can't disagree about what the string is: the mask rule is asked of what would be
+    stored, never of the body as it arrived — a mask pasted back as ``" ***"`` or ``"***\\n"`` is
+    refused like the bare one — and a typed key is stored trimmed rather than with a clipboard's
+    whitespace in it.
+    """
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _refuse_preview(key: str) -> None:
     """Refuse a submitted mask on the host's own rule, before anything else looks at it.
 
@@ -348,16 +360,19 @@ def write_key(config_path: Path, target: str, key: str) -> Dict[str, Any]:
     ``upsert_custom_endpoint``; anything else is a catalog slug, whose write is Hermes's credential
     lifecycle rather than its ``config.yaml`` writer (the lifecycle also reconciles the config
     mirrors, the env-seeded credential-pool entries and the provider's model-cache rows, which would
-    otherwise keep authenticating with the key that was just replaced). A mask is refused before
-    either is asked, and the key is never logged, echoed back or named in a refusal: what a caller
-    gets is the fresh block, in which the key is only ever its mask.
+    otherwise keep authenticating with the key that was just replaced). The key is stripped once, at
+    the top, and that one string is what the mask rule reads and what would be stored — the same
+    helper an added endpoint's key goes through, so the two writes can't disagree about it. A mask is
+    refused before either is asked, and the key is never logged, echoed back or named in a refusal:
+    what a caller gets is the fresh block, in which the key is only ever its mask.
 
     Raises ``ValueError`` for a mask, an empty key or a target this host can't write, and
     ``ImportError`` where this host has no rule, lifecycle or endpoint list, which the route answers
     with a 501.
     """
+    key = _typed_key(key)
     _refuse_preview(key)
-    if not key.strip():
+    if not key:
         # A blank is a removal, and a removal is its own step with its own confirmation.
         raise ValueError("A key can't be empty.")
     spelled = str(target or "").strip()
@@ -434,8 +449,7 @@ def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
     a ``ValueError`` carrying its sentence, which the route answers as a 400 the user can read.
     """
     fields = body if isinstance(body, dict) else {}
-    submitted = fields.get("key")
-    key = submitted.strip() if isinstance(submitted, str) else ""
+    key = _typed_key(fields.get("key"))
     _refuse_preview(key)
     name = str(fields.get("name") or "").strip()
     base_url = str(fields.get("base_url") or "").strip()

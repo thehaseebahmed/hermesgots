@@ -32,6 +32,32 @@ test("a mask is never a key to send", () => {
   )
 })
 
+test("a mask of any shape is never a key to send", () => {
+  // A mask is a mask whatever its ends are and whatever cut it: refusing only a four-and-four
+  // elision let `sk-abcd...123456` through, and a copy's own ellipsis or a redaction marker through
+  // with it.
+  const shapes = [
+    ["sk-abcd...123456", "a dotted elision with any length at either end"],
+    ["sk-o…c123", "the single-character ellipsis a copy carries"],
+    ["«redacted", "the sentinel with its closing » lost"],
+    ["[redacted]", "a redaction marker"],
+    ["sk-o ... c123", "dots with a space either side"],
+  ]
+  for (const [shape, why] of shapes) assert.equal(submittableKey(shape), false, why)
+})
+
+test("the mask the row drew is refused by its own string, whatever shape it has", () => {
+  // The row hands the page its `masked`: a shape a later host invents is still the string on screen,
+  // and it is the string that decides rather than this build's list of shapes.
+  assert.equal(submittableKey("opaque-mask-7f3a", "opaque-mask-7f3a"), false)
+  assert.equal(submittableKey("opaque-mask-7f3a"), true, "without the row's mask it is just a key")
+  assert.equal(
+    submittableKey("typed-key-0000-abcd", "opaque-mask-7f3a"),
+    true,
+    "and another row's mask is another string",
+  )
+})
+
 test("something typed is a key, whatever surrounds it", () => {
   assert.equal(submittableKey("new-key-0000-zyxw"), true)
   assert.equal(

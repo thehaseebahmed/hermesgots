@@ -436,6 +436,51 @@ class WriteTest(unittest.TestCase):
         save.assert_not_called()
 
 
+class KeyWhitespaceTest(unittest.TestCase):
+    """The one string both writes store: stripped once, at the top, before the mask rule is asked.
+
+    A mask a row drew can be pasted back with a space, a tab or a newline against it, and a typed key
+    arrives with the same padding when a phone's clipboard carries it. The rule is asked of the
+    string that would be stored rather than of the raw body, so padding can't smuggle a mask into
+    `.env` — and a key is stored trimmed rather than wearing the clipboard's whitespace.
+    """
+
+    def test_a_mask_padded_with_whitespace_is_refused(self) -> None:
+        save = mock.MagicMock()
+        previews = (" ***", "***\n", "\t***", "sk-a...4f2c\n", "  sk-a...4f2c  ")
+        for preview in previews:
+            with self.subTest(preview=preview):
+                with host_modules({}, save=save):
+                    with self.assertRaises(ValueError) as refused:
+                        llm_providers.write_key(CONFIG, "openai", preview)
+                self.assertIn("masked key", str(refused.exception), "the mask rule saw it anyway")
+                self.assertNotIn(preview.strip(), str(refused.exception), "and never repeats it")
+        save.assert_not_called()
+
+    def test_a_typed_key_padded_with_whitespace_is_stored_trimmed(self) -> None:
+        values: Dict[str, str] = {}
+        save = mock.MagicMock(side_effect=lambda env_var, key: values.__setitem__(env_var, key))
+        with host_modules(values, save=save):
+            llm_providers.write_key(CONFIG, "openai", "  my-key-0000-zyxw  ")
+        save.assert_called_once_with("OPENAI_API_KEY", "my-key-0000-zyxw")
+
+    def test_an_endpoint_key_padded_with_whitespace_is_stored_trimmed(self) -> None:
+        # One helper behind both writes, so the key form and the add form cannot disagree about the
+        # string `.env` ends up holding.
+        values = {"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY}
+        config = endpoint_config()
+        asked: list = []
+
+        def upsert(body: Any) -> None:
+            asked.append(body)
+            apply_custom_endpoint(body, values, config)
+
+        with host_modules(values, endpoints_list=endpoints(), config=config, upsert=upsert):
+            llm_providers.write_key(CONFIG, "custom:local-llama", "\tendpoint-key-9999-8888\n")
+        self.assertEqual(asked[0].api_key, "endpoint-key-9999-8888")
+        self.assertEqual(values["LOCAL_LLAMA_API_KEY"], "endpoint-key-9999-8888")
+
+
 class RemoveTest(unittest.TestCase):
     """A provider's key removed: the lifecycle's own removal, a `.env` writer never reached."""
 
@@ -1050,6 +1095,23 @@ class AddEndpointTest(unittest.TestCase):
                 llm_providers.add_endpoint(CONFIG, {"name": "", "key": "sk-o...c123"})
         self.assertIn("masked key", str(refused.exception))
         self.assertNotIn("sk-o...c123", str(refused.exception), "and never repeats the mask")
+        writer.assert_not_called()
+
+    def test_a_key_padded_with_whitespace_is_stored_trimmed(self) -> None:
+        # The add form's key goes through the same helper the key form's does, so `.env` holds the
+        # key alone whatever the clipboard wrapped it in.
+        body = dict(NEW_ENDPOINT, key=f"  {NEW_KEY}\n")
+        block, asked, config, listed, values = self.add(body)
+        self.assertEqual(asked[0].api_key, NEW_KEY, "the add form's key is stored trimmed too")
+        entry = config["providers"]["home-box"]
+        self.assertEqual(values[entry["key_env"]], NEW_KEY)
+
+    def test_a_padded_mask_is_refused_before_the_host_writer(self) -> None:
+        writer = mock.MagicMock()
+        with host_modules({}, endpoints_list=[], upsert=writer):
+            with self.assertRaises(ValueError) as refused:
+                llm_providers.add_endpoint(CONFIG, dict(NEW_ENDPOINT, key="\t***\n"))
+        self.assertIn("masked key", str(refused.exception))
         writer.assert_not_called()
 
     def test_a_host_refusal_becomes_a_value_error_in_its_words(self) -> None:
