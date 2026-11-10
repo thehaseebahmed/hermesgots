@@ -413,8 +413,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, latest, main, preview, threadLine, waiting, unread }) => {
-          const age = (main ?? latest)?.updatedAt
+        {bots?.map(({ bot, latest, preview, waiting, unread }) => {
+          const age = latest?.updatedAt
           return (
             <li key={bot.id}>
               <RootLink
@@ -456,10 +456,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                     <span className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
                         {previewLine({
-                          main: Boolean(main),
                           line: preview,
-                          thread: threadLine,
-                          latest: latest?.title,
+                          title: latest?.title,
                           online: presence(bot, now),
                         })}
                       </span>

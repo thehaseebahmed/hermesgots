@@ -43,12 +43,7 @@ export interface DiagBot {
   lastThread: string | null
   /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
   lastStored: string | null
-  /** Its Main thread, read by its own id; null where this device has no Main row for it. */
-  main: DiagChat | null
-  /** How many chats the bot has, Main among them, counted through the index. */
-  threads: number
-  /** The newest chats, most recently touched first, as far back as the window reached; Main may
-   * be among them. */
+  /** The newest chats, most recently touched first, as far back as the window reached. */
   chats: DiagChat[]
   /** Its own reads failed, so what sits above is what could be read around them. */
   unread?: true
@@ -127,14 +122,10 @@ export function diagBot(input: {
   profile: Profile
   host: DiagHost
   chats: DiagChat[]
-  /** Main itself, read by its own id rather than from the window. */
-  main: DiagChat | null
-  /** How many chats the bot has, Main among them, counted through the index. */
-  threads: number
   /** Whether the bot's own reads failed, leaving what follows as what could be read. */
   unread?: boolean
 }): DiagBot {
-  const { profile, host, chats, main, threads, unread } = input
+  const { profile, host, chats, unread } = input
   const built: DiagBot = {
     id: profile.id,
     name: profile.name,
@@ -145,8 +136,6 @@ export function diagBot(input: {
     features: host.features,
     lastThread: host.lastThread,
     lastStored: host.lastStored,
-    main,
-    threads,
     chats,
   }
   if (unread) built.unread = true

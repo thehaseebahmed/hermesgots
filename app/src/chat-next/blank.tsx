@@ -11,7 +11,7 @@ import { toast } from "sonner"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { EmptyState } from "@/components/chat/empty-states"
+import { EmptyChatState } from "@/components/chat/empty-states"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { db, type Attachment, type ModelChoice } from "@/lib/db"
 import { dictationHint } from "@/lib/dictation-hint"
@@ -62,7 +62,7 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
       className="relative flex min-h-0 flex-1 flex-col"
     >
       <ChatHeader title="" showBot={false} />
-      <EmptyState botId={bot.botId} configured />
+      <EmptyChatState botId={bot.botId} configured onSend={(text) => send(text, [])} />
       <div
         data-slot="composer-slot"
         data-toast-above

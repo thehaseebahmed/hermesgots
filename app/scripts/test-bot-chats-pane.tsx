@@ -3,7 +3,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import {
@@ -24,7 +24,7 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats-pane", { id: "bot-1", name: "Mainly" })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
 /** The bot's chats, and a project session of its own that is Code's and no row of its list. */
 const CHATS = [
   { id: "c-a", title: "Alpha", at: 13 },
@@ -41,7 +41,17 @@ async function seed({ collapsed = false } = {}) {
   await db.profiles.put(bot)
   await db.messages.clear()
   await db.conversations.clear()
-  await ensureMainThread(bot.id)
+  await db.conversations.put({
+    id: MAIN,
+    profileId: bot.id,
+    title: "Main",
+    titleEdited: true,
+    main: true,
+    hermesSessionId: `gots-${MAIN}`,
+    createdAt: 1,
+    updatedAt: 1,
+    changedAt: 0,
+  })
   await db.conversations.bulkPut([
     ...CHATS.map((chat) => ({
       id: chat.id,

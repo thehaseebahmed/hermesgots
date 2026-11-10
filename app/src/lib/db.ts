@@ -1785,45 +1785,6 @@ export async function createConversation(
   return conversation
 }
 
-/** A bot's Main thread has an id every device derives, so two devices never make two. */
-export const mainThreadId = (profileId: string) => `main-${profileId}`
-
-/** The bot a Main thread's id names, or undefined for any other chat. */
-export const mainThreadProfile = (id: string) =>
-  id.startsWith("main-") ? id.slice("main-".length) : undefined
-
-/**
- * Makes the bot's Main thread the first time it's asked for. Its change clock is 0, so a record
- * another device already synced always wins the merge over this empty copy.
- */
-export async function ensureMainThread(profileId: string): Promise<Conversation> {
-  const id = mainThreadId(profileId)
-  return db.transaction("rw", db.conversations, async () => {
-    const existing = await db.conversations.get(id)
-    if (existing) {
-      // A Main row that lost the flag reads as a plain thread and takes Main's whole behaviour
-      // with it, so it is healed here — the one place that owns the row.
-      if (existing.main) return existing
-      await updateConversation(id, { main: true })
-      return (await db.conversations.get(id)) ?? existing
-    }
-    const now = Date.now()
-    const conversation: Conversation = {
-      id,
-      profileId,
-      title: "Main",
-      titleEdited: true,
-      hermesSessionId: `gots-${id}`,
-      createdAt: now,
-      updatedAt: now,
-      changedAt: 0,
-      main: true,
-    }
-    await db.conversations.add(conversation)
-    return conversation
-  })
-}
-
 /** Every change to a chat's synced fields goes through here so sync sees it. */
 export async function updateConversation(
   id: string,

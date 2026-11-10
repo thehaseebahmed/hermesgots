@@ -4,10 +4,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   createConversation,
   db,
-  ensureMainThread,
   getSettings,
   listEnabledProfiles,
-  mainThreadId,
   type BotSort,
   type Conversation,
   type ModelChoice,
@@ -77,17 +75,13 @@ export type NewChat = { modelChoice?: ModelChoice } & Partial<
 >
 
 /**
- * The chat a new chat opens: the bot's Main with chat threads off, a record otherwise, so the legacy
- * layout still makes a plain chat and never a Main.
+ * The chat a new chat opens: a plain chat, whichever layout, since nothing makes a Main any more — a
+ * bot's chats are its own, made when one is started (G1).
  *
- * Main's model is a synced field: the pick a blank surface held is not written onto it, since one
- * device's press would move the bot's model on every device. A thread is still made with it.
+ * The pick a blank surface held rides into the chat it makes, where it is the chat's own.
  */
 export async function beginChat(profileId: string, message: NewChat = {}) {
-  if (!opensInMain(await getSettings())) return beginThread(profileId, message)
-  const main = await ensureMainThread(profileId)
-  handOverIfSaid(main.id, message)
-  return main
+  return beginThread(profileId, message)
 }
 
 function handOverIfSaid(chatId: string, { text = "", attachments = [] }: NewChat) {
@@ -265,19 +259,14 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
 
 export interface BotSummary {
   bot: Profile
-  /** Its newest thread. */
+  /** Its newest chat. */
   latest?: Conversation
-  /** Its Main thread, once this device has opened it. */
-  main?: Conversation
+  /** The newest chat's latest message, cut to a line. */
   preview?: string
-  /** The newest thread's latest message, cut to a line, for a bot with nothing said in Main. */
-  threadLine?: string
-  /** Threads waiting on the user. */
+  /** Chats waiting on the user. */
   waiting: number
-  /**
-   * A thread this device holds past its read mark — Main among them, and never a coding session's,
-   * because the row leads to Main and previews the bot's own words (ADR 0110).
-   */
+  /** A chat this device holds past its read mark — Main among them, and never a coding session's
+   * (ADR 0110). */
   unread: boolean
 }
 
@@ -294,7 +283,7 @@ export function useBotSort(): [Sort<BotSort>, (sort: Sort<BotSort>) => void] {
   return useStoredSort(BOT_SORTS, ["botSort", "botSortDir"])
 }
 
-const active = (summary: BotSummary) => (summary.main ?? summary.latest)?.updatedAt ?? -Infinity
+const active = (summary: BotSummary) => summary.latest?.updatedAt ?? -Infinity
 const byRecent = (a: BotSummary, b: BotSummary) => active(a) - active(b)
 const byAdded = (a: BotSummary, b: BotSummary) => a.bot.createdAt - b.bot.createdAt
 const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.name)
@@ -315,10 +304,9 @@ export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] 
 }
 
 /**
- * Every bot that's turned on, with its newest thread and — once this device has opened it — its
- * Main thread and the line it last said, for the sidebar, in the order linked. Its dot reads the
- * same threads, never a coding session's: a row that leads to Main must not say its news is in a
- * screen it cannot reach.
+ * Every bot that's turned on, with its newest chat and the line it last said, for the sidebar, in the
+ * order linked. Its dot reads the same chats, never a coding session's: a row that leads to the bot's
+ * screen must not say its news is in a screen it cannot reach.
  */
 export function useBotSummaries(): BotSummary[] | undefined {
   const live = useWaiting()
@@ -353,30 +341,22 @@ export function useBotSummaries(): BotSummary[] | undefined {
             )
             .map((m) => m!.conversationId),
         )
-        const main = await db.conversations.get(mainThreadId(bot.id))
-        // What the row previews: Main's last words, and where Main has none, its newest thread's —
-        // a name says what a thread is called, not what the bot last said (ADR 0090). Main is not
-        // one of those threads: it sits in the same table, so an empty Main would answer with its
-        // own title, "Main", where the newest thread had words to show.
-        const threads = chats.filter((chat) => chat.id !== main?.id)
-        const newestThread = threads[0]
+        // What the row previews: what the bot's newest chat last said, a chat with no words answering
+        // with its own name rather than nothing at all (ADR 0090).
+        const newestChat = chats[0]
         return {
           bot,
           chats,
           local,
-          main,
-          preview: main ? await latestLine(main.id) : undefined,
-          threadLine: newestThread ? await latestLine(newestThread.id) : undefined,
+          preview: newestChat ? await latestLine(newestChat.id) : undefined,
         }
       }),
     )
   }, [])
-  return rows?.map(({ bot, chats, local, main, preview, threadLine }) => ({
+  return rows?.map(({ bot, chats, local, preview }) => ({
     bot,
-    latest: chats[0] && chats[0].id !== main?.id ? chats[0] : chats.find((c) => c.id !== main?.id),
-    main,
+    latest: chats[0],
     preview,
-    threadLine,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,
     unread: chats.some((chat) => isUnread(chat.updatedAt, marks[chat.id])),
   }))

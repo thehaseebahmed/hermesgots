@@ -10,10 +10,10 @@ import { toast } from "sonner"
 
 import { attachmentsText } from "@/lib/attachment-text"
 import { removeQueued, requeueSteer, sendFromMain, sendQueued, stopMessage } from "@/lib/chat"
-import { db, mainThreadId, type Attachment } from "@/lib/db"
+import { db, type Attachment } from "@/lib/db"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
-const MAIN = mainThreadId("bot-1")
+const MAIN = "main-bot-1"
 const MAIN_SESSION = `gots-${MAIN}`
 
 type Seen = { path: string; method?: string; body: any }

@@ -16,6 +16,7 @@ import { ChatBody, type ChatBodyProps } from "@/chat-next/chat-body"
 import { db, type Conversation, type Settings } from "@/lib/db"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { limitNotice } from "@/lib/provider-usage"
+import { SUGGESTIONS } from "@/lib/suggestions"
 
 import { fakeHost } from "./chat-next-host.ts"
 import {
@@ -24,6 +25,7 @@ import {
   composerField,
   find,
   findAll,
+  findText,
   missing,
   mount,
   seedChats,
@@ -247,6 +249,21 @@ test("what the plugin holds for the chat is the pills over the composer", async 
       )
     },
   )
+})
+
+test("a chat nothing has been said in offers the words that start it, and a tap sends one", async () => {
+  await withBody("c-empty", {}, async (host) => {
+    const chip = () => findText("button", SUGGESTIONS[0])
+    await until(() => Boolean(chip()), "the opener the empty chat offers")
+    await click(chip())
+    await until(() => host.asked.runs === 1, "the chip's message was sent")
+    assert.deepEqual(
+      host.latest.body?.input,
+      [{ role: "user", content: SUGGESTIONS[0] }],
+      "the words the chip carried, in this chat",
+    )
+    await until(() => host.latest.body?.session_id === "gots-c-empty", "on this chat's own session")
+  })
 })
 
 test("a chat the host compacted offers its earlier messages", async () => {

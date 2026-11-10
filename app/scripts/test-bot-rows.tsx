@@ -3,7 +3,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
-import { db, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { markRead, readMark } from "@/lib/read-marks"
 import { ChatPage } from "@/routes/chat"
 import {
@@ -23,7 +23,7 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-rows", { id: "bot-1", name: "Mainly" })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
 
 /**
  * One bot with Main, a thread of its own and a coding session, and nothing else in the device. The

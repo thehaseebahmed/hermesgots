@@ -43,9 +43,8 @@ test("a chat is named by its shape and clocks, never by what it holds", () => {
   assert.equal(withNothing.messages, undefined, "counts only where they were counted")
 })
 
-test("a bot's state separates Main from its threads and never carries its key or host", () => {
-  const main = diagChat(chat("main-bot-1", 1_000, { main: true }))
-  const chats = [diagChat(chat("t1", 2_000))]
+test("a bot's state names its chats and never carries its key or host", () => {
+  const chats = [diagChat(chat("main-bot-1", 1_000, { main: true })), diagChat(chat("t1", 2_000))]
   const built = diagBot({
     profile,
     host: {
@@ -57,18 +56,16 @@ test("a bot's state separates Main from its threads and never carries its key or
       lastStored: "t1",
     },
     chats,
-    main,
-    threads: 1,
   })
-  assert.equal(built.main?.id, "main-bot-1", "Main is named as its own field")
-  assert.equal(built.threads, 1, "the thread count is what the reader counted")
   assert.equal(built.lastThread, "t1", "the pane's answer rides")
   assert.equal(built.lastStored, "t1", "and so does what storage holds")
   assert.deepEqual(
     built.chats.map((one) => one.id),
-    ["t1"],
-    "the threads list holds what the reader read, without Main",
+    ["main-bot-1", "t1"],
+    "the chats list holds what the reader read, Main among them and nothing counted",
   )
+  assert.equal("main" in built, false, "no separate Main field: a Main is a chat like any other (G1)")
+  assert.equal("threads" in built, false, "and no count of a bot's threads")
   assert.equal(built.configured, true)
   assert.equal(built.plugin, "0.99.0")
   assert.deepEqual(built.features, ["triage", "moves"])
@@ -77,7 +74,7 @@ test("a bot's state separates Main from its threads and never carries its key or
   assert.ok(!text.includes("secret-host"), "the server address is never in the dump")
 })
 
-test("a bot without a Main, or an answer, still reads", () => {
+test("a bot without an answer still reads", () => {
   const blank = ""
   const unconfigured = { ...profile, baseUrl: blank }
   delete unconfigured.apiKey
@@ -92,10 +89,7 @@ test("a bot without a Main, or an answer, still reads", () => {
       lastStored: null,
     },
     chats: [diagChat(chat("t1", 2_000))],
-    main: null,
-    threads: 1,
   })
-  assert.equal(built.main, null, "no Main row reads as null")
   assert.equal(built.configured, false, "nothing was asked of a bot with no server and key")
   assert.equal(built.plugin, null, "an absent answer reads as null, not as a missing field")
   assert.equal(built.lastThread, null)
@@ -114,8 +108,6 @@ test("a bot whose own reads failed says so rather than claiming emptiness", () =
       lastStored: null,
     },
     chats: [],
-    main: null,
-    threads: 0,
     unread: true,
   })
   assert.equal(built.unread, true, "an unread bot is marked, not mistaken for a fresh one")

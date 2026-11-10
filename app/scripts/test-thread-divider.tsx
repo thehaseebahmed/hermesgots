@@ -1,13 +1,12 @@
 /**
- * The thread's one divider (ADR 0087): a day in a bot's Main, a model change in a project session and
- * a compaction in both, drawn as one piece — squiggles in the fainter border colour, the words in the
- * muted one at the thread's smallest size, and a spoken name so a reader who can't see the break is
- * told what it was.
+ * The thread's one divider (ADR 0087): a model change in a project session and a compaction in any
+ * chat, drawn as one piece — squiggles in the fainter border colour, the words in the muted one at the
+ * thread's smallest size, and a spoken name so a reader who can't see the break is told what it was. A
+ * chat draws no day headings any more: its flow is its messages and a compaction's divider (G1).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { DayHeading } from "@/components/chat/day-heading"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 
 import { mount } from "./component-kit.tsx"
@@ -24,13 +23,6 @@ async function drawn(node: React.ReactNode) {
   return { separator: separator!, words: words!, squiggles }
 }
 
-test("a day is a separator that says its own day", async () => {
-  const { separator, words } = await drawn(<DayHeading day="Today" />)
-  assert.equal(words.textContent, "Today")
-  assert.equal(separator.getAttribute("aria-label"), "Today", "and a reader who can't see it hears it")
-  assert.notEqual(separator.getAttribute("aria-hidden"), "true", "the day is not decoration")
-})
-
 test("a model change says the model it switched to", async () => {
   const { separator, words } = await drawn(<ModelChange model="openai/gpt-5" />)
   assert.equal(words.textContent, "openai/gpt-5", "the row's words are the model alone")
@@ -42,9 +34,8 @@ test("a compaction keeps its size", async () => {
   assert.equal(words.textContent, "Compaction · 168k of 200k (84%)")
 })
 
-test("the three are one piece: the same words, the same squiggles, on both sides", async () => {
+test("the two are one piece: the same words, the same squiggles, on both sides", async () => {
   const pieces = [
-    await drawn(<DayHeading day="Today" />),
     await drawn(<ModelChange model="openai/gpt-5" />),
     await drawn(<Compacted compaction={{ at: 1, tokens: 5_200 }} />),
   ]

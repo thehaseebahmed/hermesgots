@@ -2,7 +2,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { Route } from "react-router"
 
-import { mainThreadId } from "@/lib/db"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { FADE_MS as COPY_FADE_MS } from "@/components/pane-transition"
@@ -25,8 +24,8 @@ import {
 
 const bot = botProfile("fade", { id: "bot-1", name: "Fader", apiKey: undefined })
 const other = botProfile("fade-other", { id: "bot-2", name: "Otherly", apiKey: undefined })
-const MAIN = mainThreadId(bot.id)
-const MAIN_OTHER = mainThreadId(other.id)
+const MAIN = "main-bot-1"
+const MAIN_OTHER = "main-bot-2"
 
 const FADE = [{ opacity: 0 }, { opacity: 1 }]
 const PUSH = [

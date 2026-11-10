@@ -6,26 +6,34 @@ import { Home } from "@/App"
 import { ConversationList } from "@/components/conversation-list"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
-import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { rememberLastChat } from "@/lib/last-chat"
 
 import {
-  Nav,
   botProfile,
-  click,
-  find,
   findAll,
   findText,
   json,
-  laptop,
   mount,
-  nav,
   seedSettings,
   until,
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly", apiKey: undefined })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
+
+/** The bot's Main, as the record a device already holds it carries it (G1: a chat like any other). */
+const mainRow = () => ({
+  id: MAIN,
+  profileId: bot.id,
+  title: "Main",
+  titleEdited: true,
+  main: true,
+  hermesSessionId: `gots-${MAIN}`,
+  createdAt: 10,
+  updatedAt: 10,
+  changedAt: 0,
+})
 async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
   await seedSettings({
     activeProfileId: bot.id,
@@ -101,61 +109,6 @@ const staleScreen = (
 )
 
 
-const cardLink = (threadId: string) => find(`a[href="/c/${threadId}"]`)
-
-test(
-  "a card tapped in Main pushes its thread, so back has somewhere to return to",
-  laptop(async () => {
-    await paneSeed()
-    await ensureMainThread(bot.id)
-    globalThis.fetch = async () => json({})
-    await mount(
-      <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
-        <Routes>
-          <Route path="/c/:id" element={<ChatPage slot="route" />} />
-        </Routes>
-        <Nav />
-      </MemoryRouter>,
-      async () => {
-        await until(async () => Boolean(cardLink("t-b")), "Main's cards")
-        await click(cardLink("t-b"))
-        await until(() => nav().startsWith("PUSH:"), "a push, so back has somewhere to return to")
-        assert.equal(nav(), "PUSH:/c/t-b")
-      },
-    )
-  }),
-)
-
-async function paneSeed() {
-  await seed()
-  await db.profiles.update(bot.id, { baseUrl: "http://bot-pane.test/v1" })
-  await seedThreads()
-}
-
-async function seedThreads() {
-  await db.conversations.bulkPut(
-    ["t-a", "t-b"].map((id) => ({
-      id,
-      profileId: bot.id,
-      title: `Thread ${id}`,
-      hermesSessionId: `gots-${id}`,
-      createdAt: 10,
-      updatedAt: 10,
-      changedAt: 0,
-    })),
-  )
-  await db.messages.bulkPut(
-    ["t-a", "t-b"].map((id) => ({
-      id: `${id}-open`,
-      conversationId: id,
-      role: "user" as const,
-      content: `Opened ${id}`,
-      status: "done" as const,
-      createdAt: 11,
-    })),
-  )
-}
-
 test("with nothing stored the app is the bot-first layout", async () => {
   await seed()
   globalThis.fetch = async () => json({})
@@ -183,7 +136,7 @@ test("with nothing stored the app is the bot-first layout", async () => {
 
 test("home opens the chat this device last had open in the bot", async () => {
   await seed()
-  await ensureMainThread(bot.id)
+  await db.conversations.put(mainRow())
   rememberLastChat(bot.id, MAIN)
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {

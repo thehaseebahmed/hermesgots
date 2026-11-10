@@ -270,11 +270,6 @@ export const FLOWS = {
     about:
       "A question replaces the composer while the subagent a turn dispatched still runs, then the result lands as the bot's message and the wake turn streams",
   },
-  "wake-window": {
-    script: "e2e/wake-window.mjs",
-    about:
-      "A chat whose turn and subagents have both ended keeps reading working through the whole window its wake turn is owed, and settles only once the wake has run",
-  },
   mcps: {
     script: "e2e/mcps.mjs",
     about:
@@ -493,12 +488,6 @@ export const FLOWS = {
     script: "e2e/bot-chats.mjs",
     about:
       "A bot opens the chat this device left it in — from the sidebar, and after a reload — with its list behind that chat, whose own press back leaves the app; a bot never opened draws its list, with nothing made for it",
-  },
-  "bot-threads": {
-    script: "e2e/bot-threads.mjs",
-    extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },
-    about:
-      "A bot opens Main, its threads are cards where they began, each under the message that opened it, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",

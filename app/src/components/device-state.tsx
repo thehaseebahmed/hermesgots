@@ -15,14 +15,7 @@ import {
   type DiagDevice,
   type DiagHost,
 } from "@/lib/diagnostics"
-import {
-  conversationsOf,
-  db,
-  getSettings,
-  listProfiles,
-  mainThreadId,
-  type Profile,
-} from "@/lib/db"
+import { conversationsOf, db, getSettings, listProfiles, type Profile } from "@/lib/db"
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
 import { resumeTrace } from "@/lib/resume-trace"
@@ -32,14 +25,6 @@ import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 /** The newest chats each bot's state names, so a busy bot can't make the dump unbounded. */
 const CHATS = 100
-
-async function messageCounts(id: string) {
-  const [user, assistant] = await Promise.all([
-    db.messages.where("[conversationId+role]").equals([id, "user"]).count(),
-    db.messages.where("[conversationId+role]").equals([id, "assistant"]).count(),
-  ])
-  return { user, assistant }
-}
 
 /** The host-and-pane answers one bot's state carries, with nulls where nothing was answered. */
 const hostOf = (
@@ -58,19 +43,14 @@ const hostOf = (
 async function botState(profile: Profile): Promise<DiagBot> {
   const configured = hasServer(profile)
   const chats = conversationsOf(profile.id).reverse().filter(listsAsChat)
-  const [rows, last, mainRow, info, threads] = await Promise.all([
-    // Main is read by its own id; a stray main-flagged chat still rides in the window.
+  const [rows, last, info] = await Promise.all([
     chats.clone().limit(CHATS).toArray(),
     landingChat(profile.id),
-    db.conversations.get(mainThreadId(profile.id)),
     configured ? getPluginInfo(serverConfig(profile)).catch(() => null) : null,
-    // The bot's own chats, Main among them, counted through the index.
-    chats.clone().count(),
   ])
   const drawn: DiagChat[] = rows.map((chat) => diagChat(chat))
-  const main = mainRow ? await diagChat(mainRow, await messageCounts(mainRow.id)) : null
   const pane = { last: last ?? null, stored: lastChatOf(profile.id) }
-  return diagBot({ profile, host: hostOf(profile, info, pane), chats: drawn, main, threads })
+  return diagBot({ profile, host: hostOf(profile, info, pane), chats: drawn })
 }
 
 /** A bot whose own reads failed: named and configured, and marked unread rather than empty. */
@@ -79,8 +59,6 @@ const unreadBot = (profile: Profile): DiagBot =>
     profile,
     host: hostOf(profile, null, { last: null, stored: null }),
     chats: [],
-    main: null,
-    threads: 0,
     unread: true,
   })
 

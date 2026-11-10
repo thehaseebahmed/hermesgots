@@ -2,15 +2,13 @@
  * What the user's own words draw, on the bubble every thread puts them in: markdown, the way a reply
  * draws it, and on the bubble's own fill — where a code fill has to be a wash of the text colour, or
  * it and its label sit at the bubble's own lightness and cannot be read. A message never streams, so
- * the whole text is drawn at once; the Moved marker repeats the same words through the same bubble.
+ * the whole text is drawn at once, and a steer repeats the same words through the same bubble.
  */
 import assert from "node:assert/strict"
 import { MemoryRouter } from "react-router"
 import test from "node:test"
 
 import { MessageItem } from "@/components/chat/message-item"
-import { MovedMarker } from "@/components/chat/moved-marker"
-import type { Move } from "@/lib/hermes"
 import { ask, reply } from "./openui-kit.tsx"
 import { find, mountMarkdown } from "./component-kit.tsx"
 
@@ -104,32 +102,6 @@ test("a control: a message with no markdown draws as the one paragraph it is", a
       "one paragraph, unchanged",
     )
   })
-})
-
-test("the Moved marker repeats the message through the same bubble", async () => {
-  const move: Move = {
-    id: "move-1",
-    text: "Move **this** one, then `npm test`",
-    threadId: "c-2",
-    at: 2,
-    undone: false,
-    undoable: true,
-    new: false,
-  }
-  await mountMarkdown(
-    <MemoryRouter initialEntries={["/c/c-1"]}>
-      <MovedMarker move={move} profileId="bot-1" title="A thread" />
-    </MemoryRouter>,
-    () => {
-      const words = bubble()
-      assert.ok(words?.querySelector("strong"), "the moved words are drawn as the thread drew them")
-      assert.equal(
-        words?.querySelector("code")?.textContent?.trim(),
-        "npm test",
-        "its code span too",
-      )
-    },
-  )
 })
 
 test("a steer draws its words through the same bubble", async () => {

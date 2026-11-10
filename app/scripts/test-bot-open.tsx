@@ -11,7 +11,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { Link, MemoryRouter, Route, Routes } from "react-router"
 
-import { db, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { BotChatsPage } from "@/routes/bot-chats"
 
 import {
@@ -29,7 +29,7 @@ import {
 
 const bot = botProfile("bot-open", { id: "bot-1", name: "Mainly" })
 const other = botProfile("bot-other", { id: "bot-2", name: "Otherly" })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
 
 /** The chat a bot was last in, as the address named it: what this device keeps for the landing. */
 const remember = (profileId: string, chat: string) =>

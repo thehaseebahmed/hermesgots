@@ -329,21 +329,25 @@ export async function runStatus(id) {
 export async function addBot(page, { name, messages, hour = 3_600_000 }) {
   return page.evaluate(
     async ({ name, messages, patch, hour }) => {
-      const { addProfile, db, ensureMainThread, mainThreadId } = await import("/src/lib/db.ts")
+      const { addProfile, createConversation, db } = await import("/src/lib/db.ts")
       const profile = await addProfile({ ...patch, name, model: "hermes-agent" })
-      const mainId = mainThreadId(profile.id)
-      await ensureMainThread(profile.id)
-      const now = Date.now()
-      await db.messages.bulkPut(
-        messages.map((content, index) => ({
-          id: `${mainId}-${index}`,
-          conversationId: mainId,
-          role: index % 2 ? "assistant" : "user",
-          content,
-          status: "done",
-          createdAt: now - hour + index,
-        })),
-      )
+      // One chat of its own, holding these rows: a bot's chats are its own, made when one is spoken
+      // in (G1) — nothing makes a Main for it.
+      const chat =
+        messages.length > 0 ? await createConversation(profile.id, { title: `${name}'s chat` }) : null
+      if (chat) {
+        const now = Date.now()
+        await db.messages.bulkPut(
+          messages.map((content, index) => ({
+            id: `${chat.id}-${index}`,
+            conversationId: chat.id,
+            role: index % 2 ? "assistant" : "user",
+            content,
+            status: "done",
+            createdAt: now - hour + index,
+          })),
+        )
+      }
       return profile.id
     },
     { name, messages, patch: botPatch(mock), hour },
@@ -550,13 +554,6 @@ export const LOOKS = [1440, 390].map((width) => ({
   look: width < 768 ? "phone-dark" : "laptop",
   options: { viewport: { width, height: width < 768 ? 844 : 900 }, dark: width < 768 },
 }))
-
-/**
- * The selector for Main's card of a thread: a card draws the thread's own message, so a flow finds it
- * by the thread it draws and never by the words on it (ADR 0082).
- */
-export const cardSelector = (id) => `[data-slot="thread-card"][data-thread="${id}"]`
-export const cardOf = (page, id) => page.locator(cardSelector(id))
 
 /**
  * The basemap a map's tiles were asked for, from their URLs: the theme `map-surface.tsx` names, and

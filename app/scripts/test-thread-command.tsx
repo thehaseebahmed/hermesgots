@@ -5,7 +5,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
-import { db, mainThreadId, saveAppearance, type Conversation } from "@/lib/db"
+import { db, saveAppearance, type Conversation } from "@/lib/db"
 import {
   botProfile,
   composerField,
@@ -22,7 +22,7 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-thread", { id: "bot-1", name: "Threader", apiKey: undefined })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
 const THREAD = "t1"
 const PICK = { provider: "picked", model: "picked/model" }
 

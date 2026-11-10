@@ -11,7 +11,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BotChatsPage } from "@/routes/bot-chats"
-import { db, mainThreadId, type Message } from "@/lib/db"
+import { db, type Message } from "@/lib/db"
 import { markRead } from "@/lib/read-marks"
 import {
   Path,
@@ -31,7 +31,7 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly" })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
 
 interface Seed {
   id: string
@@ -257,11 +257,11 @@ test("the foot starts a chat of this bot's, and a room", async () => {
     await until(async () => Boolean(control("New chat")), "the foot")
     assert.ok(control("New room"), "New room stands beside it")
     await click(control("New chat"))
-    await until(async () => path() === `/c/${MAIN}`, "a chat of this bot's")
-    assert.ok(
-      await db.conversations.get(MAIN),
-      "the chat is the bot's, written before the address moved",
-    )
+    await until(async () => path() !== `/b/${bot.id}`, "the address of the chat it made")
+    const made = (await db.conversations.toArray()).find((one) => one.id === path().slice(3))
+    assert.ok(made, "the chat is the bot's, written before the address moved")
+    assert.equal(made.profileId, bot.id, "a chat of this bot's")
+    assert.ok(!made.main, "a plain chat: nothing makes a Main any more (G1)")
   })
   await mount(screen(), async () => {
     await until(async () => Boolean(control("New room")), "the foot")

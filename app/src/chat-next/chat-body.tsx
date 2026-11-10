@@ -64,7 +64,7 @@ import {
 } from "@/lib/workspace"
 import type { ComposerControls } from "./page"
 import { prepareTurn, queueTurn, steerTurn, triageTurn } from "./turn"
-import type { BlankView, MainView } from "./app-view"
+import type { BlankView } from "./app-view"
 
 const ChatNextThread = lazy(() =>
   import("./app-view").then((m) => ({ default: m.AppChatNextThread })),
@@ -76,8 +76,8 @@ export interface ChatBodyProps {
   summaries: ComponentProps<typeof ChatNextThread>["summaries"]
   /** A project session not started yet: said in the thread's place. */
   blank?: BlankView
-  /** A bot's Main: its threads are cards in its flow, and its messages are triaged first. */
-  main?: MainView
+  /** A bot's Main: its messages are triaged by the host before they are sent (ADR 0029). */
+  main?: boolean
   /** The message a thread opened by `/thread` is handed, taken once by the route. */
   start: ComponentProps<typeof ChatNextThread>["start"]
   /** Said when the chat leaves or comes back to the screen; a container that never leaves one has
@@ -135,7 +135,6 @@ export function ChatBody({
           compacted={mayHoldArchive(chat.compactions)}
           summaries={summaries}
           blank={blank}
-          main={main}
           server={bot.baseUrl}
           apiKey={bot.apiKey}
           session={chat.hermesSessionId}

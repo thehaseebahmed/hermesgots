@@ -7,7 +7,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
 
-import { mainThreadId } from "@/lib/db"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import {
   botProfile,
@@ -24,8 +23,8 @@ import {
 
 const first = botProfile("switch-scroll-first", { id: "bot-1", name: "First", apiKey: undefined })
 const second = botProfile("switch-scroll-second", { id: "bot-2", name: "Second", apiKey: undefined })
-const MAIN_A = mainThreadId(first.id)
-const MAIN_B = mainThreadId(second.id)
+const CHAT_A = "c-a"
+const CHAT_B = "c-b"
 
 const SAID_A = ["alpha one", "alpha two"]
 const SAID_B = ["beta one", "beta two", "beta three", "beta four"]
@@ -38,10 +37,9 @@ const seed = () =>
   seedChats(
     [
       {
-        id: MAIN_A,
+        id: CHAT_A,
         profileId: first.id,
-        title: "Main",
-        main: true,
+        title: "Alpha",
         messages: SAID_A.map((content, index) => ({
           id: `a-${index}`,
           content,
@@ -49,10 +47,9 @@ const seed = () =>
         })),
       },
       {
-        id: MAIN_B,
+        id: CHAT_B,
         profileId: second.id,
-        title: "Main",
-        main: true,
+        title: "Beta",
         messages: SAID_B.map((content, index) => ({
           id: `b-${index}`,
           content,
@@ -217,8 +214,6 @@ const bringsWords = (node: Element, said: string[]) =>
   (node.matches("[data-message-id]") || Boolean(node.querySelector("[data-message-id]"))) &&
   said.some((words) => node.textContent?.includes(words))
 
-const bringsCards = (node: Element) =>
-  slot(node) === "thread-card" || Boolean(node.querySelector('[data-slot="thread-card"]'))
 
 test("a chat switched to in place is drawn by its own scroller, and placed once at its end", async () => {
   localStorage.clear()
@@ -226,7 +221,7 @@ test("a chat switched to in place is drawn by its own scroller, and placed once 
   await seed()
   const scroller = spyScroller()
   try {
-    await mount(phone(`/c/${MAIN_A}`, `/c/${MAIN_B}`), async () => {
+    await mount(phone(`/c/${CHAT_A}`, `/c/${CHAT_B}`), async () => {
       await until(async () => text().includes(SAID_A[1]), "the chat on screen")
       await settle()
       const outgoing = viewport()
@@ -240,14 +235,14 @@ test("a chat switched to in place is drawn by its own scroller, and placed once 
 
       const landed = viewport()
       assert.ok(landed, "the chat asked for has a scroller")
-      assert.equal(path(), `/c/${MAIN_B}`)
+      assert.equal(path(), `/c/${CHAT_B}`)
       assert.notEqual(
         landed,
         outgoing,
         "a switched-in chat is drawn by a scroller of its own, not the one that showed the chat left",
       )
 
-      const { moves, records, batches } = scroller.read()
+      const { moves, records } = scroller.read()
 
       assert.deepEqual(
         moves.filter((move) => move.element !== landed).map((move) => move.top),
@@ -273,22 +268,14 @@ test("a chat switched to in place is drawn by its own scroller, and placed once 
       )
       assert.equal(
         mine[0].cards,
-        1,
-        "and with Main's thread cards in the same frame: the thread list is part of what a chat waits for",
+        0,
+        "and with no card in it: a chat draws its own messages and nothing gathered inside them (G1)",
       )
 
       const arrivals = records
         .map((record, place) => (added(record, (node) => bringsWords(node, SAID_B)) ? place : -1))
         .filter((place) => place >= 0)
       assert.ok(arrivals.length > 0, "the chat's content landed")
-      const carrying = batches.find((batch) =>
-        batch.some((record) => added(record, (node) => bringsWords(node, SAID_B))),
-      )
-      assert.ok(
-        carrying?.some((record) => added(record, bringsCards)),
-        "the frame that first carries the chat's content already carries its cards",
-      )
-
       const placed = records.filter(
         (record) =>
           record.type === "attributes" &&

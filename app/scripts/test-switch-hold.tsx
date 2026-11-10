@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BOTS } from "@/components/bots"
 import { AppShell } from "@/components/app-shell"
-import { db, ensureMainThread } from "@/lib/db"
+import { db } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { useThreads } from "@/lib/threads"
@@ -173,7 +173,6 @@ test(
       ],
       { bots: [bot, other], active: bot.id },
     )
-    await ensureMainThread(bot.id)
     await mount(phone("/c/t-a", "/c/t-b"), async () => {
       await until(async () => paneText().includes("alpha one"), "the chat beside the list")
       await until(
@@ -238,13 +237,10 @@ test("a cold start paints an empty header over a blank pane, never the setup cop
 
 /**
  * Switches from a chat to one that answers gone, and checks what the pane does with it: it lands in
- * the place it was asked for, as its own empty state under `title` — the title its bot's thread
- * list still carries for it, or nothing at all — drawing no greeting and burning no line turn.
- *
- * `carried` leaves the bot's list holding the thread's row while the chat's own read answers gone,
- * which is the device still knowing what the thread was called when opening it says it is gone.
+ * the place it was asked for, under an empty header — a gone chat is never drawn as a new one, and
+ * nothing but its own record can title it — drawing no greeting and burning no line turn.
  */
-async function switchToGone(title: string, { carried }: { carried: boolean }) {
+async function switchToGone() {
   localStorage.clear()
   forgetHeldChats()
   await seedChats(
@@ -255,16 +251,16 @@ async function switchToGone(title: string, { carried }: { carried: boolean }) {
     { bots: [bot, other], active: bot.id },
   )
   const read = db.conversations.get.bind(db.conversations)
-  // The chat's own conversation answers gone; the list is read by its own query.
+  // The chat's own conversation answers gone, as one opened after another device deleted it does.
   db.conversations.get = (async (key: string) =>
-    carried && key === "c-b" ? undefined : read(key)) as typeof db.conversations.get
+    key === "c-b" ? undefined : read(key)) as typeof db.conversations.get
   try {
     await mount(phone("/c/c-a", "/c/c-b"), async () => {
       await until(async () => paneText().includes("alpha one"), "the chat on screen")
       const greeting = greetingKeys()
-      // The transcript is not this device's any more; whether the row outlives it is the question.
+      // The transcript and the row are not this device's any more.
       await db.messages.where("conversationId").equals("c-b").delete()
-      if (!carried) await db.conversations.delete("c-b")
+      await db.conversations.delete("c-b")
       await settle()
 
       await click(find("[data-switch]"))
@@ -277,7 +273,7 @@ async function switchToGone(title: string, { carried }: { carried: boolean }) {
       assert.equal(path(), "/c/c-b", "the chat keeps the place it was asked for")
       assert.ok(!paneText().includes("beta one"), "nothing of the chat this device no longer has")
       assert.ok(!paneText().includes(SETUP_COPY), "and never the setup copy")
-      await until(async () => paneTitle() === title, `the header to read "${title}"`)
+      await until(async () => paneTitle() === "", "an empty header")
       assert.ok(!paneText().includes("New chat"), "and a gone chat is never drawn as a new one")
       assert.deepEqual(
         PROVISIONAL.filter((copy) => paneText().includes(copy)),
@@ -300,11 +296,7 @@ async function switchToGone(title: string, { carried }: { carried: boolean }) {
   }
 }
 
-test("a gone thread keeps the title its bot's thread list still carries for it", () =>
-  switchToGone("Beta", { carried: true }))
-
-test('a gone thread nothing carries draws an empty header, never "New chat"', () =>
-  switchToGone("", { carried: false }))
+test('a gone thread draws an empty header, never "New chat"', () => switchToGone())
 
 /**
  * A device read of one chat, held open, so a test can look at a pane while that chat's answers are

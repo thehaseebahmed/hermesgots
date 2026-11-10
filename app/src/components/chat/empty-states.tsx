@@ -27,12 +27,19 @@ export const THREAD_MISSING = "The thread didn't load."
 
 const PANE = "flex flex-1 flex-col items-center justify-center px-4 pt-24 pb-8 text-center"
 
-export function EmptyState({
+/**
+ * What a chat with nothing said shows: the bot's face, the greeting and one of its lines, and — where
+ * the screen can send — the suggestions a tap sends as that chat's first message. A project session
+ * not started yet says the repos it will work in instead, and a bot with no server to call is told
+ * where to point one.
+ */
+export function EmptyChatState({
   botId,
   configured,
   session,
   id,
   line = true,
+  onSend,
 }: {
   botId?: string
   configured: boolean
@@ -41,6 +48,8 @@ export function EmptyState({
   /** The chat or session on screen, none for a new chat. */
   id?: string
   line?: boolean
+  /** Sends a pressed suggestion in this chat; without it, no suggestion is offered. */
+  onSend?: (text: string) => Promise<void>
 }) {
   return (
     <div className={`${PANE} gap-6`}>
@@ -49,6 +58,20 @@ export function EmptyState({
         <div className="flex max-w-md flex-col items-center gap-3">
           {line && <ReadyLine botId={botId} id={id} />}
           {session && <RepoChips repos={session.repos} />}
+          {onSend && (
+            <div className="flex max-w-md flex-wrap justify-center gap-2">
+              {SUGGESTIONS.map((text) => (
+                <Button
+                  key={text}
+                  variant="outline"
+                  className="h-auto min-h-10 rounded-full whitespace-normal"
+                  onClick={() => void onSend(text).catch(() => {})}
+                >
+                  {text}
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -106,32 +129,3 @@ export function MissingThread({
   )
 }
 
-export function MainEmptyState({
-  botId,
-  id,
-  onSend,
-}: {
-  botId?: string
-  /** Main itself, so its line is the one it keeps. */
-  id?: string
-  onSend: (text: string) => Promise<void>
-}) {
-  return (
-    <div className={`${PANE} gap-6`}>
-      <Bot id={botId} animate className="size-24" />
-      <ReadyLine botId={botId} id={id} />
-      <div className="flex max-w-md flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((text) => (
-          <Button
-            key={text}
-            variant="outline"
-            className="h-auto min-h-10 rounded-full whitespace-normal"
-            onClick={() => void onSend(text).catch(() => {})}
-          >
-            {text}
-          </Button>
-        ))}
-      </div>
-    </div>
-  )
-}

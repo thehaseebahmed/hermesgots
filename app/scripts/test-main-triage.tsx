@@ -7,11 +7,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { act } from "react"
-import { renderToStaticMarkup } from "react-dom/server"
-import { MemoryRouter } from "react-router"
 import Dexie from "dexie"
 
-import { MovedMarker } from "@/components/chat/moved-marker"
 import { Composer } from "@/components/chat/composer"
 import {
   queueMessage,
@@ -22,11 +19,9 @@ import {
   settleTriaging,
   stopMessage,
 } from "@/lib/chat"
-import { db, MESSAGE_STORES, mainThreadId, type Message, type Profile } from "@/lib/db"
+import { db, MESSAGE_STORES, type Message, type Profile } from "@/lib/db"
 import { prepareIntake } from "@/lib/attachments"
-import type { Move } from "@/lib/hermes"
-import { moveMarks } from "@/lib/move-marks"
-import { refreshMoves, undoMove } from "@/lib/moves"
+import { refreshMoves } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
 import {
   botProfile,
@@ -48,7 +43,7 @@ import {
  */
 const RUN_START = 30_000
 
-const MAIN = mainThreadId("bot-1")
+const MAIN = "main-bot-1"
 const MAIN_SESSION = `gots-${MAIN}`
 
 type Answer = "stay" | "thread" | "new" | "fail" | "hang"
@@ -577,29 +572,6 @@ test("a move is read back from the host and leaves a marker, a stay leaves none"
   assert.equal((await db.conversations.get("t1"))?.moves, undefined)
 })
 
-test("markers sit in time order among Main's messages, and an undone move has none", () => {
-  const at = (id: string, createdAt: number) =>
-    ({ id, conversationId: MAIN, role: "user", content: id, createdAt }) as Message
-  const marks = moveMarks(
-    [at("a", 5), at("b", 20), at("c", 30)],
-    [
-      { id: "m1", text: "x", threadId: "t1", at: 10, undone: false, undoable: true },
-      { id: "m2", text: "y", threadId: "t1", at: 15, undone: false, undoable: true },
-      { id: "m3", text: "z", threadId: "t1", at: 99, undone: false, undoable: true },
-      { id: "m4", text: "w", threadId: "t1", at: 12, undone: true, undoable: false },
-    ],
-  )
-  assert.deepEqual(
-    marks.before.get("b")?.map((m) => m.id),
-    ["m1", "m2"],
-  )
-  assert.equal(marks.before.size, 1)
-  assert.deepEqual(
-    marks.trailing.map((m) => m.id),
-    ["m3"],
-  )
-})
-
 test("the ask carries the message's own send time, and the held row keeps it", async () => {
   await seed("route-skew")
   const seen = host("route-skew", "stay")
@@ -630,18 +602,12 @@ test("the ask carries the message's own send time, and the held row keeps it", a
   assert.equal(
     triaged(seen).at(-1)?.body.at,
     heldAt,
-    "and the ask said when it was sent, so the marker stands there (ADR 0089)",
+    "and the ask said when it was sent, so the host can file it there (ADR 0089)",
   )
   const rows = (await messagesOf(MAIN)).sort((a, b) => a.createdAt - b.createdAt)
   const sent = rows.find((m) => m.content === "and this stays")
   // The refused run takes its empty reply with it, so the message is the last row drawn.
-  assert.equal(rows.at(-1)?.id, sent?.id, "nothing follows the message for a marker to sit under")
-  const marks = moveMarks(rows, [move], new Set<string>())
-  assert.deepEqual(
-    marks.before.get(sent?.id ?? "")?.map((m) => m.id),
-    ["m1"],
-  )
-  assert.deepEqual(marks.trailing, [])
+  assert.equal(rows.at(-1)?.id, sent?.id, "and nothing follows it")
 })
 
 test("a plain Main send keeps its own time, and stands after an older move", async () => {
@@ -654,7 +620,7 @@ test("a plain Main send keeps its own time, and stands after an older move", asy
   assert.ok(sent && sent.createdAt > move.at, "the message sorts after the move")
 })
 
-test("a message waiting in the queue keeps its own time, so the marker stays put", async () => {
+test("a message waiting in the queue keeps its own time", async () => {
   await seed("route-skew-queued")
   host("route-skew-queued", "stay", ["triage", "moves"])
   const move = recordedMove()
@@ -663,9 +629,7 @@ test("a message waiting in the queue keeps its own time, so the marker stays put
   const rows = await messagesOf(MAIN)
   const waiting = rows.find((m) => m.content === "typed while it runs")
   assert.equal(waiting?.status, "queued")
-  assert.ok(waiting.createdAt > move.at, "the waiting row sorts after the move")
-  const marks = moveMarks(rows, [move], new Set<string>())
-  assert.deepEqual(marks.trailing, [], "so the marker is not left at the end of the chat")
+  assert.ok(waiting.createdAt > move.at, "the waiting row sorts after the move it follows")
 })
 
 /** A second chat, so a sync that leaves two replies streaming leaves them here, not in Main. */
@@ -714,64 +678,6 @@ test("two turns the host started in one pass take a time each, after the move", 
   )
   assert.ok(users[0].createdAt > move.at, "the first lands after the move")
   assert.ok(users[1].createdAt > users[0].createdAt, "and the second after it, not on its time")
-})
-
-test("tapping a marker opens its thread", async () => {
-  const html = renderToStaticMarkup(
-    <MemoryRouter>
-      <MovedMarker
-        move={{ id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false, undoable: true }}
-        title="Trip to Lisbon"
-        profileId="bot-1"
-      />
-    </MemoryRouter>,
-  )
-  assert.match(html, /href="\/c\/t1"/)
-  assert.match(html, /Moved to \u201c.*Trip to Lisbon.*\u201d/)
-  // The message itself is drawn as the user's bubble, with the line under it.
-  assert.ok(html.indexOf("more on Lisbon") < html.indexOf("Moved to"))
-})
-
-test("Undo shows on a fresh marker and goes once the thread has replied", () => {
-  const render = (undoable: boolean) =>
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <MovedMarker
-          move={{ id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false, undoable }}
-          profileId="bot-1"
-          onUndo={() => undefined}
-        />
-      </MemoryRouter>,
-    )
-  assert.match(render(true), />Undo</)
-  assert.doesNotMatch(render(false), /Undo/)
-})
-
-test("undoing a move asks the host, then reads the markers again", async () => {
-  await seed("route-undo")
-  host("route-undo", "stay")
-  const fetchWith = globalThis.fetch
-  const calls: string[] = []
-  let undone = false
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/moves/m1/undo")) {
-      calls.push(`${init?.method} ${url.pathname.split("/sessions/")[1]}`)
-      undone = true
-      return json({ undone: true })
-    }
-    if (url.pathname.endsWith("/moves"))
-      return json({
-        moves: [{ id: "m1", text: "more", thread: "t1", at: 10, undone, undoable: !undone }],
-      })
-    return fetchWith(input, init)
-  }) as typeof fetch
-  await refreshMoves(MAIN)
-  assert.equal((await db.conversations.get(MAIN))?.moves?.[0].undoable, true)
-  await undoMove(MAIN, "m1")
-  assert.deepEqual(calls, [`POST ${MAIN_SESSION}/moves/m1/undo`])
-  const [after] = (await db.conversations.get(MAIN))?.moves ?? []
-  assert.deepEqual([after.undone, after.undoable], [true, false])
 })
 
 test("a Main send while Main's reply runs is triaged at once and moves without waiting", async () => {
