@@ -36,6 +36,9 @@ KEEP_SENT_MS = 60 * 60 * 1000
 FORGET_SENT_MS = 24 * 60 * 60 * 1000
 TICK_SECONDS = 1.0
 MAX_TEXT = 100_000
+# What one queued message carries. A canvas's start is held to the same number, since a longer list
+# would be trimmed here without a word.
+MAX_FILES = 20
 POST_TIMEOUT_SECONDS = 30
 
 _lock = threading.Lock()
@@ -93,10 +96,10 @@ def clean_body(session_id: str, body: Any) -> Dict[str, Any]:
 
 
 def clean_files(files: Any) -> List[Dict[str, Any]]:
-    """The attachment fields a queued item keeps, for at most 20 files."""
+    """The attachment fields a queued item keeps, for at most ``MAX_FILES`` files."""
     return [
         {key: file[key] for key in ("name", "type", "size", "path") if key in file}
-        for file in _objects(files)[:20]
+        for file in _objects(files)[:MAX_FILES]
     ]
 
 

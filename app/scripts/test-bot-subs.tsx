@@ -78,3 +78,18 @@ test("an unknown fourth segment names nothing", () => {
   assert.equal(botSubOf(TAB, "nope"), undefined)
   assert.equal(botSubOf("overview", "name"), undefined, "a page with no sub-screens has none")
 })
+
+test("the LLM Providers page holds a key for each provider it lists", () => {
+  // The page's rows are the host's catalog, which this table can't read: any slug is an address,
+  // and the page says in its own words that the host lists no such provider. The screen is titled
+  // for what it does — a slug is not a name a reader knows, and the block it reads names whose key
+  // it is — so every slot carries the same words whatever the leaf says.
+  const sub = botSubOf("llm-providers", "key", "openai")
+  assert.ok(sub, "a provider's key has a screen behind its address")
+  assert.equal(sub.id, "key", "the page's own detail")
+  assert.equal(sub.kind, "detail", "a pushed screen below 1024px and the pane's from it")
+  assert.equal(sub.item, "openai", "over the provider the address names")
+  assert.equal(sub.title, "Edit Provider", "titled with the verb the form performs")
+  assert.equal(botSubOf("llm-providers", "key", ""), undefined, "an empty leaf names no provider")
+  assert.equal(botSubOf("llm-providers", "key"), undefined, "the list itself is the page")
+})

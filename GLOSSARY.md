@@ -475,8 +475,12 @@ The row of media in a thread: images and video side by side, each opened in the 
 _Avoid_: carousel, thumbnails, media strip, lightbox
 
 **Previewer**:
-The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
+The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A **page** is drawn in a sandboxed frame. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
+
+**Page**:
+An HTML file the app shows in the **Previewer** rather than hands over, run in a sandbox that lets its scripts run but reaches nothing of the app: it loads https images and, when it is on the host, the files in its own folder and below — never anything above, and never a connection out. A page in a thread is a row of its own, not a gallery tile, so its scripts run only when it is opened.
+_Avoid_: HTML preview, web view, document, site
 
 **Library**:
 The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, or handed to the platform where the Previewer can't draw it.
@@ -613,6 +617,18 @@ _Avoid_: legacy settings, old general tab, deprecated page
 A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, then to carry on with the work rather than end there: a reply of words and no tool call ends the run. Where the list has fallen behind it also asks for it, naming `todo_list`. A bot's reminders are set per bot, on its **Bot page** under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
 _Avoid_: nudge, check-in, status ping, verbosity, quiet mode
 
+**LLM provider**:
+A model provider this bot's Hermes can run on that authenticates with an API key — one row on the LLM Providers page, drawn from the host's own catalog. A provider that signs in through an account rather than a key is not one of these.
+_Avoid_: model provider, API provider
+
+**Key slot**:
+One credential a bot can hold, as the LLM Providers page draws it: named by a provider's catalog slug or by a custom endpoint's own id. Its value on screen is a **Masked key** or *Not set*, and it is what Replace and Remove act on.
+_Avoid_: key row, credential entry
+
+**Masked key**:
+A credential as Gots shows it: its first 4 and last 4 characters with the middle elided (`sk-o...c123`), or `***` for one shorter than twelve, which is Hermes's own masking rule. The mask is made on the bot's host and drawn as it arrives; the app never builds one, and a mask is never taken where a key is written.
+_Avoid_: redacted key, partial key, preview
+
 ## Diagnostics
 
 **Network log**:
@@ -674,16 +690,20 @@ _Avoid_: gallery, component gallery, library page, showcase
 ## Canvases
 
 **Canvas**:
-A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. It has data of its own and is changed only by talking to its bot in its canvas session; a page that tries to leave for somewhere else is refused and drawn again once, and told so if it keeps leaving.
+A page of plain HTML a bot writes for you, keeps on its host and draws in a sandbox you use directly — a tracker, a planner, a dashboard. Its page is changed only by talking to its bot in its canvas session, while its data is readable and writable from any of its bot's sessions but another canvas's, naming the canvas by its title or its id; a page that tries to leave for somewhere else is refused and drawn again once, and told so if it keeps leaving.
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
 The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title.
 _Avoid_: canvas chat, build session, edit thread
 
-**Canvas sheet**:
-The canvas session raised over the canvas on a phone, where the page and its chat cannot share the screen. It opens at half height from the Edit pill with the chat laid out in that half — its composer on the screen — is dragged up to the full screen, and is swiped down to leave the page in view.
-_Avoid_: canvas drawer, edit mode, split view, bottom bar
+**Canvas preview**:
+The screen a canvas opens on: its page drawn in its frame, and on a wide screen its canvas session beside it. A canvas that has no version yet has nothing to preview, so a phone opens its edit screen instead.
+_Avoid_: viewer, canvas view, page mode
+
+**Canvas edit screen**:
+A page of its own that holds a canvas's session and nothing else, opened from the Edit control in a canvas's header and left by its Preview control or by back. A phone has no room for the page and its session together, so that is where they are talked to; on a wide screen the session sits beside the page instead and there is no edit screen.
+_Avoid_: edit mode, drawer, sheet, full-screen chat
 
 **Version**:
 One saved state of a canvas's HTML, made by every write its bot does. Undo steps back to the one before; a canvas's data is not part of a version.

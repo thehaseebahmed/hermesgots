@@ -55,6 +55,13 @@ import { cn } from "@/lib/utils"
  */
 const HeaderSlot = createContext<(key: string, draw: (() => ReactNode) | null) => void>(() => {})
 
+/**
+ * The title a page names the Screen it draws under with, where the route's own can't: a screen that
+ * is one of a list's rows is titled by the row it holds, and only the answer the screen reads knows
+ * what that row is called. Nothing published leaves the route's title standing.
+ */
+const TitleSlot = createContext<(title: string | undefined) => void>(() => {})
+
 /** The chrome every Settings screen wears: a sticky header over one centred column of groups. */
 export function Screen({
   title,
@@ -71,6 +78,7 @@ export function Screen({
   children: ReactNode
 }) {
   const [page, setPage] = useState<{ key: string; draw: () => ReactNode } | null>(null)
+  const [named, setNamed] = useState<string>()
   const publish = useCallback((key: string, draw: (() => ReactNode) | null) => {
     setPage(draw ? { key, draw } : null)
   }, [])
@@ -80,17 +88,32 @@ export function Screen({
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <div className="mx-auto flex min-h-11 max-w-2xl items-center gap-3">
           {leading}
-          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{named ?? title}</h1>
           {shown && <div className="ml-auto flex min-h-11 shrink-0 items-center">{shown}</div>}
         </div>
       </header>
       <HeaderSlot.Provider value={publish}>
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-          {children}
-        </div>
+        <TitleSlot.Provider value={setNamed}>
+          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+            {children}
+          </div>
+        </TitleSlot.Provider>
       </HeaderSlot.Provider>
     </div>
   )
+}
+
+/**
+ * Names the screen this page draws under, under nothing: the title is the page's fact while it is
+ * mounted, and the route's own returns when it unmounts or says nothing. Hand it an undefined title
+ * while the answer it is named by is still out, and the route's title stands.
+ */
+export function useHeaderTitle(title: string | undefined) {
+  const publish = useContext(TitleSlot)
+  useEffect(() => {
+    publish(title)
+    return () => publish(undefined)
+  }, [publish, title])
 }
 
 /**
@@ -482,6 +505,30 @@ export function ValueRow({
 }
 
 /**
+ * The column an edit fills when it is the screen the route pushed: it takes the screen's height, so
+ * its last row — the actions — stands on the screen's floor rather than halfway up it.
+ */
+export const formColumnClass = "flex min-h-[calc(100dvh-7rem)] flex-1 flex-col gap-6"
+
+/**
+ * A screen-form's foot: the actions pinned to the bottom of the screen, so a form taller than a phone
+ * keeps its Save within a thumb's reach while the fields scroll under it. It takes the safe area as
+ * its own (`DESIGN.md`: the foot of the screen belongs to the phone), and cancels the screen column's
+ * own bottom padding so the bar sits on the floor rather than above it. Only ever a screen's — a card
+ * is closed, not committed, and its actions stand under its last field.
+ */
+export function FormFoot({ children }: { children: ReactNode }) {
+  return (
+    <div
+      data-form-foot
+      className="sticky bottom-0 z-10 -mb-[max(2rem,env(safe-area-inset-bottom))] mt-auto flex flex-col bg-gradient-to-t from-background from-40% via-background/95 to-transparent px-1 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+    >
+      {children}
+    </div>
+  )
+}
+
+/**
  * The bar an edit form's actions sit in: one pill, the cancel and the save divided by a hairline,
  * centred under the fields. Every edit wears it — pushed as a screen on a phone, drawn as a card
  * above 1024px — so the two ways of editing are one form, and a reset, where the form has one,
@@ -495,6 +542,7 @@ export function FormActions({
   disabled,
   busy,
   className,
+  destructive,
 }: {
   /** The form's way out. Left off by a form whose Reset leads instead: back is its cancel. */
   onCancel?: () => void
@@ -505,6 +553,8 @@ export function FormActions({
   onReset?: () => void
   resetLabel?: string
   saveLabel?: string
+  /** The leading action deletes something, so it wears the destructive ink rather than a row's. */
+  destructive?: boolean
   /** Cancels and saves both wait while the form holds nothing worth writing. */
   disabled?: boolean
   busy?: boolean
@@ -520,7 +570,12 @@ export function FormActions({
     >
       {onReset ? (
         <>
-          <button type="button" disabled={busy} onClick={onReset} className={actionClass}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onReset}
+            className={cn(actionClass, destructive && "text-destructive")}
+          >
             {resetLabel}
           </button>
           <Divider />
@@ -563,6 +618,9 @@ export function EditForm({
   note,
   busy,
   surface,
+  saveable,
+  resetLabel,
+  resetDestructive,
   onSave,
   onReset,
   onCancel,
@@ -577,6 +635,10 @@ export function EditForm({
   onSave: (value: string) => void
   /** The form's nothing value, where the host holds one: the key leaving the file. */
   onReset?: () => void
+  /** What the reset is called where its own word says what goes: *Delete key*. */
+  resetLabel?: string
+  /** The reset deletes something rather than clearing a value: it wears the destructive ink. */
+  resetDestructive?: boolean
   onCancel?: () => void
   /** A write already on its way: the bar waits, and says so. */
   busy?: boolean
@@ -585,17 +647,35 @@ export function EditForm({
    * fact — the container chose it — and it decides both how the form fills and whether a back asks.
    */
   surface?: "screen" | "card"
+  /**
+   * Whether Save is offered for what the field holds. The default is the whole of an ordinary edit —
+   * a value that differs from the one it started at — and a form whose field may hold something
+   * that must not be written passes its own rule, as the key form does with a mask.
+   */
+  saveable?: (next: string) => boolean
 }) {
   const [draft, setDraft] = useState(value)
   const [shown, setShown] = useState(false)
   const id = `edit-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   const next = kind === "text" ? draft.trim() : draft
+  const offers = saveable ?? ((held: string) => held !== value)
   // What a back would throw away — only where the form is the screen. A card is a pop-up, and closing
   // a pop-up is the whole of saying no: nothing is asked.
   useUnsavedChanges(surface === "screen" && next !== value)
+  const actions = (
+    <FormActions
+      className={surface === "screen" ? undefined : "mt-auto"}
+      onCancel={onCancel}
+      onReset={onReset}
+      resetLabel={resetLabel}
+      destructive={resetDestructive}
+      disabled={!offers(next)}
+      busy={busy}
+    />
+  )
   return (
     <form
-      className={cn("flex flex-col gap-6", surface === "screen" && "min-h-[calc(100dvh-7rem)]")}
+      className={cn(surface === "screen" ? formColumnClass : "flex flex-col gap-6")}
       onSubmit={(event) => {
         event.preventDefault()
         onSave(next)
@@ -634,13 +714,7 @@ export function EditForm({
         </InputGroup>
         {note && <p className="mt-3 px-1 text-center text-sm text-muted-foreground">{note}</p>}
       </div>
-      <FormActions
-        className="mt-auto"
-        onCancel={onCancel}
-        onReset={onReset}
-        disabled={next === value}
-        busy={busy}
-      />
+      {surface === "screen" ? <FormFoot>{actions}</FormFoot> : actions}
     </form>
   )
 }

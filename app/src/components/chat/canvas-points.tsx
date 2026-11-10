@@ -17,6 +17,19 @@ export interface CanvasPoints {
   listen(answer: (point: CanvasPoint) => void): () => void
   /** The element the page answered, said to whoever is listening for one. */
   answer(point: CanvasPoint): void
+  /**
+   * Sends the reader to the page instead of arming it here. A chat with the page beside it arms that
+   * page in place; a chat drawn with no page at all — the phone's edit screen, where the page is
+   * another address — has nothing here to arm, so the composer's Point row takes them to the page
+   * and lets that screen do the pointing. Absent, the composer arms this screen's page as it always has.
+   */
+  onArm?: () => void
+  /**
+   * The element the page answered for this chat before it opened, handed over once: how a chip picked
+   * on the page survives the trip back to the chat that asked for it (the page unmounts the chat, so
+   * an answer cannot be a prop or a promise). Absent, no element is waiting for this chat.
+   */
+  take?: () => CanvasPoint | undefined
 }
 
 const CanvasPointsContext = createContext<CanvasPoints | null>(null)

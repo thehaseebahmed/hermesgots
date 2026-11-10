@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { PlayIcon, RotateCwIcon } from "lucide-react"
+import { FileCodeIcon, PlayIcon, RotateCwIcon } from "lucide-react"
 
 import { FileRow, MediaName } from "@/components/chat/attachments"
 import { usePreviewer } from "@/components/chat/previewer"
@@ -35,6 +35,8 @@ export interface MediaItem {
   path?: string
   /** The URL the host signed for it, once its answer is in. */
   src?: string
+  /** A page's folder on the host, signed with its URL, which its own files load from (ADR 0135). */
+  folder?: string
   state: MediaItemState
   /** What the host answered when it refused the file — its name and the cap it met. */
   note?: string
@@ -379,7 +381,33 @@ function AudioRow({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
 }
 
 /**
- * A thread's media drawn in one place, wherever it came from: a cell, a recording's row, or a file's.
+ * A page in the thread: a row like a file's, with a page's mark and its name, and a tap opens the
+ * Previewer on it, where it is drawn in its sandbox. A page is never a cell: there is nothing cheap
+ * to paint of it, and a running page per message on screen would run every one of their scripts.
+ */
+function PageRow({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Open ${item.name}`}
+      aria-busy={item.state === "reading" || undefined}
+      title={item.state === "failed" ? item.note : undefined}
+      className="flex h-16 max-w-48 min-w-28 shrink-0 items-center gap-2 rounded-xl border bg-muted/50 px-3 text-left text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      {item.state === "failed" ? (
+        <RotateCwIcon className="size-5 shrink-0 text-muted-foreground" />
+      ) : (
+        <FileCodeIcon className="size-5 shrink-0 text-muted-foreground" />
+      )}
+      <MediaName name={item.name} size={item.size} />
+    </button>
+  )
+}
+
+/**
+ * A thread's media drawn in one place, wherever it came from: a cell, a recording's row, a page's,
+ * or a file's.
  * The cells and rows a tap opens the Previewer on are one list, in the order they are drawn here, so
  * stepping inside the Previewer follows the message.
  */
@@ -417,8 +445,10 @@ export function MediaItems({
   }
   const cells = items.filter((item) => item.cell === "gallery")
   const recordings = items.filter((item) => item.cell === "audio")
+  const pages = items.filter((item) => item.cell === "page")
   const files = items.filter((item) => item.cell === "file")
-  const playable = [...cells, ...recordings]
+  // The Previewer steps in the order things are drawn: cells, then recordings, then pages.
+  const playable = [...cells, ...recordings, ...pages]
   // What the Previewer draws changes as each URL comes in, so the list it was opened on is kept
   // current rather than frozen at the tap: the signature says when something in it moved.
   const signature = playable.map((one) => `${one.key}\u0000${one.state}\u0000${one.src}`).join("\n")
@@ -459,6 +489,18 @@ export function MediaItems({
       {recordings.map((item) => (
         <AudioRow key={item.key} item={item} onOpen={() => open(item)} />
       ))}
+      {pages.length > 0 && (
+        <div
+          className={cn(
+            "flex max-w-full flex-wrap gap-2",
+            align === "end" ? "justify-end" : "justify-start",
+          )}
+        >
+          {pages.map((item) => (
+            <PageRow key={item.key} item={item} onOpen={() => open(item)} />
+          ))}
+        </div>
+      )}
       {files.length > 0 && (
         <div
           className={cn(

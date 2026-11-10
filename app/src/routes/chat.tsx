@@ -104,6 +104,7 @@ import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
 import { useCodePane, useRememberOpened, useSplit } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
+import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { BACK_ON_LIST, useNav } from "@/lib/nav"
@@ -267,6 +268,8 @@ export function ChatPage(props: ChatPageProps) {
   const id = params.id
   // The chat the address names is remembered as the one its bot opens next.
   useRememberedChat(id)
+  // The push that named this chat leaves the tray now that its screen is open (ADR 0132).
+  useDismissChatPushes(id)
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
     // A canvas's chat is no chat: its address opens the canvas it belongs to (ADR 0113).

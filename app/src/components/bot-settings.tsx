@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
   BotIcon,
   CodeXmlIcon,
+  KeyRoundIcon,
   MessagesSquareIcon,
   NetworkIcon,
   PlusIcon,
@@ -21,6 +22,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
+import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
@@ -79,7 +81,6 @@ import {
 import {
   checkHealth,
   GENERAL_ROUTES,
-  isGeneralTab,
   getGeneralSettings,
   getPluginVersion,
   listModels,
@@ -89,6 +90,7 @@ import {
   type ReminderLevel,
 } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
+import { LLM_PROVIDERS } from "@/lib/llm-providers"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
@@ -108,37 +110,50 @@ type Connection =
   | { state: "ok"; plugin: string | null; key: string }
   | { state: "error"; message: string; key: string }
 
-/** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
-const PAGE_FEATURES = {
+/** What a page wears, and the plugin feature it needs where a host can withhold it. */
+type PageMeta = {
+  /** The icon a page's row, and the screen it opens, wear. */
+  icon: LucideIcon
+  /** The feature the page is gated on: a page that is always there has none. */
+  feature?: string
+}
+
+/**
+ * Every page's own row: what it wears and, where a plugin can withhold it, the feature it is gated
+ * on. One table, so a page can gain neither without the other being written beside it; the screen
+ * each page draws is `PAGE_BODIES`, keyed on the same union.
+ */
+const PAGE_META: Record<BotTab, PageMeta> = {
+  bot: { icon: BotIcon },
   // General mirrors the bot's own Hermes, so it needs a plugin that can read the host's schema. A
   // host without it draws no General row, and a general address lands on the bot's own page.
-  general: GENERAL_PAGE,
-  "speech-to-text": DICTATION,
-  mcps: MCP_FEATURES.list,
-  coding: AFK_PICKS_FEATURE,
-  skills: SKILL_FEATURES.list,
-  delegation: DELEGATION_PAGE,
-} as const
+  general: { icon: SlidersHorizontalIcon, feature: GENERAL_PAGE },
+  models: { icon: MessagesSquareIcon },
+  // The host's API-key providers: a Hermes whose catalog can't be read withholds the page, so an
+  // older plugin draws no row and the address lands on the bot's own page.
+  "llm-providers": { icon: KeyRoundIcon, feature: LLM_PROVIDERS },
+  coding: { icon: CodeXmlIcon, feature: AFK_PICKS_FEATURE },
+  "speech-to-text": { icon: AudioLinesIcon, feature: DICTATION },
+  mcps: { icon: PlugZapIcon, feature: MCP_FEATURES.list },
+  skills: { icon: WrenchIcon, feature: SKILL_FEATURES.list },
+  delegation: { icon: NetworkIcon, feature: DELEGATION_PAGE },
+}
 
-type GatedPage = keyof typeof PAGE_FEATURES
+/** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
+const PAGE_FEATURES = gatedFeatures(PAGE_META)
 
-function gated(page: BotTab): page is GatedPage {
+/** That table, read off `PAGE_META` alone: a page with no feature in it is always there. */
+function gatedFeatures(meta: Record<BotTab, PageMeta>): Record<string, string> {
+  const features: Record<string, string> = {}
+  for (const [page, one] of Object.entries(meta)) if (one.feature) features[page] = one.feature
+  return features
+}
+
+function gated(page: BotTab): boolean {
   return page in PAGE_FEATURES
 }
 
 const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
-
-/** The icon a page's row, and the screen it opens, wear. */
-const PAGE_ICONS: Record<BotTab, LucideIcon> = {
-  bot: BotIcon,
-  general: SlidersHorizontalIcon,
-  models: MessagesSquareIcon,
-  coding: CodeXmlIcon,
-  "speech-to-text": AudioLinesIcon,
-  mcps: PlugZapIcon,
-  skills: WrenchIcon,
-  delegation: NetworkIcon,
-}
 
 /** The registry's Enabled flag, with when the bot's host last checked in. */
 function EnabledSetting({ profile }: { profile: Profile }) {
@@ -303,7 +318,7 @@ function PageRow({
   /** Whether the row swaps the pane beside it rather than opening a screen of its own. */
   replace?: boolean
 }) {
-  const Icon = PAGE_ICONS[page.segment]
+  const Icon = PAGE_META[page.segment].icon
   return (
     <Link
       to={botTabPath(botId, page.segment)}
@@ -388,6 +403,78 @@ export function BotSettingsList({
 }
 
 /**
+ * One page of a bot's settings: what its body is given — the bot, the sub-screen the address named
+ * where the page holds one, the address its close returns to, and whether a pane sits beside it.
+ */
+type PageBody = {
+  profile: Profile
+  /** The page's own sub-screen: nothing where the address named none, or named another page's. */
+  sub?: BotSub
+  /** Where a screen's close returns to: the address the page itself is drawn at. */
+  close: () => void
+  /** Whether a pane sits beside this one, which is what decides a card over a screen. */
+  large: boolean
+}
+
+/**
+ * The bot's own page: its edits drawn as the screen the route pushed, or as the card over the page
+ * where there is a pane beside it.
+ */
+function botPage({ profile, sub, close, large }: PageBody) {
+  // The page asked for is withheld, or its host hasn't answered: what is left to draw is the bot's
+  // own page. Where a pane sits beside this one, that page is already in it — drawing it again
+  // would put two cards, two trash buttons and two feature reads on one screen.
+  if (!sub) return large ? null : <BotSettingsList profile={profile} />
+  if (!large) return <BotEditScreen profile={profile} sub={sub} close={close} />
+  // From 1024px the bot's page is the pane beside this one, so the pane holds its edit alone.
+  return (
+    <EditCard title={sub.title} onClose={close}>
+      <BotEditScreen profile={profile} sub={sub} close={close} />
+    </EditCard>
+  )
+}
+
+/**
+ * The screen each page draws, keyed on the page itself. `BotTab` is the pages `BOT_PAGES` names, so
+ * a page added to that list fails the typecheck here until its body is written — there is no chain
+ * to fall through, and no page can be drawn by another page's screen. General and Delegation are the
+ * host's own page twice (`GeneralPage`), each keyed by the bot and the tab so a switched-to bot
+ * starts its own read.
+ */
+const PAGE_BODIES: Record<BotTab, (page: PageBody) => ReactNode> = {
+  bot: botPage,
+  general: ({ profile, sub, close }) =>
+    // General's one detail — the chain it falls back on — is a screen of its own; every other sub it
+    // holds is one of the host's keys, which its own page draws.
+    sub?.kind === "detail" ? (
+      <FallbacksPage profile={profile} />
+    ) : (
+      <GeneralPage
+        key={`${profile.id}:general`}
+        profile={profile}
+        tab="general"
+        sub={sub}
+        close={close}
+      />
+    ),
+  models: ({ profile }) => <ModelsPage profile={profile} />,
+  "llm-providers": ({ profile, sub }) => <LlmProvidersTab profile={profile} sub={sub} />,
+  coding: ({ profile }) => <CodingTab profile={profile} />,
+  "speech-to-text": ({ profile, sub }) => <DictationTab profile={profile} sub={sub} />,
+  mcps: ({ profile, sub }) => <McpsTab profile={profile} sub={sub} />,
+  skills: ({ profile, sub }) => <SkillsTab profile={profile} sub={sub} />,
+  delegation: ({ profile, sub, close }) => (
+    <GeneralPage
+      key={`${profile.id}:delegation`}
+      profile={profile}
+      tab="delegation"
+      sub={sub}
+      close={close}
+    />
+  ),
+}
+
+/**
  * One page of a bot's settings, or one of its sub-screens. A sub-screen is presented by the width:
  * below 1024px it is the screen itself, and from 1024px an edit rides over the page as a centred
  * card while a detail takes the page pane's place (ADR 0055).
@@ -429,81 +516,23 @@ export function BotSettingsPage({
     [navigate, profile.id, shown],
   )
 
-  // The bot's own page draws its edits itself, as the entry screen does: the form is the screen the
-  // route pushed, or the card over the bot's page where there is a pane beside it.
-  if (shown === "bot") {
-    // The page asked for is withheld, or its host hasn't answered: what is left to draw is the bot's
-    // own page. Where a pane sits beside this one, that page is already in it — drawing it again
-    // would put two cards, two trash buttons and two feature reads on one screen.
-    if (!own) return large ? null : <BotSettingsList profile={profile} />
-    if (!large) return <PageSub profile={profile} tab="bot" sub={own} close={close} />
-    // From 1024px the bot's page is the pane beside this one, so the pane holds its edit alone.
-    return (
-      <EditCard title={own.title} onClose={close}>
-        <PageSub profile={profile} tab="bot" sub={own} close={close} />
-      </EditCard>
-    )
-  }
-
-  // The pages with sub-screens of their own draw them; General draws its own here.
-  if (shown === "speech-to-text") return <DictationTab profile={profile} sub={own} />
-  if (shown === "mcps") return <McpsTab profile={profile} sub={own} />
-  if (shown === "coding") return <CodingTab profile={profile} />
-  if (shown === "skills") return <SkillsTab profile={profile} sub={own} />
-
-  // General is the host's own page: its rows come from the bot's Hermes, so it draws its own edit —
-  // a pushed screen on a phone, the page plus its centred card above 1024px. Its one detail is a
-  // detail like any other and takes the generic path below.
-  // Keyed by bot and tab, so a page never draws the block, the row or the refusal of the bot or the tab
-  // before it: a switched-to bot starts its own read, and shows the wait until its own answer lands.
-  if (isGeneralTab(shown) && own?.kind === "edit")
-    return (
-      <GeneralPage
-        key={`${profile.id}:${shown}`}
-        profile={profile}
-        tab={shown}
-        sub={own}
-        close={close}
-      />
-    )
-  if (isGeneralTab(shown) && !own)
-    return (
-      <GeneralPage key={`${profile.id}:${shown}`} profile={profile} tab={shown} close={close} />
-    )
-
-  // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
-  // page's own edit is the screen the route pushed.
-  if (own && (own.kind === "detail" || !large))
-    return <PageSub profile={profile} tab={shown} sub={own} close={close} />
-
-  const page = <ModelsPage profile={profile} />
-
-  if (!own) return page
-  return (
-    <>
-      {page}
-      <EditCard title={own.title} onClose={close}>
-        <PageSub profile={profile} tab={shown} sub={own} close={close} />
-      </EditCard>
-    </>
-  )
+  return PAGE_BODIES[shown]({ profile, sub: own, close, large })
 }
 
-/** The body of a page's sub-screen, wherever it is drawn: a pushed screen, a card, or the pane. */
-function PageSub({
+/**
+ * One of the bot's own edits, wherever it is drawn: the screen the route pushed, or the card over the
+ * bot's page where a pane sits beside it.
+ */
+function BotEditScreen({
   profile,
-  tab,
   sub,
   close,
 }: {
   profile: Profile
-  tab: BotTab
   sub: BotSub
   close: () => void
 }) {
   const large = useLarge()
-  // A detail is a screen of its own, and the one this page holds is the chain after its model.
-  if (tab === "general" && sub.kind === "detail") return <FallbacksPage profile={profile} />
   const edit = botEdit(sub.id)
   // A segment the router refused never reaches here; one the table doesn't name holds no field, so
   // no id can fall through to a write the page doesn't mean.

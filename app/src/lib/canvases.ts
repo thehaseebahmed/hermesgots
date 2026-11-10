@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { wireContent } from "@/lib/attachments"
 import {
   applyWrite,
   mergeGrants,
@@ -23,8 +24,8 @@ import {
   recordOf,
   upsert,
 } from "@/lib/canvas-cache"
-import { hostTargets } from "@/lib/connection"
-import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
+import { hostTargets, serverConfig } from "@/lib/connection"
+import { db, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
@@ -41,13 +42,16 @@ import {
   undoCanvas as undoCanvasOnHost,
   updateCanvas as updateCanvasOnHost,
   type CanvasChanges,
+  type CanvasFile,
 } from "@/lib/hermes"
 import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { onlineNow } from "@/lib/online"
 import { usePoll } from "@/lib/poll"
 import { quietly } from "@/lib/report"
+import { uploadAttachments } from "@/lib/send-turn"
 import { createStore } from "@/lib/store"
 import { tell } from "@/lib/tell"
+import { randomId } from "@/lib/utils"
 
 /**
  * Canvases live on each bot's Gots plugin (`canvases.py`, ADR 0113), which keeps the record, the
@@ -97,6 +101,13 @@ export interface Canvas {
 /** A canvas as a list keeps it, and as the cache's list row keeps it (`canvas-cache.ts`). */
 export type CanvasRecord = Omit<Canvas, "html" | "data" | "tools" | "dataWrites">
 
+/**
+ * Whether a canvas has a page to draw: the first version is what makes there be one, so it is also
+ * what the header's `v{n}` line, both screens' corners and the phone's own default are read from.
+ * One derivation, so no screen can disagree about a canvas that has no page yet.
+ */
+export const hasVersion = (canvas: Canvas | undefined) => (canvas?.version ?? 0) >= 1
+
 /** What a canvas's own record may change, as the host's route takes it (`hermes.ts`). */
 export type { CanvasChanges }
 
@@ -141,6 +152,15 @@ function markAway(id: string) {
   // The first miss stands: it is when the host was last found away, and a write reads it.
   if (state.missedAt[id]) return
   store.set({ ...state, missedAt: { ...state.missedAt, [id]: Date.now() } })
+}
+
+/** A read that landed is the only thing that takes the away words back. */
+function clearAway(id: string) {
+  const state = store.get()
+  if (!state.missedAt[id]) return
+  const missedAt = { ...state.missedAt }
+  delete missedAt[id]
+  store.set({ ...state, missedAt })
 }
 
 // One rule for every way a canvas is found gone — a delete the host answered, a read that came back
@@ -268,8 +288,12 @@ function put(profile: Profile, canvas: Canvas, started: number) {
   delete missedAt[canvas.id]
   const superseded = held !== undefined && (held.dataWrites ?? 0) > started
   const kept = superseded || data === undefined ? held?.data : data
+  // A record with no document is no page: a canvas the bot has written no version of yet answers an
+  // empty one, and holding that as the canvas's drawn copy is what goes stale — the first version
+  // lands on the list, and the copy read before it still says there is nothing to draw. The record
+  // and the device's copy are kept either way; a page already held for it stays as it is.
   const drawn =
-    html === undefined || stale
+    html === undefined || html === "" || stale
       ? undefined
       : {
           ...current,
@@ -319,15 +343,25 @@ function profileOf(id: string) {
 }
 
 /**
- * Reads every bot's list. The answer says whether every bot answered: a sweep one bot couldn't answer
- * is no evidence about a canvas it didn't name, which is what `botHolding` needs before it calls one
- * gone.
+ * What one sweep answers: whether every bot answered, and which of them did — the second is what a
+ * screen reading only a canvas's record needs, since its bot's answer is the whole of what it knows.
  */
-async function readAll(): Promise<boolean> {
+interface Sweep {
+  complete: boolean
+  answered: Set<string>
+}
+
+/**
+ * Reads every bot's list. A sweep one bot couldn't answer is no evidence about a canvas it didn't
+ * name, which is what `botHolding` needs before it calls one gone, and what an edit screen needs
+ * before it says its bot is away.
+ */
+async function readAll(): Promise<Sweep> {
   // Bots on one server and profile share one list, and the first of them keeps it.
   const profiles = await hostTargets(await listEnabledProfiles())
   const lists: Record<string, Canvas[]> = {}
   const unsupported = { ...store.get().unsupported }
+  const answered = new Set<string>()
   let complete = true
   await Promise.all(
     profiles.map(async (profile) => {
@@ -335,6 +369,7 @@ async function readAll(): Promise<boolean> {
         // Asked fresh rather than through the remembered list: a host that answered and refused is a
         // different sentence from one that didn't answer, and the remembered view flattens the two.
         const features = await getPluginFeatures(profile)
+        answered.add(profile.id)
         if (!features.includes("canvas")) {
           unsupported[profile.id] = "This bot's plugin can't hold canvases yet."
           lists[profile.id] = []
@@ -356,19 +391,24 @@ async function readAll(): Promise<boolean> {
   if (!state.loaded || !equal(state.lists, lists) || !equal(state.unsupported, unsupported)) {
     store.set({ ...state, lists, unsupported, loaded: true })
   }
-  return complete
+  return { complete, answered }
 }
 
 // One sweep at a time: the list's poll and a screen's own read would otherwise run the whole per-bot
 // fan-out twice and race each other's answer into the store.
-let listing: Promise<boolean> | null = null
+let listing: Promise<Sweep> | null = null
 
-/** Reads every bot's canvases, and answers whether every one of them answered. */
-export function refreshCanvases() {
+/** One sweep, joined to the one already out rather than run beside it. */
+function sweep() {
   listing ??= readAll().finally(() => {
     listing = null
   })
   return listing
+}
+
+/** Reads every bot's canvases, and answers whether every one of them answered. */
+export async function refreshCanvases() {
+  return (await sweep()).complete
 }
 
 async function configOf(profileId: string): Promise<Profile> {
@@ -450,6 +490,28 @@ export function refreshCanvas(id: string) {
   })
   reading.set(id, read)
   return read
+}
+
+/**
+ * Reads a canvas through its bot's list, and never its page: the edit screen draws no document, so a
+ * title, a version and the chat are all it needs, and a page can be 256 KB. A sweep every bot
+ * answered is what lets a canvas no list names be called gone — one where its bot didn't answer is
+ * what the header's away words are.
+ */
+async function readRecord(id: string) {
+  if (store.get().missing[id]) return
+  const { complete, answered } = await sweep()
+  const state = store.get()
+  const profileId = profileOf(id)
+  if (!profileId) {
+    // A canvas no list names is gone only when every bot answered: a bot that was away is no
+    // evidence about a canvas it didn't name.
+    if (complete) store.set({ ...state, missing: { ...state.missing, [id]: true } })
+    else markAway(id)
+    return
+  }
+  if (answered.has(profileId)) clearAway(id)
+  else markAway(id)
 }
 
 /**
@@ -591,7 +653,16 @@ export function usePinnedCanvases() {
 /** One canvas, the document its record points at read and kept fresh while it is on screen. */
 export function useCanvas(id: string) {
   const state = store.use()
-  const canvas = state.details[id] ?? Object.values(state.lists).flat().find((row) => row.id === id)
+  // A held copy is served only while it is at least as new as the record the lists hold: a sweep
+  // that reports a version this device read before it landed is the newer of the two, and a copy
+  // read earlier must not shadow it — a canvas whose first version just landed would otherwise
+  // still read as one with nothing to draw, and its preview would replace its own address with the
+  // edit screen's. No copy at all is the list's record, which is all a sweep has answered.
+  const held = state.details[id]
+  const listed = Object.values(state.lists)
+    .flat()
+    .find((row) => row.id === id)
+  const canvas = held && (!listed || held.at >= listed.at) ? held : listed
   const profile = useLiveQuery(
     () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
     [canvas?.profileId],
@@ -610,8 +681,52 @@ export function useCanvas(id: string) {
   )
   return {
     canvas,
+    /** The bot holding it, read here so neither screen reads the same profile a second time. */
+    profile,
     missing: Boolean(state.missing[id]),
     /** The last read got no answer, so what is drawn is this device's copy and nothing can be saved. */
+    away: Boolean(state.missedAt[id]),
+    loaded: state.loaded || Boolean(canvas),
+  }
+}
+
+/**
+ * One canvas's record — its title, version, chat and bot — kept fresh by the list's sweep and never
+ * by reading the page: the edit screen draws no document, so the read that keeps its version right
+ * is the sweep every list already runs, and the document is read only for a screen that draws it
+ * (`useCanvas`).
+ */
+export function useCanvasRecord(id: string) {
+  const state = store.use()
+  const listed = Object.values(state.lists).flat().find((row) => row.id === id)
+  // A record this device kept answers before a sweep has landed: it is the row a list answers, kept
+  // without the page it was kept with.
+  const kept = useLiveQuery(async () => {
+    if (listed) return undefined
+    for (const profile of await listEnabledProfiles()) {
+      const row = (await cachedList(profile)).find((one) => one.id === id)
+      if (row) return row
+    }
+    return undefined
+  }, [id, listed?.id])
+  const canvas = listed ?? kept
+  const profile = useLiveQuery(
+    () => (canvas ? db.profiles.get(canvas.profileId) : undefined),
+    [canvas?.profileId],
+  )
+  const live = useLive(profile)
+  const changes = useChanges("canvas", profile)
+  usePoll(
+    () => void readRecord(id).catch(() => undefined),
+    live ? SAFETY_MS : LIST_MS,
+    [id, changes, live],
+  )
+  return {
+    canvas,
+    /** The bot holding it, read here so neither screen reads the same profile a second time. */
+    profile,
+    missing: Boolean(state.missing[id]),
+    /** Its bot's last list read got no answer, so what is drawn is this device's record. */
     away: Boolean(state.missedAt[id]),
     loaded: state.loaded || Boolean(canvas),
   }
@@ -715,13 +830,52 @@ export async function grantCanvasTool(id: string, tool: string, allow: boolean) 
   return answer
 }
 
-/** A canvas from a prompt: the plugin writes it and queues the run that builds it. */
-export async function startCanvas(profile: Profile, prompt: string, choice?: ModelChoice) {
+/**
+ * A canvas from a prompt and the files staged with it: the app mints the chat the canvas will be
+ * built in and saves each file under the session that chat names (`gots-<chat id>`, the pair the
+ * host itself uses), because the first turn can only carry files already on the host — and the
+ * session a file belongs under is named by a chat that has to exist first (ADR 0131).
+ *
+ * The saving is the house's own (`uploadAttachments`), so a start takes the files a chat takes: a
+ * photo the model reads inline needs no save, a document with no part has no other road and its
+ * refusal is fatal in the same sentence a send's is, and `uploads` is the host's own answer about
+ * whether it has an attachments route at all.
+ *
+ * The prompt stays the reader's own words: the host titles a canvas, and the chat that carries it,
+ * from them, so the markers naming the saved files ride only the run body. The record the host
+ * answers is the canvas the screen opens — a plugin older than the chat id mints its own chat, and
+ * its record is the one that exists.
+ */
+export async function startCanvas(
+  profile: Profile,
+  prompt: string,
+  {
+    choice,
+    attachments,
+    uploads,
+  }: { choice?: ModelChoice; attachments?: Attachment[]; uploads?: boolean } = {},
+) {
+  const chatId = randomId()
+  const session = `gots-${chatId}`
+  const saved = await uploadAttachments(
+    serverConfig(profile),
+    session,
+    attachments ?? [],
+    Boolean(uploads),
+  )
+  const files: CanvasFile[] = saved.flatMap((one) =>
+    one.path ? [{ name: one.name, type: one.type, size: one.size, path: one.path }] : [],
+  )
   const body = runRequest(profile, {
-    messages: [{ role: "user", content: prompt }],
+    messages: [{ role: "user", content: await wireContent(prompt, saved) }],
     ...(choice ? { model: choice.model, provider: choice.provider } : {}),
   })
-  const raw = await createCanvas(profile, { prompt, profileId: profile.id, body })
+  const raw = await createCanvas(profile, {
+    prompt,
+    profileId: profile.id,
+    body,
+    start: { chatId, files },
+  })
   if (!raw) throw new Error("The bot didn't make the canvas.")
   const canvas = toCanvas(raw, profile.id)
   put(profile, canvas, writes)

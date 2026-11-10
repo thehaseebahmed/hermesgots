@@ -1,6 +1,7 @@
 import type { BotTab } from "@/lib/bot-tabs"
 import { botTabPath } from "@/lib/bot-tabs"
 import { fieldLabel } from "@/lib/general-settings"
+import { customEndpointId } from "@/lib/llm-providers"
 import { providerLabel, providerHasPage } from "@/lib/stt-settings"
 
 /**
@@ -18,6 +19,7 @@ export type BotSub = {
   /**
    * Whether the page lists things that each have a page of their own, so its address carries one
    * more segment than the page's own — the providers card's rows, and the page behind any one.
+   * Which of them have a page is the entry's own test (`SubEntry`), never another page's.
    */
   holds?: "items"
   /** The item this address names, where it names one of that list's. */
@@ -29,8 +31,24 @@ export type BotSub = {
   label?: string
 }
 
+/**
+ * An entry in the table: the sub-screen a segment names, and — where that sub-screen is a list whose
+ * items each have a page of their own — the list's own test of one of them and the title that page
+ * wears. A page that holds items states both, so no page can inherit another's idea of what it
+ * holds: which names are pages is the list's to know, and a second such page says its own.
+ */
+type SubEntry =
+  | (BotSub & { holds?: undefined })
+  | (BotSub & {
+      holds: "items"
+      /** Whether this list has a page behind that name; one it doesn't hold names nothing. */
+      hasPage: (name: string) => boolean
+      /** What the page behind that name is titled. */
+      titleOf: (name: string) => string
+    })
+
 /** The sub-screens whose ids the pages themselves name. */
-const FIXED: Partial<Record<BotTab, BotSub[]>> = {
+const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
   // The bot's own page: its profile, and how it connects to its Hermes.
   bot: [
     // The screen is named for what it does and the field for the setting it holds, so a form's
@@ -44,8 +62,34 @@ const FIXED: Partial<Record<BotTab, BotSub[]>> = {
   general: [{ id: "fallback_providers", kind: "detail", title: "Fallback providers" }],
   "speech-to-text": [
     { id: "vocabulary", kind: "detail", title: "Vocabulary" },
-    // Every provider but local, and one page behind it for each the host declares (ADR 0063).
-    { id: "providers", kind: "detail", title: "Providers", holds: "items" },
+    // Every provider but local, and one page behind it for each the host declares (ADR 0063). This
+    // page draws the rows, so it is the one that knows which are cards and which are screens.
+    {
+      id: "providers",
+      kind: "detail",
+      title: "Providers",
+      holds: "items",
+      hasPage: providerHasPage,
+      titleOf: providerLabel,
+    },
+  ],
+  // The LLM Providers page's rows are the host's catalog, which this table can't read: any slug is
+  // an address, and the page says in its own words where the host lists no such provider. Every
+  // slot's screen carries a verb — the screen names the provider itself once the block it reads has
+  // landed, since a slug is not a name a reader knows.
+  "llm-providers": [
+    // The page's own `+`, which adds an endpoint: a fixed id, since it is no endpoint of the host's
+    // and so has no slug to be named by. FIXED is matched before the page's items, so this can never
+    // be mistaken for one.
+    { id: "add", kind: "detail", title: "Add Custom Provider" },
+    {
+      id: "key",
+      kind: "detail",
+      title: "Edit Provider",
+      holds: "items",
+      hasPage: (name) => name.trim().length > 0,
+      titleOf: (name) => (customEndpointId(name) ? "Edit Custom Provider" : "Edit Provider"),
+    },
   ],
 }
 
@@ -75,8 +119,16 @@ export function botSubOf(
     if (fixed.holds !== "items") return fixed
     if (!leaf) return undefined
     const name = decode(leaf)
-    if (!providerHasPage(name)) return undefined
-    return { ...fixed, title: providerLabel(name), item: name }
+    // The list's own test of its leaves: a name this page doesn't hold names nothing, and the
+    // address falls back as it did before.
+    if (!fixed.hasPage(name)) return undefined
+    return {
+      id: fixed.id,
+      kind: fixed.kind,
+      title: fixed.titleOf(name),
+      holds: "items",
+      item: name,
+    }
   }
   if (ITEM_PAGES.includes(tab)) return { id: segment, kind: "detail", title: decode(segment) }
   // A keyed page's edit is titled from the key itself, which is all a URL knows before the host has

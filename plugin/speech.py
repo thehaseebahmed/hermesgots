@@ -40,9 +40,9 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from . import config_keys, dictation, dictation_cleanup, speech_probe
+from . import config_keys, credentials, dictation, dictation_cleanup, speech_probe
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -290,16 +290,6 @@ PROVIDER_KEY = "stt.provider"
 # Hermes declares these per provider and this page does not carry them: a URL typed on a phone that
 # silently breaks transcription, and a secret this app never holds (ADR 0063).
 HIDDEN = frozenset({"base_url", "api_key"})
-# The variable Hermes reads each provider's key from. Only its presence is asked for, never its
-# value: the check answers a boolean and nothing else.
-KEY_ENV = {
-    "groq": "GROQ_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "xai": "XAI_API_KEY",
-    "elevenlabs": "ELEVENLABS_API_KEY",
-    "deepinfra": "DEEPINFRA_API_KEY",
-}
 TURNED_OFF = "Speech-to-text is turned off on this host."
 NOTHING_USABLE = dictation.NO_PROVIDER
 
@@ -391,7 +381,9 @@ def _pick_names(providers: List[str], explicit: Optional[str], resolved: str) ->
     return names
 
 
-def _provider_entries(names: Sequence[str], lookup: Optional[Callable[[str], Any]]) -> List[Dict[str, Any]]:
+def _provider_entries(
+    names: Sequence[str], lookup: Optional[Callable[[str], Any]]
+) -> List[Dict[str, Any]]:
     """Providers as the page reads them. A provider with no key to check carries no ``key_set``, so
     "needs none" is not spelled the same way as "this host couldn't ask"."""
     entries: List[Dict[str, Any]] = []
@@ -420,19 +412,15 @@ def _catalogues() -> Dict[str, List[str]]:
     }
 
 
-def _env_lookup() -> Optional[Callable[[str], Any]]:
-    """The host's dotenv-aware env read, where it has one."""
-    try:
-        from agent.credential_pool import get_env_prefer_dotenv
-    except Exception:
-        logger.debug("gots: no credential pool: provider keys unknown", exc_info=True)
-        return None
-    return get_env_prefer_dotenv
-
-
 def _key_set(provider: str, lookup: Optional[Callable[[str], Any]]) -> Optional[bool]:
-    """Whether the host holds this provider's key — a boolean, never the value, None where unknown."""
-    variable = KEY_ENV.get(provider)
+    """Whether the host holds this provider's key — a boolean, never the value, None where unknown.
+
+    ``lookup`` is the host's own dotenv-aware env read, resolved once by the caller and handed down:
+    the rows and the pick ask about the same names, and a read per provider would import the same
+    function for each of them. A host with no credential pool at all (``lookup`` is ``None``) leaves
+    the entry saying nothing about a key rather than claiming there is none.
+    """
+    variable = credentials.KEY_ENV.get(provider)
     if variable is None or lookup is None:
         return None
     try:
@@ -475,9 +463,15 @@ def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) ->
     pick = values.get(PROVIDER_KEY)
     catalogues = _catalogues()
     resolved = _resolved(section)
-    lookup = _env_lookup()
     providers = _provider_names(defaults_section)
     explicit = pick.strip() if isinstance(pick, str) and pick.strip() else None
+    # One credential read for the whole answer: the rows and the pick ask the same names of the same
+    # host, so the host's env read is resolved here and handed down rather than imported per provider.
+    try:
+        lookup = credentials.env_lookup()
+    except Exception:
+        logger.debug("gots: no credential read on this host", exc_info=True)
+        lookup = None
     return {
         "values": values,
         "defaults": defaults,

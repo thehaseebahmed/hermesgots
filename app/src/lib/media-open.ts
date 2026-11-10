@@ -22,11 +22,11 @@ export interface HostFileOpen {
 
 /**
  * Opens a file the host holds by the rule ADR 0071 wrote, for a screen that isn't a thread — a
- * library's tree, and whatever lists files next: a photo, a clip or a recording opens in the app's
- * own **Previewer**, from a URL the bot signs for the file, and anything the Previewer can't draw — a
- * note, a page, an archive, a photo no browser decodes — is handed to the platform, which shows it or
- * saves it under its own name. `drawnCell` is that rule and `openAttachment` is the hand-over, so
- * neither is written twice here.
+ * library's tree, and whatever lists files next: a photo, a clip, a recording or a page opens in the
+ * app's own **Previewer**, from a URL the bot signs for the file (a page drawn in its sandboxed frame,
+ * ADR 0134), and anything the Previewer can't draw — a note, an archive, a photo no browser decodes —
+ * is handed to the platform, which shows it or saves it under its own name. `drawnCell` is that rule
+ * and `openAttachment` is the hand-over, so neither is written twice here.
  *
  * The answer is kept whole rather than as a URL or nothing: a file too large for the route says so in
  * its own sentence, and a host that didn't answer is not a missing file.
@@ -47,8 +47,8 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
           const read = answer.read
           const cell = drawnCell(read.type, file.name)
           if (cell === "file") {
-            // The host names the file in how it serves it, so the platform both shows a page or a
-            // note and saves an archive under the name it has.
+            // The host names the file in how it serves it, so the platform both shows a note and
+            // saves an archive under the name it has.
             await openAttachment(null, { name: file.name, type: read.type, src: read.url })
             return
           }
@@ -63,6 +63,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
                 size: read.size,
                 path: file.path,
                 src: read.url,
+                folder: read.folder,
                 state: "ready",
               }),
             ],

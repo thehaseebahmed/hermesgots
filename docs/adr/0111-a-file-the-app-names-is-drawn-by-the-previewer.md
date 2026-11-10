@@ -1,5 +1,10 @@
 # A file the app names is drawn by the previewer, and a tag with no file draws nothing
 
+**Amended by [ADR 0135](0135-a-previewed-page-loads-its-own-folders-files.md)** (2026-11-10): an HTML
+file is a **page** and the Previewer draws it in a sandboxed frame (`sandbox="allow-scripts"`, the
+policy of [ADR 0134](0134-a-sandboxed-page-may-load-images-over-https.md)) rather than handing it to
+the platform. Every other file the app can't show is still handed over.
+
 Two reports, one seam. A reply's text sometimes read `MEDIA:/opt/data/…` verbatim in the thread, and
 the Library's rows still opened files the way the app opened media before [ADR 0071](0071-media-opens-in-the-apps-own-previewer-from-a-signed-url.md):
 a blob fetched with the bot's key, wrapped in an object URL, and handed to the platform.

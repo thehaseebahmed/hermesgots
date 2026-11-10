@@ -3431,6 +3431,79 @@ const fallbacksOf = new Map()
 // The bot's own General settings: what its `config.yaml` holds, per profile, and the keys this mock's
 // Hermes keeps — one of each kind the page draws, and one filed under a section of its own.
 const generalValues = new Map()
+// The API-key providers this mock's Hermes knows, and the keys a page has written to them, per
+// profile. The mask is made here the way `mask_secret` makes it — first four and last four, and
+// `***` under its twelve-character floor — because a mask is the host's to make, never the app's.
+const LLM_PROVIDERS = [
+  { slug: "openai", label: "OpenAI", description: "GPT models, straight from OpenAI.", env: "OPENAI_API_KEY" },
+  { slug: "groq", label: "Groq", description: "Fast inference on Groq's hardware.", env: "GROQ_API_KEY" },
+]
+// The key OpenAI starts with here, so its row reads `sk-o...c123` until a page replaces it.
+const LLM_SEEDED = { openai: "sk-o-0000-0000-c123" }
+const llmKeys = new Map()
+// The custom endpoints this mock's Hermes holds, and the keys a page has written to them. One is a
+// local server with a key of its own — and the one the bot's model runs on, which is the endpoint no
+// page can remove — the other a gateway with none: the two a page has to draw.
+const LLM_ENDPOINTS = [
+  {
+    id: "local-llama",
+    name: "Local Llama",
+    base_url: "http://127.0.0.1:8080/v1",
+    model: "llama-3.1-8b",
+    // The transport the entry pins (`api_mode` in `providers.<id>`), and the header a proxy carries
+    // the conversation on (`session_affinity_header`) — the two settings the row's form edits.
+    transport: "chat_completions",
+    affinity: "",
+    // The host's own `is_current`: the model this bot runs on, so a removal of it is refused. It is
+    // the mock's fact and not the page's: `llmBlock` returns the row's own fields, never `current`.
+    current: true,
+  },
+  {
+    id: "work-gateway",
+    name: "Work gateway",
+    base_url: "https://llm.example.com/v1",
+    model: "gpt-4o-mini",
+    transport: "",
+    affinity: "x-litellm-session-id",
+  },
+]
+const LLM_ENDPOINT_SEEDED = { "local-llama": "llam-3.1-local-0a1f" }
+const maskSecret = (value) =>
+  value.length < 12 ? "***" : `${value.slice(0, 4)}...${value.slice(-4)}`
+// The id the host slugs from an endpoint's name, and the one its `providers.<id>` entry lands under.
+const slugEndpoint = (name) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+// The shapes a page is handed rather than a key: the host refuses one on its own rule, so a stale
+// screen or a `curl` can't write the mask back.
+const looksMasked = (value) =>
+  value === "***" || value.startsWith("«redacted") || /^\S{4}\.\.\.\S{4}$/.test(value)
+const llmKeyOf = (profile, slug) => llmKeys.get(`${profile}\n${slug}`) ?? LLM_SEEDED[slug]
+const llmEndpointKeyOf = (profile, id) =>
+  llmKeys.get(`${profile}\ncustom:${id}`) ?? LLM_ENDPOINT_SEEDED[id]
+const llmBlock = (profile) => ({
+  providers: LLM_PROVIDERS.map(({ slug, label, description, env }) => {
+    const secret = llmKeyOf(profile, slug)
+    return { slug, label, description, env, masked: secret ? maskSecret(secret) : null }
+  }),
+  endpoints: LLM_ENDPOINTS.map(({ id, name, base_url, model, transport, affinity }) => {
+    const secret = llmEndpointKeyOf(profile, id)
+    return {
+      id,
+      name,
+      base_url,
+      model,
+      transport: transport ?? "",
+      affinity: affinity ?? "",
+      // The variable the key is held in, as the host names it: the form labels its field with it.
+      key_env: `HERMES_CUSTOM_${id.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`,
+      masked: secret ? maskSecret(secret) : null,
+    }
+  }),
+})
 const GENERAL_DEFAULTS = {
   // The window a bot's model runs with: a number whose 0 is Hermes's own "detect it".
   model_context_length: 0,
@@ -4095,6 +4168,9 @@ http
           "progress_reminders",
           // The Dashboard's General tab, as a plugin that carries it advertises it (general.py).
           "general_page",
+          // The bot's API-key providers, each key as the mask the host makes of it
+          // (llm_providers.py): the page is absent where this host can't list or mask them.
+          "llm_providers",
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
@@ -4704,6 +4780,167 @@ http
           },
           defaults: GENERAL_DEFAULTS,
         },
+      })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "DELETE" &&
+      url.pathname.startsWith("/api/plugins/gots/llm-providers/key/")
+    ) {
+      // A provider's key removed (plugin/llm_providers.py): the address names the target and there is
+      // no body, and the answer is the fresh block with that row unset. Removing a key that isn't set
+      // answers the same block — the lifecycle's own removal is idempotent.
+      const key = pluginProfile ?? ""
+      const target = decodeURIComponent(url.pathname.split("/").pop() ?? "")
+      if (!LLM_PROVIDERS.some((one) => one.slug === target))
+        return json(res, 400, {
+          error: { message: `${target} isn't an API-key provider this Hermes knows.` },
+        })
+      // An empty value is what a removal leaves: the seeded key included, so the row reads Not set.
+      llmKeys.set(`${key}\n${target}`, "")
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers/key" && req.method === "POST") {
+      // A provider's key replaced (plugin/llm_providers.py): the mask a page draws is refused as a
+      // key, and a typed one lands on the block the answer carries — the same block the read gives.
+      const key = pluginProfile ?? ""
+      const body = await readBody(req)
+      const target = body?.target
+      const typed = body?.key
+      if (typeof target !== "string" || typeof typed !== "string")
+        return json(res, 400, { error: { message: "Body needs a target and a key." } })
+      // A key is one resource with one address: a provider's catalog slug, or an endpoint's
+      // `custom:<id>`. The typed key lands on whichever row the address names.
+      const endpointId = target.startsWith("custom:") ? target.slice("custom:".length) : ""
+      const known = endpointId
+        ? LLM_ENDPOINTS.some((one) => one.id === endpointId)
+        : LLM_PROVIDERS.some((one) => one.slug === target)
+      if (!known)
+        return json(res, 400, {
+          error: {
+            message: endpointId
+              ? `${endpointId} isn't a custom endpoint this Hermes knows.`
+              : `${target} isn't an API-key provider this Hermes knows.`,
+          },
+        })
+      if (looksMasked(typed))
+        return json(res, 400, {
+          error: { message: "That is a masked key, not a key. Type the key itself." },
+        })
+      llmKeys.set(`${key}\n${target}`, typed)
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "DELETE" &&
+      url.pathname.startsWith("/api/plugins/gots/llm-providers/endpoints/")
+    ) {
+      // A custom endpoint removed (plugin/llm_providers.py): the address names it and there is no
+      // body. The one the bot's model runs on is refused in the plugin's own sentence — deleting it
+      // would unpick the model, which is a picker's decision, not this page's — and nothing is
+      // touched; any other endpoint goes with the key it was given, and the answer is the fresh
+      // block without its row.
+      const key = pluginProfile ?? ""
+      const id = decodeURIComponent(url.pathname.split("/").pop() ?? "")
+      const at = LLM_ENDPOINTS.findIndex((one) => one.id === id)
+      if (at < 0)
+        return json(res, 400, {
+          error: { message: `${id} isn't a custom endpoint this Hermes knows.` },
+        })
+      const held = LLM_ENDPOINTS[at]
+      if (held.current)
+        return json(res, 409, {
+          error: {
+            message: `This bot's model runs on ${held.name}. Switch the model first.`,
+            code: "endpoint_in_use",
+          },
+        })
+      LLM_ENDPOINTS.splice(at, 1)
+      llmKeys.delete(`${key}\ncustom:${id}`)
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      url.pathname === "/api/plugins/gots/llm-providers/endpoints" &&
+      req.method === "POST"
+    ) {
+      // A custom endpoint written (plugin/llm_providers.py). With an `id`, the body is a patch on the
+      // row that id names — the host writes the fields it carries and keeps every field it doesn't,
+      // which is what lets a form send only what changed — and without one, the write adds a row the
+      // name, base URL and model must all be given for. A name an endpoint already carries is refused
+      // (the host's upsert would merge onto that entry rather than add a second one), the id is the
+      // one the host slugs from the name, and a mask sent back as a key is refused as every write here
+      // refuses one.
+      const key = pluginProfile ?? ""
+      const body = await readBody(req)
+      const typed = typeof body?.key === "string" ? body.key.trim() : ""
+      if (typed && looksMasked(typed))
+        return json(res, 400, {
+          error: { message: "That is a masked key, not a key. Type the key itself." },
+        })
+      const id = typeof body?.id === "string" ? body.id : ""
+      if (id) {
+        const at = LLM_ENDPOINTS.findIndex((one) => one.id === id)
+        if (at < 0)
+          return json(res, 400, {
+            error: { message: `${id} isn't a custom endpoint this Hermes knows.` },
+          })
+        const held = LLM_ENDPOINTS[at]
+        const words = (field, fallback) => {
+          const sent = body?.[field]
+          return typeof sent === "string" && sent.trim() ? sent.trim() : fallback
+        }
+        LLM_ENDPOINTS[at] = {
+          ...held,
+          name: words("name", held.name),
+          base_url: words("base_url", held.base_url),
+          model: words("model", held.model),
+          // A field the body names is written as it stands, the empty string included: that is how a
+          // transport goes back to Automatic and a header comes off the entry.
+          transport: "transport" in body ? String(body.transport ?? "") : (held.transport ?? ""),
+          affinity: "affinity" in body ? String(body.affinity ?? "") : (held.affinity ?? ""),
+        }
+        if (typed) llmKeys.set(`${key}\ncustom:${id}`, typed)
+        return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+      }
+      const name = typeof body?.name === "string" ? body.name.trim() : ""
+      const baseUrl = typeof body?.base_url === "string" ? body.base_url.trim() : ""
+      const model = typeof body?.model === "string" ? body.model.trim() : ""
+      if (!(name && baseUrl && model))
+        return json(res, 400, {
+          error: { message: "A custom endpoint needs a name, a base URL and a model." },
+        })
+      const held = LLM_ENDPOINTS.find((one) => one.name.toLowerCase() === name.toLowerCase())
+      if (held)
+        return json(res, 400, {
+          error: {
+            message:
+              `This Hermes already has a custom endpoint named ${held.name}. ` +
+              "Adding one with that name would replace it instead of adding a new one.",
+          },
+        })
+      const added = slugEndpoint(name)
+      LLM_ENDPOINTS.push({
+        id: added,
+        name,
+        base_url: baseUrl,
+        model,
+        transport: typeof body?.transport === "string" ? body.transport : "",
+        affinity: typeof body?.affinity === "string" ? body.affinity : "",
+      })
+      if (typed) llmKeys.set(`${key}\ncustom:${added}`, typed)
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers") {
+      // The bot's LLM providers (plugin/llm_providers.py): the host's catalog filtered to the
+      // providers that take a key, then its custom endpoints, each key as the mask `mask_secret`
+      // makes of it — first four and last four, or `***` under its floor — and `null` where none is.
+      return json(res, 200, {
+        object: "gots.llm_providers",
+        llm: llmBlock(pluginProfile ?? ""),
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/delegation-settings") {

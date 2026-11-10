@@ -7,6 +7,7 @@ import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
+  Attachment,
   ClarifyAnswers,
   ClarifyQuestion,
   ModelChoice,
@@ -33,6 +34,7 @@ import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
+import { readLlmProviders, type LlmEndpointBody } from "@/lib/llm-providers"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -1314,6 +1316,101 @@ export async function setSttSetting(
   return readStt(((await response.json())?.stt ?? null) as unknown)
 }
 
+/**
+ * The API-key providers and custom endpoints this bot's Hermes holds, each key as the host masked
+ * it (`llm_providers.py`): one read for the page, and every write answers this same block again.
+ * Nothing here asks for a key, and nothing builds a mask — the string drawn is the host's own.
+ */
+export async function getLlmProviders(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers`, {
+    headers: headers(config),
+    signal,
+  })
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
+/**
+ * Replaces one key — a provider's catalog slug, or an endpoint's `custom:<id>` — with the key the
+ * user typed, and answers the fresh block, which is the only way the page learns the new mask. The
+ * host refuses a body whose key is a mask, and its sentence is what the screen shows. The key is
+ * never logged here: it rides the request body and nothing else.
+ */
+export async function setLlmProviderKey(
+  config: HermesConfig,
+  target: string,
+  key: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers/key`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ target, key }),
+    signal,
+  })
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
+/**
+ * Removes one provider's key — the slug the row names, which rides the address alone — and answers
+ * the fresh block, where that row is *Not set*. There is no body, because a removal has no key in it
+ * to send: nothing here holds, builds or compares one.
+ */
+export async function removeLlmProviderKey(
+  config: HermesConfig,
+  target: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/llm-providers/key/${encodeURIComponent(target)}`,
+    { method: "DELETE", headers: headers(config), signal },
+  )
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
+/**
+ * Writes one custom endpoint — the whole shape of a new one, or the fields an existing one changed —
+ * and answers the block with the row as the write left it, which is how the page learns the id the
+ * host slugged, the fields it now holds and the mask it made of the key. `id` is what makes the write
+ * an edit: the host then patches that entry and keeps every field the body doesn't carry, which is
+ * why the form sends only what changed. The host validates the URL, writes `providers.<id>` and puts
+ * the key in `.env` behind the entry's `key_env`; its refusal (a URL with no host, a name an endpoint
+ * already carries) is the sentence the screen shows. The key is never logged here: it rides the
+ * request body and nothing else.
+ */
+export async function saveLlmEndpoint(
+  config: HermesConfig,
+  body: LlmEndpointBody,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/llm-providers/endpoints`, {
+    method: "POST",
+    headers: headers(config),
+    // The body as the form built it: the id where it edits, the fields that changed, and a key only
+    // where one was typed. Nothing is added here that a form didn't hold.
+    body: JSON.stringify(body),
+    signal,
+  })
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
+/**
+ * Removes one custom endpoint — the endpoint and the key it was given, together — and answers the
+ * fresh block, which no longer holds that row. The endpoint's id rides the address alone: there is
+ * no body, and nothing here ever held the key. The host refuses the endpoint its model runs on, in
+ * its own sentence ("switch the model first"), which is what the screen shows.
+ */
+export async function removeLlmEndpoint(
+  config: HermesConfig,
+  target: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/llm-providers/endpoints/${encodeURIComponent(target)}`,
+    { method: "DELETE", headers: headers(config), signal },
+  )
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
 // `/delegation` is the subagent model's own route, so the tab's path is separate.
 export const GENERAL_ROUTES = {
   general: { path: "general", field: "general", label: "General" },
@@ -2431,17 +2528,40 @@ export async function grantCanvasTool(
 }
 
 /**
+ * A record of a file a caller saved for a canvas, as the plugin's first queued turn keeps one
+ * (`outbox.clean_files`): the name, type and size a file bubble draws, and where the host put it.
+ * It is the attachment it came from, less its bytes, so the two cannot drift apart.
+ */
+export type CanvasFile = Pick<Attachment, "name" | "type" | "size"> & { path: string }
+
+/**
  * A canvas from a prompt: the plugin writes the record and the chat, and queues the run that builds
  * it on the canvas's own session, so it is built with the app closed (ADR 0113).
+ *
+ * A start is one value on the wire: the chat the caller made for the canvas and the records it saved
+ * under that chat's session. The plugin opens the thread on that chat and its first turn carries
+ * those files (ADR 0131). The two only mean anything together — the files live under the session the
+ * chat names — so a caller that has neither leaves both out of the body rather than sending an empty
+ * half, and a create that names no start is a canvas from a prompt alone.
  */
 export async function createCanvas(
   config: HermesConfig,
-  input: { prompt: string; profileId: string; body?: Record<string, unknown> },
+  input: {
+    prompt: string
+    profileId: string
+    body?: Record<string, unknown>
+    start?: { chatId: string; files: CanvasFile[] }
+  },
 ) {
   const response = await request(canvasRoot(config), {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ prompt: input.prompt, profile_id: input.profileId, body: input.body }),
+    body: JSON.stringify({
+      prompt: input.prompt,
+      profile_id: input.profileId,
+      body: input.body,
+      ...(input.start ? { chat_id: input.start.chatId, files: input.start.files } : {}),
+    }),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return (await response.json())?.canvas as Record<string, unknown> | undefined
@@ -2544,6 +2664,11 @@ export interface MediaUrlAnswer {
   size: number
   /** When the signature runs out, in unix seconds; `null` where the host named no life at all. */
   expires: number | null
+  /**
+   * A page's folder, signed beside its URL (ADR 0135): the address its `<base href>` points at, so it
+   * loads its own files from there and below. Only an HTML file has one, and only on a host that serves it.
+   */
+  folder?: string
 }
 
 /**
@@ -2574,6 +2699,7 @@ export async function getPluginMediaUrl(
     size: Number(body.size ?? 0),
     // An older plugin's mint names no life for the URL it hands over.
     expires: Number(body.expires) > 0 ? Number(body.expires) : null,
+    ...(typeof body.folder === "string" && body.folder ? { folder: body.folder } : {}),
   }
 }
 

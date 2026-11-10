@@ -359,5 +359,185 @@ class SignatureTest(unittest.TestCase):
         self.assertEqual(media.signing_key(store), first, "a second ask keeps the same secret")
 
 
+try:
+    from aiohttp import web as _web
+    from aiohttp.test_utils import TestClient as _TestClient, TestServer as _TestServer
+except ImportError:  # CI installs no aiohttp; the case runs wherever the host's own is on the path.
+    _web = None
+
+
+APP_ORIGIN = "https://app.test"
+
+
+@unittest.skipIf(_web is None, "needs aiohttp")
+class PageReadCorsTest(unittest.TestCase):
+    """The app reads an HTML file's text with ``fetch`` from its own origin, so the signed media
+    route's answer has to carry the adapter's CORS headers for that origin.
+
+    The headers are the adapter's CORS middleware's, which decorates a response once its handler
+    returns — the route answers a plain file response rather than a stream it prepared itself (which
+    is why ``stream.sse_headers`` puts CORS in up front and this route needn't). The middleware here
+    stands in for Hermes's own ``cors_middleware``, as it reads the adapter.
+    """
+
+    def test_a_signed_html_get_from_the_app_origin_carries_its_cors_headers(self) -> None:
+        import asyncio
+
+        import plugin
+        from plugin.tests._helpers import Context, RouteAdapter, temp_hermes_home
+
+        home = temp_hermes_home(self)
+        page = home / "report.html"
+        page.write_text("<!doctype html><p>hi</p>")
+
+        class Adapter(RouteAdapter):
+            def _cors_headers_for_origin(self, origin: str):
+                if origin != APP_ORIGIN:
+                    return None
+                return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+
+        @_web.middleware
+        async def cors_middleware(request, handler):
+            adapter = request.app["api_server_adapter"]
+            headers = adapter._cors_headers_for_origin(request.headers.get("Origin", ""))
+            response = await handler(request)
+            if headers is not None:
+                response.headers.update(headers)
+            return response
+
+        adapter = Adapter()
+        app = _web.Application(middlewares=[cors_middleware])
+        app["api_server_adapter"] = adapter
+        for module in (plugin.sessions, plugin.approvals):
+            self.addCleanup(setattr, module, "adapter", getattr(module, "adapter", None))
+        context = Context()
+        plugin.register(context)
+        context.platforms["api_server"](app, adapter)
+
+        async def asked():
+            async with _TestClient(_TestServer(app)) as client:
+                minted = await client.post(plugin.PREFIX + "/media/url", json={"path": str(page)})
+                url = urlsplit((await minted.json())["url"])
+                served = await client.get(
+                    f"{url.path}?{url.query}", headers={"Origin": APP_ORIGIN}
+                )
+                return served.status, served.headers, await served.text()
+
+        with mock.patch.dict(sys.modules, gateway_stub(lambda path: path)):
+            status, headers, text = asyncio.run(asked())
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["access-control-allow-origin"], APP_ORIGIN)
+        self.assertTrue(headers["content-type"].startswith("text/html"))
+        self.assertEqual(text, "<!doctype html><p>hi</p>")
+
+
+class FolderTokenTest(unittest.TestCase):
+    """A page's folder token: one folder, one profile, minutes long, and never a file's token."""
+
+    KEY = b"\x01" * 32
+
+    def test_a_folder_token_names_its_folder_and_nothing_else(self) -> None:
+        folder = Path("/home/h/site")
+        token, expires = media.mint_folder(self.KEY, folder, "work", now=1000)
+        self.assertEqual(media.folder_covered(self.KEY, token, "work", now=1001), folder)
+        self.assertIsNone(media.folder_covered(self.KEY, token, "default", now=1001))
+        self.assertIsNone(media.folder_covered(self.KEY, token, "work", now=expires))
+        other = media._encode_folder("/home/h") + token[token.index("."):]
+        self.assertIsNone(media.folder_covered(self.KEY, other, "work", now=1001))
+        for mangled in ("", ".", "abc", "abc.1000.x"):
+            self.assertIsNone(media.folder_covered(self.KEY, mangled, "work", now=1001), mangled)
+
+    def test_a_files_token_never_covers_its_folder(self) -> None:
+        signed, _ = media.mint(self.KEY, "/home/h/site", "work", now=1000)
+        token = media._encode_folder("/home/h/site") + "." + signed
+        self.assertIsNone(media.folder_covered(self.KEY, token, "work", now=1001))
+
+
+@unittest.skipIf(_web is None, "needs aiohttp")
+class PageFolderRouteTest(unittest.TestCase):
+    """The route a previewed page's ``<base href>`` points at (ADR 0135)."""
+
+    def test_a_folder_token_serves_files_under_its_folder_and_refuses_up_a_link_out_and_another_folder(
+        self,
+    ) -> None:
+        import asyncio
+
+        import plugin
+        from plugin.tests._helpers import Context, RouteAdapter, temp_hermes_home
+
+        home = temp_hermes_home(self)
+        site = home / "site"
+        (site / "img").mkdir(parents=True)
+        (site / "report.html").write_text("<link rel=stylesheet href=style.css>")
+        (site / "style.css").write_text("body{color:red}")
+        (site / "img" / "a b.png").write_bytes(b"\x89PNG")
+        (site / "font.woff2").write_bytes(b"wOF2")
+        (home / "secret.txt").write_text("above")
+        (site / "out.txt").symlink_to(home / "secret.txt")
+        other = home / "other"
+        other.mkdir()
+        (other / "o.html").write_text("<p>o</p>")
+        (other / "x.css").write_text("x")
+
+        adapter = RouteAdapter()
+        app = _web.Application()
+        app["api_server_adapter"] = adapter
+        for module in (plugin.sessions, plugin.approvals):
+            self.addCleanup(setattr, module, "adapter", getattr(module, "adapter", None))
+        context = Context()
+        plugin.register(context)
+        context.platforms["api_server"](app, adapter)
+
+        async def folder_of(client, path: Path) -> str:
+            minted = await client.post(plugin.PREFIX + "/media/url", json={"path": str(path)})
+            body = await minted.json()
+            return urlsplit(body["folder"]).path
+
+        async def get(client, url: str):
+            served = await client.get(url)
+            return served.status, served.headers, await served.read()
+
+        async def asked():
+            async with _TestClient(_TestServer(app)) as client:
+                base = await folder_of(client, site / "report.html")
+                theirs = await folder_of(client, other / "o.html")
+                plain = await client.post(
+                    plugin.PREFIX + "/media/url", json={"path": str(site / "style.css")}
+                )
+                return {
+                    "base": base,
+                    "plain": await plain.json(),
+                    "css": await get(client, base + "style.css"),
+                    "img": await get(client, base + "img/a%20b.png"),
+                    "font": await get(client, base + "font.woff2"),
+                    "up": await get(client, base + "..%2Fsecret.txt"),
+                    "up_raw": await get(client, base + "img/%2E%2E/%2E%2E/secret.txt"),
+                    "link": await get(client, base + "out.txt"),
+                    "folder": await get(client, base),
+                    "forged": await get(client, base.replace("/page/", "/page/x") + "style.css"),
+                    "theirs": await get(client, theirs + "x.css"),
+                    "theirs_mine": await get(client, theirs + "style.css"),
+                }
+
+        with mock.patch.dict(sys.modules, gateway_stub(lambda path: path)):
+            got = asyncio.run(asked())
+        self.assertTrue(got["base"].endswith("/"), got["base"])
+        self.assertIn("/media/page/", got["base"])
+        self.assertNotIn("folder", got["plain"], "only a page is handed its folder")
+        status, headers, body = got["css"]
+        self.assertEqual((status, body), (200, b"body{color:red}"))
+        self.assertTrue(headers["content-type"].startswith("text/css"))
+        self.assertEqual(headers["access-control-allow-origin"], "*")
+        self.assertEqual(got["img"][0], 200)
+        self.assertTrue(got["img"][1]["content-type"].startswith("image/png"))
+        self.assertEqual(got["font"][0], 200)
+        self.assertTrue(got["font"][1]["content-type"].startswith("font/woff2"))
+        for refused in ("up", "up_raw", "link", "folder", "theirs_mine"):
+            self.assertEqual(got[refused][0], 404, refused)
+            self.assertNotIn(b"above", got[refused][2], refused)
+        self.assertEqual(got["forged"][0], 401)
+        self.assertEqual(got["theirs"][0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

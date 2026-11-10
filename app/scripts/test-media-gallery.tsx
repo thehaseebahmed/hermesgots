@@ -298,3 +298,37 @@ test("a cell whose picture the browser couldn't decode says so, and keeps its pl
     assert.ok(gallery()?.contains(cell("cat.png")), "and it never becomes a download row")
   })
 })
+
+const report: Attachment = {
+  id: "report",
+  name: "report.html",
+  type: "text/html",
+  size: 300,
+  image: false,
+  path: `${HOST}/report.html`,
+}
+
+test("a page is a row of its own, and the Previewer steps from it to the photo beside it", async () => {
+  const profile = botProfile("media-page", { apiKey: undefined })
+  await seedChat({ id: "c1", profile, messages: [message([photo, report])] })
+  mediaHost({ host: "media-page" })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("report.html")), "the page's row")
+    assert.equal(gallery()?.contains(cell("report.html")), false, "a page is not a Gallery cell")
+    assert.ok(missing('button[aria-label="Download report.html"]'), "nor a file handed over")
+
+    await click(cell("report.html"))
+    const frame = () => document.querySelector('[role="dialog"] iframe')
+    await until(async () => frame() !== null, "the page drawn in the Previewer")
+    assert.equal(frame()!.getAttribute("sandbox"), "allow-scripts")
+
+    await click(labelled("button", "Previous"))
+    await until(
+      async () => document.querySelector('[role="dialog"] img[alt="cat.png"]') !== null,
+      "the photo beside it",
+    )
+    assert.equal(frame(), null, "the page's frame is gone once stepped away")
+    await click(labelled("button", "Next"))
+    await until(async () => frame() !== null, "and the page again")
+  })
+})

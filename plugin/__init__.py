@@ -50,6 +50,7 @@ from . import (
     host_model,
     library,
     link,
+    llm_providers,
     mcp,
     media,
     model_changes,
@@ -370,6 +371,8 @@ def mirror_for_profiles(app: Any, web: Any) -> None:
 
     for route in list(app.router.routes()):
         path = route.resource.canonical if route.resource else ""
+        # A canonical path drops a variable's pattern: a page's file route takes the rest of the path.
+        path = path.replace("{rest}", "{rest:.*}")
         if route.method == "HEAD" or not path.startswith(PREFIX + "/"):
             continue
         app.router.add_route(
@@ -565,6 +568,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The General page mirrors this Hermes's own Dashboard form; a host that has no schema to
         # copy advertises nothing, and the app keeps the page it has (general.py's gate).
         general_features = await asyncio.to_thread(_advertised, general.FEATURES)
+        # The LLM Providers page is drawn from this Hermes's own provider catalog, and a key is only
+        # ever shown as the mask that Hermes makes of it; a host with neither withholds the page
+        # (llm_providers.py's gate), so an older plugin keeps the settings list it has.
+        llm_features = await asyncio.to_thread(_advertised, llm_providers.FEATURES)
         # The session's own queue is read through Hermes's admission ledger and cleared through the
         # authority that owns it; a host with either missing offers no card at all, rather than an
         # empty one that reads as "nothing is waiting" (pending.available says which moved).
@@ -586,6 +593,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "chats",
                     *rooms_features,
                     *general_features,
+                    *llm_features,
                     "draft_text",
                     "context",
                     "todos",
@@ -637,6 +645,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # apart from `media` because a host from before it serves the file but can't
                     # sign for one, and the app would ask a route that isn't there.
                     "media_url",
+                    # A page's folder, signed beside its URL and served under `media/page/<token>/`,
+                    # so the Previewer's page loads its own files (ADR 0135).
+                    "media_page",
                     "profile_routes",
                     "pr_tool",
                     "close",
@@ -2623,16 +2634,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         url, expires = media.signed_url(
             request, key, path, _request_profile() or "", {"path": path}
         )
-        return web.json_response(
-            {
-                "object": "gots.media_url",
-                "path": path,
-                "url": url,
-                "expires": expires,
-                "type": media.content_type(file),
-                "size": await asyncio.to_thread(lambda: file.stat().st_size),
-            }
-        )
+        answer = {
+            "object": "gots.media_url",
+            "path": path,
+            "url": url,
+            "expires": expires,
+            "type": media.content_type(file),
+            "size": await asyncio.to_thread(lambda: file.stat().st_size),
+        }
+        if answer["type"] == "text/html":
+            # A page also gets its folder's address, which the Previewer puts in its `<base href>` so
+            # the page loads its own files from there and below (ADR 0135). Same life as the URL.
+            answer["folder"], _ = media.page_url(
+                request, key, file.parent.resolve(), _request_profile() or ""
+            )
+        return web.json_response(answer)
 
     async def serve_media(request: "web.Request") -> "web.StreamResponse":
         """The media route: this bot's key, or — where an element can't carry one — a URL it signed."""
@@ -2652,7 +2668,43 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 return denied
         return await served_file(request, media.media_file)
 
+    async def serve_page_file(request: "web.Request") -> "web.StreamResponse":
+        """A page's own file: one under the folder its token was signed for (ADR 0135).
+
+        The token is the address's own segment, so the page's ``<base href>`` resolves every relative
+        URL — the ones its markup names and the ones its scripts build — to a request here. Nothing
+        above the folder is served, and nothing through a link out of it. The answer says ``*`` for
+        CORS: the frame asking has an opaque origin (``null``), a font or a module script is only
+        read with CORS, and the token, not the origin, is what lets a request in.
+        """
+        key = await asyncio.to_thread(media.signing_key, store_path())
+        folder = await asyncio.to_thread(
+            media.folder_covered, key, request.match_info.get("token", ""), _request_profile() or ""
+        )
+        cors = {"Access-Control-Allow-Origin": "*"}
+        if folder is None:
+            response = _error(web, "Unauthorized", 401)
+            response.headers.update(cors)
+            return response
+        try:
+            file = await asyncio.to_thread(
+                media.folder_file, folder, request.match_info.get("rest", "")
+            )
+        except media.MediaError as error:
+            response = _error(web, str(error), error.status)
+            response.headers.update(cors)
+            return response
+        headers = {
+            "content-type": media.page_content_type(file),
+            "accept-ranges": "bytes",
+            "cache-control": f"private, max-age={media.URL_LIFETIME_S}",
+            "x-content-type-options": "nosniff",
+            **cors,
+        }
+        return web.FileResponse(file, headers=headers)
+
     app.router.add_get(f"{PREFIX}/media", serve_media)
+    app.router.add_get(f"{PREFIX}/media/{media.PAGE_SEGMENT}/{{token}}/{{rest:.*}}", serve_page_file)
     app.router.add_post(f"{PREFIX}/media/url", sign_media_url)
 
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
@@ -2885,6 +2937,145 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             ),
         )
 
+    # The bot's LLM providers, each key as the mask the host made of it (llm_providers.py): the page
+    # is drawn from the host's own catalog and its own custom-endpoint list, so a provider Hermes
+    # adds later is a row without an app release. All five routes answer the one block, so the page
+    # has one loading state, one refusal banner and no cache.
+    def llm_route(
+        *,
+        action: Callable[..., Dict[str, Any]],
+        unavailable: str,
+        failed: str,
+        logged: str,
+        needs_body: Optional[str] = None,
+        whole: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        target: bool = False,
+    ):
+        """One LLM Providers route: the page's own ladder, and the block every answer carries.
+
+        ``action`` is the domain call. It is handed the profile's ``config.yaml`` and then what the
+        route reads — the body, where ``needs_body`` is the sentence for one this route can't use
+        and ``whole`` what a body has to carry for it; or the target its address names (``target``);
+        or nothing at all. Everything else is the same on all five, so it is written once: the API
+        server's own auth check, the profile's scope, the thread the work runs on, a ``ValueError``
+        as the 400 in the domain's sentence, an ``EndpointInUse`` as the plan's 409 under
+        ``endpoint_in_use``, an ``ImportError`` as the 501 that says this host can't do it at all,
+        and anything else as this route's own 502 (``logged`` is the warning it leaves behind) —
+        never the host's exception text, which the app promises never to draw.
+        """
+
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            given: Optional[Dict[str, Any]] = None
+            if needs_body is not None:
+                given = await json_body(request)
+                if not given or (whole is not None and not whole(given)):
+                    return _error(web, needs_body, 400)
+            segment = str(request.match_info.get("target") or "").strip() if target else ""
+            config_path = host_config_path()
+            scope = profile_scope()
+
+            def run() -> Dict[str, Any]:
+                with scope():
+                    if needs_body is not None:
+                        return action(config_path, given)
+                    if target:
+                        return action(config_path, segment)
+                    return action(config_path)
+
+            try:
+                payload = await asyncio.to_thread(run)
+            except llm_providers.EndpointInUse as error:
+                return _error(web, str(error), 409, code="endpoint_in_use")
+            except ValueError as error:
+                return _error(web, str(error), 400)
+            except ImportError:
+                return _error(web, unavailable, 501)
+            except Exception:
+                logger.warning(logged, exc_info=True)
+                return _error(web, failed, 502)
+            return web.json_response({"object": "gots.llm_providers", "llm": payload})
+
+        return handler
+
+    # The page's one read. The 502 is this route's own sentence: what is read is the host's catalog,
+    # its env and its endpoint list, not the bot's General config the settings pages' read speaks of.
+    app.router.add_get(
+        f"{PREFIX}/llm-providers",
+        llm_route(
+            action=llm_providers.read,
+            unavailable="This Hermes version can't show its API-key providers.",
+            failed="The host couldn't list its API-key providers.",
+            logged="gots: couldn't read the host's API-key providers",
+        ),
+    )
+
+    # One key replaced, addressed by a catalog slug or an endpoint's `custom:<id>`: one address, one
+    # key, whatever kind of row owns it. A body whose key is a mask is refused by the domain's own
+    # host rule, and the key is neither logged nor echoed — this route's 502 is the plugin's
+    # sentence, since the host's own could hold the value.
+    app.router.add_post(
+        f"{PREFIX}/llm-providers/key",
+        llm_route(
+            action=lambda config_path, body: llm_providers.write_key(
+                config_path, body["target"], body["key"]
+            ),
+            needs_body="Body needs a target and a key.",
+            whole=lambda one: isinstance(one.get("target"), str)
+            and bool(one["target"].strip())
+            and isinstance(one.get("key"), str),
+            unavailable="This Hermes version can't write an API key from here.",
+            failed="The host couldn't save the key.",
+            logged="gots: couldn't write this bot's provider key",
+        ),
+    )
+
+    # One provider's key removed: the address names it and there is no body, since a removal has no
+    # key in it to send, log or echo. The lifecycle's own removal is idempotent, so a key that was
+    # already absent answers the block rather than a refusal.
+    app.router.add_delete(
+        f"{PREFIX}/llm-providers/key/{{target}}",
+        llm_route(
+            action=llm_providers.remove_key,
+            target=True,
+            unavailable="This Hermes version can't remove an API key from here.",
+            failed="The host couldn't remove the key.",
+            logged="gots: couldn't remove this bot's provider key",
+        ),
+    )
+
+    # One custom endpoint added or edited: the body's name, base URL and model, with the transport and
+    # affinity header where it sends them and its id where the page is editing one. The entry is built
+    # by the host's own builder and laid over the one stored (llm_providers.py), so a refusal — a URL
+    # with no host, a name an endpoint already carries, an id this host doesn't list — is answered as a
+    # 400 the user can read. The key is optional, and an absent one leaves the stored key alone.
+    app.router.add_post(
+        f"{PREFIX}/llm-providers/endpoints",
+        llm_route(
+            action=llm_providers.add_endpoint,
+            needs_body="Body needs a name, a base URL and a model.",
+            unavailable="This Hermes version can't add a custom endpoint from here.",
+            failed="The host couldn't add that endpoint.",
+            logged="gots: couldn't add this bot's custom endpoint",
+        ),
+    )
+
+    # One custom endpoint removed, its id in the address and no body at all. The row the bot's model
+    # runs on is the plan's 409 under `endpoint_in_use` — switching a model is Hermes's own picker's
+    # decision — and every other refusal is a 400. The route never sees a key.
+    app.router.add_delete(
+        f"{PREFIX}/llm-providers/endpoints/{{target}}",
+        llm_route(
+            action=llm_providers.remove_endpoint,
+            target=True,
+            unavailable="This Hermes version can't remove a custom endpoint from here.",
+            failed="The host couldn't remove that endpoint.",
+            logged="gots: couldn't remove this bot's custom endpoint",
+        ),
+    )
+
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)
         runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))
@@ -3045,7 +3236,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.canvases", "canvases": rows})
 
     async def create_canvas(request: "web.Request") -> "web.Response":
-        """A canvas from a prompt: the record, its chat, and the run that builds it, queued."""
+        """A canvas from a prompt: the record, its chat, and the run that builds it, queued.
+
+        A start that carries files names the chat it made for the canvas and the records it saved
+        under that chat's session, and both go to the store as they came; one that names neither
+        is a start with a prompt alone, which the store mints a chat for.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3061,6 +3257,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 bot_id=body.get("profile_id"),
                 prompt=body.get("prompt"),
                 body=body.get("body"),
+                chat_id=body.get("chat_id"),
+                files=body.get("files"),
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)

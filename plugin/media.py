@@ -13,6 +13,8 @@ has already drawn it keeps on the device in its own bounded cache, so the route 
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import re
@@ -333,3 +335,104 @@ def media_file(path_str: str) -> Path:
     so the only rules are Hermes's path validation and the size cap.
     """
     return _validated_path(path_str, "No such file.")
+
+
+# A page's folder (ADR 0135): one token over the folder an HTML file lies in, so the page the
+# Previewer draws can load its own stylesheets, scripts, images and fonts by relative path — those its
+# markup names and those its scripts build — from that folder and below, and nothing above it.
+#
+# The token travels in the address's path, not its query, because a ``<base href>`` resolves a
+# relative URL against the path and drops the query. It names the folder (so the route needs no other
+# state), an expiry, and a signature over both and the profile. What is signed is the folder with a
+# prefix no file path can carry, so a folder's token never covers a file's ``/media`` read and a
+# file's never covers a folder.
+PAGE_SEGMENT = "page"
+_FOLDER_PREFIX = "folder:"
+
+# What a page loads that the media route has no type for: fonts and a module's wasm.
+PAGE_TYPES: Dict[str, str] = {
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".wasm": "application/wasm",
+    ".map": "application/json",
+}
+
+
+def page_folder(path_str: str) -> Path:
+    """The folder a page's local files are served from: the one its validated file lies in."""
+    return media_file(path_str).parent.resolve()
+
+
+def _encode_folder(folder: str) -> str:
+    return base64.urlsafe_b64encode(folder.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_folder(encoded: str) -> Optional[str]:
+    try:
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        return raw.decode("utf-8")
+    except (binascii.Error, ValueError):
+        return None
+
+
+def mint_folder(
+    key: bytes,
+    folder: Path,
+    profile: str,
+    lifetime: int = URL_LIFETIME_S,
+    now: Optional[float] = None,
+) -> Tuple[str, int]:
+    """A token over one folder, this profile and an expiry — ``<folder>.<expires>.<signature>`` —
+    and the moment it runs out."""
+    signed, expires = mint(key, _FOLDER_PREFIX + str(folder), profile, lifetime, now)
+    return f"{_encode_folder(str(folder))}.{signed}", expires
+
+
+def folder_covered(key: bytes, token: str, profile: str, now: Optional[float] = None) -> Optional[Path]:
+    """The folder this token was signed for, if it was signed here for this profile and hasn't run
+    out; else ``None``."""
+    encoded, _, signed = (token or "").partition(".")
+    folder = _decode_folder(encoded) if encoded else None
+    if not folder or not covers(key, signed, _FOLDER_PREFIX + folder, profile, now):
+        return None
+    return Path(folder)
+
+
+def page_url(request: Any, key: bytes, folder: Path, profile: str) -> Tuple[str, int]:
+    """The address of a page's folder, beside the mint that asked: ``…/media/page/<token>/``.
+
+    Like :func:`signed_url` it rewrites the request's own URL, so a bot at ``/p/<profile>`` hands out
+    an address its own gateway serves; it ends in a slash so it is a ``<base href>`` as it stands.
+    """
+    token, expires = mint_folder(key, folder, profile)
+    base = request.path.removesuffix("/url") + f"/{PAGE_SEGMENT}/{token}/"
+    return str(request.url.with_path(base).with_query({})), expires
+
+
+def folder_file(folder: Path, rest: str) -> Path:
+    """The file ``rest`` names under ``folder``, or raises :class:`MediaError`.
+
+    ``rest`` is the decoded path after the token. A ``..`` or an absolute part is refused before
+    anything is read; the joined path is then resolved — symlinks too — and has to still lie under
+    the folder, so a link out of it is refused like a ``../``. Hermes's own check and the media
+    route's size cap apply to what is left, as they do to any file this plugin serves.
+    """
+    missing = "No such file."
+    parts = [part for part in (rest or "").split("/") if part not in ("", ".")]
+    if not parts or any(part == ".." or "\\" in part or "\x00" in part for part in parts):
+        raise MediaError(missing, 404)
+    try:
+        root = folder.resolve(strict=True)
+        candidate = root.joinpath(*parts).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise MediaError(missing, 404)
+    if candidate == root or not candidate.is_relative_to(root):
+        raise MediaError(missing, 404)
+    return _validated_path(str(candidate), missing)
+
+
+def page_content_type(path: Path) -> str:
+    """What a page's own file is served as: the media route's type, or a font's or a module's."""
+    return PAGE_TYPES.get(path.suffix.lower()) or content_type(path)

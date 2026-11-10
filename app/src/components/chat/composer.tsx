@@ -127,6 +127,8 @@ export function Composer({
   files = !plain,
   maxAttachments,
   placeholder,
+  fieldLabel = "Message",
+  sendLabel = "Send",
 }: {
   busy: boolean
   /** Whether a message sent while a reply runs steers it unless it starts with `/queue`. */
@@ -198,6 +200,13 @@ export function Composer({
   maxAttachments?: number
   /** The field's placeholder; a chat's is `Message <bot>…`. */
   placeholder?: string
+  /**
+   * What a reader hears the field called: a chat's `Message`, and the words of a surface that asks
+   * for something other than a message — a canvas's `What the canvas should be`.
+   */
+  fieldLabel?: string
+  /** What the submit button is called: `Send` where a message goes, `Make it` where a canvas starts. */
+  sendLabel?: string
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -206,9 +215,15 @@ export function Composer({
    * A point is a chip the message carries, as an attachment is: it goes with the send that takes it,
    * and a send the host never took hands it back.
    */
-  const [points, setPoints] = useState<CanvasPoint[]>([])
-  const [pointing, setPointing] = useState(false)
   const pointAt = useCanvasPoints()
+  const [points, setPoints] = useState<CanvasPoint[]>(() => {
+    // An element picked on the page for this chat, before it was drawn: the page unmounts the chat it
+    // was pointed from, so the answer is taken here — once, as the field's first chip — rather than
+    // handed in as a prop that a screen no longer on top could never give.
+    const picked = pointAt?.take?.()
+    return picked ? [picked] : []
+  })
+  const [pointing, setPointing] = useState(false)
   /**
    * The staged files the Host refused, each with its own sentence: a tile the user can take off,
    * rather than a message the whole of which was refused with no word about which file it was. A
@@ -575,10 +590,15 @@ export function Composer({
 
   // Only a chat drawn beside a canvas's page offers this: the press arms the page, and the chip it
   // answers with rides the next message. It is asked for in the `+` sheet, where the other ways to
-  // add context are, rather than as a fourth control on the toolbar's own row.
+  // add context are, rather than as a fourth control on the toolbar's own row. A provider that names
+  // `onArm` is a screen whose page is somewhere else — the phone's edit screen — so the press sends
+  // the reader there and leaves this composer's own press alone: nothing here is armed to wait for.
   const point =
     pointAt && !disabled
-      ? { armed: pointing, onArm: () => setPointing((was) => !was) }
+      ? {
+          armed: pointing,
+          onArm: () => (pointAt.onArm ? pointAt.onArm() : setPointing((was) => !was)),
+        }
       : undefined
 
   const attach = files ? (
@@ -783,7 +803,7 @@ export function Composer({
           size="icon-sm"
           className="size-11 rounded-full"
           disabled={!canSend}
-          aria-label="Send"
+          aria-label={sendLabel}
         >
           <ArrowUpIcon />
         </InputGroupButton>
@@ -879,7 +899,7 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={cn("max-h-48 min-h-12 px-5 pt-4 pb-2 text-base md:text-[15px]", face)}
-          aria-label="Message"
+          aria-label={fieldLabel}
         />
         <InputGroupAddon
           align="block-end"

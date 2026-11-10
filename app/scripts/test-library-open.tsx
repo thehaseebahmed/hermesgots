@@ -1,8 +1,8 @@
 /**
- * A library's files open the way the app opens any file it holds (ADR 0071, ADR 0111): a photo, a
- * clip or a recording in the app's own Previewer from a URL the bot signs, and anything else handed
- * to the platform, which shows or saves it. Nothing is fetched into this app as bytes first, and no
- * object URL of this device's making is drawn from.
+ * A library's files open the way the app opens any file it holds (ADR 0071, ADR 0111, ADR 0134): a
+ * photo, a clip, a recording or a page in the app's own Previewer from a URL the bot signs, and
+ * anything else handed to the platform, which shows or saves it. Nothing is fetched into this app as
+ * bytes first, and no object URL of this device's making is drawn from.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -53,6 +53,23 @@ const folders: LibraryFolder[] = [
         folder: "library-tab",
         worktree: "a-session",
         size: 4096,
+        at: 1,
+      },
+    ],
+  },
+]
+
+/** A page an agent left in the library: the Previewer draws it, the platform never gets it. */
+const page: LibraryFolder[] = [
+  {
+    name: "library-tab",
+    files: [
+      {
+        name: "report.html",
+        path: "/home/h/.hermes/library/library-tab/report.html",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 512,
         at: 1,
       },
     ],
@@ -124,6 +141,35 @@ test("a library file opens through the app's previewer, from a URL the bot signs
       )
       assert.equal(text().includes("MEDIA:"), false, "and nothing of a tag reaches the screen")
     })
+  } finally {
+    browser.restore()
+  }
+})
+
+test("Library opens an .html in the Previewer, not the platform", async () => {
+  const asked = mediaHost()
+  const browser = spyOpen()
+  try {
+    await mount(
+      <LibraryTree config={config} folders={page} order={{ key: "date", dir: "desc" }} />,
+      async () => {
+        await click(row("library-tab"))
+        await until(async () => row("report.html") !== null, "the folder's files")
+        await click(row("report.html"))
+        await until(
+          async () => document.querySelector('[role="dialog"] iframe') !== null,
+          "the page in the Previewer",
+        )
+        const frame = document.querySelector<HTMLIFrameElement>('[role="dialog"] iframe')!
+        assert.equal(frame.getAttribute("sandbox"), "allow-scripts", "drawn in the sandbox")
+        assert.equal(browser.opened.length, 0, "a page stays in the app")
+        assert.deepEqual(
+          mediaReads(asked).map((path) => path.split("/").pop()),
+          ["report.html"],
+          "the page's URL is signed, as for any file the Library opens",
+        )
+      },
+    )
   } finally {
     browser.restore()
   }
