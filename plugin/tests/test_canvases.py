@@ -858,7 +858,7 @@ class SessionTest(unittest.TestCase):
                 )
             )
             self.assertIn("doc", neither["error"])
-        # And outside a canvas's session neither data tool answers anything of a canvas.
+        # A call that names no canvas from a session that is not one has none to work on.
         with mock.patch.object(canvases, "_session_canvas", return_value=None):
             self.assertIn("error", json.loads(canvases.handle_data_read({}, session_id="s")))
             self.assertIn(
@@ -896,6 +896,60 @@ class SessionTest(unittest.TestCase):
                 )
             )
             self.assertEqual(one["document"]["doc"], {"km": 5})
+
+    def test_a_name_that_is_two_canvases_or_none_is_refused(self) -> None:
+        # A name is how a user says which canvas, and a title two canvases carry names neither: the
+        # refusal hands back both ids, which is the one thing that tells them apart.
+        again = make_canvas(self.path)
+        self.assertEqual(again["title"], self.canvas["title"])
+        with mock.patch.object(canvases, "_session_canvas", return_value=None):
+            two = json.loads(
+                canvases.handle_data_read({"canvas": self.canvas["title"]}, session_id=self.plain)
+            )
+            self.assertIn(self.canvas["id"], two["error"])
+            self.assertIn(again["id"], two["error"])
+            # An id, though, is one canvas however many titles answer to one name.
+            one = json.loads(
+                canvases.handle_data_read({"canvas": again["id"]}, session_id=self.plain)
+            )
+            self.assertEqual(one, {"documents": []})
+            never = json.loads(
+                canvases.handle_data_read({"canvas": "No such canvas"}, session_id=self.plain)
+            )
+            self.assertIn("No such canvas", never["error"])
+            # A call that names no canvas from a session that has none says what is missing.
+            unnamed = json.loads(canvases.handle_data_read({}, session_id=self.plain))
+            self.assertIn("canvas", unnamed["error"])
+
+    def test_a_canvas_session_works_on_its_own_data_and_no_others(self) -> None:
+        other = canvases.create(
+            self.path, request_profile="default", bot_id="bot-1", prompt="A weather page", body=BODY
+        )
+        with mock.patch.object(canvases, "_session_canvas", return_value=self.canvas["id"]):
+            # Its own canvas, named or not, is the one it works on.
+            self.assertNotIn(
+                "error",
+                json.loads(
+                    canvases.handle_data_write(
+                        {"canvas": self.canvas["id"], "collection": "runs", "id": "a", "doc": 1},
+                        session_id=self.session,
+                    )
+                ),
+            )
+            self.assertNotIn(
+                "error",
+                json.loads(
+                    canvases.handle_data_write(
+                        {"collection": "runs", "id": "b", "doc": 2}, session_id=self.session
+                    )
+                ),
+            )
+            # Another canvas is not its own, by either name it carries.
+            for name in (other["id"], other["title"]):
+                refused = json.loads(
+                    canvases.handle_data_read({"canvas": name}, session_id=self.session)
+                )
+                self.assertIn("own canvas", refused["error"])
 
 
 class EditTest(unittest.TestCase):

@@ -29,7 +29,9 @@ A canvas also keeps data of its own: JSON documents in collections (``data``, ``
 ``canvas_data_read`` and ``canvas_data_write``. The data is the canvas's, not a version's — a
 write or an undo never touches it — so a page keeps its state through a version the user walks
 back, and the whole of it is capped at ``DATA_BYTES`` because every open and every device's copy
-carries it.
+carries it. Those two tools answer every session of the bot, because keeping a canvas's data is not
+writing its page: a call outside the canvas's own session names the canvas by its name or its id
+(``named``), and a canvas's session keeps that canvas's data and no other's.
 
 A page calls a tool on the host only when the version it is drawn from declared that tool, and only
 once the user has answered for it: ``may_call`` reads the version's list and the canvas's own grant
@@ -355,6 +357,35 @@ def listing(path: Path) -> List[Dict[str, Any]]:
     finally:
         conn.close()
     return [_row(row) for row in rows]
+
+
+def named(path: Path, name: Any) -> str:
+    """The canvas a name stands for: its id, or a title only one canvas carries.
+
+    A name is how a bot that is not in a canvas's session reaches one, so it takes what a user says
+    about a canvas and what the app's own address carries. An id answers first and alone, a title
+    exact before the case and the spaces around it are forgiven, and a title two canvases share is
+    refused with both ids — a guess there would write to whichever row sorted first.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise CanvasError("A canvas is named by its name or its id.")
+    name = name.strip()
+    if not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    if record(path, name) is not None:
+        return name
+    rows = listing(path)
+    matches = [row for row in rows if row["title"] == name]
+    if not matches:
+        matches = [row for row in rows if row["title"].strip().lower() == name.lower()]
+    if not matches:
+        raise CanvasError(f"There is no canvas called {name!r}.", 404)
+    if len(matches) > 1:
+        held = ", ".join(f"{row['title']} ({row['id']})" for row in matches)
+        raise CanvasError(
+            f"More than one canvas is called {name!r}: {held}. Name the one you mean by its id."
+        )
+    return matches[0]["id"]
 
 
 def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[Dict[str, Any]]:
@@ -1480,14 +1511,22 @@ EDIT_SCHEMA = {
 DATA_READ_SCHEMA = {
     "name": TOOL_DATA_READ,
     "description": (
-        "Canvas sessions only: reads the data the canvas keeps — the documents its page stores "
-        "on the host, which no version and no undo touches. No arguments answers every "
-        "collection; a collection answers that one; a collection and an id answers one document, "
-        "or null when there is none."
+        "Reads a canvas's data — the documents its page stores on the host, which no version and "
+        "no undo touches. From any session but a canvas's own, name the canvas with `canvas`: its "
+        "name, as the user says it, or its id. No other arguments answers every collection; a "
+        "collection answers that one; a collection and an id answers one document, or null when "
+        "there is none."
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "canvas": {
+                "type": "string",
+                "description": (
+                    "The canvas to act on, by its name or its id. Leave it out in a canvas's own "
+                    "session, which already knows its canvas."
+                ),
+            },
             "collection": {
                 "type": "string",
                 "description": "One collection's name, for its documents.",
@@ -1500,13 +1539,22 @@ DATA_READ_SCHEMA = {
 DATA_WRITE_SCHEMA = {
     "name": TOOL_DATA_WRITE,
     "description": (
-        "Canvas sessions only: stores one document in the canvas's data, or removes it. A write "
-        "replaces the document with that collection and id, and the whole of a canvas's data is "
-        "capped at 1 MB, so a write past it is refused whole."
+        "Stores one document in a canvas's data, or removes it. From any session but a canvas's "
+        "own, name the canvas with `canvas`: its name, as the user says it, or its id. A session "
+        "that is a canvas's keeps that canvas's data and no other's. A write replaces the document "
+        "with that collection and id, and the whole of a canvas's data is capped at 1 MB, so a "
+        "write past it is refused whole."
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "canvas": {
+                "type": "string",
+                "description": (
+                    "The canvas to act on, by its name or its id. Leave it out in a canvas's own "
+                    "session, which already knows its canvas."
+                ),
+            },
             "collection": {
                 "type": "string",
                 "description": "The collection the document belongs to.",
@@ -1535,6 +1583,49 @@ def _tool_answer(
     if not canvas_id or path is None:
         return json.dumps({"error": f"{tool} only works in a canvas's session."})
     try:
+        found = run(path, canvas_id)
+    except CanvasError as error:
+        return json.dumps({"error": str(error)})
+    return json.dumps(answer(found))
+
+
+def _data_canvas(
+    tool: str, args: Dict[str, Any], task_id: Optional[str], session_id: Optional[str]
+) -> tuple[Optional[str], Optional[Path]]:
+    """The canvas a data tool acts on: the one it names, else the one its session edits.
+
+    The data is the canvas's rather than its page's, so every session of the bot may keep it, while
+    the session that belongs to a canvas works on that canvas and no other.
+    """
+    name = args.get("canvas")
+    mine, path = _call_canvas(task_id, session_id)
+    if name is None:
+        if mine is None:
+            raise CanvasError(f"{tool} needs the canvas to work on: name it with `canvas`.")
+        return mine, path
+    if path is None:
+        raise CanvasError(f"{tool} couldn't find the store this host keeps its canvases in.")
+    found = named(path, name)
+    if mine is not None and found != mine:
+        raise CanvasError(
+            "This is a canvas's session: it keeps its own canvas's data and no other's."
+        )
+    return found, path
+
+
+def _data_answer(
+    tool: str,
+    args: Dict[str, Any],
+    task_id: Optional[str],
+    session_id: Optional[str],
+    run: Callable[[Path, str], Dict[str, Any]],
+    answer: Callable[[Dict[str, Any]], Dict[str, Any]],
+) -> str:
+    """One data tool's answer: the canvas named or its session's, a refusal as an error, else its payload."""
+    try:
+        canvas_id, path = _data_canvas(tool, args, task_id, session_id)
+        if not canvas_id or path is None:
+            raise CanvasError(f"{tool} needs the canvas to work on: name it with `canvas`.")
         found = run(path, canvas_id)
     except CanvasError as error:
         return json.dumps({"error": str(error)})
@@ -1618,7 +1709,7 @@ def handle_data_read(
             return {"documents": documents}
         return {"document": documents[0] if documents else None}
 
-    return _tool_answer(TOOL_DATA_READ, task_id, session_id, read, lambda found: found)
+    return _data_answer(TOOL_DATA_READ, args, task_id, session_id, read, lambda found: found)
 
 
 def handle_data_write(
@@ -1626,10 +1717,8 @@ def handle_data_write(
 ) -> str:
     """The tool: stores one of the canvas's documents, or removes one."""
     args = args if isinstance(args, dict) else {}
-    return _tool_answer(
-        TOOL_DATA_WRITE,
-        task_id,
-        session_id,
+    return _data_answer(
+        TOOL_DATA_WRITE, args, task_id, session_id,
         lambda path, canvas_id: write_call(path, canvas_id, args),
         lambda found: found,
     )
