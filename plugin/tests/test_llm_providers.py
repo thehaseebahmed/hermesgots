@@ -114,13 +114,17 @@ def host_modules(
     values: Dict[str, str],
     providers: Optional[list] = None,
     save: Optional[mock.MagicMock] = None,
+    remove: Optional[mock.MagicMock] = None,
+    remove_env_value: Optional[mock.MagicMock] = None,
 ):
     """The host's own modules, planted where a lazy import finds them.
 
     ``values`` is what the bot's ``.env`` holds, as ``get_env_prefer_dotenv`` answers it; ``providers``
-    overrides the catalog for the few cases that need another one; ``save`` stands in for the
-    credential lifecycle's writer, so a test can say what it was handed — and that it was never
-    called at all. The mask rule is the host's own, planted rather than restated.
+    overrides the catalog for the few cases that need another one; ``save`` and ``remove`` stand in
+    for the credential lifecycle's two verbs, so a test can say what one was handed — and that it was
+    never called at all. ``remove_env_value`` is the ``.env`` writer a removal must never reach, and
+    it is planted so a test can assert it empty. The mask rule is the host's own, planted rather than
+    restated.
     """
     agent = ModuleType("agent")
     pool = ModuleType("agent.credential_pool")
@@ -136,7 +140,14 @@ def host_modules(
     hermes.provider_catalog = catalog_module
     lifecycle = ModuleType("hermes_cli.credential_lifecycle")
     lifecycle.save_provider_env_credential = save or mock.MagicMock()
+    lifecycle.remove_provider_env_credential = remove or mock.MagicMock()
     hermes.credential_lifecycle = lifecycle
+    # The `.env` writer, planted so a removal that reached it would be caught: `.env` alone leaves the
+    # value-matched `config.yaml` mirror and the pool entry authenticating with the removed key.
+    config_module = ModuleType("hermes_cli.config")
+    config_module.remove_env_value = remove_env_value or mock.MagicMock()
+    config_module.save_env_value = mock.MagicMock()
+    hermes.config = config_module
     routers = ModuleType("hermes_cli.web_routers")
     common = ModuleType("hermes_cli.web_routers._common")
     common.is_redacted_credential_preview = is_redacted_credential_preview
@@ -151,6 +162,7 @@ def host_modules(
             "hermes_cli": hermes,
             "hermes_cli.provider_catalog": catalog_module,
             "hermes_cli.credential_lifecycle": lifecycle,
+            "hermes_cli.config": config_module,
             "hermes_cli.web_routers": routers,
             "hermes_cli.web_routers._common": common,
         },
@@ -196,6 +208,45 @@ class WriteTest(unittest.TestCase):
         self.assertIn("nope", str(unknown.exception), "the sentence says which slug it was")
         self.assertIn("virtual", str(keyless.exception), "and a provider with no slot is no target")
         save.assert_not_called()
+
+
+class RemoveTest(unittest.TestCase):
+    """A provider's key removed: the lifecycle's own removal, a `.env` writer never reached."""
+
+    def test_a_removal_asks_the_lifecycle_not_remove_env_value(self) -> None:
+        values = {"OPENAI_API_KEY": OPENAI_KEY}
+        remove = mock.MagicMock(side_effect=lambda env_var: values.pop(env_var, None))
+        remove_env_value = mock.MagicMock()
+        with host_modules(values, remove=remove, remove_env_value=remove_env_value):
+            block = llm_providers.remove_key(CONFIG, "openai")
+        remove.assert_called_once_with("OPENAI_API_KEY")
+        # `.env` alone is not a removal: the lifecycle also reconciles the value-matched `config.yaml`
+        # mirror and the env-seeded credential-pool entry, which would otherwise keep authenticating.
+        remove_env_value.assert_not_called()
+        row = next(one for one in block["providers"] if one["slug"] == "openai")
+        self.assertIsNone(row["masked"], "the answer is the fresh read: that row is *Not set*")
+        self.assertNotIn(OPENAI_KEY, json.dumps(block), "and no key is anywhere in it")
+
+    def test_a_key_that_was_already_absent_still_answers_the_block(self) -> None:
+        remove = mock.MagicMock()
+        with host_modules({}, remove=remove):
+            block = llm_providers.remove_key(CONFIG, "groq")
+        # The lifecycle's removal is idempotent, so a stale screen's Remove — or a curl's — is the
+        # same answer the fresh read would give rather than an error.
+        remove.assert_called_once_with("GROQ_API_KEY")
+        rows = {one["slug"]: one["masked"] for one in block["providers"]}
+        self.assertIsNone(rows["groq"])
+
+    def test_an_unknown_slug_is_refused_by_name(self) -> None:
+        remove = mock.MagicMock()
+        with host_modules({}, remove=remove):
+            with self.assertRaises(ValueError) as unknown:
+                llm_providers.remove_key(CONFIG, "nope")
+            with self.assertRaises(ValueError) as keyless:
+                llm_providers.remove_key(CONFIG, "virtual")
+        self.assertIn("nope", str(unknown.exception), "the sentence says which slug it was")
+        self.assertIn("virtual", str(keyless.exception), "and a provider with no slot is no target")
+        remove.assert_not_called()
 
 
 class ReadTest(unittest.TestCase):
@@ -332,3 +383,40 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(refused["status"], 400)
         self.assertIn("masked key", refused["payload"]["error"]["message"])
         save.assert_not_called()
+
+    def remove(self, target: str) -> Dict[str, Any]:
+        """One `DELETE llm-providers/key/{target}`, as the app calls it."""
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {"target": target}, {}
+
+        return asyncio.run(
+            route(self.app, plugin.PREFIX + "/llm-providers/key/{target}", "DELETE")(request)
+        )
+
+    def test_a_key_removal_answers_the_fresh_block(self) -> None:
+        values = {"OPENAI_API_KEY": OPENAI_KEY}
+        remove = mock.MagicMock(side_effect=lambda env_var: values.pop(env_var, None))
+        with host_modules(values, remove=remove):
+            removed = self.remove("openai")
+        self.assertEqual(removed["status"], 200)
+        self.assertEqual(removed["payload"]["object"], "gots.llm_providers")
+        remove.assert_called_once_with("OPENAI_API_KEY")
+        row = next(one for one in removed["payload"]["llm"]["providers"] if one["slug"] == "openai")
+        self.assertIsNone(row["masked"], "the row the answer draws says *Not set*")
+
+    def test_a_removal_of_an_unknown_slug_is_refused_with_its_sentence(self) -> None:
+        remove = mock.MagicMock()
+        with host_modules({}, remove=remove):
+            refused = self.remove("nope")
+        self.assertEqual(refused["status"], 400)
+        self.assertIn("nope", refused["payload"]["error"]["message"])
+        remove.assert_not_called()
+
+    def test_a_host_without_the_lifecycle_answers_501(self) -> None:
+        # A host that can list its providers but has no credential lifecycle: the page is drawn and
+        # a removal from it is refused in this plugin's own words rather than the host's.
+        with host_modules({}):
+            with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": None}):
+                refused = self.remove("openai")
+        self.assertEqual(refused["status"], 501)
+        self.assertNotIn("Traceback", refused["payload"]["error"]["message"])

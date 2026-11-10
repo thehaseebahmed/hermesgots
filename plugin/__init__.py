@@ -2994,6 +2994,39 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_post(f"{PREFIX}/llm-providers/key", set_llm_provider_key)
 
+    async def remove_llm_provider_key(request: "web.Request") -> "web.Response":
+        """Removes one provider's key and answers the fresh block.
+
+        The target is the address's own segment — a catalog slug — and there is no body at all: a
+        removal has no key in it to send, log or echo. The domain resolves the slug and asks the
+        host's credential lifecycle, whose own removal is idempotent, so removing a key that was
+        already absent answers the block rather than a refusal. A refusal's sentence is the
+        plugin's own, never the host's, which could hold a value.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        target = str(request.match_info.get("target") or "").strip()
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return llm_providers.remove_key(config_path, target)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't remove an API key from here.", 501)
+        except Exception:
+            logger.warning("gots: couldn't remove this bot's provider key", exc_info=True)
+            return _error(web, "The host couldn't remove the key.", 502)
+        return web.json_response({"object": "gots.llm_providers", "llm": payload})
+
+    app.router.add_delete(f"{PREFIX}/llm-providers/key/{{target}}", remove_llm_provider_key)
+
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)
         runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))

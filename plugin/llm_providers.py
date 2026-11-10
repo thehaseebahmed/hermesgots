@@ -27,6 +27,12 @@ credential-pool entries and the provider's model-cache rows, which would otherwi
 authenticating with the key that was just replaced. A body whose key *is* a mask — the shape the page
 was handed — is refused on the host's own rule before any of that is asked.
 
+A key is removed through the same lifecycle (``remove_provider_env_credential``), never its
+``remove_env_value``: dropping the value from ``.env`` alone leaves the value-matched ``config.yaml``
+mirror and the pool entry behind, still authenticating with a key the page says is gone. A removal of
+a key that is already absent is not an error — the lifecycle's own removal is idempotent, so a stale
+screen and a ``curl`` both get the fresh block, in which the row simply reads *Not set*.
+
 Every Hermes import stays inside the function that uses it, as everywhere in this plugin, and none
 is softened into a default: a host without the catalog raises ImportError, which the route answers
 with a 501 and which ``available`` turns into a withheld page (a bot with no page, rather than a page
@@ -164,6 +170,29 @@ def write_key(config_path: Path, target: str, key: str) -> Dict[str, Any]:
     from hermes_cli.credential_lifecycle import save_provider_env_credential
 
     save_provider_env_credential(slot, key)
+    return read(config_path)
+
+
+def remove_key(config_path: Path, target: str) -> Dict[str, Any]:
+    """Remove one provider's key, and answer the page as it now reads.
+
+    The removal is Hermes's credential lifecycle, not its ``remove_env_value``: dropping the value
+    from ``.env`` alone leaves the value-matched ``config.yaml`` mirror and the env-seeded pool entry
+    authenticating with a key the page would then call *Not set*. The lifecycle is idempotent, so a
+    key that was already absent is the same answer rather than a refusal — a stale screen's Remove,
+    or a ``curl``'s, still gets the block.
+
+    The target is resolved by the same rule a write's is, so an unknown slug and a provider with no
+    slot are both refused by name before anything is asked. No key is ever named here: a removal
+    takes the env variable alone.
+
+    Raises ``ValueError`` for a target this host can't write, and ``ImportError`` where this host has
+    no lifecycle, which the route answers with a 501.
+    """
+    slot = _slot_of(str(target or "").strip())
+    from hermes_cli.credential_lifecycle import remove_provider_env_credential
+
+    remove_provider_env_credential(slot)
     return read(config_path)
 
 

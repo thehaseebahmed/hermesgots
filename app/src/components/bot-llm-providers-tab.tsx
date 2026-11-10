@@ -1,22 +1,25 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
+import { Trash2Icon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import {
   Caption,
+  ConfirmDestructive,
   FormActions,
   Group,
   ValueRow,
   fieldInputClass,
   fieldLabelClass,
 } from "@/components/settings-chrome"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { botSubPath } from "@/lib/bot-subs"
 import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { getLlmProviders, setLlmProviderKey } from "@/lib/hermes"
+import { getLlmProviders, removeLlmProviderKey, setLlmProviderKey } from "@/lib/hermes"
 import { providerRows, submittableKey, type LlmProviders } from "@/lib/llm-providers"
 
 /**
@@ -83,12 +86,22 @@ export function LlmProvidersTab({ profile }: { profile: Profile }) {
  * one back would be a write of nothing at all. Save is dead until `submittableKey` says the field
  * holds something a key could be, the host refuses a mask again on its own rule, and the answer to a
  * write is the fresh block — so the mask under the form is the host's new one, not the app's guess.
+ *
+ * Where a key is set, the screen also offers to remove it — behind `ConfirmDestructive`, whose
+ * question names the provider, because a removal is the one write here that can't be undone from
+ * this screen. Cancel writes nothing at all, and the answer is again the fresh block, where the row
+ * reads *Not set* and the action goes with the key it removed. A removal refused is said in the
+ * question, which stays up, so a retry is one tap.
  */
 export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; target: string }) {
   const { block, problem, keep } = useLlmProviders(profile)
   const [draft, setDraft] = useState("")
   const [saving, setSaving] = useState(false)
   const [refusal, setRefusal] = useState<string>()
+  // The removal's own question, and the write it is holding open: `busy` keeps the dialog up while
+  // the host is asked, so a refusal is read before the question is dismissed by hand.
+  const [asking, setAsking] = useState(false)
+  const [removing, setRemoving] = useState(false)
 
   if (!block)
     return problem ? (
@@ -126,6 +139,24 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         setRefusal(error instanceof Error ? error.message : "Couldn't save that key.")
       })
       .finally(() => setSaving(false))
+  }
+
+  const remove = () => {
+    if (removing) return
+    setRemoving(true)
+    setRefusal(undefined)
+    void removeLlmProviderKey(profile, target)
+      .then((next) => {
+        // The block the removal answered is the one the screen draws now: that row is *Not set*.
+        if (next) keep(next)
+        setAsking(false)
+      })
+      .catch((error: unknown) => {
+        // Said in the question itself, which stays up: the host's words are read before it is
+        // dismissed, and a retry is one tap.
+        setRefusal(error instanceof Error ? error.message : "Couldn't remove that key.")
+      })
+      .finally(() => setRemoving(false))
   }
 
   return (
@@ -175,6 +206,40 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         </div>
         <FormActions disabled={!submittableKey(draft)} busy={saving} />
       </form>
+      {provider.masked && (
+        // Below Replace, and only where there is a key to remove: a control that writes nothing
+        // isn't offered. The mask is the presence — there is no second flag to disagree with it.
+        <Group>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-11 w-full justify-start rounded-full text-destructive"
+            onClick={() => {
+              setRefusal(undefined)
+              setAsking(true)
+            }}
+            data-llm-remove-key
+          >
+            <Trash2Icon data-icon="inline-start" />
+            Remove key
+          </Button>
+        </Group>
+      )}
+      <ConfirmDestructive
+        open={asking}
+        title={`Remove ${provider.label}'s key?`}
+        description={
+          refusal ? (
+            <span role="alert">{refusal}</span>
+          ) : (
+            "Its key is deleted from this bot's Hermes, and anything using it stops working until a new one is set."
+          )
+        }
+        confirmLabel="Remove"
+        busy={removing}
+        onOpenChange={setAsking}
+        onConfirm={remove}
+      />
     </div>
   )
 }

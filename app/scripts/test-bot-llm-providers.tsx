@@ -9,6 +9,11 @@
  * carries `{target, key}` — the typed key, never the mask that was on the screen — and the screen
  * then draws the block that write answered.
  *
+ * Its other write is a removal: *Remove key* asks first, in a question naming the provider, and
+ * Cancel sends nothing at all. Confirm sends one DELETE for that target and the screen draws the
+ * answered block again, where the row reads *Not set*. Nothing of either write is a key: the only
+ * key the page ever holds is the typed one, in the field it was typed in.
+ *
  * A host on an older plugin advertises no `llm_providers`, so the page draws no row and its address
  * lands on the bot's own page — the gate every page over a host's own feature wears.
  */
@@ -24,6 +29,7 @@ import {
   click,
   find,
   findAll,
+  findText,
   json,
   missing,
   mount,
@@ -91,6 +97,19 @@ async function seed(name: string, features: string[], block: Block = BLOCK) {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null
     asks.push({ method, path: pathname, body })
     if (pathname.endsWith("/plugins/gots/info")) return json({ name: "gots", features })
+    // A provider's key removed: the answer is the fresh block, that row unset — the same block the
+    // read gives, which is what the screen draws again.
+    const removal = pathname.match(/\/plugins\/gots\/llm-providers\/key\/([^/]+)$/)
+    if (removal && method === "DELETE") {
+      const target = decodeURIComponent(removal[1])
+      current = {
+        ...current,
+        providers: current.providers.map((one) =>
+          one.slug === target ? { ...one, masked: null } : one,
+        ),
+      }
+      return json({ object: "gots.llm_providers", llm: current })
+    }
     if (pathname.endsWith("/plugins/gots/llm-providers/key") && method === "POST") {
       const target = String(body?.target ?? "")
       current = {
@@ -116,6 +135,11 @@ const maskRow = () => find('[data-setting="llm-provider-mask"]')
 const keyField = () => find("[data-llm-key-field]") as HTMLInputElement | null
 const saveButton = () =>
   findAll("[data-form-actions] button").find((one) => one.textContent?.trim() === "Save") ?? null
+/** The slot screen's own way to remove the key, and the question it asks first. */
+const removeKey = () => find("[data-llm-remove-key]")
+const dialog = () => find('[role="alertdialog"]')
+const dialogTitle = () => find('[data-slot="alert-dialog-title"]')?.textContent?.trim() ?? ""
+const inDialog = (label: string) => findText('[role="alertdialog"] button', label)
 
 /** A row's leaves, top to bottom: its title, its purpose line where it has one, and its value. */
 const leaves = (element: Element | null) =>
@@ -220,5 +244,38 @@ test("replacing posts the typed key, never the mask on screen, and reads the hos
       "the screen to read the block the write answered",
     )
     assert.equal(keyField()?.value, "", "and the field is empty again, holding no key")
+  })
+})
+
+test("removing a key asks first, and the row reads Not set", async () => {
+  const host = await seed("remove", ["llm_providers"])
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+    await click(providerRow("openai"))
+    await until(async () => Boolean(removeKey()), "the Remove key action")
+
+    // A question, not a write: the provider is named, and the way out of it sends nothing at all.
+    await click(removeKey())
+    assert.ok(dialog(), "Remove asks first")
+    assert.equal(dialogTitle(), "Remove OpenAI's key?", "and the question names the provider")
+    const asked = host.asks.length
+    await click(inDialog("Cancel"))
+    await until(async () => !dialog(), "the question to shut")
+    assert.equal(host.asks.length, asked, "Cancel makes no request at all")
+    assert.equal(valueOf(maskRow()), "sk-o...c123", "and the key is still the one that was there")
+
+    await click(removeKey())
+    await until(async () => Boolean(dialog()), "the question again")
+    await click(inDialog("Remove"))
+    await until(
+      async () => valueOf(maskRow()) === "Not set",
+      "the row to read the block the removal answered",
+    )
+
+    const deletes = host.asks.filter((one) => one.method === "DELETE")
+    assert.equal(deletes.length, 1, "exactly one removal")
+    assert.equal(deletes[0].path, "/api/plugins/gots/llm-providers/key/openai", "for that provider")
+    assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
+    assert.ok(missing("[data-llm-remove-key]"), "the action goes with the key it removed")
   })
 })

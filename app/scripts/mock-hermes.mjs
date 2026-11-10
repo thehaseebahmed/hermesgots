@@ -4758,6 +4758,25 @@ http
         },
       })
     }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "DELETE" &&
+      url.pathname.startsWith("/api/plugins/gots/llm-providers/key/")
+    ) {
+      // A provider's key removed (plugin/llm_providers.py): the address names the target and there is
+      // no body, and the answer is the fresh block with that row unset. Removing a key that isn't set
+      // answers the same block — the lifecycle's own removal is idempotent.
+      const key = pluginProfile ?? ""
+      const target = decodeURIComponent(url.pathname.split("/").pop() ?? "")
+      if (!LLM_PROVIDERS.some((one) => one.slug === target))
+        return json(res, 400, {
+          error: { message: `${target} isn't an API-key provider this Hermes knows.` },
+        })
+      // An empty value is what a removal leaves: the seeded key included, so the row reads Not set.
+      llmKeys.set(`${key}\n${target}`, "")
+      return json(res, 200, { object: "gots.llm_providers", llm: llmBlock(key) })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers/key" && req.method === "POST") {
       // A provider's key replaced (plugin/llm_providers.py): the mask a page draws is refused as a
       // key, and a typed one lands on the block the answer carries — the same block the read gives.

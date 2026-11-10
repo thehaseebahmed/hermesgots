@@ -1381,6 +1381,23 @@ export async function setLlmProviderKey(
   return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
 }
 
+/**
+ * Removes one provider's key — the slug the row names, which rides the address alone — and answers
+ * the fresh block, where that row is *Not set*. There is no body, because a removal has no key in it
+ * to send: nothing here holds, builds or compares one.
+ */
+export async function removeLlmProviderKey(
+  config: HermesConfig,
+  target: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/llm-providers/key/${encodeURIComponent(target)}`,
+    { method: "DELETE", headers: headers(config), signal },
+  )
+  return readLlmProviders(((await response.json())?.llm ?? null) as unknown)
+}
+
 // `/delegation` is the subagent model's own route, so the tab's path is separate.
 export const GENERAL_ROUTES = {
   general: { path: "general", field: "general", label: "General" },

@@ -281,6 +281,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    Layers: plugin domain, plugin HTTP API, mock host, `app` lib, `app` UI. Check:
    `test_llm_providers.py` — "a removal asks the lifecycle, not `remove_env_value`" — and "Remove asks
    first, and the row reads Not set", where Cancel writes nothing.
+
+   Done.
+
 7. **Custom endpoints appear, and their key can be replaced.** The read learns
    `list_custom_endpoints()` and each row's mask; the page gains the second caption and its rows; the
    slot screen draws Base URL and Model muted; `write_key` resolves `custom:<id>` to the host's
