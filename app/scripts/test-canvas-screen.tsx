@@ -1,7 +1,8 @@
 /**
  * Canvas on the screen: one page drawn in a frame that can run its own script and reach nothing else,
  * a canvas's chat that is in no list and opens its canvas at its own address (ADR 0113, 0114), and the
- * page redrawn at the version its bot last wrote, with Undo walking back one.
+ * page redrawn at the version its bot last wrote, with Undo walking back one. The edit screen is the
+ * chat alone: it draws no page, so it reads the canvas's record and never its document.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -35,6 +36,7 @@ import {
   settle,
   text,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const PAGE = `<!doctype html>
@@ -104,8 +106,11 @@ interface Host {
   hold?: () => Promise<void>
   /** Holds the next list read until it is released, so a screen can be drawn before it lands. */
   holdList?: () => Promise<void>
-  /** Answers a one-canvas read the way a host that never landed does: the request fails. */
-  fail?: boolean
+  /** Answers the list the way a bot that isn't answering does: the request fails. */
+  failList?: boolean
+  /** Every path the host was asked for, in the order they landed, so a test can read what a screen
+   * does and does not ask for. */
+  reads?: string[]
   /** The canvases the bot's list names; a canvas of its own is one this file makes for one test. */
   listed?: string[]
 }
@@ -118,6 +123,7 @@ interface Host {
 function serveCanvases(host: Host) {
   host.docs ??= []
   host.calls ??= []
+  host.reads ??= []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) return json({ version: "0.113.0", features: ["canvas"] })
@@ -155,9 +161,7 @@ function serveCanvases(host: Host) {
     }
     const one = /\/canvases\/([^/]+)$/.exec(url.pathname)
     if (one) {
-      // A host that never landed: the read fails with no answer at all, which is what leaves the
-      // canvas read-only and its header saying so (ADR 0071).
-      if (host.fail) throw new TypeError("Failed to fetch")
+      host.reads!.push(url.pathname)
       // A held read answers the documents the host had when it was asked, as a slow read would.
       const asked = host.docs
       if (host.hold) {
@@ -169,6 +173,10 @@ function serveCanvases(host: Host) {
       return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], host.docs) })
     }
     if (/\/canvases$/.test(url.pathname)) {
+      host.reads!.push(url.pathname)
+      // A bot that isn't answering: the list is the one read a record-only screen makes, so this is
+      // what leaves the edit screen saying its bot is away.
+      if (host.failList) throw new TypeError("Failed to fetch")
       const hold = host.holdList
       if (hold) {
         host.holdList = undefined
@@ -542,11 +550,12 @@ test(
   "a canvas with no version whose bot is away is not said to be building",
   atWidth(390, async () => {
     // A host that isn't answering is not a bot that is building: the edit screen says the preview's
-    // own sentence for an unreachable canvas, which is the one true thing it knows (ADR 0130).
-    serveCanvases({ version: 0, undos: 0, fail: true, listed: ["c1", "c6"] })
+    // own sentence for a canvas whose record isn't here and whose bot can't be asked for it, which is
+    // the one true thing it knows (ADR 0130). The edit screen reads the record, so a bot that is away
+    // is a list that didn't answer — and a canvas this device never read has no chat to draw either.
+    serveCanvases({ version: 0, undos: 0, failList: true, listed: ["c1", "c6"] })
     await seedCanvasChat("c1", "c6")
     await drawCanvas(["/canvas/c6/edit"], async () => {
-      await until(() => Boolean(composerField()), "the edit screen to draw")
       await until(
         () => /isn't on this device, and its bot isn't answering/.test(text()),
         "the away sentence",
@@ -1048,7 +1057,8 @@ test(
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
     })
     // A host that doesn't answer: the preview's header says so, and the edit screen's is that row.
-    serveCanvases({ version: 3, undos: 0, fail: true })
+    // A record-only screen never asks for the page, so the away bot is a list that didn't answer.
+    serveCanvases({ version: 3, undos: 0, failList: true })
     await drawCanvas(["/canvas/c2/edit"], async () => {
       await until(() => Boolean(find("[data-canvas-offline]")), "the header to say its bot is away")
       assert.match(find("[data-canvas-offline]")!.textContent ?? "", /isn't answering/)
@@ -1086,3 +1096,86 @@ test(
     }
   }),
 )
+
+/** A version's line in the header, which is the one thing a screen drawing no page still says. */
+const headerLine = () => wordsOf(find("header p"))
+
+/** Every one-canvas read the host was asked for: the page, which no record-only screen may ask for. */
+const pageReads = (host: Host) =>
+  (host.reads ?? []).filter((path) => /\/canvases\/[^/]+$/.test(path))
+
+test(
+  "the edit screen shows a version the bot writes, with nothing reloaded",
+  atWidth(390, async () => {
+    // The edit screen draws no page, so the record is what it reads: a version the bot writes is a
+    // `canvas` change, and the sweep the change starts is what moves the header's line.
+    const host: Host = { version: 3, undos: 0 }
+    serveCanvases(host)
+    await seedCanvasChat(CANVAS.id)
+    const bot = (await db.profiles.get("bot-1"))!
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(() => Boolean(composerField()), "the edit screen to draw")
+        await until(() => /v3/.test(headerLine()), "the version the record points at")
+        host.version = 4
+        await act(async () => noteChange(connectionKey(bot), "canvas"))
+        await until(() => /v4/.test(headerLine()), "the new version, with no reload")
+        assert.doesNotMatch(headerLine(), /v3/, "and not the one it drew first")
+      })
+    } finally {
+      // The store outlives a test: leave the version the host really holds behind.
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
+
+test(
+  "the edit screen says a canvas no bot holds is gone",
+  atWidth(390, async () => {
+    // A canvas the bot's list doesn't name is one no bot holds, and the edit screen is the only
+    // screen a phone can draw of that state — so it says so rather than drawing an empty chat.
+    const host: Host = { version: 3, undos: 0, listed: [CANVAS.id] }
+    serveCanvases(host)
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas(["/canvas/c5/edit"], async () => {
+      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
+      assert.ok(missing('[data-canvas-flip="preview"]'), "with nothing to flip to")
+      assert.ok(
+        missing('[aria-label="Canvas options"]'),
+        "and no options for a canvas that isn't there",
+      )
+    })
+    assert.deepEqual(pageReads(host), [], "said from the list alone")
+  }),
+)
+
+test(
+  "the edit screen reads the record and never the page",
+  atWidth(390, async () => {
+    // The edit screen draws no page: a read of it is the list's sweep, never the document, which can
+    // be 256 KB and is no fact the header or the chat reads. The version only this host's list names
+    // is what proves the sweep answered, on the screen's own first read.
+    const host: Host = { version: 6, undos: 0 }
+    // Whatever the screen before this one left in flight lands first, so the read counted here is
+    // this screen's.
+    await settle()
+    serveCanvases(host)
+    await seedCanvasChat(CANVAS.id)
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(() => Boolean(composerField()), "the edit screen to draw")
+        await until(() => /v6/.test(headerLine()), "the list's record to be drawn")
+        assert.ok(
+          (host.reads ?? []).some((path) => /\/canvases$/.test(path)),
+          "the list is what the screen reads",
+        )
+        assert.deepEqual(pageReads(host), [], "and the page is never asked for")
+      })
+    } finally {
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
+

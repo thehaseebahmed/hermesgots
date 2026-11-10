@@ -50,10 +50,12 @@ import {
   grantCanvasTool,
   hasVersion,
   refreshCanvas,
+  refreshCanvases,
   startCanvas,
   undoCanvas,
   updateCanvas,
   useCanvas,
+  useCanvasRecord,
   useCanvases,
   writeCanvasData,
   type Canvas,
@@ -727,7 +729,8 @@ export function CanvasView() {
 export function CanvasEdit() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { canvas, profile, missing, away, loaded } = useCanvas(id)
+  // The record alone: this screen draws no page, so what keeps it right is the list's sweep.
+  const { canvas, profile, missing, away, loaded } = useCanvasRecord(id)
   const { awayNow, words: awayWords } = useAway(away)
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -789,7 +792,12 @@ export function CanvasEdit() {
           {awayNow ? APART : BUILDING_ACTIVITY}
         </p>
       ) : null}
-      <CanvasChat canvas={canvas} bot={profile} className="flex min-h-0 flex-1 flex-col" />
+      <CanvasChat
+        canvas={canvas}
+        bot={profile}
+        reread={refreshCanvases}
+        className="flex min-h-0 flex-1 flex-col"
+      />
       <CanvasOptions
         open={optionsOpen}
         onOpenChange={setOptionsOpen}
@@ -924,12 +932,16 @@ function CanvasChat({
   canvas,
   bot,
   points,
+  reread = refreshCanvas,
   className,
 }: {
   canvas: Canvas | undefined
   bot: Profile | undefined
   /** The page this chat can point at; none for a screen that draws no page. */
   points?: CanvasPoints
+  /** What a settled turn reads again: the page this chat sits beside, or the record of a screen that
+   * draws none — so a canvas's chat on the edit screen never asks for a document either. */
+  reread?: (id: string) => Promise<unknown>
   className: string
 }) {
   const chatId = canvas?.chatId
@@ -948,10 +960,10 @@ function CanvasChat({
         start={undefined}
         limit={limit}
         afterSettled={() => {
-          // Every turn's end re-reads the page: a stream can be open and silent (a buffering
-          // proxy), so the event is never the only news. A read already in flight is joined and
-          // one more is owed, so the edit's event and this cost one GET between them.
-          void refreshCanvas(canvas.id).catch(() => undefined)
+          // Every turn's end re-reads what this screen draws: a stream can be open and silent (a
+          // buffering proxy), so the event is never the only news. A read already in flight is joined
+          // and one more is owed, so the edit's event and this cost one read between them.
+          void reread(canvas.id).catch(() => undefined)
         }}
       />
     </PreviewerProvider>
