@@ -11,7 +11,7 @@ import type { Conversation, Profile, Room, RoomMember } from "./db.ts"
  * The handle is the bot's profile name, because a profile name is already unique on its Host — the
  * rule the room's answerer and its pictures are resolved by (ADR 0115) — so the app owns no naming
  * policy the Host would have to repeat, and a reserved or colliding handle comes back in the Host's
- * own words (ADR 0124).
+ * own words (ADR 0129).
  */
 export function roomSeats(bots: Profile[]): RoomMember[] {
   return bots.map((bot) => ({

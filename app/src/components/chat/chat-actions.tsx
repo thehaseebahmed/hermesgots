@@ -225,7 +225,7 @@ export function LimitNotice({
  * The chat's header controls and what they open: the context ring and its usage sheet, and the
  * options menu — rename, pin, mute, resolve or reopen, discard and delete — with the dialogs they
  * ask in. Both chat screens draw it, a bot's Main among the chats it draws: Main carries the whole
- * of an ordinary chat's menu but Delete, since it is the bot's one chat that cannot go (G1).
+ * of an ordinary chat's menu but Delete, since it is the bot's one chat that cannot go.
  */
 export function ChatActions({
   chat,

@@ -39,7 +39,7 @@ export interface ChatListRow {
   /**
    * The run a routine's delivery is: its row wears the routine's icon rather than a chat's, and its
    * line and time are the record's, since the run's words are in the run's own session and this chat
-   * holds no message at all (G4).
+   * holds no message at all.
    */
   routine?: boolean
   /** The room this row is, wearing its members' pictures: nothing at all for a chat (ADR 0126). */

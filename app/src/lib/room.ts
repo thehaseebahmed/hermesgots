@@ -222,7 +222,7 @@ export interface RoomNeedsRow {
  * Whether this device may make a room at all: a Host that advertises `rooms_write`, through a bot that
  * has a profile to be seated as. The control is offered only where one can be made, rather than one
  * that can only come back refused — and it is every Host's question, not one bot's, because a room
- * belongs to its Host and seats whichever profiles its reader picks (ADR 0115, ADR 0124).
+ * belongs to its Host and seats whichever profiles its reader picks (ADR 0115, ADR 0129).
  */
 export function useCanMakeRoom(): boolean {
   const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []

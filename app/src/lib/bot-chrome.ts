@@ -4,7 +4,7 @@
  * words under the bot they are not the newest of. A bot with nothing said has nothing to preview, so
  * the line says whether its host is checking in, which is the one fact about a quiet bot a reader can
  * act on (ADR 0090). A bot's Main is one of its chats like any other, so it is previewed by its place
- * in that order and never as a special case (G1).
+ * in that order and never as a special case.
  */
 export function previewLine({
   line,

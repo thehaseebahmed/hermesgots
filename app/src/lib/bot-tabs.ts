@@ -85,14 +85,14 @@ export function botPath(botId: string): string {
 
 /**
  * A bot's screen: the list of its chats, which is also where back from a chat and from everything
- * under the list returns (G1, G5). One definition, so the address the whole shell is built on cannot
+ * under the list returns. One definition, so the address the whole shell is built on cannot
  * disagree with itself.
  */
 export function botChatsPath(botId: string): string {
   return `/b/${botId}`
 }
 
-/** A bot's routines, which its own list opens and its list is the way back from (G7). */
+/** A bot's routines, which its own list opens and its list is the way back from. */
 export function botRoutinesPath(botId: string): string {
   return `${botChatsPath(botId)}/routines`
 }

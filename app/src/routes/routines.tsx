@@ -112,7 +112,7 @@ export function RoutinesPage() {
 
 /**
  * `/routines`, from before a bot's routines had an address under the bot: it lands on the active
- * bot's, which is somewhere sensible for an address this device kept (G7).
+ * bot's, which is somewhere sensible for an address this device kept.
  */
 export function RoutinesHome() {
   const active = useLiveQuery(async () => (await getActiveProfile()) ?? null, [])
@@ -197,7 +197,7 @@ function BotRoutines({
   const [ownTick, setOwnTick] = useState(0)
   const live = useLive(profile)
   // The rows this bot published for its runs: the only way a run's session is named here, since
-  // Hermes's ledger keeps the execution and the session apart (G4).
+  // Hermes's ledger keeps the execution and the session apart.
   const published = useLiveQuery(
     async () =>
       conversationsOf(profile.id)
@@ -350,7 +350,7 @@ function JobCard({
   job: CronJob
   /** Oldest first. */
   runs: CronRun[]
-  /** This bot's routine rows, which name the sessions its runs wrote (G4). */
+  /** This bot's routine rows, which name the sessions its runs wrote. */
   published: Conversation[]
   /** When the job was fetched; relative times count from it. */
   now: number
@@ -371,7 +371,7 @@ function JobCard({
 
   /**
    * A bar picks its run: one whose delivery published a row opens that row — the same read-only screen
-   * the bot's list opens it on (G4) — and one with no row of its own, because it was silent or its row
+   * the bot's list opens it on — and one with no row of its own, because it was silent or its row
    * is gone from this device, says what happened here in the card under the bars.
    */
   const pick = (run: CronRun) => {

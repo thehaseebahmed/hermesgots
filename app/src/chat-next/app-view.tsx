@@ -188,7 +188,7 @@ export function AppThreadView({
     [messages, record.compactions],
   )
   // What the chat draws: its messages, with a compaction's divider above the message it sits over,
-  // and nothing else — a Main is drawn like any other chat (G1).
+  // and nothing else — a Main is drawn like any other chat.
   const flow = useMemo(() => chatFlow({ thread: messages, compacted }), [messages, compacted])
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
   // A chat with nothing said, and nothing held for it — no message that didn't go, nothing queued, no

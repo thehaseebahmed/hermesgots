@@ -1,5 +1,5 @@
 /**
- * A routine's run, opened from its row (G4): the run's own transcript, read-only, under the header
+ * A routine's run, opened from its row: the run's own transcript, read-only, under the header
  * naming the routine that ran, with the composer's place saying why nothing can be answered there.
  *
  * It is a screen of its own rather than a chat's, because no turn was ever taken in this session by
@@ -66,7 +66,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const upRef = useRef(up)
   upRef.current = up
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
-  // row is the bot's own, so its screen leads back to where its row stands (G5).
+  // row is the bot's own, so its screen leads back to where its row stands.
   const listPath = !legacy && chat ? botChatsPath(chat.profileId) : undefined
   const wide = useWide()
   // Where there is room the bot's list stands beside this screen (`useBotChatsPane`), so there is

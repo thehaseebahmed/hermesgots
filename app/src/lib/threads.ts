@@ -23,7 +23,7 @@ import { BOT_CHATS, waitsOnUser } from "@/lib/chat-list"
 
 /**
  * The chat a new chat opens: a plain chat of the bot's, since a bot's screen is the list of its chats
- * (G1). Both layouts ask this, so a new chat is the same record either way.
+ *. Both layouts ask this, so a new chat is the same record either way.
  *
  * `modelChoice` is the pick a blank surface was holding, which rides into the chat it makes, where it
  * is the chat's own.

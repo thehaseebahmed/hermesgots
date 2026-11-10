@@ -93,7 +93,7 @@ const CHAT_FIELDS = [
   "projectId",
   "afk",
   // A routine's run: the marker and the line a delivery writes onto its record, since a run's words
-  // are in the run's session and not in a chat of the app's making (G4).
+  // are in the run's session and not in a chat of the app's making.
   "routine",
   "line",
   "resolvedAt",

@@ -36,8 +36,8 @@ const SEARCH_FIELD_ID = "chats-search"
 /**
  * A bot's screen: the list of its chats, one flat band — the pinned ones first and the rest by what
  * was last said in them. Its header is the bot itself, whose name is the way to its settings, and its
- * foot starts a chat or a room. The list is a root screen, so its own back leaves the app (G5), and a
- * reader arriving at it lands in the chat this device last had open here (G1).
+ * foot starts a chat or a room. The list is a root screen, so its own back leaves the app, and a
+ * reader arriving at it lands in the chat this device last had open here.
  *
  * Where there is room the list is the pane and the chat it opened stands beside it
  * (`useBotChatsPane`), so this screen is then the item lane with nothing open; below that width the
@@ -116,7 +116,7 @@ function NoChatOpen() {
 
 /**
  * A bot's chats, each with the one read of its newest message that a row's line and time come from,
- * and the rooms it is a participant of: one list, one order (G3).
+ * and the rooms it is a participant of: one list, one order.
  */
 function BotChatsList({ profileId, selected }: { profileId: string; selected?: string }) {
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
@@ -169,7 +169,7 @@ function ChatList({
   const navigate = useNavigate()
   const marks = useReadMarks()
   // A room is made on a Host that advertises it, so the control is offered only where it can be used
-  // — the same rule the legacy layout's Rooms section keeps (ADR 0124).
+  // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
   const canMakeRoom = useCanMakeRoom()
   const now = useNow()
   const [query, setQuery] = useState("")
@@ -322,7 +322,7 @@ function ChatList({
  * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
  *
  * A routine's delivery is a row of this list too, and wears the routine's icon rather than a chat's,
- * because it is a run rather than a chat with the bot (G4): its line and time are the record's, since
+ * because it is a run rather than a chat with the bot: its line and time are the record's, since
  * the run's words are in the run's own session.
  *
  * A room is one of these rows, drawn by the same rule: it wears its members' pictures where a chat

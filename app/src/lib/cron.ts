@@ -76,7 +76,7 @@ export const ROUTINE_ROW_PREFIX = "routine-"
 const RUN_ROW_GRACE = 5 * 60_000
 
 /**
- * The row a run published, where this device holds it (G4): a routine's row is keyed by the job and
+ * The row a run published, where this device holds it: a routine's row is keyed by the job and
  * the session the run wrote — a session Hermes's ledger never names — and stamped with the delivery's
  * own time, which is the run's end. So the row of a run is that job's routine row written while the
  * run was finishing: no other job's can be, and a job that runs twice makes two rows at two times.

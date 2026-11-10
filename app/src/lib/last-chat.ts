@@ -1,5 +1,5 @@
 /**
- * The chat each bot was last in — what a bot's address opens on (G1).
+ * The chat each bot was last in — what a bot's address opens on.
  *
  * A bot opens where the reader left it: the chat whose address was last on screen for that bot, kept
  * per bot in this device's storage alone and never synced, since it is where a reader was sitting

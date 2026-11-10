@@ -285,7 +285,7 @@ export function ChatPage(props: ChatPageProps) {
       return `room\n${id}`
     }
     // A routine's run is no chat, whatever else it looks like: the plugin publishes one row per
-    // delivery, whose session is the run's own, so the row opens the run read-only (G4) — before the
+    // delivery, whose session is the run's own, so the row opens the run read-only — before the
     // chat screens' own paths, neither of which can take a turn in a `cron` session anyway.
     if (chat?.routine) {
       void loadRoutineChat()
@@ -369,7 +369,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   upRef.current = up
   // A chat of a bot answers its bot's list: where its own control and Android's back step when
   // nothing stands behind it, and — since a row opens the chat from that list — where they land
-  // after one (G5). A Main is one of the bot's chats, so it answers the same address.
+  // after one. A Main is one of the bot's chats, so it answers the same address.
   const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
   const xl = useXLarge()
   const wide = useWide()
@@ -591,7 +591,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     [thread, conversation?.compactions],
   )
   // What the chat draws: its messages, with a compaction's divider above the message it sits over,
-  // and nothing else — a Main is drawn like any other chat (G1).
+  // and nothing else — a Main is drawn like any other chat.
   const flow = useMemo(() => chatFlow({ thread, compacted }), [thread, compacted])
   const answered =
     settings !== undefined &&
@@ -978,7 +978,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     if (ownedBy) void setActiveProfile(ownedBy)
   }, [ownedBy])
 
-  // A chat of a bot answers its bot's list, Main among them (G5).
+  // A chat of a bot answers its bot's list, Main among them.
   const listPath =
     !legacy && conversation && !session && listsAsChat(conversation)
       ? botChatsPath(conversation.profileId)
@@ -1056,7 +1056,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const centered = Boolean(session)
   // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
   // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
-  // answer. A bot's Main is titled with its own name, like any other chat (G1).
+  // answer. A bot's Main is titled with its own name, like any other chat.
   const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? "New chat")
   let subtitle: string | undefined
   if (!unstarted)

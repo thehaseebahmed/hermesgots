@@ -1,5 +1,5 @@
 /**
- * A routine's run, as a screen reads it (G4): the newest rows of the session the run wrote, folded the
+ * A routine's run, as a screen reads it: the newest rows of the session the run wrote, folded the
  * way a chat's reply is folded — the reading the run sheet did, now that a delivery publishes a row of
  * its own rather than writing into a chat (ADR 0081).
  *

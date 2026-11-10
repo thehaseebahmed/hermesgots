@@ -243,7 +243,7 @@ export interface Conversation {
   afk?: boolean
   /**
    * A routine's run, as the plugin publishes it: one row per run, whose session is the run's own, so
-   * opening it opens that run's transcript rather than a chat (G4). The marker is the host's, written
+   * opening it opens that run's transcript rather than a chat. The marker is the host's, written
    * once with the record; the user's own chats never carry it.
    */
   routine?: boolean
