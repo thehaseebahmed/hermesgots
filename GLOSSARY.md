@@ -649,6 +649,18 @@ _Avoid_: legacy settings, old general tab, deprecated page
 A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, then to carry on with the work rather than end there: a reply of words and no tool call ends the run. Where the list has fallen behind it also asks for it, naming `todo_list`. A bot's reminders are set per bot, on its **Bot page** under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
 _Avoid_: nudge, check-in, status ping, verbosity, quiet mode
 
+**LLM provider**:
+A model provider this bot's Hermes can run on that authenticates with an API key — one row on the LLM Providers page, drawn from the host's own catalog. A provider that signs in through an account rather than a key is not one of these.
+_Avoid_: model provider, API provider
+
+**Key slot**:
+One credential a bot can hold, as the LLM Providers page draws it: named by a provider's catalog slug or by a custom endpoint's own id. Its value on screen is a **Masked key** or *Not set*, and it is what Replace and Remove act on.
+_Avoid_: key row, credential entry
+
+**Masked key**:
+A credential as Gots shows it: its first 4 and last 4 characters with the middle elided (`sk-o...c123`), or `***` for one shorter than twelve, which is Hermes's own masking rule. The mask is made on the bot's host and drawn as it arrives; the app never builds one, and a mask is never taken where a key is written.
+_Avoid_: redacted key, partial key, preview
+
 ## Diagnostics
 
 **Network log**:
