@@ -1314,9 +1314,9 @@ db.version(17).upgrade((tx) =>
 db.version(18).stores({ meetingRecordings: "id" })
 
 // v19: the message the host is deciding on is triaging, not routing — the same state, named for the
-// decision the host makes, which the GLOSSARY has always called triage. The field is indexed, so the
-// rows a closed page left behind are read through that index and rewritten, rather than left as a
-// name nothing checks for.
+// decision the host made. The field is indexed, so the rows a closed page left behind are read
+// through that index and rewritten. Triage is gone now, and this upgrade stays because a device
+// that has not opened since v19 still holds the old name.
 db.version(19).upgrade((tx) =>
   tx.table("messages").where("status").equals("routing").modify({ status: "triaging" }),
 )
