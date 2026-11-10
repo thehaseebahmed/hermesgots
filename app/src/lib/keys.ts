@@ -48,27 +48,6 @@ export function isSendChord(press: Press) {
 }
 
 /**
- * Whether one press puts the thread beside Main away: it is the close cross's twin, so it is
- * the bare Escape and never a chord, which is some other command's key.
- */
-export function closesThread(press: Press) {
-  if (press.ctrlKey || press.altKey || press.shiftKey || press.metaKey) return false
-  return press.key === "Escape"
-}
-
-/**
- * Whether one press asks for the thread this bot's lane just closed: ⌘\ on a Mac, Ctrl+\ everywhere
- * else, and no other modifier riding along. The physical key is what is read, since Option turns
- * `key` into another character on a Mac, and `mac` is the device's answer — the one fact the rule
- * cannot read for itself — so a Mac's Ctrl+\ is left to whatever else claims it.
- */
-export function reopensThread(press: Press, mac: boolean) {
-  if (press.altKey || press.shiftKey) return false
-  const chord = mac ? press.metaKey && !press.ctrlKey : press.ctrlKey && !press.metaKey
-  return chord && press.code === "Backslash"
-}
-
-/**
  * Whether one Enter in the composer sends the message. The switch is this device's own
  * (`sendOnEnter`, Settings > Appearance, off by default), so out of the box Enter is a line break —
  * what a multiline field does everywhere — and the chord sends. Shift never sends, so a line is

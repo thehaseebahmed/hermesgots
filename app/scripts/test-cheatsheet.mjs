@@ -4,11 +4,10 @@ import test from "node:test"
 import { cheatsheetGroups } from "../src/lib/cheatsheet.ts"
 
 /** The sheet under one set of switches, built here so no case can transpose them. */
-const sheet = (navShortcuts, sendOnEnter, botThreads = false) =>
-  cheatsheetGroups({ navShortcuts, sendOnEnter, botThreads })
+const sheet = (navShortcuts, sendOnEnter) => cheatsheetGroups({ navShortcuts, sendOnEnter })
 const names = (groups) => groups.map((group) => group.name)
-const group = (name, navShortcuts, sendOnEnter = false, botThreads = false) =>
-  sheet(navShortcuts, sendOnEnter, botThreads).find((one) => one.name === name)
+const group = (name, navShortcuts, sendOnEnter = false) =>
+  sheet(navShortcuts, sendOnEnter).find((one) => one.name === name)
 
 test("the sheet lists Composer, Slash menu, Chat and the open-surface keys, in that order", () => {
   assert.deepEqual(names(sheet(false, false)), [
@@ -82,47 +81,10 @@ test("each switch moves only what it owns", () => {
     "Navigation adds a group and changes no row",
   )
   assert.deepEqual(
-    sheet(false, false, true).filter((one) => one.name !== "Bot threads"),
-    sheet(false, false),
-    "Bot threads adds a group and changes no row",
-  )
-  assert.deepEqual(
     sheet(false, true).filter((one) => one.name !== "Composer"),
     sheet(false, false).filter((one) => one.name !== "Composer"),
     "Send on Enter rewrites the composer's two rows and no others",
   )
-})
-
-test("the bot threads' two keys are absent while bot threads are off, as they ship", () => {
-  assert.equal(group("Bot threads", false), undefined)
-  assert.ok(!names(sheet(false, false)).includes("Bot threads"))
-  assert.ok(
-    !JSON.stringify(sheet(false, false)).includes("Close the thread beside Main"),
-    "and no row for a key nothing answers",
-  )
-})
-
-test("with bot threads on, the sheet says how the thread beside Main is closed and reopened", () => {
-  assert.deepEqual(names(sheet(false, false, true)), [
-    "Composer",
-    "Slash menu",
-    "Chat",
-    "Bot threads",
-    "While something's open",
-  ])
-  assert.deepEqual(group("Bot threads", false, false, true).rows, [
-    { keys: ["Escape"], description: "Close the thread beside Main" },
-    { keys: ["Ctrl+\\"], description: "Reopen the thread just closed" },
-  ])
-  // Each switch still owns its own group: the two gated ones never stand in for each other.
-  assert.deepEqual(names(sheet(true, false, true)), [
-    "Composer",
-    "Slash menu",
-    "Chat",
-    "Bot threads",
-    "Navigation",
-    "While something's open",
-  ])
 })
 
 test("the open-surface group says what a viewer's arrows and a recording's Escape do", () => {

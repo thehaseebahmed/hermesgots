@@ -52,17 +52,13 @@ export function StateIcon({ state }: { state: Thread["state"] }) {
 export function ThreadCard({
   thread,
   profileId,
-  open = false,
-  beside = false,
   current = false,
   move,
   onUndo,
 }: {
   thread: Thread
   profileId: string
-  open?: boolean
-  beside?: boolean
-  /** Whether the address already is this thread, so its link leads nowhere; `open` marks it here. */
+  /** Whether the address already is this thread, so its link leads nowhere. */
   current?: boolean
   move?: Move
   onUndo?: (move: Move) => void
@@ -89,7 +85,7 @@ export function ThreadCard({
           data-slot="thread-card-body"
           className={cn(
             "flex min-h-14 min-w-0 items-center gap-3 rounded-2xl border bg-card px-4 py-2",
-            open && "border-foreground/20 bg-muted",
+            current && "border-foreground/20 bg-muted",
           )}
         >
           <StateIcon state={thread.state} />
@@ -120,9 +116,7 @@ export function ThreadCard({
         <SystemLink
           icon={MessagesSquareIcon}
           to={`/c/${thread.chat.id}`}
-          replace={beside}
           state={{ bot: profileId }}
-          current={open}
           onClick={stayHere(current)}
           label={`View ${title}`}
         >

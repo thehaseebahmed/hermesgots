@@ -39,13 +39,13 @@ export interface DiagBot {
   plugin: string | null
   /** The features the plugin advertises; null where the host couldn't be asked. */
   features: string[] | null
-  /** The thread this device's pane last opened for the bot, as the pane itself reads it. */
+  /** The chat this device's bot screen opens, as the bot's own address reads it. */
   lastThread: string | null
-  /** The thread storage holds for the pane, even where the pane refuses it. */
+  /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
   lastStored: string | null
   /** Its Main thread, read by its own id; null where this device has no Main row for it. */
   main: DiagChat | null
-  /** How many threads the bot has, counted through the index. */
+  /** How many chats the bot has, Main among them, counted through the index. */
   threads: number
   /** The newest chats, most recently touched first, as far back as the window reached; Main may
    * be among them. */
@@ -117,9 +117,9 @@ export interface DiagHost {
   plugin: string | null
   /** The features the plugin advertises. */
   features: string[] | null
-  /** The thread the pane last opened for the bot, as the pane itself reads it. */
+  /** The chat this device's bot screen opens, as the bot's own address reads it. */
   lastThread: string | null
-  /** The thread storage holds for the pane, even where the pane refuses it. */
+  /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
   lastStored: string | null
 }
 
@@ -129,7 +129,7 @@ export function diagBot(input: {
   chats: DiagChat[]
   /** Main itself, read by its own id rather than from the window. */
   main: DiagChat | null
-  /** How many threads the bot has, counted through the index. */
+  /** How many chats the bot has, Main among them, counted through the index. */
   threads: number
   /** Whether the bot's own reads failed, leaving what follows as what could be read. */
   unread?: boolean

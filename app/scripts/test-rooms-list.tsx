@@ -24,7 +24,8 @@ import { db, chatTombstones, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { connectionKey, noteChange } from "@/lib/live"
 import { syncNow } from "@/lib/sync"
-import { useBotPane, useThreads } from "@/lib/threads"
+import { useBotChatsPane } from "@/lib/pane"
+import { useBotThreads, useThreads } from "@/lib/threads"
 import {
   Path,
   atWidth,
@@ -339,7 +340,7 @@ test("a record that moved is written, and the row takes the Host's newer words",
 })
 
 test(
-  "a room's address opens no bot's pane: it is not one of a bot's threads",
+  "a room's address opens no bot's pane: it is its own screen's",
   atWidth(1400, async () => {
     await fresh()
     await merged()
@@ -354,7 +355,7 @@ test(
         assert.equal(
           find("[data-pane]")?.textContent,
           "null",
-          "a room is its own screen, so nothing stands beside it as a thread",
+          "a room is its own screen, so no bot's list stands beside it",
         )
       },
     )
@@ -362,8 +363,8 @@ test(
 )
 
 function Pane() {
-  const pane = useBotPane(true)
-  return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId, lane: pane.lane } : null)}</span>
+  const pane = useBotChatsPane(useBotThreads())
+  return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId } : null)}</span>
 }
 
 test("a room the Host disbands leaves the device that merged it", async () => {

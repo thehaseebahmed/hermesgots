@@ -4,7 +4,6 @@ import { Route } from "react-router"
 
 import { mainThreadId } from "@/lib/db"
 import { BotChatsPage } from "@/routes/bot-chats"
-import { lastThreadKey } from "@/lib/threads"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { FADE_MS as COPY_FADE_MS } from "@/components/pane-transition"
 import {
@@ -126,7 +125,7 @@ test(
 )
 
 test(
-  "a thread opened beside Main fades the thread left out over the one landing, and animates nothing of Main's",
+  "a chat opened beside the bot's list fades the chat it left out over the one landing, and moves nothing of the list's",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
@@ -138,27 +137,26 @@ test(
       ],
       { bots: [bot, other], active: bot.id },
     )
-    localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(phone(`/c/${MAIN}`, "/c/t-b"), async () => {
-      // The pane itself, drawn and ready: Main's card for the thread carries the same words.
+      // The pane itself, drawn and ready: the list's row for it carries the same words.
       await until(async () => {
-        const pane = find('[data-pane="thread"]')
-        return Boolean(pane?.textContent?.includes("alpha one") && !pane.hasAttribute("inert"))
-      }, "the thread beside Main")
+        const pane = find('[data-pane="route"]')
+        return Boolean(pane?.textContent?.includes("main one") && !pane.hasAttribute("inert"))
+      }, "the chat beside the bot's list")
       const spy = spyAnimate()
       try {
-        await click(find('[data-slot="thread-card"] a[href="/c/t-b"]'))
-        await until(async () => text().includes("beta one"), "the thread asked for")
+        await click(find('[data-slot="list-lane"] ul a[href="/c/t-b"]'))
+        await until(async () => text().includes("beta one"), "the chat asked for")
         await settle()
       } finally {
         spy.restore()
       }
 
       const out = spy.asked.filter((one) => one.keyframes.at(-1)?.opacity === 0)
-      assert.equal(out.length, 1, "the thread left fades out once")
+      assert.equal(out.length, 1, "the chat left fades out once")
       assert.ok(
-        out[0].text.includes("alpha one"),
-        `and what fades out is the thread left (saw "${out[0].text.slice(0, 120)}")`,
+        out[0].text.includes("main one"),
+        `and what fades out is the chat left (saw "${out[0].text.slice(0, 120)}")`,
       )
       assert.equal(out[0].options.duration, COPY_FADE_MS)
       assert.equal(out[0].pane, null, "a copy, which no reader of the panes can mistake for one")
@@ -166,19 +164,19 @@ test(
       const played = spy.onPanes()
       assert.deepEqual(
         played.map((one) => one.pane),
-        ["thread"],
-        "the thread asked for fades in once, as it lands, and nothing of Main's moves",
+        ["route"],
+        "the chat asked for fades in once, as it lands, and the list beside it does not move",
       )
       assert.deepEqual(played[0].keyframes, FADE)
-      assert.ok(played[0].shown.includes("beta one"), "played as the thread asked for lands")
+      assert.ok(played[0].shown.includes("beta one"), "played as the chat asked for lands")
       assert.deepEqual(
         spy.onScreen().map((one) => one.element),
         [],
         "and the screen's own element is not faded over it",
       )
       assert.ok(
-        !find('[data-pane="thread"]')?.closest("[inert]"),
-        "the thread asked for answers the reader once it is on screen",
+        !find('[data-pane="route"]')?.closest("[inert]"),
+        "the chat asked for answers the reader once it is on screen",
       )
     })
   }),

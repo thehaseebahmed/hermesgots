@@ -616,7 +616,8 @@ export function CanvasView() {
           )}
         </div>
         {/* The house's list lane: 412px, the width the app already asks its text to read in
-            (`w-103`, `SPLIT_FLOOR` in `lib/split.ts`), with the page beside it never narrower. */}
+            (`w-103`, the width the shell's own list lanes take), with the page beside it never
+            narrower. */}
         {large && body && (
           <div className="flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l">
             {body}

@@ -6,10 +6,10 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BOTS } from "@/components/bots"
 import { AppShell } from "@/components/app-shell"
-import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { db, ensureMainThread } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
-import { lastThreadKey, useThreads } from "@/lib/threads"
+import { useThreads } from "@/lib/threads"
 import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { ChatPage, SETUP_COPY } from "@/routes/chat"
 import {
@@ -30,7 +30,6 @@ import {
 
 const bot = botProfile("switch-hold", { id: "bot-1", name: "Switcher", apiKey: undefined })
 const other = botProfile("switch-hold-other", { id: "bot-2", name: "Otherly" })
-const MAIN = mainThreadId(bot.id)
 
 const PROVISIONAL = [SETUP_COPY, "New chat", ...GREETINGS, ...BOTS.flatMap((one) => one.lines)]
 
@@ -132,8 +131,6 @@ const paneText = (name = "route") => find(`[data-pane="${name}"]`)?.textContent 
 const paneTitle = () =>
   find('[data-pane="route"] [data-slot="header-title"]')?.textContent?.trim() ?? ""
 
-const card = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
-
 test("a chat switched to in place draws nothing of the one it left while its own answers come in", async () => {
   localStorage.clear()
   forgetHeldChats()
@@ -165,7 +162,7 @@ test("a chat switched to in place draws nothing of the one it left while its own
 })
 
 test(
-  "a thread opened beside Main draws nothing of the thread it replaced while its answers come in",
+  "a chat opened beside the bot's list draws nothing of the chat it replaced while its answers come in",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
@@ -177,19 +174,21 @@ test(
       { bots: [bot, other], active: bot.id },
     )
     await ensureMainThread(bot.id)
-    localStorage.setItem(lastThreadKey(bot.id), "t-a")
-    await mount(phone(`/c/${MAIN}`, "/c/t-b"), async () => {
-      await until(async () => paneText("thread").includes("alpha one"), "the thread beside Main")
-      await until(async () => Boolean(card("t-b")), "the other thread's card")
-      const before = paneFrame("thread").text
+    await mount(phone("/c/t-a", "/c/t-b"), async () => {
+      await until(async () => paneText().includes("alpha one"), "the chat beside the list")
+      await until(
+        async () => Boolean(find('[data-slot="list-lane"] ul a[href="/c/t-b"]')),
+        "the other chat's row",
+      )
+      const before = paneFrame("route").text
       const greeting = greetingKeys()
-      const seen = recordFrames(() => paneFrame("thread"))
+      const seen = recordFrames(() => paneFrame("route"))
 
-      await click(card("t-b"))
-      await until(async () => paneFrame("thread").text.includes("beta one"), "the thread asked for")
+      await click(find('[data-slot="list-lane"] ul a[href="/c/t-b"]'))
+      await until(async () => paneFrame("route").text.includes("beta one"), "the chat asked for")
       await settle()
 
-      onlyReadyFrames(seen, before, paneFrame("thread").text, "alpha one")
+      onlyReadyFrames(seen, before, paneFrame("route").text, "alpha one")
       assert.deepEqual(greetingKeys(), greeting, "the switch wrote nothing of the greeting")
     })
   }),

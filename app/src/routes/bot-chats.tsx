@@ -23,6 +23,7 @@ import { db, type Profile } from "@/lib/db"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { BACK_ON_LIST } from "@/lib/nav"
+import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { isUnread } from "@/lib/session-work"
 import { beginChat, useBotThreads, useNow } from "@/lib/threads"
@@ -36,12 +37,97 @@ const SEARCH_FIELD_ID = "chats-search"
  * was last said in them. Its header is the bot itself, whose name is the way to its settings, and its
  * foot starts a chat or a room. The list is a root screen, so its own back leaves the app (G5), and a
  * reader arriving at it lands in the chat this device last had open here (G1).
+ *
+ * Where there is room the list is the pane and the chat it opened stands beside it
+ * (`useBotChatsPane`), so this screen is then the item lane with nothing open; below that width the
+ * list is the whole screen and a chat is pushed over it, with the way back a screen of its own has.
  */
 export function BotChatsPage() {
   const { profileId } = useParams()
   const enabled = useBotThreads()
+  const pane = useBotChatsPane(enabled)
   const landing = useLanding(profileId, enabled)
-  // A bot's chats, each with the one read of its newest message that a row's line and time come from.
+  // Nothing is drawn before the switches answer, and a device on the legacy layout — where a bot has
+  // no screen — lands home rather than on a list it cannot fill.
+  if (enabled === undefined) return null
+  if (!enabled || !profileId) return <Navigate to="/" replace />
+  // The chat the address opens is on its way, so neither the list it is leaving nor an empty pane is
+  // drawn for a frame.
+  if (landing !== "none") return null
+  if (pane) return <NoChatOpen />
+  return <BotChatsList profileId={profileId} />
+}
+
+/**
+ * The chat a bot's address opens: the one this device last had open there, while it is still one of
+ * the bot's. A reader who arrives at the address steps into that chat; one who steps back onto the
+ * list gets the list — the press arrives as a pop, and the entry a chat's own control leaves in its
+ * place says the reader is back on the list — so a press back never bounces into the chat it came
+ * from.
+ *
+ * `out` while the read is out, `opens` while a chat is taking the address, `none` for a bot with
+ * nothing to open.
+ */
+function useLanding(profileId: string | undefined, enabled: boolean | undefined) {
+  const navigate = useNavigate()
+  const type = useNavigationType()
+  const listed = Boolean((useLocation().state as typeof BACK_ON_LIST | null)?.listed)
+  const answer = useLiveQuery(
+    async () =>
+      profileId && enabled
+        ? { profileId, chat: (await landingChat(profileId)) ?? null }
+        : undefined,
+    [profileId, enabled],
+  )
+  const chat = answer && answer.profileId === profileId ? answer.chat : undefined
+  const opens = type !== "POP" && !listed && Boolean(chat)
+  // One landing per visit: a second effect (a strict-mode double run) opens nothing again, and the
+  // push it leaves is the entry the chat's own control steps back from.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!opens || opened.current) return
+    opened.current = true
+    navigate(`/c/${chat}`)
+  }, [opens, chat, navigate])
+  if (chat === undefined) return "out"
+  return opens ? "opens" : "none"
+}
+
+/**
+ * The list kept on screen beside the chat it opened (see `useBotChatsPane`). It lands in nothing: a
+ * chat this device would open is the address the chat's own list row takes.
+ */
+export function BotChatsPane({ pane }: { pane: BotPane }) {
+  return <BotChatsList profileId={pane.profileId} selected={pane.selected} />
+}
+
+/**
+ * The item lane a bot's screen is where the list stands beside it and no chat is open: the reader
+ * stepped back onto the list, and the row they pick draws its chat in this place.
+ */
+function NoChatOpen() {
+  return (
+    <div
+      data-slot="bot-chats-empty"
+      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+    >
+      <p className="text-sm text-muted-foreground">No chat open</p>
+    </div>
+  )
+}
+
+/** A chat's newest message this device holds: the one read a row's line and its time both come from. */
+function newestIn(conversationId: string) {
+  return db.messages
+    .where("[conversationId+createdAt]")
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+    .reverse()
+    .filter((message) => Boolean(message.content.trim()))
+    .first()
+}
+
+/** A bot's chats, each with the one read of its newest message that a row's line and time come from. */
+function BotChatsList({ profileId, selected }: { profileId: string; selected?: string }) {
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
   const answer = useLiveQuery(async () => {
     if (!profileId) return { profileId, bot: null, rows: [] }
@@ -60,58 +146,22 @@ export function BotChatsPage() {
     return { profileId, bot, rows }
   }, [profileId])
   const fresh = answer && answer.profileId === profileId ? answer : undefined
-  // Nothing is drawn before the switches answer, and a bot that is gone — or a device on the legacy
-  // layout, where a bot has no screen — lands home rather than on a list it cannot fill.
-  if (enabled === undefined || !fresh) return null
-  if (!enabled || !fresh.bot) return <Navigate to="/" replace />
-  // The chat the address opens is on its way, so the list it is leaving is not drawn for a frame.
-  if (landing === undefined) return null
-  return <ChatList bot={fresh.bot} rows={fresh.rows} />
+  if (!fresh) return null
+  // A bot that is gone — deleted here or on another device — lands home rather than on a list it
+  // cannot fill.
+  if (!fresh.bot) return <Navigate to="/" replace />
+  return <ChatList bot={fresh.bot} rows={fresh.rows} selected={selected} />
 }
 
-/**
- * The chat a bot's address opens: the one this device last had open there, while it is still one of
- * the bot's. A reader who arrives at the address steps into that chat; one who steps back onto the
- * list gets the list — the press arrives as a pop, and the entry a chat's own control leaves in its
- * place says the reader is back on the list — so a press back never bounces into the chat it came
- * from.
- *
- * `undefined` while the read is out, `null` for a bot with nothing to open.
- */
-function useLanding(profileId: string | undefined, enabled: boolean | undefined) {
-  const navigate = useNavigate()
-  const type = useNavigationType()
-  const listed = Boolean((useLocation().state as typeof BACK_ON_LIST | null)?.listed)
-  const answer = useLiveQuery(
-    async () =>
-      profileId && enabled
-        ? { profileId, chat: (await landingChat(profileId)) ?? null }
-        : undefined,
-    [profileId, enabled],
-  )
-  const chat = answer && answer.profileId === profileId ? answer.chat : undefined
-  // One landing per visit: a second effect (a strict-mode double run) opens nothing again, and the
-  // push it leaves is the entry the chat's own control steps back from.
-  const opened = useRef(false)
-  useEffect(() => {
-    if (type === "POP" || listed || !chat || opened.current) return
-    opened.current = true
-    navigate(`/c/${chat}`)
-  }, [type, listed, chat, navigate])
-  return chat
-}
-
-/** A chat's newest message this device holds: the one read a row's line and its time both come from. */
-function newestIn(conversationId: string) {
-  return db.messages
-    .where("[conversationId+createdAt]")
-    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
-    .reverse()
-    .filter((message) => Boolean(message.content.trim()))
-    .first()
-}
-
-function ChatList({ bot, rows }: { bot: Profile; rows: ChatListRow[] }) {
+function ChatList({
+  bot,
+  rows,
+  selected,
+}: {
+  bot: Profile
+  rows: ChatListRow[]
+  selected?: string
+}) {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const marks = useReadMarks()
@@ -133,9 +183,10 @@ function ChatList({ bot, rows }: { bot: Profile; rows: ChatListRow[] }) {
     window.requestAnimationFrame(() => searchToggle.current?.focus())
   }
   // A chat is made first and the address moved after it, so back from it has the list to return to.
+  // The entry says which bot it is for, so the list keeps its lane while the new row loads.
   const start = async () => {
     const chat = await beginChat(bot.id)
-    navigate(`/c/${chat.id}`)
+    navigate(`/c/${chat.id}`, { state: { bot: bot.id } })
   }
 
   return (
@@ -211,7 +262,13 @@ function ChatList({ bot, rows }: { bot: Profile; rows: ChatListRow[] }) {
         <ul className="flex flex-col">
           {shown.map((row) => (
             <li key={row.id}>
-              <BotChatItem row={row} now={now} mark={marks[row.id]} />
+              <BotChatItem
+                row={row}
+                now={now}
+                mark={marks[row.id]}
+                selected={row.id === selected}
+                profileId={bot.id}
+              />
             </li>
           ))}
         </ul>
@@ -245,14 +302,30 @@ function ChatList({ bot, rows }: { bot: Profile; rows: ChatListRow[] }) {
 /**
  * One chat's row: a chat's icon — every row here is the same bot's, so the bot's face would say
  * nothing — its title, its last line, its age, and the dot this device's read mark decides. A reply
- * that waits on the reader wears the warning tone and says so beside the title; its line stays.
+ * that waits on the reader wears the warning tone and says so beside the title; its line stays. The
+ * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
+ *
+ * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
  */
-export function BotChatItem({ row, now, mark }: { row: ChatListRow; now: number; mark?: number }) {
+export function BotChatItem({
+  row,
+  now,
+  mark,
+  selected,
+  profileId,
+}: {
+  row: ChatListRow
+  now: number
+  mark?: number
+  selected?: boolean
+  profileId: string
+}) {
   return (
     <ItemRow
       icon={<MessageCircleIcon />}
       tone={row.waiting ? "warning" : undefined}
       unread={isUnread(row.at, mark)}
+      selected={selected}
       badge={
         row.waiting ? (
           <Badge data-waiting className="bg-warning/15 text-warning">
@@ -263,7 +336,7 @@ export function BotChatItem({ row, now, mark }: { row: ChatListRow; now: number;
       title={row.title}
       when={chatAge(row.at, now)}
       line={pinnedLine(row.pinned, row.line)}
-      link={{ to: `/c/${row.id}` }}
+      link={{ to: `/c/${row.id}`, state: { bot: profileId } }}
     />
   )
 }

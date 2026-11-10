@@ -9,7 +9,6 @@ import {
   useState,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { XIcon } from "lucide-react"
 import { matchPath, Navigate, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
@@ -111,7 +110,7 @@ import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
-import { useCodePane, useRememberOpened } from "@/lib/pane"
+import { useCodePane, useRememberOpened, useSplit } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
@@ -237,15 +236,7 @@ const loadRoomChat = () => import("@/components/room/room-chat")
 const RoomChat = lazy(() => loadRoomChat().then((m) => ({ default: m.RoomChat })))
 
 interface ChatPageProps {
-  chatId?: string
-  paneThread?: string
   slot: HoldSlot
-  /**
-   * Puts the thread beside Main away, wherever the lane holds one: the thread's header draws it as
-   * the close cross, and where the address names that thread it comes back to Main instead.
-   * Absent where closing can't take effect.
-   */
-  closeThread?: () => void
 }
 
 /**
@@ -277,10 +268,9 @@ function useRememberedChat(id: string | undefined) {
 
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
-  const id = props.chatId ?? params.id
-  // Only the chat the address names is remembered: the pane beside a list draws one the address
-  // doesn't, and a bot opens onto the chat a reader was really in.
-  useRememberedChat(props.chatId ? undefined : id)
+  const id = params.id
+  // The chat the address names is remembered as the one its bot opens next.
+  useRememberedChat(id)
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
     // A canvas's chat is no chat: its address opens the canvas it belongs to (ADR 0113).
@@ -339,9 +329,6 @@ export function ChatPage(props: ChatPageProps) {
         key={id}
         id={id}
         slot={props.slot}
-        pinned={Boolean(props.chatId)}
-        paneThread={props.paneThread}
-        closeThread={props.closeThread}
       />
     ) : screenKind === "current" ? (
       <CurrentChatPage {...props} />
@@ -364,20 +351,7 @@ export function ChatPage(props: ChatPageProps) {
  * draws it: under the bot's name and its count of threads, with its threads as cards in its flow,
  * and every message it sends triaged by the host first (ADR 0029); a thread of it leads back to it.
  */
-function NextChat({
-  id,
-  slot,
-  pinned,
-  paneThread,
-  closeThread,
-}: {
-  id: string
-  slot: HoldSlot
-  /** This instance draws a chat the address may not name: a Main beside its thread. */
-  pinned: boolean
-  paneThread?: string
-  closeThread?: () => void
-}) {
+function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
   const bot = useLiveQuery(
     async () => (chat ? db.profiles.get(chat.profileId) : undefined),
@@ -397,9 +371,6 @@ function NextChat({
   const isMain = Boolean(chat?.main)
   const mainOn = Boolean(botThreads && isMain)
   const threadList = useThreads(mainOn ? chat?.profileId : undefined)
-  // The thread the address names when this instance is a Main drawn beside it.
-  const routeThread =
-    pinned && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
   const mainPath =
     botThreads && chat && listsAsChat(chat) && !isMain
       ? `/c/${mainThreadId(chat.profileId)}`
@@ -410,7 +381,9 @@ function NextChat({
   const listPath = botThreads && chat && listsAsChat(chat) ? `/b/${chat.profileId}` : undefined
   const xl = useXLarge()
   const wide = useWide()
-  const besideMain = Boolean(mainPath) && xl
+  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
+  // there is nothing behind it for its header to lead back to.
+  const besideList = useSplit() && Boolean(listPath)
   useEffect(() => {
     if (!listPath) return
     return setBackGuard(() => {
@@ -513,24 +486,14 @@ function NextChat({
             }
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
-            centered={Boolean(session) || besideMain}
-            showBot={!session && !besideMain}
+            centered={Boolean(session)}
+            showBot={!session}
             actions={actions}
             leading={
-              // Beside Main the bot is already on screen with the thread, so the way out is the
-              // one that puts this pane away, in the slot a phone's Back takes. Below `xl` the
-              // thread is a screen of its own and leads back; a session leads back to Code,
-              // unless it is drawn beside Code's list.
-              besideMain ? (
-                closeThread && (
-                  <BackButton
-                    label="Close thread"
-                    onClick={closeThread}
-                    floating
-                    icon={<XIcon />}
-                  />
-                )
-              ) : listPath ? (
+              // Beside the bot's list there is nothing behind this chat, so it carries no way
+              // back; below that width the chat is a screen the list pushed and leads back to it,
+              // and a session leads back to Code unless it is drawn beside Code's list.
+              besideList ? undefined : listPath ? (
                 <BackButton
                   label={`Back to ${bot.name || "bot"}`}
                   onClick={() => up(listPath, BACK_ON_LIST)}
@@ -553,8 +516,6 @@ function NextChat({
                 ? {
                     profileId: chat.profileId,
                     botId: bot.botId,
-                    openThread: routeThread ?? paneThread,
-                    beside: Boolean(routeThread),
                     routeChat,
                   }
                 : undefined
@@ -578,12 +539,11 @@ function NextChat({
  * in the order the current screen draws them — closed, blocked, then a plan waiting to be approved —
  * and a chat this device holds nothing of draws none of it.
  */
-function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProps) {
+function CurrentChatPage({ slot }: ChatPageProps) {
   const params = useParams()
   const { pathname, state: address } = useLocation()
-  const id = chatId ?? params.id
-  // The id the address names, which differs from this instance's own: a Main drawn beside a
-  // thread is keyed to the Main while the address holds the thread.
+  const id = params.id
+  // The id the address names.
   const routeChat = matchPath("/c/:id", pathname)?.params.id
   // A message left triaging by a page that closed mid-triage was never sent.
   useEffect(() => {
@@ -1067,10 +1027,6 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
   }, [id, conversation, root, botThreads, mainOwner])
 
   const isMain = Boolean(conversation?.main)
-  // The thread the address itself names, when this instance is a bot's Main drawn beside it: a
-  // Main id is never a thread, so a Main drawn beside another Main carries no item of its own.
-  const routeThread =
-    chatId && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
   const mainPath =
     botThreads && conversation && !session && !isMain
       ? `/c/${mainThreadId(conversation.profileId)}`
@@ -1080,16 +1036,15 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
     botThreads && conversation && !session && listsAsChat(conversation)
       ? `/b/${conversation.profileId}`
       : undefined
-  // `beside` stays on the address alone, so a card tapped from Main still pushes a history entry
-  // Back can return to, while the thread the pane really holds is still the one marked open.
-  const openThread = routeThread ?? (isMain ? paneThread : undefined)
   // A session opens beside Code's list where there's room, and is then a top-level screen with
   // nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
-  const besideMain = Boolean(mainPath) && xl
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
+  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
+  // there is nothing behind it for its header to lead back to.
+  const besideList = useSplit() && Boolean(listPath)
   const codePath = session && "/code"
   const {
     leave,
@@ -1114,12 +1069,6 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
   useEffect(() => {
     if (seenId && seenAt > 0) markRead(seenId, seenAt)
   }, [seenId, seenAt])
-  // A thread beside Main says how many replies it has under its title.
-  const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
-  const repliesLine =
-    mainPath && xl && replyCount
-      ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
-      : undefined
   useEffect(() => {
     if (!listPath) return
     return setBackGuard(() => {
@@ -1201,9 +1150,8 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
     />
   )
 
-  // A session is a place in a project, and a thread beside Main is a place within the bot, so both
-  // are centred; the bot's own face reads from the left.
-  const centered = Boolean(session) || besideMain
+  // A session is a place in a project, so it is centred; a chat's own face reads from the left.
+  const centered = Boolean(session)
   // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
   // face, so its title is the bot's name rather than the `Main` its record is stored under: the
   // name Bot settings edits, so a rename shows here at once.
@@ -1234,7 +1182,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
           names: sessionRepos.map((repo) => repo.name),
           cap: repoCap({ wide, xlarge: xl }),
         })
-      : activity || mainLine || repliesLine
+      : activity || mainLine
 
   const frame = ready ? (
     <>
@@ -1244,24 +1192,13 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // A chat is with its bot, so its picture stays — until the bot is drawn beside its own
-        // thread, where the picture is Main's and the thread is within it.
-        showBot={!session && !unstarted && !besideMain}
+        // A chat is with its bot, so its picture stays.
+        showBot={!session && !unstarted}
         actions={actions}
         leading={
-          besideMain ? (
-            // The bot is on screen with the thread, so the way out is the one that puts this pane
-            // away, in the slot a phone's Back takes.
-            closeThread && (
-              <BackButton
-                label="Close thread"
-                onClick={closeThread}
-                floating
-                icon={<XIcon />}
-              />
-            )
-          ) : listPath ? (
-            // Below `xl` the thread is a screen over its bot's list, and leads back to it.
+          // Beside the bot's list there is nothing behind this chat, so it carries no way back;
+          // below that width the chat is a screen the list pushed and leads back to it.
+          besideList ? undefined : listPath ? (
             <BackButton
               label={`Back to ${profile?.name ?? "bot"}`}
               onClick={() => up(listPath, BACK_ON_LIST)}
@@ -1298,8 +1235,6 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
                           key={`card-${entry.thread.chat.id}`}
                           thread={entry.thread}
                           profileId={conversation?.profileId ?? ""}
-                          open={entry.thread.chat.id === openThread}
-                          beside={Boolean(routeThread)}
                           current={entry.thread.chat.id === routeChat}
                           move={moveThatOpenedThread.get(entry.thread.chat.id)}
                           onUndo={undoMoveOutMain}

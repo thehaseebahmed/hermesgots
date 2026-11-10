@@ -4,7 +4,7 @@ import test from "node:test"
 import { DeviceStateSheet, readDeviceDiagnostics } from "@/components/device-state"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { markResume, startResumeTrace } from "@/lib/resume-trace"
-import { lastThreadKey } from "@/lib/threads"
+import { lastChatKey } from "@/lib/last-chat"
 import { botProfile, json, mount, seedSettings, until } from "./component-kit.tsx"
 
 const bot = botProfile("device-state", { id: "bot-1", name: "Mainly" })
@@ -55,7 +55,7 @@ async function seed(patch: { legacyChat?: boolean } = {}) {
       createdAt: 1_001,
     },
   ])
-  localStorage.setItem(lastThreadKey(bot.id), "t1")
+  localStorage.setItem(lastChatKey(bot.id), "t1")
 }
 
 test("the device state names a bot's Main, its threads and its host's answers, with no secrets", async () => {
@@ -68,13 +68,13 @@ test("the device state names a bot's Main, its threads and its host's answers, w
   assert.ok(found, "the bot is in the dump")
   assert.equal(found.main?.id, mainThreadId(bot.id), "its Main thread is named")
   assert.deepEqual(found.main?.messages, { user: 1, assistant: 1 }, "Main's messages are counted")
-  assert.equal(found.threads, 1)
+  assert.equal(found.threads, 2, "its own chats, Main among them, and no project session")
   assert.deepEqual(
     found.chats.map((one) => one.id).sort(),
     [mainThreadId(bot.id), "t1"].sort(),
     "the window holds the thread and any main-flagged chat, and no project session",
   )
-  assert.equal(found.lastThread, "t1", "the pane's remembered thread rides along")
+  assert.equal(found.lastThread, "t1", "the chat its own screen opens rides along")
   assert.equal(found.lastStored, "t1", "and so does what storage holds")
   assert.equal(found.plugin, "0.99.0", "the host's plugin version was read")
   assert.deepEqual(found.features, ["triage", "moves"], "the host's features were read")

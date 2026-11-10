@@ -11,13 +11,13 @@ import { rememberLastChat } from "@/lib/last-chat"
 
 import {
   Nav,
-  absent,
   botProfile,
   click,
   find,
   findAll,
   findText,
   json,
+  laptop,
   mount,
   nav,
   seedSettings,
@@ -101,59 +101,30 @@ const staleScreen = (
 )
 
 
-const paneScreen = (entry: string) => (
-  <MemoryRouter initialEntries={[entry]}>
-    <ChatPage key={bot.id} chatId={MAIN} slot="route" />
-    <Routes>
-      <Route path="/c/:id" element={<ChatPage slot="route" />} />
-    </Routes>
-    <Nav />
-  </MemoryRouter>
-)
-
 const cardLink = (threadId: string) => find(`a[href="/c/${threadId}"]`)
-const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
 
-test("with room, a card beside Main swaps the thread in place and reads as open", async () => {
-  await paneSeed()
-  await ensureMainThread(bot.id)
-  globalThis.fetch = async () => json({})
-  await mount(paneScreen("/c/t-a"), async () => {
-    await until(async () => Boolean(cardLink("t-b")), "Main's cards beside the open thread")
-    assert.equal(openCards().length, 1, "exactly the thread on screen is marked open")
-    assert.equal(
-      openCards()[0].getAttribute("href"),
-      "/c/t-a",
-      "and it is the one the address names",
+test(
+  "a card tapped in Main pushes its thread, so back has somewhere to return to",
+  laptop(async () => {
+    await paneSeed()
+    await ensureMainThread(bot.id)
+    globalThis.fetch = async () => json({})
+    await mount(
+      <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
+        <Routes>
+          <Route path="/c/:id" element={<ChatPage slot="route" />} />
+        </Routes>
+        <Nav />
+      </MemoryRouter>,
+      async () => {
+        await until(async () => Boolean(cardLink("t-b")), "Main's cards")
+        await click(cardLink("t-b"))
+        await until(() => nav().startsWith("PUSH:"), "a push, so back has somewhere to return to")
+        assert.equal(nav(), "PUSH:/c/t-b")
+      },
     )
-
-    await click(cardLink("t-b"))
-    await until(() => nav().startsWith("REPLACE:"), "a replace, not another history entry")
-    assert.equal(nav(), "REPLACE:/c/t-b", "the thread swapped in where the last one was")
-    assert.equal(openCards()[0].getAttribute("href"), "/c/t-b", "and the open mark moved with it")
-  })
-})
-
-test("with no room, a tapped card pushes its thread so back returns to Main", async () => {
-  await paneSeed()
-  await ensureMainThread(bot.id)
-  globalThis.fetch = async () => json({})
-  await mount(
-    <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
-      <Routes>
-        <Route path="/c/:id" element={<ChatPage slot="route" />} />
-      </Routes>
-      <Nav />
-    </MemoryRouter>,
-    async () => {
-      await until(async () => Boolean(cardLink("t-b")), "Main's cards")
-      assert.equal(openCards().length, 0, "Main on its own has no open thread to mark")
-      await click(cardLink("t-b"))
-      await until(() => nav().startsWith("PUSH:"), "a push, so back has somewhere to return to")
-      assert.equal(nav(), "PUSH:/c/t-b")
-    },
-  )
-})
+  }),
+)
 
 async function paneSeed() {
   await seed()

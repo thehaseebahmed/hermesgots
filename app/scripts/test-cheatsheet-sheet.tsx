@@ -22,8 +22,8 @@ import {
 
 const CHAT = "cheat-1"
 const bot = botProfile("cheatsheet", { id: "bot-1", name: "Cheatsy", apiKey: undefined })
-const OFF = ["Composer", "Slash menu", "Chat", "Bot threads", "While something's open"]
-const ON = ["Composer", "Slash menu", "Chat", "Bot threads", "Navigation", "While something's open"]
+const OFF = ["Composer", "Slash menu", "Chat", "While something's open"]
+const ON = ["Composer", "Slash menu", "Chat", "Navigation", "While something's open"]
 
 const seed = (patch: Partial<Omit<Settings, "id">> = {}) =>
   seedChat({ id: CHAT, profile: bot, settings: { activeProfileId: bot.id, ...patch } })
@@ -145,24 +145,6 @@ test("with navigation shortcuts on, the sheet opened afterwards names Alt+1…9"
       "the composer's rows are the switch's, not the navigation one's",
     )
     assert.ok((sheet()?.textContent ?? "").includes("Alt+1…9"), "the keys it takes")
-  })
-})
-
-test("the sheet names the two keys of the thread beside Main", async () => {
-  await seed()
-  host()
-  await mount(chatScreen(CHAT), async () => {
-    await until(async () => Boolean(composerField()), "the composer")
-    await openSheet()
-    assert.ok(groups().includes("Bot threads"), "the group the lane's two keys live in")
-    assert.deepEqual(
-      drawn().find((one) => one.name === "Bot threads")?.rows,
-      [
-        { keys: ["Escape"], description: "Close the thread beside Main" },
-        { keys: ["Ctrl+\\"], description: "Reopen the thread just closed" },
-      ],
-      "the chevron's twin, and the chord that brings the thread back",
-    )
   })
 })
 

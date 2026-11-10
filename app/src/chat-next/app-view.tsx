@@ -62,14 +62,10 @@ import { messagesOf, heldMessage, messageParts, replyId } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 import type { Waiting } from "./state"
 
-/** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
+/** A bot's Main as chat-next draws it: whose threads are its cards, and which one the address is. */
 export interface MainView {
   profileId: string
   botId?: string
-  /** The thread open beside Main, or the one the address names. */
-  openThread?: string
-  /** The address is a thread, drawn beside Main. */
-  beside: boolean
   /** The chat the address names. */
   routeChat?: string
 }
@@ -289,8 +285,6 @@ export function AppThreadView({
                             key={`card-${entry.thread.chat.id}`}
                             thread={entry.thread}
                             profileId={main?.profileId ?? ""}
-                            open={entry.thread.chat.id === main?.openThread}
-                            beside={Boolean(main?.beside)}
                             current={entry.thread.chat.id === main?.routeChat}
                             move={moveThatOpenedThread.get(entry.thread.chat.id)}
                             onUndo={undo}
