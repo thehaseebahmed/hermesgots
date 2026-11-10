@@ -4,8 +4,10 @@ import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { formatTokens } from "@/lib/format"
+import { HEADER_BUTTON } from "@/lib/layout"
 import { useModelsDevUnreachable } from "@/lib/models"
 import { useNow } from "@/lib/threads"
+import { cn } from "@/lib/utils"
 import {
   NOTICE_REMAINING_PERCENT,
   resetsAtText,
@@ -104,7 +106,7 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
     <Button
       variant="outline"
       size="icon-lg"
-      className="size-11 rounded-full border-0 bg-background/80 backdrop-blur"
+      className={cn(HEADER_BUTTON, "border-0")}
       onClick={onClick}
       aria-label={percent ? `Context, ${percent}` : "Context"}
     >

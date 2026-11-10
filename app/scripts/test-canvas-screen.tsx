@@ -337,6 +337,54 @@ test(
 )
 
 test(
+  "the canvas's top bar is Project's top bar",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat("c1")
+    await mount(
+      <MemoryRouter initialEntries={["/canvas/c1"]}>
+        <Routes>
+          <Route path="/canvas/:id" element={<CanvasView />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(
+          () => find('[data-slot="header-title"]')?.textContent === CANVAS.title,
+          "the canvas's title in the shared header",
+        )
+        // The canvas's title is the screen's heading, not a span like a conversation's title.
+        assert.equal(
+          find('[data-slot="header-title"]')?.tagName,
+          "H1",
+          "the canvas's title is the screen's heading",
+        )
+        const row = find('[data-slot="header-row"]')
+        assert.ok(row, "the header's one row")
+        assert.ok(
+          row.contains(find('[aria-label="All canvases"]')),
+          "the back control sits in the row",
+        )
+        await until(() => Boolean(find('button[aria-label="Undo"]')), "the Undo the version offers")
+        const actions = find('[data-slot="header-actions"]')
+        assert.ok(actions, "the row's actions")
+        for (const label of ["Undo", "Canvas options"]) {
+          const button = actions.querySelector(`button[aria-label="${label}"]`)
+          assert.ok(button, `${label} is one of the row's actions`)
+          for (const look of [
+            "border-border",
+            "bg-background/80",
+            "backdrop-blur",
+            "rounded-full",
+          ]) {
+            assert.ok(button.className.includes(look), `${label} wears the Project's ${look}`)
+          }
+        }
+      },
+    )
+  }),
+)
+
+test(
   "a canvas's chat is in no list and its address opens the canvas",
   atWidth(390, async () => {
     serveCanvases({ version: 3, undos: 0 })
@@ -1126,7 +1174,7 @@ test(
 )
 
 /** A version's line in the header, which is the one thing a screen drawing no page still says. */
-const headerLine = () => wordsOf(find("header p"))
+const headerLine = () => wordsOf(find('[data-slot="header-line"]'))
 
 /** Every one-canvas read the host was asked for: the page, which no record-only screen may ask for. */
 const pageReads = (host: Host) =>

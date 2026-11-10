@@ -55,6 +55,7 @@ import {
   type PullRequestRef,
 } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
+import { HEADER_BUTTON } from "@/lib/layout"
 import { useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -179,7 +180,7 @@ export function ProjectPage() {
                   <Button
                     variant="outline"
                     size="icon-lg"
-                    className="size-11 rounded-full bg-background/80 backdrop-blur"
+                    className={HEADER_BUTTON}
                     aria-label="Project options"
                   />
                 }

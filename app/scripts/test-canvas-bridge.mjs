@@ -31,6 +31,15 @@ function fakeFrame() {
 /** Lets a settled promise's `.then` run, so a posted answer is read after the handler's own turn. */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
+/** A value of a page's realm as this one reads it: `vm`'s objects are not this realm's. */
+const plain = (value) => JSON.parse(JSON.stringify(value))
+
+/**
+ * The page's point half says it is ready on load, so a tap's call is counted among the bridge's
+ * rather than everything the page says.
+ */
+const bridgeCalls = (posted) => posted.filter((message) => message && message.type === BRIDGE_MESSAGE)
+
 /**
  * The page's half in a realm of its own: every listener it adds (by type, since it listens for two
  * kinds of event), and everything it posts to the parent.
@@ -39,6 +48,10 @@ function pageHarness() {
   const listeners = []
   const posted = []
   const context = {
+    // The page's own realm has these: `URL` is how its half reads a scheme, and `setTimeout` is
+    // how a link the page has just asked for stops being the tap's.
+    URL,
+    setTimeout,
     parent: { postMessage: (data) => posted.push(data) },
     addEventListener: (type, fn) => listeners.push({ type, fn }),
   }
@@ -404,8 +417,6 @@ test("a tool the host refuses for any other reason is not put to the reader", as
 })
 
 test("the page's half posts the call it was asked for and settles on the reply", async () => {
-  // Objects made inside the page's own realm carry its prototypes, so the test reads them as JSON.
-  const plain = (value) => JSON.parse(JSON.stringify(value))
   const { context, posted, reply } = pageHarness()
   const api = context.window.canvas.data
 
@@ -549,10 +560,6 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   // property the browser resolves it to. A tap asks once and cancels the click; everything the
   // page keeps for itself asks nothing and is not cancelled.
   const { context, posted: sent, fire } = pageHarness()
-  // The page posts its point half's readiness on load too, so what a tap asks for is counted among
-  // the bridge's own calls rather than everything the page says.
-  const asked = () => sent.filter((message) => message && message.type === BRIDGE_MESSAGE)
-  const plain = (value) => JSON.parse(JSON.stringify(value))
   const anchor = (href) => ({
     tagName: "A",
     nodeType: 1,
@@ -578,10 +585,10 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   assert.equal("open" in context.window.canvas, false, "a page can't open anything without a click")
   const link = anchor("https://example.com/a?b=1")
   const tapped = tap(link)
-  assert.equal(asked().length, 1, "one open call per tap")
-  assert.deepEqual(plain(asked()[0]), {
+  assert.equal(bridgeCalls(sent).length, 1, "one open call per tap")
+  assert.deepEqual(plain(bridgeCalls(sent)[0]), {
     type: BRIDGE_MESSAGE,
-    epoch: asked()[0].epoch,
+    epoch: bridgeCalls(sent)[0].epoch,
     call: 1,
     method: "open",
     url: "https://example.com/a?b=1",
@@ -592,24 +599,115 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
     const kept = tap(anchor(href))
     assert.equal(kept.cancels, 0, `${href} is the page's own`)
   }
-  assert.equal(asked().length, 1, "and posts nothing")
+  assert.equal(bridgeCalls(sent).length, 1, "and posts nothing")
 
   // An untrusted click (a script's own) and a click with no target ask nothing.
   assert.equal(tap(anchor("https://example.com/scripted"), { trusted: false }).cancels, 0)
   fire("click", { isTrusted: true })
-  assert.equal(asked().length, 1)
+  assert.equal(bridgeCalls(sent).length, 1)
 
   // A click the page already answered itself is the page's: its handler ran first and prevented the
   // default, so this link is not also a tab. A page's own drawer must not open a browser beside it.
   const answered = tap(anchor("https://example.com/handled"), { prevented: true })
   assert.equal(answered.cancels, 0, "a handled click is left alone")
-  assert.equal(asked().length, 1, "and asks for nothing")
+  assert.equal(bridgeCalls(sent).length, 1, "and asks for nothing")
 
   // A tap on the link's own words walks up to the anchor it is inside.
   const words = { tagName: "SPAN", nodeType: 1, parentNode: link }
   assert.equal(tap(words).cancels, 1)
-  assert.equal(asked().length, 2)
-  assert.equal(asked()[1].url, "https://example.com/a?b=1")
+  assert.equal(bridgeCalls(sent).length, 2)
+  assert.equal(bridgeCalls(sent)[1].url, "https://example.com/a?b=1")
+})
+
+test("a page's own window.open asks the app once, and only for http(s)", () => {
+  const { context, posted } = pageHarness()
+
+  const opened = context.window.open("https://example.com/kept?n=1", "_blank")
+  assert.ok(opened, "the page is told its window opened")
+  assert.equal(opened.closed, false)
+  assert.equal(opened.opener, null)
+  assert.deepEqual(
+    Object.keys(opened).sort(),
+    ["blur", "close", "closed", "focus", "opener", "postMessage"],
+    "the members a page reads off it",
+  )
+  opened.opener = { anything: true }
+  assert.deepEqual(opened.opener, { anything: true }, "the opener is the page's to set")
+
+  assert.equal(bridgeCalls(posted).length, 1, "one open call per window.open")
+  const [message] = bridgeCalls(posted)
+  assert.ok(Number.isInteger(message.call) && message.call > 0, "the call has a number")
+  assert.equal(typeof message.epoch, "string")
+  assert.ok(message.epoch.length > 0, "and the page that asked")
+  assert.deepEqual(plain(message), {
+    type: BRIDGE_MESSAGE,
+    epoch: message.epoch,
+    call: message.call,
+    method: "open",
+    url: "https://example.com/kept?n=1",
+  })
+
+  // A scheme is an address, not a prefix: the page half reads the URL the way the app does, so a
+  // string the app would refuse never reaches the page's "opened" path.
+  for (const url of [
+    "javascript:alert(1)",
+    "/kept",
+    "about:blank",
+    "https://",
+    "https:// x",
+    "https://exa mple.com",
+  ]) {
+    assert.equal(context.window.open(url), null, url)
+  }
+  assert.equal(context.window.open(), null, "no argument at all")
+
+  // A `_self` open is the page navigating itself, which the frame refuses: it is no link to open
+  // elsewhere, and asks nothing.
+  assert.equal(context.window.open("https://example.com/x", "_self"), null, "_self")
+  assert.equal(context.window.open("https://example.com/x", "_SELF"), null, "whatever its case")
+  assert.equal(bridgeCalls(posted).length, 1, "and nothing is posted")
+})
+
+test("a tap whose page opens the same link asks once", async () => {
+  // A page's own handler can answer the tap and call `window.open` itself. The bridge's click
+  // listener then runs over a click nobody prevented and would ask for the same URL again: the tap
+  // is one ask, and the click is still cancelled so the frame never navigates.
+  const { context, posted, fire } = pageHarness()
+  const url = "https://example.com/kept?n=1"
+  assert.ok(context.window.open(url, "_blank"), "the page's own open asks the app")
+  assert.equal(bridgeCalls(posted).length, 1, "once for the page's own call")
+
+  const link = {
+    tagName: "A",
+    nodeType: 1,
+    href: url,
+    getAttribute: (name) => (name === "href" ? url : null),
+    parentNode: null,
+  }
+  const tap = () => {
+    const event = {
+      target: link,
+      isTrusted: true,
+      defaultPrevented: false,
+      cancels: 0,
+      preventDefault() {
+        this.cancels += 1
+        this.defaultPrevented = true
+      },
+    }
+    fire("click", event)
+    return event
+  }
+
+  const event = tap()
+  assert.equal(bridgeCalls(posted).length, 1, "one open call for the tap, not two")
+  assert.equal(event.cancels, 1, "the click is cancelled, so the frame doesn't try to leave")
+
+  // The page's ask is the tap's only once: the next tap on the same link asks again.
+  await settled()
+  const later = tap()
+  assert.equal(bridgeCalls(posted).length, 2, "a later tap asks again")
+  assert.equal(later.cancels, 1)
 })
 
 test("a call the app cannot read is answered rather than dropped", async () => {
@@ -704,7 +802,7 @@ test("a point is armed, answered with the tapped element, and let go", () => {
   const total = node("p", { id: "total", text: "Total: 12", parent: body })
   const page = pageRealm({ body, documentElement: root })
   assert.deepEqual(
-    JSON.parse(JSON.stringify(page.posted)),
+    plain(page.posted),
     [{ type: POINT_MESSAGE, ready: true }],
     "the page says it is here, and nothing else",
   )
@@ -722,7 +820,7 @@ test("a point is armed, answered with the tapped element, and let go", () => {
   assert.match(value.style.outline, /2px solid/)
   page.fire("click", { target: value })
   assert.deepEqual(
-    page.posted.slice(1).map((one) => JSON.parse(JSON.stringify(one))),
+    page.posted.slice(1).map(plain),
     [
       {
         type: POINT_MESSAGE,
@@ -740,7 +838,7 @@ test("a point is armed, answered with the tapped element, and let go", () => {
   // An element with an id is named by it, and a sibling's place is there when there is no id or class.
   page.fire("message", { data: pointWatch(true) })
   page.fire("click", { target: total })
-  assert.deepEqual(JSON.parse(JSON.stringify(page.posted[2])).point, {
+  assert.deepEqual(plain(page.posted[2]).point, {
     label: "Total: 12",
     selector: "#total",
   })

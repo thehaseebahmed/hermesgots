@@ -13,6 +13,13 @@ export const COLUMN = "mx-auto w-full max-w-[640px]"
  */
 export const COLUMN_BOX = "mx-auto w-full max-w-[672px]"
 
+/**
+ * The round outline button a header bar wears — a Project's menu, a chat's options, a canvas's Undo
+ * and options — so every top bar reads as the same bar. A caller adds what its own place asks of
+ * it (`shrink-0`, `pointer-events-auto`, `md:hidden`, a back control's own surface).
+ */
+export const HEADER_BUTTON = "size-11 rounded-full bg-background/80 backdrop-blur"
+
 /** The foot every chat screen gives its composer, so the app and a blank surface share one gutter. */
 export const COMPOSER_SLOT = "px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
 

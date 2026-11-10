@@ -12,7 +12,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { Profile } from "@/lib/db"
-import { randomId } from "@/lib/utils"
+import { HEADER_BUTTON } from "@/lib/layout"
+import { cn, randomId } from "@/lib/utils"
 import { usePluginFeatureOn } from "@/lib/features"
 import { disbandRoomNow, renameRoomTo } from "@/lib/room-writes"
 
@@ -53,7 +54,7 @@ export function RoomActions({
             <Button
               variant="outline"
               size="icon-lg"
-              className="pointer-events-auto size-11 rounded-full bg-background/80 backdrop-blur"
+              className={cn(HEADER_BUTTON, "pointer-events-auto")}
               aria-label="Room options"
             />
           }

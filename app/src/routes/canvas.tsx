@@ -11,6 +11,7 @@ import {
   useCanvasConsent,
 } from "@/components/canvas-consent"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
@@ -50,6 +51,7 @@ import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeature } from "@/lib/features"
+import { HEADER_BUTTON } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
@@ -536,21 +538,73 @@ export function CanvasView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <CanvasHeader
-        canvas={canvas}
-        profile={profile}
-        away={awayWords ? { words: awayWords, now: awayNow } : undefined}
-        back={{ label: "All canvases", on: () => up("/canvas") }}
-        // A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130),
-        // and a canvas no bot holds has no chat to open: there is no Edit for either.
-        flip={
-          canvas && !missing && !large
-            ? { to: "edit", on: () => navigate(`/canvas/${id}/edit`) }
-            : undefined
+      {/* A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130),
+          and a canvas no bot holds has no chat to open: there is no Edit for either. */}
+      <ChatHeader
+        className="relative pb-2"
+        title={canvas?.title ?? "Canvas"}
+        subtitle={
+          <>
+            {profile && <span className="truncate">{profile.name}</span>}
+            {canvas?.version ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="shrink-0">v{canvas.version}</span>
+              </>
+            ) : null}
+            {awayWords ? (
+              <>
+                <span aria-hidden>·</span>
+                <span role="status" data-canvas-offline className="shrink-0">
+                  {awayWords}
+                </span>
+              </>
+            ) : null}
+          </>
         }
-        // A host that isn't answering can't be asked to walk the record back.
-        onUndo={awayNow ? undefined : () => void undoVersion()}
-        onOptions={() => setOptionsOpen(true)}
+        showBot={false}
+        heading
+        leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
+        actions={
+          <>
+            {canvas && !missing && !large ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className={HEADER_BUTTON}
+                data-canvas-flip="edit"
+                aria-label={FLIP.edit.label}
+                onClick={() => navigate(`/canvas/${id}/edit`)}
+              >
+                <PencilIcon />
+              </Button>
+            ) : null}
+            {/* A host that isn't answering can't be asked to walk the record back. */}
+            {canvas?.canUndo && !awayNow ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className={HEADER_BUTTON}
+                aria-label="Undo"
+                disabled={undoing}
+                onClick={() => void undoVersion()}
+              >
+                <Undo2Icon />
+              </Button>
+            ) : null}
+            {canvas ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className={HEADER_BUTTON}
+                aria-label="Canvas options"
+                onClick={() => setOptionsOpen(true)}
+              >
+                <EllipsisIcon />
+              </Button>
+            ) : null}
+          </>
+        }
       />
 
       <div className="flex min-h-0 flex-1">
@@ -664,28 +718,69 @@ export function CanvasEdit() {
   if (large) return <Navigate to={`/canvas/${id}`} replace />
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <CanvasHeader
-        canvas={canvas}
-        profile={profile}
-        away={awayWords ? { words: awayWords, now: awayNow } : undefined}
-        // The list is where this screen's way back goes whether the record has landed or not: while
-        // it is reading, that is the only screen there is to go to.
-        back={
-          reading || (loaded && !versioned)
-            ? { label: "All canvases", on: () => navigate("/canvas", { replace: true }) }
-            : undefined
+      <ChatHeader
+        className="relative pb-2"
+        title={canvas?.title ?? "Canvas"}
+        subtitle={
+          <>
+            {profile && <span className="truncate">{profile.name}</span>}
+            {canvas && hasVersion(canvas) ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="shrink-0">v{canvas.version}</span>
+              </>
+            ) : null}
+            {awayWords ? (
+              <>
+                <span aria-hidden>·</span>
+                <span role="status" data-canvas-offline className="shrink-0">
+                  {awayWords}
+                </span>
+              </>
+            ) : null}
+          </>
         }
-        flip={
-          loaded && versioned
-            ? {
-                to: "preview",
+        showBot={false}
+        heading
+        leading={
+          // The list is where this screen's way back goes whether the record has landed or not:
+          // while it is reading, that is the only screen there is to go to.
+          reading || (loaded && !versioned) ? (
+            <BackButton
+              label="All canvases"
+              onClick={() => navigate("/canvas", { replace: true })}
+            />
+          ) : undefined
+        }
+        actions={
+          <>
+            {loaded && versioned ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className={HEADER_BUTTON}
+                data-canvas-flip="preview"
+                aria-label={FLIP.preview.label}
                 // A replace, never a push: the page is this screen's own other half, so flipping to
                 // it must not leave the chat behind for the next back press to land on.
-                on: () => navigate(`/canvas/${id}`, { replace: true }),
-              }
-            : undefined
+                onClick={() => navigate(`/canvas/${id}`, { replace: true })}
+              >
+                <FrameIcon />
+              </Button>
+            ) : null}
+            {canvas ? (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className={HEADER_BUTTON}
+                aria-label="Canvas options"
+                onClick={() => setOptionsOpen(true)}
+              >
+                <EllipsisIcon />
+              </Button>
+            ) : null}
+          </>
         }
-        onOptions={canvas ? () => setOptionsOpen(true) : undefined}
       />
       {missing ? (
         <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
@@ -727,102 +822,6 @@ const FLIP = {
   preview: { label: "Preview", Icon: FrameIcon },
 } as const
 
-/**
- * A canvas's header, as both of its screens draw it: the way back where the screen has one, the
- * page's name over the one line that says whose it is and where it stands, the flip named for the
- * screen it goes to, Undo while a version sits under this one, and the menu last so the one button
- * that opens a sheet is where a hand reaches for it (ADR 0130).
- *
- * Each control is one object the screen either hands over or leaves out: no `flip` is no flip, no
- * `back` is no arrow, no `onUndo` is no Undo, and a canvas no bot holds draws no menu. The header
- * writes nothing to a host — the screen it belongs to is what asks for an undo (ADR 0113).
- */
-function CanvasHeader({
-  canvas,
-  profile,
-  away,
-  back,
-  flip,
-  onUndo,
-  onOptions,
-}: {
-  canvas: Canvas | undefined
-  profile: Profile | undefined
-  /** What the header says of a host that isn't answering, or a device with no network (ADR 0071). */
-  away?: { words: string; now: boolean }
-  /** The way back, where the screen has one. */
-  back?: { label: string; on: () => void }
-  /** The screen this header's one control goes to, and what pressing it does. */
-  flip?: { to: "edit" | "preview"; on: () => void }
-  /** Undo, offered only where a version sits under this one and the host can be asked. */
-  onUndo?: () => void
-  onOptions?: () => void
-}) {
-  const turn = flip ? FLIP[flip.to] : undefined
-  return (
-    <header className="flex items-center gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-      {back ? <BackButton label={back.label} variant="ghost" onClick={back.on} /> : null}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <h1 className="truncate font-semibold tracking-tight">{canvas?.title ?? "Canvas"}</h1>
-        {/* A place's header, as a coding session's is: the name over the one line that says where
-            the reader is — whose canvas it is, and which version of it. */}
-        <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
-          {profile && <span className="truncate">{profile.name}</span>}
-          {canvas && hasVersion(canvas) ? (
-            <>
-              <span aria-hidden>·</span>
-              <span className="shrink-0">v{canvas.version}</span>
-            </>
-          ) : null}
-          {away?.now ? (
-            <>
-              <span aria-hidden>·</span>
-              <span role="status" data-canvas-offline className="shrink-0">
-                {away.words}
-              </span>
-            </>
-          ) : null}
-        </p>
-      </div>
-      {flip && turn ? (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          data-canvas-flip={flip.to}
-          aria-label={turn.label}
-          onClick={flip.on}
-        >
-          <turn.Icon />
-        </Button>
-      ) : null}
-      {onUndo && canvas?.canUndo ? (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          aria-label="Undo"
-          onClick={onUndo}
-        >
-          <Undo2Icon />
-        </Button>
-      ) : null}
-      {/* The menu is the row's last control, so the one button that opens a sheet is always where a
-          hand reaches for it, whatever else the canvas offers today. */}
-      {canvas && onOptions ? (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          aria-label="Canvas options"
-          onClick={onOptions}
-        >
-          <EllipsisIcon />
-        </Button>
-      ) : null}
-    </header>
-  )
-}
 
 /**
  * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's

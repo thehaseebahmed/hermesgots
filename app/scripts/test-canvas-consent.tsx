@@ -659,7 +659,7 @@ test(
       await type(find("#canvas-name"), "Split the bill")
       await click(findText("button", "Save"))
       await until(
-        async () => wordsOf(find("h1")).includes("Split the bill"),
+        async () => wordsOf(find('[data-slot="header-title"]')).includes("Split the bill"),
         "the header to wear the new name",
       )
       assert.strictEqual(find("iframe[data-canvas-frame]") !== null, true, "the page stays drawn")
