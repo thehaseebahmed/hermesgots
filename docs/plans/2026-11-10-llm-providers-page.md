@@ -236,6 +236,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    cannot gain an icon without a gate, or a gate without an icon. Prepares: 4. After: none.
    Layers: `app` UI. Check: `pnpm test` over `test-bot-settings-list.tsx`, `test-bot-pane.tsx`,
    `test-bot-rows.tsx` — green before and after, no test edited.
+
+   Done.
+
 2. **Preparatory refactor (plugin): one credential read.** `plugin/credentials.py` holds `KEY_ENV`,
    `env_lookup()`, `present(name)` and `masked(name)`; `speech.py` imports `present` and its `stt`
    payload keeps `key_set` and gains nothing. Prepares: 4–9. After: none. Layers: plugin domain.

@@ -109,19 +109,48 @@ type Connection =
   | { state: "ok"; plugin: string | null; key: string }
   | { state: "error"; message: string; key: string }
 
-/** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
-const PAGE_FEATURES = {
+/** What a page wears, and the plugin feature it needs where a host can withhold it. */
+type PageMeta = {
+  /** The icon a page's row, and the screen it opens, wear. */
+  icon: LucideIcon
+  /** The feature the page is gated on: a page that is always there has none. */
+  feature?: string
+}
+
+/**
+ * Every page's own row: what it wears and, where a plugin can withhold it, the feature it is gated
+ * on. One table, so a page can gain neither without the other being written beside it.
+ */
+const PAGE_META = {
+  bot: { icon: BotIcon },
   // General mirrors the bot's own Hermes, so it needs a plugin that can read the host's schema. A
   // host without it draws no General row, and a general address lands on the bot's own page.
-  general: GENERAL_PAGE,
-  "speech-to-text": DICTATION,
-  mcps: MCP_FEATURES.list,
-  coding: AFK_PICKS_FEATURE,
-  skills: SKILL_FEATURES.list,
-  delegation: DELEGATION_PAGE,
-} as const
+  general: { icon: SlidersHorizontalIcon, feature: GENERAL_PAGE },
+  models: { icon: MessagesSquareIcon },
+  coding: { icon: CodeXmlIcon, feature: AFK_PICKS_FEATURE },
+  "speech-to-text": { icon: AudioLinesIcon, feature: DICTATION },
+  mcps: { icon: PlugZapIcon, feature: MCP_FEATURES.list },
+  skills: { icon: WrenchIcon, feature: SKILL_FEATURES.list },
+  delegation: { icon: NetworkIcon, feature: DELEGATION_PAGE },
+} satisfies Record<BotTab, PageMeta>
 
-type GatedPage = keyof typeof PAGE_FEATURES
+/** The pages a plugin can withhold: those `PAGE_META` gives a feature. */
+type GatedPage = {
+  [P in BotTab]: (typeof PAGE_META)[P] extends { feature: string } ? P : never
+}[BotTab]
+
+/** What a page is gated on, where a plugin can withhold it. */
+function gateOf(page: BotTab): string | undefined {
+  const meta: PageMeta = PAGE_META[page]
+  return meta.feature
+}
+
+/** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
+const PAGE_FEATURES = Object.fromEntries(
+  (Object.keys(PAGE_META) as BotTab[])
+    .filter((page) => gateOf(page) !== undefined)
+    .map((page) => [page, gateOf(page)]),
+) as Record<GatedPage, string>
 
 function gated(page: BotTab): page is GatedPage {
   return page in PAGE_FEATURES
@@ -131,18 +160,6 @@ function gated(page: BotTab): page is GatedPage {
 const MODELS_ANSWERS = { triage: "triage_model" } as const
 
 const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
-
-/** The icon a page's row, and the screen it opens, wear. */
-const PAGE_ICONS: Record<BotTab, LucideIcon> = {
-  bot: BotIcon,
-  general: SlidersHorizontalIcon,
-  models: MessagesSquareIcon,
-  coding: CodeXmlIcon,
-  "speech-to-text": AudioLinesIcon,
-  mcps: PlugZapIcon,
-  skills: WrenchIcon,
-  delegation: NetworkIcon,
-}
 
 /** The registry's Enabled flag, with when the bot's host last checked in. */
 function EnabledSetting({ profile }: { profile: Profile }) {
@@ -307,7 +324,7 @@ function PageRow({
   /** Whether the row swaps the pane beside it rather than opening a screen of its own. */
   replace?: boolean
 }) {
-  const Icon = PAGE_ICONS[page.segment]
+  const Icon = PAGE_META[page.segment].icon
   return (
     <Link
       to={botTabPath(botId, page.segment)}
