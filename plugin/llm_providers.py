@@ -23,8 +23,10 @@ Providers draws: a ``providers.<id>`` entry, a legacy ``custom_providers`` row t
 behind, and a bare ``provider: custom`` slot. Each row's mask is **not** the list's
 ``api_key_preview``: that is ``"${KEY_ENV}"`` for a key-env entry — the host's display for the
 indirection — so the entry's own ``key_env`` is read from the profile's ``config.yaml`` and *that*
-masked, and a plaintext ``api_key`` an older release left in the entry is masked the same way. An
-entry with neither reads *Not set*.
+masked, and a plaintext ``api_key`` an older release left in the entry is masked the same way. A
+legacy row's entry is the ``custom_providers`` one its name slugs to, so a row the migration never
+converted reads the key it really authenticates with rather than *Not set*. An entry with neither
+reads *Not set*.
 
 A key is written through Hermes's credential lifecycle (``save_provider_env_credential``), never its
 ``config.yaml`` writer: the lifecycle also reconciles the config mirrors, the env-seeded
@@ -418,8 +420,9 @@ def add_endpoint(config_path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
     ``discover_models`` is left at the body's own default: this is a new entry, so the host's default
     is the answer a person would give — there is no stored value a body could contradict.
 
-    The key is the page's and may be absent: a local server that takes no key is an endpoint Hermes
-    holds too, and a write with no key is that. A key that *is* a mask is refused first of all, before
+    The key may be absent: a local server that takes no key is an endpoint Hermes holds too, and the
+    API tolerates a write with no key for one. (The page's form requires a key before it offers Save,
+    which is the form's rule, not this one.) A key that *is* a mask is refused first of all, before
     anything else in the body is read or written, on the host's own rule.
 
     Three fields are required, and each has to hold something: a body short one of them is refused in

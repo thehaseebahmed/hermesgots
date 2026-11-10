@@ -78,7 +78,7 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
   "llm-providers": [
     // The page's own `+`, which adds an endpoint: a fixed id, since it is no endpoint of the host's
     // and so has no slug to be named by. FIXED is matched before the page's items, so this can never
-    // be mistaken for one — an endpoint a host slugs `add` is still `key/add`, a segment deeper.
+    // be mistaken for one.
     { id: "add", kind: "detail", title: "Add custom endpoint" },
     {
       id: "key",

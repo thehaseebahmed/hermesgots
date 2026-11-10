@@ -105,7 +105,7 @@ export function endpointRows(block: LlmProviders): LlmEndpointRow[] {
 /**
  * The shapes a mask arrives in, as the page must never send one back: `mask_secret`'s `***`, its
  * first-four/last-four elision, and the `«redacted…»` sentinel a Dashboard copy carries. The host
- * refuses a mask on its own (longer) rule; this is the screen's half, so no Save is even offered.
+ * refuses a mask on its own rule; this is the screen's half, so no Save is even offered.
  */
 const MASKED_KEY = /^(?:\*{3,}|«redacted[^»]*»|\S{0,4}\.{3}\S{0,4})$/
 

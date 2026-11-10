@@ -125,7 +125,6 @@ export function LlmProvidersTab({ profile }: { profile: Profile }) {
               <ValueRow
                 key={endpoint.id}
                 title={endpoint.title}
-                // The base URL and the model it runs, which this page never edits.
                 purpose={endpoint.purpose || undefined}
                 value={endpoint.value}
                 onClick={() =>

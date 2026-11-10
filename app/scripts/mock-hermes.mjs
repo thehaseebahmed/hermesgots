@@ -3453,7 +3453,7 @@ const LLM_ENDPOINTS = [
     base_url: "http://127.0.0.1:8080/v1",
     model: "llama-3.1-8b",
     // The host's own `is_current`: the model this bot runs on, so a removal of it is refused. It is
-    // the mock's fact and not the page's — `llmBlock` sends only the four fields a row draws.
+    // the mock's fact and not the page's: `llmBlock` returns the row's own fields, never `current`.
     current: true,
   },
   {

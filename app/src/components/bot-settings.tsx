@@ -534,7 +534,7 @@ function PageSub({
   // The page's own `+`: the form that adds a custom endpoint, which is a screen of its own.
   if (tab === "llm-providers" && sub.id === "add")
     return <LlmEndpointAddScreen profile={profile} close={close} />
-  // One provider's key: the page's own detail, named by the slug the address carries.
+  // One provider's key: the page's own detail, named by the target the address carried.
   if (tab === "llm-providers" && sub.kind === "detail" && sub.item)
     return <LlmProviderKeyScreen profile={profile} target={sub.item} />
   const edit = botEdit(sub.id)
