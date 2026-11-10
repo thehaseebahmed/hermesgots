@@ -452,6 +452,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 await asyncio.to_thread(closes.resume, served)
         except Exception:
             logger.debug("gots: couldn't resume the session closes", exc_info=True)
+        # And a routine delivery an older plugin queued is published as its run's row rather than
+        # lost at the upgrade; see platform_gots.py.
+        await platform_gots.resume(link.served_homes(adapter))
         # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
         # sessions.heal_sources.
         failed = await repair_labelled_sources(link.served_homes(adapter))
@@ -462,9 +465,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
-            # A routine's message that waited for its chat writes once the chat is free; see
-            # platform_gots.py.
-            asyncio.ensure_future(platform_gots.run(adapter, home)),
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
@@ -684,9 +684,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # advertised only where its tools reach a canvas's session and that session is
                     # told the design guide (openui.py) — a canvas with neither can't be worked.
                     *(["canvas"] if canvases.ready() and openui.canvas_ready() else []),
-                    # A routine's answer delivered into a chat as the bot's own message, and the
-                    # route that names the run behind it (platform_gots.py, ADR 0081).
-                    *([platform_gots.FEATURE] if platform_gots.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -1542,19 +1539,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             body["compactions"] = compacted
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(body)
-
-    async def session_routines(request: "web.Request") -> "web.Response":
-        """The routine messages a chat holds, each with the row it is drawn at now (ADR 0081)."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        session_id = request.match_info["session_id"]
-        path = store_path()
-        found = await asyncio.to_thread(
-            platform_gots.routines, path, profile_home(), session_id
-        )
-        # An empty list for a chat with none, never a 404: the app draws no chip and asks nothing more.
-        return web.json_response({"object": platform_gots.OBJECT, "routines": found})
 
     async def read_usage(provider: str) -> Dict[str, Any]:
         scope = profile_scope()
@@ -2444,7 +2428,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/routines", session_routines)
     app.router.add_get(f"{PREFIX}/usage", account_usage)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
@@ -3652,8 +3635,6 @@ def register(ctx) -> None:
         register_hook("on_session_end", events.on_turn_end)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
-        # And a routine's message that waited for this chat's turn is written now; see platform_gots.py.
-        register_hook("on_session_end", lambda **_kwargs: platform_gots.wake())
         # And AFK looks for the next task now when a project session ends; see afk.py.
         register_hook("on_session_end", afk.after_run)
         # A subagent's own session id and core's, so a card's Stop can name the live child it stops;
@@ -3679,7 +3660,8 @@ def register(ctx) -> None:
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
     openui.register(ctx)
-    # Gots is a delivery platform, so a routine can speak in a chat (platform_gots.py, ADR 0081).
+    # Gots is a delivery platform, so a routine's run is a row of this bot's chats
+    # (platform_gots.py).
     platform_gots.register(ctx)
     platform_gots.register_section(ctx)
     # A reply is read in the app's markdown, and the host's plain-text default is wrong here

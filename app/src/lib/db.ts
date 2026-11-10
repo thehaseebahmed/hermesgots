@@ -241,6 +241,18 @@ export interface Conversation {
    * carry it.
    */
   afk?: boolean
+  /**
+   * A routine's run, as the plugin publishes it: one row per run, whose session is the run's own, so
+   * opening it opens that run's transcript rather than a chat (G4). The marker is the host's, written
+   * once with the record; the user's own chats never carry it.
+   */
+  routine?: boolean
+  /**
+   * The first line of what landed here, for a row whose line this device can't read from a message of
+   * its own: a routine's is written onto its record by the delivery, since the run's words are in the
+   * run's session and not in this chat. Synced with the record, like `afk`.
+   */
+  line?: string
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
   /**
