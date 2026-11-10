@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from plugin import sessions
+from plugin import canvases, sessions
 from plugin.store import db_path
 from plugin.tests._helpers import stub_projects_db
 
@@ -63,6 +63,14 @@ class PlanModeTest(unittest.TestCase):
 
     def test_a_read_only_tool_is_left_alone(self) -> None:
         self.assertIsNone(self._before_tool("read_file", "plan"))
+
+    def test_a_canvas_data_write_is_blocked(self) -> None:
+        # The data tools ride every session a bot has, so plan mode has to name this one itself: a
+        # plan-mode chat that writes a canvas's data has changed something the user hasn't approved.
+        self.assertEqual(
+            self._before_tool(canvases.TOOL_DATA_WRITE, "plan"),
+            {"action": "block", "message": sessions.PLAN_BLOCK},
+        )
 
     def test_outside_plan_mode_nothing_is_blocked(self) -> None:
         self.assertIsNone(self._before_tool("library_add", "accept_edits"))

@@ -50,7 +50,7 @@ guide overruling what it puts first. So is anything the markup cannot decide —
 state — because a warning a bot cannot act on is noise, and one that fires on the guide's own advice
 (its 768px breakpoint, its button click) teaches a bot to distrust all three.
 
-The cost of the choice is that the guide has 18 characters of headroom under the host's 4,000 (a
+The cost of the choice is that the guide has 22 characters of headroom under the host's 4,000 (a
 section over it is dropped whole, and the app hides Canvas when its section is missing), that a page's
 own script can ask for a link to open — the scheme is what is enforced, not a proven tap — that the
 vendored skills are snapshots with no updater and duplicate names a host may already ship, and that a

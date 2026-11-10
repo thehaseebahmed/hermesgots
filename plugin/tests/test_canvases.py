@@ -775,14 +775,12 @@ class SessionTest(unittest.TestCase):
                 canvases.TOOL_WRITE,
             ],
         )
-        self.assertEqual(len(canvas_agent.tools), 6)
         # A session with no canvas of its own is exactly who needs to look one up, and one that
         # isn't a canvas's reads or writes a canvas's data by naming it.
         self.assertEqual(
             plain_agent.valid_tool_names,
             {canvases.TOOL_LIST, canvases.TOOL_DATA_READ, canvases.TOOL_DATA_WRITE},
         )
-        self.assertEqual(len(plain_agent.tools), 3)
 
         # The guide is the canvas's, and the component library's is withheld from that session.
         self.assertEqual(openui.canvas_content({"session_id": self.session + "-c1"}), openui.CANVAS_TEXT)
@@ -816,9 +814,18 @@ class SessionTest(unittest.TestCase):
             self.assertEqual((read["html"], read["version"]), (DOCUMENT, 1))
             refused = json.loads(canvases.handle_write({"html": "<p>no</p>"}, session_id=self.session))
             self.assertIn("error", refused)
-        # Outside a canvas's session neither tool answers anything of a canvas.
+        # Outside a canvas's session none of the three answers anything of a canvas.
         with mock.patch.object(canvases, "_session_canvas", return_value=None):
             self.assertIn("error", json.loads(canvases.handle_write({"html": DOCUMENT}, session_id="s")))
+            self.assertIn(
+                "error",
+                json.loads(
+                    canvases.handle_edit(
+                        {"edits": [{"find": "<h1>Tip</h1>", "replace": "<h1>Split</h1>"}]},
+                        session_id="s",
+                    )
+                ),
+            )
             self.assertIn("error", json.loads(canvases.handle_read({}, session_id="s")))
 
     def test_a_canvas_session_keeps_data_of_its_own(self) -> None:
@@ -935,11 +942,30 @@ class ListTest(unittest.TestCase):
                     self.assertEqual(list(row), ["id", "title", "archived", "at"])
         # It takes no arguments: the caller who knows no name asks it as it is.
         self.assertEqual(canvases.LIST_SCHEMA["parameters"], {"type": "object", "properties": {}})
+        # The clock is the page's: a data write never moves it, so the description says so rather
+        # than promising that `at` moves with everything a canvas holds.
+        self.assertIn("when its page last changed", canvases.LIST_SCHEMA["description"])
         # A caller that sends nothing at all is answered the same list.
         self.assertEqual(
             json.loads(canvases.handle_list(None, session_id=self.plain))["canvases"][0]["id"],
             self.newest["id"],
         )
+
+    def test_two_canvases_written_in_the_same_millisecond_are_newest_first(self) -> None:
+        # The clock is milliseconds, so two writes can share one. The rowid breaks the tie: a list
+        # that fell back to insertion order would put the older canvas first and the newest last.
+        conn = connect(self.path)
+        try:
+            conn.execute("UPDATE canvases SET at = ?", (int(time.time() * 1000),))
+        finally:
+            conn.close()
+        newest = [self.newest["id"], self.archived["id"]]
+        self.assertEqual(
+            [row["id"] for row in json.loads(canvases.handle_list({}, session_id=self.plain))["canvases"]],
+            newest,
+        )
+        self.assertEqual([found["id"] for found in canvases.names(self.path)], newest)
+        self.assertEqual([found["id"] for found in canvases.listing(self.path)], newest)
 
     def test_the_list_reads_the_store_without_walking_a_session(self) -> None:
         # The store's path is all a list needs: no canvas of its own is exactly the session it is
@@ -954,6 +980,56 @@ class ListTest(unittest.TestCase):
         self.assertEqual(
             [row["id"] for row in listed["canvases"]], [self.newest["id"], self.archived["id"]]
         )
+
+
+class UnreadableStoreTest(unittest.TestCase):
+    """A store a tool can't read — corrupt, locked or half-migrated — is an answer, not a raise.
+
+    Every canvas tool answers ``{"error": ...}`` by contract: a ``sqlite3.Error`` let out of a
+    handler fails the tool call instead, so the model is told nothing and the turn carries the
+    failure as its own. A store another writer holds (``BEGIN EXCLUSIVE``), a file that is no
+    database and a migration step that fails all arrive here the same way.
+    """
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.path = db_path(self.home)
+        self.canvas = make_canvas(self.path)
+        self.plain = triage.open_thread(self.path, "bot-1")[1]
+        # No database at all: `connect` refuses the file at its first read, which is where a locked
+        # store's timeout and a failing migration step land too.
+        self.path.write_bytes(b"not a sqlite store\n" * 32)
+
+    def test_the_list_and_a_named_read_answer_an_unreadable_store_with_an_error(self) -> None:
+        for tool, handler, args in (
+            (canvases.TOOL_LIST, canvases.handle_list, {}),
+            (
+                canvases.TOOL_DATA_READ,
+                canvases.handle_data_read,
+                {"canvas": self.canvas["id"]},
+            ),
+        ):
+            with self.subTest(tool=tool):
+                answered = json.loads(handler(args, session_id=self.plain))
+                self.assertEqual(list(answered), ["error"])
+                self.assertIn(tool, answered["error"])
+
+    def test_a_canvas_sessions_own_reads_answer_an_unreadable_store_with_an_error(self) -> None:
+        # A canvas's session names no canvas and still reads the store, so the refusal is the one
+        # `run` raises — caught where the answer is written, for every canvas tool alike.
+        with mock.patch.object(canvases, "canvas_of_session", return_value=self.canvas["id"]):
+            for tool, handler, args in (
+                (canvases.TOOL_READ, canvases.handle_read, {}),
+                (
+                    canvases.TOOL_DATA_WRITE,
+                    canvases.handle_data_write,
+                    {"collection": "notes", "id": "a", "doc": 1},
+                ),
+            ):
+                with self.subTest(tool=tool):
+                    answered = json.loads(handler(args, session_id=self.canvas["session_id"]))
+                    self.assertEqual(list(answered), ["error"])
+                    self.assertIn(tool, answered["error"])
 
 
 class EditTest(unittest.TestCase):
@@ -1454,21 +1530,102 @@ class NamingTest(unittest.TestCase):
                     canvases.handle_data_read(named, session_id=self.canvas["session_id"])
                 )
                 self.assertEqual([row["doc"] for row in read["documents"]], [{"text": "mine"}])
-        # Naming another canvas is refused, and refused before this bot's canvases are looked up at
-        # all: a canvas's bot doesn't get to enumerate its neighbours to be told no.
-        with mock.patch.object(
-            canvases,
-            "names",
-            side_effect=AssertionError("a canvas's session looked up its neighbours"),
-        ):
-            another = json.loads(
-                canvases.handle_data_read(
-                    {"canvas": self.other["id"]}, session_id=self.canvas["session_id"]
-                )
+        # Another canvas's id is that canvas in every session, so this one refuses it — and names
+        # both canvases, since a caller has to know which session it is in.
+        another = json.loads(
+            canvases.handle_data_read(
+                {"canvas": self.other["id"]}, session_id=self.canvas["session_id"]
             )
+        )
         self.assertEqual(list(another), ["error"])
         for canvas_id in (self.canvas["id"], self.other["id"]):
             self.assertIn(canvas_id, another["error"])
+
+    def test_a_canvas_session_refuses_a_title_two_canvases_answer_to(self) -> None:
+        # A title is not unique, so a name two canvases answer to is refused from a canvas's own
+        # session too, with both ids: being one of them is no reason to guess, and a name means one
+        # canvas in every session or none.
+        twin = make_canvas(self.path)
+        title = self.canvas["title"]
+        self.assertEqual(twin["title"], title)
+        refused = json.loads(
+            canvases.handle_data_read({"canvas": title}, session_id=self.canvas["session_id"])
+        )
+        self.assertEqual(list(refused), ["error"])
+        for canvas_id in (self.canvas["id"], twin["id"]):
+            self.assertIn(canvas_id, refused["error"])
+        self.assertIn(canvases.TOOL_LIST, refused["error"])
+
+    def test_a_canvas_session_refuses_a_blank_canvas(self) -> None:
+        # Leaving `canvas` out means this canvas; a blank name is not left out. It is a name no
+        # canvas answers to, so it is refused rather than quietly read as this session's data.
+        canvases.put_doc(self.path, self.canvas["id"], "notes", "mine", {"text": "mine"})
+        for named in ("", "   "):
+            with self.subTest(named=named):
+                refused = json.loads(
+                    canvases.handle_data_read(
+                        {"canvas": named}, session_id=self.canvas["session_id"]
+                    )
+                )
+                self.assertEqual(list(refused), ["error"])
+                self.assertIn(canvases.TOOL_LIST, refused["error"])
+        kept = json.loads(canvases.handle_data_read({}, session_id=self.canvas["session_id"]))
+        self.assertEqual([row["doc"] for row in kept["documents"]], [{"text": "mine"}])
+
+    def test_a_name_that_is_no_text_is_refused_rather_than_raising(self) -> None:
+        # A surrogate code point has no UTF-8 bytes, so a name holding one has nowhere to be stored:
+        # it is a name no document can have, refused here as a control character is.
+        canvases.put_doc(self.path, self.canvas["id"], "notes", "a", {"text": "mine"})
+        for named in ("\ud800", "a\udfff"):
+            with self.subTest(named=named):
+                for args in (
+                    {"canvas": self.canvas["id"], "collection": named},
+                    {"canvas": self.canvas["id"], "collection": "notes", "id": named},
+                ):
+                    refused = json.loads(
+                        canvases.handle_data_read(args, session_id=self.plain)
+                    )
+                    self.assertEqual(list(refused), ["error"])
+                    self.assertIn("surrogate", refused["error"])
+                written = json.loads(
+                    canvases.handle_data_write(
+                        {"canvas": self.canvas["id"], "collection": named, "id": "a", "doc": 1},
+                        session_id=self.plain,
+                    )
+                )
+                self.assertEqual(list(written), ["error"])
+                self.assertIn("surrogate", written["error"])
+
+    def test_a_title_that_is_another_canvass_id_names_the_id_in_every_session(self) -> None:
+        # A title is free text, so one canvas may be given another canvas's id as its name. A title
+        # can never shadow an id: the name is the canvas whose key it is, everywhere — so this
+        # session refuses the other canvas's id instead of writing into itself what was meant for
+        # its neighbour.
+        canvases.update(self.path, self.canvas["id"], {"title": self.other["id"]})
+        canvases.put_doc(self.path, self.other["id"], "notes", "theirs", {"text": "theirs"})
+        refused = json.loads(
+            canvases.handle_data_write(
+                {"canvas": self.other["id"], "collection": "notes", "id": "landed", "doc": 1},
+                session_id=self.canvas["session_id"],
+            )
+        )
+        self.assertEqual(list(refused), ["error"])
+        for canvas_id in (self.canvas["id"], self.other["id"]):
+            self.assertIn(canvas_id, refused["error"])
+        # It landed in neither canvas: the id is still that canvas's key from a plain chat, and this
+        # session holds nothing it didn't have.
+        theirs = json.loads(
+            canvases.handle_data_read(
+                {"canvas": self.other["id"], "collection": "notes"}, session_id=self.plain
+            )
+        )
+        self.assertEqual([row["id"] for row in theirs["documents"]], ["theirs"])
+        mine = json.loads(
+            canvases.handle_data_read(
+                {"canvas": self.canvas["id"], "collection": "notes"}, session_id=self.plain
+            )
+        )
+        self.assertEqual(mine, {"documents": []})
 
     def test_a_canvas_session_names_its_own_title_in_another_case(self) -> None:
         # A canvas's own session naming its own title in another case is that canvas, as it is

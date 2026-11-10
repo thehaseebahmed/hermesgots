@@ -26,12 +26,13 @@ finishes with the app closed:
 - The data tools read and write the canvas's data.
 
 **(amended 2026-11-10)** The document is the canvas session's; the data is not. A canvas's data is
-reachable from every session its bot has — `canvas_data_read` and `canvas_data_write` naming the
-canvas by its title or its id, `canvas_list` naming every canvas the bot has, and the name left out
-in the canvas's own session, where it means that canvas — because a chat that wants to leave a number
-for a page should not have to become that page's session. What the page says does stay there: a
-document is versioned, undone and replaced whole by one session, so one place holds why it changed,
-and the three document tools are equipped in that session and nowhere else.
+reachable from every session its bot has but another canvas's — `canvas_data_read` and
+`canvas_data_write` naming the canvas by its title or its id, `canvas_list` naming every canvas the
+bot has, and the name left out in the canvas's own session, where it means that canvas — because a
+chat that wants to leave a number for a page should not have to become that page's session. What the
+page says does stay there: a document is versioned, undone and replaced whole by one session, so one
+place holds why it changed, and the three document tools are equipped in that session and nowhere
+else.
 
 The session is an ordinary synced chat record carrying `canvasId` and titled with the canvas's name.
 That keeps the send path a chat already has: the model pin (ADR 0059), the queue, steer and drafts.

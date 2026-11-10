@@ -48,7 +48,7 @@ that one is CSS to paste, not to import.
 
 ## The sandbox
 
-- A form's submit is cancelled in place: the page stays, nothing navigates, so handle the click.
+- A form's submit is cancelled in place: nothing navigates, so handle the click.
 - An `http(s)` link opens in the app on tap: use one when the reader should leave.
 - Nothing loads from outside: no `<script src>`, `<link href>` to a CDN, remote image,
   `<iframe>`, `<object>`, `<embed>`, `<base>`, meta refresh or `url(https://…)`, or the write is
@@ -72,8 +72,8 @@ above it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
 A canvas keeps data, documents of `{collection, id, doc, at}`: the page reads and writes it with
 `canvas.data.list(collection)`, `.get(collection, id)`, `.put(collection, id, doc)` and
 `.remove(collection, id)`, and you with `canvas_data_read` and `canvas_data_write`. Any of the bot's
-sessions reaches it by the canvas's title or id, which `canvas_list` names; here `canvas` is left
-out for this canvas, whose page only this session changes. 1 MB a canvas.
+sessions except another canvas's reaches it by title or id, which `canvas_list` names; here
+`canvas` is left out for this canvas, whose page is this session's. 1 MB a canvas.
 
 ## The host, from the page
 

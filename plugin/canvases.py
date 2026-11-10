@@ -12,8 +12,9 @@ nowhere else, and the canvas is found from a run's session by walking the chat's
 ``canvas_list``, ``canvas_data_read`` and ``canvas_data_write`` reach every session — a session
 with no canvas of its own is exactly who has to look one up, and a chat that wants a canvas's data
 shouldn't have to become that canvas's session — while ``canvas_write``, ``canvas_edit`` and
-``canvas_read`` are equipped in the canvas's own session and nowhere else. The three name a canvas
-by its title or its id (``resolve``) and answer ``names``, never a record's picture.
+``canvas_read`` are equipped in the canvas's own session and nowhere else. The two data tools name
+a canvas by its title or its id (``resolve``), and all three answer ``names``, never a record's
+picture.
 
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
 it is archived out of the list — are the host's record too (``update``), so every device draws the same
@@ -352,12 +353,16 @@ def record(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
 
 
 def listing(path: Path) -> List[Dict[str, Any]]:
-    """Every canvas this bot has, the one written to last first."""
+    """Every canvas this bot has, the one written to last first.
+
+    The clock is milliseconds and two writes can share one, so the rowid breaks the tie: a list
+    ordered by the clock alone would fall back to insertion order and put the older canvas first.
+    """
     if not path.exists():
         return []
     conn = connect(path)
     try:
-        rows = conn.execute(f"SELECT {_RECORD} FROM canvases ORDER BY at DESC").fetchall()
+        rows = conn.execute(f"SELECT {_RECORD} FROM canvases ORDER BY at DESC, rowid DESC").fetchall()
     finally:
         conn.close()
     return [_row(row) for row in rows]
@@ -382,32 +387,16 @@ def names(path: Path) -> List[Dict[str, Any]]:
     clock the list is ordered by — the one written to last first.
 
     The list reads this rather than ``listing``: a record's picture is up to 192 KB a row and names
-    nothing, so a name is never parsed out of one.
+    nothing, so a name is never parsed out of one. The rowid breaks an `at` tie, as in ``listing``.
     """
     if not path.exists():
         return []
     conn = connect(path)
     try:
-        rows = conn.execute(f"SELECT {_NAMES} FROM canvases ORDER BY at DESC").fetchall()
+        rows = conn.execute(f"SELECT {_NAMES} FROM canvases ORDER BY at DESC, rowid DESC").fetchall()
     finally:
         conn.close()
     return [_name_row(row) for row in rows]
-
-
-def _stored_title(path: Path, canvas_id: str) -> Optional[str]:
-    """One canvas's title, read by its key — the name its own session may call it by.
-
-    A read by the store's key rather than a list of every canvas: one row, and no picture parsed
-    out of it. What else this bot has is ``canvas_list``'s to name.
-    """
-    if not path.exists():
-        return None
-    conn = connect(path)
-    try:
-        row = conn.execute("SELECT title FROM canvases WHERE id = ?", (canvas_id,)).fetchone()
-    finally:
-        conn.close()
-    return row[0] if row else None
 
 
 def _answers_to(named: str, canvas_id: str, title: Optional[str]) -> bool:
@@ -415,9 +404,8 @@ def _answers_to(named: str, canvas_id: str, title: Optional[str]) -> bool:
 
     The one rule for what a name answers to: the store's key exactly, since a title can never
     shadow an id, and the title without case, since a caller that knows a canvas's name doesn't
-    know its capitals. ``resolve`` asks it of every name and ``_own_canvas`` of the one a canvas's
-    session holds, so a name a chat reaches a canvas by is a name that canvas's own session answers
-    to as well.
+    know its capitals. ``resolve`` asks it of every canvas's names, and a canvas's own session asks
+    ``resolve`` as well — so a name means the same canvas in every session, or none.
     """
     return named == canvas_id or (title is not None and named.casefold() == title.casefold())
 
@@ -1003,11 +991,13 @@ def data(
 
 
 def _name(value: Any, what: str) -> str:
-    """A collection or a document id as a page sends one: a short name, with no control character.
+    """A collection or a document id as a page sends one: a short name, with no control character
+    and no surrogate.
 
     The page names its own collections and documents, so these are checked rather than trusted: a
     name is what a JSON key and a URL can carry, and a newline or a NUL in one is a page writing
-    something it didn't mean to.
+    something it didn't mean to. A surrogate code point is not text at all — it has no UTF-8 bytes —
+    so a name holding one would fail where the store writes it rather than here.
     """
     if not isinstance(value, str) or not value:
         raise CanvasError(f"A document's {what} is a name of 1 to {NAME_CHARS} characters.")
@@ -1017,6 +1007,11 @@ def _name(value: Any, what: str) -> str:
         )
     if any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise CanvasError(f"A document's {what} can't hold a control character.")
+    if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        raise CanvasError(
+            f"A document's {what} can't hold a surrogate code point: it has no UTF-8 bytes, so the "
+            "store could not keep it."
+        )
     return value
 
 
@@ -1489,8 +1484,8 @@ LIST_SCHEMA = {
     "name": TOOL_LIST,
     "description": (
         "Lists every canvas this bot has — each one's id, its title, whether it is archived and "
-        "when it last changed, newest first — so a canvas can be named by its title or its id. It "
-        "takes no arguments, and it works in any of this bot's sessions."
+        "when its page last changed, newest first — so a canvas can be named by its title or its "
+        "id. It takes no arguments, and it works in any of this bot's sessions."
     ),
     "parameters": {"type": "object", "properties": {}},
 }
@@ -1590,8 +1585,9 @@ EDIT_SCHEMA = {
 _CANVAS_ARG = {
     "type": "string",
     "description": (
-        "The canvas this call works on, by its title or its id. A canvas's own session may leave "
-        "it out, where it means that canvas."
+        "The canvas this call works on, by its title or its id. Any of this bot's sessions except "
+        "another canvas's reaches a canvas's data; a canvas's own session may leave this out, "
+        "where it means that canvas."
     ),
 }
 
@@ -1646,14 +1642,26 @@ DATA_WRITE_SCHEMA = {
 }
 
 
+def _unreadable(tool: str) -> str:
+    """What a tool answers for a store it can't read: the answer, never a raise.
+
+    A locked store, one that is no database and one whose migration step failed all reach a handler
+    as ``sqlite3.Error`` (with an ``OSError`` for a file it can't open). Letting one out fails the
+    tool call and tells the model nothing, so every read of the store is answered from here in the
+    voice the rest of the canvas refusals use.
+    """
+    return json.dumps({"error": f"{tool} can't read this bot's store, so it can't answer this call."})
+
+
 def _answered(
+    tool: str,
     run: Callable[[Path, str], Dict[str, Any]],
     path: Path,
     canvas_id: str,
     shape: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
 ) -> str:
     """One tool's answer as JSON: what ``run`` found — shaped, where the tool has an answer of its
-    own — or the ``CanvasError`` it refused with, named.
+    own — or the ``CanvasError`` it refused with, named, or the store it couldn't read.
 
     The envelope both kinds of canvas tool share: a refusal is an ``{"error": ...}`` answer and
     never a raise to the caller, so a model is told what went wrong rather than the call failing.
@@ -1662,6 +1670,9 @@ def _answered(
         found = run(path, canvas_id)
     except CanvasError as refused:
         return json.dumps({"error": str(refused)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't read the store", tool, exc_info=True)
+        return _unreadable(tool)
     return json.dumps(found if shape is None else shape(found))
 
 
@@ -1676,20 +1687,25 @@ def _tool_answer(
     canvas_id, path = _call_canvas(task_id, session_id)
     if not canvas_id or path is None:
         return json.dumps({"error": f"{tool} only works in a canvas's session."})
-    return _answered(run, path, canvas_id, answer)
+    return _answered(tool, run, path, canvas_id, answer)
 
 
 def _own_canvas(tool: str, named: Any, canvas_id: str, path: Path) -> None:
-    """Refuses a name that isn't the canvas a canvas's session edits."""
-    if named is None or (isinstance(named, str) and not named.strip()):
+    """Refuses a name that isn't the canvas a canvas's session edits.
+
+    The name is resolved exactly as any other session resolves it, and then asked whether it is
+    this canvas: so a name means one canvas everywhere — a title that is another canvas's id is
+    still that id, and a title two canvases answer to is refused rather than read as this one, in
+    this session as in every other. A name left out is the one case that means this canvas alone.
+    """
+    if named is None:
         return
-    if not isinstance(named, str):
-        raise CanvasError(f"A canvas is named by its title or its id; {named!r} is not a name.")
-    if _answers_to(named, canvas_id, _stored_title(path, canvas_id)):
+    resolved = resolve(path, named)
+    if resolved == canvas_id:
         return
     raise CanvasError(
         f"{tool} reaches only this canvas's data from a canvas's session: this is {canvas_id}'s "
-        f"session, and {named!r} is another canvas. Leave canvas out to mean this one."
+        f"session, and {named!r} names {resolved}. Leave canvas out to mean this one."
     )
 
 
@@ -1728,7 +1744,11 @@ def _data_answer(
         path, canvas_id = _data_canvas(tool, named, task_id, session_id)
     except CanvasError as refused:
         return json.dumps({"error": str(refused)})
-    return _answered(run, path, canvas_id)
+    except (sqlite3.Error, OSError):
+        # Naming the canvas reads the store's names, so this read fails where `run`'s does.
+        logger.debug("gots: %s couldn't read the store", tool, exc_info=True)
+        return _unreadable(tool)
+    return _answered(tool, run, path, canvas_id)
 
 
 def handle_list(
@@ -1748,7 +1768,11 @@ def handle_list(
         return json.dumps(
             {"error": f"{TOOL_LIST} can't read this bot's store, so it can't name its canvases."}
         )
-    return json.dumps({"canvases": names(path)})
+    try:
+        return json.dumps({"canvases": names(path)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't read the store", TOOL_LIST, exc_info=True)
+        return _unreadable(TOOL_LIST)
 
 
 def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
@@ -1910,8 +1934,6 @@ def wire(api_adapter: Any) -> bool:
         return _session_canvas(session) is not None
 
     took = True
-    # (tool, schema, when): the three every session carries ask nothing of the session, and the
-    # three document tools are given only to one that is a canvas's own.
     for tool, schema, when in (
         (TOOL_LIST, LIST_SCHEMA, None),
         (TOOL_DATA_READ, DATA_READ_SCHEMA, None),
