@@ -10,11 +10,17 @@
  * carries `frame-src 'self'`, so the frame can't navigate itself anywhere either. The scan on the
  * host is hygiene; this is the defence (ADR 0114).
  *
- * Import-free but for the page's data bridge (`canvas-bridge.ts`, itself import-free), so
+ * The policy, the two safety scripts and where they go are the shared sandbox rule
+ * (`sandboxed-document.ts`); this composes it with what only a canvas carries.
+ *
+ * Import-free but for the page's data bridge and the sandbox rule (both import-free), so
  * `scripts/test-canvas-document.mjs` runs it as a pure rule.
  */
 
 import { BRIDGE_SCRIPT } from "./canvas-bridge.ts"
+import { SANDBOX_CSP, SUBMIT_IN_PLACE, findHead, sandboxedDocument } from "./sandboxed-document.ts"
+
+export { SUBMIT_IN_PLACE }
 
 export type CanvasMode = "light" | "dark"
 
@@ -26,9 +32,7 @@ export type CanvasMode = "light" | "dark"
 export const LIBRARIES = ["chart", "date", "icons"] as const
 export type CanvasLibrary = (typeof LIBRARIES)[number]
 
-export const CANVAS_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
-  "font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'"
+export const CANVAS_CSP = SANDBOX_CSP
 
 /**
  * The theme tokens a canvas is told, in the app's own names. The page's styles read them as
@@ -54,26 +58,6 @@ export const TOKENS = [
   "info",
   "radius",
 ] as const
-
-/**
- * WebRTC, taken away before the page's own scripts run: a peer connection is a way out of the
- * sandbox that no policy covers, and a canvas has no reason to open one.
- */
-const NO_PEER = `(function(){var names=["RTCPeerConnection","webkitRTCPeerConnection","mozRTCPeerConnection"];for(var i=0;i<names.length;i++){try{delete window[names[i]]}catch(e){}try{window[names[i]]=undefined}catch(e){}}})()`
-
-/**
- * A form's submit, kept on the page it was made on. `form-action 'none'` refuses the navigation, so
- * without this the reader is left on a refusal with the page's state gone; the guard cancels the
- * default instead, and the page stays whole.
- *
- * It listens on `window` in the bubble phase: a submit travels from the form up to the window, so every
- * handler the page put on the form or on a field has already run and kept whatever it did, and a submit
- * the page prevented itself arrives already prevented and is left alone. Only an unprevented submit is
- * cancelled, so nothing the page means to happen is taken away from it. One it put on the window itself
- * is registered after this and runs afterwards, which is the cost of being first in the head. The policy
- * does not move: this cancels a navigation, it does not permit one.
- */
-export const SUBMIT_IN_PLACE = `(function(){addEventListener("submit",function(event){if(event&&!event.defaultPrevented){event.preventDefault()}},false)})()`
 
 /** The name the page's scroll report carries, so the route and the script agree on one shape. */
 export const SCROLL_MESSAGE = "gots:canvas-scroll"
@@ -204,34 +188,10 @@ export function canvasDocument(
   const page = withMode(inlineLibraries(html, libraries), mode)
   const head = findHead(page)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
-  const at = head.index + head.length
-  const prefix =
-    `<meta http-equiv="Content-Security-Policy" content="${CANVAS_CSP}">` +
-    `<style>${themeVariables(tokens, mode)}</style>` +
-    (css ? `<style>${escapeStyle(css)}</style>` : "") +
-    `<script>${NO_PEER}</script>` +
-    `<script>${SUBMIT_IN_PLACE}</script>` +
-    `<script>${scrollBridge(scroll)}</script>` +
-    `<script>${BRIDGE_SCRIPT}</script>`
-  return page.slice(0, at) + prefix + page.slice(at)
+  return sandboxedDocument(page, {
+    policy: CANVAS_CSP,
+    afterPolicy: `<style>${themeVariables(tokens, mode)}</style>` + (css ? `<style>${escapeStyle(css)}</style>` : ""),
+    afterSafety: `<script>${scrollBridge(scroll)}</script>` + `<script>${BRIDGE_SCRIPT}</script>`,
+  })
 }
 
-/**
- * Where the page's own head starts, searched for in its markup: a comment that mentions `<head>`
- * must not be where the policy lands, or the page would be drawn with no policy at all. The host's
- * scan reads a document the same way, so the two agree on what its head is.
- */
-function findHead(html: string): { index: number; length: number } | null {
-  let at = 0
-  for (;;) {
-    const comment = html.indexOf("<!--", at)
-    const end = comment === -1 ? html.length : comment
-    const found = /<head\b[^>]*>/i.exec(html.slice(at, end))
-    if (found) return { index: at + found.index, length: found[0].length }
-    if (comment === -1) return null
-    const closed = html.indexOf("-->", comment + 4)
-    // An unterminated comment: nothing after it is markup, so there is no head to find.
-    if (closed === -1) return null
-    at = closed + 3
-  }
-}
