@@ -45,7 +45,7 @@ const bot = botProfile("push-dismiss", { id: "bot-1", name: "Pusher", apiKey: "t
 
 const about = (chat: string, session = `gots-${chat}`) => ({
   tag: `session:${session}`,
-  data: { sessionId: session, screen: `/c/${chat}` },
+  data: { sessionId: session },
 })
 
 const dismissed = (shown: { tag: string; closed: boolean }[]) =>
@@ -78,10 +78,11 @@ test("opening a chat dismisses the pushes about it, and only those", async () =>
   )
 })
 
-test("an Android push is matched by the tag Firebase shows it under", async () => {
+test("a push whose data carries no session is matched by its tag", async () => {
   browser()
   await seedChats([{ id: "chat-a" }, { id: "chat-b" }], { bots: [bot] })
-  // The phone hands over no data, so the tag is all a dismissal has to read by.
+  // The phone hands over no data for a notification message, so the tag is what a dismissal
+  // reads by; this drives that half through the web tray, and `pushSubject` pins the Android tag.
   const shown = trayOf([{ tag: "chat_input:gots-chat-a" }, { tag: "chat_input:gots-chat-b" }])
   await mount(chatScreen("chat-a"), async () => {
     await until(async () => dismissed(shown).length > 0, "the opened chat's push is dismissed")

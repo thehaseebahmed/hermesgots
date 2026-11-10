@@ -1,3 +1,5 @@
+import type { Conversation } from "@/lib/db"
+
 /**
  * What a push can be about, and which of it a device wants. A push has a kind (`plugin/push.py`
  * and `netlify/lib/fcm.ts` keep the same lists), and the plugin puts it in a category: the kind
@@ -256,7 +258,7 @@ export interface TrayPush {
   /** `<group>:<subject>`, from `public/push-sw.js` on the web and `netlify/lib/fcm.ts` on Android. */
   tag?: string | null
   /** The web's notification data, or a phone's extras where it hands them over. */
-  data?: unknown
+  data?: { sessionId?: unknown; session_id?: unknown } | null
 }
 
 /**
@@ -265,8 +267,7 @@ export interface TrayPush {
  * screen opens but its tap answers. A push with no id at all names nothing.
  */
 export function pushSubject(entry: TrayPush): string | undefined {
-  const data = (entry.data ?? {}) as { sessionId?: unknown; session_id?: unknown }
-  const named = data.sessionId ?? data.session_id
+  const named = entry.data?.sessionId ?? entry.data?.session_id
   if (typeof named === "string" && named) return named
   const tag = typeof entry.tag === "string" ? entry.tag : ""
   const colon = tag.lastIndexOf(":")
@@ -274,15 +275,14 @@ export function pushSubject(entry: TrayPush): string | undefined {
   return tag.slice(colon + 1) || undefined
 }
 
-export function aboutSubject(entry: TrayPush, subjects: readonly string[]) {
-  const subject = pushSubject(entry)
-  return subject !== undefined && subjects.includes(subject)
+export function aboutSubject(entry: TrayPush, subject: string) {
+  return pushSubject(entry) === subject
 }
 
 /**
  * The subject a chat's own pushes name: the Host pushes a room under the room's id, and every push
  * about a chat under the Hermes session it runs in.
  */
-export function chatSubject(chat: { id: string; hermesSessionId?: string; room?: unknown }) {
+export function chatSubject(chat: Pick<Conversation, "id" | "hermesSessionId" | "room">) {
   return chat.room ? chat.id : chat.hermesSessionId
 }

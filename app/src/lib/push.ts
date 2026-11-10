@@ -201,20 +201,20 @@ function useWebPush() {
  * A screen answers only its own pushes: one about a thread the user has not opened is still news
  * (ADR 0132). A push whose id no screen opens is answered by its tap alone.
  */
-async function dismiss(subjects: readonly string[]) {
-  if (!subjects.length) return
+async function dismiss(subject: string) {
+  if (!subject) return
   try {
     if (isNative) {
       const { push } = await plugin()
       const { notifications } = await push.getDeliveredNotifications()
-      const answered = notifications.filter((entry) => aboutSubject(entry, subjects))
+      const answered = notifications.filter((entry) => aboutSubject(entry, subject))
       if (answered.length) await push.removeDeliveredNotifications({ notifications: answered })
       return
     }
     const registration = await navigator.serviceWorker?.getRegistration()
     if (!registration) return
     for (const notification of await registration.getNotifications())
-      if (aboutSubject(notification, subjects)) notification.close()
+      if (aboutSubject(notification, subject)) notification.close()
   } catch {
     // An older APK's plugin without the read, or a browser without the Notifications API.
   }
@@ -228,7 +228,7 @@ async function dismiss(subjects: readonly string[]) {
 export function useDismissPushes(subject: string | undefined) {
   useEffect(() => {
     if (!subject) return
-    const answer = () => void dismiss([subject])
+    const answer = () => void dismiss(subject)
     answer()
     const back = () => {
       if (document.visibilityState === "visible") answer()
@@ -452,7 +452,7 @@ async function listen(push: Push) {
     const path = pushPath(notification.data?.kind, notification.data?.session_id)
     // A tap answers its own push, even where the screen it opens answers nothing.
     const subject = pushSubject(notification)
-    if (subject) void dismiss([subject])
+    if (subject) void dismiss(subject)
     if (path) void openPush(path)
   })
 }

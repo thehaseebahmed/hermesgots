@@ -13,7 +13,7 @@ const route = (name) => readFileSync(new URL(`../src/routes/${name}.tsx`, import
 
 const web = (session, group = "session") => ({
   tag: `${group}:${session}`,
-  data: { sessionId: session, screen: `/c/${session}` },
+  data: { sessionId: session },
 })
 
 // Android's tag is the category and the session, and no data rides: the tag is all there is to read.
@@ -36,43 +36,41 @@ test("a push names the subject its tag or its data carries", () => {
 test("a push carrying no id names nothing", () => {
   // The test notification, and a push a service worker showed under no session at all.
   assert.equal(pushSubject({ tag: "test:", data: {} }), undefined)
-  assert.equal(
-    pushSubject({ tag: "gots", data: { sessionId: "", screen: "/routines" } }),
-    undefined,
-  )
+  assert.equal(pushSubject({ tag: "gots", data: { sessionId: "" } }), undefined)
   assert.equal(pushSubject({}), undefined)
   assert.equal(pushSubject({ tag: null, data: null }), undefined)
 })
 
-test("only the subject a screen has opened is answered", () => {
-  const shown = [web("gots-chat-a"), web("gots-chat-b"), android("chat_input", "gots-chat-c")]
-  const answered = shown.filter((push) => aboutSubject(push, ["gots-chat-b"]))
-  assert.deepEqual(
-    answered.map((push) => push.tag),
-    ["session:gots-chat-b"],
-    "opening one thread dismisses its push, and the other threads' are left in the tray",
-  )
+test("a push is answered only by the screen it is about", () => {
+  assert.equal(aboutSubject(web("gots-chat-a"), "gots-chat-a"), true)
   assert.equal(
-    shown.filter((push) => aboutSubject(push, ["gots-chat-a", "gots-chat-c"])).length,
-    2,
-    "two screens on display answer two pushes",
-  )
-  assert.equal(aboutSubject(web("gots-chat-a"), []), false, "nothing on display answers nothing")
-  assert.equal(
-    aboutSubject({ tag: "gots", data: { sessionId: "" } }, ["gots-chat-a"]),
+    aboutSubject(web("gots-chat-b"), "gots-chat-a"),
     false,
-    "a push that names nothing is never answered by a screen",
+    "another thread's push is left in the tray",
+  )
+  assert.equal(
+    aboutSubject(android("chat_input", "gots-chat-c"), "gots-chat-c"),
+    true,
+    "and a phone's tag answers the same way",
+  )
+  assert.equal(
+    aboutSubject({ tag: "gots", data: { sessionId: "" } }, "gots-chat-a"),
+    false,
+    "a push that names nothing is never answered",
   )
 })
 
 test("a chat answers its session, and a room its own id", () => {
   assert.equal(chatSubject({ id: "chat-1", hermesSessionId: "gots-chat-1" }), "gots-chat-1")
   assert.equal(
-    chatSubject({ id: "room-1", hermesSessionId: "gots-room-1", room: { id: "room-1" } }),
+    chatSubject({
+      id: "room-1",
+      hermesSessionId: "gots-room-1",
+      room: { id: "room-1", members: [] },
+    }),
     "room-1",
     "the Host pushes a room under the room's id, not the session the app gave its row",
   )
-  assert.equal(chatSubject({ id: "chat-1" }), undefined, "a chat with no session names nothing")
 })
 
 test("nothing empties the tray: an arrival answers no push", () => {
