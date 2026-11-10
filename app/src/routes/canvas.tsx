@@ -48,6 +48,7 @@ import {
   canvasData,
   deleteCanvas,
   grantCanvasTool,
+  hasVersion,
   refreshCanvas,
   startCanvas,
   undoCanvas,
@@ -60,6 +61,7 @@ import {
 } from "@/lib/canvases"
 import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { prepareIntake } from "@/lib/attachments"
+import { MAX_ATTACHMENTS, type RouteAnswer } from "@/lib/attachment-caps"
 import { usePluginFeature } from "@/lib/features"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
@@ -123,27 +125,42 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
  */
 function CanvasAttach({
   profile,
+  route,
   attachments,
   onTake,
 }: {
   profile: Profile
+  /** The host's answer about its attachments route, read once by the page this composer sits on. */
+  route: RouteAnswer
   attachments: Attachment[]
   onTake: (taken: Attachment[]) => void
 }) {
-  const filesFeature = usePluginFeature(profile, "attachments")
   const readsImages = profile.imageInput !== false
+  // The files a pick is still reading, which hold their place in the count: a second pick landing
+  // before the first settled would otherwise stage both sets past the cap the composer keeps.
+  const reading = useRef(0)
   const add = async (files: File[]) => {
-    const { attachments: prepared, refusals } = await prepareIntake(files, {
-      held: attachments,
-      readsImages,
-      route: filesFeature,
-    })
-    for (const refusal of refusals) tell.error(refusal.message)
-    if (prepared.length) onTake(prepared)
+    let mine = 0
+    try {
+      const { attachments: prepared, refusals } = await prepareIntake(files, {
+        held: attachments,
+        reserved: reading.current,
+        readsImages,
+        route,
+        onTake: (take) => {
+          mine = take.length
+          reading.current += mine
+        },
+      })
+      for (const refusal of refusals) tell.error(refusal.message)
+      if (prepared.length) onTake(prepared)
+    } finally {
+      reading.current -= mine
+    }
   }
   return (
     <AttachMenu
-      filesFeature={filesFeature}
+      filesFeature={route}
       imagesAvailable={readsImages}
       onAdd={(files) => void add(files)}
     />
@@ -261,8 +278,13 @@ export function CanvasPage() {
                 {profile && (
                   <CanvasAttach
                     profile={profile}
+                    route={filesFeature}
                     attachments={attachments}
-                    onTake={(taken) => setAttachments((held) => [...held, ...taken])}
+                    // The composer's own cap, held here too: what two picks read at once can no more
+                    // stage past ten on this screen than in a chat (ADR 0131).
+                    onTake={(taken) =>
+                      setAttachments((held) => [...held, ...taken].slice(0, MAX_ATTACHMENTS))
+                    }
                   />
                 )}
                 <span className="flex-1" />
@@ -329,6 +351,20 @@ const scrollOf = (id: string) => (leftAt.id === id ? leftAt.at : 0)
 /** The words both screens use for a canvas no bot holds any more. */
 const GONE = "This canvas is gone. Its bot doesn't hold one by that name."
 
+/** What both screens say of a canvas whose page isn't here and whose bot can't be asked for it. */
+const APART = "This canvas isn't on this device, and its bot isn't answering."
+
+/**
+ * What both a canvas's screens say of a host this device can't reach, read one way for both: a device
+ * with no network can't reach the host either, and is told so in its own words (ADR 0071) rather than
+ * being told its bot is down.
+ */
+function useAway(away: boolean) {
+  const online = useOnline()
+  const awayNow = away || !online
+  return { awayNow, words: awayLine(awayNow, online) }
+}
+
 /**
  * What both of a canvas's screens answer through its options: the reader's answers about the tools a
  * version declared, the canvas's own record, and its removal. One home for the three, so the preview
@@ -336,7 +372,7 @@ const GONE = "This canvas is gone. Its bot doesn't hold one by that name."
  * differently — and one place that says what a refusal looks like and where deleting leaves.
  */
 function useCanvasManagement(id: string) {
-  const { up } = useNav()
+  const navigate = useNavigate()
 
   /**
    * The reader's answer about a tool is kept on the host, and the host's canvas replaces the copy
@@ -381,8 +417,9 @@ function useCanvasManagement(id: string) {
       throw failure
     }
     tell.success("Canvas deleted.")
-    // The canvas is gone, so the list is where the reader lands — from either screen.
-    up("/canvas")
+    // The canvas is gone, so the list is where the reader lands — from either screen, and in this
+    // entry's place: stepping back would draw the canvas that was just deleted.
+    void navigate("/canvas", { replace: true })
   }
 
   return { grant, update, remove }
@@ -398,11 +435,7 @@ export function CanvasView() {
   const navigate = useNavigate()
   useEffect(() => setBackGuard(step("/canvas")), [step])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
-  const online = useOnline()
-  // A device with no network can't reach the host either, and is told so in its own words (ADR 0071)
-  // rather than being told its bot is down.
-  const awayNow = away || !online
-  const awayWords = awayLine(awayNow, online)
+  const { awayNow, words: awayWords } = useAway(away)
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -589,9 +622,8 @@ export function CanvasView() {
   // A canvas with no version has nothing to preview: on a phone its own address is replaced by the
   // edit one — a replacement, never a push, so back cannot land here and be sent there again
   // (ADR 0130). A wide screen keeps the lane, which is already where a canvas is built, and a
-  // redirect there would chase its own address for ever. The one derivation of "has a version" the
-  // edit screen uses too, so neither screen can disagree about which corners exist.
-  const versioned = (canvas?.version ?? 0) >= 1
+  // redirect there would chase its own address for ever.
+  const versioned = hasVersion(canvas)
   if (canvas && !versioned && !large) return <Navigate to={`/canvas/${id}/edit`} replace />
 
   return (
@@ -601,8 +633,13 @@ export function CanvasView() {
         profile={profile}
         away={awayWords ? { words: awayWords, now: awayNow } : undefined}
         back={{ label: "All canvases", on: () => up("/canvas") }}
-        // A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130).
-        flip={large ? undefined : { to: "edit", on: () => navigate(`/canvas/${id}/edit`) }}
+        // A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130),
+        // and a canvas no bot holds has no chat to open: there is no Edit for either.
+        flip={
+          canvas && !missing && !large
+            ? { to: "edit", on: () => navigate(`/canvas/${id}/edit`) }
+            : undefined
+        }
         // A host that isn't answering can't be asked to walk the record back.
         onUndo={awayNow ? undefined : () => void undoVersion()}
         onOptions={() => setOptionsOpen(true)}
@@ -632,7 +669,7 @@ export function CanvasView() {
           ) : (
             <p className="p-4 text-center text-sm text-muted-foreground">
               {awayNow && !html
-                ? "This canvas isn't on this device, and its bot isn't answering."
+                ? APART
                 : loaded && !html
                   ? BUILDING_ACTIVITY
                   : "Reading the canvas…"}
@@ -676,34 +713,43 @@ export function CanvasView() {
  *
  * The version decides the corners: with one, Preview is the flip and there is no arrow, since the
  * corner already goes to the page; without one there is nothing to preview, so no flip is drawn and
- * a leading arrow is the way back to the list instead (ADR 0130). Nothing is drawn from a record
- * that hasn't landed yet, so an arrow is never flipped to a corner under the reader's thumb.
+ * a leading arrow is the way back to the list instead (ADR 0130). A record that hasn't landed yet is
+ * reading: the same muted line the preview draws, and the way back to the list, never a corner that
+ * a record landing a moment later would move under the reader's thumb.
  *
  * A canvas with no version opens on this screen on a phone — it is the only screen it has — so this
  * one carries the preview's options menu too, or the canvas could never be archived or deleted.
  *
  * The two states the preview says in its body are said here in the same words: a canvas no bot holds
- * is gone, and a bot that isn't answering says so under the title, since the header is one row.
+ * is gone, and a canvas whose bot isn't answering says so rather than calling itself a page being
+ * built, since the header is one row and the body is where the reader is looking.
  *
  * Nothing here points at the page: a point is a tap on a page, and the page is the other screen's.
  */
 export function CanvasEdit() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { up, step } = useNav()
-  // The guard is per screen, so this one is its own: without it the hardware back would leave the
-  // canvas for the list while the header's Preview steps to the canvas's own address.
-  useEffect(() => setBackGuard(step(`/canvas/${id}`)), [step, id])
   const { canvas, profile, missing, away, loaded } = useCanvas(id)
-  const online = useOnline()
-  // The header says a host that isn't answering in the preview's own words (ADR 0071).
-  const awayNow = away || !online
-  const awayWords = awayLine(awayNow, online)
+  const { awayNow, words: awayWords } = useAway(away)
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
   const { grant, update, remove } = useCanvasManagement(id)
   // The first version is what makes there be a page at all, so it is also what the corners follow.
-  const versioned = (canvas?.version ?? 0) >= 1
+  const versioned = hasVersion(canvas)
+  // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading.
+  const reading = !canvas && !loaded
+  // The guard is per screen and its own: a canvas with a version is answered at its own address, one
+  // without has no page to show and is answered at the list. It navigates rather than stepping back —
+  // the screen behind this one may be the list, and a cold address has nothing behind it at all — and
+  // it takes the press, so the app never leaves on a back the screen could answer (ADR 0130).
+  useEffect(
+    () =>
+      setBackGuard(() => {
+        void navigate(versioned ? `/canvas/${id}` : "/canvas", { replace: true })
+        return true
+      }),
+    [navigate, id, versioned],
+  )
   // A wide screen's lane is the same chat, so this address has nowhere of its own to be: it is the
   // canvas's address in its place, never a step, and back cannot return here.
   if (large) return <Navigate to={`/canvas/${id}`} replace />
@@ -713,18 +759,20 @@ export function CanvasEdit() {
         canvas={canvas}
         profile={profile}
         away={awayWords ? { words: awayWords, now: awayNow } : undefined}
-        // Nothing of the record has landed yet: neither the arrow nor the corner is drawn from a
-        // guess, so the header cannot be drawn twice with different controls.
-        back={loaded && !versioned ? { label: "All canvases", on: () => up("/canvas") } : undefined}
+        // The list is where this screen's way back goes whether the record has landed or not: while
+        // it is reading, that is the only screen there is to go to.
+        back={
+          reading || (loaded && !versioned)
+            ? { label: "All canvases", on: () => navigate("/canvas", { replace: true }) }
+            : undefined
+        }
         flip={
           loaded && versioned
             ? {
                 to: "preview",
-                // A navigation, never a step back: the screen behind this one may be the list — a
-                // canvas the list made opens here directly, and a page with no version replaces its
-                // address with this one — so stepping back would leave the canvas instead of
-                // drawing the page it names.
-                on: () => navigate(`/canvas/${id}`),
+                // A replace, never a push: the page is this screen's own other half, so flipping to
+                // it must not leave the chat behind for the next back press to land on.
+                on: () => navigate(`/canvas/${id}`, { replace: true }),
               }
             : undefined
         }
@@ -732,10 +780,16 @@ export function CanvasEdit() {
       />
       {missing ? (
         <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
+      ) : reading ? (
+        /* Nothing of the record has landed: the preview's own reading line, in its own place. */
+        <p className="p-4 text-center text-sm text-muted-foreground">Reading the canvas…</p>
       ) : loaded && !versioned ? (
         /* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
-           preview's empty frame uses, and the first version takes them away (ADR 0130). */
-        <p className="p-4 text-center text-sm text-muted-foreground">{BUILDING_ACTIVITY}</p>
+           preview's empty frame uses — and a host that isn't answering is not a bot that is
+           building, so it says which of the two this is (ADR 0130). */
+        <p className="p-4 text-center text-sm text-muted-foreground">
+          {awayNow ? APART : BUILDING_ACTIVITY}
+        </p>
       ) : null}
       <CanvasChat canvas={canvas} bot={profile} className="flex min-h-0 flex-1 flex-col" />
       <CanvasOptions
@@ -800,7 +854,7 @@ function CanvasHeader({
             the reader is — whose canvas it is, and which version of it. */}
         <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
           {profile && <span className="truncate">{profile.name}</span>}
-          {canvas?.version ? (
+          {canvas && hasVersion(canvas) ? (
             <>
               <span aria-hidden>·</span>
               <span className="shrink-0">v{canvas.version}</span>

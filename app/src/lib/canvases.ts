@@ -101,6 +101,13 @@ export interface Canvas {
 /** A canvas as a list keeps it, and as the cache's list row keeps it (`canvas-cache.ts`). */
 export type CanvasRecord = Omit<Canvas, "html" | "data" | "tools" | "dataWrites">
 
+/**
+ * Whether a canvas has a page to draw: the first version is what makes there be one, so it is also
+ * what the header's `v{n}` line, both screens' corners and the phone's own default are read from.
+ * One derivation, so no screen can disagree about a canvas that has no page yet.
+ */
+export const hasVersion = (canvas: Canvas | undefined) => (canvas?.version ?? 0) >= 1
+
 /** What a canvas's own record may change, as the host's route takes it (`hermes.ts`). */
 export type { CanvasChanges }
 

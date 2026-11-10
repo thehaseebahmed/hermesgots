@@ -14,14 +14,20 @@ version has nothing to preview, so the preview replaces its own address with the
 phone — a replacement, never a push. A pushed default would leave the page behind it, and back
 would land on the page and be sent to Edit again.
 
-Back is what the addresses are for. The flip pushes, so back from the edit screen returns to the
-preview, and each screen sets its own guard, since the guard is per screen and the preview's would
-otherwise still send the hardware back to the list. The version decides when the control is drawn:
-absent while the bot is building, present from the first version, from the same live read the frame
-is drawn from, so nothing has to be reloaded to see it.
+Back is what the addresses are for, and each screen answers it itself. The preview's guard steps back
+to the list, as a list's own child does. The edit screen's navigates in place instead of stepping
+back: a canvas with a version is drawn at its own address and one without at the list — the same two
+screens its corners name — so the press lands where the address says whatever sat behind it, and a
+cold link with nothing behind it is answered rather than handed to the app. Flipping to the preview
+replaces the edit entry for the same reason: the page stands where the chat stood, so back from
+either screen leaves the canvas for the list rather than ping-ponging between them. The version
+decides when the control is drawn: absent while the bot is building, present from the first version,
+from the same live read the frame is drawn from, so nothing has to be reloaded to see it.
 
-The list's create takes the reader to the new canvas's edit address, which is the same rule at a
-different door: a canvas the bot has not finished has a session to read and no page to look at.
+The list's create opens the canvas's own address and lets that one rule decide the screen: a canvas the
+bot has not finished has a session to read and no page to look at, so a phone forwards to the edit
+address and a wide screen stays on the lane. One owner decides, so the create cannot disagree with a
+link.
 
 ## Considered and rejected
 

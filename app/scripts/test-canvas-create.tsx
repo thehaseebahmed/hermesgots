@@ -12,6 +12,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { db } from "@/lib/db"
+import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { CanvasPage } from "@/routes/canvas"
 
 import {
@@ -165,6 +166,56 @@ test("a canvas start saves its files under its own session and hands them to the
       // the list hands the new one over rather than picking the chat for it (ADR 0130).
       await until(() => Promise.resolve(Boolean(find("[data-canvas-screen]"))), "the new canvas's address")
       assert.match(find("[data-canvas-screen]")!.textContent ?? "", /canvas c9/)
+    },
+  )
+})
+
+/**
+ * A pick whose files are still being read when the next one lands: the change is dispatched without
+ * waiting for the screen to settle, which is two picks in flight at once.
+ */
+function startPick(source: "photos" | "files", files: File[]) {
+  const input = document.querySelector(`input[name="${source}"]`)
+  assert.ok(input, "the composer's picker is on screen")
+  Object.defineProperty(input, "files", { value: files, configurable: true })
+  input.dispatchEvent(new Event("change", { bubbles: true }))
+}
+
+/** Files of a name and a count, as a pick of that many hands them over. */
+const someFiles = (prefix: string, count: number) =>
+  Array.from(
+    { length: count },
+    (_, n) => new File([prefix], `${prefix}-${n}.txt`, { type: "text/plain" }),
+  )
+
+test("two picks at once stage no more than the composer's ten", async () => {
+  // The create screen shares the composer's count cap, and a pick still being read holds its place
+  // in it: two picks of six can no more stage twelve here than in a chat (ADR 0131).
+  host()
+  await seed()
+
+  await mount(
+    <MemoryRouter initialEntries={["/canvas"]}>
+      <Routes>
+        <Route path="/canvas" element={<CanvasPage />} />
+        <Route path="/canvas/:id" element={<ScreenMarker />} />
+        <Route path="/canvas/:id/edit" element={<ScreenMarker />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await until(() => Promise.resolve(Boolean(find('input[name="files"]'))), "the + menu")
+      // Both dispatched in one turn: the first pick's files are still being read when the second
+      // asks how much room is left.
+      await act(async () => {
+        startPick("files", someFiles("a", 6))
+        startPick("files", someFiles("b", 6))
+      })
+      await settle()
+      assert.equal(
+        tileNames().length,
+        MAX_ATTACHMENTS,
+        "the screen holds the composer's ten, not the two picks' twelve",
+      )
     },
   )
 })

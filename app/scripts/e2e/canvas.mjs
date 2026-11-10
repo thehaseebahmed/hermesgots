@@ -46,7 +46,8 @@ await flow(
     pass("the edit screen: a canvas made from a prompt lands on its chat, building it")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
-    // the flip is a step: back from the page returns to this chat.
+    // the flip replaces the chat's entry: the page stands where the chat stood, so the next back
+    // press leaves the canvas for the list rather than landing on the screen it just left (ADR 0130).
     const preview = flip("preview")
     await preview.waitFor({ timeout: 30_000 })
     await preview.click()

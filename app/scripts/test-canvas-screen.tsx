@@ -102,6 +102,8 @@ interface Host {
   calls?: { shape: string; args: Record<string, unknown> }[]
   /** Holds the next one-canvas read until it is released, so a slow read can be raced. */
   hold?: () => Promise<void>
+  /** Holds the next list read until it is released, so a screen can be drawn before it lands. */
+  holdList?: () => Promise<void>
   /** Answers a one-canvas read the way a host that never landed does: the request fails. */
   fail?: boolean
   /** The canvases the bot's list names; a canvas of its own is one this file makes for one test. */
@@ -166,11 +168,17 @@ function serveCanvases(host: Host) {
       }
       return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], host.docs) })
     }
-    if (/\/canvases$/.test(url.pathname))
+    if (/\/canvases$/.test(url.pathname)) {
+      const hold = host.holdList
+      if (hold) {
+        host.holdList = undefined
+        await hold()
+      }
       return json({
         object: "gots.canvases",
         canvases: (host.listed ?? ["c1", "c2"]).map((id) => canvasAt(host.version, id)),
       })
+    }
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
 }
@@ -220,6 +228,41 @@ async function drawCanvas(
     draw,
   )
 }
+
+test(
+  "a cold edit address says it is reading the canvas",
+  atWidth(390, async () => {
+    // Nothing of the record has landed yet: the screen draws the preview's own reading line and the
+    // way back to the list, rather than a bare header over nothing (ADR 0130). It is the file's
+    // first test because that is the only moment the store has read nothing at all.
+    const host: Host = { version: 3, undos: 0 }
+    serveCanvases(host)
+    await seedCanvasChat(CANVAS.id)
+    let release: () => void = () => {}
+    host.holdList = () => new Promise<void>((done) => (release = done))
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(() => /Reading the canvas…/.test(text()), "the reading line")
+        const back = find('[aria-label="All canvases"]')
+        assert.ok(back, "the way back to the list leads the header")
+        assert.ok(
+          back.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+          "and it is drawn before the title",
+        )
+        assert.ok(missing("[data-canvas-flip]"), "with no flip before there is a record")
+        await act(async () => release())
+        await settle()
+      })
+    } finally {
+      host.holdList = undefined
+      // The held sweep is let go whichever way the assertions went: a read joined to it would
+      // otherwise never land, and the test would hang rather than fail.
+      await act(async () => release())
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
 
 test(
   "the frame is sandboxed with allow-scripts only",
@@ -367,18 +410,26 @@ test(
         assert.ok(find('[data-canvas-flip="preview"]'), "its header offers Preview")
         assert.ok(missing('[data-canvas-flip="edit"]'), "and no Edit, which is the screen it is")
 
-        // Back is the edit screen's own: it steps to the canvas's address, not the list.
+        // Back is the edit screen's own: it draws the canvas's own address, the screen its Preview
+        // names, rather than stepping back to whatever happens to sit behind this one.
         const history = atDepth(1)
         try {
-          assert.equal(pressBack(), "screen", "the edit screen takes the press")
-          assert.deepEqual(history.backs, [1], "and steps back to the canvas's own address")
+          let pressed = ""
+          await act(async () => {
+            pressed = pressBack()
+          })
+          assert.equal(pressed, "screen", "the edit screen takes the press")
+          assert.equal(
+            nav(),
+            `REPLACE:/canvas/${CANVAS.id}`,
+            "and draws the canvas's own screen",
+          )
+          assert.deepEqual(history.backs, [], "without stepping back to the list behind it")
         } finally {
           history.restore()
         }
 
-        await click(find('[data-canvas-flip="preview"]'))
-        await until(() => nav().endsWith(`/canvas/${CANVAS.id}`), "the preview's address again")
-        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page drawn again")
+        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page drawn by the press")
         assert.match(drawn(), /var at=450/, "the page comes back where the reader left it")
       })
     }
@@ -416,12 +467,95 @@ test(
       try {
         await click(find('[data-canvas-flip="preview"]'))
         await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to be drawn")
+        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "Preview replaces this screen")
         assert.deepEqual(history.backs, [], "Preview navigates rather than stepping back")
         assert.ok(missing("[data-canvas-list]"), "Preview does not fall back to the list")
       } finally {
         history.restore()
       }
     })
+  }),
+)
+
+test(
+  "back from the edit screen draws the canvas's own screen, whatever is behind it",
+  atWidth(390, async () => {
+    // The edit address can sit on the list (a start opens it) or be the only entry (a cold link), so
+    // the press is answered by the screen's own rule rather than by the history behind it: a canvas
+    // with a version is drawn at its own address, and the press is consumed (ADR 0130).
+    serveCanvases({ version: 2, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
+    const press = async () => {
+      let pressed = ""
+      await act(async () => {
+        pressed = pressBack()
+      })
+      return pressed
+    }
+
+    // The list behind it: a step back would land there, and the page would never be drawn.
+    await drawCanvas(["/canvas", `/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(composerField()), "the edit screen to draw")
+      const history = atDepth(1)
+      try {
+        assert.equal(await press(), "screen", "the edit screen takes the press")
+        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "and draws the canvas's own address")
+        assert.deepEqual(history.backs, [], "never stepping back to the list")
+      } finally {
+        history.restore()
+      }
+      await until(() => drawn().includes("<h1>Tip, second</h1>"), "the page to be drawn")
+      assert.ok(missing("[data-canvas-list]"), "and the list is not what it fell back to")
+    })
+
+    // And the only entry: the press is the screen's, not the app's to leave on.
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(composerField()), "the edit address to draw")
+      const history = atDepth(0)
+      try {
+        assert.equal(await press(), "screen", "the edit screen answers the press, not the app")
+        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "and draws the canvas's own address")
+      } finally {
+        history.restore()
+      }
+      await until(() => drawn().includes("<h1>Tip, second</h1>"), "the page to be drawn")
+    })
+  }),
+)
+
+test(
+  "a canvas no bot holds offers no Edit",
+  atWidth(390, async () => {
+    // There is no chat to flip to: the canvas the address names is one no bot has (ADR 0130), so the
+    // header says so and offers nothing that would open a screen of it.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas(["/canvas/c8"], async () => {
+      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
+      assert.ok(missing("[data-canvas-flip]"), "and no Edit for a canvas that isn't there")
+    })
+  }),
+)
+
+test(
+  "a canvas with no version whose bot is away is not said to be building",
+  atWidth(390, async () => {
+    // A host that isn't answering is not a bot that is building: the edit screen says the preview's
+    // own sentence for an unreachable canvas, which is the one true thing it knows (ADR 0130).
+    serveCanvases({ version: 0, undos: 0, fail: true, listed: ["c1", "c6"] })
+    await seedCanvasChat("c1", "c6")
+    await drawCanvas(["/canvas/c6/edit"], async () => {
+      await until(() => Boolean(composerField()), "the edit screen to draw")
+      await until(
+        () => /isn't on this device, and its bot isn't answering/.test(text()),
+        "the away sentence",
+      )
+      assert.doesNotMatch(text(), /Your bot is building it…/, "and not the building one")
+    })
+    // Leave the store with a host that answers again, for the rest of the file.
+    serveCanvases({ version: 3, undos: 0 })
+    await refreshCanvas("c1")
   }),
 )
 
@@ -870,6 +1004,36 @@ test(
     }
     // The rest of the file draws a versioned canvas again, from a host that answers one.
     serveCanvases({ version: 3, undos: 0 })
+  }),
+)
+
+test(
+  "deleting a canvas from its edit screen lands on the list",
+  atWidth(390, async () => {
+    // The canvas the reader is on is the one that just went, so the screen behind it is no screen:
+    // deleting draws the list in this entry's place, from either screen (ADR 0130).
+    serveCanvases({ version: 2, undos: 0, listed: ["c1", "c7"] })
+    await seedCanvasChat("c1", "c7")
+    const history = atDepth(1)
+    try {
+      await drawCanvas(["/canvas/c7", "/canvas/c7/edit"], async () => {
+        await until(() => Boolean(composerField()), "the edit screen to draw")
+        await click(find('[aria-label="Canvas options"]'))
+        await until(() => Boolean(findText("button", "Delete canvas")), "the options to open")
+        await click(findText("button", "Delete canvas"))
+        await until(() => Boolean(document.querySelector('[role="alertdialog"]')), "the question")
+        const yes = [...document.querySelectorAll('[role="alertdialog"] button')].find(
+          (one) => one.textContent === "Delete",
+        )
+        assert.ok(yes, "the question asks the canvas's own word")
+        await click(yes)
+        await until(() => nav() === "REPLACE:/canvas", "deleting to leave for the list")
+        assert.deepEqual(history.backs, [], "and never stepping back to the canvas it deleted")
+        assert.ok(find("[data-canvas-list]"), "the list is what is drawn")
+      })
+    } finally {
+      history.restore()
+    }
   }),
 )
 
