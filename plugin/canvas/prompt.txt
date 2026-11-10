@@ -69,11 +69,11 @@ above it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
 
 ## Its data
 
-A canvas keeps data, documents of `{collection, id, doc, at}`: the page reads and writes it with
-`canvas.data.list(collection)`, `.get(collection, id)`, `.put(collection, id, doc)` and
-`.remove(collection, id)`, and you with `canvas_data_read` and `canvas_data_write`. Any of the bot's
-sessions except another canvas's reaches it by title or id, which `canvas_list` names; here
-`canvas` is left out for this canvas, whose page is this session's. 1 MB a canvas.
+A canvas keeps data, documents of `{collection, id, doc, at}`. The page reads and writes it with
+`canvas.data.list(collection)`, `canvas.data.get(collection, id)`,
+`canvas.data.put(collection, id, doc)` and `canvas.data.remove(collection, id)`; you with
+`canvas_data_read` and `canvas_data_write`. Any of the bot's sessions except another canvas's
+reaches it by title or id, which `canvas_list` names; `canvas` here is this canvas. 1 MB a canvas.
 
 ## The host, from the page
 
