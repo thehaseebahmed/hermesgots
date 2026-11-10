@@ -81,7 +81,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install the plugin's test dependencies
-        run: python3 -m pip install cryptography
+        run: python3 -m pip install cryptography aiohttp
       - name: Run the plugin tests
         run: bash .github/scripts/checks.sh plugin
 

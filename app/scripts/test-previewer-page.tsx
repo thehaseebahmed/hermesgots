@@ -86,7 +86,7 @@ test("a page that fails to read shows Retry and Open elsewhere", async () => {
       />,
       async () => {
         await until(async () => findText("button", "Open elsewhere") !== null, "the hand-over")
-        assert.equal(frame(), null)
+        assert.equal(frame() === null, true, "no frame while the read failed")
         assert.ok(document.body.textContent?.includes("The host answered 500."))
         await click(findText("button", "Open elsewhere"))
         await until(async () => tabs.opened.length > 0, "the platform hand-over")

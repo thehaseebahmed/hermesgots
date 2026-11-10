@@ -511,8 +511,12 @@ The row of media in a thread: images and video side by side, each opened in the 
 _Avoid_: carousel, thumbnails, media strip, lightbox
 
 **Previewer**:
-The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
+The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A **page** is drawn in a sandboxed frame. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
+
+**Page**:
+An HTML file the app shows in the **Previewer** rather than hands over, run in a sandbox that lets its scripts run but reaches nothing of the app: it loads https images and, when it is on the host, the files in its own folder and below — never anything above, and never a connection out. A page in a thread is a row of its own, not a gallery tile, so its scripts run only when it is opened.
+_Avoid_: HTML preview, web view, document, site
 
 **Library**:
 The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, or handed to the platform where the Previewer can't draw it.

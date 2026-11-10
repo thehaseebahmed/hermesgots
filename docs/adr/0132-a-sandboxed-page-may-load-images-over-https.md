@@ -23,3 +23,7 @@ that policy now lets one thing in:
 **Consequence:** a remote image is a beacon. Opening a canvas or a page that shows one tells the
 image's host the reader's address and when they looked, and a page's script can encode what it holds
 into an image URL it builds. `connect-src 'none'` still stops every other way out.
+
+A page previewed from the host also loads its own folder's files — scripts, styles, images and fonts
+under it, never above it — through a folder-signed route; that is
+[ADR 0133](0133-a-previewed-page-loads-its-own-folders-files.md). A canvas loads none.
