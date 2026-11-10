@@ -952,6 +952,8 @@ class SessionTest(unittest.TestCase):
                     canvases.handle_data_read({"canvas": name}, session_id=self.session)
                 )
                 self.assertIn("own canvas", refused["error"])
+                # A refusal names the canvas the session may work on, so a wrong guess corrects.
+                self.assertIn(self.canvas["id"], refused["error"])
 
     def test_a_session_outside_a_canvas_lists_the_canvases_it_may_name(self) -> None:
         # A bot told only a canvas's name has to find the id a data call takes.

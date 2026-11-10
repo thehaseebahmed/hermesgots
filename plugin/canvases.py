@@ -400,8 +400,6 @@ def resolve_canvas(path: Path, name: Any) -> str:
         conn.close()
     matches = [row for row in rows if row[1] == name]
     if not matches:
-        matches = [row for row in rows if row[1].strip().lower() == name.lower()]
-    if not matches:
         raise CanvasError(f"There is no canvas called {name!r}.", 404)
     if len(matches) > 1:
         held = ", ".join(f"{title} ({row_id})" for row_id, title in matches)
@@ -1669,8 +1667,10 @@ def _data_canvas(
         return mine, path
     found = mine if isinstance(name, str) and name.strip() == mine else resolve_canvas(path, name)
     if mine is not None and found != mine:
+        own = (record(path, mine) or {}).get("title") or mine
         raise CanvasError(
-            "This is a canvas's session: it keeps its own canvas's data and no other's."
+            f"This is a canvas's session: it keeps its own canvas's data and no other's. Its own "
+            f"is {own!r} ({mine})."
         )
     return found, path
 
