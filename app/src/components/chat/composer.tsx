@@ -131,6 +131,8 @@ export function Composer({
   files = !plain,
   maxAttachments,
   placeholder,
+  fieldLabel = "Message",
+  sendLabel = "Send",
 }: {
   busy: boolean
   /** Whether a message sent while a reply runs steers it unless it starts with `/queue`. */
@@ -208,6 +210,13 @@ export function Composer({
   maxAttachments?: number
   /** The field's placeholder; a chat's is `Message <bot>…`. */
   placeholder?: string
+  /**
+   * What a reader hears the field called: a chat's `Message`, and the words of a surface that asks
+   * for something other than a message — a canvas's `What the canvas should be`.
+   */
+  fieldLabel?: string
+  /** What the submit button is called: `Send` where a message goes, `Make it` where a canvas starts. */
+  sendLabel?: string
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -804,7 +813,7 @@ export function Composer({
           size="icon-sm"
           className="size-11 rounded-full"
           disabled={!canSend}
-          aria-label="Send"
+          aria-label={sendLabel}
         >
           <ArrowUpIcon />
         </InputGroupButton>
@@ -900,7 +909,7 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={cn("max-h-48 min-h-12 px-5 pt-4 pb-2 text-base md:text-[15px]", face)}
-          aria-label="Message"
+          aria-label={fieldLabel}
         />
         <InputGroupAddon
           align="block-end"

@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  ArrowUpIcon,
-  EllipsisIcon,
-  FrameIcon,
-  MenuIcon,
-  PencilIcon,
-  Undo2Icon,
-} from "lucide-react"
+import { EllipsisIcon, FrameIcon, MenuIcon, PencilIcon, Undo2Icon } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
@@ -19,9 +12,8 @@ import {
 } from "@/components/canvas-consent"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { useChatSurface } from "@/components/chat/chat-actions"
-import { AttachMenu } from "@/components/chat/attach-menu"
-import { AttachmentTile } from "@/components/chat/attachments"
 import { BotPicker } from "@/components/chat/bot-picker"
+import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
 import { useOpenDrawer } from "@/components/drawer-context"
@@ -30,13 +22,6 @@ import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from "@/components/ui/input-group"
-import { Spinner } from "@/components/ui/spinner"
 import { attempt } from "@/lib/attempt"
 import { awayLine } from "@/lib/away"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
@@ -62,14 +47,15 @@ import {
   type CanvasChanges,
 } from "@/lib/canvases"
 import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
-import { prepareIntake } from "@/lib/attachments"
-import { MAX_ATTACHMENTS, type RouteAnswer } from "@/lib/attachment-caps"
+import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { serverConfig } from "@/lib/connection"
 import { usePluginFeature } from "@/lib/features"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
+import { AttachmentError } from "@/lib/send-turn"
 import { useDark } from "@/lib/theme"
 import { BUILDING_ACTIVITY, formatRelative } from "@/lib/format"
 import { tell } from "@/lib/tell"
@@ -120,91 +106,56 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
 }
 
 /**
- * The create composer's `+`: the same intake a chat's composer has — the same count and size caps,
- * the same inline-or-host road, the same refusal sentences — with the bot's own answer about its
- * upload route deciding which road a file takes. It is a component of its own because that answer is
- * a hook that wants a server, and this screen opens before a bot has been read.
+ * The create screen's own: a prompt and the files staged with it. The composer is the app's, in its
+ * plain mode — a surface that is not a chat, which takes no `/` command and asks for words of its own
+ * — so the ten-file cap, the dedupe, the refusal sentences, the tiles and their Remove are the ones
+ * every other surface already has, rather than a second copy of them kept here (ADR 0131).
  */
-function CanvasAttach({
-  profile,
-  route,
-  attachments,
-  onTake,
-}: {
-  profile: Profile
-  /** The host's answer about its attachments route, read once by the page this composer sits on. */
-  route: RouteAnswer
-  attachments: Attachment[]
-  onTake: (taken: Attachment[]) => void
-}) {
-  const readsImages = profile.imageInput !== false
-  // The files a pick is still reading, which hold their place in the count: a second pick landing
-  // before the first settled would otherwise stage both sets past the cap the composer keeps.
-  const reading = useRef(0)
-  const add = async (files: File[]) => {
-    let mine = 0
-    try {
-      const { attachments: prepared, refusals } = await prepareIntake(files, {
-        held: attachments,
-        reserved: reading.current,
-        readsImages,
-        route,
-        onTake: (take) => {
-          mine = take.length
-          reading.current += mine
-        },
-      })
-      for (const refusal of refusals) tell.error(refusal.message)
-      if (prepared.length) onTake(prepared)
-    } finally {
-      reading.current -= mine
-    }
-  }
-  return (
-    <AttachMenu
-      filesFeature={route}
-      imagesAvailable={readsImages}
-      onAdd={(files) => void add(files)}
-    />
-  )
-}
-
 export function CanvasPage() {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { visible, archived, loaded, unsupported } = useCanvases()
   const profile = useLiveQuery(getActiveProfile, [])
   // The host's answer about its attachments route, which decides whether a staged file is saved on
-  // the host or rides the first turn inline — the same answer the `+` menu asks before it offers.
-  // Asked before a bot is read, `undefined` is no connection rather than a hook out of order.
+  // the host or rides the first turn inline — the same answer the composer's `+` menu asks before it
+  // offers. Asked before a bot is read, `undefined` is no connection rather than a hook out of order.
   const filesFeature = usePluginFeature(profile, "attachments")
   const now = useNow()
-  const [prompt, setPrompt] = useState("")
-  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [starting, setStarting] = useState(false)
   const blocked = profile ? unsupported[profile.id] : undefined
 
-  const create = async () => {
-    if (!profile || !prompt.trim() || starting) return
+  /**
+   * A start, as the composer sends one: the words it holds and the files it staged. It clears its
+   * own field with the send, and hands both back if this promise is refused — which is why a host
+   * that didn't answer is thrown on rather than swallowed, so nothing the reader typed or picked is
+   * lost before its own sentence has been said.
+   */
+  const create = async (text: string, attachments: Attachment[]) => {
+    if (!profile || !text.trim() || starting) return
     setStarting(true)
-    let started: Awaited<ReturnType<typeof startCanvas>> | undefined
-    await attempt("start the canvas", async () => {
-      started = await startCanvas(profile, prompt.trim(), {
+    try {
+      const started = await startCanvas(profile, text.trim(), {
         choice: profile.modelChoice,
         attachments,
         uploads: filesFeature === "yes",
       })
-    })
-    setStarting(false)
-    if (!started) return
-    // Only once the host has answered its own record: a start it refused leaves the tiles where
-    // they were, so the reader can send again without picking everything again.
-    setPrompt("")
-    setAttachments([])
-    // The canvas's own address, not its chat's: the preview decides which screen a canvas opens on
-    // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
-    // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
-    navigate(`/canvas/${started.id}`)
+      // The canvas's own address, not its chat's: the preview decides which screen a canvas opens on
+      // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
+      // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
+      navigate(`/canvas/${started.id}`)
+    } catch (failure) {
+      // A file the host refused is the composer's to say, on the tile it belongs to: another sentence
+      // here would say the same thing twice.
+      if (!(failure instanceof AttachmentError))
+        tell.error(
+          failure instanceof Error && failure.message
+            ? failure.message
+            : "Couldn't start the canvas.",
+        )
+      throw failure
+    } finally {
+      setStarting(false)
+    }
   }
 
   return (
@@ -232,76 +183,33 @@ export function CanvasPage() {
           <h2 className="text-center text-2xl font-semibold tracking-tight md:text-3xl">
             What should it be?
           </h2>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              void create()
-            }}
-            className="flex flex-col gap-3"
-          >
-            {profile && (
-              <div>
-                <BotPicker profile={profile} />
-              </div>
-            )}
-            {attachments.length > 0 && (
-              <div className="flex gap-2.5 overflow-x-auto pb-1" aria-label="Files to start it with">
-                {attachments.map((attachment) => (
-                  <AttachmentTile
-                    key={attachment.id}
-                    attachment={attachment}
-                    onRemove={() =>
-                      setAttachments((held) => held.filter((one) => one.id !== attachment.id))
-                    }
-                  />
-                ))}
-              </div>
-            )}
-            {/* The prompt and its send are one field, as Research asks its own: the button sits in
-                the box's corner rather than under it, so the words and the press are one thing. */}
-            <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
-              <InputGroupTextarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault()
-                    void create()
-                  }
-                }}
-                rows={3}
-                placeholder="A tip calculator for a restaurant bill, in the app's own colours"
-                aria-label="What the canvas should be"
-                className="max-h-48 min-h-20 px-5 pt-4 pb-2 text-base md:text-[15px]"
-              />
-              <InputGroupAddon align="block-end" className="px-2.5 pt-0 pb-1.5">
-                {profile && (
-                  <CanvasAttach
-                    profile={profile}
-                    route={filesFeature}
-                    attachments={attachments}
-                    // The composer's own cap, held here too: what two picks read at once can no more
-                    // stage past ten on this screen than in a chat (ADR 0131).
-                    onTake={(taken) =>
-                      setAttachments((held) => [...held, ...taken].slice(0, MAX_ATTACHMENTS))
-                    }
-                  />
-                )}
-                <span className="flex-1" />
-                <InputGroupButton
-                  type="submit"
-                  variant="default"
-                  size="icon-sm"
-                  className="size-11 rounded-full"
-                  disabled={!profile || !prompt.trim() || starting}
-                  aria-label="Make it"
-                >
-                  {starting ? <Spinner /> : <ArrowUpIcon />}
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-            {blocked && <p className="text-sm text-muted-foreground">{blocked}</p>}
-          </form>
+          {profile && (
+            <div>
+              <BotPicker profile={profile} />
+            </div>
+          )}
+          {/* A canvas is started, not messaged: the composer is the app's own, in its plain mode, with
+              this screen's words for the field and the press. `busy` is no session's — there is no
+              reply to stop here — so only a start already under way takes the field away, and the
+              composer's own `maxAttachments` is the chat's ten (ADR 0131). */}
+          <Composer
+            plain
+            files
+            maxAttachments={MAX_ATTACHMENTS}
+            fieldLabel="What the canvas should be"
+            sendLabel="Make it"
+            placeholder="A tip calculator for a restaurant bill, in the app's own colours"
+            connection={serverConfig(profile)}
+            filesFeature={filesFeature}
+            imagesAvailable={profile?.imageInput !== false}
+            busy={false}
+            disabled={starting}
+            onSend={create}
+            onQueue={create}
+            onStop={() => false}
+            botChat={false}
+          />
+          {blocked && <p className="text-sm text-muted-foreground">{blocked}</p>}
         </section>
 
         <section className="flex flex-col gap-4">

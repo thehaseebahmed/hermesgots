@@ -219,3 +219,36 @@ test("two picks at once stage no more than the composer's ten", async () => {
     },
   )
 })
+
+test("the create screen stages the composer's ten, and its own Remove takes one off", async () => {
+  // A plain surface takes files as a chat does: the tiles, their Remove and the count are the
+  // composer's own, so a canvas start refuses none of them and holds the same ten (ADR 0131).
+  host()
+  await seed()
+
+  await mount(
+    <MemoryRouter initialEntries={["/canvas"]}>
+      <Routes>
+        <Route path="/canvas" element={<CanvasPage />} />
+        <Route path="/canvas/:id" element={<ScreenMarker />} />
+        <Route path="/canvas/:id/edit" element={<ScreenMarker />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await until(() => Promise.resolve(Boolean(find('input[name="files"]'))), "the + menu")
+
+      await pick("files", someFiles("a", 2))
+      assert.deepEqual(tileNames(), ["a-0.txt", "a-1.txt"], "two files are staged")
+
+      await remove("a-0.txt")
+      assert.deepEqual(tileNames(), ["a-1.txt"], "the composer's own Remove takes one off")
+
+      await pick("files", someFiles("b", MAX_ATTACHMENTS + 1))
+      assert.equal(
+        tileNames().length,
+        MAX_ATTACHMENTS,
+        "eleven picked onto one hold the composer's ten",
+      )
+    },
+  )
+})
