@@ -2,9 +2,10 @@
  * A bot's screen is the list of its chats: `/b/<bot>` draws them, flat — its pinned ones first and the
  * rest by what was last said — each a row with a chat's icon, its title, its last line, its age and the
  * dot this device's read mark decides, and a reply that waits on the reader marked on its row. The
- * header's title is the way to the bot's settings, the search narrows the rows to what it finds in a
- * title or a line, and the foot starts a chat or a room. `scripts/test-chat-list.mjs` holds the rules
- * (the order, the row's shape, the search); this holds the screen they are drawn by.
+ * header's title is the way to the bot's settings, the search floats at the foot's left and narrows
+ * the rows to what it finds in a title or a line, and one button at the foot's right starts a chat or
+ * a room. `scripts/test-chat-list.mjs` holds the rules (the order, the row's shape, the search); this
+ * holds the screen they are drawn by.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -24,6 +25,7 @@ import {
   findAll,
   findText,
   json,
+  missing,
   mount,
   path,
   seedSettings,
@@ -333,9 +335,10 @@ test("the header's title is the bot's name, and it is the way to its settings", 
     assert.equal(find("h1")?.textContent, "Mainly", "the heading the screen is known by")
     assert.equal(
       findAll("header button").length,
-      2,
-      "the drawer and the search: no '...' and no list control",
+      1,
+      "the drawer alone: no '...' and no list control, and the search has left for the foot",
     )
+    absent("header [data-search-toggle]", "nothing of the search is in the header")
     assert.equal(
       findAll('header a[aria-label="Routines"]').length,
       1,
@@ -359,6 +362,20 @@ test("the search narrows the rows to the chats whose title or line it finds", as
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 2, "the bot's chats")
     const toggle = find("[data-search-toggle]")
+    assert.equal(
+      toggle?.closest("header"),
+      null,
+      "the search floats at the foot of the list, not in its header",
+    )
+    assert.ok(
+      find('[data-slot="list-foot"]')?.contains(toggle ?? null),
+      "on the bar the list's floating controls stand on",
+    )
+    assert.ok(
+      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+      "with the rows above it",
+    )
     assert.equal(
       toggle?.getAttribute("aria-expanded"),
       "false",
@@ -427,11 +444,41 @@ async function press(field: Element | null, key: string) {
   await settle()
 }
 
-test("the foot starts a chat of this bot's, and a room where the Host makes one", async () => {
+test("one floating button at the foot's right holds New chat and New room", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
-    await until(async () => Boolean(control("New room")), "New room beside New chat")
-    await click(control("New chat"))
+    const fab = find("[data-new-menu]")
+    assert.ok(fab, "the control is at the foot, where the thumb is")
+    assert.equal(fab?.closest("header"), null, "and not in the header")
+    assert.equal(fab?.getAttribute("aria-label"), "New", "named for what it starts")
+    assert.ok(
+      (fab?.className ?? "").includes("rounded-full"),
+      "round, and a full touch target: it is the screen's one accent",
+    )
+    await click(fab)
+    await until(async () => Boolean(newRow("New chat")), "the rows it opens")
+    assert.ok(newRow("New chat"), "New chat is one of them")
+    assert.ok(newRow("New room"), "and New room the other, where the Host makes one")
+    assert.ok(
+      find("[data-popup-form]"),
+      "in the app's own pop-up: a sheet on a phone and a menu beside the button from 1024px",
+    )
+    await settle()
+    assert.equal(
+      findAll('[data-new-menu]').length,
+      1,
+      "one button, not a foot of two: the actions are the menu's rows",
+    )
+  })
+})
+
+test("the menu's New chat makes a chat of this bot's, and its New room opens the room screen", async () => {
+  await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(find("[data-new-menu]")), "the button")
+    await click(find("[data-new-menu]"))
+    await until(async () => Boolean(newRow("New chat")), "the menu")
+    await click(newRow("New chat"))
     await until(async () => path() !== `/b/${bot.id}`, "the address of the chat it made")
     const made = (await db.conversations.toArray()).find((one) => one.id === path().slice(3))
     assert.ok(made, "the chat is the bot's, written before the address moved")
@@ -439,13 +486,15 @@ test("the foot starts a chat of this bot's, and a room where the Host makes one"
     assert.ok(!made.main, "a plain chat: nothing makes a Main any more (G1)")
   })
   await mount(screen(), async () => {
-    await until(async () => Boolean(control("New room")), "the foot")
-    await click(control("New room"))
+    await until(async () => Boolean(find("[data-new-menu]")), "the button")
+    await click(find("[data-new-menu]"))
+    await until(async () => Boolean(newRow("New room")), "the menu")
+    await click(newRow("New room"))
     await until(async () => path() === "/new-room", "the room screen")
   })
 })
 
-test("a Host that cannot make a room offers no control for one", async () => {
+test("a Host that cannot make a room offers no row for one", async () => {
   // A Host of its own, so the answer about rooms is that Host's and no other case's remembered one.
   const plain = botProfile("bot-chats-no-rooms", {
     id: "bot-1",
@@ -454,18 +503,21 @@ test("a Host that cannot make a room offers no control for one", async () => {
   })
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }], { rooms: false, host: plain })
   await mount(screen(`/b/${plain.id}`), async () => {
-    await until(async () => Boolean(control("New chat")), "the foot")
-    // The answer about its plugin is what the control waits on, so the absence is read after it.
+    await until(async () => Boolean(find("[data-new-menu]")), "the button")
+    // The answer about its plugin is what the menu waits on, so the absence is read after it.
     await until(async () => infoReads > 0, "the Host's answer about its plugin")
     await settle()
+    await click(find("[data-new-menu]"))
+    await until(async () => Boolean(newRow("New chat")), "the menu")
+    assert.ok(newRow("New chat"), "a one-row menu is still a menu")
     assert.ok(
-      control("New room") === null,
+      missing('button[aria-label="New room"]'),
       "no New room where the Host would only refuse it — the control never moved here to fail",
     )
   })
 })
 
-/** A control by the words it shows, as the foot's two buttons are read. */
-function control(label: string) {
-  return findAll("button, a").find((one) => wordsOf(one) === label) ?? null
+/** A row the new menu offers, by the name it carries exactly — the button at the foot is `New`. */
+function newRow(label: string) {
+  return find(`button[aria-label="${label}"]`)
 }

@@ -18,9 +18,12 @@ import { RoutinesHome, RoutinesPage } from "@/routes/routines"
 
 import {
   Path,
+  absent,
+  absentText,
   botProfile,
   click,
   find,
+  findAll,
   findText,
   json,
   laptop,
@@ -30,10 +33,13 @@ import {
   seedSettings,
   text,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const BOT_A = botProfile("routine-a", { id: "bot-a", name: "Mainly", hermesProfile: "default" })
 const BOT_B = botProfile("routine-b", { id: "bot-b", name: "Otherly", hermesProfile: "other" })
+/** A bot whose jobs cover the four states the pills filter by. */
+const BOT_C = botProfile("routine-c", { id: "bot-c", name: "Stately", hermesProfile: "states" })
 
 interface Host {
   jobs: unknown[]
@@ -86,13 +92,39 @@ const HOSTS: Record<string, Host> = {
       ],
     },
   },
+  // One job of each state the pills name: healthy, paused, failing by its streak, and failing by the
+  // delivery of its last run rather than by the run itself.
+  "routine-c.test": {
+    jobs: [
+      { id: "job-ok", name: "Tide watch", schedule_display: "Every day at 6:00", enabled: true },
+      { id: "job-paused", name: "Wind watch", schedule_display: "Every hour", enabled: false },
+      {
+        id: "job-streak",
+        name: "Fog watch",
+        schedule_display: "Every 5 minutes",
+        enabled: true,
+        failure_streak: 3,
+      },
+      {
+        id: "job-delivery",
+        name: "Rain watch",
+        schedule_display: "Every day at 9:00",
+        enabled: true,
+        last_status: "delivery_failed",
+      },
+    ],
+    runs: {},
+  },
 }
 
-async function seed({ published = false }: { published?: boolean } = {}) {
+async function seed({
+  published = false,
+  bots = [BOT_A, BOT_B],
+}: { published?: boolean; bots?: typeof BOT_A[] } = {}) {
   // The active bot is the one the page is *not* opened for, so the root address has to read it.
   await seedSettings({ developer: true, legacyChat: false, activeProfileId: BOT_B.id })
   await db.profiles.clear()
-  await db.profiles.bulkPut([BOT_A, BOT_B])
+  await db.profiles.bulkPut(bots)
   await db.conversations.clear()
   await db.messages.clear()
   if (published) await db.conversations.put(RUN_ROW)
@@ -138,6 +170,13 @@ const routinesScreen = (profileId: string) => (
   </MemoryRouter>
 )
 
+/** The jobs the page draws, by the name each card carries — the order it draws them in. */
+const jobNames = () =>
+  findAll("h3").map((one) => wordsOf(one))
+/** One filter pill, by the word it carries. */
+const pill = (label: string) =>
+  findAll("button").find((one) => wordsOf(one) === label) ?? null
+
 /** A bot's list, with the page its own control opens behind it. */
 const listScreen = (profileId: string) => (
   <MemoryRouter initialEntries={[`/b/${profileId}`]}>
@@ -161,6 +200,60 @@ test("a bot's routines draw its jobs and their runs, and no other bot's", async 
     assert.ok(bar, "its run, as the bar the page draws")
     assert.ok(!text().includes("Night audit"), "another bot's routine is not on this page")
     assert.ok(!find('button[aria-label^="Failed, "]'), "and neither is another bot's run")
+  })
+})
+
+test("the page says nothing of its bot: a routine belongs to the bot whose list opened it", async () => {
+  await seed()
+  await mount(routinesScreen(BOT_A.id), async () => {
+    await until(async () => Boolean(findText("h3", "Morning watch")), "the bot's routine")
+    assert.ok(!text().includes("Mainly"), "the bot's name is nowhere on the page")
+    assert.ok(!text().includes("1 routine"), "nor its count of routines")
+    assert.equal(find("header h1")?.textContent, "Routines", "the bar names the screen alone")
+    absent(
+      "header [data-slot=routines-bot]",
+      "and draws no face and no fold for the bot whose jobs these are",
+    )
+  })
+})
+
+test("the pills show each state's own jobs and hide the others'", async () => {
+  await seed({ bots: [BOT_C] })
+  await mount(routinesScreen(BOT_C.id), async () => {
+    await until(async () => jobNames().length === 4, "the bot's jobs")
+    assert.deepEqual(
+      jobNames().sort(),
+      ["Fog watch", "Rain watch", "Tide watch", "Wind watch"],
+      "All is every job",
+    )
+    const states: [string, string[]][] = [
+      ["Healthy", ["Tide watch"]],
+      ["Paused", ["Wind watch"]],
+      // One job failing by its streak, one by its last run's delivery: both are failing.
+      ["Failing", ["Fog watch", "Rain watch"]],
+      ["All", ["Fog watch", "Rain watch", "Tide watch", "Wind watch"]],
+    ]
+    for (const [label, expected] of states) {
+      await click(pill(label))
+      assert.deepEqual(jobNames().sort(), expected, `${label} shows its own jobs and no others`)
+    }
+  })
+})
+
+test("a filter with no jobs says so in the page's own words", async () => {
+  // One healthy job: three of the four pills hold nothing at all.
+  await seed()
+  await mount(routinesScreen(BOT_A.id), async () => {
+    await until(async () => jobNames().length === 1, "the bot's job")
+    await click(pill("Paused"))
+    assert.deepEqual(jobNames(), [], "no job of this state is drawn")
+    assert.ok(
+      findText("p", "No paused routines."),
+      "and the page says so rather than drawing an empty box",
+    )
+    await click(pill("Healthy"))
+    assert.deepEqual(jobNames(), ["Morning watch"], "the healthy pill keeps the one job")
+    absentText("p", "No healthy routines.")
   })
 })
 
@@ -188,7 +281,12 @@ test("the page's back is the bot's list", async () => {
   await seed()
   await mount(routinesScreen(BOT_A.id), async () => {
     await until(async () => Boolean(find('[aria-label="Back to chats"]')), "the page's way back")
-    await click(find('[aria-label="Back to chats"]'))
+    const back = find('[aria-label="Back to chats"]')
+    // The list's header anatomy, copied rather than a second one invented: a round control the size
+    // of the drawer button and the routine icon there.
+    assert.ok((back?.className ?? "").includes("size-11"), "the list's control size")
+    assert.ok((back?.className ?? "").includes("rounded-full"), "and its round shape")
+    await click(back)
     await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list")
   })
 })

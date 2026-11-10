@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams } from "react-router"
 import {
-  ChevronRightIcon,
-  CircleAlertIcon,
   EllipsisIcon,
   PauseIcon,
   PlayIcon,
@@ -15,19 +13,17 @@ import { toast } from "sonner"
 import { botChatsPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { BackButton } from "@/components/back-button"
-import { Bot } from "@/components/bot"
+import { Chip, ChipRow } from "@/components/chip"
 import { CopyBlock } from "@/components/copy-block"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import {
   HISTORY_LENGTH,
@@ -50,7 +46,11 @@ import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
 import { INSTALL_PLUGIN } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
-/** A bot's routines: its jobs and their runs, folded one bot at a time, at `/b/<bot>/routines`. */
+/**
+ * A bot's routines: its jobs and their runs, at `/b/<bot>/routines`. The page names the screen alone:
+ * a routine belongs to the bot whose list opened this one, so no face, name or count of the bot is
+ * drawn — the top bar is the bot's chat list's, and the pills over the jobs filter them by state.
+ */
 export function RoutinesPage() {
   const { profileId = "" } = useParams()
   // The answer names the address it ran for, so one bot's row can never pass for another's.
@@ -67,7 +67,9 @@ export function RoutinesPage() {
   useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
-  const [open, setOpen] = useRoutinesOpen()
+  // Which state the reader asked the page for. A page remembers nothing across visits: this is the
+  // component's own state, not a kept setting.
+  const [filter, setFilter] = useState<Filter>("all")
   const refresh = useCallback(() => setTick((n) => n + 1), [])
 
   usePoll(() => setPollTick((n) => n + 1), LIST_MS, [], { immediate: false, onShow: false })
@@ -81,30 +83,40 @@ export function RoutinesPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {/*
+        The bot's chat list's bar, control for control: the same round 44px controls, the same title
+        and the same gutters. Its leading control is the way back to that list where the list is not
+        already beside this page, and the bar's own action is Refresh.
+      */}
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
-          {!beside && <BackButton label="Back to chats" onClick={back} />}
-          <h1 className="flex-1 text-xl font-semibold tracking-tight">Routines</h1>
+        <div className="mx-auto flex max-w-2xl items-center gap-2">
+          {!beside && <BackButton label="Back to chats" onClick={back} floating />}
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight">Routines</h1>
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon-lg"
-            className="size-11 rounded-full"
+            className="size-11 shrink-0 rounded-full text-muted-foreground"
             onClick={refresh}
             aria-label="Refresh"
           >
             <RefreshCwIcon />
           </Button>
         </div>
+        {/* The page's four states, in the strip a list's chips run in — pinned with the bar, so a long
+            list of jobs is filtered without scrolling back up to reach them. */}
+        <div className="mx-auto max-w-2xl pt-3">
+          <ChipRow label="Routine states">
+            {FILTERS.map(({ key, label }) => (
+              <Chip key={key} active={filter === key} onClick={() => setFilter(key)}>
+                {label}
+              </Chip>
+            ))}
+          </ChipRow>
+        </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <BotRoutines
-          profile={bot}
-          tick={tick}
-          pollTick={pollTick}
-          open={open}
-          onOpenChange={setOpen}
-        />
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+        <BotRoutines profile={bot} tick={tick} pollTick={pollTick} filter={filter} />
       </div>
     </div>
   )
@@ -129,40 +141,39 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : "Couldn't load routines."
 }
 
-const OPEN_KEY = "gots:routines:open"
+/** The four states the page's pills name, and the page is filtered by. */
+type Filter = "all" | "healthy" | "paused" | "failing"
 
-/**
- * Whether a bot's routines are folded away: one bot draws on this page now, so it is one switch
- * rather than a set of bots, and a per-device convenience, so localStorage is enough.
- */
-function useRoutinesOpen(): [boolean, (open: boolean) => void] {
-  const [open, setStored] = useState(() => {
-    try {
-      return localStorage.getItem(OPEN_KEY) !== "0"
-    } catch {
-      return true
-    }
-  })
-  const setOpen = useCallback((next: boolean) => {
-    setStored(next)
-    try {
-      localStorage.setItem(OPEN_KEY, next ? "1" : "0")
-    } catch {
-      // Private mode or blocked storage: it just won't be remembered.
-    }
-  }, [])
-  return [open, setOpen]
-}
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "healthy", label: "Healthy" },
+  { key: "paused", label: "Paused" },
+  { key: "failing", label: "Failing" },
+]
 
 const isPaused = (job: CronJob) => !job.enabled || job.state === "paused"
 
-/** How many routines are failing now. */
-function failingCount({ jobs, runs }: CronState) {
-  return jobs.filter((job) => {
-    if (isPaused(job)) return false
-    const latest = runs[job.id]?.findLast((run) => run.status !== "running")
-    return job.failureStreak > 0 || latest?.status === "failed"
-  }).length
+/**
+ * A job that is failing now: by the streak it is on, or by what its last run answered — the run's own
+ * error, or a run that succeeded and whose delivery did not.
+ */
+const isFailing = (job: CronJob) =>
+  job.failureStreak > 0 || job.lastStatus === "error" || job.lastStatus === "delivery_failed"
+
+/** What each pill keeps, and the one rule the pills and their empty lines both read. */
+const SHOWS: Record<Filter, (job: CronJob) => boolean> = {
+  all: () => true,
+  healthy: (job) => job.enabled && !isFailing(job),
+  paused: isPaused,
+  failing: isFailing,
+}
+
+/** What a pill says when it holds nothing, in the page's own words rather than an empty box. */
+const EMPTY: Record<Filter, string> = {
+  all: "No routines yet.",
+  healthy: "No healthy routines.",
+  paused: "No paused routines.",
+  failing: "No failing routines.",
 }
 
 function PluginMissing() {
@@ -180,15 +191,14 @@ function BotRoutines({
   profile,
   tick,
   pollTick,
-  open,
-  onOpenChange,
+  filter,
 }: {
   profile: Profile
   tick: number
   /** Timed refreshes, which a bot whose server streams its changes needs far less of. */
   pollTick: number
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  /** The state the page is asked for: the pills' own rule decides which jobs are drawn. */
+  filter: Filter
 }) {
   const [cron, setCron] = useState<CronState>()
   const [syncedAt, setSyncedAt] = useState(0)
@@ -208,7 +218,7 @@ function BotRoutines({
   const cronTick = useChanges("cron", profile)
   const timedTick = live ? Math.floor(pollTick / (SAFETY_MS / LIST_MS)) : pollTick
   const jobs = cron?.jobs
-  const failing = cron && !error ? failingCount(cron) : 0
+  const shown = jobs?.filter(SHOWS[filter])
 
   useEffect(() => {
     let cancelled = false
@@ -233,73 +243,38 @@ function BotRoutines({
   const resync = useCallback(() => setOwnTick((n) => n + 1), [])
 
   return (
-    <Collapsible
-      open={open && (!error || pluginMissing)}
-      onOpenChange={onOpenChange}
-      disabled={!!error && !pluginMissing}
-    >
-      <div className="flex items-center gap-2">
-        <CollapsibleTrigger className="group/bot flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-2xl px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[disabled]/bot:opacity-40 group-data-[panel-open]/bot:rotate-90" />
-          <Bot id={profile.botId} className="size-9" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-semibold">{profile.name}</span>
-            {jobs && !error && (
-              <span className="block text-xs text-muted-foreground">
-                {jobs.length} {jobs.length === 1 ? "routine" : "routines"}
-              </span>
-            )}
-          </span>
-          <span className="flex shrink-0 flex-col items-end gap-1">
-            {failing > 0 && (
-              <Badge variant="destructive">
-                <CircleAlertIcon /> {failing} failing
-              </Badge>
-            )}
-          </span>
-        </CollapsibleTrigger>
-        {error && !pluginMissing && (
-          <Popover>
-            <PopoverTrigger
-              openOnHover
-              className="flex min-h-11 shrink-0 items-center rounded-2xl px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Badge variant="destructive">
-                <CircleAlertIcon /> Unreachable
-              </Badge>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="break-words text-destructive">
-              {error}
-            </PopoverContent>
-          </Popover>
-        )}
-      </div>
-      <CollapsibleContent>
-        <div className="flex flex-col gap-3 pt-2">
-          {pluginMissing ? (
-            <PluginMissing />
-          ) : !jobs ? (
-            <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-              <Spinner className="size-4" /> Loading routines…
-            </p>
-          ) : jobs.length === 0 ? (
-            <p className="px-1 text-sm text-muted-foreground">No routines yet.</p>
-          ) : (
-            jobs.map((job) => (
-              <JobCard
-                key={job.id}
-                profile={profile}
-                job={job}
-                runs={cron?.runs[job.id] ?? []}
-                published={published ?? []}
-                now={syncedAt}
-                onChanged={resync}
-              />
-            ))
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <div className="flex flex-col gap-3">
+      {pluginMissing ? (
+        <PluginMissing />
+      ) : error ? (
+        // A host that answered with a refusal says so where its jobs would be: the page has no bot
+        // header left to wear an Unreachable badge, and a bar with a Refresh is the way to ask again.
+        <Card className="gap-1 rounded-3xl px-4 py-4">
+          <p className="text-sm">{error}</p>
+          <p className="text-xs text-muted-foreground">Refresh asks the bot's server again.</p>
+        </Card>
+      ) : !jobs ? (
+        <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+          <Spinner className="size-4" /> Loading routines…
+        </p>
+      ) : jobs.length === 0 ? (
+        <p className="px-1 py-2 text-sm text-muted-foreground">{EMPTY.all}</p>
+      ) : !shown?.length ? (
+        <p className="px-1 py-2 text-sm text-muted-foreground">{EMPTY[filter]}</p>
+      ) : (
+        shown.map((job) => (
+          <JobCard
+            key={job.id}
+            profile={profile}
+            job={job}
+            runs={cron?.runs[job.id] ?? []}
+            published={published ?? []}
+            now={syncedAt}
+            onChanged={resync}
+          />
+        ))
+      )}
+    </div>
   )
 }
 

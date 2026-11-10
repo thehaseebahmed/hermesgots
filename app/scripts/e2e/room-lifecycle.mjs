@@ -29,12 +29,15 @@ await flow("room-lifecycle", async ({ page, profileId, until, shot }) => {
     })
   }, mock)
 
-  // A room is started from a bot's chat list, where it stands beside New chat: the drawer's bot row
-  // opens the list, and the foot of it is where the control is.
+  // A room is started from a bot's chat list: the drawer's bot row opens the list, and the one
+  // button at the foot's right opens the menu New room is a row of.
   await page.goto(`${app}/b/${profileId}`)
+  const newMenu = page.getByRole("button", { name: "New", exact: true })
+  await newMenu.waitFor({ timeout: 20_000 })
+  await shot("list")
+  await newMenu.click()
   const start = page.getByRole("button", { name: "New room" })
   await start.waitFor({ timeout: 20_000 })
-  await shot("list")
   await start.click()
 
   // The blank room, the way a new chat is blank: no record and no Host call, its seats picked where the
@@ -120,8 +123,10 @@ await flow("room-lifecycle", async ({ page, profileId, until, shot }) => {
   )
 
   // The Host's own projection carries the deletion, so a reload finds no row either: the bot's list
-  // is where the room stood, and the control that makes one is still there.
+  // is where the room stood, and the menu that makes one is still there.
   await page.reload()
+  await page.getByRole("button", { name: "New", exact: true }).waitFor({ timeout: 20_000 })
+  await page.getByRole("button", { name: "New", exact: true }).click()
   await page.getByRole("button", { name: "New room" }).waitFor({ timeout: 20_000 })
   await settled(page)
   assert.equal(

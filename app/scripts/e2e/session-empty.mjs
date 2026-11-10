@@ -30,10 +30,11 @@ await flow(
       await paragraphs.last().waitFor({ timeout: 15_000 })
       return text(paragraphs)
     }
-    // A new chat is made where the app makes one now: from the bot's list, whose New chat writes the
-    // record and lands on it (ADR 0130).
+    // A new chat is made where the app makes one now: from the bot's list, whose menu writes the
+    // record and lands on it (ADR 0130). The list's foot has one button, and New chat is its first row.
     const newChat = async () => {
       await page.goto(`${app}/b/${bot.profile}`)
+      await page.getByRole("button", { name: "New", exact: true }).click()
       await page.getByRole("button", { name: "New chat" }).click()
       await page.waitForURL(/\/c\/[^/]+$/, { timeout: 15_000 })
       await paragraphs.last().waitFor({ timeout: 15_000 })
