@@ -941,6 +941,20 @@ class ListTest(unittest.TestCase):
             self.newest["id"],
         )
 
+    def test_the_list_reads_the_store_without_walking_a_session(self) -> None:
+        # The store's path is all a list needs: no canvas of its own is exactly the session it is
+        # asked from, so the walk a canvas's tools take to find one is a lineage and a row read
+        # for nothing — on a tool every session carries.
+        with mock.patch.object(
+            canvases,
+            "canvas_of_session",
+            side_effect=AssertionError("the list walked a session's lineage"),
+        ):
+            listed = json.loads(canvases.handle_list({}, session_id=self.plain))
+        self.assertEqual(
+            [row["id"] for row in listed["canvases"]], [self.newest["id"], self.archived["id"]]
+        )
+
 
 class EditTest(unittest.TestCase):
     """A small change is find and replace, and undo walks the pointer back a version."""
@@ -1455,6 +1469,18 @@ class NamingTest(unittest.TestCase):
         self.assertEqual(list(another), ["error"])
         for canvas_id in (self.canvas["id"], self.other["id"]):
             self.assertIn(canvas_id, another["error"])
+
+    def test_a_canvas_session_names_its_own_title_in_another_case(self) -> None:
+        # A canvas's own session naming its own title in another case is that canvas, as it is
+        # from a plain chat: what a name answers to is one rule, whichever session asks it. Its
+        # own title used to be matched exactly, so a chat reached a canvas its own bot could not.
+        canvases.put_doc(self.path, self.canvas["id"], "notes", "mine", {"text": "mine"})
+        canvases.put_doc(self.path, self.other["id"], "notes", "theirs", {"text": "theirs"})
+        named = {"canvas": self.canvas["title"].upper()}
+        outside = json.loads(canvases.handle_data_read(named, session_id=self.plain))
+        own = json.loads(canvases.handle_data_read(named, session_id=self.canvas["session_id"]))
+        self.assertEqual([row["doc"] for row in outside["documents"]], [{"text": "mine"}])
+        self.assertEqual(own, outside)
 
 
 class RouteTest(unittest.TestCase):
