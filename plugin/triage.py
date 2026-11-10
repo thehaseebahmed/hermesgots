@@ -275,18 +275,22 @@ def open_thread(
     opener_at: Optional[int] = None,
     title: Optional[str] = None,
     canvas_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
     The id is the app's own kind (a UUID) and the session is ``gots-<id>``, so every device and
-    the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs,
-    unless one is given: a canvas's chat is named after the canvas and marked ``titleEdited``, so
-    Hermes's auto-title never replaces it, and carries ``canvasId``, which is what keeps it out of
-    every list and out of Main's cards. ``opener`` is the message that began the thread and
-    ``opener_at`` when the reader sent it: with them on the record, a device that never opens the
-    thread still draws its card's bubble and stands the card at that message's time (ADR 0090).
+    the dashboard label treat it as any chat. A caller that made the chat itself names it with
+    ``chat_id`` — a canvas is started with files saved under the session that chat names, so only
+    the caller could have saved them — and the session is derived from it the same way. The title
+    is Hermes's to give once the first turn runs, unless one is given: a canvas's chat is named
+    after the canvas and marked ``titleEdited``, so Hermes's auto-title never replaces it, and
+    carries ``canvasId``, which is what keeps it out of every list and out of Main's cards.
+    ``opener`` is the message that began the thread and ``opener_at`` when the reader sent it: with
+    them on the record, a device that never opens the thread still draws its card's bubble and
+    stands the card at that message's time (ADR 0090).
     """
-    chat_id = str(uuid.uuid4())
+    chat_id = chat_id or str(uuid.uuid4())
     session_id = f"{GOTS_ID_PREFIX}{chat_id}"
     now = int(time.time() * 1000)
     value = {

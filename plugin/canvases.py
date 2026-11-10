@@ -1176,6 +1176,23 @@ def _drop(path: Path, canvas_id: str) -> None:
         conn.close()
 
 
+def _saved(files: Any) -> List[Dict[str, Any]]:
+    """The records of the files a caller saved for a canvas, as the first turn's item keeps them.
+
+    A caller that made the chat itself saved the files under that chat's session before it called,
+    so the records come in with the create and ride the first turn as any message's attachments do.
+    A caller that saved none hands nothing, which is no files rather than a refusal; anything but a
+    list is refused here, before the canvas, its chat or its run exists.
+    """
+    if files is None:
+        return []
+    if not isinstance(files, list):
+        raise CanvasError(
+            "A canvas's files are the records its caller saved, as a list; this is not one."
+        )
+    return outbox.clean_files(files)
+
+
 def create(
     path: Path,
     *,
@@ -1183,42 +1200,53 @@ def create(
     bot_id: Optional[str],
     prompt: Any,
     body: Any,
+    chat_id: Optional[str] = None,
+    files: Any = None,
 ) -> Dict[str, Any]:
     """A canvas from a prompt: its record, its chat and the run that builds it, in that order.
 
     The chat is the one the app makes for a thread — ``triage.open_thread``'s record, keyed by the
     session the canvas is edited in, carrying ``canvasId`` so no list or card ever draws it, titled
     with the canvas's own name and marked ``titleEdited`` so Hermes's auto-title never replaces it.
+    A caller that made the chat itself names it with ``chat_id`` and hands the records of the files
+    it saved under that chat's session with ``files``: the canvas opens on that chat and the first
+    turn carries those files, which is how a canvas is started with an attachment. A caller that
+    names neither keeps the chat ``open_thread`` mints and queues no files.
+
     The prompt is queued on that session as its first turn, so the canvas is built with the app
     closed, and a failure anywhere takes the record back rather than leaving a canvas with no run.
+    The prompt stays the human words — a canvas and its chat are titled by them — while whatever
+    markers the caller wrote for its files ride only in the run body.
     """
     if not isinstance(prompt, str) or not prompt.strip():
         raise CanvasError("A canvas needs a prompt to build it from.")
     if not isinstance(body, dict) or not isinstance(body.get("input"), list) or not body["input"]:
         raise CanvasError("body must be the run request that builds the canvas.")
+    saved = _saved(files)
     run = body
     now = int(time.time() * 1000)
     canvas_id = str(uuid.uuid4())
     title = title_of(prompt)
-    chat_id, session_id = triage.open_thread(
+    opened, session_id = triage.open_thread(
         path,
         bot_id,
         chats.pick(run.get("provider"), run.get("model")),
         opener=prompt,
         title=title,
         canvas_id=canvas_id,
+        chat_id=chat_id,
     )
     found = {
         "id": canvas_id,
         "title": title,
         "session_id": session_id,
-        "chat_id": chat_id,
+        "chat_id": opened,
         "at": now,
     }
     _insert(path, found)
     try:
         # The canvas row is in first: the run this queues may write to it the moment it starts.
-        item = triage.queue_first_turn(path, request_profile, chat_id, session_id, prompt, [], body)
+        item = triage.queue_first_turn(path, request_profile, opened, session_id, prompt, saved, body)
     except Exception:
         _drop(path, canvas_id)
         raise

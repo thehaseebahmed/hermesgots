@@ -30,6 +30,36 @@ BODY = {
     "provider": "anthropic",
     "model": "claude-opus-5-5",
 }
+
+# A canvas started with files: the chat id the app mints for it, the two records it saved under that
+# chat's session before the create call, and the run body it builds — the prompt's words, then one
+# marker line naming each saved file, as `lib/attachment-text.ts` writes them.
+START_CHAT = "3f6a1c2e-7b4d-4a91-8e35-0c9d5b2a7e41"
+START_FILES = [
+    {
+        "name": "bill.png",
+        "type": "image/png",
+        "size": 2048,
+        "path": f"attachments/gots-{START_CHAT}/bill.png",
+    },
+    {
+        "name": "menu.pdf",
+        "type": "application/pdf",
+        "size": 40960,
+        "path": f"attachments/gots-{START_CHAT}/menu.pdf",
+    },
+]
+MARKED_CONTENT = "\n".join(
+    [
+        PROMPT,
+        *(
+            f'<attachment name="{file["name"]}" type="{file["type"]}" size="{file["size"]}" '
+            f'path="{file["path"]}" />'
+            for file in START_FILES
+        ),
+    ]
+)
+MARKED_BODY = {**BODY, "input": [{"role": "user", "content": MARKED_CONTENT}]}
 PAGE_WITHOUT_HEAD = """<!doctype html>
 <html lang="en">
   <title>Tip</title>
@@ -57,6 +87,16 @@ def make_canvas(path: Path) -> dict:
 
 def store_of(case: unittest.TestCase) -> Path:
     return db_path(temp_hermes_home(case))
+
+
+def queued_body(path: Path, item: dict) -> dict:
+    """The run request a queued item carries, as the outbox stores it."""
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT body FROM outbox WHERE id = ?", (item["id"],)).fetchone()
+    finally:
+        conn.close()
+    return json.loads(row[0])
 
 
 class Agent:
@@ -131,14 +171,7 @@ class CreationTest(unittest.TestCase):
         item = queued["items"][0]
         self.assertEqual(item["text"], PROMPT)
         # And the run it carries is the app's own request, rebound to the canvas's session.
-        conn = connect(self.path)
-        try:
-            body = json.loads(
-                conn.execute("SELECT body FROM outbox WHERE id = ?", (item["id"],)).fetchone()[0]
-            )
-        finally:
-            conn.close()
-        self.assertEqual(body["input"][0]["content"], PROMPT)
+        self.assertEqual(queued_body(self.path, item)["input"][0]["content"], PROMPT)
         # And the session is the chat's: `gots-<chat id>`, which is what every device labels it as.
         self.assertEqual(found["session_id"], f"gots-{found['chat_id']}")
 
@@ -165,6 +198,61 @@ class CreationTest(unittest.TestCase):
         self.assertEqual(canvases.listing(path), [])
         # The chat record is a tombstone rather than a thread nothing posts in.
         self.assertTrue(all(entry.get("deleted") for entry in chats.read(path).values()))
+
+    def test_a_create_on_a_named_chat_keeps_its_files_and_the_prompts_words(self) -> None:
+        path = store_of(self)
+        found = canvases.create(
+            path,
+            request_profile="default",
+            bot_id="bot-1",
+            prompt=PROMPT,
+            body=MARKED_BODY,
+            chat_id=START_CHAT,
+            files=START_FILES,
+        )
+        # The canvas is on the chat its caller made, with the session that chat names, and the chat
+        # record says which canvas it is — the same record a minted one would be.
+        self.assertEqual(found["chat_id"], START_CHAT)
+        self.assertEqual(found["session_id"], f"gots-{START_CHAT}")
+        self.assertEqual(chats.one(path, START_CHAT)["value"]["canvasId"], found["id"])
+        # The title is the prompt's own words, cut to the title's length: the markers ride the body
+        # and never the name.
+        self.assertEqual(found["title"], canvases.title_of(PROMPT))
+        self.assertTrue(PROMPT.startswith(found["title"].rstrip("…")))
+        self.assertNotIn("<attachment", found["title"])
+        # The first turn carries both files, as the records the caller saved them as, and the
+        # message is the words alone.
+        item = outbox.read(path, found["session_id"])["items"][0]
+        self.assertEqual(item["text"], PROMPT)
+        self.assertEqual(item["attachments"], START_FILES)
+        # And the run body is the caller's untouched: the markers it wrote are all still there.
+        self.assertEqual(queued_body(path, item)["input"], MARKED_BODY["input"])
+        self.assertEqual(queued_body(path, item)["session_id"], found["session_id"])
+
+    def test_a_create_naming_neither_mints_its_own_chat_and_queues_no_files(self) -> None:
+        path = store_of(self)
+        found = make_canvas(path)
+        self.assertNotEqual(found["chat_id"], START_CHAT)
+        self.assertEqual(found["session_id"], f"gots-{found['chat_id']}")
+        item = outbox.read(path, found["session_id"])["items"][0]
+        self.assertEqual(item["text"], PROMPT)
+        self.assertEqual(item["attachments"], [])
+
+    def test_a_files_that_is_no_list_is_refused_before_anything_is_made(self) -> None:
+        path = store_of(self)
+        with self.assertRaises(canvases.CanvasError):
+            canvases.create(
+                path,
+                request_profile="default",
+                bot_id="bot-1",
+                prompt=PROMPT,
+                body=MARKED_BODY,
+                chat_id=START_CHAT,
+                files=START_FILES[0],
+            )
+        # Refused whole: no canvas, no chat and nothing queued.
+        self.assertEqual(canvases.listing(path), [])
+        self.assertEqual(chats.read(path), {})
 
     def test_a_rename_is_the_canvas_and_its_chat(self) -> None:
         found = canvases.write(self.path, self.canvas["id"], DOCUMENT, title="Tip splitter")

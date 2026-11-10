@@ -3307,7 +3307,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.canvases", "canvases": rows})
 
     async def create_canvas(request: "web.Request") -> "web.Response":
-        """A canvas from a prompt: the record, its chat, and the run that builds it, queued."""
+        """A canvas from a prompt: the record, its chat, and the run that builds it, queued.
+
+        A start that carries files names the chat it made for the canvas and the records it saved
+        under that chat's session, and both go to the store as they came; one that names neither
+        is a start with a prompt alone, which the store mints a chat for.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3323,6 +3328,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 bot_id=body.get("profile_id"),
                 prompt=body.get("prompt"),
                 body=body.get("body"),
+                chat_id=body.get("chat_id"),
+                files=body.get("files"),
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)
