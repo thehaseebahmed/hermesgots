@@ -69,7 +69,7 @@ The most recent event a session has seen — a turn ending, its pull request mov
 _Avoid_: updated at, updatedAt, last update
 
 **Read mark**:
-When a device last had a chat's thread rendered on it. It stays on that device, is never synced, and a chat with anything newer than its mark has not been read there — one this device has never opened has no mark at all, so nothing about it is called unread. It is what a Code row's dot measures a session's last activity against, and what the sidebar's bot row measures the bot's own threads against — Main among them, never a coding session of that bot's, since that row leads to Main.
+When a device last had a chat's thread rendered on it. It stays on that device, is never synced, and a chat with anything newer than its mark has not been read there — one this device has never opened has no mark at all, so nothing about it is called unread. It is what a Code row's dot measures a session's last activity against, and what the sidebar's bot row measures the bot's own chats against — every chat of its list, never a coding session of that bot's, since that row leads to the bot's list.
 _Avoid_: last seen, read receipt, unread count
 
 **Question**:
@@ -81,11 +81,11 @@ A bot's request to take a sensitive action, answered Once, Session, Always or De
 _Avoid_: permission prompt, consent, authorization
 
 **Card**:
-A block Gots draws for itself inside a chat — a question, an approval, a subagent's work, a session's state — as opposed to a message, a chat drawn in a bot's Main thread, or the blocks of an interface the model drew. It comes in two shells and three kinds: a card that waits on the reader floats over the thread in its own colour, a card that records what happened lies flat and muted, and a card that stops the session — read-only, resolved, discarded — floats and stays mute, because it says a decision was taken rather than raising a fault. Its title is the app's words and keeps the app's face; what the bot said inside it takes the **Code face** in a session.
+A block Gots draws for itself inside a chat — a question, an approval, a subagent's work, a session's state — as opposed to a message, a row of a bot's chat list, or the blocks of an interface the model drew. It comes in two shells and three kinds: a card that waits on the reader floats over the thread in its own colour, a card that records what happened lies flat and muted, and a card that stops the session — read-only, resolved, discarded — floats and stays mute, because it says a decision was taken rather than raising a fault. Its title is the app's words and keeps the app's face; what the bot said inside it takes the **Code face** in a session.
 _Avoid_: panel, box, widget, chip
 
 **Conversation**:
-The stored record of one exchange with a bot: the row a chat list shows and sync carries. A coding session's conversation also names its project.
+The stored record of one chat: the row a bot's list shows and sync carries. A coding session's conversation also names its project.
 _Avoid_: chat object, session record, thread
 
 **Code face**:
@@ -120,24 +120,6 @@ rows; a turn that has said nothing yet draws neither, and the status line — th
 sign — says it instead.
 _Avoid_: tool row (which is a work row holding calls), step, item, log line
 
-**Thread card**:
-A bot's thread drawn inside its Main at the moment its opener was sent: the message in the reader's
-own bubble where any device can name it, and under it the thread's state, its name and the way in. A
-card is not a turn and wears no avatar. Its bubble says the message and its line says the thread's
-name, never the other way round, and a thread whose opener nothing can name draws no bubble rather
-than the name (ADR 0082, ADR 0090). It wears one shape whichever way it was opened: the line reads
-"View thread", and a thread triage opened carries Undo outside the card, at the end of its row
-(ADR 0094).
-_Avoid_: thread row, thread item, preview
-
-**Opener**:
-The message a thread began with — what its card's bubble draws, and the moment the card stands at.
-The screen that sends a thread's first turn records its words and its time on the thread's own
-record, and the host records them for a thread its triage opens, so a device that has never opened
-the thread still draws it; what the device holds for the thread wins where it holds something
-(ADR 0090, ADR 0096).
-_Avoid_: first message, preview, snippet
-
 **Sort**:
 A list's order, said as the fact it ranks by — created, last activity, title, name — and a direction
 arrow. The control reads one sign and one name: the arrow at its start, then the key's name. The
@@ -156,7 +138,7 @@ The one line under a reply that says what the turn is doing while it works — "
 _Avoid_: footer (that is where the line stands, not what it is), progress text, activity
 
 **Command**:
-Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, the Cheatsheet, or how a message sent mid-reply goes. One that acts — settings, the Cheatsheet, opening an empty thread — never reaches the agent as a message. One that takes the rest of the message as its own (`/thread`) is a prefix instead: picked, it lands in the field, and Send opens the thread on what was typed after it (ADR 0096).
+Something Gots itself does from the composer: opening settings, the Cheatsheet, or how a message sent mid-reply goes. One that acts — settings, the Cheatsheet — never reaches the agent as a message.
 _Avoid_: slash command, action, app skill
 
 **Skill**:
@@ -207,41 +189,17 @@ _Avoid_: alert, limit banner, usage warning
 One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
 _Avoid_: profile, agent, assistant
 
-**Main thread**:
-A bot's one permanent chat and the screen its bot opens to: its messages land there first, the ones needing no thread stay there, and every thread it has is drawn inside it as a card. It can't be deleted.
-_Avoid_: default chat, general chat, inbox
-
-**Bot Chat**:
-A bot's one chat surface: its Main thread and the threads drawn inside it as cards. A project session is not one.
-_Avoid_: bot screen, chat screen, bot page
-
-**Chat threads**:
-Whether a bot may start a new thread at all: Developer's switch, off by default and carried by the account, and the one thing that decides it. Off, no bot's chat offers a start command, a new chat's first send lands in that bot's Main, and the host is never asked to triage — a thread that already exists still lists in Main, opens and sends (ADR 0120).
-_Avoid_: bot threads (that is the layout), thread mode, threads on
-
-**Thread lane**:
-The pane a bot's Chat opens beside Main for the one thread it holds: half the room the sidebar leaves while it holds one, and not there at all once the thread is closed, so Main has the whole width. A bot's alone — Code, the projects, the meetings, research and the apps keep their list lane.
-_Avoid_: sidebar, third pane, detail pane, right pane
-
-**Split handle**:
-The separator between a bot's Main and its Thread lane: dragged, it sets the share the two read at, and a double-click or Enter returns it to half. Not a **Divider**, which is a thing that happened between two turns.
-_Avoid_: divider, gutter, grip, drag bar
+**Chat**:
+A bot's own conversation with you: one row of its list, drawn as a thread, and the screen its
+address opens. A bot's list holds every chat it has, so an older conversation is as reachable as the
+newest; a room and a routine's run are rows of the same list rather than chats, since one is shared
+with the bot's other members and the other is nobody's conversation. Main is a chat like any other:
+no mark, one place in the order, and the one chat that cannot be deleted.
+_Avoid_: thread, Main, bot chat, "the bot's screen"
 
 **Blank chat**:
-A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat; under bot threads a chat starts at its bot's Main instead, and with **Chat threads** off its first send lands there too.
+A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat as much as the bot layout's, and its first send makes the chat either way.
 _Avoid_: new chat screen, draft chat, empty chat
-
-**Triage**:
-The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays. It runs only while **Chat threads** are on, and with them off nothing is asked and every message stays.
-_Avoid_: routing, sorting, dispatch
-
-**Triage model**:
-The model a bot's host makes that decision with. Nothing set means the bot's own model decides.
-_Avoid_: router model, decision model
-
-**Moved marker**:
-What the Main thread shows in place of a message triage sent into an older thread, with the way to undo it — the undo riding the same system line the thread's name stands in. A message that opened a new thread is drawn there as that thread's card instead (ADR 0094). A marker stands among the cards and the dividers by its own time, under a day heading of its own (ADR 0097).
-_Avoid_: redirect notice, forwarded message
 
 **Steer**:
 A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
@@ -284,7 +242,7 @@ The permission an MCP server needs from the service it talks to. Gots starts the
 _Avoid_: authorization, OAuth, sign in, connect
 
 **Model pick**:
-The model a chat sends its turns with: its own pick where the user made one, else its bot's default, else the host's model. It is fixed at the chat's first send — the model in effect then is written into the chat's own pick — so a Default model changed later leaves a chat already under way where it was, and a message triage moves into a thread is that thread's next send, so a thread holding no pick takes the model the moved message named. Main is the exception, following the default for as long as it lives. Gots' own setting, sent with the turn and still the host's to run.
+The model a chat sends its turns with: its own pick where the user made one, else its bot's default, else the host's model. It is fixed at the chat's first send — the model in effect then is written into the chat's own pick — so a Default model changed later leaves a chat already under way where it was, Main is the exception, following the default for as long as it lives. Gots' own setting, sent with the turn and still the host's to run.
 _Avoid_: model choice, selected model, current model
 
 **Default model**:
@@ -296,7 +254,7 @@ The model a chat keeps, fixed at its first send: the model in effect then — th
 _Avoid_: lock, freeze, sticky model
 
 **Pinned**:
-A session held above the Code list's status groups, in a band of its own: positional and personal, it changes nothing about the session — not its state, not the model it runs, not whether anything sweeps it — and it leaves the group its claim would put it in rather than being drawn twice. It outlives the session changing state, it is ordered by the list's own sort, and a search or a project chip drops the band with the other headers. A project carries the same word in the project list, where it means the same thing — a place above the list rather than a claim about the item — though that list orders its pins by when they were pinned and the Code list orders them by the sort the reader picked.
+A session held above the Code list's status groups, in a band of its own: positional and personal, it changes nothing about the session — not its state, not the model it runs, not whether anything sweeps it — and it leaves the group its claim would put it in rather than being drawn twice. It outlives the session changing state, it is ordered by the list's own sort, and a search or a project chip drops the band with the other headers. A project carries the same word in the project list, where it means the same thing — a place above the list rather than a claim about the item — though that list orders its pins by when they were pinned and the Code list orders them by the sort the reader picked. A chat carries the word on its own record, so a pin travels to every device and lifts that chat above the newer ones in its bot's list; a room's pin is the device's alone (ADR 0121).
 _Avoid_: favourite, star, bookmark, sticky
 
 **Model change**:
@@ -304,7 +262,7 @@ The host's record of the models a chat's calls ran on, one row per change. A thr
 _Avoid_: model switch, model update, fallback
 
 **Divider**:
-A thing that happened between two turns, drawn as one piece: a squiggle on either side in the fainter border colour, broken by its words in the muted one at the thread's smallest size, and spoken as a separator. A day in a bot's Main, a compaction in any thread, and a model change in a project session — a chat draws no model change, and only a Main draws a day.
+A thing that happened between two turns, drawn as one piece: a squiggle on either side in the fainter border colour, broken by its words in the muted one at the thread's smallest size, and spoken as a separator. A compaction in any thread, and a model change in a project session — a chat draws no model change, and nothing draws a day.
 _Avoid_: separator, rule, hairline, timestamp
 
 **Progress reminder**:
@@ -312,7 +270,7 @@ A note the host writes to the model while a turn works, drawn as a system line w
 _Avoid_: nudge, check-in, reminder row
 
 **Compaction**:
-A point where Hermes compressed a chat's context — in place under the same session, the default, or by ending the session and continuing in a child. The host records when, the context's size where it measured one, and the summary's own row for one made in place. The thread draws a divider above the first message written after it, or inside the reply it fell in, at its seam, where the record is matched by that row (else by the summary's own time) — the row the record names is the seam on whichever side it was written, since one made while a reply runs is that reply's own row rather than a user row. A divider stands between two drawn messages and nowhere else — a user's words, or a reply's words or calls — so the top of a chat whose archive isn't loaded, the foot of a chat nothing follows, and a Main whose turns were all triaged away carry none. Between two drawn messages there is one divider, the one whose label names a size over a bare one.
+A point where Hermes compressed a chat's context — in place under the same session, the default, or by ending the session and continuing in a child. The host records when, the context's size where it measured one, and the summary's own row for one made in place. The thread draws a divider above the first message written after it, or inside the reply it fell in, at its seam, where the record is matched by that row (else by the summary's own time) — the row the record names is the seam on whichever side it was written, since one made while a reply runs is that reply's own row rather than a user row. A divider stands between two drawn messages and nowhere else — a user's words, or a reply's words or calls — so the top of a chat whose archive isn't loaded and the foot of a chat nothing follows carry none. Between two drawn messages there is one divider, the one whose label names a size over a bare one.
 _Avoid_: compression event, summary
 
 **Carried copy**:
@@ -446,6 +404,12 @@ A chat on one Host shared by several of its bots: what the user says reaches eve
 answers stand in one transcript. Its roster is fixed when the room is made, and its rounds are the
 Host's to drive.
 _Avoid_: group chat, group, channel, room chat
+
+**Room row**:
+A room as a bot's chat list draws it: worn with its members' pictures, drawn in the list of every
+bot whose roster seats it, and saying which member needs the reader while the room's log ends
+asking.
+_Avoid_: group row, room card, rooms section
 
 **Member**:
 One of the bots a room holds. It answers in the room as itself, with its own name and picture.
@@ -623,7 +587,7 @@ A setting that is Gots's own — the app, the device or the Gots plugin's own ho
 _Avoid_: app setting, local setting, device setting
 
 **Legacy chat UX**:
-The Developer setting that restores the old chat-list sidebar, drawing Recents instead of the bots (ADR 0110). Bot threads is the layout otherwise, on every device.
+The Developer setting that restores the old chat-list sidebar, drawing Recents instead of the bots, with a Rooms section of its own (ADR 0110). A bot's chats are the layout otherwise, on every device.
 _Avoid_: old layout, classic mode, bot threads off
 
 **Hermes setting**:
@@ -714,7 +678,7 @@ A page of plain HTML a bot writes for you, keeps on its host and draws in a sand
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
-The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a thread, never a card in Main and never triaged, and it carries the canvas's name as its title.
+The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title.
 _Avoid_: canvas chat, build session, edit thread
 
 **Canvas sheet**:
@@ -769,12 +733,23 @@ _Avoid_: notification type, group, topic, preference
 A category as a phone holds it — one record per category in Android's notification settings, which is where a phone switches that category.
 _Avoid_: topic, group, notification class
 
-**Routine message**:
-A message a routine posts into a chat as the bot: written into that chat's own history, so the thread draws it, the bot remembers saying it and the user can reply to it. It names the routine that wrote it, and opens with an aside opener when it arrives while the chat is in a turn or just after one.
-_Avoid_: notification, card, notice, automation message
+**Routine**:
+A job a bot's host runs on a schedule. It belongs to that bot — its id is in that host's cron store
+— and what a run delivers reaches Gots as a row of the bot's list, while the routines screen lists
+the jobs themselves.
+_Avoid_: cron job, automation, task, schedule
+
+**Routine row**:
+The row a routine's run publishes in its bot's list: one per run, wearing the routine's icon rather
+than a chat's, its line and its time the run's own. It opens the run's transcript read-only, which
+is why it has no composer; a run that ended silent, or that never delivered to Gots, has no row at
+all.
+_Avoid_: routine message, notification, chip, card
 
 **Routine run**:
-The execution a routine message came from, opened from that message as a transcript with no composer: a run's session refuses turns and allows reading.
+One execution of a routine, whose transcript a routine row opens: read-only, since a run's session
+refuses turns. It is also listed on its bot's routines screen, which is where a run older than any
+row can still be read.
 _Avoid_: job run, execution, log, cron session
 
 **Notification settings**:
