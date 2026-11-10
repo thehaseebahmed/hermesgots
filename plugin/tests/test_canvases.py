@@ -1472,8 +1472,7 @@ class NamingTest(unittest.TestCase):
 
     def test_a_canvas_session_names_its_own_title_in_another_case(self) -> None:
         # A canvas's own session naming its own title in another case is that canvas, as it is
-        # from a plain chat: what a name answers to is one rule, whichever session asks it. Its
-        # own title used to be matched exactly, so a chat reached a canvas its own bot could not.
+        # from a plain chat: what a name answers to is one rule, whichever session asks it.
         canvases.put_doc(self.path, self.canvas["id"], "notes", "mine", {"text": "mine"})
         canvases.put_doc(self.path, self.other["id"], "notes", "theirs", {"text": "theirs"})
         named = {"canvas": self.canvas["title"].upper()}

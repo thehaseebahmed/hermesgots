@@ -438,7 +438,6 @@ def resolve(path: Path, name: Any) -> str:
         )
     every = names(path)
     matched = [found for found in every if _answers_to(name, found["id"], found["title"])]
-    # The key answers first: a title can never shadow an id, whatever the two are called.
     keyed = next((found for found in matched if found["id"] == name), None)
     if keyed is not None:
         return keyed["id"]
@@ -1657,7 +1656,7 @@ def _answered(
     own — or the ``CanvasError`` it refused with, named.
 
     The envelope both kinds of canvas tool share: a refusal is an ``{"error": ...}`` answer and
-    never a raise to the caller, so a model is told what went wrong rather than the turn dying.
+    never a raise to the caller, so a model is told what went wrong rather than the call failing.
     """
     try:
         found = run(path, canvas_id)
@@ -1680,21 +1679,15 @@ def _tool_answer(
     return _answered(run, path, canvas_id, answer)
 
 
-def _own_canvas(tool: str, named: Any, canvas_id: str, path: Path) -> Optional[str]:
-    """The words refusing a name inside a canvas's own session, or None when it is this canvas.
-
-    No name is this canvas, and so are its id and its title — read by its key, never enumerated, so
-    a canvas's bot naming its own canvas learns nothing of its neighbours. Any other name is
-    refused here, before the bot's canvases are looked up at all: a canvas's session reaches only
-    its own data, and is told so without being handed a list of what it can't have.
-    """
+def _own_canvas(tool: str, named: Any, canvas_id: str, path: Path) -> None:
+    """Refuses a name that isn't the canvas a canvas's session edits."""
     if named is None or (isinstance(named, str) and not named.strip()):
-        return None
+        return
     if not isinstance(named, str):
-        return f"A canvas is named by its title or its id; {named!r} is not a name."
+        raise CanvasError(f"A canvas is named by its title or its id; {named!r} is not a name.")
     if _answers_to(named, canvas_id, _stored_title(path, canvas_id)):
-        return None
-    return (
+        return
+    raise CanvasError(
         f"{tool} reaches only this canvas's data from a canvas's session: this is {canvas_id}'s "
         f"session, and {named!r} is another canvas. Leave canvas out to mean this one."
     )
@@ -1713,9 +1706,7 @@ def _data_canvas(
     if path is None:
         raise CanvasError(f"{tool} can't read this bot's store, so it can't name a canvas.")
     if canvas_id:
-        refused = _own_canvas(tool, named, canvas_id, path)
-        if refused is not None:
-            raise CanvasError(refused)
+        _own_canvas(tool, named, canvas_id, path)
         return path, canvas_id
     if not isinstance(named, str) or not named.strip():
         raise CanvasError(
