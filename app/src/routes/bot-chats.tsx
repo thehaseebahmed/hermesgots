@@ -12,8 +12,8 @@ import {
 
 import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
-import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
+import { ItemRow, pinnedLine } from "@/components/item-list"
+import { ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
@@ -179,16 +179,10 @@ function ChatList({
   const now = useNow()
   const [query, setQuery] = useState("")
   const [searching, setSearching] = useState(false)
-  const field = useRef<HTMLInputElement>(null)
-
   const shown = useMemo(() => chatList(rows, query), [rows, query])
 
-  const openSearch = () => {
-    setSearching(true)
-    window.requestAnimationFrame(() => field.current?.focus())
-  }
-  // The foot returns the focus to its own control when it closes; this only clears what the field
-  // asked the list for.
+  // The foot's field takes the focus as it opens and gives it back as it closes; the screen only says
+  // whether the search is up, and clears what the field asked the list for.
   const closeSearch = () => {
     setSearching(false)
     setQuery("")
@@ -238,22 +232,6 @@ function ChatList({
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {searching && (
-          <SearchField
-            id={CHATS_SEARCH_FIELD_ID}
-            value={query}
-            // An empty field is a search that found everything, not a reason to shut: Escape and the
-            // toggle are the two ways this closes, so backspacing the last character — or the
-            // field's own clear control — keeps the focus and the keyboard where the reader is.
-            onChange={setQuery}
-            label="Search chats"
-            inputRef={field}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") closeSearch()
-            }}
-          />
-        )}
-
         {rows.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">No chats yet.</p>
         )}
@@ -279,7 +257,9 @@ function ChatList({
       <ListFoot
         canMakeRoom={canMakeRoom}
         searching={searching}
-        onSearchOpen={openSearch}
+        query={query}
+        onQueryChange={setQuery}
+        onSearchOpen={() => setSearching(true)}
         onSearchClose={closeSearch}
         onNewChat={() => void start()}
         onNewRoom={() => navigate("/new-room")}

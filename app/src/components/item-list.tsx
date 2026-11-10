@@ -231,6 +231,7 @@ export function SearchField({
   inputRef,
   onKeyDown,
   id,
+  className,
 }: {
   value: string
   onChange: (value: string) => void
@@ -239,9 +240,11 @@ export function SearchField({
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
   /** The field's own name, for the control that shows and hides it (`aria-controls`). */
   id?: string
+  /** One class from the caller, for a field that has to be as tall as the control beside it. */
+  className?: string
 }) {
   return (
-    <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
+    <InputGroup className={cn("h-11 rounded-full bg-background dark:bg-input/30", className)}>
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>

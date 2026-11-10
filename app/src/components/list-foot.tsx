@@ -1,26 +1,43 @@
-import { useRef, useState, type ReactNode } from "react"
-import { MessageCircleIcon, PlusIcon, SearchIcon, UsersIcon } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { MessageCircleIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react"
 
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { SearchField } from "@/components/item-list"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 /** The field's own name, for the control that shows and hides it. */
 export const CHATS_SEARCH_FIELD_ID = "chats-search"
 
+/** The picks' own name, for the control that shows and hides them. */
+const PICKS_ID = "new-picks"
+
 /**
- * The bar a list keeps at the foot of its scroll (see GLOSSARY: foot): the search control at the left,
- * where a thumb reaches without crossing the list, and the one accent the screen spends at the right.
- * It keeps its place in the flow (`sticky`, not `fixed`), so the last row ends above it and is
- * reachable rather than hidden behind it.
+ * The bar a list keeps at the foot of its scroll (see GLOSSARY: foot): the search at the left, where a
+ * thumb reaches without crossing the list, and the one button the screen spends at the right. It keeps
+ * its place in the flow (`sticky`, not `fixed`), so the last row ends above it and is reachable rather
+ * than hidden behind it.
+ *
+ * **The search is the foot's, at every width.** The circle becomes a field as tall as the button
+ * beside it, in the same row, so nothing above the foot moves when it opens, and its ways out are
+ * Escape and the muted X the button wears while the field is up — a press outside does not close it,
+ * because the reader is typing in it.
+ *
+ * **The button at the right is the pick itself** (ADR 0141): a `+` while it is closed, an X while its
+ * two actions stand above it as pills — one line each, New chat nearest the thumb and New room above it
+ * where the Host advertises one — and the muted X while the search holds the foot. The pills stay
+ * mounted and inert while closed, so the rise and its quiet fade both play (transitions-dev's texts
+ * reveal); they hang above the button rather than in the foot's box, so an open cluster never resizes
+ * the bar under the reader's thumb. Pressing the button, pressing anywhere else, or Escape closes the
+ * picks, and every way out returns the focus to the button.
  *
  * The foot owns its own controls — their refs, what each opens, and where the focus goes when
- * something closes — so the screen it sits on is the list and the rows, not the bar's machinery. The
- * search's field is still the screen's while it stands over the rows; it moves into the foot with its
- * state (ADR 0141).
+ * something closes — so the screen it sits on is the list and the rows, not the bar's machinery.
  */
 export function ListFoot({
   canMakeRoom,
   searching,
+  query,
+  onQueryChange,
   onSearchOpen,
   onSearchClose,
   onNewChat,
@@ -28,119 +45,176 @@ export function ListFoot({
 }: {
   canMakeRoom: boolean
   searching: boolean
+  query: string
+  onQueryChange: (query: string) => void
   onSearchOpen: () => void
   onSearchClose: () => void
   onNewChat: () => void
   onNewRoom: () => void
 }) {
-  const [starting, setStarting] = useState(false)
+  const [open, setOpen] = useState(false)
+  // The exit is one quiet fade, played while the pills are already inert: the class is what starts it,
+  // and it is taken off again once it has run.
+  const [hiding, setHiding] = useState(false)
   const searchToggle = useRef<HTMLButtonElement>(null)
   const newToggle = useRef<HTMLButtonElement>(null)
+  const field = useRef<HTMLInputElement>(null)
 
-  // A closed search leaves the reader on the control that closed it, where they pressed.
+  const closePicks = () => {
+    setOpen(false)
+    window.requestAnimationFrame(() => newToggle.current?.focus())
+  }
+  // One surface at a time: a foot showing both at once would leave one button saying two different
+  // things about what it closes.
+  const togglePicks = () => {
+    if (open) return closePicks()
+    if (searching) onSearchClose()
+    setOpen(true)
+  }
   const closeSearch = () => {
     onSearchClose()
     window.requestAnimationFrame(() => searchToggle.current?.focus())
   }
 
+  // The field takes the focus as it takes the circle's place, and the circle takes it back when the
+  // field goes.
+  useEffect(() => {
+    if (!searching) return
+    window.requestAnimationFrame(() => field.current?.focus())
+  }, [searching])
+
+  useEffect(() => {
+    if (open) {
+      setHiding(false)
+      return
+    }
+    setHiding(true)
+    const timer = window.setTimeout(() => setHiding(false), 200)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePicks()
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [open])
+
   return (
-    <>
-      <div
-        data-slot="list-foot"
-        className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
-      >
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2">
+    <div
+      data-slot="list-foot"
+      className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
+    >
+      <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2">
+        {searching ? (
+          <div className="pointer-events-auto min-w-0 flex-1">
+            <SearchField
+              id={CHATS_SEARCH_FIELD_ID}
+              value={query}
+              // An empty field is a search that found everything, not a reason to shut: Escape and the
+              // X are the two ways this closes, so backspacing the last character — or the field's own
+              // clear control — keeps the focus and the keyboard where the reader is.
+              onChange={onQueryChange}
+              label="Search chats"
+              inputRef={field}
+              className="h-14 rounded-full bg-background text-base [&_input]:h-full"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") closeSearch()
+              }}
+            />
+          </div>
+        ) : (
           <Button
             ref={searchToggle}
             variant="outline"
             size="icon-lg"
             className="pointer-events-auto size-14 shrink-0 rounded-full bg-background shadow-lg"
-            onClick={() => (searching ? closeSearch() : onSearchOpen())}
+            onClick={onSearchOpen}
             aria-label="Search"
-            aria-expanded={searching}
-            aria-controls={searching ? CHATS_SEARCH_FIELD_ID : undefined}
             data-search-toggle
           >
             <SearchIcon className="size-5" />
           </Button>
+        )}
+
+        <div className="relative flex shrink-0 flex-col items-end">
+          {/*
+            The picks have no scrim of their own, so the foot lays one: a press meant for a row closes
+            them instead of opening the row behind them.
+          */}
+          {open && (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-hidden
+              className="pointer-events-auto fixed inset-0 cursor-default"
+              onClick={closePicks}
+            />
+          )}
+          <div
+            id={PICKS_ID}
+            data-picks
+            data-toast-above={open || undefined}
+            aria-hidden={!open}
+            inert={!open}
+            className={cn(
+              "t-stagger pointer-events-auto absolute right-0 bottom-full z-10 mb-2 flex flex-col items-end gap-2",
+              open && "is-shown",
+              hiding && "is-hiding",
+            )}
+          >
+            {canMakeRoom && (
+              <button
+                type="button"
+                aria-label="New room"
+                onClick={() => {
+                  closePicks()
+                  onNewRoom()
+                }}
+                className="t-stagger-line t-stagger-line--2 inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <UsersIcon aria-hidden className="size-5 text-muted-foreground" />
+                New room
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label="New chat"
+              onClick={() => {
+                closePicks()
+                onNewChat()
+              }}
+              className="t-stagger-line t-stagger-line--1 inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <MessageCircleIcon aria-hidden className="size-5 text-muted-foreground" />
+              New chat
+            </button>
+          </div>
           <Button
             ref={newToggle}
             data-toast-above
             data-new-menu
+            data-search-close={searching || undefined}
             size="icon-lg"
-            className="pointer-events-auto size-14 shrink-0 rounded-full shadow-lg"
-            onClick={() => setStarting(true)}
-            aria-label="New"
+            className={cn(
+              "pointer-events-auto relative z-10 size-14 shrink-0 rounded-full",
+              searching ? "bg-muted text-foreground shadow-none hover:bg-muted/80" : "shadow-lg",
+            )}
+            onClick={() => (searching ? closeSearch() : togglePicks())}
+            aria-label={searching ? "Close search" : open ? "Close" : "New"}
+            aria-expanded={searching ? undefined : open}
+            aria-controls={searching ? CHATS_SEARCH_FIELD_ID : PICKS_ID}
           >
-            <PlusIcon className="size-6" />
+            {/* transitions-dev's icon swap: both faces in one cell, the state picks which shows. */}
+            <span aria-hidden className="t-icon-swap" data-state={searching || open ? "b" : "a"}>
+              <PlusIcon className="t-icon size-6" data-icon="a" />
+              <XIcon className="t-icon size-6" data-icon="b" />
+            </span>
           </Button>
         </div>
       </div>
-
-      {/* A one-tap pick from the button above it (ADR 0141 retires it for this foot's next step). */}
-      <Popup open={starting} onOpenChange={setStarting} anchor={newToggle}>
-        <PopupContent size="md" toastAbove>
-          <PopupHeader>
-            <PopupTitle>New</PopupTitle>
-          </PopupHeader>
-          <div className="flex flex-col gap-1 px-2 pb-2">
-            <NewRow
-              icon={<MessageCircleIcon />}
-              label="New chat"
-              detail="A chat with this bot"
-              onPick={() => {
-                setStarting(false)
-                onNewChat()
-              }}
-            />
-            {canMakeRoom && (
-              <NewRow
-                icon={<UsersIcon />}
-                label="New room"
-                detail="Bring other bots into one chat"
-                onPick={() => {
-                  setStarting(false)
-                  onNewRoom()
-                }}
-              />
-            )}
-          </div>
-        </PopupContent>
-      </Popup>
-    </>
-  )
-}
-
-/**
- * One row of the new menu: what it starts, and what that is, as a full-width target a thumb hits at
- * either form — a sheet's row on a phone, a menu's row beside the button from 1024px.
- */
-function NewRow({
-  icon,
-  label,
-  detail,
-  onPick,
-}: {
-  icon: ReactNode
-  label: string
-  detail: string
-  onPick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      // The name is the action alone: the detail is the line under it, not part of what it is called.
-      aria-label={label}
-      onClick={onPick}
-      className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[15px] outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <span aria-hidden className="shrink-0 text-muted-foreground [&_svg]:size-5">
-        {icon}
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{label}</span>
-        <span className="text-sm text-muted-foreground">{detail}</span>
-      </span>
-    </button>
+    </div>
   )
 }

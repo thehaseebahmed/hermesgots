@@ -277,17 +277,38 @@ test("a run with no row of its own still says what happened under the bars", asy
   })
 })
 
-test("the page's back is the bot's list", async () => {
+test("the page's back is the bot's list, from the bar every child screen draws", async () => {
   await seed()
   await mount(routinesScreen(BOT_A.id), async () => {
     await until(async () => Boolean(find('[aria-label="Back to chats"]')), "the page's way back")
     const back = find('[aria-label="Back to chats"]')
-    // The list's header anatomy, copied rather than a second one invented: a round control the size
-    // of the drawer button and the routine icon there.
+    // The app's bar, not a second header invented here (ADR 0140): the same row and slots the chat's
+    // header draws, its leading control the list's control size and shape.
+    assert.ok(find("header [data-slot=\"header-row\"]"), "the bar's own row")
     assert.ok((back?.className ?? "").includes("size-11"), "the list's control size")
     assert.ok((back?.className ?? "").includes("rounded-full"), "and its round shape")
     await click(back)
     await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list")
+  })
+})
+
+test("the bar's Refresh is a frosted circle of the bar's own size", async () => {
+  await seed()
+  await mount(routinesScreen(BOT_A.id), async () => {
+    await until(async () => Boolean(find('[aria-label="Refresh"]')), "the page's Refresh")
+    const refresh = find('[aria-label="Refresh"]')
+    assert.ok(
+      (refresh?.className ?? "").includes("size-11"),
+      "a full 44px target, like every control on the bar",
+    )
+    assert.ok(
+      (refresh?.className ?? "").includes("bg-background/80"),
+      "and frosted, so a list scrolling under it does not read through the control",
+    )
+    assert.ok(
+      (refresh?.className ?? "").includes("border"),
+      "with the outline the bar's circles wear",
+    )
   })
 })
 
