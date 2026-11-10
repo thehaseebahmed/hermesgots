@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Navigate, useParams } from "react-router"
+import { Navigate, useNavigate, useParams } from "react-router"
 import {
   ChevronRightIcon,
   CircleAlertIcon,
@@ -31,11 +31,12 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   HISTORY_LENGTH,
   PluginMissingError,
+  runRowOf,
   syncCron,
   type CronRun,
   type CronState,
 } from "@/lib/cron"
-import { db, getActiveProfile, type Profile } from "@/lib/db"
+import { db, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useChanges, useLive } from "@/lib/live"
 import { useNav } from "@/lib/nav"
@@ -197,6 +198,15 @@ function BotRoutines({
   const [pluginMissing, setPluginMissing] = useState(false)
   const [ownTick, setOwnTick] = useState(0)
   const live = useLive(profile)
+  // The rows this bot published for its runs: the only way a run's session is named here, since
+  // Hermes's ledger keeps the execution and the session apart (G4).
+  const published = useLiveQuery(
+    async () =>
+      (
+        await db.conversations.where("profileId").equals(profile.id).toArray()
+      ).filter((chat) => chat.routine),
+    [profile.id],
+  )
   const cronTick = useChanges("cron", profile)
   const timedTick = live ? Math.floor(pollTick / (SAFETY_MS / LIST_MS)) : pollTick
   const jobs = cron?.jobs
@@ -283,6 +293,7 @@ function BotRoutines({
                 profile={profile}
                 job={job}
                 runs={cron?.runs[job.id] ?? []}
+                published={published ?? []}
                 now={syncedAt}
                 onChanged={resync}
               />
@@ -333,6 +344,7 @@ function JobCard({
   profile,
   job,
   runs,
+  published,
   now,
   onChanged,
 }: {
@@ -340,10 +352,13 @@ function JobCard({
   job: CronJob
   /** Oldest first. */
   runs: CronRun[]
+  /** This bot's routine rows, which name the sessions its runs wrote (G4). */
+  published: Conversation[]
   /** When the job was fetched; relative times count from it. */
   now: number
   onChanged: () => void
 }) {
+  const navigate = useNavigate()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pending, setPending] = useState<"pause" | "resume" | "run" | null>(null)
   const selected = runs.find((run) => run.id === selectedId)
@@ -355,6 +370,17 @@ function JobCard({
     ...Array<null>(Math.max(0, HISTORY_LENGTH - runs.length)).fill(null),
     ...runs.slice(-HISTORY_LENGTH),
   ]
+
+  /**
+   * A bar picks its run: one whose delivery published a row opens that row — the same read-only screen
+   * the bot's list opens it on (G4) — and one with no row of its own, because it was silent or its row
+   * is gone from this device, says what happened here in the card under the bars.
+   */
+  const pick = (run: CronRun) => {
+    const row = runRowOf(published, job.id, run)
+    if (row) return navigate(`/c/${row}`, { state: { bot: profile.id } })
+    setSelectedId(run.id === selectedId ? null : run.id)
+  }
 
   const act = async (action: "pause" | "resume" | "run") => {
     setPending(action)
@@ -422,7 +448,7 @@ function JobCard({
             <button
               key={run.id}
               type="button"
-              onClick={() => setSelectedId(run.id === selectedId ? null : run.id)}
+              onClick={() => pick(run)}
               aria-label={`${STATUS_LABEL[run.status]}, ${formatWhen(run.startedAt)}`}
               aria-pressed={run.id === selectedId}
               className="flex h-full min-w-0 flex-1 items-center outline-none"

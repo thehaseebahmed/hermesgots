@@ -23,7 +23,6 @@ import { LineRow } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { ReminderRow } from "@/components/chat/reminder-row"
-import { RoutineReceipt } from "@/components/chat/routine-run"
 import { useRemindersShown } from "@/components/chat/use-reminders-shown"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
@@ -788,11 +787,6 @@ export const MessageItem = memo(function MessageItem({
                 conversationId={message.conversationId}
                 busy={busy}
                 parts={parts}
-                // A routine's message says which run wrote it, above its words (ADR 0081); every
-                // other reply draws nothing and asks the host nothing.
-                header={
-                  i === 0 && message.routine ? <RoutineReceipt message={message} /> : undefined
-                }
               >
                 {last && footer}
               </AssistantRow>

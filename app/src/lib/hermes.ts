@@ -3208,65 +3208,6 @@ export async function getSessionTodos(
   return parseTodos(await response.json())
 }
 
-/** One routine's message a chat holds, as the plugin names it. */
-export interface RoutineMessage {
-  /** The transcript row the message is drawn at now: a compaction moves the row, not the message. */
-  row: number
-  /** The routine that spoke; null where a delivery couldn't be attributed to one. */
-  jobId: string | null
-  /** The routine's name, as the delivery carried it. */
-  title: string | null
-  /** The Hermes session the run wrote, whose transcript the sheet reads. */
-  runSession: string | null
-  /** The model the run used, where the host named one. */
-  model: string | null
-  /** How long the run took, in seconds: a routine is often over inside one. */
-  seconds: number | null
-  /** The delivery's own stamp, milliseconds since the epoch. */
-  at: number
-}
-
-/**
- * The routine messages a chat holds, read from the plugin (ADR 0081). The row is the host's answer
- * rather than the transcript's: a compaction re-emits carried rows under fresh ids while the
- * delivery's display metadata survives, so only the host can say which row a message is drawn at.
- */
-export async function getRoutineMessages(
-  config: HermesConfig,
-  sessionId: string,
-  signal?: AbortSignal,
-): Promise<RoutineMessage[]> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/routines`,
-    { headers: headers(config), signal },
-  )
-  return parseRoutineMessages(await response.json())
-}
-
-/** The route's body as the list the chip is drawn from: a row that isn't a number names nothing. */
-export function parseRoutineMessages(raw: unknown): RoutineMessage[] {
-  const body = raw as { routines?: unknown } | null
-  const rows = Array.isArray(body?.routines) ? body.routines : []
-  return rows.flatMap((one): RoutineMessage[] => {
-    const entry = one as Record<string, unknown> | null
-    if (!entry || typeof entry.row !== "number") return []
-    return [
-      {
-        row: entry.row,
-        jobId: nameOf(entry.job_id),
-        title: nameOf(entry.title),
-        runSession: nameOf(entry.run_session),
-        model: nameOf(entry.model),
-        seconds: typeof entry.seconds === "number" ? entry.seconds : null,
-        at: typeof entry.at === "number" ? entry.at : 0,
-      },
-    ]
-  })
-}
-
-/** One of the route's nullable names: a delivery no routine could be attributed to names none. */
-const nameOf = (value: unknown) => (typeof value === "string" && value ? value : null)
-
 /** A project session's worktrees and permission mode, as the Gots plugin keeps them. */
 export interface SessionWorkspace {
   projectId: string

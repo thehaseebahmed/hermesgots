@@ -51,6 +51,8 @@ interface Seed {
   waits?: "clarify" | "approval"
   /** Another message under the newest one, so a case can prove the row reads the tail alone. */
   earlier?: string
+  /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
+  routine?: { line: string }
 }
 
 function message(chat: string, content: string, at: number, patch: Partial<Message> = {}): Message {
@@ -86,6 +88,7 @@ async function seed(
       createdAt: one.at,
       updatedAt: one.at,
       changedAt: one.at,
+      ...(one.routine ? { routine: true, line: one.routine.line } : {}),
     })),
   )
   await db.messages.bulkPut(
@@ -124,6 +127,8 @@ const rowIds = () =>
 /** One chat's row, by the chat it leads to. */
 const rowOf = (id: string) => find(`ul a[href="/c/${id}"]`)
 const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]"))
+/** The picture a row wears where its title starts: its own icon, never the bot's face. */
+const iconOf = (id: string) => rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle")
 
 const screen = (entry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -216,6 +221,47 @@ test("the dot is this device's read mark, not the host's word", async () => {
     assert.ok(
       wordsOf(rowOf("news")).includes("New activity"),
       "and says so to a reader who cannot see it",
+    )
+  })
+})
+
+test("a routine's delivery is a row of its own, with the routine's icon and the record's line", async () => {
+  // A run has no message on this device at all: the row's line and time are the record's, which is why
+  // a device that never opened the run still draws it (G4).
+  const at = Date.now() - 120_000
+  await seed([
+    {
+      id: "routine-job-1-cron_9",
+      title: "Morning watch",
+      at,
+      routine: { line: "The tide turns at 06:40, and the wind is from the west." },
+    },
+    { id: "chat", title: "A chat", at: at + 1_000, said: "Nothing else came in" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    const words = wordsOf(rowOf("routine-job-1-cron_9"))
+    assert.ok(words.includes("Morning watch"), "the row names the routine")
+    assert.ok(
+      words.includes("The tide turns at 06:40"),
+      "its line is the delivery's first words, read from the record",
+    )
+    assert.ok(
+      words.length > "Morning watch The tide turns at 06:40".length,
+      "and its age comes from the record's own clock",
+    )
+    assert.ok(
+      iconOf("routine-job-1-cron_9")?.classList.contains("lucide-timer"),
+      "the row wears the routine's icon",
+    )
+    assert.ok(
+      iconOf("chat")?.classList.contains("lucide-message-circle"),
+      "while a chat's row keeps the chat's",
+    )
+    assert.equal(
+      rowOf("routine-job-1-cron_9")?.querySelector("[data-waiting]"),
+      null,
+      "a run waits on nobody: nothing can be answered in it",
     )
   })
 })

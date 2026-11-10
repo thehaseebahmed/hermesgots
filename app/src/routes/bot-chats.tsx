@@ -152,7 +152,8 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
       .limit(CHATS)
       .toArray()
     const rows = await Promise.all(
-      chats.map(async (chat) => chatRowOf(chat, await newestIn(chat.id))),
+      // A routine's row reads its line and time off the record, so its tail isn't asked for at all.
+      chats.map(async (chat) => chatRowOf(chat, chat.routine ? undefined : await newestIn(chat.id))),
     )
     return { profileId, bot, rows }
   }, [profileId])
@@ -334,6 +335,10 @@ function ChatList({
  * that waits on the reader wears the warning tone and says so beside the title; its line stays. The
  * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
  *
+ * A routine's delivery is a row of this list too, and wears the routine's icon rather than a chat's,
+ * because it is a run rather than a chat with the bot (G4): its line and time are the record's, since
+ * the run's words are in the run's own session.
+ *
  * A room is one of these rows, drawn by the same rule: it wears its members' pictures where a chat
  * wears its icon and names them in its line, and while its own log ends asking the reader for
  * something its line is that sentence, in the warning tone, because the line is where the room's own
@@ -356,7 +361,7 @@ export function BotChatItem({
 }) {
   return (
     <ItemRow
-      icon={<MessageCircleIcon />}
+      icon={row.routine ? <TimerIcon /> : <MessageCircleIcon />}
       avatar={row.room ? <RoomFaces shown={row.room.shown} more={row.room.more} /> : undefined}
       tone={row.room ? undefined : row.waiting ? "warning" : undefined}
       unread={isUnread(row.at, mark)}

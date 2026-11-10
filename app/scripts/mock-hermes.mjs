@@ -80,10 +80,10 @@
 // enough to scroll a phone's thread, then a patch block reusing that id (it changes the card and
 // table in place, and draws nothing where it sits), then a block naming a component the library
 // doesn't have — which draws as the code the model sent — and a closing line.
-// Say "routine message" for a turn whose reply is followed by a routine's own message (ADR 0081):
-// an assistant row with `display_kind: "routine_message"` and the plugin's `routine` metadata, the
-// run it came from a transcript of its own, and GET /api/plugins/gots/sessions/{id}/routines
-// answering the row so the message draws with its chip.
+// Say "routine message" for a turn that ends in a routine's delivery: the plugin publishes one chat
+// record per run — titled for the routine, its session the run's own, its line the delivery's first
+// words — so the bot's list grows a row wearing the routine's icon, and that row's screen reads the
+// run's transcript at GET /api/sessions/{id}/messages (G4).
 // Say "draw the map" for a reply whose block is a map: one `Map` of four labelled places on the
 // north waterfront, each with its detail, and a summary — the receipt under it long enough to
 // scroll a phone's thread past the map, so a scroll gesture has somewhere to go.
@@ -1152,10 +1152,9 @@ const DONT_RULES = "- Don't ask before shipping, and never merge or close: mergi
 const MEDIA_RULES = "A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem \u2014 `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.\n\n- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path \u2014 the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.\n- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.\n\nIts extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else \u2014 a PDF, a document, an archive \u2014 is a row the user saves. So the file keeps its own name."
 const MODES = ["accept_edits", "auto", "plan"]
 
-// The routine messages a chat holds, as the plugin's `sessions/{id}/routines` answers them: a
-// routine's answer delivered into a chat while its bot worked (ADR 0081). Say "routine message" and
-// the turn's reply is followed by one, its run's session a transcript of its own.
-const routineMessages = new Map()
+// The routine deliveries this mock has published, newest last: one chat record per run, as the
+// plugin's platform adapter publishes them (ADR 0081's successor).
+const routineDeliveries = []
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
 // each a transcript of its own at GET /api/sessions/{id}/messages.
@@ -1657,14 +1656,16 @@ function record(req, row) {
 }
 
 /**
- * A routine's answer, delivered into the chat that asked for it (ADR 0081): an assistant row with
- * the plugin's display kind, a run session of its own to open read-only, and the entry the plugin's
- * `sessions/{id}/routines` route answers so the message can carry its chip.
+ * A routine's answer, published the way the plugin's platform adapter publishes it: one chat record
+ * per run — named for the job and the session the run wrote, so a repeat delivery of the same run is
+ * the same row — carrying the routine's name, that session and the delivery's first line. The run's
+ * own transcript is a session of its own, which is what its screen reads (G4).
  */
 function recordRoutine(req, body) {
   const session = sessionOf(req, body)
   if (!session || !req.headers.authorization) return
-  const runSession = `cron_mock_${routineMessages.size + 1}`
+  const runSession = `cron_mock_${routineDeliveries.length + 1}`
+  const answer = "The tide turns at 06:40, and the wind is from the west."
   transcripts.set(runSession, [
     {
       id: ++lastRowId,
@@ -1701,33 +1702,35 @@ function recordRoutine(req, body) {
       session_id: runSession,
       timestamp: Date.now() / 1000,
       role: "assistant",
-      content: "The tide turns at 06:40, and the wind is from the west.",
+      content: answer,
       finish_reason: "stop",
     },
   ])
-  const routine = {
-    job_id: "job_mock",
-    title: "Morning watch",
-    run_session: runSession,
-    execution: `job_mock:${runSession}`,
-    model: "anthropic/claude-sonnet-4-5",
-    seconds: 12,
-  }
-  const row = ++lastRowId
-  transcripts.get(session).push({
-    id: row,
-    session_id: session,
-    timestamp: Date.now() / 1000,
-    role: "assistant",
-    content: "On a side note, the tide turns at 06:40, and the wind is from the west.",
-    display_kind: "routine_message",
-    display_metadata: { routine },
-  })
-  routineMessages.set(session, [
-    ...(routineMessages.get(session) ?? []),
-    { row, at: Date.now(), ...routine },
-  ])
-  noteEvent("chats", session)
+  const now = Date.now()
+  const id = `routine-job_mock-${runSession}`
+  // The same run delivered twice is the same row (the plugin derives the id), so nothing is replaced.
+  if (!chatStore().has(id))
+    chatStore().set(id, {
+      at: now,
+      value: {
+        title: "Morning watch",
+        titleEdited: true,
+        hermesSessionId: runSession,
+        createdAt: now,
+        updatedAt: now,
+        routine: true,
+        line: answer,
+      },
+    })
+  routineDeliveries.push(id)
+  // The list's change is a chat's, so every open device reads the row without a reload.
+  noteEvent("chats")
+}
+
+/** The chats a bot's plugin holds here: the default profile's list is the server's own. */
+function chatStore(key = "") {
+  if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
+  return pluginChatLists.get(key)
 }
 
 const STEER_OPEN =
@@ -2963,7 +2966,7 @@ async function playTurn(req, body, last, out) {
       }
     }
   } else if (/routine message/i.test(last)) {
-    await say("I'll watch the tide and tell you here when it turns.")
+    await say("I'll watch the tide and tell you when it turns.")
   } else if (/image|chart/i.test(last)) {
     await say(
       "Here's the chart:\n\n" +
@@ -4089,8 +4092,6 @@ http
           // The queue Hermes itself keeps for a session, and the turn a restart lost under it
           // (plugin/pending.py): the card that names it and the one control that clears it.
           "pending",
-          // A routine's message, and the route that names the run behind it (ADR 0081).
-          ...(PLUGIN ? ["routine_message"] : []),
           "progress_reminders",
           // The Dashboard's General tab, as a plugin that carries it advertises it (general.py).
           "general_page",
@@ -5182,8 +5183,7 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/chats") {
       const key = pluginProfile ?? ""
-      if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
-      const chatList = pluginChatLists.get(key)
+      const chatList = chatStore(key)
       if (req.method === "POST") {
         const { chats } = await readBody(req)
         let changed = false
@@ -5226,14 +5226,6 @@ http
         model_changes: modelChanges.get(id) ?? [],
         compactions: compactions.get(id) ?? [],
       })
-    }
-    const sessionRoutines = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/routines$/.exec(
-      url.pathname,
-    )
-    if (PLUGIN && !profile && req.method === "GET" && sessionRoutines) {
-      const id = decodeURIComponent(sessionRoutines[1])
-      // An empty list for a chat with none, never a 404, like the plugin's own route.
-      return json(res, 200, { object: "gots.routines", routines: routineMessages.get(id) ?? [] })
     }
     const usageRoute = /^\/api\/plugins\/gots\/usage$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && usageRoute) {

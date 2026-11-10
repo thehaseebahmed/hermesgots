@@ -75,6 +75,25 @@ test("two chats last spoken in at one moment keep one order, whatever the reader
   )
 })
 
+test("a routine's row reads its line and its time from its record, not from a message", () => {
+  // A delivery's words are in the run's own session, so this device holds no message for the row at
+  // all: the plugin writes the first line onto the record, and the row draws that (G4).
+  const row = chatRowOf(
+    chat("routine-job-1-cron_1", 400, { routine: true, line: "The tide turns at 06:40" }),
+  )
+  assert.equal(row.line, "The tide turns at 06:40", "the record's line is the row's")
+  assert.equal(row.at, 400, "and the record's clock places and ages it")
+  assert.equal(row.routine, true, "the row says it is a run, so the list can wear its own icon")
+  // A message on the row would be a second telling of it, and the record is the one the host wrote.
+  const withTail = chatRowOf(
+    chat("routine-job-1-cron_2", 400, { routine: true, line: "Said by the delivery" }),
+    said("A message nobody wrote", 900),
+  )
+  assert.equal(withTail.line, "Said by the delivery")
+  assert.equal(withTail.at, 400)
+  assert.equal(chatRowOf(chat("a", 100)).routine, undefined, "a chat is not a run")
+})
+
 test("a search keeps a chat whose title or last line it finds, in the list's own order", () => {
   const rows = [
     chatRowOf(chat("one", 300, { title: "Trip to Lisbon" }), said("Booked the flights", 300)),

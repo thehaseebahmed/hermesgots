@@ -88,13 +88,14 @@ const HOSTS: Record<string, Host> = {
   },
 }
 
-async function seed() {
+async function seed({ published = false }: { published?: boolean } = {}) {
   // The active bot is the one the page is *not* opened for, so the root address has to read it.
   await seedSettings({ developer: true, legacyChat: false, activeProfileId: BOT_B.id })
   await db.profiles.clear()
   await db.profiles.bulkPut([BOT_A, BOT_B])
   await db.conversations.clear()
   await db.messages.clear()
+  if (published) await db.conversations.put(RUN_ROW)
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     const host = HOSTS[url.host]
@@ -107,6 +108,24 @@ async function seed() {
   }) as typeof fetch
 }
 
+/**
+ * The row a delivered run published, as the plugin derives it — the job and the session the run wrote
+ * — stamped with the delivery's own time, which is the run's end (G4).
+ */
+const RUN_END = Date.parse("2026-11-08T07:00:12Z")
+const RUN_ROW = {
+  id: "routine-job-morning-cron_morning_1",
+  profileId: BOT_A.id,
+  title: "Morning watch",
+  titleEdited: true,
+  hermesSessionId: "cron_morning_1",
+  createdAt: RUN_END + 900,
+  updatedAt: RUN_END + 900,
+  changedAt: RUN_END + 900,
+  routine: true,
+  line: "The tide turns at 06:40.",
+}
+
 /** A bot's routines, at the address its list's control takes. */
 const routinesScreen = (profileId: string) => (
   <MemoryRouter initialEntries={[`/b/${profileId}/routines`]}>
@@ -114,6 +133,7 @@ const routinesScreen = (profileId: string) => (
     <Routes>
       <Route path="b/:profileId/routines" element={<RoutinesPage />} />
       <Route path="b/:profileId" element={<p data-list />} />
+      <Route path="c/:id" element={<p data-chat />} />
     </Routes>
   </MemoryRouter>
 )
@@ -141,6 +161,26 @@ test("a bot's routines draw its jobs and their runs, and no other bot's", async 
     assert.ok(bar, "its run, as the bar the page draws")
     assert.ok(!text().includes("Night audit"), "another bot's routine is not on this page")
     assert.ok(!find('button[aria-label^="Failed, "]'), "and neither is another bot's run")
+  })
+})
+
+test("a run's bar opens the row its delivery published, so the run reads as its own screen does", async () => {
+  await seed({ published: true })
+  await mount(routinesScreen(BOT_A.id), async () => {
+    await until(async () => Boolean(find('button[aria-label^="Succeeded, "]')), "the run's bar")
+    await click(find('button[aria-label^="Succeeded, "]'))
+    await until(async () => path() === `/c/${RUN_ROW.id}`, "the run's own row")
+    assert.ok(find("[data-chat]"), "and the address it opened is the row's, not a card's")
+  })
+})
+
+test("a run with no row of its own still says what happened under the bars", async () => {
+  await seed()
+  await mount(routinesScreen(BOT_A.id), async () => {
+    await until(async () => Boolean(find('button[aria-label^="Succeeded, "]')), "the run's bar")
+    await click(find('button[aria-label^="Succeeded, "]'))
+    await until(async () => text().includes("Succeeded · "), "the run's own card")
+    assert.equal(path(), `/b/${BOT_A.id}/routines`, "and the page is still where the reader was")
   })
 })
 

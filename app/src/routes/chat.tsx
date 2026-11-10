@@ -225,6 +225,9 @@ const loadBlankChat = () => import("@/chat-next/blank")
 const ChatNextBlank = lazy(() => loadBlankChat().then((m) => ({ default: m.ChatNextBlank })))
 const loadRoomChat = () => import("@/components/room/room-chat")
 const RoomChat = lazy(() => loadRoomChat().then((m) => ({ default: m.RoomChat })))
+// A routine's row is a run, not a chat: it opens on the screen that reads the run and nothing else.
+const loadRoutineChat = () => import("@/components/chat/routine-chat")
+const RoutineChat = lazy(() => loadRoutineChat().then((m) => ({ default: m.RoutineChat })))
 
 interface ChatPageProps {
   slot: HoldSlot
@@ -279,6 +282,13 @@ export function ChatPage(props: ChatPageProps) {
       void loadRoomChat()
       return `room\n${id}`
     }
+    // A routine's run is no chat, whatever else it looks like: the plugin publishes one row per
+    // delivery, whose session is the run's own, so the row opens the run read-only (G4) — before the
+    // chat screens' own paths, neither of which can take a turn in a `cron` session anyway.
+    if (chat?.routine) {
+      void loadRoutineChat()
+      return `routine\n${id}`
+    }
     const bot = chat
       ? await db.profiles.get(chat.profileId)
       : id
@@ -312,6 +322,10 @@ export function ChatPage(props: ChatPageProps) {
     ) : screenKind === "room" && verdict === `room\n${id}` && id ? (
       <Suspense fallback={null}>
         <RoomChat key={id} id={id} slot={props.slot} />
+      </Suspense>
+    ) : screenKind === "routine" && verdict === `routine\n${id}` && id ? (
+      <Suspense fallback={null}>
+        <RoutineChat key={id} id={id} slot={props.slot} />
       </Suspense>
     ) : screenKind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat

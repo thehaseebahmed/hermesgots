@@ -12,7 +12,10 @@ import { oneLine } from "./words.ts"
 import type { Conversation, Message } from "./db.ts"
 
 /** The chat record a row is read from. */
-export type ChatRecord = Pick<Conversation, "id" | "title" | "pinned" | "updatedAt">
+export type ChatRecord = Pick<
+  Conversation,
+  "id" | "title" | "pinned" | "updatedAt" | "routine" | "line"
+>
 
 /** The newest message this device holds for a chat: its words, its time, and anything it waits on. */
 export type ChatTail = Pick<Message, "content" | "createdAt" | "clarify" | "approval">
@@ -32,6 +35,12 @@ export interface ChatListRow {
   at: number
   pinned: boolean
   waiting: boolean
+  /**
+   * The run a routine's delivery is: its row wears the routine's icon rather than a chat's, and its
+   * line and time are the record's, since the run's words are in the run's own session and this chat
+   * holds no message at all (G4).
+   */
+  routine?: boolean
   /** The room this row is, wearing its members' pictures: nothing at all for a chat (ADR 0126). */
   room?: { shown: string[]; more: number }
   /** The sentence a room's row says it needs the reader for, while its log ends asking. */
@@ -47,6 +56,18 @@ function waitsOnUser(newest: ChatTail | undefined): boolean {
 
 /** One chat's row, from its record and the newest message this device holds for it. */
 export function chatRowOf(chat: ChatRecord, newest?: ChatTail): ChatListRow {
+  // A routine's delivery: the run's line and the delivery's time are on the record, because the words
+  // are in the run's own session and this device holds no message of the row at all.
+  if (chat.routine)
+    return {
+      id: chat.id,
+      title: chat.title,
+      line: chat.line,
+      at: chat.updatedAt,
+      pinned: Boolean(chat.pinned),
+      waiting: false,
+      routine: true,
+    }
   return {
     id: chat.id,
     title: chat.title,
