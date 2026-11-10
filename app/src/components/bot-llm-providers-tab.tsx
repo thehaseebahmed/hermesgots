@@ -20,21 +20,28 @@ import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getLlmProviders, removeLlmProviderKey, setLlmProviderKey } from "@/lib/hermes"
-import { providerRows, submittableKey, type LlmProviders } from "@/lib/llm-providers"
+import {
+  customEndpointId,
+  endpointRows,
+  providerRows,
+  submittableKey,
+  type LlmProviders,
+} from "@/lib/llm-providers"
 
 /**
- * The LLM Providers page: the API-key providers this bot's Hermes knows, one row each, its key drawn
- * as the mask the host made of it (`llm_providers.py`). The key itself never leaves the host, so
- * nothing here derives, reveals or compares one — a row's value is the string that arrived, and an
- * empty one is the *Not set* `ValueRow` already draws.
+ * The LLM Providers page: the API-key providers this bot's Hermes knows and the custom endpoints it
+ * holds, each row's key drawn as the mask the host made of it (`llm_providers.py`). The key itself
+ * never leaves the host, so nothing here derives, reveals or compares one — a row's value is the
+ * string that arrived, and an empty one is the *Not set* `ValueRow` already draws.
  *
  * A row opens its slot screen, whose one write is a key: the field starts empty, Save is dead until
  * the field holds something a key could be (`submittableKey`), and the screen then draws the block
- * that write answered — the row's new mask, made by the host.
+ * that write answered — the row's new mask, made by the host. An endpoint's slot screen is the same
+ * form under the endpoint's own name, with the base URL and model it runs reported muted above it;
+ * its target is spelled `custom:<id>`, so one address names one key.
  *
  * The page is only ever reached where the host advertises `llm_providers` (the gate is the route's
- * own, `bot-settings.tsx`'s `PAGE_META`), so a host that can't list them draws no page at all. The
- * custom endpoints are a later step.
+ * own, `bot-settings.tsx`'s `PAGE_META`), so a host that can't list them draws no page at all.
  */
 export function LlmProvidersTab({ profile }: { profile: Profile }) {
   const navigate = useNavigate()
@@ -50,6 +57,9 @@ export function LlmProvidersTab({ profile }: { profile: Profile }) {
     )
 
   const rows = providerRows(block)
+  // The endpoints are the same page's second list: a host with none draws no caption at all, since
+  // a heading over nothing is a control that can't be pressed.
+  const endpoints = endpointRows(block)
   return (
     <div className="flex flex-col gap-4" data-bot-llm-providers>
       {problem && <Banner tone="warning">{problem}</Banner>}
@@ -74,24 +84,46 @@ export function LlmProvidersTab({ profile }: { profile: Profile }) {
           No providers. This bot&apos;s Hermes lists none with an API key to set.
         </p>
       )}
+      {endpoints.length > 0 && (
+        <>
+          <Caption>Custom endpoints</Caption>
+          <Group>
+            {endpoints.map((endpoint) => (
+              <ValueRow
+                key={endpoint.id}
+                title={endpoint.title}
+                // The base URL and the model it runs, which this page never edits.
+                purpose={endpoint.purpose || undefined}
+                value={endpoint.value}
+                onClick={() =>
+                  navigate(botSubPath(profile.id, "llm-providers", "key", endpoint.target))
+                }
+                data-setting={`llm-endpoint-${endpoint.id}`}
+              />
+            ))}
+          </Group>
+        </>
+      )}
     </div>
   )
 }
 
 /**
- * One provider's key, as the page's slot screen draws it (ADR 0055): the provider's own label and
- * line, its key as the host masked it, and the one form that replaces it.
+ * One key, as the page's slot screen draws it (ADR 0055): a provider's own label and line, or an
+ * endpoint's name over the base URL and model it runs, its key as the host masked it, and the one
+ * form that replaces it. The target the address carried says which: a catalog slug, or `custom:<id>`.
  *
  * The field starts empty, never holding the mask: a mask is what the host made of a key, and sending
  * one back would be a write of nothing at all. Save is dead until `submittableKey` says the field
  * holds something a key could be, the host refuses a mask again on its own rule, and the answer to a
  * write is the fresh block — so the mask under the form is the host's new one, not the app's guess.
  *
- * Where a key is set, the screen also offers to remove it — behind `ConfirmDestructive`, whose
- * question names the provider, because a removal is the one write here that can't be undone from
- * this screen. Cancel writes nothing at all, and the answer is again the fresh block, where the row
- * reads *Not set* and the action goes with the key it removed. A removal refused is said in the
- * question, which stays up, so a retry is one tap.
+ * Where a provider's key is set, the screen also offers to remove it — behind `ConfirmDestructive`,
+ * whose question names the provider, because a removal is the one write here that can't be undone
+ * from this screen. Cancel writes nothing at all, and the answer is again the fresh block, where the
+ * row reads *Not set* and the action goes with the key it removed. A removal refused is said in the
+ * question, which stays up, so a retry is one tap. An endpoint's removal is its own step: nothing
+ * on this screen offers it, so no endpoint is ever deleted by a key write.
  */
 export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; target: string }) {
   const { block, problem, keep } = useLlmProviders(profile)
@@ -112,14 +144,17 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
       </div>
     )
 
-  const provider = block.providers.find((one) => one.slug === target)
-  // The address is reachable by hand, so a slug this host doesn't list says so rather than drawing
+  // One address, one key: `custom:<id>` names an endpoint's, anything else a provider's slug.
+  const endpointId = customEndpointId(target)
+  const provider = endpointId ? undefined : block.providers.find((one) => one.slug === target)
+  const endpoint = endpointId ? block.endpoints.find((one) => one.id === endpointId) : undefined
+  // The address is reachable by hand, so a target this host doesn't list says so rather than drawing
   // a form whose write the host would refuse.
-  if (!provider)
+  if (!provider && !endpoint)
     return (
       <div className="flex flex-col gap-4" data-llm-provider-slot={target}>
         <p className="px-5 py-8 text-center text-sm text-muted-foreground">
-          This bot&apos;s Hermes lists no provider by that name.
+          This bot&apos;s Hermes lists no provider or endpoint by that name.
         </p>
       </div>
     )
@@ -160,19 +195,43 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
   }
 
   return (
-    <div className="flex flex-col gap-4" data-llm-provider-slot={provider.slug}>
+    <div className="flex flex-col gap-4" data-llm-provider-slot={target}>
       {refusal && (
         <Banner tone="error">
           <span role="alert">{refusal}</span>
         </Banner>
       )}
       <Group>
-        <ValueRow
-          title={provider.label}
-          purpose={provider.description || undefined}
-          value={provider.masked ?? ""}
-          data-setting="llm-provider-mask"
-        />
+        {endpoint ? (
+          <>
+            {/* The endpoint's own name over its key, then the two fields this page only reports:
+                the base URL and the model, each muted because neither is the page's to claim. */}
+            <ValueRow
+              title={endpoint.name}
+              value={endpoint.masked ?? ""}
+              data-setting="llm-provider-mask"
+            />
+            <ValueRow
+              title="Base URL"
+              value={endpoint.base_url}
+              muted
+              data-setting="llm-endpoint-base-url"
+            />
+            <ValueRow
+              title="Model"
+              value={endpoint.model}
+              muted
+              data-setting="llm-endpoint-model"
+            />
+          </>
+        ) : provider ? (
+          <ValueRow
+            title={provider.label}
+            purpose={provider.description || undefined}
+            value={provider.masked ?? ""}
+            data-setting="llm-provider-mask"
+          />
+        ) : null}
       </Group>
       <Caption>Replace key</Caption>
       <form
@@ -194,7 +253,7 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="The provider's API key"
+            placeholder={endpoint ? "The endpoint's API key" : "The provider's API key"}
             onChange={(event) => setDraft(event.target.value)}
             className={fieldInputClass}
             data-llm-key-field
@@ -206,9 +265,10 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
         </div>
         <FormActions disabled={!submittableKey(draft)} busy={saving} />
       </form>
-      {provider.masked && (
+      {provider?.masked && (
         // Below Replace, and only where there is a key to remove: a control that writes nothing
         // isn't offered. The mask is the presence — there is no second flag to disagree with it.
+        // An endpoint's key is a step of its own, so no removal is drawn on this screen.
         <Group>
           <Button
             type="button"
@@ -225,21 +285,23 @@ export function LlmProviderKeyScreen({ profile, target }: { profile: Profile; ta
           </Button>
         </Group>
       )}
-      <ConfirmDestructive
-        open={asking}
-        title={`Remove ${provider.label}'s key?`}
-        description={
-          refusal ? (
-            <span role="alert">{refusal}</span>
-          ) : (
-            "Its key is deleted from this bot's Hermes, and anything using it stops working until a new one is set."
-          )
-        }
-        confirmLabel="Remove"
-        busy={removing}
-        onOpenChange={setAsking}
-        onConfirm={remove}
-      />
+      {provider && (
+        <ConfirmDestructive
+          open={asking}
+          title={`Remove ${provider.label}'s key?`}
+          description={
+            refusal ? (
+              <span role="alert">{refusal}</span>
+            ) : (
+              "Its key is deleted from this bot's Hermes, and anything using it stops working until a new one is set."
+            )
+          }
+          confirmLabel="Remove"
+          busy={removing}
+          onOpenChange={setAsking}
+          onConfirm={remove}
+        />
+      )}
     </div>
   )
 }

@@ -1,9 +1,11 @@
 """Tests for a bot's LLM providers (``plugin/llm_providers.py``).
 
-The page is the host's own catalog filtered to the providers that hold an API key, each key as
-``mask_secret`` makes it and nothing else. These assert the promises that rests on: the block is
-``{providers, endpoints}`` with ``endpoints`` present and empty until the custom endpoints arrive; a
-catalog entry with no key env var is no row, and neither is one that authenticates by an account; the
+The page is the host's own catalog filtered to the providers that hold an API key, and the host's own
+list of custom endpoints, each key as ``mask_secret`` makes it and nothing else. These assert the
+promises that rests on: the block is ``{providers, endpoints}``; an endpoint's mask is read from the
+``key_env`` its own entry names — never from the list's ``api_key_preview`` — and a plaintext
+``api_key`` an older release left in the entry is masked, never echoed; a catalog entry with no key
+env var is no row, and neither is one that authenticates by an account; the
 value a key is never leaves the host — the planted key is absent from the serialized payload — and a
 row's presence is the mask itself (``***`` for a key under the mask's floor, ``None`` for one that
 isn't set), never a second boolean beside it. A write is read too: a body whose key is a mask is
@@ -38,6 +40,13 @@ OPENAI_KEY = "sk-live-0123456789abcdefghij"
 SHORT_KEY = "groq-11char"
 TYPED_KEY = "sk-t-0000-zyxw"
 assert len(SHORT_KEY) == 11
+
+# A custom endpoint's keys: one in `.env`, behind the variable its entry's `key_env` names, and one an
+# older release left in the entry itself as plaintext. Neither is a mask's shape, so either could be
+# typed into the page.
+ENDPOINT_KEY = "endpoint-key-0000-0a1f"
+ENDPOINT_PLAIN = "plain-key-1111-9999"
+assert len(ENDPOINT_KEY) >= 12 and len(ENDPOINT_PLAIN) >= 12
 
 
 def catalog() -> list:
@@ -110,12 +119,156 @@ def is_redacted_credential_preview(value: str) -> bool:
     )
 
 
+def endpoints() -> list:
+    """The host's own ``list_custom_endpoints()`` rows, as the host lists them.
+
+    A row's ``api_key_preview`` is ``"${LOCAL_LLAMA_API_KEY}"`` for a key-env entry — the host's
+    display for the indirection, never a mask — so the plugin has to read the entry's own ``key_env``
+    and mask that. The previews here are deliberately not masks: a read that echoed one is caught.
+    """
+    return [
+        {
+            "id": "local-llama",
+            "name": "Local Llama",
+            "base_url": "http://127.0.0.1:8080/v1",
+            "model": "llama-3.1-8b",
+            "has_api_key": True,
+            "api_key_preview": "${LOCAL_LLAMA_API_KEY}",
+            "is_current": False,
+        },
+        {
+            "id": "old-plain",
+            "name": "Old Plain",
+            "base_url": "https://plain.example.com/v1",
+            "model": "plain-1",
+            "has_api_key": True,
+            "api_key_preview": "«redacted»",
+            "discover_models": False,
+            "is_current": False,
+        },
+        {
+            "id": "bare",
+            "name": "Bare",
+            "base_url": "https://bare.example.com/v1",
+            "model": "bare-1",
+            "has_api_key": False,
+            "api_key_preview": None,
+            "is_current": True,
+        },
+    ]
+
+
+def endpoint_config() -> Dict[str, Any]:
+    """The profile's ``config.yaml`` behind those rows: one entry per endpoint, keyed by its id.
+
+    ``local-llama``'s key is in ``.env`` behind ``key_env``; ``old-plain`` still carries a plaintext
+    ``api_key`` and asks that its ``discover_models`` stay false — the field a body's own default
+    would silently flip; ``bare`` has neither.
+    """
+    return {
+        "providers": {
+            "local-llama": {
+                "name": "Local Llama",
+                "base_url": "http://127.0.0.1:8080/v1",
+                "model": "llama-3.1-8b",
+                "key_env": "LOCAL_LLAMA_API_KEY",
+                "discover_models": True,
+            },
+            "old-plain": {
+                "name": "Old Plain",
+                "base_url": "https://plain.example.com/v1",
+                "model": "plain-1",
+                "api_key": ENDPOINT_PLAIN,
+                "discover_models": False,
+            },
+            "bare": {
+                "name": "Bare",
+                "base_url": "https://bare.example.com/v1",
+                "model": "bare-1",
+            },
+        }
+    }
+
+
+class CustomEndpointUpdate:
+    """``hermes_cli.web_models.CustomEndpointUpdate``, as this host spells its fields.
+
+    Planted as a class rather than stood in for by a dict because a key replace hands the host the
+    host's own body: what the plugin filled is read back by name, and the model's own default for
+    ``discover_models`` is ``True`` — the default a body that named none would write over a stored
+    ``false``.
+    """
+
+    def __init__(
+        self,
+        id: str = "",
+        name: str = "",
+        base_url: str = "",
+        model: str = "",
+        api_key: Optional[str] = None,
+        discover_models: bool = True,
+        **_extra: Any,
+    ) -> None:
+        self.id = id
+        self.name = name
+        self.base_url = base_url
+        self.model = model
+        self.api_key = api_key
+        self.discover_models = discover_models
+
+
+class HTTPException(Exception):
+    """``fastapi.HTTPException``, as the host's own writer raises one for a body it won't take."""
+
+    def __init__(self, status_code: int = 400, detail: Any = "") -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+def custom_key_env(endpoint_id: str) -> str:
+    """The variable this host names a key by, where the entry carries no ``key_env`` of its own."""
+    return f"HERMES_CUSTOM_{endpoint_id.upper().replace('-', '_')}_API_KEY"
+
+
+def apply_custom_endpoint(body: Any, values: Dict[str, str], config: Dict[str, Any]) -> None:
+    """``_write_custom_endpoint``'s key half, as the host does it.
+
+    The typed key goes to ``.env`` behind the entry's ``key_env`` (naming one where the entry has
+    none), a legacy plaintext ``api_key`` is cleared on the same write, and the fields the body
+    names are written over the entry's — which is why ``discover_models`` has to be carried rather
+    than left to the body's default.
+    """
+    providers = config.setdefault("providers", {})
+    existing = providers.get(body.id)
+    entry: Dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    entry.update(
+        {
+            "name": body.name,
+            "base_url": body.base_url,
+            "model": body.model,
+            "discover_models": bool(body.discover_models),
+        }
+    )
+    key = str(body.api_key or "").strip()
+    if key:
+        env_var = str(entry.get("key_env") or "").strip() or custom_key_env(body.id)
+        values[env_var] = key
+        entry["key_env"] = env_var
+        entry.pop("api_key", None)
+    providers[body.id] = entry
+
+
 def host_modules(
     values: Dict[str, str],
     providers: Optional[list] = None,
     save: Optional[mock.MagicMock] = None,
     remove: Optional[mock.MagicMock] = None,
     remove_env_value: Optional[mock.MagicMock] = None,
+    endpoints_list: Optional[list] = None,
+    upsert: Optional[Any] = None,
+    config: Optional[Dict[str, Any]] = None,
+    config_write: Optional[mock.MagicMock] = None,
 ):
     """The host's own modules, planted where a lazy import finds them.
 
@@ -125,6 +278,12 @@ def host_modules(
     never called at all. ``remove_env_value`` is the ``.env`` writer a removal must never reach, and
     it is planted so a test can assert it empty. The mask rule is the host's own, planted rather than
     restated.
+
+    ``endpoints_list`` is what ``list_custom_endpoints()`` answers — empty where a case has none —
+    and ``config`` is the profile's ``config.yaml`` as ``gateway.run`` loads it, which is where an
+    endpoint's ``key_env`` is read. ``upsert`` stands in for the host's writer (``apply_custom_endpoint``
+    by default, so the write really lands), and ``config_write`` is the plugin's own ``config.yaml``
+    writer, planted so a test can prove an endpoint's key never reaches it.
     """
     agent = ModuleType("agent")
     pool = ModuleType("agent.credential_pool")
@@ -153,6 +312,27 @@ def host_modules(
     common.is_redacted_credential_preview = is_redacted_credential_preview
     routers._common = common
     hermes.web_routers = routers
+    # The custom endpoints: the host's own list, and the writer a key replace goes through. The
+    # writer applies the write by default, so a test can read the answered block as the fresh read.
+    listed = [] if endpoints_list is None else endpoints_list
+    cfg = {} if config is None else config
+    config_env = ModuleType("hermes_cli.web_routers.config_env")
+    config_env.list_custom_endpoints = lambda profile=None: {"endpoints": listed, "current": {}}
+    config_env.upsert_custom_endpoint = upsert or (
+        lambda body: apply_custom_endpoint(body, values, cfg)
+    )
+    routers.config_env = config_env
+    web_models = ModuleType("hermes_cli.web_models")
+    web_models.CustomEndpointUpdate = CustomEndpointUpdate
+    hermes.web_models = web_models
+    # The profile's `config.yaml`, as `gateway.run._load_gateway_config` loads it, and the
+    # round-trip writer the plugin must never reach with an endpoint's key.
+    run = ModuleType("gateway.run")
+    run._load_gateway_config = lambda config_path=None: cfg
+    gateway = ModuleType("gateway")
+    gateway.run = run
+    utils = ModuleType("utils")
+    utils.atomic_roundtrip_yaml_update = config_write or mock.MagicMock()
     return mock.patch.dict(
         sys.modules,
         {
@@ -165,6 +345,11 @@ def host_modules(
             "hermes_cli.config": config_module,
             "hermes_cli.web_routers": routers,
             "hermes_cli.web_routers._common": common,
+            "hermes_cli.web_routers.config_env": config_env,
+            "hermes_cli.web_models": web_models,
+            "gateway": gateway,
+            "gateway.run": run,
+            "utils": utils,
         },
     )
 
@@ -318,6 +503,10 @@ class ReadTest(unittest.TestCase):
     def test_available_answers_the_page_s_gate(self) -> None:
         with host_modules({}):
             self.assertIsNone(llm_providers.available())
+            # The endpoints are one page with the providers: a host that can list and mask keys but
+            # has no custom-endpoint list withholds the page rather than answering it half a block.
+            with mock.patch.dict(sys.modules, {"hermes_cli.web_routers.config_env": None}):
+                self.assertIsInstance(llm_providers.available(), str)
         # A host without the catalog withholds the page, in a sentence rather than an error.
         absent = ModuleType("hermes_cli")
         with mock.patch.dict(sys.modules, {"hermes_cli": absent, "hermes_cli.provider_catalog": None}):
@@ -325,6 +514,139 @@ class ReadTest(unittest.TestCase):
         self.assertEqual(
             [name for name, _ in llm_providers.FEATURES], ["llm_providers"], "the page's one feature"
         )
+
+
+class EndpointReadTest(unittest.TestCase):
+    """The custom endpoints, as the host lists them, each key as the mask its own entry names."""
+
+    def read(self, values: Dict[str, str], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        with host_modules(
+            values, endpoints_list=endpoints(), config=endpoint_config() if config is None else config
+        ):
+            return llm_providers.read(CONFIG)
+
+    def test_an_endpoint_row_is_its_name_url_model_and_its_key_env_s_mask(self) -> None:
+        block = self.read({"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY})
+        self.assertEqual(
+            [row["id"] for row in block["endpoints"]],
+            ["local-llama", "old-plain", "bare"],
+            "a row per endpoint, in the host's own order",
+        )
+        self.assertEqual(
+            block["endpoints"][0],
+            {
+                "id": "local-llama",
+                "name": "Local Llama",
+                "base_url": "http://127.0.0.1:8080/v1",
+                "model": "llama-3.1-8b",
+                "masked": mask_secret(ENDPOINT_KEY),
+            },
+            "the mask is the one its entry's key_env names — not the list's `${KEY_ENV}` preview",
+        )
+        # A bare endpoint has no entry of its own to name a key, so it says there is none.
+        self.assertIsNone(block["endpoints"][2]["masked"])
+
+    def test_a_plaintext_key_is_masked_and_never_echoed(self) -> None:
+        block = self.read({})
+        plain = next(row for row in block["endpoints"] if row["id"] == "old-plain")
+        self.assertEqual(
+            plain["masked"],
+            mask_secret(ENDPOINT_PLAIN),
+            "an entry an older release left a plaintext api_key on is masked the same way",
+        )
+        payload = json.dumps(block)
+        self.assertNotIn(ENDPOINT_PLAIN, payload, "and the value itself is nowhere in the answer")
+        self.assertNotIn(ENDPOINT_PLAIN[4:-4], payload)
+        self.assertNotIn("${LOCAL_LLAMA_API_KEY}", payload, "the list's preview is no mask either")
+
+
+class EndpointWriteTest(unittest.TestCase):
+    """An endpoint's key replaced: the host's own writer, holding the row's stored fields."""
+
+    def test_an_endpoint_s_key_is_written_through_the_host_s_writer(self) -> None:
+        values = {"LOCAL_LLAMA_API_KEY": ENDPOINT_KEY}
+        config = endpoint_config()
+        asked: list = []
+        write = mock.MagicMock()
+
+        def upsert(body: Any) -> None:
+            asked.append(body)
+            apply_custom_endpoint(body, values, config)
+
+        with host_modules(values, endpoints_list=endpoints(), config=config, upsert=upsert,
+                          config_write=write):
+            block = llm_providers.write_key(CONFIG, "custom:local-llama", TYPED_KEY)
+
+        self.assertEqual(len(asked), 1, "one write, through the host's own upsert")
+        body = asked[0]
+        self.assertEqual(
+            (body.id, body.name, body.base_url, body.model, body.api_key),
+            (
+                "local-llama",
+                "Local Llama",
+                "http://127.0.0.1:8080/v1",
+                "llama-3.1-8b",
+                TYPED_KEY,
+            ),
+            "the row's own id, name, base URL and model, and the key that was typed",
+        )
+        self.assertEqual(
+            config["providers"]["local-llama"]["key_env"],
+            "LOCAL_LLAMA_API_KEY",
+            "the host keeps the entry's key_env: the plugin composes no providers entry",
+        )
+        row = next(one for one in block["endpoints"] if one["id"] == "local-llama")
+        self.assertEqual(row["masked"], mask_secret(TYPED_KEY), "the answer is the fresh read")
+        self.assertNotIn(TYPED_KEY, json.dumps(block), "and the key itself is nowhere in it")
+        write.assert_not_called()  # never the plugin's own config.yaml writer
+
+    def test_a_discover_models_false_is_carried_rather_than_defaulted(self) -> None:
+        # The body's own default is true, and the host's writer writes whatever it says over the
+        # entry's stored value: a key replace must not quietly switch discovery back on.
+        values: Dict[str, str] = {}
+        config = endpoint_config()
+        asked: list = []
+
+        def upsert(body: Any) -> None:
+            asked.append(body)
+            apply_custom_endpoint(body, values, config)
+
+        with host_modules(values, endpoints_list=endpoints(), config=config, upsert=upsert):
+            llm_providers.write_key(CONFIG, "custom:old-plain", TYPED_KEY)
+
+        self.assertFalse(asked[0].discover_models, "the row's own answer rides the body")
+        self.assertIs(
+            config["providers"]["old-plain"]["discover_models"], False, "and stays as it was stored"
+        )
+        self.assertNotIn("api_key", config["providers"]["old-plain"], "the plaintext key is gone")
+
+    def test_a_mask_targeting_an_endpoint_is_refused_before_the_writer(self) -> None:
+        writer = mock.MagicMock()
+        # No endpoint at all is listed: the mask is refused before the target is even resolved,
+        # exactly as the provider path refuses it before the catalog is read.
+        with host_modules({}, endpoints_list=[], upsert=writer):
+            with self.assertRaises(ValueError) as refused:
+                llm_providers.write_key(CONFIG, "custom:local-llama", "llam...0a1f")
+        self.assertIn("masked key", str(refused.exception))
+        self.assertNotIn("llam...0a1f", str(refused.exception), "and never repeats the mask")
+        writer.assert_not_called()
+
+    def test_an_unknown_endpoint_is_refused_by_name(self) -> None:
+        writer = mock.MagicMock()
+        with host_modules({}, endpoints_list=endpoints(), config=endpoint_config(), upsert=writer):
+            with self.assertRaises(ValueError) as unknown:
+                llm_providers.write_key(CONFIG, "custom:nope", TYPED_KEY)
+        self.assertIn("nope", str(unknown.exception), "the sentence says which endpoint it was")
+        writer.assert_not_called()
+
+    def test_a_host_refusal_becomes_a_value_error_in_its_words(self) -> None:
+        def refuse(body: Any) -> None:
+            raise HTTPException(400, "base_url must include scheme and host")
+
+        with host_modules({}, endpoints_list=endpoints(), config=endpoint_config(), upsert=refuse):
+            with self.assertRaises(ValueError) as refused:
+                llm_providers.write_key(CONFIG, "custom:local-llama", TYPED_KEY)
+        self.assertEqual(str(refused.exception), "base_url must include scheme and host")
 
 
 class RouteTest(unittest.TestCase):

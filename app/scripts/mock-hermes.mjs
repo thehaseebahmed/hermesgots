@@ -3443,6 +3443,23 @@ const LLM_PROVIDERS = [
 // The key OpenAI starts with here, so its row reads `sk-o...c123` until a page replaces it.
 const LLM_SEEDED = { openai: "sk-o-0000-0000-c123" }
 const llmKeys = new Map()
+// The custom endpoints this mock's Hermes holds, and the keys a page has written to them. One is a
+// local server with a key of its own, the other a gateway with none — the two a page has to draw.
+const LLM_ENDPOINTS = [
+  {
+    id: "local-llama",
+    name: "Local Llama",
+    base_url: "http://127.0.0.1:8080/v1",
+    model: "llama-3.1-8b",
+  },
+  {
+    id: "work-gateway",
+    name: "Work gateway",
+    base_url: "https://llm.example.com/v1",
+    model: "gpt-4o-mini",
+  },
+]
+const LLM_ENDPOINT_SEEDED = { "local-llama": "llam-3.1-local-0a1f" }
 const maskSecret = (value) =>
   value.length < 12 ? "***" : `${value.slice(0, 4)}...${value.slice(-4)}`
 // The shapes a page is handed rather than a key: the host refuses one on its own rule, so a stale
@@ -3450,12 +3467,17 @@ const maskSecret = (value) =>
 const looksMasked = (value) =>
   value === "***" || value.startsWith("«redacted") || /^\S{4}\.\.\.\S{4}$/.test(value)
 const llmKeyOf = (profile, slug) => llmKeys.get(`${profile}\n${slug}`) ?? LLM_SEEDED[slug]
+const llmEndpointKeyOf = (profile, id) =>
+  llmKeys.get(`${profile}\ncustom:${id}`) ?? LLM_ENDPOINT_SEEDED[id]
 const llmBlock = (profile) => ({
   providers: LLM_PROVIDERS.map(({ slug, label, description }) => {
     const secret = llmKeyOf(profile, slug)
     return { slug, label, description, masked: secret ? maskSecret(secret) : null }
   }),
-  endpoints: [],
+  endpoints: LLM_ENDPOINTS.map(({ id, name, base_url, model }) => {
+    const secret = llmEndpointKeyOf(profile, id)
+    return { id, name, base_url, model, masked: secret ? maskSecret(secret) : null }
+  }),
 })
 const GENERAL_DEFAULTS = {
   // The window a bot's model runs with: a number whose 0 is Hermes's own "detect it".
@@ -4786,9 +4808,19 @@ http
       const typed = body?.key
       if (typeof target !== "string" || typeof typed !== "string")
         return json(res, 400, { error: { message: "Body needs a target and a key." } })
-      if (!LLM_PROVIDERS.some((one) => one.slug === target))
+      // A key is one resource with one address: a provider's catalog slug, or an endpoint's
+      // `custom:<id>`. The typed key lands on whichever row the address names.
+      const endpointId = target.startsWith("custom:") ? target.slice("custom:".length) : ""
+      const known = endpointId
+        ? LLM_ENDPOINTS.some((one) => one.id === endpointId)
+        : LLM_PROVIDERS.some((one) => one.slug === target)
+      if (!known)
         return json(res, 400, {
-          error: { message: `${target} isn't an API-key provider this Hermes knows.` },
+          error: {
+            message: endpointId
+              ? `${endpointId} isn't a custom endpoint this Hermes knows.`
+              : `${target} isn't an API-key provider this Hermes knows.`,
+          },
         })
       if (looksMasked(typed))
         return json(res, 400, {
@@ -4799,9 +4831,8 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/llm-providers") {
       // The bot's LLM providers (plugin/llm_providers.py): the host's catalog filtered to the
-      // providers that take a key, each key as the mask `mask_secret` makes of it — first four and
-      // last four, or `***` under its floor — and `null` where none is set. `endpoints` is empty
-      // until the custom endpoints are written here; it is on the answer from the first release.
+      // providers that take a key, then its custom endpoints, each key as the mask `mask_secret`
+      // makes of it — first four and last four, or `***` under its floor — and `null` where none is.
       return json(res, 200, {
         object: "gots.llm_providers",
         llm: llmBlock(pluginProfile ?? ""),

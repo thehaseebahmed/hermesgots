@@ -18,14 +18,22 @@ The one rule the page rests on is that a key never leaves the host:
   in a ``config.yaml`` mirror therefore reads *Not set* — the risk the plan names, which replacing
   the key heals.
 
-``endpoints`` is on every answer from the first release and empty until the custom endpoints arrive,
-so the app's shape does not change when they do.
+``endpoints`` is the host's own ``list_custom_endpoints()``, the same list the desktop's Settings →
+Providers draws: a ``providers.<id>`` entry, a legacy ``custom_providers`` row the migration left
+behind, and a bare ``provider: custom`` slot. Each row's mask is **not** the list's
+``api_key_preview``: that is ``"${KEY_ENV}"`` for a key-env entry — the host's display for the
+indirection — so the entry's own ``key_env`` is read from the profile's ``config.yaml`` and *that*
+masked, and a plaintext ``api_key`` an older release left in the entry is masked the same way. An
+entry with neither reads *Not set*.
 
 A key is written through Hermes's credential lifecycle (``save_provider_env_credential``), never its
 ``config.yaml`` writer: the lifecycle also reconciles the config mirrors, the env-seeded
 credential-pool entries and the provider's model-cache rows, which would otherwise keep
-authenticating with the key that was just replaced. A body whose key *is* a mask — the shape the page
-was handed — is refused on the host's own rule before any of that is asked.
+authenticating with the key that was just replaced. An endpoint's key goes the same way through the
+host's own ``upsert_custom_endpoint`` — the plugin composes no ``providers`` entry and writes no
+``config.yaml`` — and its target is spelled ``custom:<id>`` so one address names one key whatever
+kind of row owns it. A body whose key *is* a mask — the shape the page was handed — is refused on
+the host's own rule before any of that is asked.
 
 A key is removed through the same lifecycle (``remove_provider_env_credential``), never its
 ``remove_env_value``: dropping the value from ``.env`` alone leaves the value-matched ``config.yaml``
@@ -68,16 +76,115 @@ def _mask() -> Callable[[str], str]:
     return mask_secret
 
 
-def available() -> Optional[str]:
-    """``None`` where this page can list the host's providers, else why it can't be drawn.
+# The prefix one address spells an endpoint's key with: `custom:<id>`, so a provider's slug and an
+# endpoint's id can never be mistaken for each other.
+ENDPOINT_PREFIX = "custom:"
 
-    All three reads are asked, not just the catalog: a host that can list its providers but can't
-    mask a key, or can't read one, must withhold the page rather than draw rows it can't answer for.
+
+def _endpoint_list() -> List[Dict[str, Any]]:
+    """The host's own custom endpoints, as ``list_custom_endpoints()`` answers its rows."""
+    from hermes_cli.web_routers.config_env import list_custom_endpoints
+
+    answer = list_custom_endpoints()
+    rows = answer.get("endpoints") if isinstance(answer, dict) else None
+    return [row for row in (rows or ()) if isinstance(row, dict)]
+
+
+def _entry_mask(entry: Any) -> Optional[str]:
+    """One entry's key as its mask, or ``None`` where it names none.
+
+    The entry's ``key_env`` first — the variable Hermes writes a key to, read through the host's own
+    dotenv-aware env read — and else a plaintext ``api_key`` an older release left in the entry.
+    Either way what leaves here is ``mask_secret``'s output and never the value.
+    """
+    if not isinstance(entry, dict):
+        return None
+    key_env = str(entry.get("key_env") or "").strip()
+    if key_env:
+        return credentials.masked(key_env)
+    plaintext = str(entry.get("api_key") or "").strip()
+    if plaintext:
+        return _mask()(plaintext)
+    return None
+
+
+def _endpoints(config_path: Path) -> List[Dict[str, Any]]:
+    """The page's endpoint rows: what the host lists, each key as the mask its own entry names.
+
+    The profile's ``config.yaml`` is opened once, and only where the host listed something: it is
+    the one place an endpoint's ``key_env`` can be read — the list says a key exists but never which
+    value it is, and its ``api_key_preview`` is the host's ``"${KEY_ENV}"`` display, not a mask.
+
+    A legacy ``custom_providers`` row — one the host still routes but the migration never converted —
+    has no ``providers`` entry here, so it reads *Not set* until a key write converts it (the host's
+    own writer pops the legacy row and writes a ``providers`` one).
+    """
+    listed = _endpoint_list()
+    if not listed:
+        return []
+    from . import config_keys
+
+    providers = config_keys.load(config_path).get("providers")
+    entries = providers if isinstance(providers, dict) else {}
+    rows: List[Dict[str, Any]] = []
+    for raw in listed:
+        endpoint_id = str(raw.get("id") or "").strip()
+        if not endpoint_id:
+            # A row with no id has no address to write to and no entry to read: it is no row.
+            continue
+        rows.append(
+            {
+                "id": endpoint_id,
+                "name": str(raw.get("name") or endpoint_id),
+                "base_url": str(raw.get("base_url") or ""),
+                "model": str(raw.get("model") or ""),
+                "masked": _entry_mask(entries.get(endpoint_id)),
+            }
+        )
+    return rows
+
+
+def _endpoint_of(endpoint_id: str) -> Dict[str, Any]:
+    """One endpoint's row, as the host's own list answers it, or a ``ValueError`` naming the id.
+
+    The list is asked every time, never restated: an id this host doesn't hold is a refusal, in a
+    sentence that says which id it was.
+    """
+    if not endpoint_id:
+        raise ValueError("No custom endpoint was named.")
+    for raw in _endpoint_list():
+        if str(raw.get("id") or "") == endpoint_id:
+            return raw
+    raise ValueError(f"{endpoint_id} isn't a custom endpoint this Hermes knows.")
+
+
+def _host_refusal(error: BaseException) -> Optional[str]:
+    """The sentence a host's own HTTP refusal carries, or ``None`` for any other exception.
+
+    ``upsert_custom_endpoint`` raises FastAPI's ``HTTPException`` for a body it won't take (``model
+    required``, a base URL with no host). The plugin reads it by its two attributes rather than
+    importing FastAPI for it: the host that raises one is the host that imported it.
+    """
+    status = getattr(error, "status_code", None)
+    detail = getattr(error, "detail", None)
+    if not isinstance(status, int) or not isinstance(detail, str):
+        return None
+    return detail.strip() or None
+
+
+def available() -> Optional[str]:
+    """``None`` where this page can list the host's providers and endpoints, else why it can't.
+
+    Every read the page rests on is asked, not just the catalog: a host that can list its providers
+    but can't mask a key, can't read one, or has no custom-endpoint list must withhold the page
+    rather than draw rows it can't answer for — one page, one feature, all or nothing, so a host
+    without the endpoints withholds the page instead of failing every read of it.
     """
     try:
         _catalog()
         credentials.env_lookup()
         _mask()
+        _endpoint_list()
     except Exception:
         logger.debug("gots: this Hermes can't list its API-key providers", exc_info=True)
         return "This Hermes version can't show its API-key providers."
@@ -151,25 +258,71 @@ def _refuse_preview(key: str) -> None:
 
 
 def write_key(config_path: Path, target: str, key: str) -> Dict[str, Any]:
-    """Write one provider's key, and answer the page as it now reads.
+    """Write one key — a provider's or an endpoint's — and answer the page as it now reads.
 
-    The write is Hermes's credential lifecycle, not its ``config.yaml`` writer: the lifecycle also
-    reconciles the config mirrors, the env-seeded credential-pool entries and the provider's
-    model-cache rows, which would otherwise keep authenticating with the key that was just replaced.
-    A mask is refused before the catalog is read, and the key is never logged, echoed back or named
-    in a refusal: what a caller gets is the fresh block, in which the key is only ever its mask.
+    A target spelled ``custom:<id>`` is a custom endpoint's key and goes through the host's own
+    ``upsert_custom_endpoint``; anything else is a catalog slug, whose write is Hermes's credential
+    lifecycle rather than its ``config.yaml`` writer (the lifecycle also reconciles the config
+    mirrors, the env-seeded credential-pool entries and the provider's model-cache rows, which would
+    otherwise keep authenticating with the key that was just replaced). A mask is refused before
+    either is asked, and the key is never logged, echoed back or named in a refusal: what a caller
+    gets is the fresh block, in which the key is only ever its mask.
 
-    Raises ``ValueError`` for a mask, an empty key or a slug this host can't write, and
-    ``ImportError`` where this host has no rule or no lifecycle, which the route answers with a 501.
+    Raises ``ValueError`` for a mask, an empty key or a target this host can't write, and
+    ``ImportError`` where this host has no rule, lifecycle or endpoint list, which the route answers
+    with a 501.
     """
     _refuse_preview(key)
     if not key.strip():
         # A blank is a removal, and a removal is its own step with its own confirmation.
         raise ValueError("A key can't be empty.")
-    slot = _slot_of(str(target or "").strip())
+    spelled = str(target or "").strip()
+    if spelled.startswith(ENDPOINT_PREFIX):
+        return _write_endpoint_key(config_path, spelled[len(ENDPOINT_PREFIX) :].strip(), key)
+    slot = _slot_of(spelled)
     from hermes_cli.credential_lifecycle import save_provider_env_credential
 
     save_provider_env_credential(slot, key)
+    return read(config_path)
+
+
+def _write_endpoint_key(config_path: Path, endpoint_id: str, key: str) -> Dict[str, Any]:
+    """Replace one endpoint's key through the host's own writer, and answer the fresh block.
+
+    The body is the host's ``CustomEndpointUpdate``, and the fields are the host's own: ``id``, the
+    stored ``name``, ``base_url`` and ``model`` come from the row its list answered, so the app can
+    never rewrite a field it does not own, and only the key is the caller's. The host writes the key
+    to ``.env`` behind the entry's ``key_env``, keeps the entry's other fields, and clears or
+    migrates a legacy plaintext ``api_key`` itself — which is why nothing is composed here and
+    ``config.yaml`` is never written.
+
+    ``discover_models`` is carried on the body with the row's own answer: the model's default is
+    ``True``, and the host writes whatever the body says over the entry's stored value, so a body
+    that named none would quietly switch discovery back on for an endpoint that had turned it off.
+
+    A host refusal (a base URL with no host, a model it won't take) arrives as FastAPI's
+    ``HTTPException`` and leaves here as a ``ValueError`` carrying its sentence, which the route
+    answers as a 400 the user can read.
+    """
+    row = _endpoint_of(endpoint_id)
+    from hermes_cli.web_models import CustomEndpointUpdate
+    from hermes_cli.web_routers.config_env import upsert_custom_endpoint
+
+    body = CustomEndpointUpdate(
+        id=str(row.get("id") or endpoint_id),
+        name=str(row.get("name") or endpoint_id),
+        base_url=str(row.get("base_url") or ""),
+        model=str(row.get("model") or ""),
+        api_key=key,
+        discover_models=bool(row.get("discover_models", True)),
+    )
+    try:
+        upsert_custom_endpoint(body)
+    except Exception as error:
+        detail = _host_refusal(error)
+        if detail is None:
+            raise
+        raise ValueError(detail) from error
     return read(config_path)
 
 
@@ -197,18 +350,18 @@ def remove_key(config_path: Path, target: str) -> Dict[str, Any]:
 
 
 def read(config_path: Path) -> Dict[str, Any]:
-    """The page's one read: the providers this bot can be given a key for, each key as its mask.
+    """The page's one read: every provider and endpoint this bot can be given a key for, masked.
 
-    ``config_path`` is the profile's ``config.yaml`` and is not opened: a provider's key lives in the
-    bot's env, which the host reads for itself, and the custom endpoints — which do come from the
-    file — are the host's own list, added in the step after this one.
+    ``config_path`` is the profile's ``config.yaml``, opened only to find the ``key_env`` an
+    endpoint's entry names (``_endpoints``): a provider's key lives in the bot's env, which the host
+    reads for itself, and the endpoints come from the host's own list rather than from the file.
 
-    Raises ImportError where this host has no catalog or no mask, which the route answers with a 501
-    rather than with a page of *Not set* rows.
+    Raises ImportError where this host has no catalog, mask or endpoint list, which the route answers
+    with a 501 rather than with a page of *Not set* rows.
     """
     providers: List[Dict[str, Any]] = []
     for entry in _catalog():
         row = _row(entry)
         if row is not None:
             providers.append(row)
-    return {"providers": providers, "endpoints": []}
+    return {"providers": providers, "endpoints": _endpoints(config_path)}

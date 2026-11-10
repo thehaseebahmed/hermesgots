@@ -292,6 +292,9 @@ test is step 4's "an older plugin draws no LLM Providers row", beside the existi
    `test_llm_providers.py` — "an endpoint's key lands in its own env var and the config keeps
    `key_env`", and a legacy plaintext `api_key` is gone from the entry after the write — and "an
    endpoint row shows its base URL and its key masked, and its key can be replaced".
+
+   Done.
+
 8. **An endpoint can be added.** `POST llm-providers/endpoints` calls the host's own upsert with the
    four fields; the host's refusal (a missing base URL or model, a duplicate id) is shown in its
    words. The page's `+` opens the form as a sub-screen. Goals: G5. After: 7. Layers: plugin domain,

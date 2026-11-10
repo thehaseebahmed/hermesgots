@@ -2944,9 +2944,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     # The bot's LLM providers, each key as the mask the host made of it (llm_providers.py): the
-    # page is drawn from the host's own catalog, so a provider Hermes adds later is a row without an
-    # app release. The read opens no config.yaml — a key's presence is the host's own env read — and
-    # `endpoints` rides on the same answer, empty until the custom endpoints' step.
+    # page is drawn from the host's own catalog and its own custom-endpoint list, so a provider
+    # Hermes adds later is a row without an app release. The read opens config.yaml only to find the
+    # `key_env` an endpoint's entry names; a provider's presence is the host's own env read.
     app.router.add_get(
         f"{PREFIX}/llm-providers",
         keyed_settings_read(
@@ -2959,12 +2959,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     )
 
     async def set_llm_provider_key(request: "web.Request") -> "web.Response":
-        """Writes one provider's key and answers the fresh block.
+        """Writes one key and answers the fresh block.
 
-        The target is a catalog slug and the key is the typed one. A body whose key is a mask is
-        refused by the domain's own host rule, in its sentence: a mask never reaches a write. The
-        key is not logged and not echoed — the 502's sentence is the plugin's, never the host's own
-        words, which could hold the value.
+        The target is a catalog slug, or an endpoint's `custom:<id>` — one address, one key, whatever
+        kind of row owns it — and the key is the typed one. A body whose key is a mask is refused by
+        the domain's own host rule, in its sentence: a mask never reaches a write. The key is not
+        logged and not echoed — the 502's sentence is the plugin's, never the host's own words, which
+        could hold the value.
         """
         denied = unauthorized(request)
         if denied is not None:

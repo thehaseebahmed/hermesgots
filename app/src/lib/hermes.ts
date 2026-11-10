@@ -1361,10 +1361,10 @@ export async function getLlmProviders(config: HermesConfig, signal?: AbortSignal
 }
 
 /**
- * Replaces one provider's key — the catalog slug the row names, and the key the user typed — and
- * answers the fresh block, which is the only way the page learns the new mask. The host refuses a
- * body whose key is a mask, and its sentence is what the screen shows. The key is never logged here:
- * it rides the request body and nothing else.
+ * Replaces one key — a provider's catalog slug, or an endpoint's `custom:<id>` — with the key the
+ * user typed, and answers the fresh block, which is the only way the page learns the new mask. The
+ * host refuses a body whose key is a mask, and its sentence is what the screen shows. The key is
+ * never logged here: it rides the request body and nothing else.
  */
 export async function setLlmProviderKey(
   config: HermesConfig,

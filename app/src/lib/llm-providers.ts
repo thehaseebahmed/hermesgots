@@ -1,12 +1,13 @@
 /**
  * A bot's LLM providers, as its Hermes answers them (`plugin/llm_providers.py`): the API-key
- * providers the host's own catalog knows, and — from the step that writes them — the custom
- * OpenAI-compatible endpoints it holds. A provider's key reaches this file only as the mask the
- * host made of it, `mask_secret`'s own output; nothing here builds, derives or unwraps one, and a
- * row's presence is that mask rather than a second flag beside it.
+ * providers the host's own catalog knows, and the custom OpenAI-compatible endpoints it holds. A
+ * key reaches this file only as the mask the host made of it, `mask_secret`'s own output; nothing
+ * here builds, derives or unwraps one, and a row's presence is that mask rather than a second flag
+ * beside it.
  *
- * `endpoints` is on the type from the first release and empty until the endpoints arrive, so the
- * app's shape does not change when they do.
+ * A key is one resource with one address whatever kind of row owns it: a provider's catalog slug, or
+ * an endpoint's `custom:<id>`. `customTarget` spells the second and `customEndpointId` reads one
+ * back, so the screen and the form that writes it never disagree about what a target is.
  */
 
 /** The feature a host advertises when it can list its providers (and can withhold the page). */
@@ -24,11 +25,13 @@ export interface LlmProvider {
   masked: string | null
 }
 
-/** One custom endpoint the host holds. Empty until the endpoints' step; the type is the block's. */
+/** One custom endpoint the host holds, as its own list answers it. */
 export interface LlmEndpoint {
   id: string
   name: string
   base_url: string
+  /** The model the endpoint runs when this bot's model names it. */
+  model: string
   masked: string | null
 }
 
@@ -57,6 +60,45 @@ export function providerRows(block: LlmProviders): LlmProviderRow[] {
     title: provider.label,
     description: provider.description,
     value: provider.masked ?? "",
+  }))
+}
+
+/** The prefix one address spells an endpoint's key with, so no slug can be mistaken for an id. */
+const CUSTOM_TARGET = "custom:"
+
+/** The address one endpoint's key is written to: `custom:<id>`. */
+export function customTarget(id: string): string {
+  return `${CUSTOM_TARGET}${id}`
+}
+
+/** The endpoint an address names, or `""` for a target that names a provider instead. */
+export function customEndpointId(target: string): string {
+  return target.startsWith(CUSTOM_TARGET) ? target.slice(CUSTOM_TARGET.length) : ""
+}
+
+/** One endpoint's row: its name, the URL and model it runs, and its mask as the value. */
+export interface LlmEndpointRow {
+  id: string
+  /** The address its key is written to, `custom:<id>`. */
+  target: string
+  title: string
+  purpose: string
+  /** The mask, or `""` where no key is set — which `ValueRow` draws as *Not set*. */
+  value: string
+}
+
+/**
+ * The endpoints' rows, in the host's order: the endpoint's name, the base URL and model it runs on
+ * one line, and its mask as the value. Neither the URL nor the model is the page's to change, so
+ * they are the row's line rather than its value.
+ */
+export function endpointRows(block: LlmProviders): LlmEndpointRow[] {
+  return block.endpoints.map((endpoint) => ({
+    id: endpoint.id,
+    target: customTarget(endpoint.id),
+    title: endpoint.name,
+    purpose: [endpoint.base_url, endpoint.model].filter(Boolean).join(" · "),
+    value: endpoint.masked ?? "",
   }))
 }
 
@@ -116,6 +158,7 @@ function endpointOf(raw: unknown): LlmEndpoint[] {
       id: row.id,
       name: typeof row.name === "string" && row.name ? row.name : row.id,
       base_url: typeof row.base_url === "string" ? row.base_url : "",
+      model: typeof row.model === "string" ? row.model : "",
       masked: typeof row.masked === "string" && row.masked ? row.masked : null,
     },
   ]

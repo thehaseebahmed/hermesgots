@@ -40,7 +40,8 @@ import {
 } from "./component-kit.tsx"
 
 type Provider = { slug: string; label: string; description: string; masked: string | null }
-type Block = { providers: Provider[]; endpoints: unknown[] }
+type Endpoint = { id: string; name: string; base_url: string; model: string; masked: string | null }
+type Block = { providers: Provider[]; endpoints: Endpoint[] }
 
 /** What `GET llm-providers` answers: two providers, one with a key and one without. */
 const BLOCK: Block = {
@@ -60,6 +61,27 @@ const BLOCK: Block = {
   ],
   endpoints: [],
 }
+
+/**
+ * The custom endpoints a host holds: one with a key, one without. They draw under their own caption,
+ * and either one's slot screen is the same Replace-key form a provider's is.
+ */
+const ENDPOINTS: Endpoint[] = [
+  {
+    id: "local-llama",
+    name: "Local Llama",
+    base_url: "http://127.0.0.1:8080/v1",
+    model: "llama-3.1-8b",
+    masked: "llam...0a1f",
+  },
+  {
+    id: "work-gateway",
+    name: "Work gateway",
+    base_url: "https://llm.example.com/v1",
+    model: "gpt-4o-mini",
+    masked: null,
+  },
+]
 
 /** The settings route, as the app draws it: the list, the page, and the address on screen. */
 const settings = (entry: string) => (
@@ -112,12 +134,21 @@ async function seed(name: string, features: string[], block: Block = BLOCK) {
     }
     if (pathname.endsWith("/plugins/gots/llm-providers/key") && method === "POST") {
       const target = String(body?.target ?? "")
-      current = {
-        ...current,
-        providers: current.providers.map((one) =>
-          one.slug === target ? { ...one, masked: maskOf(String(body?.key ?? "")) } : one,
-        ),
-      }
+      const masked = maskOf(String(body?.key ?? ""))
+      // One route, one target: `custom:<id>` names an endpoint's key, anything else a provider's.
+      current = target.startsWith("custom:")
+        ? {
+            ...current,
+            endpoints: current.endpoints.map((one) =>
+              one.id === target.slice("custom:".length) ? { ...one, masked } : one,
+            ),
+          }
+        : {
+            ...current,
+            providers: current.providers.map((one) =>
+              one.slug === target ? { ...one, masked } : one,
+            ),
+          }
       return json({ object: "gots.llm_providers", llm: current })
     }
     if (pathname.endsWith("/plugins/gots/llm-providers"))
@@ -130,8 +161,12 @@ async function seed(name: string, features: string[], block: Block = BLOCK) {
 /** The page itself, one provider's row on it, and the slot screen a row opens. */
 const page = () => find("[data-bot-llm-providers]")
 const providerRow = (slug: string) => find(`[data-setting="llm-provider-${slug}"]`)
+const endpointRow = (id: string) => find(`[data-setting="llm-endpoint-${id}"]`)
 const slot = () => find("[data-llm-provider-slot]")
 const maskRow = () => find('[data-setting="llm-provider-mask"]')
+/** An endpoint's facts on its slot screen: the base URL and the model, neither of them ours. */
+const baseUrlRow = () => find('[data-setting="llm-endpoint-base-url"]')
+const modelRow = () => find('[data-setting="llm-endpoint-model"]')
 const keyField = () => find("[data-llm-key-field]") as HTMLInputElement | null
 const saveButton = () =>
   findAll("[data-form-actions] button").find((one) => one.textContent?.trim() === "Save") ?? null
@@ -148,6 +183,8 @@ const lines = (element: Element | null) =>
   leaves(element).map((span) => span.textContent?.trim() ?? "")
 const titleOf = (element: Element | null) => lines(element)[0] ?? ""
 const valueOf = (element: Element | null) => lines(element).at(-1) ?? ""
+/** The class a row's value is drawn with: muted where the value is not the page's to claim. */
+const valueClass = (element: Element | null) => leaves(element).at(-1)?.className ?? ""
 
 test("a provider with a key shows its first and last four, one without shows Not set", async () => {
   await seed("providers", ["llm_providers"])
@@ -277,5 +314,77 @@ test("removing a key asks first, and the row reads Not set", async () => {
     assert.equal(deletes[0].path, "/api/plugins/gots/llm-providers/key/openai", "for that provider")
     assert.equal(deletes[0].body, null, "and no body: the address names what is removed")
     assert.ok(missing("[data-llm-remove-key]"), "the action goes with the key it removed")
+  })
+})
+
+test("an endpoint row shows its base URL and its key masked, and its key can be replaced", async () => {
+  const host = await seed("endpoints", ["llm_providers"], { ...BLOCK, endpoints: ENDPOINTS })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    await until(async () => Boolean(endpointRow("local-llama")), "the host's custom endpoints")
+
+    // Both lists are one page: the providers' caption, then the endpoints' — the second one only
+    // because there are endpoints to draw under it.
+    assert.deepEqual(
+      findAll("[data-bot-llm-providers] > p").map((one) => one.textContent?.trim()),
+      ["Providers", "Custom endpoints"],
+      "a second caption over the endpoints' rows",
+    )
+    assert.deepEqual(
+      lines(endpointRow("local-llama")),
+      ["Local Llama", "http://127.0.0.1:8080/v1 · llama-3.1-8b", "llam...0a1f"],
+      "its name, the base URL and model it runs, and its key as the host masked it",
+    )
+    assert.equal(
+      valueOf(endpointRow("work-gateway")),
+      "Not set",
+      "an endpoint holding no key says so the way every row does",
+    )
+
+    await click(endpointRow("local-llama"))
+    await until(async () => Boolean(slot()), "the endpoint's screen")
+
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/llm-providers/key/custom%3Alocal-llama",
+      "the address names the endpoint's key, spelled custom:<id>",
+    )
+    assert.deepEqual(
+      lines(maskRow()),
+      ["Local Llama", "llam...0a1f"],
+      "the endpoint's name over its key, as the host masked it",
+    )
+    assert.deepEqual(
+      lines(baseUrlRow()),
+      ["Base URL", "http://127.0.0.1:8080/v1"],
+      "and the base URL it was configured with",
+    )
+    assert.deepEqual(lines(modelRow()), ["Model", "llama-3.1-8b"], "and the model")
+    // Neither is the page's to claim: they are what the host holds, so they read muted.
+    for (const row of [baseUrlRow(), modelRow()])
+      assert.ok(
+        valueClass(row).includes("text-muted-foreground") &&
+          !valueClass(row).includes("text-primary"),
+        "a value the page doesn't own reads muted",
+      )
+
+    await type(keyField(), "endpoint-key-0000-0a1f")
+    await until(async () => saveButton()?.disabled === false, "Save to wake for a typed key")
+    await click(saveButton())
+    await until(async () => host.asks.some((one) => one.method === "POST"), "the write")
+
+    const write = host.asks.find((one) => one.method === "POST")
+    assert.deepEqual(
+      write?.body,
+      { target: "custom:local-llama", key: "endpoint-key-0000-0a1f" },
+      "the endpoint's key under its custom: target, and nothing else",
+    )
+    assert.ok(
+      !JSON.stringify(write?.body).includes("llam...0a1f"),
+      "the mask that was on screen never rides the write",
+    )
+    await until(
+      async () => valueOf(maskRow()) === "endp...0a1f",
+      "the screen to read the block the write answered",
+    )
   })
 })

@@ -8,7 +8,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { submittableKey } from "../src/lib/llm-providers.ts"
+import {
+  customEndpointId,
+  customTarget,
+  endpointRows,
+  submittableKey,
+} from "../src/lib/llm-providers.ts"
 
 test("an empty field, or one holding only spaces, has nothing to send", () => {
   assert.equal(submittableKey(""), false)
@@ -33,4 +38,46 @@ test("something typed is a key, whatever surrounds it", () => {
     true,
     "the field's own spaces are not part of the key",
   )
+})
+
+test("an endpoint's row is its name, the URL and model it runs, and its mask", () => {
+  const rows = endpointRows({
+    providers: [],
+    endpoints: [
+      {
+        id: "local-llama",
+        name: "Local Llama",
+        base_url: "http://127.0.0.1:8080/v1",
+        model: "llama-3.1-8b",
+        masked: "llam...0a1f",
+      },
+      {
+        id: "bare",
+        name: "Bare",
+        base_url: "https://bare.example.com/v1",
+        model: "bare-1",
+        masked: null,
+      },
+    ],
+  })
+  assert.deepEqual(
+    rows[0],
+    {
+      id: "local-llama",
+      target: "custom:local-llama",
+      title: "Local Llama",
+      purpose: "http://127.0.0.1:8080/v1 · llama-3.1-8b",
+      value: "llam...0a1f",
+    },
+    "the name, the base URL and model on one line, the mask as the value, and its address",
+  )
+  assert.equal(rows[1].value, "", "an endpoint with no key draws as Not set")
+  assert.equal(rows[1].purpose, "https://bare.example.com/v1 · bare-1")
+})
+
+test("a key's address is one target: custom:<id> for an endpoint, a slug for a provider", () => {
+  assert.equal(customTarget("local-llama"), "custom:local-llama")
+  assert.equal(customEndpointId("custom:local-llama"), "local-llama")
+  assert.equal(customEndpointId("openai"), "", "a provider's slug names no endpoint")
+  assert.equal(customEndpointId(""), "")
 })
