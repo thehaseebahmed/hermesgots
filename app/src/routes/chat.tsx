@@ -108,6 +108,7 @@ import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { useNav } from "@/lib/nav"
 import { rememberLastChat } from "@/lib/last-chat"
+import { useUnreadElsewhere } from "@/lib/unread-chats"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
@@ -424,6 +425,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const [away, setAway] = useState(false)
   const online = useOnline()
+  const unread = useUnreadElsewhere(chat?.profileId, chat?.id)
   const actions = chat && bot && (
     <ChatActions
       chat={chat}
@@ -431,6 +433,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       session={session}
       wide={wide}
       listPath={lead.listPath}
+      unread={unread}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -1002,6 +1005,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     }
   }
 
+  const unread = useUnreadElsewhere(conversation?.profileId, conversation?.id)
   const actions = conversation && (
     <ChatActions
       chat={conversation}
@@ -1009,6 +1013,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       session={session}
       wide={wide}
       listPath={lead.listPath}
+      unread={unread}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}

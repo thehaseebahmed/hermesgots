@@ -5,10 +5,10 @@ import {
   BellOffIcon,
   CheckIcon,
   EllipsisIcon,
+  ListChecksIcon,
   PencilIcon,
   PinIcon,
   RotateCcwIcon,
-  Rows4Icon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
@@ -231,6 +231,7 @@ export function ChatActions({
   session,
   wide,
   listPath,
+  unread,
   usage,
   providerUsage,
   usageOpen,
@@ -244,6 +245,8 @@ export function ChatActions({
   wide: boolean
   /** The bot's chats, where this chat has a list of its own that isn't already on screen beside it. */
   listPath?: string
+  /** Whether anything else in that list waits unread on this device. */
+  unread?: boolean
   usage: ContextUsage
   providerUsage?: Profile["providerUsage"]
   /** The usage sheet, which the limit banner above the composer opens too. */
@@ -274,10 +277,19 @@ export function ChatActions({
           <Link
             to={listPath}
             state={OPENED_CHAT(chat.id)}
-            aria-label={`Chats with ${profile?.name ?? "the bot"}`}
+            aria-label={`Chats with ${profile?.name ?? "the bot"}${unread ? ", unread chats" : ""}`}
             className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
           >
-            <Rows4Icon />
+            <span className="relative flex items-center justify-center">
+              <ListChecksIcon />
+              {unread && (
+                <span
+                  data-unread
+                  aria-hidden
+                  className="absolute -top-1.5 -right-1.5 size-2.5 rounded-full bg-info ring-2 ring-background"
+                />
+              )}
+            </span>
           </Link>
         )}
         <DropdownMenu>

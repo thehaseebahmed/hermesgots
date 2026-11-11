@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
+import { forgetRead, markRead } from "@/lib/read-marks"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import {
@@ -228,6 +229,47 @@ test(
         control?.getAttribute("class") ?? "",
         /\bsize-11\b.*\bbackdrop-blur\b/,
         "wearing the frosted circle the bar's other controls wear",
+      )
+    })
+  }),
+)
+
+test(
+  "the list control says when another of the bot's chats waits unread",
+  atWidth(390, async () => {
+    localStorage.clear()
+    await seed()
+    // Beta has moved since this device last read it. The marks outlive a case in this process, so the
+    // one an earlier case wrote for this chat is dropped first, and the mark put back behind its record.
+    forgetRead("c-b")
+    markRead("c-b", 11)
+    await mount(screen("/c/c-a"), async () => {
+      await until(async () => titles().includes("Alpha"), "the chat's own header")
+      const control = () => find('[data-slot="header-actions"] a[href^="/b/"]')
+      assert.equal(
+        control()?.getAttribute("aria-label"),
+        "Chats with Mainly, unread chats",
+        "the control names the row of the list that waits",
+      )
+      assert.equal(
+        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
+        false,
+        "and wears the dot the app's rows wear",
+      )
+      markRead("c-b", 13)
+      await until(
+        async () =>
+          control()?.getAttribute("aria-label") === "Chats with Mainly",
+        "the dot to go once that chat has been read",
+      )
+      // The chat on screen moving is not news to the reader sitting in it, so it never dots the
+      // control that opens the rest of the list.
+      await db.conversations.update("c-a", { updatedAt: Date.now() })
+      await settle()
+      assert.equal(
+        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
+        true,
+        "with nothing of the bot's left waiting, and the chat on screen not counted",
       )
     })
   }),
