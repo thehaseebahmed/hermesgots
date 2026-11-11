@@ -13,7 +13,6 @@ import {
   HistoryIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
-  MenuIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -26,12 +25,12 @@ import { toast } from "sonner"
 
 import { attempt } from "@/lib/attempt"
 import { Banner } from "@/components/banner"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
@@ -155,7 +154,6 @@ export function ResearchPane({ pane }: { pane: FeaturePane }) {
 }
 
 function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
-  const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { missions, unsupported } = useMissions()
   const profile = useLiveQuery(getActiveProfile, [])
@@ -186,23 +184,16 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {!ask && (
-        <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl items-center gap-3">
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full md:hidden"
-              onClick={openDrawer}
-              aria-label="Open conversations"
-            >
-              <MenuIcon />
-            </Button>
-            <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
-              Research
-              <ExperimentalBadge />
-            </h1>
-          </div>
-        </header>
+        <ChatHeader
+          pinned
+          heading
+          showBot={false}
+          title={
+            <>
+              Research <ExperimentalBadge />
+            </>
+          }
+        />
       )}
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">

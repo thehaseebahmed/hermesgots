@@ -4,7 +4,6 @@ import {
   CrosshairIcon,
   EllipsisIcon,
   FrameIcon,
-  MenuIcon,
   PencilIcon,
   Undo2Icon,
 } from "lucide-react"
@@ -24,7 +23,6 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
@@ -122,7 +120,6 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
  * every other surface already has, rather than a second copy of them kept here (ADR 0131).
  */
 export function CanvasPage() {
-  const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { visible, archived, loaded, unsupported } = useCanvases()
   const profile = useLiveQuery(getActiveProfile, [])
@@ -170,23 +167,16 @@ export function CanvasPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-          <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
-            Canvas
-            <ExperimentalBadge />
-          </h1>
-        </div>
-      </header>
+      <ChatHeader
+        pinned
+        heading
+        showBot={false}
+        title={
+          <>
+            Canvas <ExperimentalBadge />
+          </>
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">
         <section className="flex flex-col gap-3">

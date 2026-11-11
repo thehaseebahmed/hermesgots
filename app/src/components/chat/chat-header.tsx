@@ -62,7 +62,11 @@ export function ChatHeader({
   )
   const titleClass = cn(
     "min-w-0",
-    pinned ? "text-xl font-semibold tracking-tight" : "truncate text-sm font-semibold",
+    pinned && heading
+      ? "text-xl font-semibold tracking-tight"
+      : pinned
+        ? "truncate text-base font-semibold tracking-tight"
+        : "truncate text-sm font-semibold",
     centered && "max-w-full",
   )
 
