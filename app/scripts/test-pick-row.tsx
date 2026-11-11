@@ -132,6 +132,20 @@ test("the chosen fill comes from the surface the row sits on", async () => {
   )
 })
 
+test("a row's button fills its item, so the fill reaches both edges", async () => {
+  await mount(
+    <PickGroup mode="choose" label="Models">
+      <PickRow title="claude-sonnet-4-5" line="200k" selected onPick={noop} />
+    </PickGroup>,
+    async () => {
+      // `flex-1` alone leaves the button as wide as its words: a block that sits inside a list item
+      // is filled by `w-full`, and the selected fill then paints the whole row rather than a pill.
+      assert.match(find("li button")?.className ?? "", /\bw-full\b/, "the button spans its item")
+      assert.doesNotMatch(find("li button")?.className ?? "", /inline-flex/, "and is not squeezed in")
+    },
+  )
+})
+
 test("a row with no group goes somewhere", async () => {
   await mount(<PickRow title="A pull request" onPick={noop} />, async () => {
     const button = find("button")

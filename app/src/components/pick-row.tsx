@@ -135,7 +135,7 @@ export function PickRow({
         onMouseDown={mode === "option" ? (event) => event.preventDefault() : undefined}
         onClick={onPick}
         className={cn(
-          "flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
+          "flex w-full min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
           mode === "option"
             ? active && "bg-accent"
             : cn(
