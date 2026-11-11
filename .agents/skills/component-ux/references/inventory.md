@@ -7,8 +7,8 @@ surface that shows in one place, and a component with none is dead. LOC is conte
 Counted by reading the import graph of `app/src` (405 files), not by hand:
 
 - 156 component files — 126 app components, 30 shadcn/Base UI primitives.
-- 7 app components with 10+ importers, 27 with 4–9, 42 with 2–3, 49 with exactly 1, 1 with none
-  (`skill-sheet.tsx`) and one unused primitive (`ui/toggle-group.tsx`).
+- 9 app components with 10+ importers, 27 with 4–9, 42 with 2–3, 48 with exactly 1, and none dead
+  on the app side. One primitive has never been imported (`ui/toggle-group.tsx`).
 
 The families below are the ones the skill's table names. The last two sections are the answer to
 "this isn't reused — what should it be?": the one-offs worth folding, and the ones that are
@@ -20,14 +20,17 @@ legitimately single-use.
 | --- | --- | --- | --- |
 | `ui/button` | 69 | The action | Any action. `primary` once a screen |
 | `ui/spinner` | 37 | The loader | Beside the words of anything running |
-| `popup` | 32 | Sheet / drawer / menu | Anything over the page (ADR 0141's foot excepted) |
+| `popup` | 31 | Sheet / drawer / menu | Anything over the page (ADR 0141's foot excepted) |
 | `bot` | 22 | A bot's artwork | Wherever a bot is named: a row, a card, a header |
 | `banner` | 17 | A one-line notice | Top of a screen or sheet, above its subject |
 | `chat/code-face` | 15 | `CODE_FACE` / `CodeFaceProvider` | A code session's mono face, at both chat screens' root (ADR 0069, 0087) |
 | `settings-chrome` | 14 | `Screen`, `Group`, rows, `EditForm`, `PickList`, `ConfirmDestructive` | Every settings-shaped screen, and the AFK and skill-detail pages that borrow its rows |
 | `ui/alert-dialog` | 13 | The question | A destructive confirmation, through one of the two wrappers |
 | `chat/markdown` | 10 | The reply's renderer | A reply, a bubble, a card's prose |
-| `chat/chat-header` | 9 | The bar | Every child screen (ADR 0140) |
+| `chat/chat-header` | 13 | The bar | Every child screen (ADR 0140): a chat, a room, a routine, a project, canvas, Code, Projects, Meetings, Research, a bot's list |
+| `confirm-destructive` | 15 | The question | A delete, a remove, a discard — and it owns the write (ADR 0142) |
+| `pick-row` (`PickRow`, `PickGroup`) | 8 | A row a pop-up offers | The model picker, settings picks, Mode and Tools, a Prompt, the `/` menu, both PR surfaces (ADR 0142) |
+| `search-field` | 7 | The search | Every list, sheet, picker and form |
 | `item-list` | 8 | `ItemRow`, `ItemGroup`, `SearchField` | Projects, Code, Meetings, Research, a bot's chats, the Canvas list |
 
 ## Pills and chips
@@ -47,15 +50,13 @@ legitimately single-use.
 | --- | --- | --- |
 | `item-list` `ItemRow` | 8 | A list of things: disc, bot corner, title, age, one line, unread dot |
 | `settings-chrome` `RowText`/`LinkRow`/`SwitchRow`/`ValueRow`/`SplitSwitchRow` | 14 (kit) | A settings-shaped page |
-| `chat/pr-pill` `PrRow` | 4 (kit) | A pull request as a list row inside the outputs drawer |
-| `sheet-picker` `SheetPickerRow` | 1 | A pickable record with a pencil, in a sheet |
-| `skill-row` `SkillRow` | 2 | A skill, in the composer's menu and in the sheet that chooses one |
+| `pick-row` `PickRow` | 8 | A row a pop-up offers: a mark, a name, one muted line, a tick or a chevron by its mode |
+| `pr-row` `PrRow` | 2 | A pull request as a pick row, opening on GitHub |
 | `bot-card` `BotCard` | 2 | A bot as a small card, in a strip |
 | `library` `FileRow`/`FolderSection` | 2 | A project's library tree |
 
-Four of these draw the same anatomy — leading mark, name, muted second line, optional trailing
-action — and each owns its own copy. That is the one place a new primitive is worth its keep (see
-`deviations.md`, finding N1).
+These were four of the seven hand-drawn rows this inventory found; the pick-row round (ADR 0142)
+made them one `PickRow` in a `PickGroup`, and what is left above is that component and its callers.
 
 ## Cards and groups
 
@@ -72,8 +73,7 @@ action — and each owns its own copy. That is the one place a new primitive is 
 | Component | Importers | When |
 | --- | --- | --- |
 | `popup` | 32 | The only sheet / drawer / menu |
-| `settings-chrome` `ConfirmDestructive` | 14 (kit) | A destructive yes-or-no |
-| `chat/confirm-dialog` `ConfirmDialog` | 2 | The same question, with the write's rejection shown inside it |
+| `confirm-destructive` | 15 | A destructive yes-or-no, holding its write and the host's refusal |
 | `chat/session-leave` | 1 | Three ways out of a session: keep, discard, stay |
 | `chat/rename-dialog` | 2 | A one-field rename, in a dialog |
 | `fullscreen` (`FullscreenPopup` in `popup`) | — | The Previewer and the meeting recorder |
@@ -130,23 +130,21 @@ The verdicts are the three from `SKILL.md`; each finding is written up with evid
 
 | One-off | Importers | Maps to | Verdict |
 | --- | --- | --- | --- |
-| `chat/confirm-dialog.tsx` | 2 | `ConfirmDestructive` + the async rejection it lacks | Fit it — one confirmation, two behaviours |
-| `chat/pr-pill` `PrRow` | 1 | `ItemRow`'s anatomy (disc, title, line) | Fit it, or make the pick row a rule first |
-| `skill-row.tsx` + `sheet-picker.tsx` + `PickList` rows | 2, 1, 1 | one `PickRow` with slots | Make it a rule (N1) |
-| `project-settings` search, `new-project` search, `model-picker` search, `PickList` search | 1 each | `SearchField` | Fit it |
 | `chat/todos` ring spinner | 1 | `ui/spinner` | Fit it |
-| Projects / Meetings / Code empty states | 3 copies | new `EmptyState` | Make it a rule (N2) |
-| 16 hand-written page columns | 8 files | `Screen`'s column, or a `PageColumn` | Make it a rule (N3) |
-| 6 hand-written sticky bars | 5 files | `ChatHeader` pinned (ADR 0140) | Fit it |
-| 18 ad-hoc `rounded-3xl border bg-card` cards | 6 files | `ui/card`, once its radius is the app's | Make it a rule (N4) |
-| 11 direct `AlertDialog` imports | 11 files | `ConfirmDestructive` where it is a yes-or-no | Fit or name the exception |
-| `skill-sheet.tsx` | 0 | nothing — dead since the AFK workflow machine went (ADR 0110) | Delete |
+| Projects / Meetings / Code empty states | 3 copies | new `EmptyState` | Make it a rule — `no-component-at-all.md` |
+| 16 hand-written page columns | 8 files | `Screen`'s column, or a `PageColumn` | Make it a rule — `no-component-at-all.md` |
+| 18 ad-hoc `rounded-3xl border bg-card` cards | 6 files | `ui/card`, once its radius is the app's | Make it a rule — `no-component-at-all.md` |
 | `ui/toggle-group.tsx` | 0 | nothing — an unused shadcn primitive | Delete |
+
+Done in the pick-row, confirmation, search and bar round (ADR 0142): `PrRow`, `SheetPickerRow`,
+`SkillRow`, `PickList`'s row and the model picker's row became `PickRow`; `ConfirmDialog` and the six
+hand-written confirmations became `ConfirmDestructive`; four hand-drawn searches became
+`SearchField`; six hand-written bars became `ChatHeader`; `skill-sheet.tsx`, `skill-row.tsx` and
+`sheet-picker.tsx` were deleted.
 
 ## Single-use and correctly so
 
-`sheet-picker.tsx` has one consumer but is not a one-off: it is the two-part primitive (row + list)
-a picker sheet is built from, and `prompt-library-sheet` is its first caller. Same for
 `chat/chat-composer` (the blank chat's one composer), `chat/thinking-line` (a thought row owns its
-sheet) and `openui/chart-surface` / `openui/map-surface` (lazy, one library each). A future audit
+sheet) and `openui/chart-surface` / `openui/map-surface` (lazy, one library each) have one caller
+each and are not one-offs: each is a primitive whose first caller is its screen. A future audit
 should leave these alone; the exception register says so.

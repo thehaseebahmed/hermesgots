@@ -395,7 +395,10 @@ a card or a group of rows, `{rounded.sheet}` 28px for the top corners of a botto
 ## Components
 
 A row is the app's unit. It is 56px of `{colors.card}` with 16px of padding either side, a title at
-16px and one muted line under it, and the row that is open takes `{colors.accent}`. Rows are stacked
+16px and one muted line under it, and the row that is open takes `{colors.accent}`. A row a pop-up
+offers is a control rather than a list row: 44px at its shortest, taller only where it carries a
+second line, and it takes the tick, the press, the chevron or the cursor its list promises
+(ADR 0142). Rows are stacked
 in a group: one 24px card whose hairline fill shows between them, so the group is one shape and the
 separators are not drawn.
 

@@ -19,25 +19,10 @@ copy of it. An entry that is still Open after two audits is an exception nobody 
 | E3 | Sync recovery | A form inside an `AlertDialog`, where one step's answer is what the next step shows | ADR 0005 |
 | E4 | A room's other members | `ui/bubble` with `variant="outline"`, not `UserBubble` — it is someone else's words, not the reader's | ADR 0115 |
 | E5 | A pull request's state icon | `animate-spin` on the icon while checks run: the icon reports the PR's state, it is not a loader | `chat/pr-look.ts` |
-| E6 | `sheet-picker.tsx`, `skill-row.tsx`, `PickList` | One consumer each, and each is a primitive's first caller rather than a screen. They merge into N1, not into nothing | — |
 | E7 | `Screen`'s header | The settings chrome keeps its own sticky header. Whether it becomes `ChatHeader`'s pinned form is undecided; until then it is the one bar outside ADR 0140 | open question |
-| E8 | A dialog that is not a yes-or-no | A reminder (`break-reminder-provider`), a permission question (`canvas-consent`), a one-action notice (`account-settings`), a three-way exit (`session-leave`), a one-field form (`rename-dialog`): each says so in its own file | — |
+| E8 | A dialog that is not a yes-or-no | A reminder (`break-reminder-provider`), a permission question (`canvas-consent`), a one-action notice (`account-settings`), a three-way exit (`session-leave`), a one-field form (`rename-dialog`), the recorder's keep-or-end question (`routes/meetings.tsx`): each says so in its own file | — |
 
 ## Open
-
-### N1 — Four ways to draw a pick row
-
-`sheet-picker.tsx` `SheetPickerRow` (li, full-width button, muted second line, pencil action),
-`skill-row.tsx` `SkillRow` (li, `role="option"`, icon, name, category badge, check),
-`settings-chrome` `PickList` rows (radio row with a tick) and, for a pull request, `PrRow` in
-`chat/pr-pill.tsx:40` (button, 44px disc, title, state line) are the same row: a leading mark, a
-name, a muted line, a trailing mark. Each owns its height, its radius and its hover.
-
-**Verdict: make it a rule.** One `PickRow` with slots (`leading`, `title`, `line`, `trailing`,
-`action`, `selected`) in `components/`, and the four become callers. It is the one new component
-this audit is confident about: four callers exist today, so it is not a rule one file could satisfy.
-`PrRow` is the smallest change and the clearest proof — it is `ItemRow`'s anatomy with `ItemRow`'s
-mark, written privately inside a pill's file.
 
 ### N2 — Three empty states, no component
 
@@ -71,39 +56,6 @@ places skip `Card` entirely and write `rounded-3xl border bg-card` by hand (`com
 six overrides go, and the ad-hoc surfaces become `Card`. The alternative — an app-level `Panel` that
 wraps `Card` with the right radius and padding — is a bigger change for the same result.
 
-### N5 — Two destructive confirmations
-
-`settings-chrome.tsx:774` `ConfirmDestructive` has nine call sites. `chat/confirm-dialog.tsx`
-`ConfirmDialog` has two (`chat/chat-actions.tsx`, `room/room-actions.tsx`) and adds one thing the
-other lacks: it runs the write itself, keeps the dialog open on a rejection and shows the host's
-words. Meanwhile six destructive confirmations are written by hand, in the same shape:
-`routes/settings.tsx:891`, `routes/project.tsx:327`, `routes/meetings.tsx:866`,
-`routes/research.tsx:663`, `components/prompt-library-sheet.tsx:188`,
-`components/project-settings.tsx:303`.
-
-**Verdict: fit it.** One component with `onConfirm` allowed to return a promise; a rejection keeps it
-open and prints the reason. `ConfirmDialog`'s behaviour is the better one — it is `ConfirmDestructive`
-that should grow it, not the other way round.
-
-### N6 — Six hand-written bars
-
-`routes/research.tsx:198,734`, `routes/projects.tsx:212`, `routes/canvas.tsx:173`,
-`routes/meetings.tsx:158`, `routes/code.tsx:326` each paste the sticky header string from
-`chat/chat-header.tsx:73`. ADR 0140 settled that one bar draws every child screen, in a pinned and a
-floating form; `ChatHeader` already has `pinned`, `heading`, `leading`, `actions` and `below`.
-
-**Verdict: fit it.** These are exactly the three-copies-drifted fault ADR 0140 describes, one level
-further out. `code.tsx`'s `pt-[var(--list-header-pt)]` is the only real difference and is a prop.
-
-### N7 — Four hand-written search fields
-
-`SearchField` (`item-list.tsx`) owns the 44px target, the clear button, Escape and the label; the
-list's foot already uses it. Drawn by hand: `chat/model-picker.tsx:129,280`,
-`components/new-project.tsx:238`, `components/project-settings.tsx:473`,
-`settings-chrome.tsx:857` (inside `PickList`).
-
-**Verdict: fit it.** Each keeps its own placeholder and label; none needs its own frame.
-
 ### N8 — A ring spinner in the todos pill
 
 `chat/todos.tsx:99` draws `size-5 rounded-full border-2 border-muted border-t-primary
@@ -111,11 +63,9 @@ motion-safe:animate-spin` — a loader painted with two borders, while `ui/spinn
 
 **Verdict: fit it.** `Spinner` at the pill's size. The PR icon's spin is E5 and stays.
 
-### N9 — Two dead files
+### N9 — One dead primitive
 
-`components/skill-sheet.tsx` (137 lines) lost its callers in #916, which removed the AFK workflow
-machine (ADR 0110); its own last edit was #565, so it has been dead and maintained at once.
-`components/ui/toggle-group.tsx` has never been imported.
+`components/ui/toggle-group.tsx` has never been imported. (`skill-sheet.tsx` went with the pick-row
+round, ADR 0142.)
 
-**Verdict: delete both.** A component nobody calls is a component nobody keeps true; `skill-sheet`'s
-`SkillRow` knowledge lives on in `skill-row.tsx`, which still has two callers.
+**Verdict: delete it.** A component nobody calls is a component nobody keeps true.

@@ -33,11 +33,12 @@ component with its importers; `references/deviations.md` is what is currently of
 | A screen's column and its header | `Screen` (`settings-chrome`) | A settings-shaped screen: sticky header over one centred column of groups. Its title slot is for a page that is a row's detail |
 | A row in a list of things | `ItemRow` | Projects, Code, Meetings, Research, a bot's chats, the Canvas list. Icon disc, title, age, one status line, unread dot |
 | A row in a settings-shaped screen | `RowText` / `LinkRow` / `SwitchRow` / `ValueRow` | A value shows, the edit drills in (`settings-ux`). Never an input inside the row |
+| A row a pop-up offers | `PickRow` in a `PickGroup` | A model, a bot, a mode, a Prompt, a skill in `/`, a pull request, a setting's value. 44px at its shortest, a tick or a chevron by the group's `mode` (ADR 0142) |
 | A group of rows | `Group` | Settings and skills. One 24px card, rows square inside it, hairline showing between |
 | A card that is a feature's own surface | `Card` (`ui/card`) | A Routines job, a bot gallery card, an account panel. Flat `bg-card`, one hairline ring |
 | A card inside a thread | `CARD_BASE` / `CARD` / `FLAT_CARD` (`chat/session-cards.tsx`) | A question, an approval, a plan, a resolved card. `CARD` floats in the composer slot, `FLAT_CARD` sits in the thread |
 | Anything opened over the page | `Popup` | A pick, a detail, a form, a list. Bottom sheet below 1024px, side drawer from it, menu when `anchor` is a button. ADR 0141's foot is the one exception |
-| A yes-or-no question | `ConfirmDestructive` / `ConfirmDialog` | A delete, a remove, a discard. Centred `AlertDialog` at every width, two actions, never a sheet |
+| A yes-or-no question | `ConfirmDestructive` | A delete, a remove, a discard. Centred `AlertDialog` at every width, two actions, never a sheet; it owns the write, so a refusal stays on screen |
 | A full-screen takeover | `FullscreenPopup` | The Previewer and the meeting recorder. Nothing else |
 | A quiet choice from a button | `Popup anchor` (menu) | The composer's `+`, a model field, a project pick. Never a sheet for a two-row pick |
 | A notice inside a screen or sheet | `Banner` | Above what it is about. Tone plus words; no icon where the room is tight |
@@ -47,7 +48,7 @@ component with its importers; `references/deviations.md` is what is currently of
 | A list with nothing in it | *(none yet — `EmptyState` is the extraction)* | One icon disc, one sentence saying what would fill it, one action where the screen can make one. Three copies exist today; the fourth is the deviation |
 | A shape about to fill | `Skeleton` | A row, a card, an image cell while its read is out |
 | Something running | `Spinner` | Beside the words it belongs to, 16px. Never a private ring |
-| A field of search | `SearchField` | Every search: a list's bar, a sheet's list, a picker |
+| A field of search | `SearchField` (`components/search-field.tsx`) | Every search: a list's bar, a sheet's list, a picker, a form |
 | A pill that filters | `Chip` + `ChipRow` | A row of alternatives, 44px, pressed state |
 | A pill that reports | `Badge`, `RepoChips` | Read-only metadata: a category, a repo and its branch. Never pressable |
 | A pill above the composer | `PILL` (`chat/pill.ts`) | Todos, outputs, a pull request. One row, one height |
@@ -59,8 +60,9 @@ component with its importers; `references/deviations.md` is what is currently of
    `below` slot and 44px icon circles. A screen that writes `<header className="sticky top-0 …">`
    has forked the bar. ADR 0140 settled this after three copies drifted in opposite directions.
 2. **One row system per context, and none written by hand.** A *list* row is `ItemRow`; a *settings*
-   row is the `settings-chrome` kit. They are different on purpose: a list row carries a mark, an
-   age and a status line; a settings row carries a title over its value. A screen picks one and
+   row is the `settings-chrome` kit; a row *a pop-up offers* is `PickRow` in a `PickGroup`. They are
+   different on purpose: a list row carries a mark, an age and a status line; a settings row carries
+   a title over its value; a pick row carries the one state its mode promises. A screen picks one and
    stops. A row whose title is a bare `<span>` in a flex is a row that will drift.
 3. **Cards: three kinds, no fourth.** A feature card (`Card`), a thread card (`CARD_BASE`), or a
    group (`Group`). `rounded-3xl border bg-card` typed by hand is the fourth kind and is the
@@ -68,9 +70,11 @@ component with its importers; `references/deviations.md` is what is currently of
 4. **One overlay.** `Popup` decides sheet, drawer or menu from the width and the anchor. A bare
    `Sheet`, `Dialog` or `Drawer` is a bug unless the surface is a confirmation (`AlertDialog`) or a
    full-screen takeover. Pop-ups are push, not edit-in-place.
-5. **One question.** A destructive confirmation is `AlertDialog`, `size="sm"`, Cancel plus the one
-   destructive action, and it stays open while the write runs. Two components do this today
-   (`ConfirmDestructive` and `ConfirmDialog`) — that is a pending fix, not permission for a third.
+5. **One question.** A destructive confirmation is `ConfirmDestructive`: `AlertDialog`, `size="sm"`,
+   Cancel plus the one destructive action, and it owns the write — a promise that rejects keeps it
+   open with the host's words. The six dialogs that are not yes-or-no questions (a rename form, a
+   three-way exit, a permission question, a reminder, a one-action notice, the recorder's stop) keep
+   their own, and say why in their file.
 6. **Notices have three homes and they are not interchangeable.** `Banner` is a state of the screen;
    `SystemLine` is the app speaking about the thread; `toast` is the answer to an action. A failure
    the screen can keep showing belongs in a banner or a row, not in a toast that disappears.
@@ -80,8 +84,9 @@ component with its importers; `references/deviations.md` is what is currently of
 8. **Empty says what would fill it.** One sentence, muted, in the app's voice. No illustration, no
    paragraph about why the screen exists. Three screens already draw the same disc-and-sentence by
    hand (Projects, Meetings, Code): the next one extracts `EmptyState` rather than copying it.
-9. **One search field.** `SearchField` already handles the 44px target, the clear button, the
-   Escape and the label. A new input with a `SearchIcon` beside it is the duplicate.
+9. **One search field.** `SearchField` handles the 44px target, the clear button, the label and the
+   browser's own clear. A new input with a `SearchIcon` beside it is the duplicate, and no picker,
+   sheet or form draws its own.
 10. **The numbers are not per-screen.** 44px for anything tappable, 56px for a row, 640/672 for the
     reading column and the card box, 16px typed text, one breakpoint at 1024px. A screen that wants
     its own is asking for an app-wide change (ADR 0055), not a local one.
@@ -89,8 +94,9 @@ component with its importers; `references/deviations.md` is what is currently of
     screen that has not decided what it is for.
 12. **A surface is named by what it is, not where it was first used.** A component that grew in one
     feature and now has a second caller moves to `components/` with a doc comment saying when it
-    shows and where — `item-list.tsx` is that move done. `PrRow`, in `pr-pill.tsx`, is the same row
-    still written privately inside the file of the pill it shares a name with.
+    shows and where — `item-list.tsx` and `pick-row.tsx` are that move done. `PrRow`, in
+    `components/pr-row.tsx`, is a twelve-line caller of `PickRow`: the disc, the state word and its
+    colour are the part worth not copying.
 
 ## Settling a deviation
 
@@ -139,7 +145,12 @@ so every finding is read, then settled:
 - Which component from the table draws it? If the answer is "a new one", is the new one in the
   table, and does more than one surface need it?
 - Is the bar `ChatHeader`, or a `<header>` that was pasted?
-- Is every row a row of its context (`ItemRow` or the settings kit), or a hand-flexed title?
+- Is every row a row of its context (`ItemRow`, the settings kit, or `PickRow`), or a hand-flexed
+  title?
+- Is a pick in a `PickGroup` whose `mode` says what its rows are, at 44px or taller, with its action
+  as a sibling of the pick button?
+- Is every search `SearchField`, every bar `ChatHeader` pinned, every destructive question
+  `ConfirmDestructive`?
 - Is the card one of the three kinds, and is a nested surface's radius smaller than its parent's?
 - Is the overlay `Popup` — sheet below 1024px, drawer or menu from it — with a `PopupHeader`?
 - Is the question `AlertDialog` with two actions, Cancel first?
@@ -162,5 +173,10 @@ so every finding is read, then settled:
   place; a toast is gone in three seconds and the screen looks empty, not failed.
 - **An exception registry that only grows.** Re-read it when the surface it excuses is next touched;
   the 29px work row is deliberate, a spinner somebody forgot is not.
+- **44px mistaken for a height.** A pick row with a muted line is ~56; 44 is the floor. A `size` prop
+  or a fixed height brings back the two heights this replaced.
+- **Folding the dialogs that are not yes-or-no.** A rename form, a three-way exit, a permission
+  question, a reminder and a one-action notice look like a confirmation and are not: folding them
+  needs a prop that means "this one is different", which is the row-per-screen fault again.
 - **Reading the script's output as the review.** It finds shapes. Whether the shape is right is the
   table, the ADR and the three verdicts above.

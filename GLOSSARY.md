@@ -8,6 +8,18 @@ Gots is a client for one Hermes Agent server: chat with your bots from a phone, 
 Who you are to Gots. Signed out means it has ended, and only a fresh sign-in brings it back.
 _Avoid_: login, account, user, "logged out"
 
+**Pick row**:
+One row of a list a pop-up offers — a model, a bot, a mode, a Prompt, a skill to run, a pull request, a setting's value. It is a control, not a list row: 44px at its shortest, one mark, a name, at most one muted line, and the one state its mode promises.
+_Avoid_: option row, list item, choice row
+
+**Pick group**:
+The list a pick row sits in, and the thing that says what its rows are: one of several, each on its own, a way out, or a cursor to run. A row outside one is a way out.
+_Avoid_: picker list, options list
+
+**Cursor**:
+The row a list's keyboard is on, which is not the row that is chosen. The `/` menu has a cursor and no choice; a settings pick has a choice and no cursor.
+_Avoid_: selection, highlight, focus
+
 **Identity**:
 The sign-in service an account session lives in. The Android app talks to it directly; the browser goes through the library.
 _Avoid_: auth server, login service, GoTrue
