@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CircleAlertIcon, MessageCircleIcon, TimerIcon } from "lucide-react"
+import { CircleAlertIcon, MessageCircleIcon, RotateCcwClockIcon } from "lucide-react"
 import {
   Link,
   Navigate,
@@ -224,7 +224,7 @@ function ChatList({
               "shrink-0 text-muted-foreground",
             )}
           >
-            <TimerIcon />
+            <RotateCcwClockIcon />
           </Link>
         }
       />
@@ -307,7 +307,7 @@ export function BotChatItem({
     <ItemRow
       icon={
         row.routine ? (
-          <TimerIcon />
+          <RotateCcwClockIcon />
         ) : row.needs ? (
           <CircleAlertIcon />
         ) : working ? (

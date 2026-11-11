@@ -148,7 +148,9 @@ const rowOf = (id: string) => find(`ul a[href="/c/${id}"]`)
 const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]"))
 /** The picture a row wears where its title starts: its own icon, never the bot's face. */
 const iconOf = (id: string) =>
-  rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle, svg.lucide-circle-alert")
+  rowOf(id)?.querySelector(
+    "svg.lucide-rotate-ccw-clock, svg.lucide-message-circle, svg.lucide-circle-alert",
+  )
 /** The disc a row's icon stands in, which is where a list picks its tone. */
 const discOf = (id: string) => rowOf(id)?.querySelector('[data-slot="row-mark"] span.rounded-full')
 
@@ -349,7 +351,7 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
       "and its age comes from the record's own clock",
     )
     assert.ok(
-      iconOf("routine-job-1-cron_9")?.classList.contains("lucide-timer"),
+      iconOf("routine-job-1-cron_9")?.classList.contains("lucide-rotate-ccw-clock"),
       "the row wears the routine's icon",
     )
     assert.ok(
