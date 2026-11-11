@@ -15,6 +15,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
 import { db, deleteConversation, type Message } from "@/lib/db"
+import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
   Nav,
@@ -366,6 +367,30 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
       "a run waits on nobody: nothing can be answered in it",
     )
   })
+})
+
+test("the list answers the press with the step behind it, and leaves the app its own", async () => {
+  await seed([{ id: "quiet", title: "An old chat", at: 100 }])
+  const stepped = atDepth(1)
+  try {
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the bot's chats")
+      assert.equal(pressBack(), "screen", "a list something opened answers the press")
+      assert.deepEqual(stepped.backs, [1], "with the one step back to whatever opened it")
+    })
+  } finally {
+    stepped.restore()
+  }
+  const entry = atDepth(0)
+  try {
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the bot's chats")
+      assert.equal(pressBack(), "app", "and at the app's first entry the press is the app's")
+      assert.deepEqual(entry.backs, [], "with nothing behind it to step to")
+    })
+  } finally {
+    entry.restore()
+  }
 })
 
 test("the list holds every chat the bot has, so a pin and a chat past the bound are both reachable", async () => {

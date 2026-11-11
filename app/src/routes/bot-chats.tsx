@@ -177,7 +177,9 @@ function ChatList({
   // the only thing that pushes a list, but a typed or restored address can land it on any entry.
   const backToChat = Boolean(selected)
   const marks = useReadMarks()
-  useEffect(() => (pushed ? setBackGuard(back()) : undefined), [pushed, back])
+  // The press is the app's at its first entry — where this list stands when nothing opened it — and a
+  // step back wherever something did, which `back()` answers itself.
+  useEffect(() => setBackGuard(back()), [back])
   // The host's answer for each session, read once for the whole list: a run started on another device
   // is in flight here too, and only the poll can say so.
   const runs = useAllLiveRuns()
