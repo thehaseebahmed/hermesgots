@@ -10,6 +10,7 @@
  * chat yet keeps the record's own clock and draws no line.
  */
 import { filterByFuzzy } from "./fuzzy.ts"
+import { isUnread } from "./session-work.ts"
 import { reasonText } from "./wait-text.ts"
 import { NO_MESSAGES, plainLine } from "./words.ts"
 import type { WaitingReason } from "./hermes.ts"
@@ -155,6 +156,61 @@ export function orderChatRows(rows: readonly ChatListRow[]): ChatListRow[] {
  */
 export function chatList(rows: readonly ChatListRow[], query: string): ChatListRow[] {
   return filterByFuzzy(orderChatRows(rows), query, (row) => [row.title, row.line])
+}
+
+/**
+ * The pills a bot's list narrows its rows by, in the order they stand. A filter only narrows: the one
+ * pressed keeps the rows it names and the list's own order decides where they sit.
+ */
+export type ChatFilter = "all" | "unread" | "chats" | "rooms" | "routines"
+
+/**
+ * The pills, each with the words it wears and the sentence it says when it keeps nothing. The sentence
+ * lives here rather than on the screen so a pill and its emptiness cannot be worded apart, the way the
+ * search's own emptiness is `chatList`'s to keep. All's sentence is the list's emptiness with nothing
+ * narrowing it, so an empty bot says "No chats yet." and a pill holding nothing says its own.
+ */
+export const CHAT_FILTERS: readonly { key: ChatFilter; label: string; empty: string }[] = [
+  { key: "all", label: "All", empty: "No chats yet." },
+  { key: "unread", label: "Unread", empty: "No unread chats." },
+  { key: "chats", label: "Chats", empty: "No chats." },
+  { key: "rooms", label: "Rooms", empty: "No rooms." },
+  { key: "routines", label: "Routines", empty: "No routines." },
+]
+
+/** This device's read marks, as the rows' dots and the Unread pill both read them. */
+export type ReadMarks = Record<string, number>
+
+/**
+ * What each pill keeps. Unread is the row's own dot (`isUnread`, with the same mark), Chats is a row
+ * that is neither a room nor a routine's run, and a room's and a run's are the row's own markers — so
+ * the three kinds partition the list and the pill, its dot and its sentence cannot disagree.
+ */
+const KEEPS: Record<ChatFilter, (row: ChatListRow, marks: ReadMarks) => boolean> = {
+  all: () => true,
+  unread: (row, marks) => isUnread(row.at, marks[row.id]),
+  chats: (row) => !row.room && !row.routine,
+  rooms: (row) => Boolean(row.room),
+  routines: (row) => Boolean(row.routine),
+}
+
+/** The rows one pill keeps, in the order they were handed over. A filter never re-orders the list. */
+export function filterChatRows(
+  rows: readonly ChatListRow[],
+  filter: ChatFilter,
+  marks: ReadMarks,
+): ChatListRow[] {
+  return rows.filter((row) => KEEPS[filter](row, marks))
+}
+
+/** Whether a stored value is one of the pills, for a setting read off a device an older build wrote. */
+export function isChatFilter(value: unknown): value is ChatFilter {
+  return CHAT_FILTERS.some((entry) => entry.key === value)
+}
+
+/** What a pill says when it keeps nothing, by its key. */
+export function emptyOf(filter: ChatFilter): string {
+  return (CHAT_FILTERS.find((entry) => entry.key === filter) ?? CHAT_FILTERS[0]).empty
 }
 
 const DAY_MS = 86_400_000

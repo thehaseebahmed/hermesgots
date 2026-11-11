@@ -13,6 +13,7 @@ import {
   ChevronRightIcon,
   EyeIcon,
   EyeOffIcon,
+  Trash2Icon,
   type LucideIcon,
 } from "lucide-react"
 
@@ -26,6 +27,7 @@ import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   InputGroup,
@@ -287,6 +289,35 @@ export function SwitchRow({
 /** The muted caption over a card: how a page names its groups now, in place of a heading. */
 export function Caption({ children }: { children: ReactNode }) {
   return <p className="px-5 text-[13px] font-medium text-muted-foreground">{children}</p>
+}
+
+/**
+ * The one control a page ends on when it takes something away: a pill in the destructive ink over
+ * the tint `DESIGN.md` gives that act, with the trash at its lead, in the words of the thing it
+ * removes — *Delete bot* at a bot's page's foot, *Remove server* on a server's sheet. One shape, so
+ * two pages that both destroy don't read two ways.
+ */
+export function DestructiveButton({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void
+  disabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="destructive"
+      className="h-11 rounded-full"
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <Trash2Icon data-icon="inline-start" />
+      {children}
+    </Button>
+  )
 }
 
 /**

@@ -24,15 +24,18 @@ import {
   find,
   findAll,
   json,
+  labelled,
   laptop,
   mediaHost,
   missing,
   mount,
   path,
+  refuseFirst,
   seedSettings,
   settle,
   type HostAsk,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 /** The MCP page, at the address the bot's settings list gives it, with the address on screen. */
@@ -67,6 +70,14 @@ const SERVERS = [
   },
 ]
 
+/** The Catalogue entry the failed-read case opens: one that declares a value, so its form is its own. */
+const ENTRY = {
+  name: "linear",
+  description: "Linear's issues, over MCP.",
+  installed: false,
+  needs_config: true,
+}
+
 const addButton = () => find("[data-mcp-add]")
 /** Every control on the screen answering to the Add action's name, wherever it sits. */
 const namedAdd = () =>
@@ -80,13 +91,23 @@ const sectionCaption = (section: string) =>
 
 /**
  * A bot of this test's own — its connection names a host, so no other test's feature answers are
- * read — with the plugin's `info` advertising `features` and its `mcp` route answering `servers`.
+ * read — with the plugin's `info` advertising `features`, its `mcp` route answering `servers`, its
+ * Catalogue answering the entry above, and one named thing's own block refused `refusals` times
+ * before it answers. The reads of a named thing are recorded, so a case can count the one a retry
+ * adds.
  */
-async function seed(name: string, features: string[], servers: unknown[] = SERVERS) {
+async function seed(
+  name: string,
+  features: string[],
+  servers: unknown[] = SERVERS,
+  { refusals = 0 }: { refusals?: number } = {},
+) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
   const asked: HostAsk[] = []
+  const reads: string[] = []
+  const refuseRead = refuseFirst(refusals, "This bot's config.yaml can't be read right now.")
   mediaHost({ host: name, features, asked })
   const host = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -97,26 +118,42 @@ async function seed(name: string, features: string[], servers: unknown[] = SERVE
       asked.push({ host: url.host, path: url.pathname, search: url.search, authorization: null })
       return json({ object: { servers } })
     }
-    // One server's own block, as its page reads it: what the Config tab is built from.
-    const detail = url.pathname.match(/\/plugins\/gots\/mcp\/([^/]+)$/)
-    if (detail)
-      return json({
-        object: {
-          server: {
-            name: decodeURIComponent(detail[1]),
-            source: "config",
-            transport: "stdio",
-            command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-github"],
-            auth: "none",
-            editable: true,
-            values: [{ name: "GITHUB_TOKEN", set: true }],
-          },
-        },
-      })
+    if (url.pathname.endsWith("/plugins/gots/mcp/catalogue"))
+      return json({ object: { entries: [ENTRY] } })
+    // One named thing, read on its own: a server's block (what the Config tab is built from) or a
+    // Catalogue entry's values (what its form is built from).
+    const read = url.pathname.match(/\/plugins\/gots\/mcp\/(catalogue\/)?([^/]+)$/)
+    if (read) {
+      reads.push(url.pathname)
+      const refusal = refuseRead()
+      if (refusal) return refusal
+      return read[1]
+        ? json({
+            object: {
+              entry: {
+                ...ENTRY,
+                values: [{ name: "LINEAR_TOKEN", prompt: "A token", required: true, secret: true }],
+              },
+            },
+          })
+        : json({
+            object: {
+              server: {
+                name: decodeURIComponent(read[2]),
+                source: "config",
+                transport: "stdio",
+                command: "npx",
+                args: ["-y", "@modelcontextprotocol/server-github"],
+                auth: "none",
+                editable: true,
+                values: [{ name: "GITHUB_TOKEN", set: true }],
+              },
+            },
+          })
+    }
     return host(input as RequestInfo, init)
   }) as typeof fetch
-  return asked
+  return { asked, reads }
 }
 
 test("the + sits in the screen header, not in the page's body", async () => {
@@ -156,13 +193,13 @@ test("its tap opens the Add sheet, with both ways in", async () => {
 })
 
 test("a Host without mcps_add has no + anywhere, and still lists its servers", async () => {
-  const asked = await seed("mcp-add-withheld", ["mcps", "mcps_catalogue"])
+  const host = await seed("mcp-add-withheld", ["mcps", "mcps_catalogue"])
   await mount(settings(), async () => {
     await settle()
     assert.ok(missing("[data-mcp-add]"), "no +")
     assert.equal(namedAdd().length, 0, "and nothing named Add a server")
     assert.equal(
-      asked.filter((one) => one.path.endsWith("/plugins/gots/mcp")).length,
+      host.asked.filter((one) => one.path.endsWith("/plugins/gots/mcp")).length,
       1,
       "the page still read the bot's servers",
     )
@@ -323,5 +360,85 @@ test("opened again with the host away, the page draws the servers the host last 
   await mount(settings(), async () => {
     await until(async () => Boolean(find('[data-mcp-section="config"]')), "the held servers")
     assert.ok(missing('[aria-label="github on"]'), "no switch until the host answers")
+  })
+})
+
+test("a refused configuration read says so, and the retry draws the form", async () => {
+  const host = await seed("mcp-config-refused", ["mcps", "mcps_config"], SERVERS, { refusals: 1 })
+  await mount(settings("/settings/bots/bot-1/mcps/github"), async () => {
+    const notice = '[data-mcp-server="github"] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.equal(
+      wordsOf(find(notice)),
+      "Couldn't load this server's configuration.",
+      "the notice says what the tab couldn't read",
+    )
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(
+      retry.getAttribute("title"),
+      "Try again",
+      "an icon, so the words it is named are what a reader hears",
+    )
+    assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
+    assert.equal(
+      findAll('[data-mcp-server="github"] button').filter((one) => wordsOf(one) === "Try again")
+        .length,
+      0,
+      "the outline pill is replaced rather than kept beside the notice",
+    )
+    assert.equal(host.reads.length, 1, "the tab asked its block once, and was refused")
+
+    await click(retry)
+    await until(async () => Boolean(find("#mcp-config-command")), "the form the host described")
+
+    assert.deepEqual(
+      host.reads,
+      ["/api/plugins/gots/mcp/github", "/api/plugins/gots/mcp/github"],
+      "the tap asked the same route again, once",
+    )
+    assert.ok(missing(notice), "the notice goes with it")
+    const command = find("#mcp-config-command") as HTMLInputElement | null
+    assert.equal(command?.value, "npx", "and the form holds what the host answered")
+  })
+})
+
+test("a refused entry read says so, and the retry draws the fields", async () => {
+  const host = await seed(
+    "mcp-entry-refused",
+    ["mcps", "mcps_add", "mcps_catalogue"],
+    SERVERS,
+    { refusals: 1 },
+  )
+  await mount(settings(), async () => {
+    await settle()
+    await click(addButton())
+    await until(async () => Boolean(find('[data-mcp-source="catalogue"]')), "the Add sheet")
+    await click(find('[data-mcp-source="catalogue"]'))
+    await until(async () => Boolean(find("[data-catalogue]")), "the Catalogue's entries")
+    await click(find("[data-catalogue]"))
+
+    const notice = '[role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.equal(
+      wordsOf(find(notice)),
+      "Couldn't load this entry's values.",
+      "the notice says what the form couldn't read",
+    )
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(host.reads.length, 1, "the form asked its entry once, and was refused")
+
+    await click(retry)
+    await until(async () => Boolean(find("#mcp-value-LINEAR_TOKEN")), "the field the entry declares")
+
+    assert.deepEqual(
+      host.reads,
+      ["/api/plugins/gots/mcp/catalogue/linear", "/api/plugins/gots/mcp/catalogue/linear"],
+      "the tap asked the same route again, once",
+    )
+    assert.ok(missing(notice), "the notice goes with it")
   })
 })

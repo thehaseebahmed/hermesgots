@@ -24,7 +24,16 @@ import { botTabOf, botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
 import { readSpeech } from "@/lib/speech"
-import { botProfile, click, find, findAll, json, seedSettings, until } from "./component-kit.tsx"
+import {
+  botProfile,
+  click,
+  find,
+  findAll,
+  json,
+  refuseFirst,
+  seedSettings,
+  until,
+} from "./component-kit.tsx"
 
 export const speech = (patch: Record<string, unknown> = {}) => ({
   model: "small",
@@ -186,6 +195,8 @@ export function host(
     stallSpeech?: boolean
     /** The host's own sentence for a speech read it refuses. */
     refuseSpeech?: string
+    /** How many of its speech reads this host refuses before it answers. */
+    speechRefusals?: number
     refuse?: string
     writers?: { model: boolean; provider: boolean }
     /** The bot's models, as the cleanup pick's own picker reads them. */
@@ -201,6 +212,10 @@ export function host(
   const calls: { path: string; method: string; body: unknown }[] = []
   // A setting the page wrote: the read that follows answers with the route the pick moved the bot to.
   let written = false
+  const refuseSpeechRead = refuseFirst(
+    options.speechRefusals ?? 0,
+    "Speech-to-text is turned off on this host.",
+  )
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
     const method = init?.method ?? "GET"
@@ -233,8 +248,11 @@ export function host(
         if (options.refuse) return json({ error: { message: options.refuse } }, 400)
         return json({ speech: options.next ?? options.speech })
       }
+      calls.push({ path, method, body: undefined })
       if (options.stallSpeech) return new Promise<Response>(() => {})
       if (options.refuseSpeech) return json({ error: { message: options.refuseSpeech } }, 500)
+      const refusal = refuseSpeechRead()
+      if (refusal) return refusal
       if (!options.speech) return json({}, 404)
       return json({ speech: written ? (options.afterStt ?? options.speech) : options.speech })
     }
@@ -407,6 +425,14 @@ export async function seed(
   globalThis.fetch = server.fetch
   return server.calls
 }
+
+/** The page's writes, whichever route they went to: its `calls` record its reads beside them. */
+export const writes = (calls: { method: string }[]) =>
+  calls.filter((call) => call.method === "POST")
+
+/** The page's own speech reads: the read a retry asks again, once per ask. */
+export const speechReads = (calls: { path: string; method: string }[]) =>
+  calls.filter((call) => call.method === "GET" && call.path.endsWith("/api/plugins/gots/speech"))
 
 /**
  * The answer this device already read for the seeded bot, written where the page looks for it: what

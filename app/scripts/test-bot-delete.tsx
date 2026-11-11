@@ -1,9 +1,10 @@
 /**
- * Deleting a bot from its settings list: the trash in the screen's header, named for what it does;
- * the confirmation that asks first, in the copy each kind of bot settled; Cancel leaving the bot
- * where it is; Delete unlinking a linked bot's host or removing an unlinked bot's profile, and
- * landing on the Settings menu; the trash left off where an unlinked bot has nothing to fall back
- * on; and no remove or delete control of its own left on General.
+ * Deleting a bot from its settings page: the *Delete bot* button at the foot of the page, inside the
+ * column its captions and cards stand in and nowhere near the screen's header; the confirmation that
+ * asks first, in the copy each kind of bot settled; Cancel leaving the bot where it is; Delete
+ * unlinking a linked bot's host or removing an unlinked bot's profile, and landing on the Settings
+ * menu; the button left off where an unlinked bot has nothing to fall back on; and no other remove or
+ * delete control on the page at all.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -66,22 +67,33 @@ const nameOf = (button: Element) =>
 const buttonNamed = (name: string) =>
   findAll("button").find((button) => nameOf(button) === name) ?? null
 
-const trash = () => find('header button[aria-label="Delete A bot"]')
+/**
+ * The page's delete control, found by the words it shows — its accessible name, since the button
+ * carries no label of its own — and never by a header selector: the header holds none.
+ */
+const removeBot = () => buttonNamed("Delete bot")
+const headerRemovals = () =>
+  findAll("header button").filter((one) => /delete|remove/i.test(nameOf(one)))
+
 const dialog = () => find('[role="alertdialog"]')
 const title = () => find('[data-slot="alert-dialog-title"]')?.textContent ?? ""
 const description = () => find('[data-slot="alert-dialog-description"]')?.textContent ?? ""
 const inDialog = (label: string) => findText('[role="alertdialog"] button', label)
 const shut = () => until(async () => !dialog(), "the dialog shut")
 
-test("a linked bot's trash asks first, then unlinks its host and lands on the Settings menu", async () => {
+test("a linked bot's Delete bot asks first, then unlinks its host and lands on the Settings menu", async () => {
   const asked = await seed("delete-linked", [
     { id: "bot-1", name: "A bot", hostId: "host-1" },
     { id: "bot-2", name: "Second bot", hostId: "host-1" },
   ])
   await mount(settings("/settings/bots/bot-1"), async () => {
-    const control = trash()
-    assert.ok(control, "the header carries a trash named for the bot")
-    assert.ok(control!.closest("header"), "and it sits in the screen's header")
+    const control = removeBot()
+    assert.ok(control, "the page's foot carries a button reading Delete bot")
+    assert.ok(
+      control!.closest("[data-bot-settings-list]"),
+      "inside the column its captions and cards stand in",
+    )
+    assert.equal(control!.closest("header"), null, "and not in the screen's header")
     assert.equal((control as HTMLButtonElement).disabled, false, "a linked bot can always go")
     assert.ok(missing('[role="alertdialog"]'), "nothing is asked before it is tapped")
 
@@ -101,7 +113,7 @@ test("a linked bot's trash asks first, then unlinks its host and lands on the Se
     assert.equal(path(), "/settings/bots/bot-1", "Cancel leaves the bot where it was")
     assert.ok(await db.profiles.get("bot-1"), "and the bot stands")
 
-    await click(trash())
+    await click(removeBot())
     await click(inDialog("Delete"))
     // The unlink is a request and a write that follow the dialog's own turn, so wait for the rows to
     // go rather than for two flushes of React's queue: on a loaded runner the settles came back
@@ -122,14 +134,14 @@ test("a linked bot's trash asks first, then unlinks its host and lands on the Se
   })
 })
 
-test("an unlinked bot's trash asks with the copy that says its chats go too, and removes it", async () => {
+test("an unlinked bot's Delete bot asks with the copy that says its chats go too, and removes it", async () => {
   await seed("delete-unlinked", [
     { id: "bot-1", name: "A bot" },
     { id: "bot-2", name: "Second bot" },
   ])
   await mount(settings("/settings/bots/bot-1"), async () => {
-    const control = trash()
-    assert.ok(control, "the header carries a trash named for the bot")
+    const control = removeBot()
+    assert.ok(control, "the page's foot carries a button reading Delete bot")
     assert.equal(
       (control as HTMLButtonElement).disabled,
       false,
@@ -156,8 +168,8 @@ test("an unlinked bot's trash asks with the copy that says its chats go too, and
   })
 })
 
-test("the bot's own page holds no remove or delete control but the header's trash", async () => {
-  await seed("delete-general", [
+test("the bot's page ends on Delete bot, and its header carries no control at all", async () => {
+  await seed("delete-page", [
     { id: "bot-1", name: "A bot", hostId: "host-1" },
     { id: "bot-2", name: "Second bot", hostId: "host-2" },
   ])
@@ -167,21 +179,40 @@ test("the bot's own page holds no remove or delete control but the header's tras
       ["A bot"],
       "the bot's own page",
     )
-    for (const name of ["Remove A bot", "Delete bot"])
-      assert.equal(buttonNamed(name), null, `no button named ${name} on the page`)
+    const control = removeBot()
+    assert.ok(control, "with Delete bot at its foot")
+    assert.ok(
+      control!.closest("[data-bot-settings-list]"),
+      "inside the column its captions and cards stand in",
+    )
+    assert.equal(
+      findAll("[data-bot-settings-list] button").filter((one) => nameOf(one) === "Delete bot")
+        .length,
+      1,
+      "one Delete bot in the column, and the header holds none",
+    )
+    assert.deepEqual(headerRemovals(), [], "and nothing in the screen's header removes a bot")
+    assert.deepEqual(
+      findAll("button").filter((one) => /delete|remove/i.test(nameOf(one))),
+      [control],
+      "the foot button is the page's one remove control",
+    )
     absentText("button", "Remove")
     assert.ok(missing('[data-slot="alert-dialog-trigger"]'), "and nothing there asks first")
-    for (const label of ["Enabled", "Mute notifications", "Bot Profile", "Test connection"])
+    for (const label of ["Enabled", "Mute notifications", "Bot Profile", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
   })
 })
 
-test("an unlinked bot this device would be left without has the trash, and it is off", async () => {
+test("an unlinked bot this device would be left without has the button, and it is off", async () => {
   await seed("delete-alone", [{ id: "bot-1", name: "A bot" }])
   await mount(settings("/settings/bots/bot-1"), async () => {
-    const control = trash()
-    assert.ok(control, "the header still carries the trash")
-    assert.ok(control!.closest("header"), "in the screen's header")
+    const control = removeBot()
+    assert.ok(control, "the page still ends on Delete bot")
+    assert.ok(
+      control!.closest("[data-bot-settings-list]"),
+      "in the column its captions and cards stand in",
+    )
     assert.equal(
       (control as HTMLButtonElement).disabled,
       true,

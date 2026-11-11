@@ -10,7 +10,6 @@ import {
   PlusIcon,
   PlugZapIcon,
   SlidersHorizontalIcon,
-  Trash2Icon,
   WrenchIcon,
   XIcon,
   type LucideIcon,
@@ -18,7 +17,7 @@ import {
 import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
@@ -30,6 +29,7 @@ import { SkillsTab } from "@/components/skills-tab"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
+  DestructiveButton,
   EditCard,
   EditForm,
   Group,
@@ -63,7 +63,7 @@ import { useDelegationModel } from "@/lib/delegation"
 import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
-import { usePluginFeatureAnswers } from "@/lib/features"
+import { usePluginFeatureAnswers, usePluginVersion } from "@/lib/features"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
 import {
@@ -79,11 +79,8 @@ import {
   type GeneralSettings,
 } from "@/lib/general-settings"
 import {
-  checkHealth,
   GENERAL_ROUTES,
   getGeneralSettings,
-  getPluginVersion,
-  listModels,
   REMINDER_LEVELS,
   setGeneralSetting,
   type GeneralTab,
@@ -95,8 +92,8 @@ import { LLM_PROVIDERS } from "@/lib/llm-providers"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
-import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
+import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
@@ -104,12 +101,6 @@ import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
-
-type Connection =
-  | { state: "idle" }
-  | { state: "testing" }
-  | { state: "ok"; plugin: string | null; key: string }
-  | { state: "error"; message: string; key: string }
 
 /** What a page wears, and the plugin feature it needs where a host can withhold it. */
 type PageMeta = {
@@ -269,12 +260,15 @@ function DeleteBotDialog({
   onDeleted?: () => void
 }) {
   const linked = Boolean(profile.hostId)
+  // The confirmation's own sentence: who else the unlink takes with it. Nothing is scanned while the
+  // dialog is shut — a write to any profile re-emits this query, and the page writes the plugin
+  // version on its own open, so an always-live query would scan the table on every such write.
   const siblings = useLiveQuery(
     async (): Promise<Profile[]> =>
-      profile.hostId
+      open && profile.hostId
         ? db.profiles.filter((p) => p.hostId === profile.hostId && p.id !== profile.id).toArray()
         : [],
-    [profile.hostId, profile.id],
+    [open, profile.hostId, profile.id],
   )
   const others = siblings?.map((p) => p.name).join(", ")
 
@@ -336,26 +330,28 @@ function PageRow({
 /**
  * A bot's own page: the plugin banner when it is out of date, then what the bot is — its switches,
  * its profile and how it connects — under the caption *Bot*, and the settings behind it in one card
- * under *Settings* (ADR 0106). A page the plugin withholds draws no row. The header's trash deletes
- * the bot, asking first; an unlinked bot is left alone where this device holds no other bot to fall
- * back on.
+ * under *Settings* (ADR 0106). A page the plugin withholds draws no row. The page ends on *Delete bot*
+ * at the foot of its column, asking first; an unlinked bot is left alone where this device holds no
+ * other bot to fall back on.
  */
 export function BotSettingsList({
   profile,
   replace,
-  canDelete = false,
   onDeleted,
 }: {
   profile: Profile
   /** Whether the row swaps the pane beside it rather than opening a screen of its own. */
   replace?: boolean
-  /** Whether this device holds a bot to fall back on: an unlinked bot can't be the last one. */
-  canDelete?: boolean
   onDeleted?: () => void
 }) {
   const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
   const [confirming, setConfirming] = useState(false)
   const linked = Boolean(profile.hostId)
+  // The rule is the device's own: an unlinked bot cannot be the last one, since removing it would
+  // leave nothing to fall back on. Counted here rather than handed in, so the page a withheld tab
+  // address falls back to carries the same answer as the page its own address opens.
+  const held = useLiveQuery(() => db.profiles.count(), [])
+  const canDelete = (held ?? 0) > 1
   const navigate = useNavigate()
   // A row the host says it hasn't got is not drawn; a row whose answer hasn't come back yet is, so
   // the card fills in rather than appearing a row at a time.
@@ -364,23 +360,6 @@ export function BotSettingsList({
     if (gated(segment) && answers[segment] === "no") return null
     return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
   })
-
-  // The trash is the screen's own action, and its handler is the setter: the header reads the node
-  // it was published with, and never re-renders for a change in the list below it.
-  useHeaderAction(
-    "delete",
-    <Button
-      variant="outline"
-      size="icon-lg"
-      className="size-11 rounded-full"
-      aria-label={`Delete ${profile.name}`}
-      title={`Delete ${profile.name}`}
-      disabled={!linked && !canDelete}
-      onClick={() => setConfirming(true)}
-    >
-      <Trash2Icon />
-    </Button>,
-  )
 
   return (
     <div className="flex flex-col gap-4" data-bot-settings-list>
@@ -393,6 +372,11 @@ export function BotSettingsList({
       <BotCard profile={profile} onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))} />
       <Caption>Settings</Caption>
       <Group>{rows}</Group>
+      {/* The page's own last control, under its last card: the button MCP Details wears as *Remove
+          server*, in this page's words. */}
+      <DestructiveButton onClick={() => setConfirming(true)} disabled={!linked && !canDelete}>
+        Delete bot
+      </DestructiveButton>
       <DeleteBotDialog
         profile={profile}
         open={confirming}
@@ -424,7 +408,7 @@ type PageBody = {
 function botPage({ profile, sub, close, large }: PageBody) {
   // The page asked for is withheld, or its host hasn't answered: what is left to draw is the bot's
   // own page. Where a pane sits beside this one, that page is already in it — drawing it again
-  // would put two cards, two trash buttons and two feature reads on one screen.
+  // would put two cards, two Delete bot buttons and two feature reads on one screen.
   if (!sub) return large ? null : <BotSettingsList profile={profile} />
   if (!large) return <BotEditScreen profile={profile} sub={sub} close={close} />
   // From 1024px the bot's page is the pane beside this one, so the pane holds its edit alone.
@@ -597,6 +581,95 @@ function botEdit(id: string): BotEdit | undefined {
 const RESTART_NOTE = "Applies when this bot's Hermes restarts."
 
 /**
+ * The page's own read: the host's General (or Delegation) block, and the sentence where it came back
+ * without one. `retry` asks the same read again where it threw; a host that answered without its
+ * block keeps its sentence and gets no control, since an answer is an answer. `keep` takes the block
+ * a write answers, because a write's answer is fresher than any read could be.
+ */
+function useGeneralSettings(profile: Profile, tab: GeneralTab) {
+  const connection = connectionKey(profile)
+  const route = GENERAL_ROUTES[tab].path
+  const page = `${connection}/${tab}`
+  const [block, setBlock] = useState<GeneralSettings>()
+  const [problem, setProblem] = useState<string>()
+  const [read, setRead] = useState("")
+  const [fresh, setFresh] = useState("")
+  const { attempt, landed, landedThrew, release, retry } = useReadAttempt(page)
+
+  useEffect(() => {
+    let cancelled = false
+    let answered = false
+    // The page opens on the last answer this host gave this device, and the fresh read replaces it;
+    // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
+    // Only the first open seeds from that copy: a retry asks the host, and seeding again would
+    // flicker the rows and strobe the sentence under them.
+    setBlock(undefined)
+    if (seedsFromCache(attempt))
+      void cachedHost<GeneralSettings>(profile, route).then((held) => {
+        if (!cancelled && !answered && held) setBlock(held)
+      })
+    void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((next) => {
+        if (cancelled) return
+        answered = true
+        setRead(connection)
+        setProblem(
+          next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
+        )
+        if (next) {
+          setBlock(next)
+          setFresh(page)
+          void keepHost(profile, route, next)
+        }
+        landed()
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        // A read that failed is still an answer: the page stops loading and says what the host said.
+        setRead(connection)
+        setProblem(
+          error instanceof Error
+            ? error.message
+            : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
+        )
+        landedThrew()
+      })
+    return () => {
+      cancelled = true
+      release(attempt)
+    }
+    // The connection is what the answer belongs to: another bot's read is not this page's, and no
+    // other field of the profile moves what the host holds. `attempt` is the read asked again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id, connection, tab, attempt])
+
+  const keep = useCallback(
+    (next: GeneralSettings) => {
+      setBlock(next)
+      setFresh(page)
+      void keepHost(profile, route, next)
+    },
+    [profile, route, page],
+  )
+
+  return {
+    block,
+    problem,
+    /**
+     * Whether the block drawn is this device's copy rather than the host's own answer: nothing is
+     * written from it until the host's answer lands.
+     */
+    stale: Boolean(block) && fresh !== page,
+    /** Whether the page holds an answer to draw at all, this device's copy or the host's. */
+    seeded: read === connection || Boolean(block),
+    /** The block a write answered: it is the host's word, so it is drawn without a read. */
+    keep,
+    /** The same read, asked again — and nothing at all where the last one did not throw. */
+    retry,
+  }
+}
+
+/**
  * General: the settings on this bot's own Hermes, as its Dashboard's Config > General tab holds
  * them. The rows are the host's own — keys, kinds and choices all arrive with the read, so a key
  * Hermes adds later is a row without an app release — and each is drawn as this app draws a setting:
@@ -625,56 +698,10 @@ function GeneralPage({
   const own = botModel(profile, info)
   const chain = useFallbackModels(delegation ? null : profile)
   const subagent = useDelegationModel(delegation ? profile : null)
-  const connection = connectionKey(profile)
-  const [block, setBlock] = useState<GeneralSettings>()
-  const [problem, setProblem] = useState<string>()
-  const [read, setRead] = useState("")
-  const [fresh, setFresh] = useState("")
+  const settings = useGeneralSettings(profile, tab)
+  const { block, problem, stale, seeded, keep, retry } = settings
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
-  const route = GENERAL_ROUTES[tab].path
-  const page = `${connection}/${tab}`
-
-  useEffect(() => {
-    let cancelled = false
-    let landed = false
-    // The page opens on the last answer this host gave this device, and the fresh read replaces it;
-    // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
-    setBlock(undefined)
-    void cachedHost<GeneralSettings>(profile, route).then((held) => {
-      if (!cancelled && !landed && held) setBlock(held)
-    })
-    void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((next) => {
-        if (cancelled) return
-        landed = true
-        setRead(connection)
-        setProblem(
-          next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
-        )
-        if (next) {
-          setBlock(next)
-          setFresh(page)
-          void keepHost(profile, route, next)
-        }
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        // A read that failed is still an answer: the page stops loading and says what the host said.
-        setRead(connection)
-        setProblem(
-          error instanceof Error
-            ? error.message
-            : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
-        )
-      })
-    return () => {
-      cancelled = true
-    }
-    // The connection is what the answer belongs to: another bot's read is not this page's, and no
-    // other field of the profile moves what the host holds.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.id, connection, tab])
 
   // Every write answers the host's fresh block, so the row a person just changed is the row the
   // host now holds — and a refused write leaves the page as it was, with the host's sentence.
@@ -692,9 +719,7 @@ function GeneralPage({
         // A host that answered without its block hasn't saved anything this page can draw: say so
         // rather than closing the form over the value it held before.
         if (!next) throw new Error("The host answered without its settings.")
-        setBlock(next)
-        setFresh(page)
-        void keepHost(profile, route, next)
+        keep(next)
         return true
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Couldn't save that.")
@@ -703,12 +728,9 @@ function GeneralPage({
         setSaving(undefined)
       }
     },
-    [profile, tab, page, route],
+    [profile, tab, keep],
   )
 
-  // Drawn from this device's copy: nothing is written from it until the host's own answer lands.
-  const stale = Boolean(block) && fresh !== page
-  const seeded = read === connection || Boolean(block)
   const groups = block ? generalGroups(block.fields) : []
   // An address into a key this host doesn't hold: the page goes back to itself rather than standing
   // on a screen that would draw nothing and write to a field it has no row for.
@@ -729,7 +751,9 @@ function GeneralPage({
           onClose={close}
         />
       ) : problem ? (
-        <Banner tone="warning">{problem}</Banner>
+        <Banner tone="warning" action={retry && <Retry onRetry={retry} />}>
+          {problem}
+        </Banner>
       ) : (
         <div className="flex items-center justify-center py-16" data-general-loading>
           <Spinner />
@@ -765,7 +789,11 @@ function GeneralPage({
     const others = first?.section === "" ? rest : groups
     return (
       <div className="flex flex-col gap-4" {...{ [`data-bot-${tab}`]: true }}>
-        {problem && <Banner tone="warning">{problem}</Banner>}
+        {problem && (
+          <Banner tone="warning" action={retry && <Retry onRetry={retry} />}>
+            {problem}
+          </Banner>
+        )}
         <Group>
           {/* The row is the page's own lead row, drawn only over a page the host let this app read: a
               refused page says so in its banner and carries no row (#992). */}
@@ -992,75 +1020,43 @@ function FieldForm({
 }
 
 /**
- * What a bot is, on its own page: its switches, then what it looks like and how it connects, then
- * what sits on its Hermes. Every setting is a value that opens its edit or its pick — no card holds
- * a field (ADR 0055).
+ * What a bot is, on its own page: its switches and the plugin its host runs, then what it looks like
+ * and how it connects, then what sits on its Hermes. Every setting is a value that opens its edit or
+ * its pick — no card holds a field (ADR 0055) — but the plugin is a fact the page reports, so its
+ * row opens nothing (ADR 0143).
  */
 function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) => void }) {
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
   const character = BOTS.find((bot) => bot.id === profile.botId)
-  const [connection, setConnection] = useState<Connection>({ state: "idle" })
-  // The answer belongs to the connection it tested: an edited address or key is a connection nothing
-  // has asked yet, so the row reads idle rather than claiming a server it never reached.
-  const key = connectionKey(profile)
-  const tested = connection.state === "ok" || connection.state === "error" ? connection : undefined
-  const answer = tested?.key === key ? tested : undefined
+  // The version the bot's host runs, off the `info` read the page already makes for its gates.
+  const plugin = usePluginVersion(profile)
+  const reported = plugin && (plugin.version ?? "No plugin")
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
 
-  const test = async () => {
-    // Bounded like every read: a host that stops answering mid-way leaves no row testing.
-    const signal = AbortSignal.timeout(READ_TIMEOUT_MS)
-    setConnection({ state: "testing" })
-    try {
-      await checkHealth(profile, signal)
-      const ids = await listModels(profile, signal)
-      if (ids.length && !ids.includes(profile.model)) save({ model: ids[0] })
-      const plugin = await getPluginVersion(profile)
-      setConnection({ state: "ok", plugin, key })
-      if (plugin) await db.profiles.update(profile.id, { pluginVersion: plugin })
-      const saved = await db.profiles.get(profile.id)
-      if (saved) await syncContextWindow(saved)
-    } catch (error) {
-      setConnection({
-        state: "error",
-        message: error instanceof Error ? error.message : String(error),
-        key,
-      })
-    }
-  }
+  // What this device keeps follows the Host's own answer, never the copy it cached from an earlier
+  // open (ADR 0132), and only when the version moved: the banner and the Settings menu's tag read
+  // this field, so they say what the Host said rather than what this device remembered.
+  useEffect(() => {
+    if (!plugin?.fromHost) return
+    // A host that answers without a plugin runs none, so no version is stored and the banner that
+    // read one goes; a host whose version moved replaces it. Either way the field follows the host.
+    const next = plugin.version ?? undefined
+    if (next === profile.pluginVersion) return
+    void db.profiles.update(profile.id, { pluginVersion: next })
+  }, [profile.id, profile.pluginVersion, plugin])
 
   return (
     <div className="flex flex-col gap-4" data-bot-card>
-      {/* The bot's own three switches, and the tap that asks its server how it is: the row is the
-          action, so nothing sits beside it that a thumb has to find. */}
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
         <ValueRow
-          title="Test connection"
-          purpose="Ask this bot's server how it is"
-          onClick={test}
-          disabled={profile.disabled}
-          busy={connection.state === "testing"}
-          data-setting="test"
-        >
-          {answer && (
-            <span
-              role={answer.state === "error" ? "alert" : "status"}
-              className={cn(
-                "line-clamp-2 text-sm",
-                answer.state === "error" ? "text-destructive" : "text-primary",
-              )}
-            >
-              {answer.state === "error"
-                ? answer.message
-                : answer.plugin
-                  ? `Connected · Plugin ${answer.plugin}`
-                  : "Connected · No plugin"}
-            </span>
-          )}
-        </ValueRow>
+          title="Plugin"
+          value={reported}
+          muted={!plugin?.version}
+          data-setting="plugin"
+        />
       </Group>
 
       <Caption>Bot Profile</Caption>

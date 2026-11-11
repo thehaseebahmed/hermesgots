@@ -1,5 +1,10 @@
 # A bot's page is what the bot is, then its settings
 
+**Amended by [ADR 0143](0143-a-bots-page-asks-its-host-nothing-it-does-not-already-read.md)**: the
+_Test connection_ row is gone, and a _Plugin_ row at the foot of the bot's own card reports the version
+the bot's host runs — read from the `info` answer the page already makes for its gates, and written to
+the profile only from an answer this page took from the host.
+
 Settings > Bot was a page of pages: a card of links, General first and the rest under it. Which left
 the bot itself — the switch that turns it off, its notifications, its name, its picture, whether its
 server answers — either on one of those pages or nowhere a thumb could reach in one tap. The bot is

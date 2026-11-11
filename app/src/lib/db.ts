@@ -6,6 +6,7 @@ import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { carriesPart } from "@/lib/attachment-caps"
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
+import type { ChatFilter } from "@/lib/chat-list"
 import { connectionKey, hasServer } from "@/lib/connection"
 import { equal } from "@/lib/equal"
 import { mediaKeyPrefix } from "@/lib/media-key"
@@ -85,6 +86,11 @@ export interface Settings {
   /** How the Code list orders each group; unset is `created`, newest first. Local. */
   codeSort?: CodeSort
   codeSortDir?: SortDir
+  /**
+   * The pill a bot's list narrows its rows by, as `chat-list.ts`'s own key; unset is All. Local, like the
+   * sorts beside it: a filter is how this device is being read, not a fact about the account (ADR 0145).
+   */
+  chatFilter?: ChatFilter
   activeProfileId?: string
   /** The bot the Bubble hears with; chat navigation never moves it. */
   bubbleProfileId?: string
