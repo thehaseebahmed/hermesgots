@@ -62,11 +62,15 @@ export async function readRows(database: SessionDb, session: string, set: Sessio
   return held.map((one) => one.row)
 }
 
-/** Only what a turn is folded from, so a field the fold never reads is not kept or compared. */
+/**
+ * Only what a turn is folded from, so a field the fold never reads is not kept or compared. A row's
+ * words are kept as the text the app draws: the parts the host stores for a photo would otherwise sit
+ * in this device's copy as the bytes of the photo, which nothing here draws.
+ */
 const kept = (row: Row): Row => ({
   id: row.id,
   role: row.role,
-  content: row.content,
+  content: rowText(row.content),
   tool_call_id: row.tool_call_id,
   finish_reason: row.finish_reason,
   display_kind: row.display_kind,
