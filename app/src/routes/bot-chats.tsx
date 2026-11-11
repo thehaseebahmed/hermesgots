@@ -39,10 +39,11 @@ import { cn } from "@/lib/utils"
  * A bot's screen: the list of its chats, one flat band — the pinned ones first and the rest by what
  * was last said in them. Its header is the bot itself, whose name is the way to its settings, and the
  * two controls it floats over the foot search the list and start something in it: a chat, or a room.
- * At the app's entry the list is a root screen, so its own back leaves the app, and a reader arriving
- * at it lands in the chat this device last had open here. Pushed over a chat — which is what a chat's
- * own list control does — it stands on that chat instead: its bar leads back to it, Android's press
- * steps to it, and the chat it covers is the row it marks as open.
+ * A bot's address opens the chat this device last had here, taking the entry the address stood on, so
+ * the chat — not this list — is where the app is and back from it is the app's. A bot with nothing to
+ * open draws this list at the app's entry instead, where its own back leaves the app. Pushed over a
+ * chat — which is what a chat's own list control does — the list stands on that chat instead: its bar
+ * leads back to it, Android's press steps to it, and the chat it covers is the row it marks as open.
  *
  * Where there is room the list is the pane and the chat it opened stands beside it
  * (`useBotChatsPane`), so this screen is then the item lane with nothing open; below that width the
@@ -84,12 +85,14 @@ function useListPlace() {
 
 /**
  * The chat a bot's address opens: the one this device last had open there, while it is still one of
- * the bot's. A reader who arrives at the address steps into that chat; one who steps back onto the
- * list gets the list — the press arrives as a pop, and the entry a chat's own control leaves in its
- * place says the reader is back on the list — so a press back never bounces into the chat it came
- * from.
+ * the bot's. A reader who arrives at the address takes its entry into that chat — a replacement,
+ * never a push — so the chat stands where the bot's address stood and the list is not left behind
+ * it. One who steps back onto the list gets the list — the press arrives as a pop, and the entry a
+ * chat's own control leaves in its place says the reader is back on the list — so a press back never
+ * bounces into the chat it came from.
  *
- * `landed` is the arrival `useListPlace` read, since only that one opens a chat.
+ * `landed` is the arrival `useListPlace` read, since only that one opens a chat: a list a chat's own
+ * control pushed over it, at a rung of its own, is not one.
  *
  * Answers whether the address is still being settled — the read is out, or a chat is taking it —
  * which the screen draws nothing for, so neither the list it is leaving nor an empty pane is drawn
@@ -106,14 +109,15 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined,
   )
   const chat = answer && answer.profileId === profileId ? answer.chat : undefined
   const opens = landed && Boolean(chat)
-  // One landing per visit: a second effect (a strict-mode double run) opens nothing again, and the
-  // push it leaves is the entry the chat's own control steps back from.
+  // One landing per visit: a second effect (a strict-mode double run) opens nothing again. The bot
+  // rides the entry the chat takes, so the shell keeps its list's lane while the chat's own record
+  // loads, as a row's link does.
   const opened = useRef(false)
   useEffect(() => {
     if (!opens || opened.current) return
     opened.current = true
-    navigate(`/c/${chat}`)
-  }, [opens, chat, navigate])
+    navigate(`/c/${chat}`, { replace: true, state: { bot: profileId } })
+  }, [opens, chat, profileId, navigate])
   return chat === undefined || opens
 }
 
