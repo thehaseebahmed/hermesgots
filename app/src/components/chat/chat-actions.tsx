@@ -5,10 +5,10 @@ import {
   BellOffIcon,
   CheckIcon,
   EllipsisIcon,
-  ListIcon,
   PencilIcon,
   PinIcon,
   RotateCcwIcon,
+  Rows4Icon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
@@ -277,7 +277,7 @@ export function ChatActions({
             aria-label={`Chats with ${profile?.name ?? "the bot"}`}
             className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
           >
-            <ListIcon />
+            <Rows4Icon />
           </Link>
         )}
         <DropdownMenu>
