@@ -73,10 +73,11 @@ import { BackButton } from "@/components/back-button"
 export function ProjectPage() {
   const { profileId = "", projectId = "" } = useParams()
   const beside = Boolean(useProjectsPane())
-  const { up } = useNav()
-  const back = useCallback(() => up("/projects"), [up])
-  // Beside the list a project is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  const { up, back } = useNav()
+  const leave = useCallback(() => up("/projects"), [up])
+  // Beside the list a project is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const baseUrl = profile?.baseUrl
@@ -154,7 +155,7 @@ export function ProjectPage() {
         await deleteConversation(c.id)
       }
       setDeleting(false)
-      back()
+      leave()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
     } finally {
@@ -171,7 +172,7 @@ export function ProjectPage() {
         title={project?.name ?? ""}
         subtitle={subtitle}
         showBot={false}
-        leading={beside ? null : <BackButton label="Back to Projects" onClick={back} />}
+        leading={beside ? null : <BackButton label="Back to Projects" onClick={leave} />}
         actions={
           ready && (
             <DropdownMenu>

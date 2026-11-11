@@ -1002,10 +1002,10 @@ function MeetingView() {
   const { id = "" } = useParams()
   const { meeting } = useMeeting(id)
   const navigate = useNavigate()
-  const { up } = useNav()
+  const { up, back } = useNav()
   const beside = Boolean(useMeetingsPane())
   const now = useNow()
-  const back = useCallback(() => up("/meetings"), [up])
+  const leave = useCallback(() => up("/meetings"), [up])
   const bots = useMeetingBots()
   const asks = usePluginFeatureOn(
     bots.find((b) => b.id === meeting?.profileId) ?? { baseUrl: "", apiKey: "" },
@@ -1025,8 +1025,9 @@ function MeetingView() {
   const [tab, setTab] = useState("notes")
   // The time a note cited, which the transcript tab opens at.
   const [focus, setFocus] = useState<number>()
-  // Beside the list a meeting is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  // Beside the list a meeting is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   useRememberOpened("meetings", meeting?.id)
 
   if (!meeting) return <Gone />
@@ -1046,7 +1047,7 @@ function MeetingView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
-          leading={beside ? null : <BackButton onClick={back} label="Back to Meetings" />}
+          leading={beside ? null : <BackButton onClick={leave} label="Back to Meetings" />}
           title={
             <h1 className="truncate text-base font-semibold tracking-tight">{meeting.title}</h1>
           }
@@ -1057,7 +1058,7 @@ function MeetingView() {
           ]
             .filter(Boolean)
             .join(" · ")}
-          actions={<MeetingMenu meeting={meeting} onRemoved={back} />}
+          actions={<MeetingMenu meeting={meeting} onRemoved={leave} />}
         />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-2 pb-8">
           {meeting.stage === "ready" && !isFailed(meeting) ? (
@@ -1692,13 +1693,13 @@ function TopicScreen() {
 
 function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; topic: Topic }) {
   const navigate = useNavigate()
-  const { up } = useNav()
+  const { up, back } = useNav()
   const [params] = useSearchParams()
   const from = params.get("at")
   const [position, setPosition] = useState(() => (from === null ? undefined : Number(from)))
   const [tab, setTab] = useState(from === null ? "summary" : "transcript")
-  const back = useCallback(() => up(`/meetings/${meeting.id}`), [up, meeting.id])
-  useEffect(() => setBackGuard(() => (back(), true)), [back])
+  const leave = useCallback(() => up(`/meetings/${meeting.id}`), [up, meeting.id])
+  useEffect(() => setBackGuard(back()), [back])
 
   const index = notes.topics.indexOf(topic)
   const next = notes.topics[index + 1]
@@ -1719,7 +1720,7 @@ function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; 
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
-          leading={<BackButton onClick={back} label={`Back to ${meeting.title}`} />}
+          leading={<BackButton onClick={leave} label={`Back to ${meeting.title}`} />}
           title={<h1 className="truncate text-base font-semibold tracking-tight">{topic.title}</h1>}
           subtitle={`Topic ${index + 1} of ${notes.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
         />

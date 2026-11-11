@@ -458,11 +458,12 @@ function Steps({ mission }: { mission: Mission }) {
 export function MissionPage() {
   const { id = "" } = useParams()
   const { mission, loaded } = useMission(id)
-  const { up } = useNav()
+  const { up, back } = useNav()
   const beside = Boolean(useResearchPane())
-  const back = useCallback(() => up("/research"), [up])
-  // Beside the list a mission is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  const leave = useCallback(() => up("/research"), [up])
+  // Beside the list a mission is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   useRememberOpened("research", mission?.id)
   useDismissPushes(mission?.id)
 
@@ -475,12 +476,12 @@ export function MissionPage() {
 
   const researching = !["brief", "scope"].includes(mission.stage)
   return researching ? (
-    <WorkView mission={mission} onBack={beside ? undefined : back} />
+    <WorkView mission={mission} onBack={beside ? undefined : leave} />
   ) : (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <MissionHeader
         mission={mission}
-        onBack={beside ? undefined : back}
+        onBack={beside ? undefined : leave}
         actions={<MissionMenu mission={mission} />}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">

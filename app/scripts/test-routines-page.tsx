@@ -12,6 +12,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { db } from "@/lib/db"
+import { pressBack } from "@/lib/native"
 import { AppShell } from "@/components/app-shell"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { RoutinesHome, RoutinesPage } from "@/routes/routines"
@@ -19,6 +20,7 @@ import { RoutinesHome, RoutinesPage } from "@/routes/routines"
 import {
   Path,
   absent,
+  atDepth,
   absentText,
   botProfile,
   click,
@@ -283,6 +285,29 @@ test("a run with no row of its own still says what happened under the bars", asy
     assert.equal(path(), `/b/${BOT_A.id}/routines`, "and the page is still where the reader was")
   })
 })
+
+test(
+  "a page at the app's first entry leaves the press to the app, which arms the exit",
+  async () => {
+    await seed()
+    const history = atDepth(0)
+    try {
+      await mount(routinesScreen(BOT_A.id), async () => {
+        await until(async () => Boolean(find('[aria-label="Back to chats"]')), "the page's way back")
+        assert.equal(pressBack(), "app", "the press is the app's at its first entry")
+        assert.deepEqual(history.backs, [], "and nothing steps")
+        assert.equal(path(), `/b/${BOT_A.id}/routines`, "so the page is still what is on")
+        assert.equal(
+          find("[data-listed]")?.textContent,
+          "false",
+          "with no list left in its place to read as a fresh arrival",
+        )
+      })
+    } finally {
+      history.restore()
+    }
+  },
+)
 
 test("the page's back is the bot's list, from the bar every child screen draws", async () => {
   await seed()
