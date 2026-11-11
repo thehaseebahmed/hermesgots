@@ -102,11 +102,10 @@ import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
-import { useCodePane, useRememberOpened, useSplit } from "@/lib/pane"
+import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
-import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { rememberLastChat } from "@/lib/last-chat"
 import { modelChanges } from "@/lib/model-changes"
@@ -131,10 +130,9 @@ import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { reportUnreadThread } from "@/lib/sentry"
 import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
-import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
-import { botChatsPath } from "@/lib/bot-tabs"
 import { chatFlow } from "@/lib/chat-flow"
+import { useChatLead } from "@/lib/chat-lead"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
 import { dictationHint } from "@/lib/dictation-hint"
@@ -356,24 +354,6 @@ export function ChatPage(props: ChatPageProps) {
   )
 }
 
-function useChatLead(
-  chat: Conversation | null | undefined,
-  { underCode, leave }: { underCode: boolean; leave: () => void },
-) {
-  const legacy = useLegacyChat()
-  const { back } = useNav()
-  const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
-  const besideList = useSplit() && Boolean(listPath)
-  useEffect(() => {
-    if (!listPath) return
-    return setBackGuard(back())
-  }, [listPath, back])
-  const leading = underCode ? (
-    <BackButton label="Back to Code" onClick={() => void leave()} floating />
-  ) : undefined
-  return { listPath: besideList ? undefined : listPath, leading }
-}
-
 /** A chat drawn by chat-next, under the chat's own header: a bot's chat is a chat, Main among them. */
 function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
@@ -401,7 +381,11 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     beside,
     unsent: isUnsent,
   })
-  const lead = useChatLead(chat, { underCode, leave })
+  const lead = useChatLead({
+    bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
+    underCode,
+    leave,
+  })
   // The repos a session not started yet will work in; the project screen hands its project over.
   const handed = (address as { project?: HermesProject } | null)?.project
   const projectId = session?.projectId
@@ -985,7 +969,11 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     beside,
     unsent: hasNoMessages,
   })
-  const lead = useChatLead(conversation, { underCode, leave })
+  const lead = useChatLead({
+    bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
+    underCode,
+    leave,
+  })
   // This device has the chat's thread on screen as of now — its read mark, written when the thread
   // renders and again while new activity lands in front of the reader, which is what clears a row's
   // dot (never synced: a mark is about where the reader was sitting). Every chat writes one, not

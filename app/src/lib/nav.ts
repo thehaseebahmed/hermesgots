@@ -54,6 +54,16 @@ export function useNav() {
   )
 
   /**
+   * Steps back onto a list this screen's row stands in: `up`'s move with the marker a list reads as
+   * "the reader stepped back here". A list left without it reads the entry as a fresh arrival and
+   * lands the reader in the chat behind it, so the move carries the marker rather than each caller.
+   */
+  const backToList = useCallback(
+    (to: string) => up(to, BACK_ON_LIST),
+    [up],
+  )
+
+  /**
    * The guard a screen gives the back button where the menu and a list both open it: whatever
    * opened it stands behind it, so the press steps back to that; the menu opens it as the first
    * entry, where nothing is behind it, so the press is left to the app — which leaves, as back does
@@ -68,5 +78,5 @@ export function useNav() {
     [],
   )
 
-  return { root, up, back }
+  return { root, up, backToList, back }
 }
