@@ -13,7 +13,6 @@ import {
   ChevronRightIcon,
   EyeIcon,
   EyeOffIcon,
-  SearchIcon,
   type LucideIcon,
 } from "lucide-react"
 
@@ -25,6 +24,7 @@ import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
+import { SearchField } from "@/components/search-field"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -796,17 +796,11 @@ export function PickList({
   return (
     <div className="flex min-h-0 flex-col gap-3">
       {search && (
-        <InputGroup className="h-11">
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-          <InputGroupInput
+        <SearchField
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Search ${label.toLowerCase()}`}
-            aria-label={`Search ${label.toLowerCase()}`}
+            onChange={setQuery}
+            label={`Search ${label.toLowerCase()}`}
           />
-        </InputGroup>
       )}
       <div data-pick-list={label} className="flex min-h-0 flex-col overflow-y-auto">
         <PickGroup mode="choose" label={label}>

@@ -22,7 +22,11 @@ const OWNERS = {
   bar: ["src/components/chat/chat-header.tsx", "src/components/settings-chrome.tsx"],
   column: ["src/components/settings-chrome.tsx", "src/components/list-foot.tsx"],
   chipRow: ["src/components/chip.tsx", "src/components/repos.tsx"],
-  search: ["src/components/item-list.tsx", "src/components/list-foot.tsx"],
+  search: [
+    "src/components/search-field.tsx",
+    "src/components/item-list.tsx",
+    "src/components/list-foot.tsx",
+  ],
   spinner: ["src/components/ui/spinner.tsx", "src/components/ui/sonner.tsx"],
   card: ["src/components/chat/session-cards.tsx"],
   confirm: ["src/components/settings-chrome.tsx", "src/components/chat/confirm-dialog.tsx"],

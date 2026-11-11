@@ -4,7 +4,6 @@ import {
   ArrowLeftIcon,
   ChevronDownIcon,
   PlusIcon,
-  SearchIcon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -13,11 +12,11 @@ import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/mode
 import { SortMenu } from "@/components/sort-menu"
 import { defaultSort, type Sort } from "@/lib/sort"
 import { PickGroup, PickRow } from "@/components/pick-row"
+import { SearchField } from "@/components/search-field"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
@@ -123,17 +122,12 @@ export function ModelPicker({
         {(total > 8 || flat) && (
           <div className="flex items-center gap-2">
             {total > 8 && (
-              <InputGroup className="h-11 min-w-0 flex-1">
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-                <InputGroupInput
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={drilled ? `Search ${drilled.name}` : "Search models"}
-                  aria-label="Search models"
-                />
-              </InputGroup>
+              <SearchField
+              value={query}
+              onChange={setQuery}
+              label={drilled ? `Search ${drilled.name}` : "Search models"}
+              className="min-w-0 flex-1"
+            />
             )}
             {/* Only a flat list sorts: the providers list stays A to Z, so it shows no menu. */}
             {flat && <ModelSortMenu sort={sort} onSort={setSort} />}
@@ -267,17 +261,12 @@ function ProviderModels({
       </PopupHeader>
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">
-          <InputGroup className="h-11 min-w-0 flex-1">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${provider.name}`}
-              aria-label={`Search ${provider.name}`}
-            />
-          </InputGroup>
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label={`Search ${provider.name}`}
+            className="min-w-0 flex-1"
+          />
           <ModelSortMenu sort={sort} onSort={setSort} />
         </div>
         {models.length ? (
