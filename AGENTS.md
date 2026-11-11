@@ -402,6 +402,15 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 - **iOS has nothing yet**: there is no iOS app, and receiving shares there needs one with a Share Extension and an App Group, so a paid Apple Developer Program account.
 - `window.gotsShare({ title, text, url, files })` opens the screen in development.
 
+## Components
+
+- **A surface is drawn by the component `.agents/skills/component-ux/SKILL.md` names for it.** Its table is the map — the bar, the row, the group, the card, the pop-up, the confirmation, the notice, the loader, the empty state, the search field, the pill — with when each shows and where. Drawing one by hand is the deviation that skill's audit finds; `references/deviations.md` beside it is the exceptions register and the open findings, so a review does not re-discover them.
+- **One bar, and it is `ChatHeader`** in its `pinned` form for a child screen that scrolls rows under it (ADR 0140). A hand-written `<header className="sticky top-0 …">` is how three bars drifted before it.
+- **One row system per context:** a list row is `ItemRow`, a settings row is the `settings-chrome` kit, and neither is written by hand. **One search field** (`SearchField`), **one spinner** (`ui/spinner`), **one destructive confirmation** (`ConfirmDestructive`), **one overlay** (`Popup`).
+- **Cards come in three kinds and no fourth:** a feature card (`ui/card`), a thread card (`CARD_BASE`/`CARD`/`FLAT_CARD`) and a group (`Group`). `rounded-3xl border bg-card` typed into a screen is the fourth.
+- **An empty state is one sentence saying what would fill it**, in the app's voice, with one action where the screen can make one.
+- **A component with no caller is deleted**, and a component wanted in a second place moves to `components/` with a doc comment saying when it shows. `node .agents/skills/component-ux/scripts/audit.mjs [paths]` reports the shapes that mean a primitive was skipped.
+
 ## Settings UX
 
 - **A settings card never holds a text box, a picker or a stepper.** A card shows a value and the edit drills in: a text value opens a pushed edit screen below 1024px and a centred dialog card from 1024px (a labelled input over one action bar, title *Edit Name* rather than the field's own word); a list that is picked from opens a bottom sheet below 1024px and the same centred card from it (search, radio rows); a list that is only read drills in as a screen — a push below 1024px, the page pane from it. Switches, steppers, avatars and buttons act in place. The rules, their Material and Android evidence and a review checklist are `.agents/skills/settings-ux/SKILL.md` (ADR 0055).
