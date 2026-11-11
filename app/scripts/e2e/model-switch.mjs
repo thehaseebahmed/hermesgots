@@ -16,7 +16,7 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
     const picker = page.getByRole("dialog")
     await picker.getByRole("textbox", { name: "Search models" }).fill(model)
     const row = new RegExp(`^${model.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} `)
-    await picker.getByRole("button", { name: row }).click()
+    await picker.getByRole("radio", { name: row }).click()
     // The composer's own input is the last one on the page: wait for the picker's to go.
     await picker.waitFor({ state: "hidden" })
   }

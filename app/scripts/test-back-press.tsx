@@ -4,22 +4,24 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { useEffect } from "react"
+import { act, useEffect } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
+import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
 import { useNav } from "@/lib/nav"
-import { pressBack, setBackGuard } from "@/lib/native"
+import { answerBackPress, pressBack, setBackGuard, setMenuOpener } from "@/lib/native"
 import { ChatPage } from "@/routes/chat"
 import { SettingsPage } from "@/routes/settings"
 
 import {
   Path,
+  absent,
   atDepth,
   atWidth,
   botProfile,
-  click,
   find,
+  findAll,
   GENERAL,
   json,
   mediaHost,
@@ -34,10 +36,9 @@ import {
 const State = () => <p data-state>{JSON.stringify(useLocation().state ?? null)}</p>
 const state = () => find("[data-state]")?.textContent ?? ""
 
-/** The guard a screen the menu and a list both open registers: `step` to the screen behind it. */
-function Stepping({ to }: { to: string }) {
-  const { step } = useNav()
-  useEffect(() => setBackGuard(step(to)), [step, to])
+function Stepping() {
+  const { back } = useNav()
+  useEffect(() => setBackGuard(back()), [back])
   return null
 }
 
@@ -46,7 +47,7 @@ test("a screen a list pushed steps up to the list behind it", async () => {
   try {
     await mount(
       <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Stepping to="/canvas" />
+        <Stepping />
       </MemoryRouter>,
       async () => {
         assert.equal(pressBack(), "screen", "the screen takes the press")
@@ -63,7 +64,7 @@ test("a screen the menu opened leaves the press to the app", async () => {
   try {
     await mount(
       <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Stepping to="/canvas" />
+        <Stepping />
       </MemoryRouter>,
       async () => {
         assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
@@ -141,14 +142,118 @@ test("an open pop-up takes the press before any screen", async () => {
   }
 })
 
-/** A chat of a bot's on screen, with the list its bot's address draws reachable from it. */
+function disarm() {
+  for (let press = 0; press < 2; press += 1) if (answerBackPress() === "leave") return
+}
+
+test("the first press at the root opens the menu, and the second leaves", async () => {
+  let opened = 0
+  const done = setMenuOpener(() => void (opened += 1))
+  try {
+    assert.equal(answerBackPress(), "armed", "the first press at the root arms the exit")
+    assert.equal(opened, 1, "and offers the app's menu with it")
+    assert.equal(answerBackPress(), "leave", "the press inside the window leaves")
+  } finally {
+    disarm()
+    done()
+  }
+})
+
+test("an armed press leaves with a sheet open", async () => {
+  assert.equal(answerBackPress(), "armed", "the first press arms the exit")
+  const sheet = document.createElement("div")
+  sheet.setAttribute("role", "dialog")
+  sheet.setAttribute("data-open", "")
+  let escaped = 0
+  sheet.addEventListener("keydown", () => void (escaped += 1))
+  document.body.append(sheet)
+  try {
+    assert.equal(answerBackPress(), "leave", "the press the toast promised leaves anyway")
+    assert.equal(escaped, 0, "and the sheet standing in front is never the press's to close")
+    assert.equal(document.body.contains(sheet), true, "so it is still standing after it")
+  } finally {
+    sheet.remove()
+    disarm()
+  }
+})
+
+test("a change of address clears the arm", async () => {
+  const before = window.location.pathname
+  try {
+    assert.equal(answerBackPress(), "armed", "the press arms the exit at this address")
+    window.history.pushState({}, "", "/c/somewhere-else")
+    assert.equal(
+      answerBackPress(),
+      "armed",
+      "a press at another address arms afresh rather than leaving",
+    )
+    assert.equal(answerBackPress(), "leave", "and the arm it made is the one that leaves")
+  } finally {
+    window.history.replaceState(window.history.state, "", before)
+    disarm()
+  }
+})
+
+test("a press at another entry of the same address is not the armed press", async () => {
+  const href = window.location.href
+  try {
+    assert.equal(answerBackPress(), "armed", "the press arms the exit at this entry")
+    // The same address one entry deeper: a round trip back to it is a different place, so the press
+    // there is not the one the toast promised to answer.
+    window.history.pushState({ idx: 1 }, "", href)
+    assert.equal(
+      answerBackPress(),
+      "armed",
+      "a press at another entry of that address arms afresh rather than leaving",
+    )
+  } finally {
+    disarm()
+    window.history.replaceState({}, "", href)
+  }
+})
+
+const shellAt = (id: string) => (
+  <MemoryRouter initialEntries={[`/c/${id}`]}>
+    <Path />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+const DRAWER_DIALOG = '[role="dialog"][data-open] [data-slot="sheet-title"]'
+
+test(
+  "a tablet offers no drawer over the sidebar the press already has",
+  atWidth(1024, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(shellAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        await act(async () => {
+          assert.equal(answerBackPress(), "armed", "the press still arms the exit")
+        })
+        absent(DRAWER_DIALOG, "and offers no drawer over the list the sidebar already draws")
+      })
+    } finally {
+      disarm()
+      history.restore()
+    }
+  }),
+)
+
 const chatAt = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Path />
     <State />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
-      <Route path="b/:profileId" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -175,34 +280,7 @@ async function seedChatOfBot() {
 }
 
 test(
-  "a chat of a bot's own control answers its bot's list",
-  atWidth(390, async () => {
-    await seedChatOfBot()
-    const history = atDepth(0)
-    try {
-      await mount(chatAt("back-chat"), async () => {
-        const back = () =>
-          [...document.querySelectorAll("button")].find(
-            (one) => one.getAttribute("aria-label") === "Back to Mainly",
-          ) ?? null
-        await until(async () => Boolean(back()), "the chat's way out")
-        await click(back())
-        await until(async () => path() === "/b/bot-1", "the bot's list")
-        assert.deepEqual(history.backs, [], "nothing was stepped back: nothing stood behind it")
-        assert.deepEqual(
-          JSON.parse(state()),
-          { listed: true },
-          "and the list knows the reader stepped back onto it, so it draws itself",
-        )
-      })
-    } finally {
-      history.restore()
-    }
-  }),
-)
-
-test(
-  "a chat opened as the app's only entry leaves its bot's list in its place",
+  "a chat's bar leads with the app's menu, not its bot's list",
   atWidth(390, async () => {
     await seedChatOfBot()
     const history = atDepth(0)
@@ -212,14 +290,66 @@ test(
           async () => Boolean(document.querySelector('[data-slot="header-title"]')),
           "the chat",
         )
-        assert.equal(pressBack(), "screen", "the chat takes the press rather than the app")
-        await until(async () => path() === "/b/bot-1", "the bot's list in the chat's place")
-        assert.deepEqual(history.backs, [], "nothing was stepped back: nothing stood behind it")
-        assert.deepEqual(
-          JSON.parse(state()),
-          { listed: true },
-          "and the list knows the reader stepped back onto it, so it draws itself",
+        assert.equal(
+          find('[data-slot="header-row"] button')?.getAttribute("aria-label"),
+          "Open conversations",
+          "the bar leads with the drawer's own control",
         )
+        assert.equal(
+          findAll('[aria-label="Back to Mainly"]').length,
+          0,
+          "and nothing anywhere leads back to the bot's list",
+        )
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "a chat at the app's entry leaves the press to the app",
+  atWidth(390, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(chatAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
+        assert.deepEqual(history.backs, [], "and nothing steps")
+        assert.equal(path(), "/c/back-chat", "so the chat is still what is on")
+        assert.deepEqual(JSON.parse(state()), null, "with nothing written in its place")
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "the press at the root draws the drawer the shell registered",
+  atWidth(390, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(shellAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        await act(async () => {
+          assert.equal(answerBackPress(), "armed", "the press at the root arms the exit")
+        })
+        await until(async () => find(DRAWER_DIALOG) !== null, "the drawer's dialog over the chat")
+        assert.equal(
+          find(DRAWER_DIALOG)?.textContent,
+          "Conversations",
+          "the app's own menu, drawn by the shell",
+        )
+        assert.equal(answerBackPress(), "leave", "and the press the toast promised leaves")
       })
     } finally {
       history.restore()

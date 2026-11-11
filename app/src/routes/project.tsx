@@ -19,21 +19,12 @@ import { quietly } from "@/lib/report"
 import { AfkPopup, AFK_FEATURE } from "@/components/afk"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS } from "@/components/chat/pr-look"
-import { PrRow } from "@/components/chat/pr-pill"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
+import { PrRow } from "@/components/pr-row"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import { ProjectUsageView } from "@/components/project-usage"
 import { RepoChips } from "@/components/repos"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -73,10 +64,11 @@ import { BackButton } from "@/components/back-button"
 export function ProjectPage() {
   const { profileId = "", projectId = "" } = useParams()
   const beside = Boolean(useProjectsPane())
-  const { up } = useNav()
-  const back = useCallback(() => up("/projects"), [up])
-  // Beside the list a project is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  const { up, back } = useNav()
+  const leave = useCallback(() => up("/projects"), [up])
+  // Beside the list a project is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const baseUrl = profile?.baseUrl
@@ -154,7 +146,7 @@ export function ProjectPage() {
         await deleteConversation(c.id)
       }
       setDeleting(false)
-      back()
+      leave()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
     } finally {
@@ -171,7 +163,7 @@ export function ProjectPage() {
         title={project?.name ?? ""}
         subtitle={subtitle}
         showBot={false}
-        leading={beside ? null : <BackButton label="Back to Projects" onClick={back} />}
+        leading={beside ? null : <BackButton label="Back to Projects" onClick={leave} />}
         actions={
           ready && (
             <DropdownMenu>
@@ -284,9 +276,7 @@ export function ProjectPage() {
                       fold={group.fold}
                     >
                       {list.map((pr) => (
-                        <li key={prKey(pr)}>
-                          <PrRow pr={pr} />
-                        </li>
+                        <PrRow key={prKey(pr)} pr={pr} />
                       ))}
                     </Group>
                   )
@@ -324,23 +314,15 @@ export function ProjectPage() {
         />
       )}
 
-      <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The project and its sessions are removed from this device. Its folders on the server
-              stay where they are, and Hermes keeps its own copy of the sessions.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void remove()}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Delete this project?"
+        description="The project and its sessions are removed from this device. Its folders on the server stay where they are, and Hermes keeps its own copy of the sessions."
+        confirmLabel="Delete"
+        busy={busy}
+        onConfirm={remove}
+      />
     </div>
   )
 }

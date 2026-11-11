@@ -9,6 +9,10 @@
 /* shadcn "neutral" base + "green" theme (base-maia style). */
 :root {
   --toast-bottom: max(1rem, env(safe-area-inset-bottom));
+  /* A screen bar's top padding: the notch where there is one, 12px where there is not. A screen
+     that publishes its own (Code, whose sticky group headings read it too) sets it on its scroll
+     container. */
+  --list-header-pt: max(0.75rem, env(safe-area-inset-top));
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

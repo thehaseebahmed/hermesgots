@@ -64,9 +64,13 @@ export function RoutinesPage() {
   // The bot's list stands beside its routines where there is room (`useBotChatsPane`), so the page
   // has nothing to lead back to; below that width the list pushed it and is what back returns to.
   const beside = Boolean(useBotChatsPane(useLegacyChat() === false))
-  const { up } = useNav()
-  const back = useCallback(() => up(botChatsPath(profileId)), [up, profileId])
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  const { backToList, back } = useNav()
+  // The list a routine's page steps back onto draws itself: without the marker the replacement this
+  // makes at the app's entry would read as a fresh arrival, and land the reader in a chat.
+  const leave = useCallback(() => backToList(botChatsPath(profileId)), [backToList, profileId])
+  // Beside the list the page is the top-level screen, so the press is the app's where nothing stands
+  // behind it. The control above still steps to the list, wherever this page was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
   // Which state the reader asked the page for. A page remembers nothing across visits: this is the
@@ -95,7 +99,7 @@ export function RoutinesPage() {
       <ChatHeader
         pinned
         showBot={false}
-        leading={!beside && <BackButton label="Back to chats" onClick={back} floating />}
+        leading={!beside && <BackButton label="Back to chats" onClick={leave} floating />}
         title="Routines"
         actions={
           <Button

@@ -13,7 +13,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   const picker = page.getByRole("dialog")
   const pick = async (query, label) => {
     await picker.getByRole("textbox", { name: "Search models" }).fill(query)
-    await picker.getByRole("button", { name: label }).first().click()
+    await picker.getByRole("radio", { name: label }).first().click()
   }
   // The drill-in page the row opens: the rows it holds, and the aria-busy they wear while a write
   // is on its way (ADR 0055).

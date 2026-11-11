@@ -66,9 +66,9 @@ test("a row names the session its chat answers at, and whether a reply is still 
   assert.equal(routine.streaming, undefined)
 })
 
-test("a chat nothing has been said in keeps its own clock and draws no line", () => {
+test("a chat nothing has been said in says so, and keeps its own clock", () => {
   const row = chatRowOf(chat("a", 100))
-  assert.equal(row.line, undefined, "nothing said, nothing to preview")
+  assert.equal(row.line, "No messages yet", "nothing said yet, and the row says it rather than nothing")
   assert.equal(row.at, 100, "so the row is placed by when the chat was made")
 })
 
@@ -226,4 +226,29 @@ test("a row's age says how long ago today, and the date when that would not say 
   assert.ok(today.length > 0, "a message from this morning reads as a time")
   assert.notEqual(today, older, "a message from weeks ago does not read the same")
   assert.ok(older.includes("2026"), "it names the date, so the year is not guessed at")
+})
+
+test("a row's line is the first line of a message's words, with its markdown taken out", () => {
+  const cases = [
+    ["**Done** and *done*", "Done and done"],
+    ["`pnpm test` is green", "pnpm test is green"],
+    ["See [the pull request](https://example.test/1) for it", "See the pull request for it"],
+    ["# Plan\n\n**Step one**", "Plan"],
+    ["- a bullet", "a bullet"],
+    ["1. numbered", "numbered"],
+    ["> quoted", "quoted"],
+    ["~~gone~~ now", "gone now"],
+    ["a \\* b", "a * b"],
+    ["```ts\nconst x = 1\n```", "const x = 1"],
+    ["![a chart](chart.png) says", "a chart says"],
+    ["| a | b |\n| - | - |\n| 1 | 2 |", "a b"],
+  ]
+  for (const [text, words] of cases) {
+    assert.equal(chatRowOf(chat("c", 1), said(text, 2)).line, words, text)
+  }
+})
+
+test("a chat nothing has been said in says so, rather than drawing an empty line", () => {
+  assert.equal(chatRowOf(chat("c", 1), said("", 2)).line, "No messages yet")
+  assert.equal(chatRowOf(chat("c", 1)).line, "No messages yet")
 })

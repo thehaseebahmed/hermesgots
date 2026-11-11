@@ -255,7 +255,7 @@ test("a pick opens its sheet, searchable where the host says the list is long", 
     await click(row("timezone"))
     await until(async () => Boolean(find('[data-pick-list="Timezone"]')), "the pick's sheet")
     assert.ok(find('[aria-label="Search timezone"]'), "a long list is searched, never typed")
-    const utc = findAll('[data-pick-list="Timezone"] > button').find(
+    const utc = findAll('[data-pick-list="Timezone"] li > button').find(
       (one) => wordsOf(one) === "UTC",
     )
     await click(utc ?? null)

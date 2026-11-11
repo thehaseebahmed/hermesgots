@@ -288,6 +288,9 @@ export const AskAgainContext = createContext<((text: string) => Promise<void>) |
   undefined,
 )
 
+/** What a question left without an answer reads as, drawn like any answer. */
+const SKIPPED = "Skipped"
+
 /**
  * How a clarify call ended: what the card calls it, and whether an answer was still owed. Everything
  * else Hermes says — an outcome this app doesn't know, or none at all — reads as no answer.
@@ -359,21 +362,17 @@ export function ClarifyCard({
         asked.map((a, i) => (
           <div key={i} className="space-y-1">
             {a.question && <p className={cn("font-medium", face)}>{a.question}</p>}
-            {a.answers.length ? (
-              a.answers.map((answer) => (
-                <p
-                  key={answer}
-                  className={cn(
-                    "rounded-2xl bg-background px-3 py-2 wrap-anywhere whitespace-pre-wrap",
-                    face,
-                  )}
-                >
-                  {answer}
-                </p>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">Skipped</p>
-            )}
+            {(a.answers.length ? a.answers : [SKIPPED]).map((answer) => (
+              <p
+                key={answer}
+                className={cn(
+                  "rounded-2xl bg-background px-3 py-2 wrap-anywhere whitespace-pre-wrap",
+                  face,
+                )}
+              >
+                {answer}
+              </p>
+            ))}
           </div>
         ))
       )}

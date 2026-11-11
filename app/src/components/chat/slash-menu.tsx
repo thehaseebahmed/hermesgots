@@ -8,7 +8,8 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { SkillRow } from "@/components/skill-row"
+import { PickGroup, PickRow } from "@/components/pick-row"
+import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { optionId, type LocalCommand, type SendMode, type SlashItem } from "@/lib/slash"
 import type { SkillsState } from "@/lib/skills"
@@ -98,32 +99,40 @@ export function SlashMenu({
       ref={box}
       className="absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-3xl border bg-popover text-popover-foreground shadow-lg shadow-black/5"
     >
-      <ul
+      <PickGroup
+        mode="option"
+        label="Commands and skills"
         id={id}
-        role="listbox"
-        aria-label="Commands and skills"
         style={{ maxHeight: room }}
         className="overflow-y-auto p-1.5"
       >
         {items.map((item, index) => {
           const Icon = item.kind === "command" ? COMMAND_ICONS[item.name] : SparklesIcon
           return (
-            <SkillRow
+            <PickRow
               key={`${item.kind}:${item.name}`}
               id={optionId(id, index)}
-              name={item.name}
-              slash
-              category={item.kind === "skill" ? item.category : undefined}
-              description={item.kind === "skill" ? item.description : undefined}
-              icon={Icon}
-              selected={index === active}
+              leading={<Icon className="size-4 text-muted-foreground" />}
+              title={
+                <>
+                  <span className="min-w-0 truncate font-mono text-sm">
+                    /{item.name}
+                  </span>
+                  {item.kind === "skill" && item.category && (
+                    <Badge variant="secondary" className="max-w-28">
+                      <span className="truncate">{item.category}</span>
+                    </Badge>
+                  )}
+                </>
+              }
+              line={item.kind === "skill" ? item.description : undefined}
               active={index === active}
               onActive={() => index !== active && onActive(index)}
               onPick={() => onPick(item)}
             />
           )
         })}
-      </ul>
+      </PickGroup>
       {/* A bot whose host can't list skills shows the commands alone; silently, as a missing feature. */}
       {status === "loading" && (
         <div className="flex items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground">

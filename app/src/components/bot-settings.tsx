@@ -26,9 +26,9 @@ import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
 import { SkillsTab } from "@/components/skills-tab"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
-  ConfirmDestructive,
   DestructiveButton,
   EditCard,
   EditForm,

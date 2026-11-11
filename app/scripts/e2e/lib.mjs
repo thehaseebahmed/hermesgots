@@ -29,6 +29,9 @@ export const runId = () => Math.random().toString(36).slice(2, 8)
 /** The page's own words, in the order the app drew them. */
 export const drawn = (page) => page.evaluate(() => document.body.innerText)
 
+/** How deep in the browser's history the page stands: 0 is a press from leaving the app. */
+export const rung = (page) => page.evaluate(() => window.history.state?.idx ?? null)
+
 /** A user's words, long enough that a few turns fill a phone's pane. */
 export const long = (name, turns = 10) =>
   `${name}: ` + Array.from({ length: turns }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")
@@ -366,8 +369,17 @@ export async function openChatNext({ page, seed }, { id, title }) {
   const chat = `${id}-${runId()}`
   await seed([{ id: chat, title }])
   await page.goto(`${app}/c/${chat}`)
-  await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
+  // A bot's chat opens beside its Main, which draws first: until the chat's own pane is there and
+  // ready (an inert pane's field is no textbox at all), the last field on the page — the one `send`
+  // types into — is Main's.
+  await page
+    .locator('[data-chat-next][data-pane]:not([data-pane="main"]):not([inert])')
+    .last()
+    .waitFor({ timeout: 20_000 })
 }
+
+/** The chat `openChatNext` opened: its own pane, never the bot's Main drawn beside it. */
+export const chatPane = (page) => page.locator('[data-chat-next][data-pane]:not([data-pane="main"])').last()
 
 /** The button a question offers for `choice`. Anchored at the start of the label, which a
  * recommended first choice carries the badge after, so one label's start never matches inside
@@ -389,8 +401,9 @@ export async function answerWith(scope, { pick, type }) {
   const page = (await questionPage(scope).count()) ? questionPage(scope) : scope
   if (pick) await choiceButton(page, pick).first().click()
   else await page.getByPlaceholder("Type your answer").fill(type)
-  // Send is the card's, not the page's: the footer sits outside the pages.
-  await scope.getByRole("button", { name: "Send", exact: true }).click()
+  // Send is the card's, not the page's: the footer sits outside the pages — and never a composer's
+  // own Send, which a bot's Main beside the chat draws too.
+  await scope.locator("[data-slot=card]").getByRole("button", { name: "Send", exact: true }).click()
 }
 
 /** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */

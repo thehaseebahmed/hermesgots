@@ -35,7 +35,7 @@ await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => 
   await add.click()
   const picker = page.getByRole("dialog")
   await picker.getByRole("textbox", { name: "Search models" }).fill("gpt-5-mini")
-  await picker.getByRole("button", { name: "openai/gpt-5-mini" }).first().click()
+  await picker.getByRole("radio", { name: "openai/gpt-5-mini" }).first().click()
 
   // While it waits, the pick is on show, greyed out, with the row wearing its saving state.
   await row1.waitFor({ timeout: 15_000 })

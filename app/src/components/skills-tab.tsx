@@ -3,9 +3,9 @@ import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { SkillDetail } from "@/components/skill-detail-sheet"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
-  ConfirmDestructive,
   Group,
   headerRowClass,
   linkRowClass,

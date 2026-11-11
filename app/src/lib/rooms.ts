@@ -1,7 +1,7 @@
 import { hostKey } from "./connection.ts"
 import { memberLabel } from "./room-log.ts"
 import { randomId } from "./utils.ts"
-import { oneLine } from "./words.ts"
+import { NO_ROOM_MESSAGES, plainLine } from "./words.ts"
 import type { ChatListRow } from "./chat-list.ts"
 import type { Conversation, Profile, Room, RoomEvent, RoomMember } from "./db.ts"
 
@@ -111,7 +111,7 @@ export function roomLastLine(events: readonly Pick<RoomEvent, "seq" | "kind" | "
     if (event.kind !== "message.member") continue
     if (!newest || event.seq > newest.seq) newest = event
   }
-  return newest ? oneLine(newest.text ?? "") : undefined
+  return newest ? plainLine(newest.text ?? "") : undefined
 }
 
 /**
@@ -164,7 +164,7 @@ export function roomRowOf(
   return {
     id: chat.id,
     title: chat.title,
-    line: said ?? members,
+    line: said ?? members ?? NO_ROOM_MESSAGES,
     at: chat.updatedAt,
     pinned: Boolean(chat.pinned),
     // A room's need is `needs`, drawn as its line in the warning tone: a room is never a chat whose

@@ -1,3 +1,4 @@
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
@@ -27,6 +28,7 @@ import {
   MessageSquareTextIcon,
   PaletteIcon,
   PlusIcon,
+  RotateCcwClockIcon,
   SmartphoneIcon,
   TrophyIcon,
   TelescopeIcon,
@@ -66,17 +68,6 @@ import {
 import { useOpenDrawer } from "@/components/drawer-context"
 import { DeviceStateSheet } from "@/components/device-state"
 import { FeedbackSheet } from "@/components/feedback"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -143,7 +134,7 @@ const MenuContext = createContext<{ active?: string; replace: boolean }>({ repla
 export function SettingsPage() {
   const { section, botId, tab, sub, leaf } = useParams()
   const large = useLarge()
-  const { up, step, root } = useNav()
+  const { up, back, root } = useNav()
   const { account } = useSyncState()
   const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
@@ -167,17 +158,17 @@ export function SettingsPage() {
     if (separate && botScreen && botTab) return
     // The menu itself is a screen a chat can open, and from `lg` so is a section; each steps back to
     // whatever opened it, and the drawer's own menu — the first entry — leaves the press to the app.
-    if (!separate && !botScreen) return setBackGuard(step("/settings"))
-    const back = botSub
+    if (!separate && !botScreen) return setBackGuard(back())
+    const parent = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
         ? botPath(botId)
         : "/settings"
     return setBackGuard(() => {
-      up(back)
+      up(parent)
       return true
     })
-  }, [separate, botScreen, up, section, botId, botTab, botSub])
+  }, [separate, botScreen, up, back, section, botId, botTab, botSub])
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
@@ -527,7 +518,7 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
 const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
   chats: MessagesSquareIcon,
   code: CodeXmlIcon,
-  routines: TimerIcon,
+  routines: RotateCcwClockIcon,
   research: TelescopeIcon,
   meetings: AudioLinesIcon,
 }
@@ -870,34 +861,21 @@ function DataSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <AlertDialog open={clearing} onOpenChange={setClearing}>
-          <AlertDialogTrigger render={<Button variant="destructive" />}>
-            Clear local data
-          </AlertDialogTrigger>
-          <AlertDialogContent size="sm">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Clear everything?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes
-                server are untouched.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={async () => {
-                  await clearAllData()
-                  forgetLocalKey()
-                  setClearing(false)
-                  toast.success("Local data cleared")
-                }}
-              >
-                Clear
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <Button variant="destructive" onClick={() => setClearing(true)}>
+          Clear local data
+        </Button>
+        <ConfirmDestructive
+          open={clearing}
+          onOpenChange={setClearing}
+          title="Clear everything?"
+          description="Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes server are untouched."
+          confirmLabel="Clear"
+          onConfirm={async () => {
+            await clearAllData()
+            forgetLocalKey()
+            toast.success("Local data cleared")
+          }}
+        />
       </CardContent>
     </Card>
   )

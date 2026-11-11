@@ -8,6 +8,18 @@ Gots is a client for one Hermes Agent server: chat with your bots from a phone, 
 Who you are to Gots. Signed out means it has ended, and only a fresh sign-in brings it back.
 _Avoid_: login, account, user, "logged out"
 
+**Pick row**:
+One row of a list a pop-up offers — a model, a bot, a mode, a Prompt, a skill to run, a pull request, a setting's value. It is a control, not a list row: 44px at its shortest, one mark, a name, at most one muted line, and the one state its mode promises.
+_Avoid_: option row, list item, choice row
+
+**Pick group**:
+The list a pick row sits in, and the thing that says what its rows are: one of several, each on its own, a way out, or a cursor to run. A row outside one is a way out.
+_Avoid_: picker list, options list
+
+**Cursor**:
+The row a list's keyboard is on, which is not the row that is chosen. The `/` menu has a cursor and no choice; a settings pick has a choice and no cursor.
+_Avoid_: selection, highlight, focus
+
 **Identity**:
 The sign-in service an account session lives in. The Android app talks to it directly; the browser goes through the library.
 _Avoid_: auth server, login service, GoTrue
@@ -190,11 +202,12 @@ One Hermes profile the user has linked to Gots: its own agent, skills and settin
 _Avoid_: profile, agent, assistant
 
 **Chat**:
-A bot's own conversation with you: one row of its list, drawn as a thread, and the screen its
-address opens. A bot's list holds every chat it has, so an older conversation is as reachable as the
-newest; a room and a routine's run are rows of the same list rather than chats, since one is shared
-with the bot's other members and the other is nobody's conversation. Main is a chat like any other:
-no mark, one place in the order, and the one chat that cannot be deleted.
+A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
+not a list of them, is the screen the app opens on and the one a reload keeps the reader in. A bot's
+list holds every chat it has, so an older conversation is as reachable as the newest, and a chat's bar
+carries the way to that list; a room and a routine's run are rows of the same list rather than chats,
+since one is shared with the bot's other members and the other is nobody's conversation. Main is a
+chat like any other: no mark, one place in the order, and the one chat that cannot be deleted.
 _Avoid_: thread, Main, bot chat, "the bot's screen"
 
 **Blank chat**:
@@ -204,6 +217,10 @@ _Avoid_: new chat screen, draft chat, empty chat
 **Steer**:
 A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
 _Avoid_: interrupt, injection, mid-run message
+
+**Share sheet**:
+The screen another app's share opens in Gots: what arrived, a note the sender's own text opens, the bot it goes to, and a row to send it into. Its rows are the picked bot's chats, code sessions and the rooms its roster seats, touched in the last seven days and newest first — ten drawn, Show more for the rest of the week, twenty-five at most — while the search at its foot reaches everything the bot is in, not only what is older: every title it matches, the week's own rows and the ones past the twenty-five included, best match first. A room takes the message through its own store, as the room's composer does, rather than as a chat's turn.
+_Avoid_: share target, share dialog, share screen
 
 **Host**:
 The machine a bot's Hermes runs on: where its profiles, its MCP servers and the keys they use live.
@@ -398,7 +415,7 @@ The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
 **Bar**:
-A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Every icon control on it is a frosted outline circle.
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. The leading control is the app's menu on a bot's chat, which is where the app is, so there is nothing behind it to go back to; it is a way back only where a screen was opened from another — a project session's "Back to Code", a bot's list's back to the chat it covers. Every icon control on it is a frosted outline circle.
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:

@@ -4,7 +4,6 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderKanbanIcon,
-  MenuIcon,
   PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -16,7 +15,7 @@ import { toast } from "sonner"
 
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
-import { useOpenDrawer } from "@/components/drawer-context"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
 import { NewProjectPopup } from "@/components/new-project"
 import { Button } from "@/components/ui/button"
@@ -126,7 +125,6 @@ export function ProjectsPane({ pane }: { pane: FeaturePane }) {
 
 /** Hermes Projects from every bot, pinned ones and then the most recently worked on first. */
 function ProjectsList({ pane }: { pane?: FeaturePane }) {
-  const openDrawer = useOpenDrawer()
   const profiles = useLiveQuery(listEnabledProfiles, [])
   const [results, setResults] = useState<BotResult[]>()
   const [now, setNow] = useState(() => Date.now())
@@ -209,18 +207,12 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-          <h1 className="flex-1 text-xl font-semibold tracking-tight">Projects</h1>
+      <ChatHeader
+        pinned
+        heading
+        showBot={false}
+        title="Projects"
+        actions={
           <Button
             variant="outline"
             size="icon-lg"
@@ -231,8 +223,8 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
           >
             {loading ? <Spinner /> : <RefreshCwIcon />}
           </Button>
-        </div>
-      </header>
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {unreachable.map(({ profile, error }) => (

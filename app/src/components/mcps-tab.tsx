@@ -13,9 +13,9 @@ import { toast } from "sonner"
 import { Banner, Retry } from "@/components/banner"
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
-  ConfirmDestructive,
   DestructiveButton,
   Group,
   linkRowClass,

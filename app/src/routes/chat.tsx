@@ -102,13 +102,13 @@ import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
-import { useCodePane, useRememberOpened, useSplit } from "@/lib/pane"
+import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
-import { setBackGuard } from "@/lib/native"
-import { BACK_ON_LIST, useNav } from "@/lib/nav"
+import { useNav } from "@/lib/nav"
 import { rememberLastChat } from "@/lib/last-chat"
+import { useUnreadElsewhere } from "@/lib/unread-chats"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
@@ -131,10 +131,9 @@ import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { reportUnreadThread } from "@/lib/sentry"
 import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
-import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
-import { botChatsPath } from "@/lib/bot-tabs"
 import { chatFlow } from "@/lib/chat-flow"
+import { useChatLead } from "@/lib/chat-lead"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
 import { dictationHint } from "@/lib/dictation-hint"
@@ -364,28 +363,10 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
-  const legacy = useLegacyChat()
   const { state: address } = useLocation()
   const { root, up } = useNav()
-  // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
-  const upRef = useRef(up)
-  upRef.current = up
-  // A chat of a bot answers its bot's list: where its own control and Android's back step when
-  // nothing stands behind it, and — since a row opens the chat from that list — where they land
-  // after one. A Main is one of the bot's chats, so it answers the same address.
-  const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
   const xl = useXLarge()
   const wide = useWide()
-  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
-  // there is nothing behind it for its header to lead back to.
-  const besideList = useSplit() && Boolean(listPath)
-  useEffect(() => {
-    if (!listPath) return
-    return setBackGuard(() => {
-      upRef.current(listPath, BACK_ON_LIST)
-      return true
-    })
-  }, [listPath])
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
   // and a session nothing was sent in isn't kept.
   const session = chat?.projectId ? chat : undefined
@@ -400,6 +381,11 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     session,
     beside,
     unsent: isUnsent,
+  })
+  const lead = useChatLead({
+    bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
+    underCode,
+    leave,
   })
   // The repos a session not started yet will work in; the project screen hands its project over.
   const handed = (address as { project?: HermesProject } | null)?.project
@@ -439,12 +425,15 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const [away, setAway] = useState(false)
   const online = useOnline()
+  const unread = useUnreadElsewhere(chat?.profileId, chat?.id)
   const actions = chat && bot && (
     <ChatActions
       chat={chat}
       profile={bot}
       session={session}
       wide={wide}
+      listPath={lead.listPath}
+      unread={unread}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -482,22 +471,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             centered={Boolean(session)}
             showBot={!session}
             actions={actions}
-            leading={
-              // Beside the bot's list there is nothing behind this chat, so it carries no way
-              // back; below that width the chat is a screen the list pushed and leads back to it,
-              // and a session leads back to Code unless it is drawn beside Code's list.
-              besideList ? undefined : listPath ? (
-                <BackButton
-                  label={`Back to ${bot.name || "bot"}`}
-                  onClick={() => up(listPath, BACK_ON_LIST)}
-                  floating
-                />
-              ) : (
-                underCode && (
-                  <BackButton label="Back to Code" onClick={() => void leave()} floating />
-                )
-              )
-            }
+            leading={lead.leading}
           />
           <ChatBody
             chat={chat}
@@ -981,20 +955,12 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     if (ownedBy) void setActiveProfile(ownedBy)
   }, [ownedBy])
 
-  // A chat of a bot answers its bot's list, Main among them.
-  const listPath =
-    !legacy && conversation && !session && listsAsChat(conversation)
-      ? botChatsPath(conversation.profileId)
-      : undefined
   // A session opens beside Code's list where there's room, and is then a top-level screen with
   // nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
-  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
-  // there is nothing behind it for its header to lead back to.
-  const besideList = useSplit() && Boolean(listPath)
   const codePath = session && "/code"
   const {
     leave,
@@ -1005,6 +971,11 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     session,
     beside,
     unsent: hasNoMessages,
+  })
+  const lead = useChatLead({
+    bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
+    underCode,
+    leave,
   })
   // This device has the chat's thread on screen as of now — its read mark, written when the thread
   // renders and again while new activity lands in front of the reader, which is what clears a row's
@@ -1019,13 +990,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   useEffect(() => {
     if (seenId && seenAt > 0) markRead(seenId, seenAt)
   }, [seenId, seenAt])
-  useEffect(() => {
-    if (!listPath) return
-    return setBackGuard(() => {
-      up(listPath, BACK_ON_LIST)
-      return true
-    })
-  }, [listPath, up])
 
   const send = async (text: string, attachments: Attachment[] = [], at?: number) => {
     if (!id) return
@@ -1041,12 +1005,15 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     }
   }
 
+  const unread = useUnreadElsewhere(conversation?.profileId, conversation?.id)
   const actions = conversation && (
     <ChatActions
       chat={conversation}
       profile={profile}
       session={session}
       wide={wide}
+      listPath={lead.listPath}
+      unread={unread}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -1083,19 +1050,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         // A chat is with its bot, so its picture stays.
         showBot={!session && !unstarted}
         actions={actions}
-        leading={
-          // Beside the bot's list there is nothing behind this chat, so it carries no way back;
-          // below that width the chat is a screen the list pushed and leads back to it.
-          besideList ? undefined : listPath ? (
-            <BackButton
-              label={`Back to ${profile?.name ?? "bot"}`}
-              onClick={() => up(listPath, BACK_ON_LIST)}
-              floating
-            />
-          ) : (
-            underCode && <BackButton label="Back to Code" onClick={() => void leave()} floating />
-          )
-        }
+        leading={lead.leading}
       />
 
       {flow.length > 0 ? (

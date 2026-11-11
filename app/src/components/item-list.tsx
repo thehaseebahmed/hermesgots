@@ -1,14 +1,8 @@
-import type { KeyboardEvent, ReactNode, Ref } from "react"
-import { ChevronUpIcon, PinIcon, SearchIcon, XIcon } from "lucide-react"
+import type { ReactNode } from "react"
+import { ChevronUpIcon, PinIcon } from "lucide-react"
 import { Link } from "react-router"
 
 import { Bot } from "@/components/bot"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type { ListGroup } from "@/lib/item-groups"
 import type { RowTone } from "@/lib/session-work"
@@ -228,64 +222,7 @@ export function ItemRow({
   )
 }
 
-/**
- * The search field itself, where a screen puts it in its own chrome — the list's bar and Code's field
- * under its title bar are the same one, so the placeholder, the clear button and the frame cannot
- * drift between them.
- */
-export function SearchField({
-  value,
-  onChange,
-  label,
-  inputRef,
-  onKeyDown,
-  id,
-  className,
-}: {
-  value: string
-  onChange: (value: string) => void
-  label: string
-  inputRef?: Ref<HTMLInputElement>
-  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
-  /** The field's own name, for the control that shows and hides it (`aria-controls`). */
-  id?: string
-  /** One class from the caller, for a field that has to be as tall as the control beside it. */
-  className?: string
-}) {
-  return (
-    <InputGroup className={cn("h-11 rounded-full bg-background dark:bg-input/30", className)}>
-      <InputGroupAddon>
-        <SearchIcon />
-      </InputGroupAddon>
-      <InputGroupInput
-        ref={inputRef}
-        id={id}
-        type="search"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={label}
-        aria-label={label}
-        autoComplete="off"
-        className="[&::-webkit-search-cancel-button]:hidden"
-      />
-      {value && (
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            size="icon-sm"
-            // A full 44px target: the field is 44 tall, and a clear control a thumb has to find is
-            // the one place a smaller icon would cost the tap.
-            className="size-11 rounded-full"
-            onClick={() => onChange("")}
-            aria-label="Clear search"
-          >
-            <XIcon />
-          </InputGroupButton>
-        </InputGroupAddon>
-      )}
-    </InputGroup>
-  )
-}
+import { SearchField } from "@/components/search-field"
 
 /** The search field at the top of a list. */
 export function ItemSearch({
