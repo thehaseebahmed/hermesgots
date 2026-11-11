@@ -12,6 +12,12 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 /**
+ * Whether this is the open that draws this device's copy of an answer: a retry asks the host, and
+ * seeding again would put the copy back under the answer it is waiting for.
+ */
+export const seedsFromCache = (attempt: number) => attempt === 0
+
+/**
  * `readFor` is what the read is about — a server's name, a bot's connection, a page's tab. When it
  * changes, the throw belongs to the thing that is gone: the screen has not asked about the new one
  * yet, so nothing may offer to retry it.
@@ -38,13 +44,18 @@ export function useReadAttempt(readFor?: string) {
     held.resolve()
   }, [])
 
-  const landed = useCallback(
+  const settle = useCallback(
     (failed: boolean) => {
       release()
       setThrew(failed)
     },
     [release],
   )
+
+  /** The attempt landed: the block arrived, or the host answered without it. */
+  const landed = useCallback(() => settle(false), [settle])
+  /** The attempt threw, or never landed, or timed out — the one ending a retry is offered for. */
+  const landedThrew = useCallback(() => settle(true), [settle])
 
   const reload = useCallback(() => {
     // A tap settles the tap before it rather than leaving it waiting on a read nobody made.
@@ -70,5 +81,5 @@ export function useReadAttempt(readFor?: string) {
   // The screen closing is a teardown no read of its own can report.
   useEffect(() => () => release(), [release])
 
-  return { attempt, landed, release, retry: threw ? reload : undefined }
+  return { attempt, landed, landedThrew, release, retry: threw ? reload : undefined, failed: threw }
 }

@@ -93,7 +93,7 @@ import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
 import { setBotMuted } from "@/lib/push"
-import { useReadAttempt } from "@/lib/read-attempt"
+import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
@@ -594,7 +594,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
   const [problem, setProblem] = useState<string>()
   const [read, setRead] = useState("")
   const [fresh, setFresh] = useState("")
-  const { attempt, landed, release, retry } = useReadAttempt(page)
+  const { attempt, landed, landedThrew, release, retry } = useReadAttempt(page)
 
   useEffect(() => {
     let cancelled = false
@@ -604,7 +604,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
     // Only the first open seeds from that copy: a retry asks the host, and seeding again would
     // flicker the rows and strobe the sentence under them.
     setBlock(undefined)
-    if (attempt === 0)
+    if (seedsFromCache(attempt))
       void cachedHost<GeneralSettings>(profile, route).then((held) => {
         if (!cancelled && !answered && held) setBlock(held)
       })
@@ -621,7 +621,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
           setFresh(page)
           void keepHost(profile, route, next)
         }
-        landed(false)
+        landed()
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -632,7 +632,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
             ? error.message
             : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
         )
-        landed(true)
+        landedThrew()
       })
     return () => {
       cancelled = true

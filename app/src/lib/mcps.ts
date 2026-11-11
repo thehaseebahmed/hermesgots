@@ -354,7 +354,7 @@ function useReadOnOpen<T extends { name: string }>(
   const [value, setValue] = useState<T | undefined>(undefined)
   const config = serverConfig(server)
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
-  const { attempt, landed, retry } = useReadAttempt(`${key}:${name ?? ""}`)
+  const { attempt, landed, landedThrew, retry } = useReadAttempt(`${key}:${name ?? ""}`)
   usePoll(
     (signal) => {
       const bounded = AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
@@ -363,11 +363,11 @@ function useReadOnOpen<T extends { name: string }>(
         bounded,
         (found) => {
           setValue(found)
-          landed(false)
+          landed()
         },
         (error) => {
           noteFailure(noting, error)
-          landed(true)
+          landedThrew()
         },
       )
     },

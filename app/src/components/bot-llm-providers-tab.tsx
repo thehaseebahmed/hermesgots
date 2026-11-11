@@ -970,7 +970,7 @@ function useLlmProviders(profile: Profile) {
   const [block, setBlock] = useState<LlmProviders | undefined>(handed.current)
   const [problem, setProblem] = useState<string>()
   const connection = connectionKey(profile)
-  const { attempt, landed, release, retry } = useReadAttempt(connection)
+  const { attempt, landed, landedThrew, release, retry } = useReadAttempt(connection)
   // This screen's own address, for the replace that takes the block off the entry it rode in on.
   const here = `${location.pathname}${location.search}`
 
@@ -992,7 +992,7 @@ function useLlmProviders(profile: Profile) {
         if (cancelled) return
         setProblem(next ? undefined : "This host doesn't list its LLM providers.")
         if (next) setBlock(next)
-        landed(false)
+        landed()
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -1000,7 +1000,7 @@ function useLlmProviders(profile: Profile) {
         setProblem(
           error instanceof Error ? error.message : "Couldn't read this bot's LLM providers.",
         )
-        landed(true)
+        landedThrew()
       })
     return () => {
       cancelled = true

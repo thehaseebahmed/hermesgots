@@ -25,7 +25,7 @@ test("a retry's promise settles when its read is torn down", async () => {
   await mount(<ReadAttemptProbe />, async () => {
     assert.equal(probe.api?.retry, undefined, "a read that has not thrown offers no retry")
 
-    probe.api!.landed(true)
+    probe.api!.landedThrew()
     await settle()
     const tap = probe.api!.retry
     assert.ok(tap, "a read that threw offers the same read again")
@@ -59,7 +59,7 @@ test("a read about something else starts with nothing to retry", async () => {
   probe.api = undefined
   const settled: string[] = []
   await mount(<ChangingProbe />, async () => {
-    probe.api!.landed(true)
+    probe.api!.landedThrew()
     await settle()
     const tap = probe.api!.retry
     assert.ok(tap, "the first read's refusal is one that can be asked again")

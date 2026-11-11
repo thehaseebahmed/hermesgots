@@ -20,7 +20,7 @@ import {
 } from "@/lib/hermes"
 import { connectionKey } from "@/lib/connection"
 import { modelInfoFor } from "@/lib/model-info"
-import { useReadAttempt } from "@/lib/read-attempt"
+import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
 import { cn } from "@/lib/utils"
 
@@ -39,7 +39,7 @@ function useBotAfk(config: HermesConfig) {
   const [threshold, setThreshold] = useState<number | null>(null)
   const [stale, setStale] = useState(false)
   const [problem, setProblem] = useState<string>()
-  const { attempt, landed, release, retry } = useReadAttempt(connectionKey(config))
+  const { attempt, landed, landedThrew, release, retry, failed } = useReadAttempt(connectionKey(config))
 
   // A host from before the route answers nothing, which is the reason the tab says it couldn't read
   // it rather than drawing a number nobody wrote.
@@ -48,7 +48,7 @@ function useBotAfk(config: HermesConfig) {
     let answered = false
     // Only the first open seeds from this device's copy: a retry asks the host, and seeding again
     // would put the copy back under the answer it is waiting for.
-    if (attempt === 0)
+    if (seedsFromCache(attempt))
       void cachedHost<{ budget: number; threshold: number | null }>(config, "bot-afk").then(
         (held) => {
           if (cancelled || answered || !held) return
@@ -69,13 +69,13 @@ function useBotAfk(config: HermesConfig) {
         // must stay shut until one lands rather than opening over the default nobody was sent.
         setProblem(undefined)
         void keepHost(config, "bot-afk", { budget: next, threshold: answer.usageThreshold })
-        landed(false)
+        landed()
       })
       .catch((error: unknown) => {
         noteFailure("Reading this bot's pick budget", error)
         if (cancelled) return
         setProblem(error instanceof Error ? error.message : "Couldn't read this bot's pick budget.")
-        landed(true)
+        landedThrew()
       })
     return () => {
       cancelled = true
@@ -102,6 +102,8 @@ function useBotAfk(config: HermesConfig) {
     },
     /** The same read, asked again — and nothing at all where the last one did not throw. */
     retry,
+    /** Whether the last read threw: the one fact that shuts the tab's own controls. */
+    failed,
   }
 }
 
@@ -142,7 +144,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
   // fact — it exists only while the last landing threw, so a retry still out keeps them shut rather
   // than opening over a default nobody was sent. `stale` is the other reason they do: the numbers
   // drawn are this device's copy until the host's own lands.
-  const failed = Boolean(afk.retry)
+  const failed = afk.failed
   // The count a write is carrying until its answer lands: a refused one drops it, so nothing on the
   // tab reads as saved that the host never kept.
   const [draft, setDraft] = useState<number | null>(null)

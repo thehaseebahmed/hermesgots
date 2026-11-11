@@ -268,14 +268,24 @@ const wide = async ({ page, profileId, shot }) => {
   )
   await shot("general")
 
-  // The click's own scroll moves the list's box: the pane holds 1645px of rows in 768px, so reaching
-  // Models scrolls it 741px. The box the swap is measured from is taken with the row already in
-  // view, so what it reads afterwards is the swap's doing rather than the scroll's.
+  // The click's own scroll moves the list's box: the pane holds more rows than a laptop's height, so
+  // reaching Models scrolls it. The box the swap is measured from is taken with the row already in
+  // view, and the scroll itself is asserted, so what the swap is judged on is its own doing.
   const models = list.locator('[data-bot-page="models"]')
+  const scrolledTo = () =>
+    list.evaluate((element) => {
+      // The pane the rows scroll in is the list's own column, not the list: ask the ancestor that
+      // actually scrolls, so the number is the reader's place rather than an always-zero element.
+      for (let node = element.parentElement; node; node = node.parentElement)
+        if (node.scrollHeight > node.clientHeight + 1) return node.scrollTop
+      return 0
+    })
   await models.scrollIntoViewIfNeeded()
   await settled(page)
   const before = await list.boundingBox()
+  const scroll = await scrolledTo()
   assert.ok(before, "the list has a box to hold its place by")
+  assert.ok(scroll > 0, `reaching Models scrolled the list's pane (${scroll}px)`)
   await models.click()
   await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models`, {
     timeout: 15_000,
@@ -294,6 +304,7 @@ const wide = async ({ page, profileId, shot }) => {
     "the list is the same element it was",
   )
   assert.ok(await list.isVisible(), "the list is still on screen beside the page")
+  assert.equal(await scrolledTo(), scroll, "and the swap left that scroll where it was")
   const after = await list.boundingBox()
   assert.ok(after, "the list still has a box")
   assert.ok(same(before, after), "the list's box did not move while the pane beside it swapped")

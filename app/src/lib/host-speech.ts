@@ -11,7 +11,7 @@ import {
   setSttSetting,
 } from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
-import { useReadAttempt } from "@/lib/read-attempt"
+import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
 import {
   CLEANUP_LEVELS_FEATURE,
@@ -93,7 +93,7 @@ async function kept(config: Server, ask: () => Promise<unknown>): Promise<Speech
  *
  * The page opens on the last answer this device read — `settings` is the fresh block once it lands,
  * and the cached one under a `stale` page until then, when every row is drawn muted and untappable
- * (ADR 0082). A write while nothing fresh has landed is refused here as well as in the page, so a
+ * (ADR 0132). A write while nothing fresh has landed is refused here as well as in the page, so a
  * stale level or model never reaches the host.
  */
 export function useSpeech(profile?: Server | null) {
@@ -129,19 +129,19 @@ export function useSpeech(profile?: Server | null) {
   // The read's own sentence, where the request was refused, never landed, or timed out — and the
   // only failure the page offers to ask again.
   const [readProblem, setReadProblem] = useState<string | null>(null)
-  const { attempt, landed, release, retry } = useReadAttempt(key)
+  const { attempt, landed, landedThrew, release, retry } = useReadAttempt(key)
   // Kept with the connection they belong to, as `failed` is: another bot's probe is not this bot's.
   const [measuring, setMeasuring] = useState("")
   const [measureProblem, setMeasureProblem] = useState<{ key: string; message: string }>()
   // Whether the answer this hook holds is the host's own rather than this device's older copy: the
-  // one question every guard below and the page's greying both ask (ADR 0082).
+  // one question every guard below and the page's greying both ask (ADR 0132).
   const settled = state?.key === key
 
   // The copy this device last read, drawn before the read lands: a phone with no signal still shows
-  // the page it answered five minutes ago rather than a blank one (ADR 0082). Only the first open
+  // the page it answered five minutes ago rather than a blank one (ADR 0132). Only the first open
   // seeds from it: a retry asks the host, and seeding again would flicker the values under it.
   useEffect(() => {
-    if (!key || attempt > 0) return
+    if (!key || !seedsFromCache(attempt)) return
     let cancelled = false
     void cachedSpeech(key).then((settings) => {
       if (!cancelled && settings) setCached({ key, settings })
@@ -166,7 +166,7 @@ export function useSpeech(profile?: Server | null) {
         // The read's own sentence goes; a write's refusal is not this read's to clear.
         setFailed("")
         setReadProblem(null)
-        landed(false)
+        landed()
       })
       .catch((error: unknown) => {
         noteFailure("Reading the host's speech model", error)
@@ -174,7 +174,7 @@ export function useSpeech(profile?: Server | null) {
         setFailed(key)
         // The host's own sentence where it answered with one; our own where the request never landed.
         setReadProblem(error instanceof HermesError && error.status ? error.message : READ_FAILED)
-        landed(true)
+        landedThrew()
       })
     return () => {
       cancelled = true
@@ -199,7 +199,7 @@ export function useSpeech(profile?: Server | null) {
   const write = useCallback(
     async (patch: SpeechPatch) => {
       // Nothing fresh has landed, so what the page holds is this device's copy of an older answer:
-      // writing it would send a value the host may have moved past (ADR 0082).
+      // writing it would send a value the host may have moved past (ADR 0132).
       if (!settled) return false
       const settings = await save(() =>
         setSpeech({ baseUrl, apiKey }, patch, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
@@ -231,7 +231,7 @@ export function useSpeech(profile?: Server | null) {
       }
       // Who hears a take is not in the `stt` block this answers with, so a provider pick is followed
       // by the read that names it: the page greys Cleanup on that route, and must not keep saying the
-      // provider the bot has just left (ADR 0082).
+      // provider the bot has just left (ADR 0132).
       if (setting === "stt.provider") {
         const fresh = await save(() =>
           getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS)),
@@ -285,7 +285,7 @@ export function useSpeech(profile?: Server | null) {
     failed === key ? "failed" : model || settled || !supported || !baseUrl ? undefined : "checking"
 
   return {
-    /** The host's fresh answer, or this device's cached one until a read lands (ADR 0082). */
+    /** The host's fresh answer, or this device's cached one until a read lands (ADR 0132). */
     settings,
     /** Whether those values are the cached copy: every row is drawn muted and untappable. */
     stale: !settled && Boolean(held),

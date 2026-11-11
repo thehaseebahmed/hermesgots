@@ -301,9 +301,10 @@ export function Caption({ children }: { children: ReactNode }) {
 }
 
 /**
- * The one control a page ends on when it takes something away: a ghost pill with the trash at its
- * lead, in the words of the thing it removes — *Delete bot* at a bot's page's foot, *Remove server*
- * on a server's sheet. One shape, so two pages that both destroy don't read two ways.
+ * The one control a page ends on when it takes something away: a pill in the destructive ink over
+ * the tint `DESIGN.md` gives that act, with the trash at its lead, in the words of the thing it
+ * removes — *Delete bot* at a bot's page's foot, *Remove server* on a server's sheet. One shape, so
+ * two pages that both destroy don't read two ways.
  */
 export function DestructiveButton({
   onClick,
@@ -317,8 +318,8 @@ export function DestructiveButton({
   return (
     <Button
       type="button"
-      variant="ghost"
-      className="h-11 rounded-full text-destructive"
+      variant="destructive"
+      className="h-11 rounded-full"
       onClick={onClick}
       disabled={disabled}
     >
