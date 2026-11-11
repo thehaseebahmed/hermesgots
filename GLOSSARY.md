@@ -750,6 +750,18 @@ _Avoid_: revision, snapshot, draft
 What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
 
+**Ask**:
+The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app
+replaces with that library's source. A name the app doesn't carry leaves nothing, and a name the
+canvas's host doesn't carry refuses the write.
+_Avoid_: library tag, import, include, library request
+
+**Catalogue**:
+The libraries a canvas may ask for by name: the app's one list of them, holding each one's source,
+global, size and any stylesheet or setup, which the host's refusal list and the guide's library block
+are both generated from.
+_Avoid_: library list, manifest, registry, SDK list
+
 **Point**:
 Tapping an element of a canvas while editing it, so the message you send names that element.
 _Avoid_: select, pick, inspect, element picker
