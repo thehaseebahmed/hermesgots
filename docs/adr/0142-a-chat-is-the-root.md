@@ -34,6 +34,14 @@ default where the drawer is what holds the bots — not a back control to a list
 under. Nothing leads at all where the sidebar is on screen. A project session under Code keeps "Back
 to Code": it is not a bot's chat, and this record does not reach it.
 
+**A press at the root offers the menu as well as arming the exit.** The first press that reaches the
+app's edge raises "Press back again to exit" and opens the drawer with it, so a reader whose press has
+gone as far back as the app goes is offered another context rather than only a second press. The press
+that arm promised leaves even with that drawer standing in front of it — the toast said it would
+leave, and a promise an open sheet can cancel is not one — while a press a screen or a pop-up takes
+steps back and clears the arm, as a press at another address does. It is the Android app's alone:
+there is no exit toast in a browser, so nothing of this reaches one.
+
 **A bot with nothing to open draws its list as the root.** No chat remembered for the bot, or a
 remembered one that has been deleted or has come to belong to another bot, is the list — to pick a
 chat from, at the app's entry, where back leaves the app. The newest chat is not a fallback: "the

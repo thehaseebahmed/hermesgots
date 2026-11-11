@@ -4,12 +4,13 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { useEffect } from "react"
+import { act, useEffect } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
+import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
 import { useNav } from "@/lib/nav"
-import { pressBack, setBackGuard } from "@/lib/native"
+import { answerBackPress, pressBack, setBackGuard, setMenuOpener } from "@/lib/native"
 import { ChatPage } from "@/routes/chat"
 import { SettingsPage } from "@/routes/settings"
 
@@ -142,6 +143,80 @@ test("an open pop-up takes the press before any screen", async () => {
 })
 
 /**
+ * Takes back whatever arm a case left — even one that failed before its own second press — so the
+ * app's exit is nobody's inheritance. Two presses always end unarmed: one arms, one leaves.
+ */
+function disarm() {
+  for (let press = 0; press < 2; press += 1) if (answerBackPress() === "leave") return
+}
+
+test("the first press at the root opens the menu, and the second leaves", async () => {
+  let opened = 0
+  const done = setMenuOpener(() => void (opened += 1))
+  try {
+    assert.equal(answerBackPress(), "armed", "the first press at the root arms the exit")
+    assert.equal(opened, 1, "and offers the app's menu with it")
+    assert.equal(answerBackPress(), "leave", "the press inside the window leaves")
+  } finally {
+    disarm()
+    done()
+  }
+})
+
+test("an armed press leaves with a sheet open", async () => {
+  assert.equal(answerBackPress(), "armed", "the first press arms the exit")
+  const sheet = document.createElement("div")
+  sheet.setAttribute("role", "dialog")
+  sheet.setAttribute("data-open", "")
+  let escaped = 0
+  sheet.addEventListener("keydown", () => void (escaped += 1))
+  document.body.append(sheet)
+  try {
+    assert.equal(answerBackPress(), "leave", "the press the toast promised leaves anyway")
+    assert.equal(escaped, 0, "and the sheet standing in front is never the press's to close")
+    assert.equal(document.body.contains(sheet), true, "so it is still standing after it")
+  } finally {
+    sheet.remove()
+    disarm()
+  }
+})
+
+test("a change of address clears the arm", async () => {
+  const before = window.location.pathname
+  try {
+    assert.equal(answerBackPress(), "armed", "the press arms the exit at this address")
+    window.history.pushState({}, "", "/c/somewhere-else")
+    assert.equal(
+      answerBackPress(),
+      "armed",
+      "a press at another address arms afresh rather than leaving",
+    )
+    assert.equal(answerBackPress(), "leave", "and the arm it made is the one that leaves")
+  } finally {
+    window.history.replaceState(window.history.state, "", before)
+    disarm()
+  }
+})
+
+/**
+ * The shell over a chat, the way `test-bot-chats-pane.tsx` mounts it: the drawer is the shell's, so
+ * what a press at the root opens is drawn by it and not by a spy.
+ */
+const shellAt = (id: string) => (
+  <MemoryRouter initialEntries={[`/c/${id}`]}>
+    <Path />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+/** The drawer's own dialog, as the shell opens it: the sheet whose title is the app's menu. */
+const DRAWER_DIALOG = '[role="dialog"][data-open] [data-slot="sheet-title"]'
+
+/**
  * A chat of a bot's on screen at the app's only entry: nothing behind it, and nothing in its bar
  * naming a screen of the app's, since the drawer opens those.
  */
@@ -219,6 +294,34 @@ test(
         assert.deepEqual(history.backs, [], "and nothing steps")
         assert.equal(path(), "/c/back-chat", "so the chat is still what is on")
         assert.deepEqual(JSON.parse(state()), null, "with nothing written in its place")
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "the press at the root draws the drawer the shell registered",
+  atWidth(390, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(shellAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        await act(async () => {
+          assert.equal(answerBackPress(), "armed", "the press at the root arms the exit")
+        })
+        await until(async () => find(DRAWER_DIALOG) !== null, "the drawer's dialog over the chat")
+        assert.equal(
+          find(DRAWER_DIALOG)?.textContent,
+          "Conversations",
+          "the app's own menu, drawn by the shell",
+        )
+        assert.equal(answerBackPress(), "leave", "and the press the toast promised leaves")
       })
     } finally {
       history.restore()

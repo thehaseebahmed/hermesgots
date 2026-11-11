@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -26,6 +27,7 @@ import {
   useProjectsPane,
   useResearchPane,
 } from "@/lib/pane"
+import { setMenuOpener } from "@/lib/native"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { cn } from "@/lib/utils"
@@ -193,6 +195,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
   useBubbleMirror()
   useBubbleTakeaways()
   const [open, setOpen] = useState(false)
+  // The drawer is the app's menu, and a press at the app's edge offers it beside the exit toast.
+  useEffect(() => setMenuOpener(() => setOpen(true)), [setOpen])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)

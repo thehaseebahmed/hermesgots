@@ -166,9 +166,10 @@ export const EXIT_TOASTER = "exit"
 type BackPress = "popup" | "screen" | "app"
 
 /**
- * One press of Android's back, decided in the order the app keeps: the frontmost pop-up first, as
+ * Which layer of the app takes a press, in the order the app keeps: the frontmost pop-up first, as
  * Material's modal sheets and dialogs close on back, then the screen's own guard where it sets one
- * (a thread, a project, a session), then the app's own.
+ * (a thread, a project, a session) — and "app" where neither did, which is the press the app's own
+ * exit rules answer (`answerBackPress`).
  */
 export function pressBack(): BackPress {
   if (closeTopPopup()) return "popup"
@@ -176,30 +177,70 @@ export function pressBack(): BackPress {
   return "app"
 }
 
+/** What a whole press came to: a layer took it, it armed the exit, or the app left. */
+export type BackAnswer = "popup" | "screen" | "armed" | "leave"
+
 /**
- * Android's back button, where nothing took the press: the app leaves on a second press within
- * `EXIT_WINDOW`, so a stray press doesn't. Leaving minimizes rather than exits, as Android's own
- * back does from 12 on, so a reply keeps streaming and the screen stays.
+ * The arm the toast promises: when the exit was armed, and the address it was armed at. Nothing
+ * until a press arms it; a press that leaves, a press a layer takes, and a press at another address
+ * all drop it.
  */
+let armed: { href: string; at: number } | undefined
+
+/**
+ * The app's menu, as the shell registers it: the drawer, which holds the contexts a reader can go
+ * to instead of leaving.
+ */
+let menuOpener: (() => void) | undefined
+
+/**
+ * Registers what opens the app's menu. Returns the cleanup, which leaves an opener a shell
+ * registered after it alone.
+ */
+export function setMenuOpener(opener: () => void) {
+  menuOpener = opener
+  return () => {
+    if (menuOpener === opener) menuOpener = undefined
+  }
+}
+
+/**
+ * One press of Android's back, decided and performed, and what it came to.
+ *
+ * An armed press, at the address it was armed at and inside `EXIT_WINDOW`, leaves — whatever stands
+ * in front, the menu the first press opened included. That is the only rule that beats an open
+ * pop-up, and it does because the toast promised to leave: a promise a sheet can cancel is not one.
+ * Otherwise the frontmost pop-up takes the press, as Material's sheets and dialogs close on back;
+ * otherwise the screen's own guard does (a thread, a project, a session); otherwise nothing did, so
+ * the press arms the exit, raises the toast and offers the app's menu — the reader whose press
+ * reached the app's edge is offered another context, not only a second press.
+ *
+ * Leaving minimizes rather than exits, as Android's own back does from 12 on, so a reply keeps
+ * streaming and the screen stays.
+ */
+export function answerBackPress(): BackAnswer {
+  if (armed && armed.href === location.href && Date.now() - armed.at < EXIT_WINDOW) {
+    armed = undefined
+    toast.dismiss(EXIT_TOASTER)
+    void minimizeAndroidApp()
+    return "leave"
+  }
+  const taken = pressBack()
+  if (taken !== "app") {
+    armed = undefined
+    return taken
+  }
+  armed = { href: location.href, at: Date.now() }
+  placeToasts()
+  toast("Press back again to exit", { id: EXIT_TOASTER, duration: EXIT_WINDOW })
+  menuOpener?.()
+  return "armed"
+}
+
+/** Android's back button, wired to the one press. Nothing outside the app registers it. */
 export function handleBackButton() {
   if (!isNative) return
-  let armedAt = 0
   void App.addListener("backButton", () => {
-    if (pressBack() !== "app") {
-      armedAt = 0
-      return
-    }
-    if (Date.now() - armedAt < EXIT_WINDOW) {
-      armedAt = 0
-      toast.dismiss(EXIT_TOASTER)
-      void App.minimizeApp()
-      return
-    }
-    armedAt = Date.now()
-    placeToasts()
-    toast("Press back again to exit", {
-      id: EXIT_TOASTER,
-      duration: EXIT_WINDOW,
-    })
+    answerBackPress()
   })
 }
