@@ -809,7 +809,7 @@ test("a provider pick is followed by the route it moved to, and Cleanup shuts at
     await until(async () => Boolean(row("cleanup-level")), "the cleanup's card")
     assert.equal(off(row("cleanup-level")), false, "a local route keeps Cleanup live")
     await click(row("stt.provider"))
-    const groq = findAll('[data-pick-list="Provider"] > button').find((one) =>
+    const groq = findAll('[data-pick-list="Provider"] li > button').find((one) =>
       (one.textContent ?? "").includes("Groq"),
     )
     assert.ok(groq, "the Provider row offers the vendor")

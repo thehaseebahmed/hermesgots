@@ -241,7 +241,7 @@ const testRow = () => find('[data-setting="test"]')
 
 /** The bottom sheet a pick opens on a phone: its list of buttons, and the choices it offers. */
 const sheet = (label: string) => find(`[data-pick-list="${label}"]`)
-const choices = (label: string) => findAll(`[data-pick-list="${label}"] > button`)
+const choices = (label: string) => findAll(`[data-pick-list="${label}"] li > button`)
 const choice = (label: string, name: string) =>
   choices(label).find((one) => wordsOf(one) === name) ?? null
 /** A model a model pick offers, in the sheet it opened. */

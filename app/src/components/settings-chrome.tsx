@@ -11,7 +11,6 @@ import {
 
 import {
   ChevronRightIcon,
-  CheckIcon,
   EyeIcon,
   EyeOffIcon,
   SearchIcon,
@@ -24,6 +23,7 @@ import { Link } from "react-router"
 
 import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { PickGroup, PickRow } from "@/components/pick-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
@@ -865,21 +865,14 @@ export function PickList({
         </InputGroup>
       )}
       <div data-pick-list={label} className="flex min-h-0 flex-col overflow-y-auto">
-        {shown.map((option) => {
-          const chosen = option.id === selected
-          return (
-            <button
+        <PickGroup mode="choose" label={label}>
+          {shown.map((option) => (
+            <PickRow
               key={option.id}
-              type="button"
-              onClick={() => onPick(option.id)}
-              className={cn(
-                "flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-                chosen && "bg-muted",
-              )}
-            >
-              {option.leading}
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="flex min-w-0 items-center gap-2">
+              leading={option.leading}
+              selected={option.id === selected}
+              title={
+                <>
                   <span className="text-base break-all">{option.label}</span>
                   {option.badge && (
                     // Muted, and outlined rather than filled: a chosen row is already `bg-muted`.
@@ -890,15 +883,13 @@ export function PickList({
                       {option.badge}
                     </span>
                   )}
-                </span>
-                {option.detail && (
-                  <span className="truncate text-sm text-muted-foreground">{option.detail}</span>
-                )}
-              </span>
-              {chosen && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
-            </button>
-          )
-        })}
+                </>
+              }
+              line={option.detail}
+              onPick={() => onPick(option.id)}
+            />
+          ))}
+        </PickGroup>
         {!shown.length && <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>}
       </div>
     </div>
