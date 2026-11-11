@@ -120,6 +120,7 @@ const laneClass = () => find('[data-slot="list-lane"]')?.getAttribute("class") ?
 const LANE = '[data-slot="list-lane"]'
 const CHAT_BESIDE = '[data-slot="item-lane"] [data-slot="chat-pane"]'
 const BACK_TO_BOT = 'button[aria-label="Back to Mainly"]'
+const LIST_CONTROL = 'a[aria-label="Chats with Mainly"]'
 const DRAWER = 'button[aria-label="Open conversations"]'
 const OPEN_ROW = '[data-slot="list-lane"] ul a[aria-current="page"]'
 
@@ -170,6 +171,7 @@ test(
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
       assert.equal(missing(BACK_TO_BOT), true, "the chat carries no way back to the list either")
+      assert.equal(missing(LIST_CONTROL), true, "and no way to it in the bar: it stands on screen beside")
     })
   }),
 )
@@ -202,6 +204,31 @@ test(
       assert.equal(missing(LANE), true, "no list stands beside it")
       assert.equal(missing(DRAWER), false, "and the bar leads with the drawer's own control")
       assert.equal(missing(BACK_TO_BOT), true, "with no way back to the list")
+    })
+  }),
+)
+
+test(
+  "a phone's chat carries the way to its bot's chats, beside the options menu",
+  atWidth(390, async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-a"), async () => {
+      await until(async () => titles().includes("Alpha"), "the chat's own header")
+      const control = find(LIST_CONTROL)
+      assert.equal(control?.getAttribute("href"), `/b/${bot.id}`, "the bar carries the way to the bot's chats")
+      assert.deepEqual(
+        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map((one) =>
+          one.getAttribute("aria-label"),
+        ),
+        ["Chats with Mainly", "Chat options"],
+        "and it stands immediately beside the options menu",
+      )
+      assert.match(
+        control?.getAttribute("class") ?? "",
+        /\bsize-11\b.*\bbackdrop-blur\b/,
+        "wearing the frosted circle the bar's other controls wear",
+      )
     })
   }),
 )

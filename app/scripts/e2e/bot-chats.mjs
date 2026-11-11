@@ -37,7 +37,7 @@ await flow(
         const title = document.querySelector('[data-slot="header-title"]')
         return title?.textContent?.trim() ?? ""
       })
-    const back = () => page.getByRole("button", { name: "Back to Test bot" })
+    const back = () => page.getByRole("button", { name: "Back to chat" })
     // The rooms this device seats the bot in: they are rows of its list, beside its chats.
     const rooms = () =>
       page.evaluate(async () => {
@@ -82,13 +82,28 @@ await flow(
     await shot("chat")
     pass("a row opens its chat, on an address of its own")
 
-    // Back from a chat is the list, and the list is the whole of the history behind it: the next press
-    // is the app's to take.
-    await back().click()
+    // The chat's own bar carries the way to its bot's chats: a push, so the chat stays behind the
+    // list, and the list leads back to the chat it covers.
+    const chatRung = await rung()
+    await page.getByRole("link", { name: "Chats with Test bot" }).click()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
     await until(async () => (await rows()).length === expected.length, 20_000, "the list again")
-    assert.equal(await rung(), 0, "and nothing stands behind the list")
-    pass("back from a chat lands the list, and the list is the app's first entry")
+    assert.equal(await rung(), chatRung + 1, "the list stands a rung above the chat it covers")
+    assert.equal(
+      await page.evaluate(
+        () => document.querySelector('main ul a[aria-current="page"]')?.getAttribute("href") ?? null,
+      ),
+      chat,
+      "with the chat's row marked as the one it covers",
+    )
+    await shot("list-over-chat")
+    pass("the chat's list control opens the bot's chats above it, the chat's row marked")
+
+    await back().click()
+    await page.waitForURL(`**${chat}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat it led back to")
+    assert.equal(await rung(), chatRung, "back on the rung the chat stands at, nothing left over")
+    pass("back from the pushed list returns the chat it covers")
 
     // Away in the app and back: the chat the reader left is where they land.
     await page.locator('aside a[href="/code"]').first().click()

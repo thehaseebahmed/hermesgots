@@ -11,6 +11,7 @@ import {
 } from "react-router"
 
 import { Bot } from "@/components/bot"
+import { BackButton } from "@/components/back-button"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemRow, pinnedLine } from "@/components/item-list"
 import { ListFoot } from "@/components/list-foot"
@@ -23,7 +24,8 @@ import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib
 import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
-import { BACK_ON_LIST, depth } from "@/lib/nav"
+import { setBackGuard } from "@/lib/native"
+import { BACK_ON_LIST, depth, useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
@@ -37,8 +39,10 @@ import { cn } from "@/lib/utils"
  * A bot's screen: the list of its chats, one flat band — the pinned ones first and the rest by what
  * was last said in them. Its header is the bot itself, whose name is the way to its settings, and the
  * two controls it floats over the foot search the list and start something in it: a chat, or a room.
- * The list is a root screen, so its own back leaves the app, and a reader arriving at it lands in the
- * chat this device last had open here.
+ * At the app's entry the list is a root screen, so its own back leaves the app, and a reader arriving
+ * at it lands in the chat this device last had open here. Pushed over a chat — which is what a chat's
+ * own list control does — it stands on that chat instead: its bar leads back to it, Android's press
+ * steps to it, and the chat it covers is the row it marks as open.
  *
  * Where there is room the list is the pane and the chat it opened stands beside it
  * (`useBotChatsPane`), so this screen is then the item lane with nothing open; below that width the
@@ -49,7 +53,10 @@ export function BotChatsPage() {
   const legacy = useLegacyChat()
   const enabled = legacy === false
   const pane = useBotChatsPane(enabled)
-  const landing = useLanding(profileId, enabled)
+  const place = useListPlace()
+  // The chat a pushed list covers, named by the state the chat's control left with it.
+  const open = (useLocation().state as { open?: string } | null)?.open
+  const landing = useLanding(profileId, enabled, place.landed)
   // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
   if (legacy === undefined) return null
@@ -58,15 +65,15 @@ export function BotChatsPage() {
   // drawn for a frame.
   if (landing) return null
   if (pane) return <NoChatOpen />
-  return <BotChatsList profileId={profileId} />
+  return <BotChatsList profileId={profileId} selected={open} pushed={!place.root} />
 }
 
 /**
  * Where this list stands, asked once: `root` is this list being the app's own entry, `listed` is the
  * state a chat leaves the entry it steps back into it with (`BACK_ON_LIST`), and `landed` is the one
  * arrival that opens a chat — forwards, at the app's entry, with nobody having asked for the list.
- * A reload of the address, a step back onto it, or a list pushed over a chat (from that width's list
- * control) is none of them.
+ * A reload of the address, a step back onto it, or a list a chat's own control pushed over that chat
+ * is none of them.
  */
 function useListPlace() {
   const type = useNavigationType()
@@ -82,13 +89,14 @@ function useListPlace() {
  * place says the reader is back on the list — so a press back never bounces into the chat it came
  * from.
  *
+ * `landed` is the arrival `useListPlace` read, since only that one opens a chat.
+ *
  * Answers whether the address is still being settled — the read is out, or a chat is taking it —
  * which the screen draws nothing for, so neither the list it is leaving nor an empty pane is drawn
  * for a frame.
  */
-function useLanding(profileId: string | undefined, enabled: boolean | undefined) {
+function useLanding(profileId: string | undefined, enabled: boolean | undefined, landed: boolean) {
   const navigate = useNavigate()
-  const { landed } = useListPlace()
   const answer = useLiveQuery(
     async () =>
       profileId && enabled
@@ -111,7 +119,8 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined)
 
 /**
  * The list kept on screen beside the chat it opened (see `useBotChatsPane`). It lands in nothing: a
- * chat this device would open is the address the chat's own list row takes.
+ * chat this device would open is the address the chat's own list row takes. And it leads nowhere,
+ * since the chat it covers is already beside it: its bar keeps the drawer, and there is no back.
  */
 export function BotChatsPane({ pane }: { pane: BotPane }) {
   return <BotChatsList profileId={pane.profileId} selected={pane.selected} />
@@ -132,7 +141,17 @@ function NoChatOpen() {
  * A bot's chats, each with the one read of its newest message that a row's line and time come from,
  * and the rooms it is a participant of: one list, one order.
  */
-function BotChatsList({ profileId, selected }: { profileId: string; selected?: string }) {
+function BotChatsList({
+  profileId,
+  selected,
+  pushed,
+}: {
+  profileId: string
+  /** The chat this list stands over: beside it in the pane, or under it where it was pushed. */
+  selected?: string
+  /** Whether this list is a screen pushed over the chat it covers rather than the app's own entry. */
+  pushed?: boolean
+}) {
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
   const rooms = useRoomNeeds()
@@ -172,20 +191,34 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
   const seated = (rooms ?? [])
     .filter((room) => room.seated.includes(profileId))
     .map((room) => roomRowOf(room.chat, room.faces))
-  return <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} />
+  return (
+    <ChatList
+      bot={fresh.bot}
+      rows={[...fresh.rows, ...seated]}
+      selected={selected}
+      pushed={pushed}
+    />
+  )
 }
 
 function ChatList({
   bot,
   rows,
   selected,
+  pushed,
 }: {
   bot: Profile
   rows: ChatListRow[]
   selected?: string
+  pushed?: boolean
 }) {
   const navigate = useNavigate()
+  const { back } = useNav()
   const marks = useReadMarks()
+  // A list pushed over a chat stands on that chat, so Android's press steps back to it — the same
+  // move its bar's back control makes. At the app's entry there is nothing behind the list, so the
+  // press is the app's own, which is what the bar's drawer is there for.
+  useEffect(() => (pushed ? setBackGuard(back()) : undefined), [pushed, back])
   // A room is made on a Host that advertises it, so the control is offered only where it can be used
   // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
   const canMakeRoom = useCanMakeRoom()
@@ -204,13 +237,15 @@ function ChatList({
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/*
         The bot's bar, as the app draws it (ADR 0140): the pinned form, because this screen's content
-        scrolls under it. The drawer control on a phone, the bot's picture and name as the screen's
-        heading and the way to its settings, and the routine control — the one screen a bot's list
-        opens that is not a chat (ADR 0139) — as the bar's own action.
+        scrolls under it. The drawer control on a phone — or, on a list pushed over a chat, the way
+        back to the chat it covers — the bot's picture and name as the screen's heading and the way
+        to its settings, and the routine control — the one screen a bot's list opens that is not a
+        chat (ADR 0139) — as the bar's own action.
       */}
       <ChatHeader
         pinned
         showBot={false}
+        leading={pushed ? <BackButton label="Back to chat" onClick={back()} floating /> : undefined}
         title={
           <Link
             to={botPath(bot.id)}

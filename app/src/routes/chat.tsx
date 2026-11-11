@@ -360,10 +360,10 @@ export function ChatPage(props: ChatPageProps) {
  * What a chat's bar leads with, and the press its screen answers, asked once for both screens that
  * draw a chat. Nothing leads but a session's own way out to Code (`underCode` and `leave`, which
  * only the screen holding the session knows): for a bot's chat the bar draws its own default, the
- * drawer — the app's menu, which is how a reader reaches a screen of the app's, the bot's list
- * among them — so no control in a chat names a destination of the chat's own. `listPath` is the
+ * drawer — the app's menu, which is how a reader reaches a screen of the app's. `listPath` is the
  * address of the list a chat of a bot's has, and `besideList` whether that list already stands on
- * screen beside it. Android's press is a plain step back, wherever that lands.
+ * screen beside it: the bar carries a control to it only where it doesn't, since a list on screen is
+ * its own way. Android's press is a plain step back, wherever that lands.
  */
 function useChatLead(
   chat: Conversation | null | undefined,
@@ -462,6 +462,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       profile={bot}
       session={session}
       wide={wide}
+      listPath={lead.besideList ? undefined : lead.listPath}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -1035,6 +1036,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       profile={profile}
       session={session}
       wide={wide}
+      listPath={lead.besideList ? undefined : lead.listPath}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}

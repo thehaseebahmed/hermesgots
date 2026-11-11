@@ -144,6 +144,11 @@ test("a routine's row opens its run read-only, under the header naming it", asyn
       TITLE,
       "the header names the routine that ran",
     )
+    assert.equal(
+      findAll('a[aria-label^="Chats with"]').length,
+      0,
+      "and the run's bar carries no list of its own: a run is not one of a bot's chats",
+    )
     assert.equal(findAll("textarea").length, 0, "and nothing here can be sent")
     const note = wordsOf(find("[data-slot=routine-note]"))
     assert.match(note, /read-only/i, "the composer's place says what this screen is")
