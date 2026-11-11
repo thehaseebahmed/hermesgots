@@ -97,6 +97,7 @@ import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
+import type { ReadFailure } from "@/lib/read-outcome"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
@@ -597,6 +598,93 @@ function botEdit(id: string): BotEdit | undefined {
 const RESTART_NOTE = "Applies when this bot's Hermes restarts."
 
 /**
+ * The page's own read: the host's General (or Delegation) block, and the sentence where it came back
+ * without one. `failure` says which sentence that is — a read that threw, which `reload` asks again,
+ * or a host that answered without its block, which asking again cannot change — and `keep` takes the
+ * block a write answers, since a write's answer is fresher than any read could be.
+ */
+function useGeneralSettings(profile: Profile, tab: GeneralTab) {
+  const connection = connectionKey(profile)
+  const route = GENERAL_ROUTES[tab].path
+  const page = `${connection}/${tab}`
+  const [block, setBlock] = useState<GeneralSettings>()
+  const [problem, setProblem] = useState<string>()
+  const [failure, setFailure] = useState<ReadFailure>()
+  const [read, setRead] = useState("")
+  const [fresh, setFresh] = useState("")
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    let landed = false
+    // The page opens on the last answer this host gave this device, and the fresh read replaces it;
+    // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
+    setBlock(undefined)
+    void cachedHost<GeneralSettings>(profile, route).then((held) => {
+      if (!cancelled && !landed && held) setBlock(held)
+    })
+    void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((next) => {
+        if (cancelled) return
+        landed = true
+        setRead(connection)
+        setFailure(next ? undefined : "answered")
+        setProblem(
+          next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
+        )
+        if (next) {
+          setBlock(next)
+          setFresh(page)
+          void keepHost(profile, route, next)
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        // A read that failed is still an answer: the page stops loading and says what the host said.
+        setRead(connection)
+        setFailure("threw")
+        setProblem(
+          error instanceof Error
+            ? error.message
+            : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
+        )
+      })
+    return () => {
+      cancelled = true
+    }
+    // The connection is what the answer belongs to: another bot's read is not this page's, and no
+    // other field of the profile moves what the host holds. `attempt` is the read asked again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id, connection, tab, attempt])
+
+  const keep = useCallback(
+    (next: GeneralSettings) => {
+      setBlock(next)
+      setFresh(page)
+      void keepHost(profile, route, next)
+    },
+    [profile, route, page],
+  )
+
+  return {
+    block,
+    problem,
+    failure,
+    /**
+     * Whether the block drawn is this device's copy rather than the host's own answer: nothing is
+     * written from it until the host's answer lands.
+     */
+    stale: Boolean(block) && fresh !== page,
+    /** Whether the page holds an answer to draw at all, this device's copy or the host's. */
+    seeded: read === connection || Boolean(block),
+    /** The block a write answered: it is the host's word, so it is drawn without a read. */
+    keep,
+    /** The same read, asked again — the attempt its effect is keyed on. */
+    reload: () => setAttempt((count) => count + 1),
+  }
+}
+
+/**
  * General: the settings on this bot's own Hermes, as its Dashboard's Config > General tab holds
  * them. The rows are the host's own — keys, kinds and choices all arrive with the read, so a key
  * Hermes adds later is a row without an app release — and each is drawn as this app draws a setting:
@@ -625,56 +713,10 @@ function GeneralPage({
   const own = botModel(profile, info)
   const chain = useFallbackModels(delegation ? null : profile)
   const subagent = useDelegationModel(delegation ? profile : null)
-  const connection = connectionKey(profile)
-  const [block, setBlock] = useState<GeneralSettings>()
-  const [problem, setProblem] = useState<string>()
-  const [read, setRead] = useState("")
-  const [fresh, setFresh] = useState("")
+  const settings = useGeneralSettings(profile, tab)
+  const { block, problem, stale, seeded, keep } = settings
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
-  const route = GENERAL_ROUTES[tab].path
-  const page = `${connection}/${tab}`
-
-  useEffect(() => {
-    let cancelled = false
-    let landed = false
-    // The page opens on the last answer this host gave this device, and the fresh read replaces it;
-    // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
-    setBlock(undefined)
-    void cachedHost<GeneralSettings>(profile, route).then((held) => {
-      if (!cancelled && !landed && held) setBlock(held)
-    })
-    void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((next) => {
-        if (cancelled) return
-        landed = true
-        setRead(connection)
-        setProblem(
-          next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
-        )
-        if (next) {
-          setBlock(next)
-          setFresh(page)
-          void keepHost(profile, route, next)
-        }
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        // A read that failed is still an answer: the page stops loading and says what the host said.
-        setRead(connection)
-        setProblem(
-          error instanceof Error
-            ? error.message
-            : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
-        )
-      })
-    return () => {
-      cancelled = true
-    }
-    // The connection is what the answer belongs to: another bot's read is not this page's, and no
-    // other field of the profile moves what the host holds.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.id, connection, tab])
 
   // Every write answers the host's fresh block, so the row a person just changed is the row the
   // host now holds — and a refused write leaves the page as it was, with the host's sentence.
@@ -692,9 +734,7 @@ function GeneralPage({
         // A host that answered without its block hasn't saved anything this page can draw: say so
         // rather than closing the form over the value it held before.
         if (!next) throw new Error("The host answered without its settings.")
-        setBlock(next)
-        setFresh(page)
-        void keepHost(profile, route, next)
+        keep(next)
         return true
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Couldn't save that.")
@@ -703,12 +743,9 @@ function GeneralPage({
         setSaving(undefined)
       }
     },
-    [profile, tab, page, route],
+    [profile, tab, keep],
   )
 
-  // Drawn from this device's copy: nothing is written from it until the host's own answer lands.
-  const stale = Boolean(block) && fresh !== page
-  const seeded = read === connection || Boolean(block)
   const groups = block ? generalGroups(block.fields) : []
   // An address into a key this host doesn't hold: the page goes back to itself rather than standing
   // on a screen that would draw nothing and write to a field it has no row for.

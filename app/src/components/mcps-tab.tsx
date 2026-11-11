@@ -729,7 +729,7 @@ function ConfigTab({
   onRemove: () => void
   saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
 }) {
-  const { detail, failed, reload } = useMcpServerDetail(profile, server.name, true)
+  const { detail, failure, reload } = useMcpServerDetail(profile, server.name, true)
   // What a save answered: the block as the Host landed it, which is newer than the read the sheet
   // opened with and costs no second request.
   const [written, setWritten] = useState<McpServerDetail | undefined>(undefined)
@@ -738,7 +738,7 @@ function ConfigTab({
   const [version, setVersion] = useState(0)
   const block = written ?? detail
 
-  if (failed && !block) {
+  if (failure && !block) {
     return (
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">Couldn't load this server's configuration.</p>
@@ -1131,7 +1131,7 @@ function McpEntryForm({
   onBack: () => void
   onAdded: () => void
 }) {
-  const { entry, failed } = useMcpCatalogueEntry(profile, name, true)
+  const { entry, failure } = useMcpCatalogueEntry(profile, name, true)
   const [entered, setEntered] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
@@ -1172,7 +1172,7 @@ function McpEntryForm({
       </PopupHeader>
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pt-2 pb-4">
         {/* A read that came back an error: said, rather than left as a form with nothing in it. */}
-        {failed && entry === undefined && (
+        {failure && entry === undefined && (
           <p className="px-1 text-sm text-muted-foreground">Couldn't load this entry's values.</p>
         )}
         <FieldGroup>

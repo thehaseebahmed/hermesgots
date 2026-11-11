@@ -35,6 +35,7 @@ import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { useLarge } from "@/lib/media"
+import type { ReadFailure } from "@/lib/read-outcome"
 import { useUnsavedChanges } from "@/lib/unsaved"
 import {
   getLlmProviders,
@@ -916,6 +917,9 @@ function TransportField({
  * until its own answer lands, so a failure never stands over the rows of the answer before it. A
  * block a write answered is the exception and the point — it rides the navigation that returns to
  * the page, and is drawn once instead of read again.
+ *
+ * `failure` says which of the two ways the read came back without a block: it threw, which `reload`
+ * asks again, or the host answered without listing its providers, which asking again cannot change.
  */
 function useLlmProviders(profile: Profile) {
   const location = useLocation()
@@ -925,6 +929,8 @@ function useLlmProviders(profile: Profile) {
   const handed = useRef((location.state as { llm?: LlmProviders } | null)?.llm)
   const [block, setBlock] = useState<LlmProviders | undefined>(handed.current)
   const [problem, setProblem] = useState<string>()
+  const [failure, setFailure] = useState<ReadFailure>()
+  const [attempt, setAttempt] = useState(0)
   const connection = connectionKey(profile)
   // This screen's own address, for the replace that takes the block off the entry it rode in on.
   const here = `${location.pathname}${location.search}`
@@ -945,12 +951,14 @@ function useLlmProviders(profile: Profile) {
     void getLlmProviders(profile, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {
         if (cancelled) return
+        setFailure(next ? undefined : "answered")
         setProblem(next ? undefined : "This host doesn't list its LLM providers.")
         if (next) setBlock(next)
       })
       .catch((error: unknown) => {
         if (cancelled) return
         // A read that failed is still an answer: the page says what the host said.
+        setFailure("threw")
         setProblem(
           error instanceof Error ? error.message : "Couldn't read this bot's LLM providers.",
         )
@@ -958,17 +966,22 @@ function useLlmProviders(profile: Profile) {
     return () => {
       cancelled = true
     }
-    // The connection is what the answer belongs to: another bot's read is not this page's.
+    // The connection is what the answer belongs to: another bot's read is not this page's, and
+    // `attempt` is the read asked again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.id, connection])
+  }, [profile.id, connection, attempt])
 
   return {
     block,
     problem,
+    failure,
     /** A write answered: draw that block, and nothing of the read's refusal stands over it. */
     keep: (next: LlmProviders) => {
       setProblem(undefined)
+      setFailure(undefined)
       setBlock(next)
     },
+    /** The same read, asked again — the attempt its effect is keyed on. */
+    reload: () => setAttempt((count) => count + 1),
   }
 }

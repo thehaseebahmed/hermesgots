@@ -11,6 +11,7 @@ import {
   setSttSetting,
 } from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
+import type { ReadFailure } from "@/lib/read-outcome"
 import { noteFailure } from "@/lib/report"
 import {
   CLEANUP_LEVELS_FEATURE,
@@ -123,6 +124,9 @@ export function useSpeech(profile?: Server | null) {
   const probeSupport = features.probe === "yes"
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+  // The read's own attempt: its effect is keyed on it, so `reload` is the same read asked again
+  // rather than a second path to the host.
+  const [attempt, setAttempt] = useState(0)
   // Kept with the connection they belong to, as `failed` is: another bot's probe is not this bot's.
   const [measuring, setMeasuring] = useState("")
   const [measureProblem, setMeasureProblem] = useState<{ key: string; message: string }>()
@@ -148,7 +152,12 @@ export function useSpeech(profile?: Server | null) {
     let cancelled = false
     void getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((settings) => {
-        if (!cancelled) setState({ key, settings })
+        if (cancelled) return
+        setState({ key, settings })
+        // An answer is the host's word, so nothing a read before it said stands over it — including
+        // the sentence a reload was asked to clear.
+        setFailed("")
+        setProblem(null)
       })
       .catch((error: unknown) => {
         noteFailure("Reading the host's speech model", error)
@@ -162,7 +171,7 @@ export function useSpeech(profile?: Server | null) {
     return () => {
       cancelled = true
     }
-  }, [key, baseUrl, apiKey, supported])
+  }, [key, baseUrl, apiKey, supported, attempt])
 
   /** One write's brackets: the page greys while it is out, and the host's words land on it if not. */
   const save = useCallback(async <T>(work: () => Promise<T>): Promise<T | undefined> => {
@@ -265,6 +274,10 @@ export function useSpeech(profile?: Server | null) {
   const model = settings?.model || undefined
   const check: SpeechCheck =
     failed === key ? "failed" : model || settled || !supported || !baseUrl ? undefined : "checking"
+  // The read's own failure, as `problem` states it: a speech read has one kind — the request threw —
+  // since a host that answers without its speech block draws the page it always had. A sentence a
+  // write put on `problem` is no read's failure, so it carries none.
+  const failure: ReadFailure | undefined = failed === key ? "threw" : undefined
 
   return {
     /** The host's fresh answer, or this device's cached one until a read lands (ADR 0082). */
@@ -276,6 +289,9 @@ export function useSpeech(profile?: Server | null) {
     model,
     check,
     supported,
+    failure,
+    /** The same read, asked again — the attempt its effect is keyed on. */
+    reload: () => setAttempt((count) => count + 1),
     /** Whether the host carries the rest of its speech settings on this page (ADR 0063). */
     stt: supported && sttSupport,
     /** Whether the host takes a cleanup level (ADR 0066). */

@@ -56,6 +56,7 @@ import {
   type McpTools,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
+import type { ReadFailure } from "@/lib/read-outcome"
 import { noteFailure } from "@/lib/report"
 
 /**
@@ -374,31 +375,37 @@ function useReadOnOpen<T extends { name: string }>(
     [key, name, attempt],
     { active: active && Boolean(key) && Boolean(name), onShow: false },
   )
+  const failure: ReadFailure | undefined =
+    name !== undefined && failedFor === name ? "threw" : undefined
   return {
     value: name !== undefined && value?.name === name ? value : undefined,
-    failed: name !== undefined && failedFor === name,
+    /**
+     * The read threw. It is the only way this read comes back empty-handed: a Host that answers
+     * without the thing asked for has answered, and asking again cannot change it.
+     */
+    failure,
     reload: () => setAttempt((count) => count + 1),
   }
 }
 
 /**
  * One server's block: what the Config tab is built from, read when its sheet opens. Undefined until
- * a read lands; `failed` says the read came back an error, so the tab can say so rather than
- * standing there as an empty stub. Nothing is written by reading this.
+ * a read lands; `failure` says the read threw, so the tab can say so rather than standing there as
+ * an empty stub, and `reload` asks the same read again. Nothing is written by reading this.
  */
 export function useMcpServerDetail(
   server: McpServerConfig,
   name: string | undefined,
   active: boolean,
 ) {
-  const { value, failed, reload } = useReadOnOpen(
+  const { value, failure, reload } = useReadOnOpen(
     server,
     name,
     active,
     getMcpServer,
     "Reading a server's configuration",
   )
-  return { detail: value, failed, reload }
+  return { detail: value, failure, reload }
 }
 
 /**
@@ -410,14 +417,14 @@ export function useMcpCatalogueEntry(
   name: string | undefined,
   active: boolean,
 ) {
-  const { value, failed } = useReadOnOpen(
+  const { value, failure, reload } = useReadOnOpen(
     server,
     name,
     active,
     getMcpCatalogueEntry,
     "Reading a catalogue entry",
   )
-  return { entry: value, failed }
+  return { entry: value, failure, reload }
 }
 
 /**
