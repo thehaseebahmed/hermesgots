@@ -1232,6 +1232,10 @@ export function ChatNextThread({
               void readRun({ server, key }, followingRun.current).then(
                 (prompt) => prompt && dispatch({ type: "waiting", waiting: prompt }),
               )
+          // A run held on a prompt writes nothing more, so its turn is the host's rows: read them,
+          // as a busy chat does, so a page that joined the run before they landed takes them. The
+          // stream is the turn while the run works, and its rows land when it ends.
+          if (now.current.waiting) void catchUp()
           return
         }
         // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are

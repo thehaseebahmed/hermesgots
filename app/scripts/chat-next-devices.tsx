@@ -119,8 +119,14 @@ export async function openDevice(
       await click(unsentRow(container, text)?.querySelector("[data-unsent-cancel]") ?? null)
       await settle()
     },
+    /**
+     * The thread's turns. The prompt the run is held on is drawn in the same column (a question's
+     * card, an approval's) and is no turn of the thread, so it is not counted with them.
+     */
     turns: (): ExpectedTurn[] =>
-      [...container.querySelectorAll("main > section")].map((section) => ({
+      [
+        ...container.querySelectorAll("main > section:not([data-question]):not([data-approval])"),
+      ].map((section) => ({
         user: section.querySelector("[data-user]")?.textContent ?? "",
         texts: [...section.querySelectorAll("[data-text]")].map((text) => text.textContent ?? ""),
         tools: [...section.querySelectorAll("[data-tools]")]

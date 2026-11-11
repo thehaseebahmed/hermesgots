@@ -651,7 +651,12 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The call's row is the only place the rest of its questions survive, so it is read for a prompt
       // that names one, even mid-stream.
       const found = questionsFor(state, state.waiting, event.rows)
-      if (state.running && !event.final) {
+      // A run held on a prompt writes nothing more, so its rows are the turn as far as the host has
+      // it: a read that lands while it waits is taken, and the run stays attached, because a read
+      // ends no wait. A run at work keeps the stream as its turn — its rows are the turn's partial
+      // writing — and they land when the turn ends, which is also the read that ends the follow.
+      const heldOnPrompt = Boolean(state.running && state.waiting && !event.final)
+      if (state.running && !event.final && !heldOnPrompt) {
         // A call the stream drew as a count of commands is worded from its row, mid-stream too.
         const worded = state.live && withCommandWords(state.live, event.rows)
         const next = worded && worded !== state.live ? { ...state, live: worded } : state
@@ -663,6 +668,30 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       if (!rows) return state
       const partial = event.more ?? state.partial
       const last = foldedOf(rows, { ...state, partial }).at(-1)
+      if (heldOnPrompt) {
+        // The streamed turn moves onto the copy the rows now hold. A turn the transcript did not
+        // have is the run's own, and the parts the stream drew are that turn's; and the floor the
+        // join put on the replay goes with it, since the rows are the turn now — `drawn` weighs the
+        // two copies against each other while the wait stands, so the fuller one is what shows.
+        const live = state.live
+        const turn = !live
+          ? undefined
+          : last && last.row !== live.turn.row
+            ? {
+                ...live,
+                turn: { ...last, parts: live.turn.parts },
+                replaces: true,
+                replay: undefined,
+              }
+            : { ...live, replay: undefined }
+        return {
+          ...state,
+          rows,
+          partial: partial ? true : undefined,
+          live: turn,
+          questionSet: found ?? state.questionSet,
+        }
+      }
       const done = last?.done
       // What the turn this device watched cost goes with the row that opened it, which the
       // transcript has now written.
