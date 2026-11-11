@@ -1,9 +1,4 @@
 /**
- * A bot opens where the reader left it: `/b/<bot>` steps into the chat this device last had open
- * there, and draws the list where there is nothing to open — a bot never opened, a memory whose chat
- * has gone or belongs to another bot, or a list the reader stepped back onto. The chat's own way
- * out is `scripts/test-back-press.tsx`'s.
- *
  * The memory is this device's own, so a case writes it where the app keeps it — the address of the
  * chat a bot was last in, under the bot's id — and never through the module that reads it.
  */
@@ -15,6 +10,7 @@ import { db } from "@/lib/db"
 import { BotChatsPage } from "@/routes/bot-chats"
 
 import {
+  Nav,
   Path,
   botProfile,
   click,
@@ -22,6 +18,7 @@ import {
   findText,
   json,
   mount,
+  nav,
   path,
   seedSettings,
   until,
@@ -73,6 +70,7 @@ const screen = ({ from = "/", at, listed }: { from?: string; at?: string; listed
     initialEntries={[listed ? { pathname: at ?? `/b/${bot.id}`, state: { listed } } : (at ?? from)]}
   >
     <Path />
+    <Nav />
     <Link to={`/b/${bot.id}`}>the bot</Link>
     <Routes>
       <Route path="b/:profileId" element={<BotChatsPage />} />
@@ -106,10 +104,13 @@ test("a bot opens the chat this device last had open there", async () => {
     await click(theBot())
     await until(async () => path() === "/c/a", "the chat the bot was left in")
     assert.deepEqual(rowIds(), [], "the list is not what was drawn")
+    assert.equal(nav(), "REPLACE:/c/a", "taking the address's entry rather than pushing one")
   })
 })
 
-test("a memory of another bot's chat opens the newest chat this one has left", async () => {
+const settled = () => rowIds().length > 0 || path().startsWith("/c/")
+
+test("a memory of another bot's chat draws the list, not a chat it guessed at", async () => {
   await seed([
     { id: "a", at: 100 },
     { id: "b", at: 200 },
@@ -118,11 +119,13 @@ test("a memory of another bot's chat opens the newest chat this one has left", a
   remember(bot.id, "theirs")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => path() === "/c/b", "this bot's newest chat")
+    await until(async () => settled(), "the landing to settle")
+    assert.equal(path(), `/b/${bot.id}`, "the list is what a bot with nothing to open draws")
+    assert.equal(rowIds().length, 2, "this bot's own chats, drawn to pick from")
   })
 })
 
-test("a chat that has gone falls to the newest chat the bot has left", async () => {
+test("a memory of a chat that has gone draws the list", async () => {
   await seed([
     { id: "a", at: 100 },
     { id: "b", at: 200 },
@@ -130,7 +133,9 @@ test("a chat that has gone falls to the newest chat the bot has left", async () 
   remember(bot.id, "deleted")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => path() === "/c/b", "the newest chat left")
+    await until(async () => settled(), "the landing to settle")
+    assert.equal(path(), `/b/${bot.id}`, "the list is what a bot with nothing to open draws")
+    assert.equal(rowIds().length, 2, "the bot's chats, drawn to pick from")
   })
 })
 
@@ -142,7 +147,9 @@ test("a routine's run is never the chat its bot opens on", async () => {
   remember(bot.id, "run")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => path() === "/c/chat", "the newest chat it can open")
+    await until(async () => settled(), "the landing to settle")
+    assert.equal(path(), `/b/${bot.id}`, "the list, not the run the memory named")
+    assert.equal(rowIds().length, 2, "the bot's chat and its run, drawn to pick from")
   })
 })
 

@@ -8,10 +8,9 @@
  * approval — and what is left of a chat's controls is its own menu, so the row is still the reader's
  * to rename, mute or put away.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { BackButton } from "@/components/back-button"
 import { ChatActions, useChatSurface } from "@/components/chat/chat-actions"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { MessageItem } from "@/components/chat/message-item"
@@ -22,16 +21,13 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
-import { botChatsPath } from "@/lib/bot-tabs"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { serverConfig } from "@/lib/connection"
 import { db, type Message } from "@/lib/db"
 import { COMPOSER_SLOT } from "@/lib/layout"
-import { useLegacyChat } from "@/lib/legacy-chat"
-import { BACK_ON_LIST, useNav } from "@/lib/nav"
-import { setBackGuard } from "@/lib/native"
+import { useChatLead } from "@/lib/chat-lead"
+import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
-import { useSplit } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { RUN_GONE, RUN_UNREAD, ranOn, useRoutineTranscript } from "@/lib/routine-transcript"
 import { useWide } from "@/lib/media"
@@ -60,25 +56,15 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
-  const legacy = useLegacyChat()
-  const { root, up } = useNav()
-  // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
-  const upRef = useRef(up)
-  upRef.current = up
+  const { root } = useNav()
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
   // row is the bot's own, so its screen leads back to where its row stands.
-  const listPath = !legacy && chat ? botChatsPath(chat.profileId) : undefined
+  const lead = useChatLead({
+    bot: chat?.profileId,
+    press: "list",
+    label: `Back to ${bot?.name || "bot"}`,
+  })
   const wide = useWide()
-  // Where there is room the bot's list stands beside this screen (`useBotChatsPane`), so there is
-  // nothing behind it for its header to lead back to.
-  const besideList = useSplit() && Boolean(listPath)
-  useEffect(() => {
-    if (!listPath) return
-    return setBackGuard(() => {
-      upRef.current(listPath, BACK_ON_LIST)
-      return true
-    })
-  }, [listPath])
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   }, [ready, slot, id])
@@ -106,7 +92,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
       providerUsage={providerUsage}
       usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
-      onDeleted={() => (listPath ? up(listPath, BACK_ON_LIST) : root("/"))}
+      onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}
     />
   )
 
@@ -126,15 +112,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
             actions={actions}
-            leading={
-              besideList ? undefined : listPath ? (
-                <BackButton
-                  label={`Back to ${bot.name || "bot"}`}
-                  onClick={() => up(listPath, BACK_ON_LIST)}
-                  floating
-                />
-              ) : undefined
-            }
+            leading={lead.leading}
           />
           <MessageScrollerProvider key={id} autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">

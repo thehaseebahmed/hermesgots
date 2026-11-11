@@ -144,7 +144,7 @@ const MenuContext = createContext<{ active?: string; replace: boolean }>({ repla
 export function SettingsPage() {
   const { section, botId, tab, sub, leaf } = useParams()
   const large = useLarge()
-  const { up, step, root } = useNav()
+  const { up, back, root } = useNav()
   const { account } = useSyncState()
   const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
@@ -169,17 +169,17 @@ export function SettingsPage() {
     if (separate && botScreen && botTab) return
     // The menu itself is a screen a chat can open, and from `lg` so is a section; each steps back to
     // whatever opened it, and the drawer's own menu — the first entry — leaves the press to the app.
-    if (!separate && !botScreen) return setBackGuard(step("/settings"))
-    const back = botSub
+    if (!separate && !botScreen) return setBackGuard(back())
+    const parent = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
         ? botPath(botId)
         : "/settings"
     return setBackGuard(() => {
-      up(back)
+      up(parent)
       return true
     })
-  }, [separate, botScreen, up, section, botId, botTab, botSub])
+  }, [separate, botScreen, up, back, section, botId, botTab, botSub])
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />

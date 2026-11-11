@@ -10,10 +10,14 @@ export const stayHere = (current: boolean) =>
   current ? (event: MouseEvent<HTMLAnchorElement>) => event.preventDefault() : undefined
 
 /**
- * The state a chat gives the entry it leaves a list in its place: the reader stepped back onto the
- * list, so it draws itself rather than opening the chat they have just come from.
+ * The state a room's screen and a routine's run give the entry they leave a bot's list in: the reader
+ * stepped back onto the list, so it draws itself rather than landing in the chat behind it.
  */
 export const BACK_ON_LIST = { listed: true }
+
+export const OPENED_CHAT = (id: string) => ({ open: id })
+
+export const openedChat = (state: unknown) => (state as { open?: string } | null)?.open
 
 /**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
@@ -50,18 +54,29 @@ export function useNav() {
   )
 
   /**
-   * The guard a screen gives the back button where the menu and a list both open it: a list pushes
-   * it, so the press steps up to `to`; the menu opens it as the first entry, where nothing is behind
-   * it, so the press is left to the app — which leaves, as back does from any top-level screen.
+   * Steps back onto a list this screen's row stands in: `up`'s move with the marker a list reads as
+   * "the reader stepped back here". A list left without it reads the entry as a fresh arrival and
+   * lands the reader in the chat behind it, so the move carries the marker rather than each caller.
    */
-  const step = useCallback(
-    (to: string) => () => {
-      if (!depth()) return false
-      up(to)
-      return true
-    },
+  const backToList = useCallback(
+    (to: string) => up(to, BACK_ON_LIST),
     [up],
   )
 
-  return { root, up, step }
+  /**
+   * The guard a screen gives the back button where the menu and a list both open it: whatever
+   * opened it stands behind it, so the press steps back to that; the menu opens it as the first
+   * entry, where nothing is behind it, so the press is left to the app — which leaves, as back does
+   * from any top-level screen.
+   */
+  const back = useCallback(
+    () => () => {
+      if (!depth()) return false
+      window.history.back()
+      return true
+    },
+    [],
+  )
+
+  return { root, up, backToList, back }
 }

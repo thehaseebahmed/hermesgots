@@ -11,7 +11,7 @@
  */
 import { filterByFuzzy } from "./fuzzy.ts"
 import { reasonText } from "./wait-text.ts"
-import { oneLine } from "./words.ts"
+import { NO_MESSAGES, plainLine } from "./words.ts"
 import type { WaitingReason } from "./hermes.ts"
 import type { Conversation, Message } from "./db.ts"
 
@@ -118,7 +118,7 @@ export function chatRowOf(
   return {
     id: chat.id,
     title: chat.title,
-    line: oneLine((reply ?? newest)?.content ?? ""),
+    line: plainLine((reply ?? newest)?.content ?? "") ?? NO_MESSAGES,
     at: newest?.createdAt ?? chat.updatedAt,
     pinned: Boolean(chat.pinned),
     ...(chat.hermesSessionId ? { session: chat.hermesSessionId } : {}),

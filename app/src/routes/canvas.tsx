@@ -348,9 +348,9 @@ function useCanvasManagement(id: string) {
  */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const { up, step } = useNav()
+  const { up, back } = useNav()
   const navigate = useNavigate()
-  useEffect(() => setBackGuard(step("/canvas")), [step])
+  useEffect(() => setBackGuard(back()), [back])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
   const { awayNow, words: awayWords } = useAway(away)
   const dark = useDark()

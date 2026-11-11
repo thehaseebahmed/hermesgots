@@ -8,6 +8,7 @@ import test from "node:test"
 
 import {
   botsByProfile,
+  roomRowOf,
   roomAnswerer,
   roomAnswerers,
   roomFaces,
@@ -122,4 +123,9 @@ test("a room's row says the last message a member sent, and never the reader's o
   )
   // A reply whose text the Host trimmed still has nothing to say, so the row does not draw an empty line.
   assert.equal(roomLastLine([{ seq: 5, kind: "message.member", text: "  " }]), undefined)
+})
+
+test("a room with nothing said and no members line says so on its row", () => {
+  const row = roomRowOf({ id: "r", title: "A room", updatedAt: 1 }, { shown: [], more: 0 })
+  assert.equal(row.line, "Nothing said in this room yet")
 })
