@@ -18,6 +18,16 @@ export function themeLabel(value: string | undefined) {
   return THEMES.find((theme) => theme.value === (value ?? "system"))?.label ?? THEMES[0].label
 }
 
+/** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
+export function toHex(color: string) {
+  const context = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+  if (!context) return color
+  context.fillStyle = color
+  context.fillRect(0, 0, 1, 1)
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`
+}
+
 /**
  * Whether the app is drawing dark, as next-themes resolved the stored choice: `system` follows the
  * OS, and a page that isn't mounted yet reads as light.
