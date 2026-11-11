@@ -7,10 +7,6 @@ import { useNavigate } from "react-router"
  */
 export const BACK_ON_LIST = { listed: true }
 
-export const OPENED_CHAT = (id: string) => ({ open: id })
-
-export const openedChat = (state: unknown) => (state as { open?: string } | null)?.open
-
 /**
  * The `onClick` for a link that opens a top-level screen: the plain press opens it as the app's only
  * entry, and a press meant for a new tab or window — a modifier held, or a button other than the

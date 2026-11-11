@@ -10,10 +10,11 @@ reached from the bot's own row stands at rung 0 and answers the press with the d
 toast. A row picked in a list that was itself the app's entry pushed, so back returned to the list
 instead. Two depths, two answers, and neither was "this chat is where the app is".
 
-**A pick is the same move as the landing.** The row opens its chat as the app's only entry: the
-entries above the app's first are dropped and that first entry is replaced by the chat's address. A
-pick made over a chat therefore leaves neither the list nor the chat under it behind, and a pick made
-at the app's entry leaves the list. The chat picked is the chat its bot opens from then on, because it
+**A pick is the same move as the landing.** The row opens its chat as the app's only entry: the app
+steps back to its first entry and replaces that entry with the chat's address — which is all a page
+can do to a stack, a forward entry being beyond a script's reach. A pick made over a chat therefore
+leaves neither the list nor the chat under it behind, and a pick made at the app's entry leaves the
+list; neither is one press away. The chat picked is the chat its bot opens from then on, because it
 is on screen — the memory was never the part that was missing — and everything a root chat does
 follows from standing at rung 0: the first press arms the exit and offers the drawer, the second
 leaves, the bar's control opens the bot's list above it, and a reload keeps the reader in it.
@@ -27,7 +28,8 @@ pane beside the chat, not a screen the chat opened: its rows open beside it, and
 keeps its place in the history rather than flattening whatever the reader arrived through.
 
 The cost is the one the model already charges: the chat a reader leaves is not one press behind them.
-A chat is reached from its bot's list, which is one control away in every chat's bar.
+A chat is reached from its bot's list, which is one control away in every chat's bar that does not
+already have the list beside it.
 
 ## Considered options
 
@@ -47,6 +49,7 @@ A chat is reached from its bot's list, which is one control away in every chat's
   which bot's list it belongs to while its row loads, and `opensAsRoot` is the press a link answers
   with: a plain left press roots the chat, while a press meant for a new tab is left to the browser.
 - The bot-chats flow walks the browser's own history: the first pick in a list at the app's entry, a
-  pick over a chat, the foot's New chat, and the press after each — which leaves the app.
+  pick over a chat, and the foot's New chat — the last two leaving the app to a press back, since
+  nothing of either list stands behind them.
 - `scripts/test-bot-chats.tsx` holds the move a screen without a session history can see, the entry
   replaced; the steps back through a list are the flow's.

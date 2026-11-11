@@ -26,7 +26,7 @@ import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
-import { BACK_ON_LIST, depth, openedChat, opensAsRoot, useNav } from "@/lib/nav"
+import { BACK_ON_LIST, depth, opensAsRoot, useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
@@ -63,7 +63,7 @@ function useListPlace() {
   // The landing fires at the app's entry, arrived at forwards, with nobody having asked for the
   // list: a step back onto it arrives as a `POP`, and a list a chat pushed or a screen stepped back
   // onto is either not the entry or carries the marker. Each draws the list rather than a chat.
-  return { root, open: openedChat(state), landed: root && type !== "POP" && !listed }
+  return { root, landed: root && type !== "POP" && !listed }
 }
 
 function useLanding(profileId: string | undefined, enabled: boolean | undefined, landed: boolean) {
