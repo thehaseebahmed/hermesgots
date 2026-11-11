@@ -2,6 +2,7 @@ import Dexie from "dexie"
 
 import type { SessionDb, SessionRow, SessionState } from "@/lib/db"
 import { FLUSH_INTERVAL_MS } from "@/lib/freshness"
+import { rowText } from "@/lib/row-text"
 
 import type { Row } from "./fold"
 import { initial, reduce, type ThreadEvent, type ThreadState } from "./state"
@@ -77,7 +78,7 @@ const kept = (row: Row): Row => ({
 
 const sameRow = (a: Row, b: Row) =>
   a.role === b.role &&
-  a.content === b.content &&
+  rowText(a.content) === rowText(b.content) &&
   a.tool_call_id === b.tool_call_id &&
   a.finish_reason === b.finish_reason &&
   a.display_kind === b.display_kind &&

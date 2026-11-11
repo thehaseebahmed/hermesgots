@@ -10,23 +10,9 @@ import { progressReminderNotes } from "../lib/progress-reminder.ts"
 import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
 import { requestIn } from "../lib/retry-message.ts"
-import { rowText } from "../lib/row-text.ts"
+import { rowText, rowWords, type RowContent } from "../lib/row-text.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
-
-/** A part of a row's words, or the one dict a row's whole content can be: its kind and its text. */
-export interface ContentPart {
-  type?: string
-  text?: unknown
-  [field: string]: unknown
-}
-
-/**
- * What the host stores as a row's `content`: a string, a list of parts (a message that carried a
- * photo, or a tool result carrying an image), one structured dict, or nothing. `rowText` is the one
- * reader of every shape.
- */
-export type RowContent = string | ContentPart[] | ContentPart | null
 
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
@@ -163,14 +149,15 @@ export const drawsRequest = (turn: Turn) =>
 export function withArchive(live: Row[], archive: Row[]): Row[] {
   const held = new Set(live.map((row) => row.id))
   const at = new Map(live.map((row, index) => [row.id, index]))
-  const inArchive = new Map(archive.map((row, index) => [row.id, index]))
-  const above: Row[] = []
-  const after = new Map<number, Row[]>()
+  const read = archive.map(readRow)
+  const inArchive = new Map(read.map((row, index) => [row.id, index]))
+  const above: ReadRow[] = []
+  const after = new Map<number, ReadRow[]>()
   // A turn's request can be a live row (Hermes writes it again when it compacts mid-turn) while the
   // work it started before the compaction is archived: the archive lists that work right after the
   // request, and the work follows it here rather than ending up under an earlier turn.
   let request: number | undefined
-  for (const row of archive) {
+  for (const row of read) {
     if (held.has(row.id)) {
       request = isRequest(row) ? row.id : undefined
     } else if (request !== undefined) {
@@ -186,7 +173,7 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   for (const [id, work] of after) {
     const last = inArchive.get(work.at(-1)!.id)!
     const rows: Row[] = []
-    for (const row of archive.slice(last + 1)) {
+    for (const row of read.slice(last + 1)) {
       if (!held.has(row.id) || (at.get(row.id) ?? Infinity) > (at.get(id) ?? -1)) break
       rows.push(row)
     }
@@ -204,11 +191,12 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   ]
 }
 
-/** A row whose words the fold has read: the shape everything inside it is handed. */
 type ReadRow = Omit<Row, "content"> & { content: string }
 
-/** A row with its words read through `rowText`, the one reader of the shapes the host stores. */
-const readRow = (row: Row): ReadRow => ({ ...row, content: rowText(row.content) })
+const readRow = (row: Row): ReadRow => ({
+  ...row,
+  content: row.role === "tool" ? rowWords(row.content) : rowText(row.content),
+})
 
 const isScaffold = (row: ReadRow) =>
   row.display_kind === "hidden" ||
@@ -217,11 +205,8 @@ const isScaffold = (row: ReadRow) =>
   RESTATED.test(row.content) ||
   isSeamScaffolding(row)
 
-const isRequest = (row: Row) => {
-  if (row.role !== "user") return false
-  const read = readRow(row)
-  return !DELIVERY.test(read.content) && !isScaffold(read)
-}
+const isRequest = (row: ReadRow) =>
+  row.role === "user" && !DELIVERY.test(row.content) && !isScaffold(row)
 
 function pushCall(parts: Part[], call: ToolCall) {
   const last = parts.at(-1)
@@ -283,8 +268,6 @@ export function foldTurns(
 ): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
-  // One read of every row's words at the door: a parts list or a structured dict reaches nothing
-  // below as anything but the text the host itself makes of it.
   const read = rows.map(readRow)
   const refusals = progressReminderNotes(read)
   // The refused calls already accounted for: a carried copy of a row must not draw its reminder twice.
