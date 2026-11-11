@@ -478,6 +478,11 @@ test("the foot's New rises two picks above it, and the button turns to a Close",
     // The picks stand above the button, so they are built in the foot's own bar and inert until asked
     // for: a closed cluster is not a control a tap can reach (ADR 0141).
     assert.equal(picksOpen(), false, "nothing is up until it is asked for")
+    assert.equal(
+      find("[data-picks]")?.hasAttribute("inert"),
+      true,
+      "and inert while closed: a cluster kept in the tree is not one a tab or a tap can reach",
+    )
     assert.equal(fab?.getAttribute("aria-expanded"), "false", "and the button says so")
     await click(fab)
     await until(async () => picksOpen(), "the picks it raises")
@@ -547,6 +552,44 @@ test("a Host that cannot make a room offers no row for one", async () => {
   })
 })
 
+test("the foot holds one surface at a time: the search takes the picks' place, and closing it clears the query", async () => {
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "dinner", title: "Dinner", at: 200, said: "We said eight" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+
+    // A reader on a keyboard reaches the search circle while the picks are up; the foot cannot then
+    // show both a field and a cluster over one button that says two different things.
+    await click(find("[data-new-menu]"))
+    await until(async () => picksOpen(), "the picks")
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the field")
+    assert.equal(picksOpen(), false, "and the picks are put away for it")
+    assert.equal(
+      find("[data-new-menu]")?.getAttribute("aria-label"),
+      "Close search",
+      "so the button says what it actually closes",
+    )
+
+    // The query goes with the field: a reopened search starts empty and the list it narrowed is whole
+    // again, rather than a list filtered by words the reader can no longer see.
+    await type(find("#chats-search"), "lisbon")
+    await until(async () => rowIds().length === 1, "the row it keeps")
+    await click(find("[data-search-close]"))
+    await until(async () => !find("#chats-search"), "the field put away")
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the field again")
+    assert.equal(
+      (find("#chats-search") as HTMLInputElement).value,
+      "",
+      "empty, because the closed field took its query with it",
+    )
+    assert.equal(rowIds().length, 2, "and the list it narrowed is whole again")
+  })
+})
+
 /** A pick the foot offers, by the name it carries exactly — the button itself is `New`. */
 function newRow(label: string) {
   return find(`button[aria-label="${label}"]`)
@@ -554,8 +597,10 @@ function newRow(label: string) {
 
 /**
  * Whether the picks stand above the button. They are built with the foot and kept inert while closed,
- * so what says they are up is the group's own state, not their presence in the tree.
+ * so what says they are up is the group's own state, not their presence in the tree — and a group
+ * that says it is up while still inert is a group a tap cannot reach.
  */
 function picksOpen() {
-  return find("[data-picks]")?.getAttribute("aria-hidden") === "false"
+  const picks = find("[data-picks]")
+  return picks?.getAttribute("aria-hidden") === "false" && !picks.hasAttribute("inert")
 }

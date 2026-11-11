@@ -70,14 +70,13 @@
 }
 
 /*
-  The motion scale every transition in the app reads, copied from transitions-dev with the three
-  snippets the foot uses (icon swap, texts reveal, card resize). Durations and easings are its shared
-  tokens; a snippet names the ones it wants and nothing else, so half a scale never sits unused.
+  The motion scale the foot's two transitions read, copied from transitions-dev (icon swap, texts
+  reveal). Durations and easings are its shared tokens; a snippet names the ones it wants and nothing
+  else, so half a scale never sits unused.
 */
 :root {
   /* Durations */
   --duration-stagger: 40ms; /* per-item stagger offset */
-  --duration-quick: 150ms; /* modal/dropdown close, text swap, tooltip appear */
   --duration-fast: 250ms; /* icon swap, dropdown/modal open, tabs sliding, page slide */
   --duration-very-slow: 500ms; /* emphasis moments, badge appear, text reveal, success check */
   /* Easings */
@@ -101,10 +100,6 @@
   --stagger-stagger: var(--duration-stagger);
   --stagger-blur: var(--blur-medium);
   --stagger-ease: var(--ease-smooth-out);
-
-  /* Card resize — the search circle becoming its bar. */
-  --resize-dur: var(--duration-fast);
-  --resize-ease: var(--ease-smooth-out);
 }
 
 .dark {
@@ -181,7 +176,7 @@
 }
 
 /*
-  The foot's three transitions, from transitions-dev, verbatim but for the selectors' names.
+  The foot's two transitions, from transitions-dev, verbatim but for the selectors' names.
 
   Icon swap: both faces sit in one grid cell and the state picks which one shows, so the plus and the
   cross cross-fade in the slot rather than one replacing the other.
@@ -225,7 +220,6 @@
     opacity var(--stagger-dur) var(--stagger-ease),
     transform var(--stagger-dur) var(--stagger-ease),
     filter var(--stagger-dur) var(--stagger-ease);
-  will-change: transform, opacity, filter;
 }
 .t-stagger-line--2 {
   transition-delay: var(--stagger-stagger);
@@ -234,6 +228,12 @@
   opacity: 1;
   transform: translateY(0);
   filter: blur(0);
+}
+/* The pills are mounted for the life of the list, so the layers are held only while a rise or a fade
+   is actually running — not for the whole session. */
+.t-stagger.is-shown .t-stagger-line,
+.t-stagger.is-hiding .t-stagger-line {
+  will-change: transform, opacity, filter;
 }
 .t-stagger.is-hiding .t-stagger-line {
   opacity: 0;
@@ -246,18 +246,9 @@
   transition-delay: 0s;
 }
 
-/* Card resize: the search circle's own footprint becomes the bar's, so nothing above it jumps. */
-.t-resize {
-  transition:
-    width var(--resize-dur) var(--resize-ease),
-    height var(--resize-dur) var(--resize-ease);
-  will-change: width, height;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .t-icon-swap .t-icon,
-  .t-stagger-line,
-  .t-resize {
+  .t-stagger-line {
     transition: none !important;
   }
 }

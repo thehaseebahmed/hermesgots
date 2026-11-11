@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /** The field's own name, for the control that shows and hides it. */
-export const CHATS_SEARCH_FIELD_ID = "chats-search"
+const CHATS_SEARCH_FIELD_ID = "chats-search"
 
 /** The picks' own name, for the control that shows and hides them. */
 const PICKS_ID = "new-picks"
@@ -131,7 +131,12 @@ export function ListFoot({
             variant="outline"
             size="icon-lg"
             className="pointer-events-auto size-14 shrink-0 rounded-full bg-background shadow-lg"
-            onClick={onSearchOpen}
+            onClick={() => {
+              // A keyboard reaches this while the picks are up, where a tap cannot: one surface at a
+              // time, whichever control opened the other.
+              if (open) closePicks()
+              onSearchOpen()
+            }}
             aria-label="Search"
             data-search-toggle
           >
@@ -186,7 +191,7 @@ export function ListFoot({
                 closePicks()
                 onNewChat()
               }}
-              className="t-stagger-line t-stagger-line--1 inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              className="t-stagger-line inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
             >
               <MessageCircleIcon aria-hidden className="size-5 text-muted-foreground" />
               New chat
@@ -205,7 +210,7 @@ export function ListFoot({
             onClick={() => (searching ? closeSearch() : togglePicks())}
             aria-label={searching ? "Close search" : open ? "Close" : "New"}
             aria-expanded={searching ? undefined : open}
-            aria-controls={searching ? CHATS_SEARCH_FIELD_ID : PICKS_ID}
+            aria-controls={searching ? undefined : PICKS_ID}
           >
             {/* transitions-dev's icon swap: both faces in one cell, the state picks which shows. */}
             <span aria-hidden className="t-icon-swap" data-state={searching || open ? "b" : "a"}>

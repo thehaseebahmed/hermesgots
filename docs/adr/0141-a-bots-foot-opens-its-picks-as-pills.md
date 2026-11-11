@@ -13,9 +13,10 @@ is open, and raises the two actions as pills stacked above it — one line each,
 nearest the thumb and New room above it where the Host advertises one. The pills stay mounted and inert
 while closed, so their rise and its quiet fade both play.
 A press outside closes them, caught by a press-catcher the foot lays behind the stack, and so does
-Escape and the button itself; every way out returns focus to the button. `data-toast-above` moves from
-the button to the stack, so a toast raised on this screen clears the pills instead of landing under
-them.
+Escape and the button itself; every way out returns focus to the button. The picks' own stack carries
+`data-toast-above` while it is up, so a toast raised on this screen clears the pills as well as the
+button rather than landing under them. The field takes the circle's place in a single frame: the row
+keeps one height, so nothing above the foot moves when it opens.
 
 **The button holds the foot's whole state.** Closed, picks or search: the accent `+`; the accent X while
 the picks are up; the muted X, reading `Close search`, while a search holds the foot. One control, one
