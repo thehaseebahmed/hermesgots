@@ -16,10 +16,10 @@ const TRY_AGAIN = "Try again"
 
 /**
  * The notice's own control: one tap asks the read again, and no second tap lands while that read is
- * out — a reload that answers with its promise is what says when the read is over, and one that
- * answers with nothing is over at once.
+ * out — every reload answers with a promise, which settles when its read lands or the effect behind
+ * it is torn down, so the guard can never leave the button dead.
  */
-function Retry({ onRetry }: { onRetry: () => void | Promise<void> }) {
+export function Retry({ onRetry }: { onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   return (
     <Button
@@ -32,15 +32,7 @@ function Retry({ onRetry }: { onRetry: () => void | Promise<void> }) {
       disabled={retrying}
       onClick={() => {
         setRetrying(true)
-        void (async () => {
-          try {
-            await onRetry()
-          } catch {
-            // The read reports its own failure, in the sentence this control stands beside.
-          } finally {
-            setRetrying(false)
-          }
-        })()
+        void Promise.resolve(onRetry()).finally(() => setRetrying(false))
       }}
     >
       <RotateCwIcon />
@@ -53,30 +45,23 @@ export function Banner({
   tone = "warning",
   className,
   action,
-  onRetry,
   icon = true,
   children,
 }: {
   tone?: keyof typeof TONES
   className?: string
-  /** A button at the end, such as a dismiss. */
+  /** A control at the end, such as a dismiss, or the `Retry` a failed read hands its own reload. */
   action?: ReactNode
-  /**
-   * The read this notice offers to ask again, drawn in the action slot: one control at the end, so a
-   * notice carrying its own `action` draws that instead.
-   */
-  onRetry?: () => void | Promise<void>
   /** False for a notice whose colour and words already say what it is, and whose room is tight. */
   icon?: boolean
   children: ReactNode
 }) {
   const { Icon, className: toneClass } = TONES[tone]
-  const control = action ?? (onRetry ? <Retry onRetry={onRetry} /> : null)
   return (
     <Alert className={cn("rounded-2xl border-0 px-4 py-3", toneClass, className)}>
       {icon && <Icon aria-hidden />}
       <AlertDescription className="text-foreground">{children}</AlertDescription>
-      {control && <AlertAction className="top-1/2 right-1 -translate-y-1/2">{control}</AlertAction>}
+      {action && <AlertAction className="top-1/2 right-1 -translate-y-1/2">{action}</AlertAction>}
     </Alert>
   )
 }

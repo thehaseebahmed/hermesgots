@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
@@ -10,7 +10,6 @@ import {
   PlusIcon,
   PlugZapIcon,
   SlidersHorizontalIcon,
-  Trash2Icon,
   WrenchIcon,
   XIcon,
   type LucideIcon,
@@ -18,7 +17,7 @@ import {
 import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
@@ -30,6 +29,7 @@ import { SkillsTab } from "@/components/skills-tab"
 import {
   Caption,
   ConfirmDestructive,
+  DestructiveButton,
   EditCard,
   EditForm,
   Group,
@@ -93,7 +93,7 @@ import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
 import { setBotMuted } from "@/lib/push"
-import type { ReadFailure } from "@/lib/read-outcome"
+import { useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
@@ -260,12 +260,15 @@ function DeleteBotDialog({
   onDeleted?: () => void
 }) {
   const linked = Boolean(profile.hostId)
+  // The confirmation's own sentence: who else the unlink takes with it. Nothing is scanned while the
+  // dialog is shut — a write to any profile re-emits this query, and the page writes the plugin
+  // version on its own open, so an always-live query would scan the table on every such write.
   const siblings = useLiveQuery(
     async (): Promise<Profile[]> =>
-      profile.hostId
+      open && profile.hostId
         ? db.profiles.filter((p) => p.hostId === profile.hostId && p.id !== profile.id).toArray()
         : [],
-    [profile.hostId, profile.id],
+    [open, profile.hostId, profile.id],
   )
   const others = siblings?.map((p) => p.name).join(", ")
 
@@ -369,16 +372,9 @@ export function BotSettingsList({
       <BotCard profile={profile} onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))} />
       <Caption>Settings</Caption>
       <Group>{rows}</Group>
-      <Button
-        type="button"
-        variant="ghost"
-        className="h-11 rounded-full text-destructive"
-        onClick={() => setConfirming(true)}
-        disabled={!linked && !canDelete}
-      >
-        <Trash2Icon data-icon="inline-start" />
+      <DestructiveButton onClick={() => setConfirming(true)} disabled={!linked && !canDelete}>
         Delete bot
-      </Button>
+      </DestructiveButton>
       <DeleteBotDialog
         profile={profile}
         open={confirming}
@@ -584,9 +580,9 @@ const RESTART_NOTE = "Applies when this bot's Hermes restarts."
 
 /**
  * The page's own read: the host's General (or Delegation) block, and the sentence where it came back
- * without one. `failure` says which sentence that is — a read that threw, which `reload` asks again,
- * or a host that answered without its block, which asking again cannot change — and `keep` takes the
- * block a write answers, since a write's answer is fresher than any read could be.
+ * without one. `retry` asks the same read again where it threw; a host that answered without its
+ * block keeps its sentence and gets no control, since an answer is an answer. `keep` takes the block
+ * a write answers, because a write's answer is fresher than any read could be.
  */
 function useGeneralSettings(profile: Profile, tab: GeneralTab) {
   const connection = connectionKey(profile)
@@ -594,35 +590,27 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
   const page = `${connection}/${tab}`
   const [block, setBlock] = useState<GeneralSettings>()
   const [problem, setProblem] = useState<string>()
-  const [failure, setFailure] = useState<ReadFailure>()
   const [read, setRead] = useState("")
   const [fresh, setFresh] = useState("")
-  const [attempt, setAttempt] = useState(0)
-  // The promise a reload hands back: the notice's retry waits on it, so one tap is one read and the
-  // control can't be tapped again until that read has answered.
-  const settle = useRef<(() => void) | null>(null)
+  const { attempt, landed, release, retry } = useReadAttempt()
 
   useEffect(() => {
     let cancelled = false
-    let landed = false
-    /** The reload that asked for this read is answered: it landed, or the host refused it. */
-    const done = () => {
-      const resolve = settle.current
-      settle.current = null
-      resolve?.()
-    }
+    let answered = false
     // The page opens on the last answer this host gave this device, and the fresh read replaces it;
     // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
+    // Only the first open seeds from that copy: a retry asks the host, and seeding again would
+    // flicker the rows and strobe the sentence under them.
     setBlock(undefined)
-    void cachedHost<GeneralSettings>(profile, route).then((held) => {
-      if (!cancelled && !landed && held) setBlock(held)
-    })
+    if (attempt === 0)
+      void cachedHost<GeneralSettings>(profile, route).then((held) => {
+        if (!cancelled && !answered && held) setBlock(held)
+      })
     void getGeneralSettings(profile, tab, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {
         if (cancelled) return
-        landed = true
+        answered = true
         setRead(connection)
-        setFailure(next ? undefined : "answered")
         setProblem(
           next ? undefined : `This host doesn't carry its ${GENERAL_ROUTES[tab].label} settings.`,
         )
@@ -631,22 +619,22 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
           setFresh(page)
           void keepHost(profile, route, next)
         }
-        done()
+        landed(false)
       })
       .catch((error: unknown) => {
         if (cancelled) return
         // A read that failed is still an answer: the page stops loading and says what the host said.
         setRead(connection)
-        setFailure("threw")
         setProblem(
           error instanceof Error
             ? error.message
             : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
         )
-        done()
+        landed(true)
       })
     return () => {
       cancelled = true
+      release(attempt)
     }
     // The connection is what the answer belongs to: another bot's read is not this page's, and no
     // other field of the profile moves what the host holds. `attempt` is the read asked again.
@@ -662,23 +650,9 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
     [profile, route, page],
   )
 
-  /**
-   * The same read, asked again — the attempt its effect is keyed on — answering with a promise that
-   * settles once that read has answered, which is what the notice's retry waits on.
-   */
-  const reload = useCallback(
-    () =>
-      new Promise<void>((resolve) => {
-        settle.current = resolve
-        setAttempt((count) => count + 1)
-      }),
-    [],
-  )
-
   return {
     block,
     problem,
-    failure,
     /**
      * Whether the block drawn is this device's copy rather than the host's own answer: nothing is
      * written from it until the host's answer lands.
@@ -688,7 +662,8 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
     seeded: read === connection || Boolean(block),
     /** The block a write answered: it is the host's word, so it is drawn without a read. */
     keep,
-    reload,
+    /** The same read, asked again — and nothing at all where the last one did not throw. */
+    retry,
   }
 }
 
@@ -722,9 +697,7 @@ function GeneralPage({
   const chain = useFallbackModels(delegation ? null : profile)
   const subagent = useDelegationModel(delegation ? profile : null)
   const settings = useGeneralSettings(profile, tab)
-  const { block, problem, failure, stale, seeded, keep, reload } = settings
-  // Only a read that threw can be asked again: a host that answered without its block has answered.
-  const retry = failure === "threw" ? reload : undefined
+  const { block, problem, stale, seeded, keep, retry } = settings
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
 
@@ -776,7 +749,7 @@ function GeneralPage({
           onClose={close}
         />
       ) : problem ? (
-        <Banner tone="warning" onRetry={retry}>
+        <Banner tone="warning" action={retry && <Retry onRetry={retry} />}>
           {problem}
         </Banner>
       ) : (
@@ -815,7 +788,7 @@ function GeneralPage({
     return (
       <div className="flex flex-col gap-4" {...{ [`data-bot-${tab}`]: true }}>
         {problem && (
-          <Banner tone="warning" onRetry={retry}>
+          <Banner tone="warning" action={retry && <Retry onRetry={retry} />}>
             {problem}
           </Banner>
         )}
@@ -1054,21 +1027,20 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
   const character = BOTS.find((bot) => bot.id === profile.botId)
-  // The version the bot's host runs, off the `info` read the page already makes for its gates.
+  // The version the bot's host runs, off the `info` read the page already makes for its gates. What
+  // the row reads comes off that one value: nothing while the answer is owed, the host's version
+  // where there is one, and that it runs no plugin where the host answered without one.
   const plugin = usePluginVersion(profile)
-  const version = plugin?.version
-  const fromHost = plugin?.fromHost ?? false
+  const reported = plugin && (plugin.version ?? "No plugin")
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
-  // What the row reads: nothing while the answer is owed, the host's version, or that it runs none.
-  const reported = plugin === undefined ? undefined : (version ?? "No plugin")
 
   // What this device keeps follows the Host's own answer, never the copy it cached from an earlier
   // open (ADR 0132), and only when the version moved: the banner and the Settings menu's tag read
   // this field, so they say what the Host said rather than what this device remembered.
   useEffect(() => {
-    if (!fromHost || !version || version === profile.pluginVersion) return
-    void db.profiles.update(profile.id, { pluginVersion: version })
-  }, [profile.id, profile.pluginVersion, version, fromHost])
+    if (!plugin?.fromHost || !plugin.version || plugin.version === profile.pluginVersion) return
+    void db.profiles.update(profile.id, { pluginVersion: plugin.version })
+  }, [profile.id, profile.pluginVersion, plugin])
 
   return (
     <div className="flex flex-col gap-4" data-bot-card>
@@ -1080,7 +1052,7 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
         <ValueRow
           title="Plugin"
           value={reported}
-          muted={!version}
+          muted={!plugin?.version}
           data-setting="plugin"
         />
       </Group>

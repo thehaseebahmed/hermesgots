@@ -20,12 +20,13 @@ nothing on a tap: it reports what is there rather than a setting to change (ADR 
 where the test row sat rather than moving to a page of its own: the plugin belongs to the bot's Hermes,
 but the _Hermes_ card is drawn for unlinked bots only, and every bot has a plugin version worth naming.
 
-**What the device keeps follows the host, and only from an answer this page took.** `pluginVersion` is
+**What the device keeps follows the host, and only from a live read this session.** `pluginVersion` is
 what the out-of-date banner and the Settings menu's tag read, so it has to be the host's fact rather
-than this device's memory: it is written only when the answer came from a read this page made, never
-from the copy the device kept from an earlier open (ADR 0132), and only when it differs from what is
-stored. A host that has updated therefore clears its own banner on the next visit to its page, and a
-host that is away changes nothing — its banner stands on the last fact anyone had.
+than this device's memory: it is written only when the answer came from a read taken from the host in
+this session, never from the copy the device kept from an earlier open (ADR 0132), and only when it
+differs from what is stored. A host that has updated therefore clears its own banner on the next
+visit to its page, and a host that is away changes nothing — its banner stands on the last fact anyone
+had.
 
 **A failed read offers its own retry, and nothing else does.** Every other read a bot's settings page
 makes — General, the provider list, the speech settings, the pick budget, an MCP server's

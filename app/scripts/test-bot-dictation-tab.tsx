@@ -36,6 +36,8 @@ import {
   off,
   STT,
   switchIn,
+  writes,
+  speechReads,
 } from "./dictation-page-kit.tsx"
 import {
   click,
@@ -406,7 +408,7 @@ test("a model picked in the sheet is written to the host, and the row says which
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await openSpeech()
     await click(speechOption("base"))
-    assert.deepEqual(calls[0]?.body, { model: "base" }, "one field, the model that moved")
+    assert.deepEqual(writes(calls)[0]?.body, { model: "base" }, "one field, the model that moved")
     assert.equal(valueOf(row("speech-model")), "base", "the row names the new model")
     assert.equal(valueColour(row("speech-model")), "accent", "in the accent colour")
     await until(async () => speechOptions().length === 0, "the sheet to close behind the pick")
@@ -426,7 +428,7 @@ test("a pick answered without the page's settings leaves every setting where it 
     assert.ok(before > 0, "the page draws the host's settings to begin with")
     await openSpeech()
     await click(speechOption("base"))
-    assert.deepEqual(calls[0]?.body, { model: "base" }, "the pick was written")
+    assert.deepEqual(writes(calls)[0]?.body, { model: "base" }, "the pick was written")
     await until(async () => speechOptions().length === 0, "the sheet to close behind the pick")
     assert.equal(valueOf(row("speech-model")), "base", "the row names the new model")
     assert.equal(
@@ -498,7 +500,7 @@ test("a model the host refuses leaves the old one in place and shows the host's 
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await openSpeech()
     await click(speechOption("base"))
-    assert.deepEqual(calls[0]?.body, { model: "base" }, "the pick was written")
+    assert.deepEqual(writes(calls)[0]?.body, { model: "base" }, "the pick was written")
     assert.equal(valueOf(row("speech-model")), "small", "the old model stays in place")
     assert.equal(
       find('[role="alert"]')?.textContent?.trim(),
@@ -508,6 +510,11 @@ test("a model the host refuses leaves the old one in place and shows the host's 
     assert.ok(
       speechPage()?.firstElementChild?.matches('[role="alert"]'),
       "and it leads the page, over both captions it reports for",
+    )
+    assert.equal(
+      labelled('[role="alert"] button', "Try again") === null,
+      true,
+      "with no control: a write has nothing a retry could re-run",
     )
   })
 })
@@ -607,7 +614,7 @@ test("a cleanup model picked from a provider is written to the host, and the row
     await until(async () => Boolean(modelRow("claude-x")), "the provider's models")
     await click(modelRow("claude-x"))
     assert.deepEqual(
-      calls[0]?.body,
+      writes(calls)[0]?.body,
       { cleanup_model: { provider: "anthropic", model: "claude-x" } },
       "one pick, the cleanup model that moved",
     )
@@ -642,7 +649,7 @@ test("the pick's Default row clears the cleanup model the bot had", async () => 
     )
     await click(modelRow("Default"))
     assert.deepEqual(
-      calls[0]?.body,
+      writes(calls)[0]?.body,
       { cleanup_model: null },
       "clearing writes null, and nothing else",
     )
@@ -718,7 +725,7 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
       "each card says what it changes and shows the same sentence at its level",
     )
     await click(find('[data-cleanup-level="high"]'))
-    assert.deepEqual(calls[0]?.body, { cleanup_level: "high" }, "one level, written to the host")
+    assert.deepEqual(writes(calls)[0]?.body, { cleanup_level: "high" }, "one level, written to the host")
     await until(
       async () => lines(row("cleanup-level"))[3] === "High",
       "the row naming the level the host now runs",
@@ -773,7 +780,7 @@ test("a Developer's Hearing prompt switch is written to the host and read back",
       "a bot hears its takes unprompted until it says otherwise",
     )
     await click(switchIn("hearing-prompt"))
-    assert.deepEqual(calls[0]?.body, { hearing_prompt: true }, "one switch, written to the host")
+    assert.deepEqual(writes(calls)[0]?.body, { hearing_prompt: true }, "one switch, written to the host")
     await until(
       async () => switchIn("hearing-prompt")?.getAttribute("aria-checked") === "true",
       "the switch reading back on",
@@ -885,7 +892,7 @@ test("the page opens on the last answer this device read, every row muted until 
       assert.equal(off(row(name)), true, `${name} takes no taps until the host answers`)
     await click(row("cleanup-level"))
     assert.equal(findAll("[data-cleanup-levels]").length, 0, "so a tap on it opens nothing")
-    assert.deepEqual(calls, [], "and nothing is written from a value that may be stale")
+    assert.deepEqual(writes(calls), [], "and nothing is written from a value that may be stale")
   })
 })
 
@@ -941,21 +948,12 @@ test("a failed read leaves the cached copy muted, under the host's own sentence"
 })
 
 test("a read the host refused says so, with a way to ask again, and the tap draws the page", async () => {
-  await seed(
+  const calls = await seed(
     "refused-read",
     ["dictation", "speech_model"],
     {},
     { speech: speech(), speechRefusals: 1 },
   )
-  // The page's own read, counted here: the speech route it asks, refused once and then answered.
-  const reads: string[] = []
-  const live = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/gots/speech") && (init?.method ?? "GET") === "GET")
-      reads.push(url.pathname)
-    return live(input as RequestInfo, init)
-  }) as typeof fetch
 
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     const notice = '[data-bot-dictation] [role="alert"]'
@@ -974,12 +972,12 @@ test("a read the host refused says so, with a way to ask again, and the tap draw
       "an icon, so the words it is named are what a reader hears",
     )
     assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
-    assert.equal(reads.length, 1, "the page asked its speech read once, and was refused")
+    assert.equal(speechReads(calls).length, 1, "the page asked its speech read once, and was refused")
 
     await click(retry)
     await until(async () => valueOf(row("speech-model")) === "small", "the host's own answer")
 
-    assert.equal(reads.length, 2, "the tap asked the same route again, once")
+    assert.equal(speechReads(calls).length, 2, "the tap asked the same route again, once")
     assert.ok(missing(notice), "the notice goes with it")
   })
 })
@@ -1047,7 +1045,7 @@ test("a bot whose takes leave the host greys Cleanup's rows and says nothing abo
     assert.equal(off(switchIn("hearing-prompt")), true, "nor the Hearing prompt's switch")
     await click(row("cleanup-level"))
     assert.equal(findAll("[data-cleanup-levels]").length, 0, "so nothing opens under it")
-    assert.deepEqual(calls, [], "and the row's value is not written")
+    assert.deepEqual(writes(calls), [], "and the row's value is not written")
   })
 })
 

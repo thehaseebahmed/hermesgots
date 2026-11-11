@@ -67,8 +67,6 @@ const nameOf = (button: Element) =>
 const buttonNamed = (name: string) =>
   findAll("button").find((button) => nameOf(button) === name) ?? null
 
-/** The page's own column: its captions and cards, and the button it ends on. */
-const column = () => find("[data-bot-settings-list]")
 /**
  * The page's delete control, found by the words it shows — its accessible name, since the button
  * carries no label of its own — and never by a header selector: the header holds none.
@@ -184,10 +182,15 @@ test("the bot's page ends on Delete bot, and its header carries no control at al
     )
     const control = removeBot()
     assert.ok(control, "with Delete bot at its foot")
+    assert.ok(
+      control!.closest("[data-bot-settings-list]"),
+      "inside the column its captions and cards stand in",
+    )
     assert.equal(
-      column()?.lastElementChild,
-      control,
-      "the last thing in the column its captions and cards stand in",
+      findAll("[data-bot-settings-list] button").filter((one) => nameOf(one) === "Delete bot")
+        .length,
+      1,
+      "one Delete bot in the column, and the header holds none",
     )
     assert.deepEqual(headerRemovals(), [], "and nothing in the screen's header removes a bot")
     assert.deepEqual(

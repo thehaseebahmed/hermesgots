@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentProps } from "r
 import { useLocation, useNavigate } from "react-router"
 import { ChevronDownIcon, EyeIcon, EyeOffIcon, PlusIcon } from "lucide-react"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import {
   Caption,
   ConfirmDestructive,
@@ -35,7 +35,7 @@ import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { useLarge } from "@/lib/media"
-import type { ReadFailure } from "@/lib/read-outcome"
+import { useReadAttempt } from "@/lib/read-attempt"
 import { useUnsavedChanges } from "@/lib/unsaved"
 import {
   getLlmProviders,
@@ -133,10 +133,7 @@ export function LlmProvidersTab({ profile, sub }: { profile: Profile; sub?: BotS
  */
 function ProvidersPage({ profile }: { profile: Profile }) {
   const navigate = useNavigate()
-  const { block, problem, failure, reload } = useLlmProviders(profile)
-  // The read this notice offers to ask again: only a read that threw can be, since a host that
-  // answered without its providers has answered.
-  const retry = failure === "threw" ? reload : undefined
+  const { block, problem, retry } = useLlmProviders(profile)
   // The page's own way to add one: the header's `+`, which opens the form as a sub-screen. Its
   // handler is `navigate` — stable across renders — because the header draws the node it was
   // published with and never re-renders for a change on the page below it.
@@ -156,16 +153,13 @@ function ProvidersPage({ profile }: { profile: Profile }) {
   )
 
   if (!block)
-    return problem ? (
-      <div className="flex flex-col gap-4" data-bot-llm-providers>
-        <Banner tone="warning" onRetry={retry}>
-          {problem}
-        </Banner>
-      </div>
-    ) : (
-      <div className="flex items-center justify-center py-16" data-llm-providers-loading>
-        <Spinner />
-      </div>
+    return (
+      <ReadBody
+        problem={problem}
+        retry={retry}
+        loading="data-llm-providers-loading"
+        data-bot-llm-providers=""
+      />
     )
 
   const rows = providerRows(block)
@@ -175,7 +169,7 @@ function ProvidersPage({ profile }: { profile: Profile }) {
   return (
     <div className="flex flex-col gap-4" data-bot-llm-providers>
       {problem && (
-        <Banner tone="warning" onRetry={retry}>
+        <Banner tone="warning" action={retry && <Retry onRetry={retry} />}>
           {problem}
         </Banner>
       )}
@@ -254,8 +248,7 @@ export function LlmProviderKeyScreen({
   close: () => void
 }) {
   const large = useLarge()
-  const { block, problem, failure, keep, reload } = useLlmProviders(profile)
-  const retry = failure === "threw" ? reload : undefined
+  const { block, problem, keep, retry } = useLlmProviders(profile)
   // What the form is made again by: a write that landed, so its field holds nothing afterwards —
   // even the same key written twice changes no mask, and the field is emptied all the same.
   const [written, setWritten] = useState(0)
@@ -271,16 +264,13 @@ export function LlmProviderKeyScreen({
   useHeaderTitle(block ? `Edit ${provider?.label ?? target}` : undefined)
 
   if (!block)
-    return problem ? (
-      <div className="flex flex-col gap-4" data-llm-provider-slot={target}>
-        <Banner tone="warning" onRetry={retry}>
-          {problem}
-        </Banner>
-      </div>
-    ) : (
-      <div className="flex items-center justify-center py-16" data-llm-provider-loading>
-        <Spinner />
-      </div>
+    return (
+      <ReadBody
+        problem={problem}
+        retry={retry}
+        loading="data-llm-provider-loading"
+        data-llm-provider-slot={target}
+      />
     )
 
   // The address is reachable by hand, so a target this host doesn't list says so rather than drawing
@@ -421,8 +411,7 @@ export function LlmEndpointScreen({
   id: string
 }) {
   const navigate = useNavigate()
-  const { block, problem, failure, keep, reload } = useLlmProviders(profile)
-  const retry = failure === "threw" ? reload : undefined
+  const { block, problem, keep, retry } = useLlmProviders(profile)
   const [written, setWritten] = useState(0)
   const endpoint = block?.endpoints.find((one) => one.id === id)
   // A form's heading carries the verb, and names what it edits: a provider by its label, an endpoint
@@ -437,16 +426,13 @@ export function LlmEndpointScreen({
   )
 
   if (!block)
-    return problem ? (
-      <div className="flex flex-col gap-4" data-llm-endpoint-slot={id}>
-        <Banner tone="warning" onRetry={retry}>
-          {problem}
-        </Banner>
-      </div>
-    ) : (
-      <div className="flex items-center justify-center py-16" data-llm-endpoint-loading>
-        <Spinner />
-      </div>
+    return (
+      <ReadBody
+        problem={problem}
+        retry={retry}
+        loading="data-llm-endpoint-loading"
+        data-llm-endpoint-slot={id}
+      />
     )
 
   if (!endpoint)
@@ -931,6 +917,39 @@ function TransportField({
 }
 
 /**
+ * What a page or a slot draws where its read came back without a block: the notice carrying the
+ * host's sentence and, where that read threw, the one control that asks it again — or the loader
+ * while the answer is owed. One body for the page and both of its slots, since one page family
+ * reads one way.
+ */
+function ReadBody({
+  problem,
+  retry,
+  loading,
+  ...marks
+}: {
+  problem?: string
+  /** The same read asked again, where the last one threw — and nothing where it answered. */
+  retry?: () => Promise<void>
+  /** The mark the loader wears, so a test names the read it is waiting on. */
+  loading: string
+} & Record<`data-${string}`, string | undefined>) {
+  if (!problem)
+    return (
+      <div className="flex items-center justify-center py-16" {...{ [loading]: true }}>
+        <Spinner />
+      </div>
+    )
+  return (
+    <div className="flex flex-col gap-4" {...marks}>
+      <Banner tone="warning" action={retry && <Retry onRetry={retry} />}>
+        {problem}
+      </Banner>
+    </div>
+  )
+}
+
+/**
  * The page's block, and a write's answer folded into it: one read on the connection the page belongs
  * to, and the block a write answers kept where the screen is already drawing.
  *
@@ -939,8 +958,8 @@ function TransportField({
  * block a write answered is the exception and the point — it rides the navigation that returns to
  * the page, and is drawn once instead of read again.
  *
- * `failure` says which of the two ways the read came back without a block: it threw, which `reload`
- * asks again, or the host answered without listing its providers, which asking again cannot change.
+ * `retry` is the same read asked again, and exists only where that read threw: a host that answered
+ * without listing its providers has answered, and asking again cannot change it.
  */
 function useLlmProviders(profile: Profile) {
   const location = useLocation()
@@ -950,8 +969,7 @@ function useLlmProviders(profile: Profile) {
   const handed = useRef((location.state as { llm?: LlmProviders } | null)?.llm)
   const [block, setBlock] = useState<LlmProviders | undefined>(handed.current)
   const [problem, setProblem] = useState<string>()
-  const [failure, setFailure] = useState<ReadFailure>()
-  const [attempt, setAttempt] = useState(0)
+  const { attempt, landed, release, retry } = useReadAttempt()
   const connection = connectionKey(profile)
   // This screen's own address, for the replace that takes the block off the entry it rode in on.
   const here = `${location.pathname}${location.search}`
@@ -972,20 +990,21 @@ function useLlmProviders(profile: Profile) {
     void getLlmProviders(profile, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((next) => {
         if (cancelled) return
-        setFailure(next ? undefined : "answered")
         setProblem(next ? undefined : "This host doesn't list its LLM providers.")
         if (next) setBlock(next)
+        landed(false)
       })
       .catch((error: unknown) => {
         if (cancelled) return
         // A read that failed is still an answer: the page says what the host said.
-        setFailure("threw")
         setProblem(
           error instanceof Error ? error.message : "Couldn't read this bot's LLM providers.",
         )
+        landed(true)
       })
     return () => {
       cancelled = true
+      release(attempt)
     }
     // The connection is what the answer belongs to: another bot's read is not this page's, and
     // `attempt` is the read asked again.
@@ -995,14 +1014,12 @@ function useLlmProviders(profile: Profile) {
   return {
     block,
     problem,
-    failure,
     /** A write answered: draw that block, and nothing of the read's refusal stands over it. */
     keep: (next: LlmProviders) => {
       setProblem(undefined)
-      setFailure(undefined)
       setBlock(next)
     },
-    /** The same read, asked again — the attempt its effect is keyed on. */
-    reload: () => setAttempt((count) => count + 1),
+    /** The same read, asked again — and nothing at all where the last one did not throw. */
+    retry,
   }
 }

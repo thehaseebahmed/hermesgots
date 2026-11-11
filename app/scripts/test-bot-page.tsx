@@ -15,6 +15,7 @@ import { useState } from "react"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { useReadAttempt } from "@/lib/read-attempt"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
@@ -30,7 +31,9 @@ import {
   missing,
   mount,
   path,
+  refuseFirst,
   seedSettings,
+  settle,
   type,
   until,
   wordsOf,
@@ -85,7 +88,7 @@ const DELEGATION = {
 }
 
 /** The host's General block, as its schema offers it: a key at the top level and one in a section. */
-const GENERAL = {
+const HOST_GENERAL = {
   fields: [
     { key: "timezone", kind: "string" as const, section: "" },
     { key: "session.terminal_continue", kind: "boolean" as const, section: "session" },
@@ -159,7 +162,10 @@ function host({
   noGeneral?: boolean
 } = {}) {
   const calls: Sent[] = []
-  let generalReads = 0
+  const refuseGeneral = refuseFirst(
+    generalRefusals,
+    "This bot's config.yaml can't be read right now.",
+  )
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
@@ -170,10 +176,9 @@ function host({
         ? json({ error: { message: "Not home." } }, 503)
         : json({ name: "gots", version, features })
     if (url.pathname.endsWith("/plugins/gots/general")) {
-      generalReads += 1
-      if (generalReads <= generalRefusals)
-        return json({ error: { message: "This bot's config.yaml can't be read right now." } }, 500)
-      return json(noGeneral ? {} : { general: GENERAL })
+      const refusal = refuseGeneral()
+      if (refusal) return refusal
+      return json(noGeneral ? {} : { general: HOST_GENERAL })
     }
     if (url.pathname.endsWith("/plugins/gots/delegation-settings"))
       return noDelegation
@@ -544,16 +549,16 @@ test("a bot switched to on one connection draws nothing of the bot before it", a
   const second = botProfile("B bot", { id: "bot-2", baseUrl: address, apiKey: "key" })
   await db.profiles.bulkPut([first, second])
 
-  let reads = 0
+  // The first bot's page cannot be read; the second's answer is still on its way when the page is
+  // asked what it draws, which is the moment the bot before it would show.
+  const refuseDelegation = refuseFirst(1, "No delegation category.", 501)
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ name: "gots", version: "0.81.0", features: [...FEATURES, "delegation_page"] })
     if (url.pathname.endsWith("/plugins/gots/delegation-settings")) {
-      reads += 1
-      // The first bot's page cannot be read; the second's answer is still on its way when the page is
-      // asked what it draws, which is the moment the bot before it would show.
-      if (reads === 1) return json({ error: { message: "No delegation category." } }, 501)
+      const refusal = refuseDelegation()
+      if (refusal) return refusal
       await new Promise((resolve) => setTimeout(resolve, 100))
       return json({ object: "gots.delegation_settings", delegation: DELEGATION })
     }
@@ -681,6 +686,43 @@ test("a read the host refused says so, with a way to ask again, and the tap draw
     absent(notice, "the notice goes with it")
     assert.equal(accent("timezone"), "Europe/London", "and the rows draw what the host holds")
   })
+})
+
+/**
+ * The notice's retry is one tap on one read: the promise it hands back settles when that read lands
+ * or when the screen that asked for it goes away. A read torn down mid-flight is the case a screen
+ * cannot show — the page it was reading for is replaced by its loader — so the seam is read here,
+ * where the effect's teardown is the whole of it.
+ */
+const probe: { api?: ReturnType<typeof useReadAttempt> } = {}
+
+function ReadAttemptProbe() {
+  probe.api = useReadAttempt()
+  return null
+}
+
+test("a retry's promise settles when its read is torn down", async () => {
+  probe.api = undefined
+  const settled: string[] = []
+  await mount(<ReadAttemptProbe />, async () => {
+    assert.equal(probe.api?.retry, undefined, "a read that has not thrown offers no retry")
+
+    probe.api!.landed(true)
+    await settle()
+    const tap = probe.api!.retry
+    assert.ok(tap, "a read that threw offers the same read again")
+
+    void tap().then(() => settled.push("settled"))
+    await settle()
+    assert.deepEqual(settled, [], "and the tap waits on the read it asked for")
+  })
+
+  await settle()
+  assert.deepEqual(
+    settled,
+    ["settled"],
+    "the teardown settles it, so the control can never be left waiting for good",
+  )
 })
 
 test("a host that answers without its General block says so, and offers no retry", async () => {

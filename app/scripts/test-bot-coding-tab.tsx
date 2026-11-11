@@ -30,6 +30,7 @@ import {
   mount,
   seedSettings,
   until,
+  watchNotes,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -234,14 +235,16 @@ test("a read the host refused says so, with a way to ask again, and the tap draw
     pickBudget: 3,
     afkReadsRefused: 1,
   })
+  const notes = watchNotes("pick budget")
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     const notice = '[data-bot-coding] [role="alert"]'
     await until(async () => Boolean(find(notice)), "the refusal to be said")
     assert.equal(
       wordsOf(find(notice)),
-      "Couldn't read this bot's pick budget.",
-      "the notice says what the tab couldn't read",
+      "This bot's config.yaml can't be read right now.",
+      "the notice holds the host's own sentence, as every sibling hook does",
     )
+    assert.equal(notes.count(), 1, "and the throw was noted for the console")
 
     const retry = labelled(`${notice} button`, "Try again")
     assert.ok(retry, "and one control offering to ask the same read again")
@@ -262,6 +265,32 @@ test("a read the host refused says so, with a way to ask again, and the tap draw
       "the tap asked the same route again, once",
     )
     assert.ok(missing(notice), "the notice goes with it")
+    notes.stop()
+  })
+})
+
+test("a retry still out keeps the stepper shut, so no budget the host never sent is written", async () => {
+  // The retry's read never answers: the tab is looked at in the one moment the old code opened the
+  // stepper over the default, and a tap there would have written five as the bot's real budget.
+  const calls = await seed("coding-retry-out", ["afk", "afk_picks"], {
+    pickBudget: 3,
+    afkReadsRefused: 1,
+    holdAfk: new Promise<void>(() => {}),
+  })
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    const notice = '[data-bot-coding] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+
+    await click(labelled(`${notice} button`, "Try again"))
+
+    assert.equal(
+      step("Increase pick budget")?.hasAttribute("disabled"),
+      true,
+      "the stepper stays shut while the retry is out",
+    )
+    assert.equal(step("Decrease pick budget")?.hasAttribute("disabled"), true)
+    assert.equal(shown(), "5 tasks", "the default is drawn, not written")
+    assert.equal(botWrites(calls).length, 0, "and nothing was sent as the bot's budget")
   })
 })
 

@@ -161,11 +161,12 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
       "the bot's switches lead its card",
     )
     assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
-    assert.equal(
-      wordsOf(find("[data-bot-settings-list]")?.lastElementChild ?? null),
-      "Delete bot",
-      "and the list ends on the button that deletes the bot",
+    const control = findAll("button").find((one) => wordsOf(one) === "Delete bot")
+    assert.ok(
+      control?.closest("[data-bot-settings-list]"),
+      "the list carries one Delete bot, inside its own column",
     )
+    assert.equal(control?.closest("header"), null, "and none in the screen's header")
   })
 })
 

@@ -2,7 +2,7 @@ import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import { Segmented } from "@/components/segmented"
 import { Group, rowClass } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -19,7 +19,7 @@ import {
   type UsageWindow,
 } from "@/lib/hermes"
 import { modelInfoFor } from "@/lib/model-info"
-import type { ReadFailure } from "@/lib/read-outcome"
+import { useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
 import { cn } from "@/lib/utils"
 
@@ -28,56 +28,68 @@ import { cn } from "@/lib/utils"
  * its projects at once, and the usage threshold it stops picking up at. Only this device's copy of
  * the host's last answer is drawn until the read lands.
  *
- * `failure` says the read threw — the one way this read comes back empty-handed, since a host that
- * answers without a budget draws the default it would itself use — and `reload` asks the same read
- * again. A write answers the numbers the host now holds, so `keepBudget` and `keepThreshold` fold it
- * in rather than reading again.
+ * `problem` is the host's own sentence where the read threw — the one way this read comes back
+ * empty-handed, since a host that answers without a budget draws the default it would itself use —
+ * and `retry` asks the same read again, existing only while that sentence stands. A write answers
+ * the numbers the host now holds, so `keepBudget` and `keepThreshold` fold it in rather than reading
+ * again.
  */
 function useBotAfk(config: HermesConfig) {
   const [budget, setBudget] = useState<number | null>(null)
   const [threshold, setThreshold] = useState<number | null>(null)
   const [stale, setStale] = useState(false)
-  const [failure, setFailure] = useState<ReadFailure>()
-  const [attempt, setAttempt] = useState(0)
+  const [problem, setProblem] = useState<string>()
+  const { attempt, landed, release, retry } = useReadAttempt()
 
   // A host from before the route answers nothing, which is the reason the tab says it couldn't read
   // it rather than drawing a number nobody wrote.
   useEffect(() => {
     let cancelled = false
-    let landed = false
-    setFailure(undefined)
-    void cachedHost<{ budget: number; threshold: number | null }>(config, "bot-afk").then(
-      (held) => {
-        if (cancelled || landed || !held) return
-        setBudget(held.budget)
-        setThreshold(held.threshold)
-        setStale(true)
-      },
-    )
+    let answered = false
+    // Only the first open seeds from this device's copy: a retry asks the host, and seeding again
+    // would put the copy back under the answer it is waiting for.
+    if (attempt === 0)
+      void cachedHost<{ budget: number; threshold: number | null }>(config, "bot-afk").then(
+        (held) => {
+          if (cancelled || answered || !held) return
+          setBudget(held.budget)
+          setThreshold(held.threshold)
+          setStale(true)
+        },
+      )
     void getBotAfk(config, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((answer) => {
         if (cancelled) return
-        landed = true
+        answered = true
         const next = answer.pickBudget ?? PICK_BUDGET.unset
         setBudget(next)
         setThreshold(answer.usageThreshold)
         setStale(false)
+        // Only an answer clears the sentence: a retry still out is no answer, and the tab's controls
+        // must stay shut until one lands rather than opening over the default nobody was sent.
+        setProblem(undefined)
         void keepHost(config, "bot-afk", { budget: next, threshold: answer.usageThreshold })
+        landed(false)
       })
-      .catch(() => {
-        if (!cancelled) setFailure("threw")
+      .catch((error: unknown) => {
+        noteFailure("Reading this bot's pick budget", error)
+        if (cancelled) return
+        setProblem(error instanceof Error ? error.message : "Couldn't read this bot's pick budget.")
+        landed(true)
       })
     return () => {
       cancelled = true
+      release(attempt)
     }
-  }, [config, attempt])
+  }, [config, attempt, landed, release])
 
   return {
     budget,
     threshold,
     /** Whether the numbers drawn are this device's copy rather than the host's own answer. */
     stale,
-    failure,
+    /** The host's own sentence where its pick budget couldn't be read. */
+    problem,
     /** The budget a write answered, with the threshold the tab already holds. */
     keepBudget: (next: number) => {
       setBudget(next)
@@ -88,8 +100,8 @@ function useBotAfk(config: HermesConfig) {
       setThreshold(next)
       void keepHost(config, "bot-afk", { budget: budget ?? PICK_BUDGET.unset, threshold: next })
     },
-    /** The same read, asked again — the attempt its effect is keyed on. */
-    reload: () => setAttempt((count) => count + 1),
+    /** The same read, asked again — and nothing at all where the last one did not throw. */
+    retry,
   }
 }
 
@@ -125,10 +137,12 @@ export function CodingTab({ profile }: { profile: Profile }) {
     [profile.baseUrl, profile.apiKey],
   )
   const afk = useBotAfk(config)
-  const { budget, threshold, stale } = afk
-  // The read threw: the tab says it couldn't read the budget and its controls stay shut. `stale` is
-  // the other reason they do — the numbers drawn are this device's copy until the host's own lands.
-  const failed = Boolean(afk.failure)
+  const { budget, threshold, stale, problem } = afk
+  // The read threw: the tab says what the host said and its controls stay shut. `retry` is that
+  // fact — it exists only while the last landing threw, so a retry still out keeps them shut rather
+  // than opening over a default nobody was sent. `stale` is the other reason they do: the numbers
+  // drawn are this device's copy until the host's own lands.
+  const failed = Boolean(afk.retry)
   // The count a write is carrying until its answer lands: a refused one drops it, so nothing on the
   // tab reads as saved that the host never kept.
   const [draft, setDraft] = useState<number | null>(null)
@@ -238,11 +252,11 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   return (
     <div className="flex flex-col gap-4" data-bot-coding>
-      {/* A read that threw is said above the rows it couldn't fill, with the one control that asks
-          it again; the numbers below stay shut until that read lands. */}
-      {failed && (
-        <Banner tone="warning" onRetry={afk.reload}>
-          Couldn't read this bot's pick budget.
+      {/* A read that threw is said above the rows it couldn't fill, in the host's own words, with
+          the one control that asks it again; the numbers below stay shut until that read lands. */}
+      {problem && (
+        <Banner tone="warning" action={afk.retry && <Retry onRetry={afk.retry} />}>
+          {problem}
         </Banner>
       )}
       <Group>

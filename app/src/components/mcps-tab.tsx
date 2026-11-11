@@ -7,16 +7,16 @@ import {
   CopyIcon,
   PlusIcon,
   ServerIcon,
-  Trash2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   Caption,
   ConfirmDestructive,
+  DestructiveButton,
   Group,
   linkRowClass,
   rowClass,
@@ -496,7 +496,9 @@ function ServerDetail({
       {/* Removal is advertised on its own gate, so a Host that can remove a server without being
           able to describe one still gets the way to do it — the Config tab is where it sits when
           there is one, since that is the tab a removal belongs to. */}
-      {!config && removable && server.source !== "plugin" && <RemoveServer onRemove={onRemove} />}
+      {!config && removable && server.source !== "plugin" && (
+        <DestructiveButton onClick={onRemove}>Remove server</DestructiveButton>
+      )}
     </div>
   )
 }
@@ -730,7 +732,7 @@ function ConfigTab({
   onRemove: () => void
   saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
 }) {
-  const { detail, failure, reload } = useMcpServerDetail(profile, server.name, true)
+  const { detail, retry } = useMcpServerDetail(profile, server.name, true)
   // What a save answered: the block as the Host landed it, which is newer than the read the sheet
   // opened with and costs no second request.
   const [written, setWritten] = useState<McpServerDetail | undefined>(undefined)
@@ -739,9 +741,9 @@ function ConfigTab({
   const [version, setVersion] = useState(0)
   const block = written ?? detail
 
-  if (failure && !block) {
+  if (retry && !block) {
     return (
-      <Banner tone="warning" onRetry={reload}>
+      <Banner tone="warning" action={<Retry onRetry={retry} />}>
         Couldn't load this server's configuration.
       </Banner>
     )
@@ -849,23 +851,10 @@ function ConfigFields({
         </div>
       )}
 
-      {editable && removable && <RemoveServer onRemove={onRemove} />}
+      {editable && removable && (
+        <DestructiveButton onClick={onRemove}>Remove server</DestructiveButton>
+      )}
     </div>
-  )
-}
-
-/** Taking a server away: the Config tab's last button, and its own where there is no tab. */
-function RemoveServer({ onRemove }: { onRemove: () => void }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      className="h-11 rounded-full text-destructive"
-      onClick={onRemove}
-    >
-      <Trash2Icon data-icon="inline-start" />
-      Remove server
-    </Button>
   )
 }
 
@@ -1129,7 +1118,7 @@ function McpEntryForm({
   onBack: () => void
   onAdded: () => void
 }) {
-  const { entry, failure, reload } = useMcpCatalogueEntry(profile, name, true)
+  const { entry, retry } = useMcpCatalogueEntry(profile, name, true)
   const [entered, setEntered] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
@@ -1171,8 +1160,8 @@ function McpEntryForm({
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pt-2 pb-4">
         {/* A read that threw: said in the page family's own notice, with the one control that asks
             it again — a form with nothing in it would read as an entry declaring nothing. */}
-        {failure && entry === undefined && (
-          <Banner tone="warning" onRetry={reload}>
+        {retry && entry === undefined && (
+          <Banner tone="warning" action={<Retry onRetry={retry} />}>
             Couldn't load this entry's values.
           </Banner>
         )}

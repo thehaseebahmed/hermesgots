@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import {
   Caption,
   FormActions,
@@ -125,18 +125,18 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
     )
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
-      {/* One notice for every write, and the host's own sentence where a read failed: the cached
-          copy under it may be older than it looks. A read that threw is the one failure that can
-          be asked again, so it carries the notice's control; a write's refusal has nothing to
-          re-run. */}
-      {speech.problem && (
+      {/* Two sentences, each about its own fact: the read's own failure — the cached copy under it
+          may be older than it looks — with the one control that asks that read again; and a write's
+          refusal, which has nothing to re-run and so draws no control. */}
+      {speech.readProblem && (
         <Banner
           tone="error"
-          onRetry={speech.failure === "threw" ? speech.reload : undefined}
+          action={speech.retry && <Retry onRetry={speech.retry} />}
         >
-          {speech.problem}
+          {speech.readProblem}
         </Banner>
       )}
+      {speech.problem && <Banner tone="error">{speech.problem}</Banner>}
 
       {/* A host that carries only the model draws the page it always had — no captions to name
           groups it doesn't have, the two Gots rows marked where they sit. */}

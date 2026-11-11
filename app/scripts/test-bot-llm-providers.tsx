@@ -38,6 +38,7 @@ import {
   missing,
   mount,
   path,
+  refuseFirst,
   seedSettings,
   text,
   type,
@@ -193,8 +194,10 @@ async function seed(
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
   const asks: Asked[] = []
-  // How many times the page has read its block, so a case can refuse the first.
-  let providerReads = 0
+  const refuseProviders = refuseFirst(
+    readsRefused,
+    "This bot's providers can't be read right now.",
+  )
   // The refusals this host answered, by the status and the code it sent: the endpoint its model
   // runs on is the plan's 409 under `endpoint_in_use`, and the page draws its sentence anyway.
   const refusals: { status: number; code: string }[] = []
@@ -246,9 +249,8 @@ async function seed(
       return answered(current)
     }
     if (pathname.endsWith("/plugins/gots/llm-providers") && method === "GET") {
-      providerReads += 1
-      if (providerReads <= readsRefused)
-        return json({ error: { message: "This bot's providers can't be read right now." } }, 500)
+      const refusal = refuseProviders()
+      if (refusal) return refusal
       return json(
         noBlock ? { object: "gots.llm_providers" } : { object: "gots.llm_providers", llm: current },
       )

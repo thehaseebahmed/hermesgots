@@ -39,6 +39,19 @@ export function json(body: unknown, status = 200) {
 }
 
 /**
+ * A route a fake host refuses its first `times` reads, then answers: the counter every test that
+ * proves a retry needs, in one place rather than one per fake. Call it once per read; it answers the
+ * refusal to send, or nothing at all where this is the read that lands.
+ */
+export function refuseFirst(times: number, message: string, status = 500) {
+  let reads = 0
+  return () => {
+    reads += 1
+    return reads <= times ? json({ error: { message } }, status) : undefined
+  }
+}
+
+/**
  * Transcript rows for a session, each taking the next id and a time that follows it: a row, a call
  * and its result, and the two together. `reset` starts the ids over for the next case.
  */
@@ -901,6 +914,7 @@ export function afkHost({
   thresholdRefusal = null,
   thresholdAnswer,
   afkReadsRefused = 0,
+  holdAfk = null,
   hostProvider = "anthropic",
   windows = null,
   deciding = null,
@@ -935,6 +949,8 @@ export function afkHost({
   thresholdAnswer?: number | null
   /** How many of its bot-level `afk` reads this host refuses before it answers. */
   afkReadsRefused?: number
+  /** A bot-level read that waits on this before it answers, so a case can read the tab mid-retry. */
+  holdAfk?: Promise<void> | null
   /** The provider the host reports as its main model, which is whose account the usage is read for. */
   hostProvider?: string
   /** The account's usage windows as the host answers them; null is a provider with no windows. */
@@ -969,7 +985,10 @@ export function afkHost({
   // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
   let threshold = usageThreshold
   // How many times its bot-level route has been read, so a case can refuse the first.
-  let afkReads = 0
+  const refuseAfk = refuseFirst(
+    afkReadsRefused,
+    "This bot's config.yaml can't be read right now.",
+  )
   const botAnswer = () => ({
     object: "gots.afk.bot",
     pick_budget: budget ?? 5,
@@ -1035,12 +1054,9 @@ export function afkHost({
     // The bot's own AFK route, beside the project's: no project segment, one write of its own.
     if (url.pathname.endsWith("/plugins/gots/afk")) {
       if (method === "GET") {
-        afkReads += 1
-        if (afkReads <= afkReadsRefused)
-          return json(
-            { error: { message: "This bot's config.yaml can't be read right now." } },
-            500,
-          )
+        const refusal = refuseAfk()
+        if (refusal) return refusal
+        await holdAfk
       }
       if (method === "POST" && typeof body?.pick_budget === "number") {
         if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
