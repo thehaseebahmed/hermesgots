@@ -75,6 +75,99 @@ await flow(
     await shot("list")
     pass("the list draws the bot's chats")
 
+    // A row's line is one line whatever the bot said: a long reply is cut with an ellipsis rather than
+    // wrapped onto a second line, which a list of rows scanned down cannot afford.
+    const LONG =
+      "The build is green and every gate passed, so I opened the draft pull request for you to read when you are back at a screen."
+    await page.evaluate(
+      async ([chat, text]) => {
+        const { db } = await import("/src/lib/db.ts")
+        await db.messages.put({
+          id: `${chat}-long`,
+          conversationId: chat,
+          role: "assistant",
+          content: text,
+          status: "done",
+          createdAt: Date.now(),
+        })
+      },
+      [CHATS[0].id, LONG],
+    )
+    /** One row's mark and its line, as the browser laid them out. */
+    const boxesOf = (href) =>
+      page.evaluate((href) => {
+        const row = document.querySelector(`main ul a[href="${href}"]`)
+        const mark = row?.querySelector('[data-slot="row-mark"] > *')
+        const line = row?.querySelector('[data-slot="row-line"]')
+        const words = line?.firstElementChild
+        if (!row || !mark || !line || !words) return null
+        const box = (node) => {
+          const { top, bottom, width, right } = node.getBoundingClientRect()
+          return {
+            top,
+            bottom,
+            width,
+            right,
+            height: bottom - top,
+            centre: top + (bottom - top) / 2,
+          }
+        }
+        return {
+          row: box(row),
+          mark: box(mark),
+          line: box(line),
+          words: { ...box(words), scroll: words.scrollWidth, client: words.clientWidth },
+        }
+      }, href)
+
+    // The room's own row says something short, so its line is the height of one line of text.
+    const roomRow = (await rooms())[0]
+    assert.ok(roomRow, "the room's row is on the screen to be measured")
+    const room = await boxesOf(roomRow)
+    assert.ok(room !== null, "the room's row draws a mark and a line")
+    const oneLine = room.line.height
+    assert.ok(oneLine > 0, "and that line has a height to be measured against")
+
+    const long = () => boxesOf(`/c/${CHATS[0].id}`)
+    await until(
+      async () => (await long())?.words.height === oneLine,
+      20_000,
+      "the long reply as a chat's line",
+    )
+    const said = await long()
+    assert.ok(said !== null, "the chat's row draws a mark and a line")
+    assert.ok(
+      said.line.height <= oneLine * 1.5,
+      `the long reply is one line high (${said.line.height} against ${oneLine})`,
+    )
+    assert.ok(said.words.scroll > said.words.client, "and the words past the edge are cut off")
+    assert.ok(said.words.right <= said.row.right + 1, "rather than reaching past the row")
+    await shot("long-line")
+    pass("a long reply keeps to one line, cut at the row's edge")
+
+    // A room's mark is a cluster of faces rather than a disc, and it stands on the same centre line as
+    // every chat's icon — not on the column's top edge, where a mark shorter than a disc would sit.
+    // Each mark is read against the top of its own row, since the two rows stand at different heights.
+    const roomOffset = room.mark.centre - room.row.centre
+    const chatOffset = said.mark.centre - said.row.centre
+    assert.ok(
+      Math.abs(roomOffset - chatOffset) <= 1,
+      `a room's faces stand where a chat row's icon does, off the row's centre (${roomOffset} against ${chatOffset})`,
+    )
+    assert.equal(
+      await page.evaluate(
+        (href) =>
+          document
+            .querySelector(`main ul a[href="${href}"] [data-room-faces]`)
+            ?.getAttribute("role"),
+        roomRow,
+      ),
+      "img",
+      "and the cluster names its members to a reader who cannot see the pictures",
+    )
+    await shot("room-mark")
+    pass("a room's faces stand on the same axis as every chat's icon")
+
     await page.locator(`main ul a[href="${chat}"]`).click()
     await page.waitForURL(`**${chat}`, { timeout: 20_000 })
     await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat's own title")
