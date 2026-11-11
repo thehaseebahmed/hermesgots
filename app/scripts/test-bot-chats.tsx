@@ -10,7 +10,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
 
 import { Home } from "@/App"
 import { BotChatsPage } from "@/routes/bot-chats"
@@ -159,7 +159,7 @@ const iconOf = (id: string) =>
 /** The disc a row's icon stands in, which is where a list picks its tone. */
 const discOf = (id: string) => rowOf(id)?.querySelector('[data-slot="row-mark"] span.rounded-full')
 
-const screen = (entry = `/b/${bot.id}`) => (
+const screen = (entry: InitialEntry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
     <Nav />
@@ -717,23 +717,14 @@ test("a list a chat opens marks no row, where a list beside a chat marks the one
   ])
   // The list a chat's own control opens names the chat it covers, and that chat is not open beside it:
   // the mark a row carries for "this is the one drawn here" would say something untrue.
-  await mount(
-    <MemoryRouter initialEntries={[{ pathname: `/b/${bot.id}`, state: { open: "a" } }]}>
-      <Path />
-      <Routes>
-        <Route path="b/:profileId" element={<BotChatsPage />} />
-        <Route path="c/:id" element={<p data-chat />} />
-      </Routes>
-    </MemoryRouter>,
-    async () => {
-      await until(async () => rowIds().length === 2, "the bot's chats")
-      assert.equal(
-        findAll("ul a[aria-current]").length,
-        0,
-        "no row of the list a chat opened is marked as the one open",
-      )
-    },
-  )
+  await mount(screen({ pathname: `/b/${bot.id}`, state: { open: "a" } }), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    assert.equal(
+      findAll("ul a[aria-current]").length,
+      0,
+      "no row of the list a chat opened is marked as the one open",
+    )
+  })
 })
 
 test("a Host that cannot make a room offers no row for one", async () => {

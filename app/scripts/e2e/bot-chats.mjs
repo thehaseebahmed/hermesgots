@@ -26,6 +26,12 @@ await flow(
           row.getAttribute("href"),
         ),
       )
+    /** The chat's own control, and the list it opens with every row of it drawn. */
+    const openList = async (why) => {
+      await page.getByRole("link", { name: "Chats with Test bot" }).click()
+      await page.waitForURL(`**${list}`, { timeout: 20_000 })
+      await until(async () => (await rows()).length === expected.length, 20_000, why)
+    }
     const header = () =>
       page.evaluate(() => {
         const title = document.querySelector('[data-slot="header-title"]')
@@ -204,9 +210,7 @@ await flow(
     pass("a row opens its chat as the app's only entry")
 
     const chatRung = await rung(page)
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list again")
+    await openList("the list again")
     assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat it covers")
     assert.equal(
       await page.evaluate(() => document.querySelectorAll("main ul a[aria-current]").length),
@@ -226,9 +230,7 @@ await flow(
     // the list does not stand behind it, and neither does the chat the reader started in. So the
     // picked chat is what the bot's own row opens, and it answers the press as any root chat does.
     const picked = `/c/${CHATS[0].id}`
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list for the pick")
+    await openList("the list for the pick")
     assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat it covers")
     await page.locator(`main ul a[href="${picked}"]`).click()
     await page.waitForURL(`**${picked}`, { timeout: 20_000 })
@@ -260,9 +262,7 @@ await flow(
 
     // A room is not a chat of the bot's, so its row keeps its own screen above the list rather than
     // taking the app's entry: the room's way back lands that list, not the chat behind it.
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list for the room")
+    await openList("the list for the room")
     const roomRung = await rung(page)
     await page.locator(`main ul a[href="${roomRow}"]`).click()
     await page.waitForURL(`**${roomRow}`, { timeout: 20_000 })
@@ -286,9 +286,7 @@ await flow(
     assert.equal(await rung(page), 0, "and the entry it stood on, the chat being the address")
     pass("a reload keeps the reader where they were")
 
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list above it")
+    await openList("the list above it")
     assert.equal(await rung(page), 1, "the list stands a rung above the chat at the app's entry")
     await shot("list-over-root")
     pass("the chat at the app's entry opens its bot's chats above it")
@@ -301,9 +299,7 @@ await flow(
 
     // The foot's New chat is the same move from the same list: the list does not stand behind the new
     // chat either, so it is the bot's chat on screen with the press a root chat answers.
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list for a new chat")
+    await openList("the list for a new chat")
     assert.equal(await rung(page), 1, "the list stands a rung above the chat at the app's entry")
     await page.getByRole("button", { name: "New", exact: true }).click()
     await page.getByRole("button", { name: "New chat", exact: true }).click()

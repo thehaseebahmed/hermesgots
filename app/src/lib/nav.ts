@@ -2,14 +2,6 @@ import { useCallback, type MouseEvent } from "react"
 import { useNavigate } from "react-router"
 
 /**
- * The `onClick` for a link to the thread the address already is: it stays an anchor — the sentence
- * reads the same and `aria-current` marks it here — but goes nowhere, since reopening would only
- * redraw the pane the thread is already in.
- */
-export const stayHere = (current: boolean) =>
-  current ? (event: MouseEvent<HTMLAnchorElement>) => event.preventDefault() : undefined
-
-/**
  * The state a room's screen and a routine's run give the entry they leave a bot's list in: the reader
  * stepped back onto the list, so it draws itself rather than landing in the chat behind it.
  */
