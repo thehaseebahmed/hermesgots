@@ -15,7 +15,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
-import { db, deleteConversation, type Message } from "@/lib/db"
+import { db, deleteConversation, getSettings, type Message } from "@/lib/db"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
@@ -894,3 +894,29 @@ test(
     })
   }),
 )
+
+test("the filter a device kept is the one its list opens on", async () => {
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  // A device that has never chosen: the ground the first visit stands on.
+  await seedSettings({ developer: true, activeProfileId: bot.id })
+  const pill = (label: string) =>
+    findAll('header [role="group"] button').find(
+      (one) => (one.textContent ?? "").trim() === label,
+    ) ?? null
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the list")
+    assert.equal(pill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
+    await click(pill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "the press narrows the rows")
+    assert.equal((await getSettings()).chatFilter, "rooms", "and is what this device keeps")
+  })
+  // The next visit is the pill it left, not the ground.
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the list opened on the pill this device kept")
+    assert.deepEqual(rowIds(), ["planning"], "the rows it keeps")
+    assert.equal(pill("Rooms")?.getAttribute("aria-pressed"), "true", "with Rooms pressed")
+  })
+})

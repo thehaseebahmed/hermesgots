@@ -28,10 +28,19 @@ import {
   chatRowOf,
   emptyOf,
   filterChatRows,
+  isChatFilter,
   type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
-import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
+import {
+  conversationsOf,
+  db,
+  getSettings,
+  isReply,
+  newestMessage,
+  saveSettings,
+  type Profile,
+} from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
@@ -41,6 +50,7 @@ import { setBackGuard } from "@/lib/native"
 import { BACK_ON_LIST, depth, openedChat, useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
+import { quietly } from "@/lib/report"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
 import { roomRowOf } from "@/lib/rooms"
 import { useAllLiveRuns } from "@/lib/waiting"
@@ -203,8 +213,13 @@ function ChatList({
   // search at all there: one field, in the one place this width puts it (ADR 0145).
   const wide = useXLarge()
   const [query, setQuery] = useState("")
-  // The pill the reader pressed: All until they choose otherwise.
-  const [filter, setFilter] = useState<ChatFilter>("all")
+  // The pill this device keeps, read as the key itself rather than the settings row: a live query that
+  // answered a fresh object would re-render the list on every sync write (the reason `useStoredSort`
+  // records), and a key an older build wrote is no pill at all.
+  const keptKey = useLiveQuery(async () => (await getSettings()).chatFilter ?? null, [])
+  const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
+  const chooseFilter = (next: ChatFilter) =>
+    void saveSettings({ chatFilter: next }).catch(quietly("Saving the filter"))
   // The pill narrows first and the search narrows what it kept, so the two emptinesses stay apart: a pill
   // that holds nothing says its own sentence, and a pill whose rows the words miss says the search's.
   const kept = useMemo(() => filterChatRows(rows, filter, marks), [rows, filter, marks])
@@ -271,7 +286,7 @@ function ChatList({
             )}
             <ChipRow label="Filter chats">
               {CHAT_FILTERS.map(({ key, label }) => (
-                <Chip key={key} active={filter === key} onClick={() => setFilter(key)}>
+                <Chip key={key} active={filter === key} onClick={() => chooseFilter(key)}>
                   {label}
                 </Chip>
               ))}
