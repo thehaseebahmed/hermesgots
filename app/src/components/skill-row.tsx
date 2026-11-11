@@ -1,4 +1,4 @@
-import { CheckIcon, SparklesIcon, type LucideIcon } from "lucide-react"
+import { SparklesIcon, type LucideIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -18,7 +18,6 @@ export function SkillRow({
   category,
   description,
   selected = false,
-  checked = false,
   active = false,
   icon: Icon = SparklesIcon,
   onPick,
@@ -32,8 +31,6 @@ export function SkillRow({
   description?: string | null
   /** Whether this row is the list's current one, for a reader that follows the keyboard. */
   selected?: boolean
-  /** Whether this skill is one of those chosen, where the list is a choice of many. */
-  checked?: boolean
   active?: boolean
   icon?: LucideIcon
   onPick?: () => void
@@ -60,7 +57,6 @@ export function SkillRow({
         {slash ? `/${name}` : name}
       </div>
       <span className="row-start-1 flex items-center gap-2">
-        {checked && <CheckIcon aria-hidden className="size-4" />}
         {category && (
           <Badge variant="secondary" className="max-w-28">
             <span className="truncate">{category}</span>

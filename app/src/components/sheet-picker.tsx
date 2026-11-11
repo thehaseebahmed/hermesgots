@@ -16,16 +16,13 @@ import { Spinner } from "@/components/ui/spinner"
 
 /**
  * One record in a picker: a full-width button carrying what the sheet reads of it, and the pencil
- * that opens it to be renamed, rewritten or deleted. `chosen` marks the record the screen holds
- * already — the check inside the row and `aria-current` on the control — and is left out where a
- * list has nothing chosen, so the attribute's absence means the same in both sheets.
+ * that opens it to be renamed, rewritten or deleted. The record a sheet holds already is marked by
+ * the check its caller draws inside the row, never by the row's own state.
  */
 export function SheetPickerRow({
   id,
   attribute,
   name,
-  chosen,
-  saving = false,
   pickLabel,
   onPick,
   onEdit,
@@ -37,10 +34,6 @@ export function SheetPickerRow({
   attribute: `data-${string}`
   /** The record's name, which is what its pencil is called: `Edit <name>`. */
   name: string
-  /** Whether this is the record the screen holds now: checked, and read as `aria-current`. */
-  chosen?: boolean
-  /** A write is on its way: the row is out of reach until its answer lands. */
-  saving?: boolean
   /** The pick button's own name, where the record's name alone would read as nothing to press. */
   pickLabel?: string
   onPick: () => void
@@ -53,8 +46,6 @@ export function SheetPickerRow({
       <button
         type="button"
         aria-label={pickLabel}
-        aria-current={chosen}
-        disabled={saving}
         onClick={onPick}
         className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
       >
