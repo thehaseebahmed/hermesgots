@@ -1,5 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon, PlusIcon } from "lucide-react"
+import { useMemo } from "react"
 import { useNavigate } from "react-router"
 
 import { Bot } from "@/components/bot"
@@ -15,10 +16,26 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { listEnabledProfiles, setActiveProfile, type Profile } from "@/lib/db"
 
-/** Which bot a new chat goes to, as a pill above the composer. */
-export function BotPicker({ profile }: { profile: Profile }) {
+/**
+ * Which bot a new chat goes to, as a pill above the composer. The bots are listed by name, a picker
+ * being read for one someone is looking for rather than for the order they were linked in.
+ *
+ * `onPick` hands the choice to the caller instead of making it the account's active bot: the share
+ * sheet sends into the bot it picked, and switches the active one only when the note goes.
+ */
+export function BotPicker({
+  profile,
+  onPick,
+}: {
+  profile: Profile
+  onPick?: (bot: Profile) => void
+}) {
   const navigate = useNavigate()
-  const profiles = useLiveQuery(listEnabledProfiles, [])
+  const answering = useLiveQuery(listEnabledProfiles, [])
+  const profiles = useMemo(
+    () => [...(answering ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [answering],
+  )
 
   return (
     <DropdownMenu>
@@ -39,7 +56,12 @@ export function BotPicker({ profile }: { profile: Profile }) {
       <DropdownMenuContent align="start" className="min-w-56">
         <DropdownMenuRadioGroup
           value={profile.id}
-          onValueChange={(value) => void setActiveProfile(value as string)}
+          onValueChange={(value) => {
+            const picked = profiles.find((option) => option.id === value)
+            if (!picked) return
+            if (onPick) onPick(picked)
+            else void setActiveProfile(picked.id)
+          }}
         >
           {profiles?.map((option) => (
             <DropdownMenuRadioItem

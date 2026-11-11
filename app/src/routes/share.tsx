@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { ChevronDownIcon, CodeXmlIcon, LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
-import { BotCard } from "@/components/bot-card"
+import { BotPicker } from "@/components/chat/bot-picker"
 import { AttachmentTile } from "@/components/chat/attachments"
 import { SearchField } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -19,7 +19,6 @@ import { serverConfig } from "@/lib/connection"
 import {
   conversationsOf,
   db,
-  getActiveProfile,
   listEnabledProfiles,
   setActiveProfile,
   type Attachment,
@@ -132,10 +131,15 @@ export function SharePage() {
     up("/")
   }
 
-  const bots = useLiveQuery(listEnabledProfiles, [])
-  const active = useLiveQuery(async () => (await getActiveProfile())?.id ?? null, [])
+  const answering = useLiveQuery(listEnabledProfiles, [])
+  // The bots by name, as the picker lists them, and the first of them the sheet starts on: a share
+  // has no bot of its own, and the one it arrived at is whichever bot was last talked to.
+  const bots = useMemo(
+    () => [...(answering ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [answering],
+  )
   const [picked, setPicked] = useState<string>()
-  const profile = bots?.find((bot) => bot.id === (picked ?? active)) ?? bots?.[0]
+  const profile = bots.find((bot) => bot.id === picked) ?? bots[0]
   const [showAll, setShowAll] = useState(false)
   const [query, setQuery] = useState("")
   const [note, setNote] = useState("")
@@ -227,7 +231,7 @@ export function SharePage() {
     setShowAll(false)
   }
 
-  if (!share || !bots) {
+  if (!share || !answering) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <Spinner className="size-6" />
@@ -448,21 +452,7 @@ export function SharePage() {
 
           <section className="flex flex-col gap-2">
             <SectionLabel>Send to</SectionLabel>
-            <div
-              role="radiogroup"
-              aria-label="Bot"
-              className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6 py-1 [&::-webkit-scrollbar]:hidden"
-            >
-              {bots.map((bot) => (
-                <BotCard
-                  key={bot.id}
-                  botId={bot.botId}
-                  name={bot.name}
-                  selected={bot.id === profile?.id}
-                  onClick={() => pickBot(bot.id)}
-                />
-              ))}
-            </div>
+            {profile && <BotPicker profile={profile} onPick={(bot) => pickBot(bot.id)} />}
             {imagesBlocked && <Banner>{profile?.name}'s model can't take images.</Banner>}
             {!configured && profile && <Banner>{profile.name} isn't set up yet.</Banner>}
           </section>

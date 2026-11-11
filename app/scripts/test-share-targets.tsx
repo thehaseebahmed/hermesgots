@@ -97,8 +97,18 @@ const roomRecord = (id: string, profiles: string[]) => ({
   })),
 })
 
-const botCard = (name: string) =>
-  findAll('[aria-label="Bot"] button').find((one) => wordsOf(one) === name) ?? null
+/**
+ * Picks a bot in the sheet's picker, which is the app's own: a pill that names the bot it is on, and
+ * a menu of the others under it. The pill is what a tap opens; the menu's item is the pick.
+ */
+async function pickBot(name: string) {
+  const pill = document.querySelector('button[aria-label^="Bot: "]')
+  assert.ok(pill, "the sheet's bot picker")
+  await click(pill)
+  const items = '[role="menuitemradio"], [role="menuitem"]'
+  await until(async () => Boolean(findText(items, name)), `the picker's row for ${name}`)
+  await click(findText(items, name))
+}
 
 interface RoomAsk {
   method: string
@@ -240,6 +250,66 @@ function holdReads() {
   }
 }
 
+test("the bot picker lists the bots by name and starts on the first, whatever was active", async () => {
+  const now = Date.now()
+  const zeta = botProfile("share-picker", {
+    id: "bot-z",
+    name: "Zeta",
+    hermesProfile: "zeta",
+    botId: "zeta",
+  })
+  const alpha = botProfile("share-picker", {
+    id: "bot-a",
+    name: "Alpha",
+    hermesProfile: "alpha",
+    botId: "alpha",
+  })
+  const mango = botProfile("share-picker", {
+    id: "bot-m",
+    name: "Mango",
+    hermesProfile: "mango",
+    botId: "mango",
+  })
+  await seedChats(
+    [
+      { id: "c-alpha", title: "Alpha's own chat", at: now - HOUR, profileId: "bot-a" },
+      { id: "c-zeta", title: "Zeta's own chat", at: now - 2 * HOUR, profileId: "bot-z" },
+    ],
+    { bots: [zeta, alpha, mango], active: "bot-z" },
+  )
+  try {
+    shares()
+    await mount(screen(), async () => {
+      const pill = () => find('button[aria-label^="Bot: "]')
+      await until(async () => Boolean(pill()), "the sheet's bot picker")
+      assert.equal(
+        pill()!.getAttribute("aria-label"),
+        "Bot: Alpha",
+        "the first bot by name, not the account's active one",
+      )
+      await until(async () => row("Alpha's own chat") !== null, "the first bot's rows")
+      assert.equal(row("Zeta's own chat"), null, "and no row of the bot that was active")
+
+      await click(pill())
+      await until(
+        async () => findAll('[role="menuitemradio"]').length === 3,
+        "the picker's three bots",
+      )
+      assert.deepEqual(
+        findAll('[role="menuitemradio"]').map((one) => wordsOf(one)),
+        ["Alpha", "Mango", "Zeta"],
+        "listed by name",
+      )
+      await click(findText('[role="menuitemradio"], [role="menuitem"]', "Zeta"))
+      await until(async () => row("Zeta's own chat") !== null, "the picked bot's rows")
+      assert.equal(row("Alpha's own chat"), null, "the list follows the bot picked")
+      assert.equal(pill()!.getAttribute("aria-label"), "Bot: Zeta", "and the pill says so")
+    })
+  } finally {
+    clearShare()
+  }
+})
+
 test("a room the picked bot's roster seats is a row among the chats, and switching bots changes them", async () => {
   const now = Date.now()
   await seedChats(
@@ -282,7 +352,7 @@ test("a room the picked bot's roster seats is a row among the chats, and switchi
       assert.equal(row("Coder standup"), null, "a room seated by another bot only is not a row")
       assert.equal(row("Orphan room"), null, "and a room no roster here answers for is nobody's")
 
-      await click(botCard("Hex"))
+      await pickBot("Hex")
       await until(async () => row("Coder standup") !== null, "the second bot's rooms")
       assert.ok(row("Weekly sync"), "the room both rosters seat is a row of each bot's sheet")
       assert.equal(row("Orphan room"), null, "and the room no bot answers for is still nobody's")
@@ -319,7 +389,7 @@ test("a pick draws nothing of the bot it left, even before the next bot's chats 
       // with the first bot's rows beside the second bot's rooms, where a tap would send into one bot's
       // chat under the other bot's name.
       held.chats.shut()
-      await click(botCard("Hex"))
+      await pickBot("Hex")
       await settle()
       assert.equal(row("Cubby's chat"), null, "the first bot's chat is gone the moment it is left")
       assert.equal(row("Hex's chat"), null, "and the second's is not drawn before it is read")
