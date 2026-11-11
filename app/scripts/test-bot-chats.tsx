@@ -140,7 +140,9 @@ const rowOf = (id: string) => find(`ul a[href="/c/${id}"]`)
 const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]"))
 /** The picture a row wears where its title starts: its own icon, never the bot's face. */
 const iconOf = (id: string) =>
-  rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle")
+  rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle, svg.lucide-circle-alert")
+/** The disc a row's icon stands in, which is where a list picks its tone. */
+const discOf = (id: string) => iconOf(id)?.parentElement
 
 const screen = (entry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -222,7 +224,7 @@ test("a row says what the bot last said, and the reader's own words only while i
   })
 })
 
-test("a reply that waits on the reader marks its row, and says what it waits for", async () => {
+test("a waiting row is drawn the way Code draws a waiting session", async () => {
   await seed([
     { id: "asking", title: "Needs me", at: 200, said: "Shall I book it?", waits: "clarify" },
     { id: "approving", title: "Approval", at: 150, said: "Run the command", waits: "approval" },
@@ -230,21 +232,34 @@ test("a reply that waits on the reader marks its row, and says what it waits for
   ])
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 3, "the bot's chats")
-    assert.ok(rowOf("asking")?.querySelector("[data-waiting]"), "a question marks its row")
-    assert.ok(rowOf("approving")?.querySelector("[data-waiting]"), "and so does an approval")
+    // The alert icon and the warning tone are Code's own two marks of a session that waits.
+    assert.ok(
+      rowOf("asking")?.querySelector("svg.lucide-circle-alert"),
+      "a question wears the alert icon",
+    )
+    assert.ok(
+      rowOf("approving")?.querySelector("svg.lucide-circle-alert"),
+      "and so does an approval",
+    )
+    assert.ok(discOf("asking")?.className.includes("text-warning"), "in the warning tone")
     assert.equal(
-      rowOf("quiet")?.querySelector("[data-waiting]"),
+      rowOf("asking")?.querySelector("[data-waiting]"),
       null,
-      "a finished chat is not marked",
+      "and no badge beside the title says it twice",
     )
     assert.ok(
       wordsOf(rowOf("asking")).includes("Awaiting your answer"),
-      "the row says why it waits, in Code's words",
+      "the reason stands where the line stands, in Code's words",
     )
     assert.ok(
       wordsOf(rowOf("approving")).includes("Approve Run the command"),
       "and an approval names the command it wants to run",
     )
+    assert.ok(
+      rowOf("quiet")?.querySelector("svg.lucide-message-circle"),
+      "a chat at rest keeps the chat icon",
+    )
+    assert.ok(!discOf("quiet")?.className.includes("text-warning"), "and no warning tone")
   })
 })
 

@@ -10,9 +10,12 @@ this device was last in there.
 
 **One list, one order, one row.** `/b/<profileId>` draws the bot's picture and its name (a button to
 its Bot Settings) over a search field and a flat band of rows — pinned chats first, then by what was
-last said, ties by id so two devices agree (`lib/chat-list.ts`, `orderChatRows`). A row carries a chat
-icon, its title, its newest line, its age and an unread dot, and a chat whose newest reply waits on a
-question or an approval says so. The list is flat on purpose: a second ordering rule — by kind, by
+last said, ties by id so two devices agree (`lib/chat-list.ts`, `orderChatRows`). A row carries an
+icon, its title, the last message the reader was *told* — the bot's newest words, and their own only
+while the bot has not answered them — its age and an unread dot. A row that waits on a question or an
+approval is drawn the way [Code's list](0053-a-run-in-flight-is-the-code-lists-primary-claim.md) draws
+a session that waits: the alert icon in the warning tone, and the reason in place of the line, worded
+once in `lib/wait-text.ts`. The list is flat on purpose: a second ordering rule — by kind, by
 day, by waiting — moves rows under the reader every time something happens. Search filters the title
 and the line through the matcher Code's list already uses; a search narrows a list, it never
 re-orders one.

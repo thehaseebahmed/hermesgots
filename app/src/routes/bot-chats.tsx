@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  CircleAlertIcon,
   MenuIcon,
   MessageCircleIcon,
   PlusIcon,
@@ -23,7 +24,6 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { RoomFaces } from "@/components/room/room-faces"
-import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
@@ -409,18 +409,21 @@ function NewRow({
 
 /**
  * One row of the list: a chat's icon — every row here is the same bot's, so the bot's face would say
- * nothing — its title, its last line, its age, and the dot this device's read mark decides. A reply
- * that waits on the reader wears the warning tone and says so beside the title; its line stays. The
+ * nothing — its title, the bot's last word, its age, and the dot this device's read mark decides. The
  * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
+ *
+ * A row that waits on the reader is drawn the way Code draws a session that waits: the alert icon in
+ * the warning tone, and the reason in place of the line, where it is needed and why. No badge says it
+ * twice — a reader scanning either list finds the same shape in the same place.
  *
  * A routine's delivery is a row of this list too, and wears the routine's icon rather than a chat's,
  * because it is a run rather than a chat with the bot: its line and time are the record's, since
  * the run's words are in the run's own session.
  *
  * A room is one of these rows, drawn by the same rule: it wears its members' pictures where a chat
- * wears its icon and names them in its line, and while its own log ends asking the reader for
- * something its line is that sentence, in the warning tone, because the line is where the room's own
- * screen says it too (ADR 0115, ADR 0126).
+ * wears its icon and says the last message received in it, and while its own log ends asking the
+ * reader for something its line is that sentence, in the warning tone, because the line is where the
+ * room's own screen says it too (ADR 0115, ADR 0126).
  *
  * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
  */
@@ -439,18 +442,11 @@ export function BotChatItem({
 }) {
   return (
     <ItemRow
-      icon={row.routine ? <TimerIcon /> : <MessageCircleIcon />}
+      icon={row.routine ? <TimerIcon /> : row.needs ? <CircleAlertIcon /> : <MessageCircleIcon />}
       avatar={row.room ? <RoomFaces shown={row.room.shown} more={row.room.more} /> : undefined}
       tone={row.room ? undefined : row.needs ? "warning" : undefined}
       unread={isUnread(row.at, mark)}
       selected={selected}
-      badge={
-        row.needs && !row.room ? (
-          <Badge data-waiting className="bg-warning/15 text-warning">
-            Needs you
-          </Badge>
-        ) : undefined
-      }
       title={row.title}
       when={chatAge(row.at, now)}
       line={pinnedLine(row.pinned, row.needs ?? row.line)}
