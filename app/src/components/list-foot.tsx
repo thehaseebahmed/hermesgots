@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { MessageCircleIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react"
 
-import { SearchField } from "@/components/item-list"
+import { SearchField } from "@/components/search-field"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

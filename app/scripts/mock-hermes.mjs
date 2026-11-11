@@ -3914,7 +3914,9 @@ function startRun(req, body, options = {}) {
           outcome = settled.outcome
           break
         }
-        answers[question.id] = settled.answer || null
+        // Hermes reads the word "skip" as a question skipped, as it does an answer with no words.
+        const said = (settled.answer ?? "").trim()
+        answers[question.id] = !said || said.toLowerCase() === "skip" ? null : settled.answer
         push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
       }
       pendingClarifies.delete(id)

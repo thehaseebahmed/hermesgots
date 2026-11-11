@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react"
 
-import { ConfirmDialog } from "@/components/chat/confirm-dialog"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { RenameDialog } from "@/components/chat/rename-dialog"
 import { Button } from "@/components/ui/button"
 import {
@@ -94,12 +94,12 @@ export function RoomActions({
         onSave={(next) => renameRoomTo(answerer, roomId, next, renameId)}
       />
 
-      <ConfirmDialog
+      <ConfirmDestructive
         open={disbanding}
         onOpenChange={setDisbanding}
         title="Disband this room?"
         description="Its work stops, and the room is gone for every device. This can't be undone."
-        confirm="Disband"
+        confirmLabel="Disband"
         onConfirm={() => disbandRoomNow(answerer, roomId, cancelId)}
       />
     </>

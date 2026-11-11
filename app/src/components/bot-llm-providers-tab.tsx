@@ -3,9 +3,9 @@ import { useLocation, useNavigate } from "react-router"
 import { ChevronDownIcon, EyeIcon, EyeOffIcon, PlusIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
-  ConfirmDestructive,
   EditForm,
   FormActions,
   FormFoot,
@@ -377,6 +377,7 @@ export function LlmProviderKeyScreen({
         }
         confirmLabel="Remove"
         busy={removing}
+        staysOpen
         onOpenChange={setAsking}
         onConfirm={remove}
       />
@@ -635,6 +636,7 @@ function EndpointForm({
         description="The endpoint and its key are deleted from this bot's Hermes. Anything pinned to it stops working."
         confirmLabel="Remove"
         busy={removing}
+        staysOpen
         onOpenChange={setAsking}
         onConfirm={remove}
       />

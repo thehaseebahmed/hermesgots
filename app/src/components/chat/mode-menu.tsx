@@ -1,7 +1,7 @@
-import { CheckIcon, MapIcon, PencilLineIcon, ZapIcon } from "lucide-react"
+import { MapIcon, PencilLineIcon, ZapIcon } from "lucide-react"
 
+import { PickGroup, PickRow } from "@/components/pick-row"
 import type { SessionMode } from "@/lib/db"
-import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
 const MODES: { mode: SessionMode; icon: typeof ZapIcon }[] = [
@@ -36,35 +36,18 @@ export function ModeOptions({
   }
   const off = (option: SessionMode) => Boolean(disabled) || (option === "auto" && !autoAvailable)
   return (
-    <div
-      role="radiogroup"
-      aria-label="Mode"
-      className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1"
-    >
-      {MODES.map(({ mode: option, icon: Icon }) => {
-        const selected = option === mode
-        return (
-          <button
-            key={option}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            disabled={off(option)}
-            onClick={() => onPick(option)}
-            className={cn(
-              "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-left text-[15px] transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50 disabled:hover:bg-transparent",
-              selected && "bg-background",
-            )}
-          >
-            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="flex items-center gap-2">{MODE_LABELS[option]}</span>
-              {note(option) && <span className="text-sm text-muted-foreground">{note(option)}</span>}
-            </span>
-            {selected && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
-          </button>
-        )
-      })}
-    </div>
+    <PickGroup mode="choose" surface="plate" label="Mode">
+      {MODES.map(({ mode: option, icon: Icon }) => (
+        <PickRow
+          key={option}
+          leading={<Icon className="size-4 text-muted-foreground" aria-hidden />}
+          title={MODE_LABELS[option]}
+          line={note(option)}
+          selected={option === mode}
+          disabled={off(option)}
+          onPick={() => onPick(option)}
+        />
+      ))}
+    </PickGroup>
   )
 }

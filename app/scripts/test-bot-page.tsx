@@ -241,17 +241,17 @@ const testRow = () => find('[data-setting="test"]')
 
 /** The bottom sheet a pick opens on a phone: its list of buttons, and the choices it offers. */
 const sheet = (label: string) => find(`[data-pick-list="${label}"]`)
-const choices = (label: string) => findAll(`[data-pick-list="${label}"] > button`)
+const choices = (label: string) => findAll(`[data-pick-list="${label}"] li > button`)
 const choice = (label: string, name: string) =>
   choices(label).find((one) => wordsOf(one) === name) ?? null
 /** A model a model pick offers, in the sheet it opened. */
 const modelOption = (name: string) =>
-  findAll("[aria-pressed]").find((one) => wordsOf(one) === name) ?? null
+  findAll("[role=radio]").find((one) => wordsOf(one) === name) ?? null
 /** Opens a setting's pick, and waits for the sheet it opens. */
 async function openPick(id: string) {
   await click(row(id))
   await until(
-    async () => Boolean(find("[data-pick-list]")) || Boolean(find("[aria-pressed]")),
+    async () => Boolean(find("[data-pick-list]")) || Boolean(find("[role=radiogroup]")),
     "the pick's sheet",
   )
 }

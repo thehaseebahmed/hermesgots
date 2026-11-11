@@ -8,7 +8,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { questionAt } from "../src/lib/clarify.ts"
+import { clarifyRead, questionAt } from "../src/lib/clarify.ts"
 import { questionsAround, questionsOf } from "../src/lib/clarify-questions.ts"
 
 const ASKED = JSON.stringify({
@@ -119,4 +119,49 @@ test("an exact match wins over a question that is another's first line", () => {
   assert.equal(questionAt(set, "Which?\nThe long one"), 0)
   assert.equal(questionAt(set, "Which?"), 1)
   assert.equal(questionAt(set, "Which?\nReply skip"), 1)
+})
+
+test("a response of Hermes's own word for a skip reads as a question skipped", () => {
+  // Through Hermes 0.23.1's run route a skipped question comes back answered, as the word it was
+  // sent with.
+  const result = (responses) => JSON.stringify({ responses, outcome: "submitted" })
+  const read = clarifyRead(
+    result([
+      {
+        question: "Which colour?",
+        choices_offered: ["Red", "Blue"],
+        status: "answered",
+        user_response: "Red",
+      },
+      {
+        question: "Which size?",
+        choices_offered: ["Small", "Large"],
+        status: "answered",
+        user_response: "skip",
+      },
+      {
+        question: "Any notes?",
+        choices_offered: null,
+        status: "answered",
+        user_response: " Skip ",
+      },
+      { question: "Why?", choices_offered: null, status: "answered", user_response: "skip it" },
+    ]),
+  )
+  assert.deepEqual(
+    read.asked.map((one) => one.answers),
+    [["Red"], [], [], ["skip it"]],
+    "the word alone is a skip, whatever its case; a sentence with it in is an answer",
+  )
+  const offered = clarifyRead(
+    result([
+      {
+        question: "Next?",
+        choices_offered: ["go", "skip"],
+        status: "answered",
+        user_response: "skip",
+      },
+    ]),
+  )
+  assert.deepEqual(offered.asked[0].answers, ["skip"], "a choice the question offered is an answer")
 })

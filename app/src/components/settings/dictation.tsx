@@ -10,9 +10,9 @@ import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
-  ConfirmDestructive,
   Group,
   LinkRow,
   PickList,

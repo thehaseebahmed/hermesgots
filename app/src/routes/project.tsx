@@ -19,21 +19,12 @@ import { quietly } from "@/lib/report"
 import { AfkPopup, AFK_FEATURE } from "@/components/afk"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS } from "@/components/chat/pr-look"
-import { PrRow } from "@/components/chat/pr-pill"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
+import { PrRow } from "@/components/pr-row"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import { ProjectUsageView } from "@/components/project-usage"
 import { RepoChips } from "@/components/repos"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -285,9 +276,7 @@ export function ProjectPage() {
                       fold={group.fold}
                     >
                       {list.map((pr) => (
-                        <li key={prKey(pr)}>
-                          <PrRow pr={pr} />
-                        </li>
+                        <PrRow key={prKey(pr)} pr={pr} />
                       ))}
                     </Group>
                   )
@@ -325,23 +314,15 @@ export function ProjectPage() {
         />
       )}
 
-      <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The project and its sessions are removed from this device. Its folders on the server
-              stay where they are, and Hermes keeps its own copy of the sessions.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void remove()}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Delete this project?"
+        description="The project and its sessions are removed from this device. Its folders on the server stay where they are, and Hermes keeps its own copy of the sessions."
+        confirmLabel="Delete"
+        busy={busy}
+        onConfirm={remove}
+      />
     </div>
   )
 }

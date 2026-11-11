@@ -7,7 +7,7 @@ import { ChevronDownIcon, CodeXmlIcon, LinkIcon, MessageCircleIcon, PlusIcon } f
 import { Banner } from "@/components/banner"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { AttachmentTile } from "@/components/chat/attachments"
-import { SearchField } from "@/components/item-list"
+import { SearchField } from "@/components/search-field"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Spinner } from "@/components/ui/spinner"

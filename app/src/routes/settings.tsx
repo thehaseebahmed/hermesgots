@@ -1,3 +1,4 @@
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
@@ -67,17 +68,6 @@ import {
 import { useOpenDrawer } from "@/components/drawer-context"
 import { DeviceStateSheet } from "@/components/device-state"
 import { FeedbackSheet } from "@/components/feedback"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -885,34 +875,21 @@ function DataSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <AlertDialog open={clearing} onOpenChange={setClearing}>
-          <AlertDialogTrigger render={<Button variant="destructive" />}>
-            Clear local data
-          </AlertDialogTrigger>
-          <AlertDialogContent size="sm">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Clear everything?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes
-                server are untouched.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={async () => {
-                  await clearAllData()
-                  forgetLocalKey()
-                  setClearing(false)
-                  toast.success("Local data cleared")
-                }}
-              >
-                Clear
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <Button variant="destructive" onClick={() => setClearing(true)}>
+          Clear local data
+        </Button>
+        <ConfirmDestructive
+          open={clearing}
+          onOpenChange={setClearing}
+          title="Clear everything?"
+          description="Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes server are untouched."
+          confirmLabel="Clear"
+          onConfirm={async () => {
+            await clearAllData()
+            forgetLocalKey()
+            toast.success("Local data cleared")
+          }}
+        />
       </CardContent>
     </Card>
   )

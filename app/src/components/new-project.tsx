@@ -1,5 +1,6 @@
+import { SearchField } from "@/components/search-field"
 import { useEffect, useState } from "react"
-import { CheckIcon, CircleAlertIcon, LockIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react"
+import { CheckIcon, CircleAlertIcon, LockIcon, PlusIcon, XIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
 import { CopyBlock } from "@/components/copy-block"
@@ -7,7 +8,6 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -233,18 +233,12 @@ function ProjectForm({
             </p>
           ) : github.connected ? (
             <div className="flex flex-col gap-2">
-              <InputGroup className="h-11">
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-                <InputGroupInput
-                  id="project-repo"
-                  placeholder={github.login ? `Search ${github.login}'s repositories` : "Search"}
-                  autoComplete="off"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </InputGroup>
+              <SearchField
+                id="project-repo"
+                label={github.login ? `Search ${github.login}'s repositories` : "Search"}
+                value={query}
+                onChange={setQuery}
+              />
               <ul className="flex max-h-64 flex-col overflow-y-auto rounded-2xl border p-1">
                 {!repos ? (
                   <li className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">

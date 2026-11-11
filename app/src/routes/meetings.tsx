@@ -16,7 +16,6 @@ import {
   GitBranchIcon,
   ListIcon,
   MailIcon,
-  MenuIcon,
   MicIcon,
   PauseIcon,
   PlusIcon,
@@ -29,8 +28,9 @@ import {
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
+import { ChatHeader } from "@/components/chat/chat-header"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
@@ -146,28 +146,22 @@ function Header({
   actions,
   className,
 }: {
-  leading: ReactNode
+  leading?: ReactNode
   title: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
   className?: string
 }) {
   return (
-    <header
-      className={cn(
-        "sticky top-0 z-10 bg-background/80 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur",
-        className,
-      )}
-    >
-      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4">
-        {leading}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {title}
-          {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
-        </div>
-        {actions}
-      </div>
-    </header>
+    <ChatHeader
+      pinned
+      showBot={false}
+      leading={leading}
+      title={title}
+      subtitle={subtitle}
+      actions={actions}
+      className={className}
+    />
   )
 }
 
@@ -294,7 +288,6 @@ function Unfinished() {
 }
 
 function MeetingsList({ pane }: { pane?: PaneState }) {
-  const openDrawer = useOpenDrawer()
   const open = useSwap()
   const { meetings, loaded, unsupported } = useMeetings()
   const [adding, setAdding] = useState(false)
@@ -329,22 +322,11 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Header
-        leading={
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-        }
         title={
-          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <>
             Meetings
             <ExperimentalBadge />
-          </h1>
+          </>
         }
       />
 
@@ -1048,9 +1030,7 @@ function MeetingView() {
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
           leading={beside ? null : <BackButton onClick={leave} label="Back to Meetings" />}
-          title={
-            <h1 className="truncate text-base font-semibold tracking-tight">{meeting.title}</h1>
-          }
+          title={meeting.title}
           subtitle={[
             meeting.projectName,
             meeting.duration > 0 && length(meeting.duration),
@@ -1145,26 +1125,20 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this meeting?</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() =>
-                removeMeeting(meeting)
-                  .then(onRemoved)
-                  .catch((error) => toast.error(message(error, "Couldn't delete the meeting.")))
-              }
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this meeting?"
+        description="Its transcript and everything written from it go too."
+        confirmLabel="Delete"
+        onConfirm={() =>
+          removeMeeting(meeting)
+            .then(onRemoved)
+            .catch((error) => {
+              toast.error(message(error, "Couldn't delete the meeting."))
+            })
+        }
+      />
     </>
   )
 }
@@ -1721,7 +1695,7 @@ function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
           leading={<BackButton onClick={leave} label={`Back to ${meeting.title}`} />}
-          title={<h1 className="truncate text-base font-semibold tracking-tight">{topic.title}</h1>}
+          title={topic.title}
           subtitle={`Topic ${index + 1} of ${notes.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
         />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-8">

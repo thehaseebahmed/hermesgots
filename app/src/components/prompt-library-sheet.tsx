@@ -9,22 +9,15 @@
  */
 import { useState } from "react"
 
+import { PencilIcon } from "lucide-react"
+
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { SheetPickerList, SheetPickerRow } from "@/components/sheet-picker"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
+import { PickGroup, PickRow } from "@/components/pick-row"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
   bodyPreview,
@@ -60,37 +53,36 @@ export function PromptLibrarySheet({
           <PopupTitle>Choose a Prompt</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-3 px-4 pb-4 sm:px-6" data-prompt-library>
-          <SheetPickerList
-            entries={entries}
-            label="Prompts"
-            reading="Reading prompts…"
-            empty="No prompts yet."
-            row={(entry) => (
-              <SheetPickerRow
-                key={entry.id}
-                attribute="data-prompt"
-                id={entry.id}
-                name={entry.name}
-                pickLabel={`Use ${entry.name}`}
-                onPick={() => onPick(entry)}
-                onEdit={() => onEdit(entry)}
-              >
-                <span className="min-w-0 truncate text-base">{entry.name}</span>
-                {entry.tags.length > 0 && (
-                  <span className="flex min-w-0 flex-wrap items-center gap-1">
-                    {entry.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </span>
-                )}
-                <span className="min-w-0 truncate text-sm text-muted-foreground">
-                  {bodyPreview(entry.body)}
-                </span>
-              </SheetPickerRow>
-            )}
-          />
+          {entries === undefined ? (
+            <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+              <Spinner className="size-4" /> Reading prompts…
+            </p>
+          ) : entries.length === 0 ? (
+            <p className="px-1 py-2 text-sm text-muted-foreground">No prompts yet.</p>
+          ) : (
+            <PickGroup mode="choose" label="Prompts">
+              {entries.map((entry) => (
+                <PickRow
+                  key={entry.id}
+                  data={{ "data-prompt": entry.id }}
+                  label={`Use ${entry.name}`}
+                  title={
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="min-w-0 truncate text-base">{entry.name}</span>
+                      {entry.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </span>
+                  }
+                  line={bodyPreview(entry.body)}
+                  action={{ label: `Edit ${entry.name}`, icon: <PencilIcon />, onPress: () => onEdit(entry) }}
+                  onPick={() => onPick(entry)}
+                />
+              ))}
+            </PickGroup>
+          )}
         </div>
       </PopupContent>
     </Popup>
@@ -124,6 +116,7 @@ export function PromptEntrySheet({
   const [tags, setTags] = useState(tagsText(entry?.tags ?? []))
   const [body, setBody] = useState(entry?.body ?? prompt)
   const [saving, setSaving] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   const draft: PromptDraft = { name, tags: promptTags(tags), body }
 
@@ -167,33 +160,25 @@ export function PromptEntrySheet({
           />
           <div className="flex items-center justify-between gap-2">
             {entry && (
-              <AlertDialog>
-                <AlertDialogTrigger
-                  render={<Button type="button" variant="ghost" disabled={saving} />}
-                >
-                  Delete
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete this Prompt?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {entry.name} is removed from the library. Projects that already took its words
-                      keep them.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
-                      Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      render={<Button type="button" variant="destructive" />}
-                      onClick={() => void onDelete(entry)}
-                    >
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={saving}
+                onClick={() => setConfirming(true)}
+              >
+                Delete
+              </Button>
+            )}
+            {entry && (
+              <ConfirmDestructive
+                open={confirming}
+                onOpenChange={setConfirming}
+                title="Delete this Prompt?"
+                description={`${entry.name} is removed from the library. Projects that already took its words keep them.`}
+                confirmLabel="Delete"
+                busy={saving}
+                onConfirm={() => onDelete(entry)}
+              />
             )}
             <Button
               type="button"

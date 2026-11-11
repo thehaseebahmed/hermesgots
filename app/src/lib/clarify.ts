@@ -115,6 +115,21 @@ export function clarifyAnswered(
   return JSON.stringify({ responses: [...held, written], outcome })
 }
 
+/** What Hermes's `clarify` route reads as a question skipped (`SKIP_WORD` in `tools/clarify_gateway.py`). */
+export const SKIP_WORD = "skip"
+
+/**
+ * A question Hermes's run route records as answered with the word it was skipped by: the route
+ * stores the reply as sent, where its own surfaces turn the word into no answer. A choice the
+ * question really offered under that name is an answer.
+ */
+function skipped(response: Record<string, unknown>): boolean {
+  const said = response?.user_response
+  if (typeof said !== "string" || said.trim().toLowerCase() !== SKIP_WORD) return false
+  const offered = Array.isArray(response?.choices_offered) ? response.choices_offered : []
+  return !offered.some((one) => typeof one === "string" && one.trim().toLowerCase() === SKIP_WORD)
+}
+
 /**
  * What a call asked and was answered: Hermes's `{ responses, outcome }`, or the one answer older
  * shapes and plain text carry. `fallbackQuestion` is the call's own label, which is its first
@@ -136,7 +151,7 @@ export function clarifyRead(result?: string, fallbackQuestion?: string): Clarify
         outcome,
         asked: parsed.responses.map((response: Record<string, unknown>) => ({
           question: typeof response?.question === "string" ? response.question : undefined,
-          answers: listOf(response?.user_response),
+          answers: skipped(response) ? [] : listOf(response?.user_response),
         })),
       }
     }

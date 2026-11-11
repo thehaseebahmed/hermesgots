@@ -11,10 +11,8 @@ import {
 
 import {
   ChevronRightIcon,
-  CheckIcon,
   EyeIcon,
   EyeOffIcon,
-  SearchIcon,
   type LucideIcon,
 } from "lucide-react"
 
@@ -24,17 +22,10 @@ import { Link } from "react-router"
 
 import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
+import { PickGroup, PickRow } from "@/components/pick-row"
+import { SearchField } from "@/components/search-field"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   InputGroup,
@@ -767,53 +758,6 @@ export function ModelPick({
   )
 }
 
-/**
- * A destructive confirmation: the question, what it does, and a Cancel that writes nothing. `busy`
- * holds the dialog open on the write, so a refused one can be read before it is dismissed by hand.
- */
-export function ConfirmDestructive({
-  open,
-  title,
-  description,
-  confirmLabel,
-  cancelLabel = "Cancel",
-  busy,
-  onOpenChange,
-  onConfirm,
-}: {
-  open: boolean
-  title: string
-  description: ReactNode
-  confirmLabel: string
-  /** The way out of the question, where Cancel isn't the word the dialog wants. */
-  cancelLabel?: string
-  busy?: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => void
-}) {
-  return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && !busy) onOpenChange(false)
-      }}
-    >
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>{cancelLabel}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={busy} onClick={onConfirm}>
-            {confirmLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
-}
-
 /** One thing a list can pick: what it is called, and the muted line saying what it is. */
 export type PickOption = {
   id: string
@@ -852,34 +796,21 @@ export function PickList({
   return (
     <div className="flex min-h-0 flex-col gap-3">
       {search && (
-        <InputGroup className="h-11">
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-          <InputGroupInput
+        <SearchField
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Search ${label.toLowerCase()}`}
-            aria-label={`Search ${label.toLowerCase()}`}
+            onChange={setQuery}
+            label={`Search ${label.toLowerCase()}`}
           />
-        </InputGroup>
       )}
       <div data-pick-list={label} className="flex min-h-0 flex-col overflow-y-auto">
-        {shown.map((option) => {
-          const chosen = option.id === selected
-          return (
-            <button
+        <PickGroup mode="choose" label={label}>
+          {shown.map((option) => (
+            <PickRow
               key={option.id}
-              type="button"
-              onClick={() => onPick(option.id)}
-              className={cn(
-                "flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-                chosen && "bg-muted",
-              )}
-            >
-              {option.leading}
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="flex min-w-0 items-center gap-2">
+              leading={option.leading}
+              selected={option.id === selected}
+              title={
+                <>
                   <span className="text-base break-all">{option.label}</span>
                   {option.badge && (
                     // Muted, and outlined rather than filled: a chosen row is already `bg-muted`.
@@ -890,15 +821,13 @@ export function PickList({
                       {option.badge}
                     </span>
                   )}
-                </span>
-                {option.detail && (
-                  <span className="truncate text-sm text-muted-foreground">{option.detail}</span>
-                )}
-              </span>
-              {chosen && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
-            </button>
-          )
-        })}
+                </>
+              }
+              line={option.detail}
+              onPick={() => onPick(option.id)}
+            />
+          ))}
+        </PickGroup>
         {!shown.length && <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>}
       </div>
     </div>

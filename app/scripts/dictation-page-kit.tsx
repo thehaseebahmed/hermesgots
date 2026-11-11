@@ -359,7 +359,7 @@ export const chevrons = () =>
 
 /** The sheet the Speech model row opens, and the options it lists. */
 export const speechSheet = () => find('[data-pick-list="Speech models"]')
-export const speechOptions = () => findAll('[data-pick-list="Speech models"] > button')
+export const speechOptions = () => findAll('[data-pick-list="Speech models"] li > button')
 /** The option wearing the tick: the model the host has in play. */
 export const speechInPlay = () =>
   speechOptions().find((option) => option.querySelector("svg")) ?? null
