@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { carriedFiles } from "@/lib/attachment-caps"
 import { connectionKey, hasServer, serverConfig } from "@/lib/connection"
 import {
   ROOM_LOG_ROWS,
@@ -450,9 +451,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const send = useCallback(
     async (text: string, attachments: Attachment[] = []): Promise<void> => {
       const words = text.trim()
-      const carried = attachments.filter((file): file is Attachment & { blob: Blob } =>
-        Boolean(file.blob),
-      )
+      const carried = carriedFiles(attachments)
       if (!roomId || !hasServer(bot) || (!words && !carried.length)) return
       try {
         // The ids are minted here and kept with the message, so a send retried after a dropped

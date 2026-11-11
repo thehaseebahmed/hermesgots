@@ -8,12 +8,14 @@ import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router"
+import { toast } from "sonner"
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import type { SessionMessage } from "@/lib/hermes"
+import { clearShare } from "@/lib/share"
 import { THINKING_WORD } from "@/lib/thinking"
 import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import { ChatPage } from "@/routes/chat"
@@ -455,6 +457,24 @@ export async function withReducedMotion(body: () => Promise<void>) {
     await body()
   } finally {
     flag.__reducedMotion = before
+  }
+}
+
+/**
+ * The refusals a screen says out loud, collected from the toasts it shows, and the share left clear
+ * however the case ends — a case that threw halfway must not hand the next one a share to send.
+ */
+export async function withToasts(body: (said: string[]) => Promise<void>) {
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await body(said)
+  } finally {
+    toast.error = original
+    clearShare()
   }
 }
 

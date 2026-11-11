@@ -2,6 +2,7 @@ import Dexie from "dexie"
 
 import type { SessionDb, SessionRow, SessionState } from "@/lib/db"
 import { FLUSH_INTERVAL_MS } from "@/lib/freshness"
+import { rowText } from "@/lib/row-text"
 
 import type { Row } from "./fold"
 import { initial, reduce, type ThreadEvent, type ThreadState } from "./state"
@@ -61,11 +62,15 @@ export async function readRows(database: SessionDb, session: string, set: Sessio
   return held.map((one) => one.row)
 }
 
-/** Only what a turn is folded from, so a field the fold never reads is not kept or compared. */
+/**
+ * Only what a turn is folded from, so a field the fold never reads is not kept or compared. A row's
+ * words are kept as the text the app draws: the parts the host stores for a photo would otherwise sit
+ * in this device's copy as the bytes of the photo, which nothing here draws.
+ */
 const kept = (row: Row): Row => ({
   id: row.id,
   role: row.role,
-  content: row.content,
+  content: rowText(row.content),
   tool_call_id: row.tool_call_id,
   finish_reason: row.finish_reason,
   display_kind: row.display_kind,
@@ -77,7 +82,7 @@ const kept = (row: Row): Row => ({
 
 const sameRow = (a: Row, b: Row) =>
   a.role === b.role &&
-  a.content === b.content &&
+  rowText(a.content) === rowText(b.content) &&
   a.tool_call_id === b.tool_call_id &&
   a.finish_reason === b.finish_reason &&
   a.display_kind === b.display_kind &&

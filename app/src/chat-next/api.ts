@@ -105,7 +105,9 @@ export class HostNoPage extends Error {}
  * One page of a session's transcript: the `PAGE` rows that end `offset` rows before the newest,
  * oldest first. A session the host has not heard of yet is an empty chat, not a failure; an answer
  * carrying no page raises `HostNoPage`, so a walk that has rows to keep says the read failed instead
- * of drawing the chat short.
+ * of drawing the chat short. The page is read without its inline attachments (`inline_images=false`):
+ * the host then renders a message's photo as the placeholder the app draws itself, instead of sending
+ * every stored attachment over the wire for a screen that paints none of them.
  */
 export async function readPage(
   connection: Connection,
@@ -117,7 +119,7 @@ export async function readPage(
   let response: Response
   try {
     response = await ask(
-      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
+      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}&inline_images=false${archived ? "&include_compacted=true" : ""}`,
       { headers: headers(connection), signal: within(signal) },
     )
   } catch {
