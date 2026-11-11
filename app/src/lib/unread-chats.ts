@@ -1,7 +1,7 @@
 /**
  * Whether a bot has a row this device has not read, other than the one on screen. A reader sitting in
  * one chat cannot see the bot's list, so the control that opens it says when something there wants
- * them (ADR 0143).
+ * them (ADR 0144).
  *
  * The rule is the list's own — a row's record moved past this device's read mark — over the rows that
  * list draws: the bot's own chats, and every room its roster seats. A chat this device has never
