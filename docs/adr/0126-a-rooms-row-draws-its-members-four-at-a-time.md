@@ -9,9 +9,11 @@ each picture above the one it covers so the cluster reads left to right. The clu
 fifth member and beyond become a `+N` chip in the row's muted tone. A rail draws one picture — the member
 the row is most likely to answer as — because a 44px rail has a slot, not a width.
 
-**What follows, and is accepted.** The pictures are decoration beside the row's words: they are hidden
-from a screen reader, which gets the room's name and its members from the row's own line, so a cluster
-never becomes a list of unlabelled images. A member whose bot this device does not hold has no picture:
+**What follows, and is accepted.** The pictures carry the roster, because the row's line carries what was
+last said in the room (ADR 0136): the cluster is one named image — `role="img"` labelled with the members
+it draws — so a screen reader hears who is in the room without the line giving up what was said in it,
+and a cluster never becomes a list of unlabelled images. A row with no message to say yet still names its
+members in its line, and there the cluster stays decoration and is hidden. A member whose bot this device does not hold has no picture:
 it is counted in the `+N` rather than drawn as a gap or a placeholder face, so the count can say more
 than the cluster shows for a reason other than length. And the cluster is bounded rather than scrolled or
 wrapped — four is a rule, not a measurement of the row's width — so a room of six and a room of four look

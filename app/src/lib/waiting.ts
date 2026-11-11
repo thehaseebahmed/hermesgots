@@ -9,6 +9,8 @@ import { connectionKey, isLive, onChanges } from "@/lib/live"
 import { markResume } from "@/lib/resume-trace"
 
 export type { WaitingReason }
+// The wait's sentence is a rule of its own (`wait-text.ts`), so a screen with no DOM can read it too.
+export { reasonText } from "@/lib/wait-text"
 
 /** A project session, in any project, that waits for the user. */
 export interface WaitingSession {
@@ -16,19 +18,6 @@ export interface WaitingSession {
   title: string
   reason: WaitingReason
   project?: string
-}
-
-export function reasonText(reason: WaitingReason) {
-  if (reason.kind === "question")
-    return reason.count > 1 ? `${reason.count} questions to answer` : "Awaiting your answer"
-  if (reason.kind === "approval") {
-    const command = reason.command?.split("\n")[0].trim()
-    return command ? `Approve ${command}` : "Needs approval to run a command"
-  }
-  if (reason.kind === "stalled") return reason.reason
-  if (reason.kind === "plan") return "Plan ready for review"
-  // A kind this build doesn't know yet still means the session wants the user, not a plan.
-  return "Needs you"
 }
 
 type Found = LiveRuns["waiting"]

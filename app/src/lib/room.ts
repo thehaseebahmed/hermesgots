@@ -30,7 +30,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { onChanges, useChanges } from "@/lib/live"
-import { roomAnswerers, roomFaces } from "@/lib/rooms"
+import { roomAnswerers, roomFaces, roomLastLine } from "@/lib/rooms"
 import { usePoll } from "@/lib/poll"
 import { AttachmentError } from "@/lib/send-turn"
 import { randomId } from "@/lib/utils"
@@ -214,6 +214,11 @@ export interface RoomNeedsRow {
   seated: string[]
   /** The members' pictures the row draws, and how many it could not draw (ADR 0126). */
   faces: { shown: string[]; more: number }
+  /**
+   * The last message received in the room, off the page this device holds: what its row says under
+   * its name, and nothing until a member has said anything (ADR 0116).
+   */
+  said?: string
   /** The record's clock this device last read the room's page at, or nothing before it has. */
   read?: number
 }
@@ -247,10 +252,14 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
   const rooms = useLiveQuery(async () => {
     const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
     const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
-    return held.map((chat) => {
-      const answerers = chat.room
-        ? roomAnswerers(chat.room, bots, bots.get(chat.profileId))
-        : []
+    // A room's row says the last message received in it, which is the newest member's words of the
+    // page this device holds. Reading the page here is what makes the row follow it: a member's reply
+    // that lands on its own wakes this query, and the row says what was said without opening the room.
+    const said = await Promise.all(
+      held.map(async (chat) => roomLastLine(await pageRange(chat.id).toArray())),
+    )
+    return held.map((chat, at) => {
+      const answerers = chat.room ? roomAnswerers(chat.room, bots, bots.get(chat.profileId)) : []
       return {
         chat,
         bot: answerers[0],
@@ -258,6 +267,7 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
         faces: chat.room
           ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId))
           : { shown: [], more: 0 },
+        said: said[at],
         read: chat.roomNeeds?.at,
       }
     })
@@ -440,8 +450,8 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const send = useCallback(
     async (text: string, attachments: Attachment[] = []): Promise<void> => {
       const words = text.trim()
-      const carried = attachments.filter(
-        (file): file is Attachment & { blob: Blob } => Boolean(file.blob),
+      const carried = attachments.filter((file): file is Attachment & { blob: Blob } =>
+        Boolean(file.blob),
       )
       if (!roomId || !hasServer(bot) || (!words && !carried.length)) return
       try {
@@ -453,8 +463,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
         const reused = failed.current?.key === key ? failed.current : undefined
         const eventId = reused?.eventId ?? randomId()
         const uploads =
-          reused?.uploads ??
-          new Map<string, { uploadId: string; manifest?: RoomAttachment }>()
+          reused?.uploads ?? new Map<string, { uploadId: string; manifest?: RoomAttachment }>()
         failed.current = { key, eventId, uploads }
         const manifests: RoomAttachment[] = await Promise.all(
           carried.map(async (file) => {
@@ -524,9 +533,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
 
   const approve = useCallback(
     (approval: RoomApproval, choice: "once" | "deny") =>
-      roomId
-        ? act(() => approveRoom(config, roomId, approval, choice))
-        : Promise.resolve(false),
+      roomId ? act(() => approveRoom(config, roomId, approval, choice)) : Promise.resolve(false),
     [roomId, config, act],
   )
 
@@ -537,10 +544,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   )
 
   const stop = useCallback(
-    () =>
-      roomId
-        ? act(() => stopRoom(config, roomId, randomId()))
-        : Promise.resolve(false),
+    () => (roomId ? act(() => stopRoom(config, roomId, randomId())) : Promise.resolve(false)),
     [roomId, config, act],
   )
 
