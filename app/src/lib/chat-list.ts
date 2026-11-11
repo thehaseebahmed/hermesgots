@@ -47,8 +47,12 @@ export interface ChatListRow {
    * holds no message at all.
    */
   routine?: boolean
-  /** The room this row is, wearing its members' pictures: nothing at all for a chat (ADR 0126). */
-  room?: { shown: string[]; more: number }
+  /**
+   * The room this row is, wearing its members' pictures: nothing at all for a chat (ADR 0126). `names`
+   * is what the pictures cannot say to a reader who cannot see them, since the row's line is now the
+   * last thing said in the room rather than the roster.
+   */
+  room?: { shown: string[]; more: number; names?: string }
   /**
    * The sentence a row says it needs the reader for, while it waits: a chat's own question or
    * approval, and a room's log ending addressed to them. It is drawn in the warning tone in place of

@@ -9,13 +9,15 @@ import { cn } from "@/lib/utils"
  * under it, so the cluster needs no ring or backing disc — the app draws bots as their art everywhere
  * else, and a circle behind a character that is not round would be a second shape to explain.
  *
- * The pictures are decoration beside the row's own words: the row still names the room, and a screen
- * reader hears the members from that name and its line, so the cluster is hidden from it rather than
- * read out as a list of images.
+ * `label` is the members' names, and with it the cluster is one named picture rather than decoration:
+ * a room's line says what was last said in it, so the names a screen reader used to hear there now
+ * ride the mark, as a single `role="img"` and never a list of unlabelled images. Without a label it
+ * stays hidden from a screen reader, which is the little a rail's one face has to say.
  */
 export function RoomFaces({
   shown,
   more,
+  label,
   collapsed = false,
   className,
 }: {
@@ -23,6 +25,8 @@ export function RoomFaces({
   shown: string[]
   /** How many members the row could not draw a picture for. */
   more: number
+  /** The members' names, for the reader who cannot see the pictures: the cluster becomes one image. */
+  label?: string
   /** A rail draws no room for a cluster: it shows the member a room is most likely to answer as. */
   collapsed?: boolean
   className?: string
@@ -31,7 +35,7 @@ export function RoomFaces({
   if (collapsed) return <Bot id={shown[0]} className={cn("size-5", className)} />
   return (
     <span
-      aria-hidden
+      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
       data-room-faces
       className={cn("flex shrink-0 items-center", className)}
     >

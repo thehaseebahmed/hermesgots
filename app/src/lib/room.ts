@@ -30,7 +30,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { onChanges, useChanges } from "@/lib/live"
-import { roomAnswerers, roomFaces } from "@/lib/rooms"
+import { roomAnswerers, roomFaces, roomLastLine } from "@/lib/rooms"
 import { usePoll } from "@/lib/poll"
 import { AttachmentError } from "@/lib/send-turn"
 import { randomId } from "@/lib/utils"
@@ -111,12 +111,7 @@ async function readMark(roomId: string): Promise<number> {
  * stopped before the end, so a long room is read on until this device holds what the screen draws.
  * `MAX_PAGES` is the plugin's own page cap, so a room past it is read as far as one open goes.
  */
-async function follow(
-  config: HermesConfig,
-  roomId: string,
-  since?: number,
-  signal?: AbortSignal,
-) {
+async function follow(config: HermesConfig, roomId: string, since?: number, signal?: AbortSignal) {
   let found = await getRoom(config, roomId, since, signal)
   for (let pages = 1; found.hasMore && pages < MAX_PAGES; pages += 1) {
     const next = await getRoom(config, roomId, found.cursor, signal)
@@ -184,9 +179,7 @@ async function readNeeds({ chat, bot }: RoomNeedsRow, { paced }: { paced: boolea
     await trim(id, found.latestSeq)
     if (found.events.length) await prune(id)
     const held = await db.conversations.get(id)
-    const members = found.room.members.length
-      ? found.room.members
-      : (held?.room?.members ?? [])
+    const members = found.room.members.length ? found.room.members : (held?.room?.members ?? [])
     const asked = askingEvent(await page(id), members)
     const next: RoomNeeds = { at: chat.changedAt, ...(asked ?? {}) }
     // A reading that says what the row already says costs no write: every write wakes the lists.
@@ -214,6 +207,11 @@ export interface RoomNeedsRow {
   seated: string[]
   /** The members' pictures the row draws, and how many it could not draw (ADR 0126). */
   faces: { shown: string[]; more: number }
+  /**
+   * The last message received in the room, off the page this device holds: what its row says under
+   * its name, and nothing until a member has said anything (ADR 0116).
+   */
+  said?: string
   /** The record's clock this device last read the room's page at, or nothing before it has. */
   read?: number
 }
@@ -247,10 +245,14 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
   const rooms = useLiveQuery(async () => {
     const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
     const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
-    return held.map((chat) => {
-      const answerers = chat.room
-        ? roomAnswerers(chat.room, bots, bots.get(chat.profileId))
-        : []
+    // A room's row says the last message received in it, which is the newest member's words of the
+    // page this device holds. Reading the page here is what makes the row follow it: a member's reply
+    // that lands on its own wakes this query, and the row says what was said without opening the room.
+    const said = await Promise.all(
+      held.map(async (chat) => roomLastLine(await pageRange(chat.id).toArray())),
+    )
+    return held.map((chat, at) => {
+      const answerers = chat.room ? roomAnswerers(chat.room, bots, bots.get(chat.profileId)) : []
       return {
         chat,
         bot: answerers[0],
@@ -258,6 +260,7 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
         faces: chat.room
           ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId))
           : { shown: [], more: 0 },
+        said: said[at],
         read: chat.roomNeeds?.at,
       }
     })
@@ -280,7 +283,8 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
   useEffect(
     () =>
       onChanges("room", () => {
-        for (const room of current.current ?? []) if (room.bot) void readNeeds(room, { paced: true })
+        for (const room of current.current ?? [])
+          if (room.bot) void readNeeds(room, { paced: true })
       }),
     [],
   )
@@ -330,11 +334,14 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
    * lands once, and a file whose manifest is already in hand is not uploaded again: the upload id
    * makes the Host's store idempotent, but every byte of a re-sent file is still the wire's.
    */
-  const failed = useRef<{
-    key: string
-    eventId: string
-    uploads: Map<string, { uploadId: string; manifest?: RoomAttachment }>
-  } | undefined>(undefined)
+  const failed = useRef<
+    | {
+        key: string
+        eventId: string
+        uploads: Map<string, { uploadId: string; manifest?: RoomAttachment }>
+      }
+    | undefined
+  >(undefined)
 
   const read = useCallback(
     async (signal?: AbortSignal) => {
@@ -348,9 +355,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
         // The Host is the only authority on what its log holds: a row this device drew above the
         // Host's newest sequence is one it never wrote, so it goes rather than staying the read mark.
         await trim(roomId, found.latestSeq)
-        const members = found.room.members.length
-          ? found.room.members
-          : (chat?.room?.members ?? [])
+        const members = found.room.members.length ? found.room.members : (chat?.room?.members ?? [])
         setLive((held) => {
           const next: RoomLive = {
             name: found.room.name || held.name,
@@ -440,8 +445,8 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   const send = useCallback(
     async (text: string, attachments: Attachment[] = []): Promise<void> => {
       const words = text.trim()
-      const carried = attachments.filter(
-        (file): file is Attachment & { blob: Blob } => Boolean(file.blob),
+      const carried = attachments.filter((file): file is Attachment & { blob: Blob } =>
+        Boolean(file.blob),
       )
       if (!roomId || !hasServer(bot) || (!words && !carried.length)) return
       try {
@@ -453,8 +458,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
         const reused = failed.current?.key === key ? failed.current : undefined
         const eventId = reused?.eventId ?? randomId()
         const uploads =
-          reused?.uploads ??
-          new Map<string, { uploadId: string; manifest?: RoomAttachment }>()
+          reused?.uploads ?? new Map<string, { uploadId: string; manifest?: RoomAttachment }>()
         failed.current = { key, eventId, uploads }
         const manifests: RoomAttachment[] = await Promise.all(
           carried.map(async (file) => {
@@ -524,9 +528,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
 
   const approve = useCallback(
     (approval: RoomApproval, choice: "once" | "deny") =>
-      roomId
-        ? act(() => approveRoom(config, roomId, approval, choice))
-        : Promise.resolve(false),
+      roomId ? act(() => approveRoom(config, roomId, approval, choice)) : Promise.resolve(false),
     [roomId, config, act],
   )
 
@@ -537,10 +539,7 @@ export function useRoom(chat: Conversation | undefined, bot: Profile | undefined
   )
 
   const stop = useCallback(
-    () =>
-      roomId
-        ? act(() => stopRoom(config, roomId, randomId()))
-        : Promise.resolve(false),
+    () => (roomId ? act(() => stopRoom(config, roomId, randomId())) : Promise.resolve(false)),
     [roomId, config, act],
   )
 

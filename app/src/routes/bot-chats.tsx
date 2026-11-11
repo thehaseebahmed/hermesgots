@@ -167,7 +167,7 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
   if (!fresh.bot) return <Navigate to="/" replace />
   const seated = (rooms ?? [])
     .filter((room) => room.seated.includes(profileId))
-    .map((room) => roomRowOf(room.chat, room.faces))
+    .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} />
 }
 
@@ -443,7 +443,11 @@ export function BotChatItem({
   return (
     <ItemRow
       icon={row.routine ? <TimerIcon /> : row.needs ? <CircleAlertIcon /> : <MessageCircleIcon />}
-      avatar={row.room ? <RoomFaces shown={row.room.shown} more={row.room.more} /> : undefined}
+      avatar={
+        row.room ? (
+          <RoomFaces shown={row.room.shown} more={row.room.more} label={row.room.names} />
+        ) : undefined
+      }
       tone={row.room ? undefined : row.needs ? "warning" : undefined}
       unread={isUnread(row.at, mark)}
       selected={selected}
