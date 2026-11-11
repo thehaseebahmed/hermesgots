@@ -419,8 +419,12 @@ A child screen's top bar: the leading control, the title, the line under it, the
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:
-The bar of floating controls a list keeps at the foot of its scroll, above the safe area, so a thumb reaches them: the chat list's search and its New cluster.
+The bar of floating controls a list keeps at the foot of its scroll, above the safe area, so a thumb reaches them. A bot's chat list keeps its New cluster there, and its search too on a phone and a tablet; from a laptop's width up the search stands in the **bar** instead, above the **filters**, and the foot holds the New cluster alone.
 _Avoid_: bottom bar, FAB row, dock
+
+**Filter**:
+One of the pills that narrow a bot's chat list: All, Unread, Chats, Rooms or Routines. They stand in the bar under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on. A filter only narrows and never re-orders, Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads.
+_Avoid_: tab, segment, tag, category
 
 ## Rooms
 

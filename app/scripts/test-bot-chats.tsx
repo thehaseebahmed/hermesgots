@@ -13,9 +13,9 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { Home } from "@/App"
-import { BotChatsPage } from "@/routes/bot-chats"
+import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
-import { db, deleteConversation, type Message } from "@/lib/db"
+import { db, deleteConversation, getSettings, type Message } from "@/lib/db"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
@@ -23,12 +23,14 @@ import {
   Path,
   absent,
   atDepth,
+  atWidth,
   botProfile,
   click,
   find,
   findAll,
   findText,
   json,
+  laptop,
   missing,
   mount,
   nav,
@@ -41,6 +43,15 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
+
+/**
+ * A filter pill, by the word it wears. Named by its group rather than by `header [role="group"] button`,
+ * because the bar's own search field is a group too once it holds words, with a clear button in it.
+ */
+const filterPill = (label: string) =>
+  findAll('[role="group"][aria-label="Filter chats"] button').find(
+    (one) => (one.textContent ?? "").trim() === label,
+  ) ?? null
 
 /** What this bot's Host says its plugin offers: a room may be made where the Host advertises it. */
 let offers = ["chats", "rooms", "rooms_write"]
@@ -66,6 +77,8 @@ interface Seed {
   streaming?: boolean
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
+  /** The room this row is: the Host's record, with this bot seated in it. */
+  room?: boolean
 }
 
 function message(chat: string, content: string, at: number, patch: Partial<Message> = {}): Message {
@@ -102,6 +115,9 @@ async function seed(
       updatedAt: one.at,
       changedAt: one.at,
       ...(one.routine ? { routine: true, line: one.routine.line } : {}),
+      ...(one.room
+        ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: "Mainly" }] } }
+        : {}),
     })),
   )
   await db.messages.bulkPut(
@@ -490,9 +506,9 @@ test("the header's title is the bot's name, and it is the way to its settings", 
     assert.equal(wordsOf(title), "Mainly", "and it is the bot's own name")
     assert.equal(find("h1")?.textContent, "Mainly", "the heading the screen is known by")
     assert.equal(
-      findAll("header button").length,
+      findAll('[data-slot="header-row"] button').length,
       1,
-      "the drawer alone: no '...' and no list control, and the search has left for the foot",
+      "the drawer alone in the bar's row: no '...' and no list control, and the search has left for the foot",
     )
     absent("header [data-search-toggle]", "nothing of the search is in the header")
     assert.equal(
@@ -793,3 +809,117 @@ function picksOpen() {
   const picks = find("[data-picks]")
   return picks?.getAttribute("aria-hidden") === "false" && !picks.hasAttribute("inert")
 }
+
+test("the pills narrow the rows to the kind each names, and say what their emptiness is", async () => {
+  // One room, one unread chat, one read chat: the three kinds the pills name, and the dot's own answer
+  // for Unread — a row this device never opened has no mark to be newer than.
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "dinner", title: "Dinner", at: 200, said: "We said eight" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  markRead("trip", 100)
+  markRead("dinner", 250)
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 3, "the list")
+    const pills = () => findAll('[role="group"][aria-label="Filter chats"] button')
+    assert.deepEqual(
+      pills().map((one) => (one.textContent ?? "").trim()),
+      ["All", "Unread", "Chats", "Rooms", "Routines"],
+      "the five pills, in the rule's own order",
+    )
+    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
+
+    await click(filterPill("Unread"))
+    assert.deepEqual(rowIds(), ["trip"], "Unread keeps the rows that wear this device's dot")
+    await click(filterPill("Chats"))
+    assert.deepEqual(rowIds(), ["trip", "dinner"], "Chats is a row that is neither a room nor a run")
+    await click(filterPill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "Rooms is the room's own row")
+    await click(filterPill("Routines"))
+    assert.deepEqual(rowIds(), [], "no routine has delivered here")
+    assert.ok(findText("p", "No routines."), "so the pill says what its emptiness is, in its own words")
+
+    // A search inside a pill that holds rows is the search's emptiness, not the pill's.
+    await click(filterPill("Rooms"))
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the foot's field")
+    await type(find("#chats-search"), "lisbon")
+    assert.deepEqual(rowIds(), [], "the pill keeps the room, and the words find nothing in it")
+    assert.ok(findText("p", "No chats match."), "which is the search's sentence")
+  })
+})
+
+/**
+ * The list as the shell draws it at the laptop width, where the screen is the pane's list: the page
+ * itself answers "No chat open" there, and the list beside the chat is the same component.
+ */
+const listPane = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+    <Nav />
+    <BotChatsPane pane={{ profileId: bot.id, open: true }} />
+  </MemoryRouter>
+)
+
+test(
+  "from the laptop width the search stands in the bar, above the pills, and the foot has no circle",
+  laptop(async () => {
+    await seed([
+      { id: "a", title: "A chat", at: 100, said: "Hello there" },
+      { id: "b", title: "Another", at: 90, said: "Other words" },
+    ])
+    await mount(listPane(), async () => {
+      await until(async () => rowIds().length === 2, "the list")
+      assert.equal(missing("[data-search-toggle]"), true, "the foot's circle is gone")
+      const field = find("header #chats-search")
+      const pills = find('header [role="group"][aria-label="Filter chats"]')
+      const rows = find("ul")
+      assert.ok(field && pills && rows, "the field, the pills and the rows are all on screen")
+      assert.ok(
+        field!.compareDocumentPosition(pills!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the field stands above the pills",
+      )
+      assert.ok(
+        pills!.compareDocumentPosition(rows!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and the pills above the rows",
+      )
+      assert.equal(findAll("#chats-search").length, 1, "one field, never two")
+      await type(field, "another")
+      assert.deepEqual(rowIds(), ["b"], "and it narrows the rows where it stands")
+    })
+  }),
+)
+
+test(
+  "below the laptop width the search is still the foot's, and the bar holds no field",
+  atWidth(1024, async () => {
+    await seed([{ id: "a", title: "A chat", at: 100, said: "Hello there" }])
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the list")
+      assert.equal(missing("[data-search-toggle]"), false, "the circle is in the foot")
+      assert.equal(missing("header #chats-search"), true, "and the bar holds no field")
+    })
+  }),
+)
+
+test("the filter a device kept is the one its list opens on", async () => {
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  // A device that has never chosen: the ground the first visit stands on.
+  await seedSettings({ developer: true, activeProfileId: bot.id })
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the list")
+    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
+    await click(filterPill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "the press narrows the rows")
+    assert.equal((await getSettings()).chatFilter, "rooms", "and is what this device keeps")
+  })
+  // The next visit is the pill it left, not the ground.
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the list opened on the pill this device kept")
+    assert.deepEqual(rowIds(), ["planning"], "the rows it keeps")
+    assert.equal(filterPill("Rooms")?.getAttribute("aria-pressed"), "true", "with Rooms pressed")
+  })
+})
