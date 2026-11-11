@@ -205,6 +205,7 @@ async function driveLaptop({ page, profileId, until, shot }) {
     Math.abs(fab.x + fab.width - (foot.x + foot.width - 16)) <= 1,
     "and keeps the foot's right edge, where the thumb found it",
   )
+  await shot("bar")
   await page.locator(NEW).click()
   await until(() => picksOpen(page), 5_000, "the picks still rise above it")
   await shot("laptop")
