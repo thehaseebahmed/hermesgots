@@ -75,6 +75,7 @@ sent.
   search finds it.
 - The window and the cap read the record's clock, not the newest message's, so a chat whose last message
   landed from another device moves into the week when its record does.
-- The search at the foot and the rooms as rows are the rest of this decision and land behind it in the
-  same change. The search is how a row past the twenty-five is reached; until the rooms land, a share
-  into a room has no row here.
+- The search at the foot and the rooms as rows are the rest of this decision and landed behind it in
+  the same change. The search is how a row past the twenty-five is reached, and a room's row comes
+  from the device's own room list rather than from the bot's read — its record is in both, so the
+  rule places it once beside the chats.

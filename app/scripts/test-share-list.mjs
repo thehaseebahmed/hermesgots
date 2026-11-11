@@ -92,6 +92,76 @@ test("the newest row comes first, and two touched at one moment keep one order",
 
 const MONTH = 30 * 24 * HOUR
 
+/**
+ * A room as the device's own room list hands it to the rule — the record's own id, title and clock,
+ * and the faces its row wears. A room is no conversation of the bot's read: the sheet is handed it
+ * from the room list, and the rule places it among the chats.
+ */
+const room = (id, at, faces = { shown: ["bot-1"], more: 0 }) => ({
+  id,
+  title: `Room ${id}`,
+  updatedAt: at,
+  faces,
+})
+
+test("a room takes its place among the chats by its own clock, and is drawn once", () => {
+  const rows = recentTargets(
+    [
+      chat("newest", NOW - 60_000),
+      // The room's record is in the bot's read as well: its row is the room list's, never a second.
+      chat("room-1", NOW - 2 * HOUR, { room: { id: "room-1", members: [] } }),
+      chat("oldest", NOW - 3 * HOUR),
+    ],
+    NOW,
+    [room("room-1", NOW - 2 * HOUR)],
+  )
+  assert.deepEqual(
+    rows.map((row) => [row.id, row.kind]),
+    [
+      ["newest", "chat"],
+      ["room-1", "room"],
+      ["oldest", "chat"],
+    ],
+    "a room is placed by the clock its row is aged by, between the chats it was touched between",
+  )
+  assert.deepEqual(
+    rows[1].faces,
+    { shown: ["bot-1"], more: 0 },
+    "and wears the faces the room list read for it",
+  )
+})
+
+test("the week is the room's too, and the twenty-five counts it", () => {
+  const held = [room("room-1", NOW - HOUR), room("room-old", NOW - SHARE_WINDOW_MS - 1)]
+  assert.deepEqual(
+    recentTargets([chat("chat", NOW - 2 * HOUR)], NOW, held).map((row) => row.id),
+    ["room-1", "chat"],
+    "a room inside the week is a row, and one a moment past it is not",
+  )
+  const many = recentTargets(
+    [],
+    NOW,
+    Array.from({ length: 30 }, (_, index) => room(`room-${index}`, NOW - index * 60_000)),
+  )
+  assert.equal(many.length, SHARE_MOST, "the twenty-five is the window's, rooms and chats alike")
+  assert.equal(many[0].id, "room-0", "and it keeps the newest")
+})
+
+test("a query finds a room the week leaves out", () => {
+  const rows = [chat("week", NOW - HOUR, { title: "Trip to Lisbon" })]
+  const held = [room("planning", NOW - MONTH)]
+  assert.equal(
+    recentTargets(rows, NOW, held).some((row) => row.id === "planning"),
+    false,
+    "the window leaves last month's room out",
+  )
+  assert.deepEqual(
+    searchTargets(rows, "planning", held).map((row) => [row.id, row.kind]),
+    [["planning", "room"]],
+    "and the search at the foot is how it is reached",
+  )
+})
+
 test("a query finds a chat from last month, which the week's window leaves out", () => {
   const rows = [
     chat("week", NOW - HOUR, { title: "Trip to Lisbon" }),

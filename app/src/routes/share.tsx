@@ -9,11 +9,13 @@ import { BotCard } from "@/components/bot-card"
 import { AttachmentTile } from "@/components/chat/attachments"
 import { SearchField } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { RoomFaces } from "@/components/room/room-faces"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { isPhoto } from "@/lib/attachment-caps"
+import { ROOM_MAX_ATTACHMENTS, isPhoto, roomRefusal } from "@/lib/attachment-caps"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
+import { serverConfig } from "@/lib/connection"
 import {
   conversationsOf,
   db,
@@ -23,11 +25,20 @@ import {
   type Attachment,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { sendRoomMessage, uploadRoomAttachment } from "@/lib/hermes"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
+import { useRoomNeeds } from "@/lib/room"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
-import { recentTargets, searchTargets, SHARE_FIRST, type ShareTarget } from "@/lib/share-list"
+import {
+  recentTargets,
+  searchTargets,
+  SHARE_FIRST,
+  type ShareKind,
+  type ShareTarget,
+} from "@/lib/share-list"
 import { beginChat, useNow } from "@/lib/threads"
+import { randomId } from "@/lib/utils"
 
 /** No files at all, kept as one array so a share with nothing read yet doesn't rebuild on render. */
 const NO_FILES: Attachment[] = []
@@ -159,17 +170,35 @@ export function SharePage() {
     if (!profile) return []
     return conversationsOf(profile.id).toArray()
   }, [profile?.id])
+  // The rooms this device lists, and the ones the picked bot's roster seats: a room's row is the room
+  // list's rather than the read above's, so the sheet draws it once (ADR 0115). A room no bot of this
+  // device answers for seats nobody, and is no list's row.
+  const roomNeeds = useRoomNeeds()
+  const rooms = useMemo(
+    () =>
+      profile
+        ? (roomNeeds ?? [])
+            .filter((room) => room.seated.includes(profile.id))
+            .map((room) => ({
+              id: room.chat.id,
+              title: room.chat.title,
+              updatedAt: room.chat.updatedAt,
+              faces: room.faces,
+            }))
+        : [],
+    [roomNeeds, profile],
+  )
   const targets = useMemo(
-    () => (conversations ? recentTargets(conversations, now) : undefined),
-    [conversations, now],
+    () => (conversations ? recentTargets(conversations, now, rooms) : undefined),
+    [conversations, now, rooms],
   )
   // A query is the search's, and it draws every match: the ten rows and the window's twenty-five are
   // what the field leads out of, not its edge. A blank field is no query at all, so the window is
   // drawn again with its Show more.
   const searching = Boolean(query.trim())
   const matches = useMemo(
-    () => (searching && conversations ? searchTargets(conversations, query) : undefined),
-    [conversations, query, searching],
+    () => (searching && conversations ? searchTargets(conversations, query, rooms) : undefined),
+    [conversations, query, searching, rooms],
   )
   const shown = matches ?? (showAll ? targets : targets?.slice(0, SHARE_FIRST))
 
@@ -193,7 +222,48 @@ export function SharePage() {
   const canSend =
     Boolean(profile) && configured && !imagesBlocked && !empty && !sending && !preparing
 
-  const send = async (target: string) => {
+  /**
+   * One message into a room, the way the room's own composer sends one: every file to the Host's room
+   * store under an upload id minted here, then the note as one event under an id minted here (ADR
+   * 0116). A room is not a chat, so nothing catches up, nothing queues and no chat is made: the Host
+   * appends the message and its members answer it.
+   *
+   * The Host takes eight files to a message, so a bigger share is refused here in the room's own
+   * number rather than half sent — and refused only here, since a chat takes the same share whole.
+   */
+  const sendIntoRoom = async (id: string) => {
+    if (!profile || !canSend) return
+    const carried = files.filter((file): file is Attachment & { blob: Blob } => Boolean(file.blob))
+    if (carried.length > ROOM_MAX_ATTACHMENTS) {
+      toast.error(roomRefusal(carried.length).message)
+      return
+    }
+    setSending(id)
+    try {
+      const config = serverConfig(profile)
+      const manifests = await Promise.all(
+        carried.map((file) =>
+          uploadRoomAttachment(
+            config,
+            id,
+            { name: file.name, type: file.type, blob: file.blob },
+            randomId(),
+          ),
+        ),
+      )
+      await sendRoomMessage(config, id, randomId(), shareText(share, note), manifests)
+      void setActiveProfile(profile.id)
+      leaving.current = true
+      clearShare()
+      root(`/c/${id}`)
+    } catch (error) {
+      setSending(false)
+      toast.error(error instanceof Error ? error.message : "Couldn't share that.")
+    }
+  }
+
+  const send = async (target: string, kind?: ShareKind) => {
+    if (kind === "room") return sendIntoRoom(target)
     if (!profile || !canSend) return
     setSending(target)
     try {
@@ -226,12 +296,18 @@ export function SharePage() {
     }
   }
 
-  const option = (id: string, icon: React.ReactNode, title: string, subtitle?: string) => (
+  const option = (
+    id: string,
+    icon: React.ReactNode,
+    title: string,
+    subtitle?: string,
+    kind?: ShareKind,
+  ) => (
     <button
       key={id}
       type="button"
       disabled={!canSend}
-      onClick={() => void send(id)}
+      onClick={() => void send(id, kind)}
       className="flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground outline-none hover:bg-muted focus-visible:bg-muted disabled:opacity-60"
     >
       {icon}
@@ -243,16 +319,23 @@ export function SharePage() {
     </button>
   )
 
-  /** The tile a row leads with: Code's mark for a session, a chat's own bubble for a chat. */
-  const mark = (kind: ShareTarget["kind"]) => (
-    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted">
-      {kind === "session" ? (
-        <CodeXmlIcon className="size-5 text-muted-foreground" />
-      ) : (
-        <MessageCircleIcon className="size-5 text-muted-foreground" />
-      )}
-    </span>
-  )
+  /**
+   * The tile a row leads with: Code's mark for a session, a chat's own bubble for a chat, and a room's
+   * members' faces where a chat wears its disc — the cluster is the app's own mark for a room wherever
+   * it is drawn (ADR 0126).
+   */
+  const mark = (target: ShareTarget) =>
+    target.kind === "room" ? (
+      <RoomFaces shown={target.faces?.shown ?? []} more={target.faces?.more ?? 0} />
+    ) : (
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted">
+        {target.kind === "session" ? (
+          <CodeXmlIcon className="size-5 text-muted-foreground" />
+        ) : (
+          <MessageCircleIcon className="size-5 text-muted-foreground" />
+        )}
+      </span>
+    )
 
   return (
     <Popup open onOpenChange={(open) => !open && close()}>
@@ -333,7 +416,13 @@ export function SharePage() {
                 "New chat",
               )}
               {shown?.map((target) =>
-                option(target.id, mark(target.kind), target.title, formatRelative(target.at, now)),
+                option(
+                  target.id,
+                  mark(target),
+                  target.title,
+                  formatRelative(target.at, now),
+                  target.kind,
+                ),
               )}
               {!searching && !showAll && (targets?.length ?? 0) > SHARE_FIRST && (
                 <button
