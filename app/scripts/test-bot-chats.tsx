@@ -44,10 +44,14 @@ import {
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
 
-/** A filter pill, by the word it wears — the group is the bar's one pill row. */
+/**
+ * A filter pill, by the word it wears. Named by its group rather than by `header [role="group"] button`,
+ * because the bar's own search field is a group too once it holds words, with a clear button in it.
+ */
 const filterPill = (label: string) =>
-  findAll('header [role="group"] button').find((one) => (one.textContent ?? "").trim() === label) ??
-  null
+  findAll('[role="group"][aria-label="Filter chats"] button').find(
+    (one) => (one.textContent ?? "").trim() === label,
+  ) ?? null
 
 /** What this bot's Host says its plugin offers: a room may be made where the Host advertises it. */
 let offers = ["chats", "rooms", "rooms_write"]
@@ -818,7 +822,7 @@ test("the pills narrow the rows to the kind each names, and say what their empti
   markRead("dinner", 250)
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 3, "the list")
-    const pills = () => findAll('header [role="group"] button')
+    const pills = () => findAll('[role="group"][aria-label="Filter chats"] button')
     assert.deepEqual(
       pills().map((one) => (one.textContent ?? "").trim()),
       ["All", "Unread", "Chats", "Rooms", "Routines"],
