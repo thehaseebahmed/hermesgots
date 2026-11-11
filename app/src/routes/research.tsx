@@ -26,6 +26,7 @@ import { toast } from "sonner"
 
 import { attempt } from "@/lib/attempt"
 import { Banner } from "@/components/banner"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
 import { BotPicker } from "@/components/chat/bot-picker"
@@ -45,16 +46,6 @@ import {
   QuizCanvas,
   StageStrip,
 } from "@/components/research"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -650,29 +641,17 @@ function MissionMenu({
           <RewritePicker mission={mission} onDone={() => setRewriting(false)} />
         </PopupContent>
       </Popup>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this mission?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its sources, claims and everything written from them go too.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                setConfirming(false)
-                if (await attempt("delete the mission", () => deleteMission(mission)))
-                  navigate("/research", { replace: true })
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this mission?"
+        description="Its sources, claims and everything written from them go too."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (await attempt("delete the mission", () => deleteMission(mission)))
+            navigate("/research", { replace: true })
+        }}
+      />
     </>
   )
 }

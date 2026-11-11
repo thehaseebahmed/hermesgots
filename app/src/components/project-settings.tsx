@@ -1,3 +1,4 @@
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { useEffect, useState, type ReactNode } from "react"
 import {
   CodeXmlIcon,
@@ -11,16 +12,6 @@ import {
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import type { Profile } from "@/lib/db"
@@ -287,31 +278,20 @@ function SettingsForm({
         </Button>
       </div>
 
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Remove {dropping.length === 1 ? dropping[0] : `${dropping.length} repos`}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              The server deletes its copy of {names.format(dropping)}, with any work in it that
-              isn't pushed. Sessions that used it can still be read, but not continued.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                setConfirming(false)
-                void save()
-              }}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Remove ${dropping.length === 1 ? dropping[0] : `${dropping.length} repos`}?`}
+        description={
+          <>
+            The server deletes its copy of {names.format(dropping)}, with any work in it that isn't
+            pushed. Sessions that used it can still be read, but not continued.
+          </>
+        }
+        confirmLabel="Remove"
+        busy={busy}
+        onConfirm={() => save()}
+      />
     </form>
   )
 }

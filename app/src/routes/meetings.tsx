@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
@@ -1144,26 +1145,20 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this meeting?</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() =>
-                removeMeeting(meeting)
-                  .then(onRemoved)
-                  .catch((error) => toast.error(message(error, "Couldn't delete the meeting.")))
-              }
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this meeting?"
+        description="Its transcript and everything written from it go too."
+        confirmLabel="Delete"
+        onConfirm={() =>
+          removeMeeting(meeting)
+            .then(onRemoved)
+            .catch((error) => {
+              toast.error(message(error, "Couldn't delete the meeting."))
+            })
+        }
+      />
     </>
   )
 }

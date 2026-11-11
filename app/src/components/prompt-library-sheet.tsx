@@ -12,18 +12,8 @@ import { useState } from "react"
 import { PencilIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -126,6 +116,7 @@ export function PromptEntrySheet({
   const [tags, setTags] = useState(tagsText(entry?.tags ?? []))
   const [body, setBody] = useState(entry?.body ?? prompt)
   const [saving, setSaving] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   const draft: PromptDraft = { name, tags: promptTags(tags), body }
 
@@ -169,33 +160,25 @@ export function PromptEntrySheet({
           />
           <div className="flex items-center justify-between gap-2">
             {entry && (
-              <AlertDialog>
-                <AlertDialogTrigger
-                  render={<Button type="button" variant="ghost" disabled={saving} />}
-                >
-                  Delete
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete this Prompt?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {entry.name} is removed from the library. Projects that already took its words
-                      keep them.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
-                      Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      render={<Button type="button" variant="destructive" />}
-                      onClick={() => void onDelete(entry)}
-                    >
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={saving}
+                onClick={() => setConfirming(true)}
+              >
+                Delete
+              </Button>
+            )}
+            {entry && (
+              <ConfirmDestructive
+                open={confirming}
+                onOpenChange={setConfirming}
+                title="Delete this Prompt?"
+                description={`${entry.name} is removed from the library. Projects that already took its words keep them.`}
+                confirmLabel="Delete"
+                busy={saving}
+                onConfirm={() => onDelete(entry)}
+              />
             )}
             <Button
               type="button"
