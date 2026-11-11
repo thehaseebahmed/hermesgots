@@ -59,6 +59,11 @@ export const FLOWS = {
     about:
       "A room that needs the user, answered there: a member's approval Once and then Denied, a member's question answered with one of its choices, a reply addressed to @user drawing needs-you, and Stop cancelling a round the transcript then says was stopped — at a phone's width and a tablet's",
   },
+  "list-foot": {
+    script: "e2e/list-foot.mjs",
+    about:
+      "A bot list's foot: its button opens New chat and New room as pills standing entirely above it, one line each and right-aligned to it, its face turning from a plus to a cross; and its search circle becomes a field the button's own height in the same row, the muted X in the button's slot closing it, with the bar's height unmoved by either — at 390 and 1024px",
+  },
   "routine-message": {
     script: "e2e/routine-message.mjs",
     about:

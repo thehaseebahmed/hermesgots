@@ -69,6 +69,39 @@
   --chart-5: oklch(0.62 0.12 195);
 }
 
+/*
+  The motion scale the foot's two transitions read, copied from transitions-dev (icon swap, texts
+  reveal). Durations and easings are its shared tokens; a snippet names the ones it wants and nothing
+  else, so half a scale never sits unused.
+*/
+:root {
+  /* Durations */
+  --duration-stagger: 40ms; /* per-item stagger offset */
+  --duration-fast: 250ms; /* icon swap, dropdown/modal open, tabs sliding, page slide */
+  --duration-very-slow: 500ms; /* emphasis moments, badge appear, text reveal, success check */
+  /* Easings */
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* open + close, page slide, resize */
+  --ease-in-out: ease-in-out; /* icon swap, text swap, text reveal, skeleton reveal */
+  /* Distances */
+  --distance-medium: 12px; /* text reveal */
+  /* Blur */
+  --blur-small: 2px; /* panel reveal, icon swap, text swap, skeleton reveal, number pop-in */
+  --blur-medium: 3px; /* page slide, text reveal */
+
+  /* Icon swap — the foot's button between its plus and its cross. */
+  --icon-swap-dur: var(--duration-fast);
+  --icon-swap-blur: var(--blur-small);
+  --icon-swap-start-scale: 0.25;
+  --icon-swap-ease: var(--ease-in-out);
+
+  /* Texts reveal — the picks rising above the button. */
+  --stagger-dur: var(--duration-very-slow);
+  --stagger-distance: var(--distance-medium);
+  --stagger-stagger: var(--duration-stagger);
+  --stagger-blur: var(--blur-medium);
+  --stagger-ease: var(--ease-smooth-out);
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -139,6 +172,86 @@
 @media (prefers-reduced-motion: no-preference) {
   [data-working] [data-slot="work-label"] {
     animation: work-pulse 1.8s ease-in-out infinite;
+  }
+}
+
+/*
+  The foot's two transitions, from transitions-dev.
+
+  Icon swap: both faces sit in one grid cell and the state picks which one shows, so the plus and the
+  cross cross-fade in the slot rather than one replacing the other.
+*/
+.t-icon-swap {
+  position: relative;
+  display: inline-grid;
+}
+.t-icon-swap .t-icon {
+  grid-area: 1 / 1;
+  /* No will-change: it would freeze each icon's raster at its 0.25 start scale, so the icon would
+     scale up blurry. */
+  transition:
+    opacity var(--icon-swap-dur) var(--icon-swap-ease),
+    filter var(--icon-swap-dur) var(--icon-swap-ease),
+    transform var(--icon-swap-dur) var(--icon-swap-ease);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+  opacity: 0;
+  filter: blur(var(--icon-swap-blur));
+  transform: scale(var(--icon-swap-start-scale));
+}
+
+/*
+  Texts reveal: the picks rise into place one behind the other. The exit is one quiet fade for every
+  line, with no Y return and no blur, so shutting them does not replay the rise backwards. Our own two
+  changes are marked where they sit: an inline-flex line, and a will-change held only while a rise or
+  a fade runs, since these pills outlive their animation.
+*/
+.t-stagger-line {
+  display: inline-flex;
+  opacity: 0;
+  transform: translateY(var(--stagger-distance));
+  filter: blur(var(--stagger-blur));
+  transition:
+    opacity var(--stagger-dur) var(--stagger-ease),
+    transform var(--stagger-dur) var(--stagger-ease),
+    filter var(--stagger-dur) var(--stagger-ease);
+}
+.t-stagger-line--2 {
+  transition-delay: var(--stagger-stagger);
+}
+.t-stagger.is-shown .t-stagger-line {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+}
+/* The pills are mounted for the life of the list, so the layers are held only while a rise or a fade
+   is actually running — not for the whole session. */
+.t-stagger.is-shown .t-stagger-line,
+.t-stagger.is-hiding .t-stagger-line {
+  will-change: transform, opacity, filter;
+}
+.t-stagger.is-hiding .t-stagger-line {
+  opacity: 0;
+  transform: translateY(0);
+  filter: blur(0);
+  transition:
+    opacity 200ms ease,
+    transform 0s linear,
+    filter 0s linear;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-icon-swap .t-icon,
+  .t-stagger-line {
+    transition: none !important;
   }
 }
 

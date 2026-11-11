@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import { botChatsPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { BackButton } from "@/components/back-button"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { Chip, ChipRow } from "@/components/chip"
 import { CopyBlock } from "@/components/copy-block"
 import { Badge } from "@/components/ui/badge"
@@ -43,6 +44,7 @@ import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
 import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
+import { HEADER_BUTTON } from "@/lib/layout"
 import { INSTALL_PLUGIN } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
@@ -84,27 +86,29 @@ export function RoutinesPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/*
-        The bot's chat list's bar, control for control: the same round 44px controls, the same title
-        and the same gutters. Its leading control is the way back to that list where the list is not
-        already beside this page, and the bar's own action is Refresh.
+        The app's bar in its pinned form (ADR 0140) — the same row, slots and frosted circles the chat
+        and the bot's list draw. Its leading control is the way back to that list where the list is not
+        already beside this page, its title is the screen's own, its action is Refresh, and the four
+        states it filters by are pinned under the row inside the same sticky box, so a long list is
+        filtered without scrolling back up to reach them.
       */}
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-2">
-          {!beside && <BackButton label="Back to chats" onClick={back} floating />}
-          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight">Routines</h1>
+      <ChatHeader
+        pinned
+        showBot={false}
+        leading={!beside && <BackButton label="Back to chats" onClick={back} floating />}
+        title="Routines"
+        actions={
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon-lg"
-            className="size-11 shrink-0 rounded-full text-muted-foreground"
+            className={cn(HEADER_BUTTON, "shrink-0 text-muted-foreground")}
             onClick={refresh}
             aria-label="Refresh"
           >
             <RefreshCwIcon />
           </Button>
-        </div>
-        {/* The page's four states, in the strip a list's chips run in — pinned with the bar, so a long
-            list of jobs is filtered without scrolling back up to reach them. */}
-        <div className="mx-auto max-w-2xl pt-3">
+        }
+        below={
           <ChipRow label="Routine states">
             {FILTERS.map(({ key, label }) => (
               <Chip key={key} active={filter === key} onClick={() => setFilter(key)}>
@@ -112,8 +116,8 @@ export function RoutinesPage() {
               </Chip>
             ))}
           </ChipRow>
-        </div>
-      </header>
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
         <BotRoutines profile={bot} tick={tick} pollTick={pollTick} filter={filter} />

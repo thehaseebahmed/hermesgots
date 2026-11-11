@@ -397,6 +397,14 @@ _Avoid_: footer, signature, attribution block, branding, co-author line, byline
 The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
+**Bar**:
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Every icon control on it is a frosted outline circle.
+_Avoid_: topbar, navbar, toolbar, app bar, header
+
+**Foot**:
+The bar of floating controls a list keeps at the foot of its scroll, above the safe area, so a thumb reaches them: the chat list's search and its New cluster.
+_Avoid_: bottom bar, FAB row, dock
+
 ## Rooms
 
 **Room**:

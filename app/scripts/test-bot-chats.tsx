@@ -407,6 +407,16 @@ test("the header's title is the bot's name, and it is the way to its settings", 
       "a link to a screen announced as the link it is, not as a button",
     )
     assert.ok((routines?.className ?? "").includes("size-11"), "and still a full touch target")
+    // The list's bar is the app's bar in its pinned form (ADR 0140) — the same row, slots and controls
+    // the chat's header draws, so a change to one row is a change to both screens.
+    const header = find("header")
+    assert.ok(header?.className.includes("sticky"), "pinned in the list's scroll, not floating")
+    assert.ok(header?.querySelector('[data-slot="header-row"]'), "the bar's own row")
+    assert.ok(header?.querySelector('[data-slot="header-middle"]'), "the title's slot in it")
+    assert.ok(
+      (routines?.className ?? "").includes("bg-background/80"),
+      "and the routine control a frosted outline circle, like the chat's back and its options",
+    )
   })
 })
 
@@ -421,7 +431,7 @@ test("the search narrows the rows to the chats whose title or line it finds", as
     assert.equal(
       toggle?.closest("header"),
       null,
-      "the search floats at the foot of the list, not in its header",
+      "the search is at the foot of the list, not in its header",
     )
     assert.ok(
       find('[data-slot="list-foot"]')?.contains(toggle ?? null),
@@ -432,15 +442,24 @@ test("the search narrows the rows to the chats whose title or line it finds", as
         0,
       "with the rows above it",
     )
-    assert.equal(
-      toggle?.getAttribute("aria-expanded"),
-      "false",
-      "the field is away until it is asked for",
-    )
+    assert.ok(!find("#chats-search"), "the field is away until it is asked for")
     await click(toggle)
-    assert.equal(toggle?.getAttribute("aria-expanded"), "true", "and says so once it is out")
-    assert.equal(toggle?.getAttribute("aria-controls"), "chats-search", "naming the field it opens")
-    assert.ok(find("#chats-search"), "the field itself")
+    await until(async () => Boolean(find("#chats-search")), "the field it opens")
+    assert.ok(
+      find('[data-slot="list-foot"]')?.contains(find("#chats-search") ?? null),
+      "the circle becomes the field in the foot's own row, so nothing above the foot moves",
+    )
+    assert.ok(
+      !find("[data-search-toggle]"),
+      "the circle is gone: the field is what it became, not a second control beside it",
+    )
+    const close = find("[data-search-close]")
+    assert.ok(close, "and the button beside it is the way out")
+    assert.equal(close?.getAttribute("aria-label"), "Close search", "named for what it closes")
+    assert.ok(
+      (close?.className ?? "").includes("bg-muted"),
+      "muted, so the screen's one accent is not spent on a way out",
+    )
     await type(find("#chats-search"), "said eight")
     await until(async () => rowIds().length === 1, "the row the line keeps")
     assert.deepEqual(rowIds(), ["dinner"], "a line is searched as well as a title")
@@ -453,7 +472,7 @@ test("the search narrows the rows to the chats whose title or line it finds", as
   })
 })
 
-test("emptying the search leaves the field where it is, and only Escape or the toggle close it", async () => {
+test("emptying the search leaves the field where it is, and only Escape or the X close it", async () => {
   // A field that closes itself the moment it is empty takes the focus and the keyboard with it, so
   // backspacing the last character — or the field's own clear control — throws the reader out of a
   // search they were still in.
@@ -485,9 +504,10 @@ test("emptying the search leaves the field where it is, and only Escape or the t
     absent("#chats-search", "Escape is one of the two ways it closes")
 
     await click(find("[data-search-toggle]"))
-    assert.ok(field(), "the toggle opens it again")
-    await click(find("[data-search-toggle]"))
-    absent("#chats-search", "and is the other way it closes")
+    await until(async () => Boolean(field()), "the circle opens it again")
+    await click(find("[data-search-close]"))
+    await until(async () => !field(), "and the muted X beside it is the other way it closes")
+    assert.ok(find("[data-search-toggle]"), "the circle is back, where the reader left it")
   })
 })
 
@@ -500,7 +520,7 @@ async function press(field: Element | null, key: string) {
   await settle()
 }
 
-test("one floating button at the foot's right holds New chat and New room", async () => {
+test("the foot's New rises two picks above it, and the button turns to a Close", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
     const fab = find("[data-new-menu]")
@@ -511,29 +531,44 @@ test("one floating button at the foot's right holds New chat and New room", asyn
       (fab?.className ?? "").includes("rounded-full"),
       "round, and a full touch target: it is the screen's one accent",
     )
+    // The picks stand above the button, so they are built in the foot's own bar and inert until asked
+    // for: a closed cluster is not a control a tap can reach (ADR 0141).
+    assert.equal(picksOpen(), false, "nothing is up until it is asked for")
+    assert.equal(
+      find("[data-picks]")?.hasAttribute("inert"),
+      true,
+      "and inert while closed: a cluster kept in the tree is not one a tab or a tap can reach",
+    )
+    assert.equal(fab?.getAttribute("aria-expanded"), "false", "and the button says so")
     await click(fab)
-    await until(async () => Boolean(newRow("New chat")), "the rows it opens")
+    await until(async () => picksOpen(), "the picks it raises")
     assert.ok(newRow("New chat"), "New chat is one of them")
     assert.ok(newRow("New room"), "and New room the other, where the Host makes one")
     assert.ok(
-      find("[data-popup-form]"),
-      "in the app's own pop-up: a sheet on a phone and a menu beside the button from 1024px",
+      find('[data-slot="list-foot"]')?.contains(newRow("New chat") ?? null),
+      "both on the foot's own bar, not in a pop-up over the list",
     )
+    assert.ok(!find("[data-popup-form]"), "the app's pop-up is gone from this screen")
+    assert.equal(fab?.getAttribute("aria-label"), "Close", "the button now says how to shut them")
+    assert.equal(fab?.getAttribute("aria-expanded"), "true", "and that they are up")
     await settle()
     assert.equal(
       findAll("[data-new-menu]").length,
       1,
-      "one button, not a foot of two: the actions are the menu's rows",
+      "one button, not a foot of three: the actions are the picks above it",
     )
+    await click(fab)
+    await until(async () => !picksOpen(), "the button that raised them also shuts them")
+    assert.equal(fab?.getAttribute("aria-label"), "New", "and it is the plus again")
   })
 })
 
-test("the menu's New chat makes a chat of this bot's, and its New room opens the room screen", async () => {
+test("the picks' New chat makes a chat of this bot's, and their New room opens the room screen", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
     await until(async () => Boolean(find("[data-new-menu]")), "the button")
     await click(find("[data-new-menu]"))
-    await until(async () => Boolean(newRow("New chat")), "the menu")
+    await until(async () => picksOpen(), "the picks")
     await click(newRow("New chat"))
     await until(async () => path() !== `/b/${bot.id}`, "the address of the chat it made")
     const made = (await db.conversations.toArray()).find((one) => one.id === path().slice(3))
@@ -544,7 +579,7 @@ test("the menu's New chat makes a chat of this bot's, and its New room opens the
   await mount(screen(), async () => {
     await until(async () => Boolean(find("[data-new-menu]")), "the button")
     await click(find("[data-new-menu]"))
-    await until(async () => Boolean(newRow("New room")), "the menu")
+    await until(async () => picksOpen(), "the picks")
     await click(newRow("New room"))
     await until(async () => path() === "/new-room", "the room screen")
   })
@@ -564,8 +599,8 @@ test("a Host that cannot make a room offers no row for one", async () => {
     await until(async () => infoReads > 0, "the Host's answer about its plugin")
     await settle()
     await click(find("[data-new-menu]"))
-    await until(async () => Boolean(newRow("New chat")), "the menu")
-    assert.ok(newRow("New chat"), "a one-row menu is still a menu")
+    await until(async () => picksOpen(), "the picks")
+    assert.ok(newRow("New chat"), "one pick is still a pick")
     assert.ok(
       missing('button[aria-label="New room"]'),
       "no New room where the Host would only refuse it — the control never moved here to fail",
@@ -573,7 +608,55 @@ test("a Host that cannot make a room offers no row for one", async () => {
   })
 })
 
-/** A row the new menu offers, by the name it carries exactly — the button at the foot is `New`. */
+test("the foot holds one surface at a time: the search takes the picks' place, and closing it clears the query", async () => {
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "dinner", title: "Dinner", at: 200, said: "We said eight" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+
+    // A reader on a keyboard reaches the search circle while the picks are up; the foot cannot then
+    // show both a field and a cluster over one button that says two different things.
+    await click(find("[data-new-menu]"))
+    await until(async () => picksOpen(), "the picks")
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the field")
+    assert.equal(picksOpen(), false, "and the picks are put away for it")
+    assert.equal(
+      find("[data-new-menu]")?.getAttribute("aria-label"),
+      "Close search",
+      "so the button says what it actually closes",
+    )
+
+    // The query goes with the field: a reopened search starts empty and the list it narrowed is whole
+    // again, rather than a list filtered by words the reader can no longer see.
+    await type(find("#chats-search"), "lisbon")
+    await until(async () => rowIds().length === 1, "the row it keeps")
+    await click(find("[data-search-close]"))
+    await until(async () => !find("#chats-search"), "the field put away")
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the field again")
+    assert.equal(
+      (find("#chats-search") as HTMLInputElement).value,
+      "",
+      "empty, because the closed field took its query with it",
+    )
+    assert.equal(rowIds().length, 2, "and the list it narrowed is whole again")
+  })
+})
+
+/** A pick the foot offers, by the name it carries exactly — the button itself is `New`. */
 function newRow(label: string) {
   return find(`button[aria-label="${label}"]`)
+}
+
+/**
+ * Whether the picks stand above the button. They are built with the foot and kept inert while closed,
+ * so what says they are up is the group's own state, not their presence in the tree — and a group
+ * that says it is up while still inert is a group a tap cannot reach.
+ */
+function picksOpen() {
+  const picks = find("[data-picks]")
+  return picks?.getAttribute("aria-hidden") === "false" && !picks.hasAttribute("inert")
 }
