@@ -66,6 +66,8 @@ interface Seed {
   streaming?: boolean
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
+  /** The room this row is: the Host's record, with this bot seated in it. */
+  room?: boolean
 }
 
 function message(chat: string, content: string, at: number, patch: Partial<Message> = {}): Message {
@@ -102,6 +104,9 @@ async function seed(
       updatedAt: one.at,
       changedAt: one.at,
       ...(one.routine ? { routine: true, line: one.routine.line } : {}),
+      ...(one.room
+        ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: "Mainly" }] } }
+        : {}),
     })),
   )
   await db.messages.bulkPut(
@@ -490,9 +495,9 @@ test("the header's title is the bot's name, and it is the way to its settings", 
     assert.equal(wordsOf(title), "Mainly", "and it is the bot's own name")
     assert.equal(find("h1")?.textContent, "Mainly", "the heading the screen is known by")
     assert.equal(
-      findAll("header button").length,
+      findAll('[data-slot="header-row"] button').length,
       1,
-      "the drawer alone: no '...' and no list control, and the search has left for the foot",
+      "the drawer alone in the bar's row: no '...' and no list control, and the search has left for the foot",
     )
     absent("header [data-search-toggle]", "nothing of the search is in the header")
     assert.equal(
@@ -793,3 +798,45 @@ function picksOpen() {
   const picks = find("[data-picks]")
   return picks?.getAttribute("aria-hidden") === "false" && !picks.hasAttribute("inert")
 }
+
+test("the pills narrow the rows to the kind each names, and say what their emptiness is", async () => {
+  // One room, one unread chat, one read chat: the three kinds the pills name, and the dot's own answer
+  // for Unread — a row this device never opened has no mark to be newer than.
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "dinner", title: "Dinner", at: 200, said: "We said eight" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  markRead("trip", 100)
+  markRead("dinner", 250)
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 3, "the list")
+    const pills = () => findAll('header [role="group"] button')
+    const pill = (label: string) =>
+      pills().find((one) => (one.textContent ?? "").trim() === label) ?? null
+    assert.deepEqual(
+      pills().map((one) => (one.textContent ?? "").trim()),
+      ["All", "Unread", "Chats", "Rooms", "Routines"],
+      "the five pills, in the rule's own order",
+    )
+    assert.equal(pill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
+
+    await click(pill("Unread"))
+    assert.deepEqual(rowIds(), ["trip"], "Unread keeps the rows that wear this device's dot")
+    await click(pill("Chats"))
+    assert.deepEqual(rowIds(), ["trip", "dinner"], "Chats is a row that is neither a room nor a run")
+    await click(pill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "Rooms is the room's own row")
+    await click(pill("Routines"))
+    assert.deepEqual(rowIds(), [], "no routine has delivered here")
+    assert.ok(findText("p", "No routines."), "so the pill says what its emptiness is, in its own words")
+
+    // A search inside a pill that holds rows is the search's emptiness, not the pill's.
+    await click(pill("Rooms"))
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the foot's field")
+    await type(find("#chats-search"), "lisbon")
+    assert.deepEqual(rowIds(), [], "the pill keeps the room, and the words find nothing in it")
+    assert.ok(findText("p", "No chats match."), "which is the search's sentence")
+  })
+})

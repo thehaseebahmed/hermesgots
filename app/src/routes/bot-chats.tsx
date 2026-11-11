@@ -13,13 +13,24 @@ import {
 import { Bot } from "@/components/bot"
 import { BackButton } from "@/components/back-button"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { Chip, ChipRow } from "@/components/chip"
 import { ItemRow, pinnedLine } from "@/components/item-list"
 import { ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
-import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
+import {
+  BOT_CHATS,
+  CHAT_FILTERS,
+  chatAge,
+  chatList,
+  chatRowOf,
+  emptyOf,
+  filterChatRows,
+  type ChatFilter,
+  type ChatListRow,
+} from "@/lib/chat-list"
 import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
@@ -188,7 +199,13 @@ function ChatList({
   const canMakeRoom = useCanMakeRoom()
   const now = useNow()
   const [query, setQuery] = useState("")
-  const shown = useMemo(() => chatList(rows, query), [rows, query])
+  // The pill the reader pressed: All until they choose otherwise.
+  const [filter, setFilter] = useState<ChatFilter>("all")
+  // The pill narrows first and the search narrows what it kept, so the two emptinesses stay apart: a pill
+  // that holds nothing says its own sentence, and a pill whose rows the words miss says the search's.
+  const kept = useMemo(() => filterChatRows(rows, filter, marks), [rows, filter, marks])
+  const shown = useMemo(() => chatList(kept, query), [kept, query])
+  const empty = kept.length === 0 ? emptyOf(filter) : shown.length === 0 ? "No chats match." : null
 
   // A chat is made first and the address moved after it: onto the list's own entry where the list
   // was pushed, so a switch costs no rung, and above it where the list is the root. The entry says
@@ -236,15 +253,21 @@ function ChatList({
             <RotateCcwClockIcon />
           </Link>
         }
+        // The pills are pinned with the bar, in the slot the routines page fills with its state chips, so
+        // a long list is filtered without scrolling back up to reach them (ADR 0145).
+        below={
+          <ChipRow label="Filter chats">
+            {CHAT_FILTERS.map(({ key, label }) => (
+              <Chip key={key} active={filter === key} onClick={() => setFilter(key)}>
+                {label}
+              </Chip>
+            ))}
+          </ChipRow>
+        }
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {rows.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">No chats yet.</p>
-        )}
-        {rows.length > 0 && shown.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">No chats match.</p>
-        )}
+        {empty && <p className="py-8 text-center text-sm text-muted-foreground">{empty}</p>}
 
         <ul className="flex flex-col">
           {shown.map((row) => (
