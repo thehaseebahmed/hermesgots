@@ -35,33 +35,3 @@ export function PrPill({
     </Button>
   )
 }
-
-/** A pull request as a row of a list: its state's icon, title, state, number and repo. */
-export function PrRow({ pr }: { pr: PullRequestRef }) {
-  const look = prLook(pr)
-  const Icon = look.icon
-  return (
-    <button
-      type="button"
-      disabled={!pr.url}
-      onClick={() => pr.url && openExternal(pr.url)}
-      className="-mx-2 flex min-h-14 w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-    >
-      <span
-        className={cn(
-          "flex size-11 shrink-0 items-center justify-center rounded-xl",
-          look.className,
-        )}
-      >
-        <Icon className={cn("size-5", look.spin && "motion-safe:animate-spin")} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{pr.title || `#${pr.number}`}</span>
-        <span className="block truncate text-sm text-muted-foreground">
-          <span className={look.text}>{look.label[0].toUpperCase() + look.label.slice(1)}</span>
-          {` · #${pr.number} · ${pr.repo}`}
-        </span>
-      </span>
-    </button>
-  )
-}

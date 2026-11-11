@@ -19,7 +19,7 @@ import { quietly } from "@/lib/report"
 import { AfkPopup, AFK_FEATURE } from "@/components/afk"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS } from "@/components/chat/pr-look"
-import { PrRow } from "@/components/chat/pr-pill"
+import { PrRow } from "@/components/pr-row"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import { ProjectUsageView } from "@/components/project-usage"
@@ -284,9 +284,7 @@ export function ProjectPage() {
                       fold={group.fold}
                     >
                       {list.map((pr) => (
-                        <li key={prKey(pr)}>
-                          <PrRow pr={pr} />
-                        </li>
+                        <PrRow key={prKey(pr)} pr={pr} />
                       ))}
                     </Group>
                   )

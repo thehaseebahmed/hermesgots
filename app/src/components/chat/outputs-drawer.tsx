@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 
-import { PrRow } from "@/components/chat/pr-pill"
+import { PickGroup } from "@/components/pick-row"
+import { PrRow } from "@/components/pr-row"
 import { SessionLibrary } from "@/components/library"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -51,13 +52,11 @@ export function OutputsDrawer({
                 No pull requests yet.
               </p>
             ) : (
-              <ul className="pt-2">
+              <PickGroup mode="open" label="Pull requests" className="pt-2">
                 {prs.map((pr) => (
-                  <li key={prKey(pr)}>
-                    <PrRow pr={pr} />
-                  </li>
+                  <PrRow key={prKey(pr)} pr={pr} />
                 ))}
-              </ul>
+              </PickGroup>
             )}
           </TabsContent>
           <TabsContent value="library">
