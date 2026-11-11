@@ -1,8 +1,10 @@
 import { lazy, memo, Suspense } from "react"
 
 import { useCodeFace } from "@/components/chat/code-face"
+import { Diagram } from "@/components/chat/diagram"
 import type { Tone } from "@/components/chat/markdown-renderer"
 import { markdownBlocks } from "@/lib/markdown-blocks"
+import { mermaidParts } from "@/lib/mermaid-fences"
 import { cn } from "@/lib/utils"
 
 // Off the startup path, but asked for at once, so it's usually in by the time a reply shows; until
@@ -15,6 +17,23 @@ const MarkdownRenderer = lazy(load)
 const Block = memo(function Block({ text, tone }: { text: string; tone: Tone }) {
   return <MarkdownRenderer tone={tone}>{text}</MarkdownRenderer>
 })
+
+/**
+ * The text as it is drawn: each closed ```mermaid fence becomes a frame where the fence stood, and
+ * every stretch between them is split into blocks as it always was, so a reply still streaming draws
+ * its words block by block and its fences keep the code they are until they close.
+ */
+function drawnParts(text: string, tone: Tone) {
+  return mermaidParts(text).map((part) =>
+    part.kind === "mermaid" ? (
+      <Diagram key={`mermaid:${part.at}`} source={part.source} tone={tone} />
+    ) : (
+      markdownBlocks(part.text).map((block, i) => (
+        <Block key={`text:${part.at}:${i}`} text={block} tone={tone} />
+      ))
+    ),
+  )
+}
 
 export const Markdown = memo(function Markdown({
   children,
@@ -45,9 +64,7 @@ export const Markdown = memo(function Markdown({
       )}
     >
       <Suspense fallback={<p className="whitespace-pre-wrap">{children}</p>}>
-        {markdownBlocks(children).map((text, i) => (
-          <Block key={i} text={text} tone={tone} />
-        ))}
+        {drawnParts(children, tone)}
       </Suspense>
     </div>
   )

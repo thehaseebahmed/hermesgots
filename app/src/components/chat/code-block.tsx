@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
 import { useMonoFace } from "@/components/chat/code-face"
@@ -32,6 +32,8 @@ export function CodeBlock({
   tone = "page",
   scrolling = false,
   className,
+  body,
+  slot,
 }: {
   language?: string
   code: string
@@ -40,6 +42,15 @@ export function CodeBlock({
   scrolling?: boolean
   /** The block's own spacing, where it stands in something that already spaces its children. */
   className?: string
+  /**
+   * What the block draws instead of its source as code — a diagram's drawing. A block given a body
+   * is a frame around something that is not code: its root names `slot` and carries no
+   * `data-md-code`, since that marker is what every reader counts as a block of code. It keeps this
+   * block's one fill, one label and one copy control, and copies the same source.
+   */
+  body?: ReactNode
+  /** The slot a frame's root names itself by — what the block draws instead of code is not code. */
+  slot?: string
 }) {
   const [copied, setCopied] = useState(false)
   const mono = useMonoFace()
@@ -54,7 +65,11 @@ export function CodeBlock({
   }
 
   return (
-    <div data-md-code className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}>
+    <div
+      data-md-code={body ? undefined : true}
+      data-slot={slot}
+      className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}
+    >
       <div
         className={cn(
           "flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs",
@@ -71,15 +86,17 @@ export function CodeBlock({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </div>
-      <pre
-        className={cn(
-          mono,
-          "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap",
-          scrolling && "max-h-[30dvh] overflow-y-auto overscroll-contain",
-        )}
-      >
-        <code>{code}</code>
-      </pre>
+      {body ?? (
+        <pre
+          className={cn(
+            mono,
+            "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap",
+            scrolling && "max-h-[30dvh] overflow-y-auto overscroll-contain",
+          )}
+        >
+          <code>{code}</code>
+        </pre>
+      )}
     </div>
   )
 }
