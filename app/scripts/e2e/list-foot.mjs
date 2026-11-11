@@ -147,6 +147,7 @@ for (const { width, dark } of [
   { width: 390, dark: false },
   { width: 390, dark: true },
   { width: 1024, dark: false },
+  { width: 1024, dark: true },
 ]) {
   await flow(`list-foot-${width}${dark ? "-dark" : ""}`, drive, {
     viewport: { width, height: width === 390 ? 844 : 768 },
