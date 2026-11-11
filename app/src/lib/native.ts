@@ -3,6 +3,7 @@ import { Browser } from "@capacitor/browser"
 import { Capacitor, registerPlugin } from "@capacitor/core"
 import { toast } from "sonner"
 
+import { depth } from "@/lib/nav"
 import { placeToasts } from "@/lib/toast"
 
 /** True inside the Android app, where the page is served from `https://localhost`. */
@@ -180,7 +181,7 @@ export function pressBack(): BackPress {
 /** What a whole press came to: a layer took it, it armed the exit, or the app left. */
 export type BackAnswer = Exclude<BackPress, "app"> | "armed" | "leave"
 
-let armed: { href: string; at: number } | undefined
+let armed: { href: string; idx: number; at: number } | undefined
 
 let menuOpener: (() => void) | undefined
 
@@ -196,11 +197,20 @@ export function setMenuOpener(opener: () => void) {
 }
 
 /**
+ * The press the toast armed leaves, whatever is in front — the sheet the first press opened included,
+ * since closing it there would make "press back again to exit" false. Every other pop-up is closed by
+ * the press that meets it, which is the order below this one.
+ *
  * Leaving minimizes rather than exits, as Android's own back does from 12 on, so a reply keeps
  * streaming and the screen stays.
  */
 export function answerBackPress(): BackAnswer {
-  if (armed && armed.href === location.href && Date.now() - armed.at < EXIT_WINDOW) {
+  if (
+    armed &&
+    armed.href === location.href &&
+    armed.idx === depth() &&
+    Date.now() - armed.at < EXIT_WINDOW
+  ) {
     armed = undefined
     toast.dismiss(EXIT_TOASTER)
     void minimizeAndroidApp()
@@ -211,7 +221,7 @@ export function answerBackPress(): BackAnswer {
     armed = undefined
     return taken
   }
-  armed = { href: location.href, at: Date.now() }
+  armed = { href: location.href, idx: depth(), at: Date.now() }
   placeToasts()
   toast("Press back again to exit", { id: EXIT_TOASTER, duration: EXIT_WINDOW })
   menuOpener?.()

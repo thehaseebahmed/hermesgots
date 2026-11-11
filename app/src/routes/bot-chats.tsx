@@ -60,6 +60,9 @@ function useListPlace() {
   const state = useLocation().state
   const listed = Boolean((state as typeof BACK_ON_LIST | null)?.listed)
   const root = depth() === 0
+  // The landing fires at the app's entry, arrived at forwards, with nobody having asked for the
+  // list: a step back onto it arrives as a `POP`, and a list a chat pushed or a screen stepped back
+  // onto is either not the entry or carries the marker. Each draws the list rather than a chat.
   return { root, open: openedChat(state), landed: root && type !== "POP" && !listed }
 }
 
@@ -114,6 +117,7 @@ function BotChatsList({
   /** Whether this list is a screen pushed over the chat it covers rather than the app's own entry. */
   pushed?: boolean
 }) {
+
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
   const rooms = useRoomNeeds()
@@ -169,6 +173,9 @@ function ChatList({
 }) {
   const navigate = useNavigate()
   const { back } = useNav()
+  // What stands behind this screen, as far as the entry that opened it says: a chat's own control is
+  // the only thing that pushes a list, but a typed or restored address can land it on any entry.
+  const backToChat = Boolean(selected)
   const marks = useReadMarks()
   useEffect(() => (pushed ? setBackGuard(back()) : undefined), [pushed, back])
   // The host's answer for each session, read once for the whole list: a run started on another device
@@ -194,7 +201,15 @@ function ChatList({
       <ChatHeader
         pinned
         showBot={false}
-        leading={pushed ? <BackButton label="Back to chat" onClick={back()} floating /> : undefined}
+        leading={
+          pushed ? (
+            <BackButton
+              label={backToChat ? "Back to chat" : "Back"}
+              onClick={back()}
+              floating
+            />
+          ) : undefined
+        }
         title={
           <Link
             to={botPath(bot.id)}
@@ -238,7 +253,9 @@ function ChatList({
                 mark={marks[row.id]}
                 selected={row.id === selected}
                 profileId={bot.id}
-                replace={pushed}
+                // Only a chat of the bot's takes the list's place: a room and a routine's run are
+                // screens of their own whose way back is this list, so they stay above it.
+                replace={pushed && !row.room && !row.routine}
                 live={row.session ? runs[row.session] : undefined}
               />
             </li>

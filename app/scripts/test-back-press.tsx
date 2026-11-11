@@ -193,6 +193,24 @@ test("a change of address clears the arm", async () => {
   }
 })
 
+test("a press at another entry of the same address is not the armed press", async () => {
+  const href = window.location.href
+  try {
+    assert.equal(answerBackPress(), "armed", "the press arms the exit at this entry")
+    // The same address one entry deeper: a round trip back to it is a different place, so the press
+    // there is not the one the toast promised to answer.
+    window.history.pushState({ idx: 1 }, "", href)
+    assert.equal(
+      answerBackPress(),
+      "armed",
+      "a press at another entry of that address arms afresh rather than leaving",
+    )
+  } finally {
+    disarm()
+    window.history.replaceState({}, "", href)
+  }
+})
+
 const shellAt = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Path />
@@ -205,6 +223,33 @@ const shellAt = (id: string) => (
 )
 
 const DRAWER_DIALOG = '[role="dialog"][data-open] [data-slot="sheet-title"]'
+
+test(
+  "a tablet offers no drawer over the sidebar the press already has",
+  atWidth(1024, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(shellAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        await act(async () => {
+          assert.equal(answerBackPress(), "armed", "the press still arms the exit")
+        })
+        assert.equal(
+          find(DRAWER_DIALOG),
+          null,
+          "and offers no drawer over the list the sidebar already draws",
+        )
+      })
+    } finally {
+      disarm()
+      history.restore()
+    }
+  }),
+)
 
 const chatAt = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>

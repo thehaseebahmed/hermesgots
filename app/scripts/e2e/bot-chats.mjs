@@ -242,6 +242,20 @@ await flow(
     assert.equal(await rung(page), chatRung, "back on the chat the reader started in")
     pass("back from the chat picked returns the chat the reader started in")
 
+    // A room is not a chat of the bot's, so its row keeps its own screen above the list rather than
+    // taking the list's entry: the room's way back lands that list, not the chat behind it.
+    await page.getByRole("link", { name: "Chats with Test bot" }).click()
+    await page.waitForURL(`**${list}`, { timeout: 20_000 })
+    await until(async () => (await rows()).length === expected.length, 20_000, "the list for the room")
+    const roomRung = await rung(page)
+    await page.locator(`main ul a[href="${roomRow}"]`).click()
+    await page.waitForURL(`**${roomRow}`, { timeout: 20_000 })
+    assert.equal(await rung(page), roomRung + 1, "the room stands above the list it was picked from")
+    await page.getByRole("button", { name: "Back to Test bot" }).click()
+    await page.waitForURL(`**${list}`, { timeout: 20_000 })
+    assert.equal(await rung(page), roomRung, "and the room's own way back lands that list")
+    pass("a room picked from a pushed list keeps the list as its way back")
+
     await page.locator('aside a[href="/code"]').first().click()
     await page.waitForURL("**/code", { timeout: 20_000 })
     await page.locator(`aside a[href="${list}"]`).first().click()

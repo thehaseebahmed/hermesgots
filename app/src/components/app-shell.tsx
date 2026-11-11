@@ -197,7 +197,9 @@ export function AppShell({ children }: { children?: ReactNode }) {
   useBubbleTakeaways()
   const [open, setOpen] = useState(false)
   const openDrawer = useCallback(() => setOpen(true), [])
-  useEffect(() => setMenuOpener(openDrawer), [openDrawer])
+  // The drawer is the phone's menu: where the sidebar stands, the menu is already on screen, so the
+  // press at the app's edge offers nothing rather than a sheet over a list that is already there.
+  useEffect(() => (wide ? undefined : setMenuOpener(openDrawer)), [openDrawer, wide])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)

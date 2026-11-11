@@ -10,8 +10,8 @@ export const stayHere = (current: boolean) =>
   current ? (event: MouseEvent<HTMLAnchorElement>) => event.preventDefault() : undefined
 
 /**
- * The state a chat gives the entry it leaves a list in its place: the reader stepped back onto the
- * list, so it draws itself rather than opening the chat they have just come from.
+ * The state a room's screen and a routine's run give the entry they leave a bot's list in: the reader
+ * stepped back onto the list, so it draws itself rather than landing in the chat behind it.
  */
 export const BACK_ON_LIST = { listed: true }
 

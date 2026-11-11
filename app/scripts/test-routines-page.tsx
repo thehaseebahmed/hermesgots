@@ -9,7 +9,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { db } from "@/lib/db"
 import { AppShell } from "@/components/app-shell"
@@ -158,10 +158,17 @@ const RUN_ROW = {
   line: "The tide turns at 06:40.",
 }
 
+/** Whether the entry on screen is the one a screen gave a bot's list as it stepped back onto it. */
+const Listed = () => {
+  const state = useLocation().state as { listed?: boolean } | null
+  return <p data-listed>{String(Boolean(state?.listed))}</p>
+}
+
 /** A bot's routines, at the address its list's control takes. */
 const routinesScreen = (profileId: string) => (
   <MemoryRouter initialEntries={[`/b/${profileId}/routines`]}>
     <Path />
+    <Listed />
     <Routes>
       <Route path="b/:profileId/routines" element={<RoutinesPage />} />
       <Route path="b/:profileId" element={<p data-list />} />
@@ -289,6 +296,13 @@ test("the page's back is the bot's list, from the bar every child screen draws",
     assert.ok((back?.className ?? "").includes("rounded-full"), "and its round shape")
     await click(back)
     await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list")
+    // The replacement says which screen it is: without the marker the list reads this as a fresh
+    // arrival at its address, and lands the reader in the chat they were last in.
+    assert.equal(
+      find("[data-listed]")?.textContent,
+      "true",
+      "and the entry it leaves says the reader stepped back onto the list",
+    )
   })
 })
 

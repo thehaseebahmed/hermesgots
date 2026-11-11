@@ -37,7 +37,7 @@ import {
 import { db, conversationsOf, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useChanges, useLive } from "@/lib/live"
-import { useNav } from "@/lib/nav"
+import { BACK_ON_LIST, useNav } from "@/lib/nav"
 import { setBackGuard } from "@/lib/native"
 import { useBotChatsPane } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
@@ -65,7 +65,9 @@ export function RoutinesPage() {
   // has nothing to lead back to; below that width the list pushed it and is what back returns to.
   const beside = Boolean(useBotChatsPane(useLegacyChat() === false))
   const { up } = useNav()
-  const back = useCallback(() => up(botChatsPath(profileId)), [up, profileId])
+  // The list a routine's page steps back onto draws itself: without the marker the replacement this
+  // makes at the app's entry would read as a fresh arrival, and land the reader in a chat.
+  const back = useCallback(() => up(botChatsPath(profileId), BACK_ON_LIST), [up, profileId])
   useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
