@@ -116,7 +116,13 @@ test("a bot opens the chat this device last had open there", async () => {
   })
 })
 
-test("a memory of another bot's chat opens the newest chat this one has left", async () => {
+/**
+ * The landing settled, either way: the list drew its rows, or the chat the memory holds took the
+ * address. What the case then asserts is which one it was, so the red names the chat a run landed in.
+ */
+const settled = () => rowIds().length > 0 || path().startsWith("/c/")
+
+test("a memory of another bot's chat draws the list, not a chat it guessed at", async () => {
   await seed([
     { id: "a", at: 100 },
     { id: "b", at: 200 },
@@ -125,11 +131,13 @@ test("a memory of another bot's chat opens the newest chat this one has left", a
   remember(bot.id, "theirs")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => path() === "/c/b", "this bot's newest chat")
+    await until(async () => settled(), "the landing to settle")
+    assert.equal(path(), `/b/${bot.id}`, "the list is what a bot with nothing to open draws")
+    assert.equal(rowIds().length, 2, "this bot's own chats, drawn to pick from")
   })
 })
 
-test("a chat that has gone falls to the newest chat the bot has left", async () => {
+test("a memory of a chat that has gone draws the list", async () => {
   await seed([
     { id: "a", at: 100 },
     { id: "b", at: 200 },
@@ -137,7 +145,9 @@ test("a chat that has gone falls to the newest chat the bot has left", async () 
   remember(bot.id, "deleted")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => path() === "/c/b", "the newest chat left")
+    await until(async () => settled(), "the landing to settle")
+    assert.equal(path(), `/b/${bot.id}`, "the list is what a bot with nothing to open draws")
+    assert.equal(rowIds().length, 2, "the bot's chats, drawn to pick from")
   })
 })
 
@@ -149,7 +159,9 @@ test("a routine's run is never the chat its bot opens on", async () => {
   remember(bot.id, "run")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => path() === "/c/chat", "the newest chat it can open")
+    await until(async () => settled(), "the landing to settle")
+    assert.equal(path(), `/b/${bot.id}`, "the list, not the run the memory named")
+    assert.equal(rowIds().length, 2, "the bot's chat and its run, drawn to pick from")
   })
 })
 
