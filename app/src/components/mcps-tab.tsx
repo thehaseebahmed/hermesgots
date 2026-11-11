@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Banner } from "@/components/banner"
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
@@ -740,12 +741,9 @@ function ConfigTab({
 
   if (failure && !block) {
     return (
-      <div className="flex flex-col gap-4">
-        <p className="text-sm text-muted-foreground">Couldn't load this server's configuration.</p>
-        <Button variant="outline" className="h-11 rounded-full" onClick={reload}>
-          Try again
-        </Button>
-      </div>
+      <Banner tone="warning" onRetry={reload}>
+        Couldn't load this server's configuration.
+      </Banner>
     )
   }
   if (!block) return null
@@ -1131,7 +1129,7 @@ function McpEntryForm({
   onBack: () => void
   onAdded: () => void
 }) {
-  const { entry, failure } = useMcpCatalogueEntry(profile, name, true)
+  const { entry, failure, reload } = useMcpCatalogueEntry(profile, name, true)
   const [entered, setEntered] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
@@ -1171,9 +1169,12 @@ function McpEntryForm({
         </div>
       </PopupHeader>
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pt-2 pb-4">
-        {/* A read that came back an error: said, rather than left as a form with nothing in it. */}
+        {/* A read that threw: said in the page family's own notice, with the one control that asks
+            it again — a form with nothing in it would read as an entry declaring nothing. */}
         {failure && entry === undefined && (
-          <p className="px-1 text-sm text-muted-foreground">Couldn't load this entry's values.</p>
+          <Banner tone="warning" onRetry={reload}>
+            Couldn't load this entry's values.
+          </Banner>
         )}
         <FieldGroup>
           {entry?.values.map((value) => (

@@ -186,6 +186,8 @@ export function host(
     stallSpeech?: boolean
     /** The host's own sentence for a speech read it refuses. */
     refuseSpeech?: string
+    /** How many of its speech reads this host refuses before it answers. */
+    speechRefusals?: number
     refuse?: string
     writers?: { model: boolean; provider: boolean }
     /** The bot's models, as the cleanup pick's own picker reads them. */
@@ -201,6 +203,8 @@ export function host(
   const calls: { path: string; method: string; body: unknown }[] = []
   // A setting the page wrote: the read that follows answers with the route the pick moved the bot to.
   let written = false
+  // How many times its speech route has been read, so a case can refuse the first.
+  let speechReads = 0
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
     const method = init?.method ?? "GET"
@@ -235,6 +239,9 @@ export function host(
       }
       if (options.stallSpeech) return new Promise<Response>(() => {})
       if (options.refuseSpeech) return json({ error: { message: options.refuseSpeech } }, 500)
+      speechReads += 1
+      if (speechReads <= (options.speechRefusals ?? 0))
+        return json({ error: { message: "Speech-to-text is turned off on this host." } }, 500)
       if (!options.speech) return json({}, 404)
       return json({ speech: written ? (options.afterStt ?? options.speech) : options.speech })
     }

@@ -126,10 +126,15 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
       {/* One notice for every write, and the host's own sentence where a read failed: the cached
-          copy under it may be older than it looks. */}
+          copy under it may be older than it looks. A read that threw is the one failure that can
+          be asked again, so it carries the notice's control; a write's refusal has nothing to
+          re-run. */}
       {speech.problem && (
-        <Banner tone="error">
-          <span role="alert">{speech.problem}</span>
+        <Banner
+          tone="error"
+          onRetry={speech.failure === "threw" ? speech.reload : undefined}
+        >
+          {speech.problem}
         </Banner>
       )}
 

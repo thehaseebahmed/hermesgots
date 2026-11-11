@@ -25,10 +25,12 @@ import {
   click,
   find,
   findAll,
+  labelled,
   missing,
   mount,
   seedSettings,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 function LiveEditor() {
@@ -224,6 +226,42 @@ test("a host that holds no pick budget reads as the default five", async () => {
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.equal(shown(), "5 tasks", "the count the host would use where it holds none")
     assert.equal(botWrites(calls).length, 0, "and reading it wrote nothing")
+  })
+})
+
+test("a read the host refused says so, with a way to ask again, and the tap draws the budget", async () => {
+  const calls = await seed("coding-refused-read", ["afk", "afk_picks"], {
+    pickBudget: 3,
+    afkReadsRefused: 1,
+  })
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    const notice = '[data-bot-coding] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.equal(
+      wordsOf(find(notice)),
+      "Couldn't read this bot's pick budget.",
+      "the notice says what the tab couldn't read",
+    )
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(
+      retry.getAttribute("title"),
+      "Try again",
+      "an icon, so the words it is named are what a reader hears",
+    )
+    assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
+    assert.equal(botReads(calls).length, 1, "the tab asked its own route once, and was refused")
+
+    await click(retry)
+    await until(async () => shown() === "3 tasks", "the budget the host answered")
+
+    assert.deepEqual(
+      botReads(calls).map((call) => call.method),
+      ["GET", "GET"],
+      "the tap asked the same route again, once",
+    )
+    assert.ok(missing(notice), "the notice goes with it")
   })
 })
 

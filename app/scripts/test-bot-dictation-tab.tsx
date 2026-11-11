@@ -37,7 +37,17 @@ import {
   STT,
   switchIn,
 } from "./dictation-page-kit.tsx"
-import { click, find, findAll, missing, mount, type, until } from "./component-kit.tsx"
+import {
+  click,
+  find,
+  findAll,
+  labelled,
+  missing,
+  mount,
+  type,
+  until,
+  wordsOf,
+} from "./component-kit.tsx"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
 
@@ -496,7 +506,7 @@ test("a model the host refuses leaves the old one in place and shows the host's 
       "the host's own sentence, in full",
     )
     assert.ok(
-      speechPage()?.firstElementChild?.querySelector('[role="alert"]'),
+      speechPage()?.firstElementChild?.matches('[role="alert"]'),
       "and it leads the page, over both captions it reports for",
     )
   })
@@ -927,6 +937,50 @@ test("a failed read leaves the cached copy muted, under the host's own sentence"
     )
     assert.equal(valueOf(row("speech-model")), "base", "the cached answer stays under it")
     assert.equal(off(row("speech-model")), true, "muted, not trusted")
+  })
+})
+
+test("a read the host refused says so, with a way to ask again, and the tap draws the page", async () => {
+  await seed(
+    "refused-read",
+    ["dictation", "speech_model"],
+    {},
+    { speech: speech(), speechRefusals: 1 },
+  )
+  // The page's own read, counted here: the speech route it asks, refused once and then answered.
+  const reads: string[] = []
+  const live = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/plugins/gots/speech") && (init?.method ?? "GET") === "GET")
+      reads.push(url.pathname)
+    return live(input as RequestInfo, init)
+  }) as typeof fetch
+
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    const notice = '[data-bot-dictation] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.equal(
+      wordsOf(find(notice)),
+      "Speech-to-text is turned off on this host.",
+      "the notice holds the host's own sentence",
+    )
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(
+      retry.getAttribute("title"),
+      "Try again",
+      "an icon, so the words it is named are what a reader hears",
+    )
+    assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
+    assert.equal(reads.length, 1, "the page asked its speech read once, and was refused")
+
+    await click(retry)
+    await until(async () => valueOf(row("speech-model")) === "small", "the host's own answer")
+
+    assert.equal(reads.length, 2, "the tap asked the same route again, once")
+    assert.ok(missing(notice), "the notice goes with it")
   })
 })
 

@@ -900,6 +900,7 @@ export function afkHost({
   usageThreshold = null,
   thresholdRefusal = null,
   thresholdAnswer,
+  afkReadsRefused = 0,
   hostProvider = "anthropic",
   windows = null,
   deciding = null,
@@ -932,6 +933,8 @@ export function afkHost({
   thresholdRefusal?: string | null
   /** What a threshold write answers with, where the host holds something other than what was asked. */
   thresholdAnswer?: number | null
+  /** How many of its bot-level `afk` reads this host refuses before it answers. */
+  afkReadsRefused?: number
   /** The provider the host reports as its main model, which is whose account the usage is read for. */
   hostProvider?: string
   /** The account's usage windows as the host answers them; null is a provider with no windows. */
@@ -965,6 +968,8 @@ export function afkHost({
   let budget = pickBudget
   // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
   let threshold = usageThreshold
+  // How many times its bot-level route has been read, so a case can refuse the first.
+  let afkReads = 0
   const botAnswer = () => ({
     object: "gots.afk.bot",
     pick_budget: budget ?? 5,
@@ -1029,6 +1034,14 @@ export function afkHost({
       })
     // The bot's own AFK route, beside the project's: no project segment, one write of its own.
     if (url.pathname.endsWith("/plugins/gots/afk")) {
+      if (method === "GET") {
+        afkReads += 1
+        if (afkReads <= afkReadsRefused)
+          return json(
+            { error: { message: "This bot's config.yaml can't be read right now." } },
+            500,
+          )
+      }
       if (method === "POST" && typeof body?.pick_budget === "number") {
         if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
         budget = body.pick_budget

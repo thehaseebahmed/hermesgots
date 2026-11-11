@@ -2,6 +2,7 @@ import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
+import { Banner } from "@/components/banner"
 import { Segmented } from "@/components/segmented"
 import { Group, rowClass } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -237,6 +238,13 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   return (
     <div className="flex flex-col gap-4" data-bot-coding>
+      {/* A read that threw is said above the rows it couldn't fill, with the one control that asks
+          it again; the numbers below stay shut until that read lands. */}
+      {failed && (
+        <Banner tone="warning" onRetry={afk.reload}>
+          Couldn't read this bot's pick budget.
+        </Banner>
+      )}
       <Group>
         <div className={cn(rowClass, "items-start gap-3")} aria-busy={saving || stale || undefined}>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
@@ -273,11 +281,6 @@ export function CodingTab({ profile }: { profile: Profile }) {
             </Button>
           </div>
         </div>
-        {failed && (
-          <p className={cn(rowClass, "text-sm text-muted-foreground")}>
-            Couldn't read this bot's pick budget.
-          </p>
-        )}
       </Group>
       <Group>
         <div className="flex flex-col gap-3 px-4 py-3" aria-busy={saving || stale || undefined}>

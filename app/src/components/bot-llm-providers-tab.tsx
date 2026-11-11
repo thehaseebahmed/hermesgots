@@ -133,7 +133,10 @@ export function LlmProvidersTab({ profile, sub }: { profile: Profile; sub?: BotS
  */
 function ProvidersPage({ profile }: { profile: Profile }) {
   const navigate = useNavigate()
-  const { block, problem } = useLlmProviders(profile)
+  const { block, problem, failure, reload } = useLlmProviders(profile)
+  // The read this notice offers to ask again: only a read that threw can be, since a host that
+  // answered without its providers has answered.
+  const retry = failure === "threw" ? reload : undefined
   // The page's own way to add one: the header's `+`, which opens the form as a sub-screen. Its
   // handler is `navigate` — stable across renders — because the header draws the node it was
   // published with and never re-renders for a change on the page below it.
@@ -154,7 +157,11 @@ function ProvidersPage({ profile }: { profile: Profile }) {
 
   if (!block)
     return problem ? (
-      <Banner tone="warning">{problem}</Banner>
+      <div className="flex flex-col gap-4" data-bot-llm-providers>
+        <Banner tone="warning" onRetry={retry}>
+          {problem}
+        </Banner>
+      </div>
     ) : (
       <div className="flex items-center justify-center py-16" data-llm-providers-loading>
         <Spinner />
@@ -167,7 +174,11 @@ function ProvidersPage({ profile }: { profile: Profile }) {
   const endpoints = endpointRows(block)
   return (
     <div className="flex flex-col gap-4" data-bot-llm-providers>
-      {problem && <Banner tone="warning">{problem}</Banner>}
+      {problem && (
+        <Banner tone="warning" onRetry={retry}>
+          {problem}
+        </Banner>
+      )}
       <Caption>Providers</Caption>
       {rows.length ? (
         <Group>
@@ -243,7 +254,8 @@ export function LlmProviderKeyScreen({
   close: () => void
 }) {
   const large = useLarge()
-  const { block, problem, keep } = useLlmProviders(profile)
+  const { block, problem, failure, keep, reload } = useLlmProviders(profile)
+  const retry = failure === "threw" ? reload : undefined
   // What the form is made again by: a write that landed, so its field holds nothing afterwards —
   // even the same key written twice changes no mask, and the field is emptied all the same.
   const [written, setWritten] = useState(0)
@@ -260,7 +272,11 @@ export function LlmProviderKeyScreen({
 
   if (!block)
     return problem ? (
-      <Banner tone="warning">{problem}</Banner>
+      <div className="flex flex-col gap-4" data-llm-provider-slot={target}>
+        <Banner tone="warning" onRetry={retry}>
+          {problem}
+        </Banner>
+      </div>
     ) : (
       <div className="flex items-center justify-center py-16" data-llm-provider-loading>
         <Spinner />
@@ -405,7 +421,8 @@ export function LlmEndpointScreen({
   id: string
 }) {
   const navigate = useNavigate()
-  const { block, problem, keep } = useLlmProviders(profile)
+  const { block, problem, failure, keep, reload } = useLlmProviders(profile)
+  const retry = failure === "threw" ? reload : undefined
   const [written, setWritten] = useState(0)
   const endpoint = block?.endpoints.find((one) => one.id === id)
   // A form's heading carries the verb, and names what it edits: a provider by its label, an endpoint
@@ -421,7 +438,11 @@ export function LlmEndpointScreen({
 
   if (!block)
     return problem ? (
-      <Banner tone="warning">{problem}</Banner>
+      <div className="flex flex-col gap-4" data-llm-endpoint-slot={id}>
+        <Banner tone="warning" onRetry={retry}>
+          {problem}
+        </Banner>
+      </div>
     ) : (
       <div className="flex items-center justify-center py-16" data-llm-endpoint-loading>
         <Spinner />
