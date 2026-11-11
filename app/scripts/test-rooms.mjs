@@ -6,7 +6,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { botsByProfile, roomAnswerer, roomAnswerers, roomFaces } from "../src/lib/rooms.ts"
+import {
+  botsByProfile,
+  roomAnswerer,
+  roomAnswerers,
+  roomFaces,
+  roomLastLine,
+} from "../src/lib/rooms.ts"
 
 /** A bot of one Host, reached by the link `hostId` names. */
 const bot = (id, profile, baseUrl, hostId) => ({
@@ -89,4 +95,31 @@ test("a room of two bots lists in both their lists, in member order", () => {
     "ada",
     "and the one answerer is still the first bot that answers",
   )
+})
+
+test("a room's row says the last message a member sent, and never the reader's own", () => {
+  // The Host's log is ordered by one sequence number, and the page this device holds is a slice of it.
+  const page = [
+    { seq: 1, kind: "message.user", text: "Who takes the release?" },
+    { seq: 3, kind: "message.member", text: "I'll take the API.\nAnd the routes." },
+    { seq: 2, kind: "message.member", text: "I can, but @user has to pick." },
+    { seq: 4, kind: "turn.started", text: "" },
+  ]
+  assert.equal(
+    roomLastLine(page),
+    "I'll take the API. And the routes.",
+    "the newest member's words, on one line",
+  )
+  assert.equal(
+    roomLastLine([page[0], page[3]]),
+    undefined,
+    "a room only the reader has spoken in says nothing, and its row names its members instead",
+  )
+  assert.equal(
+    roomLastLine([]),
+    undefined,
+    "and a room this device has not read says nothing at all",
+  )
+  // A reply whose text the Host trimmed still has nothing to say, so the row does not draw an empty line.
+  assert.equal(roomLastLine([{ seq: 5, kind: "message.member", text: "  " }]), undefined)
 })

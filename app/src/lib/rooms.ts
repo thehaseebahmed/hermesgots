@@ -1,8 +1,9 @@
 import { hostKey } from "./connection.ts"
 import { memberLabel } from "./room-log.ts"
 import { randomId } from "./utils.ts"
+import { oneLine } from "./words.ts"
 import type { ChatListRow } from "./chat-list.ts"
-import type { Conversation, Profile, Room, RoomMember } from "./db.ts"
+import type { Conversation, Profile, Room, RoomEvent, RoomMember } from "./db.ts"
 
 /**
  * The seats a set of bots would make, one per bot: the member id this app minted for it, its handle
@@ -96,6 +97,24 @@ export function roomMembersLine(room: Room): string {
 }
 
 /**
+ * The last message received in a room: the newest member's words on the page this device holds, on one
+ * line, and nothing until a member has said anything.
+ *
+ * A room's words live on its Host and nothing of its transcript syncs (ADR 0116), so what a row can say
+ * is what this device has already read of the log — the same page the room's own screen draws. The
+ * user's own message is not the room's news, any more than it is in a chat: a chat's row says what the
+ * bot last said, and a room's says what a member last did.
+ */
+export function roomLastLine(events: readonly Pick<RoomEvent, "seq" | "kind" | "text">[]) {
+  let newest: Pick<RoomEvent, "seq" | "kind" | "text"> | undefined
+  for (const event of events) {
+    if (event.kind !== "message.member") continue
+    if (!newest || event.seq > newest.seq) newest = event
+  }
+  return newest ? oneLine(newest.text ?? "") : undefined
+}
+
+/**
  * The one sentence a room that needs the user says, wherever it is drawn: its row in the chat list,
  * and the room's own screen under the transcript. The member's name where the log names one, and
  * the room's own words where it doesn't.
@@ -121,15 +140,17 @@ export function roomNeedsOf(
 }
 
 /**
- * A room's row in a list: its name, its members as its line and as the pictures it wears, and the
+ * A room's row in a list: its name, the last message received in it and the pictures it wears, and the
  * sentence its log ends asking the reader for.
  *
  * It is aged and ordered by the record's own clock, because a room's words live on its Host and
  * nothing of its transcript syncs (ADR 0116), and its pin is this device's (ADR 0121) — so a room
  * takes its place among the chats by the same rule every other row does.
  *
- * `faces` is what the list that draws it read for the room (`roomFaces`, off the same roster), so a
- * screen with the row already in hand draws it without resolving the members twice.
+ * `faces` is what the list that draws it read for the room (`roomFaces`, off the same roster), and
+ * `said` the last message received in it (`roomLastLine`, off the page this device holds), so a screen
+ * with the row already in hand draws it without resolving either twice. A room nothing has been said
+ * in yet names its members instead, which is the little it can honestly say.
  */
 export function roomRowOf(
   chat: Pick<
@@ -137,17 +158,19 @@ export function roomRowOf(
     "id" | "title" | "pinned" | "updatedAt" | "room" | "roomNeeds" | "roomSeenSeq"
   >,
   faces: { shown: string[]; more: number },
+  said?: string,
 ): ChatListRow {
+  const members = chat.room ? roomMembersLine(chat.room) : undefined
   return {
     id: chat.id,
     title: chat.title,
-    line: chat.room ? roomMembersLine(chat.room) : undefined,
+    line: said ?? members,
     at: chat.updatedAt,
     pinned: Boolean(chat.pinned),
     // A room's need is `needs`, drawn as its line in the warning tone: a room is never a chat whose
-    // reply is waiting, so it never wears the badge that says one is.
-    waiting: false,
-    room: faces,
+    // reply is waiting, so it never wears the badge that says one is. The members ride the pictures,
+    // which is the only place left that can name them once the line says what was said.
+    room: { ...faces, ...(members ? { names: members } : {}) },
     needs: roomNeedsOf(chat),
   }
 }

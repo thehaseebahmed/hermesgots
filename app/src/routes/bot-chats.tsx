@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MessageCircleIcon, TimerIcon } from "lucide-react"
+import { CircleAlertIcon, MessageCircleIcon, TimerIcon } from "lucide-react"
 import {
   Link,
   Navigate,
@@ -15,11 +15,12 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemRow, pinnedLine } from "@/components/item-list"
 import { ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
-import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
 import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
+import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
@@ -28,7 +29,8 @@ import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
 import { roomRowOf } from "@/lib/rooms"
-import { isUnread } from "@/lib/session-work"
+import { useAllLiveRuns } from "@/lib/waiting"
+import { isUnread, runInFlight } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -142,11 +144,11 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
       chats.map(async (chat) => {
         if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
         const newest = await newestMessage(chat.id)
-        // A question or an approval sits on a reply, so a chat whose newest row is the reader's own
-        // still waits while the reply above it does.
-        const waits =
-          newest && !isReply(newest) ? await newestMessage(chat.id, isReply) : undefined
-        return chatRowOf(chat, newest, waits)
+        // The row says what the bot last said, and a question or an approval sits on a reply: a read
+        // of the newest message that already is one answers both, and one that is the reader's own
+        // asks for the reply above it.
+        const reply = !newest || isReply(newest) ? newest : await newestMessage(chat.id, isReply)
+        return chatRowOf(chat, newest, reply)
       }),
     )
     return { profileId, bot, rows }
@@ -158,7 +160,7 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
   if (!fresh.bot) return <Navigate to="/" replace />
   const seated = (rooms ?? [])
     .filter((room) => room.seated.includes(profileId))
-    .map((room) => roomRowOf(room.chat, room.faces))
+    .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} />
 }
 
@@ -173,6 +175,9 @@ function ChatList({
 }) {
   const navigate = useNavigate()
   const marks = useReadMarks()
+  // The host's answer for each session, read once for the whole list: a run started on another device
+  // is in flight here too, and only the poll can say so.
+  const runs = useAllLiveRuns()
   // A room is made on a Host that advertises it, so the control is offered only where it can be used
   // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
   const canMakeRoom = useCanMakeRoom()
@@ -241,6 +246,7 @@ function ChatList({
                 mark={marks[row.id]}
                 selected={row.id === selected}
                 profileId={bot.id}
+                live={row.session ? runs[row.session] : undefined}
               />
             </li>
           ))}
@@ -260,18 +266,23 @@ function ChatList({
 
 /**
  * One row of the list: a chat's icon — every row here is the same bot's, so the bot's face would say
- * nothing — its title, its last line, its age, and the dot this device's read mark decides. A reply
- * that waits on the reader wears the warning tone and says so beside the title; its line stays. The
+ * nothing — its title, the bot's last word, its age, and the dot this device's read mark decides. The
  * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
+ *
+ * The icon says what is happening, in the three states Code's rows use: a chat at rest is grey, the
+ * app's own colour for nothing to say; a run in flight — the host's answer, else a reply this device
+ * still watches arrive — is a spinner, so a list of quiet rows shows the one that is working; and a
+ * row that waits on the reader takes the alert icon in the warning tone, with the reason in place of
+ * the line. Yellow is spent on the one thing that wants the reader, never on nothing happening.
  *
  * A routine's delivery is a row of this list too, and wears the routine's icon rather than a chat's,
  * because it is a run rather than a chat with the bot: its line and time are the record's, since
  * the run's words are in the run's own session.
  *
  * A room is one of these rows, drawn by the same rule: it wears its members' pictures where a chat
- * wears its icon and names them in its line, and while its own log ends asking the reader for
- * something its line is that sentence, in the warning tone, because the line is where the room's own
- * screen says it too (ADR 0115, ADR 0126).
+ * wears its icon and says the last message received in it, and while its own log ends asking the
+ * reader for something its line is that sentence, in the warning tone, because the line is where the
+ * room's own screen says it too (ADR 0115, ADR 0126).
  *
  * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
  */
@@ -281,27 +292,38 @@ export function BotChatItem({
   mark,
   selected,
   profileId,
+  live,
 }: {
   row: ChatListRow
   now: number
   mark?: number
   selected?: boolean
   profileId: string
+  /** What the host says of this chat's run: `running` beats a reply still streaming here. */
+  live?: LiveRunStatus
 }) {
+  const working = runInFlight(live, { streaming: row.streaming, waiting: Boolean(row.needs) })
   return (
     <ItemRow
-      icon={row.routine ? <TimerIcon /> : <MessageCircleIcon />}
-      avatar={row.room ? <RoomFaces shown={row.room.shown} more={row.room.more} /> : undefined}
-      tone={row.room ? undefined : row.waiting ? "warning" : undefined}
-      unread={isUnread(row.at, mark)}
-      selected={selected}
-      badge={
-        row.waiting && !row.room ? (
-          <Badge data-waiting className="bg-warning/15 text-warning">
-            Needs you
-          </Badge>
+      icon={
+        row.routine ? (
+          <TimerIcon />
+        ) : row.needs ? (
+          <CircleAlertIcon />
+        ) : working ? (
+          <Spinner />
+        ) : (
+          <MessageCircleIcon />
+        )
+      }
+      avatar={
+        row.room ? (
+          <RoomFaces shown={row.room.shown} more={row.room.more} label={row.room.names} />
         ) : undefined
       }
+      tone={row.room ? undefined : row.needs ? "warning" : "muted"}
+      unread={isUnread(row.at, mark)}
+      selected={selected}
       title={row.title}
       when={chatAge(row.at, now)}
       line={pinnedLine(row.pinned, row.needs ?? row.line)}

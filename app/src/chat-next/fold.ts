@@ -10,6 +10,7 @@ import { progressReminderNotes } from "../lib/progress-reminder.ts"
 import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
 import { requestIn } from "../lib/retry-message.ts"
+import { rowText, rowWords, type RowContent } from "../lib/row-text.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
 
@@ -17,7 +18,7 @@ import type { Timing } from "../lib/reply-stats.ts"
 export interface Row {
   id: number
   role: string
-  content: string | null
+  content: RowContent
   tool_call_id?: string | null
   finish_reason?: string | null
   display_kind?: string | null
@@ -148,14 +149,15 @@ export const drawsRequest = (turn: Turn) =>
 export function withArchive(live: Row[], archive: Row[]): Row[] {
   const held = new Set(live.map((row) => row.id))
   const at = new Map(live.map((row, index) => [row.id, index]))
-  const inArchive = new Map(archive.map((row, index) => [row.id, index]))
-  const above: Row[] = []
-  const after = new Map<number, Row[]>()
+  const read = archive.map(readRow)
+  const inArchive = new Map(read.map((row, index) => [row.id, index]))
+  const above: ReadRow[] = []
+  const after = new Map<number, ReadRow[]>()
   // A turn's request can be a live row (Hermes writes it again when it compacts mid-turn) while the
   // work it started before the compaction is archived: the archive lists that work right after the
   // request, and the work follows it here rather than ending up under an earlier turn.
   let request: number | undefined
-  for (const row of archive) {
+  for (const row of read) {
     if (held.has(row.id)) {
       request = isRequest(row) ? row.id : undefined
     } else if (request !== undefined) {
@@ -171,7 +173,7 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   for (const [id, work] of after) {
     const last = inArchive.get(work.at(-1)!.id)!
     const rows: Row[] = []
-    for (const row of archive.slice(last + 1)) {
+    for (const row of read.slice(last + 1)) {
       if (!held.has(row.id) || (at.get(row.id) ?? Infinity) > (at.get(id) ?? -1)) break
       rows.push(row)
     }
@@ -189,15 +191,22 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   ]
 }
 
-const isScaffold = (row: Row) =>
+type ReadRow = Omit<Row, "content"> & { content: string }
+
+const readRow = (row: Row): ReadRow => ({
+  ...row,
+  content: row.role === "tool" ? rowWords(row.content) : rowText(row.content),
+})
+
+const isScaffold = (row: ReadRow) =>
   row.display_kind === "hidden" ||
   row.display_kind === "model_switch" ||
   row.display_kind === "steer" ||
-  RESTATED.test(row.content ?? "") ||
+  RESTATED.test(row.content) ||
   isSeamScaffolding(row)
 
-const isRequest = (row: Row) =>
-  row.role === "user" && !DELIVERY.test(row.content ?? "") && !isScaffold(row)
+const isRequest = (row: ReadRow) =>
+  row.role === "user" && !DELIVERY.test(row.content) && !isScaffold(row)
 
 function pushCall(parts: Part[], call: ToolCall) {
   const last = parts.at(-1)
@@ -259,7 +268,8 @@ export function foldTurns(
 ): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
-  const refusals = progressReminderNotes(rows)
+  const read = rows.map(readRow)
+  const refusals = progressReminderNotes(read)
   // The refused calls already accounted for: a carried copy of a row must not draw its reminder twice.
   const noted = new Set<string>()
   /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
@@ -288,7 +298,7 @@ export function foldTurns(
     turns.push(turn)
     return turn
   }
-  for (let row of rows) {
+  for (let row of read) {
     // What the host wrote after the compaction closes the reply above it.
     if (pending && !isScaffold(row) && writtenAfter(row)) openSeam()
     const boundary = boundaryOf(row, summaries)
@@ -305,7 +315,7 @@ export function foldTurns(
     if (row.role === "user") {
       // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
       if (row.display_kind === "steer") {
-        turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content ?? "") })
+        turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content) })
         continue
       }
       // A model switch, a restatement, the task snapshot and the pruned-skills notice are the model's
@@ -342,8 +352,8 @@ export function foldTurns(
     if (row.role === "tool") {
       const call = row.tool_call_id ? callOf.get(row.tool_call_id) : undefined
       // A carried copy of a call can hold the cleared notice where the original kept its output.
-      if (call && !(call.result && PRUNED.test(row.content ?? ""))) {
-        call.result = row.content ?? ""
+      if (call && !(call.result && PRUNED.test(row.content))) {
+        call.result = row.content
         const at = msOf(row)
         if (at !== undefined) call.endedAt = at
       }
@@ -378,7 +388,7 @@ export function foldTurns(
     // before it and is read with the words or the call it led to.
     let thought = row.reasoning ?? row.reasoning_content ?? undefined
     if (row.content || (thought && !drawn.length)) {
-      turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
+      turn.parts.push({ kind: "text", text: row.content, ...(thought ? { thought } : {}) })
       thought = undefined
     }
     const callAt = msOf(row)

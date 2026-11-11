@@ -186,7 +186,6 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return json({}, 404)
 }) as typeof fetch
 
-
 /** Every write to the device's chat rows, so "an unchanged record writes nothing" can be measured. */
 const writes = { rows: 0 }
 db.conversations.hook("creating", () => void writes.rows++)
@@ -462,6 +461,45 @@ test("a room draws in the list of every bot it seats, and in no other bot's", as
   }
 })
 
+test("a room's row says the last message received in it, and names its members on the mark", async () => {
+  await fresh({ layout: "bots", ask: true })
+  // The log ends on a member's reply that asks nobody: a round still going, not a wait on the reader.
+  log = [
+    { seq: 1, eventId: "e1", kind: "message.user", text: "Who takes the release?" },
+    {
+      seq: 2,
+      eventId: "e2",
+      kind: "message.member",
+      text: "I'll take the API and the routes.",
+      memberId: "m1",
+      name: "Coder",
+    },
+  ]
+  await merged()
+  await mount(listScreen(CODER), async () => {
+    await until(async () => Boolean(find(`a[href="/c/${ROOM}"]`)), "the room's row")
+    await until(
+      async () => wordsOf(find(`a[href="/c/${ROOM}"]`)).includes("I'll take the API"),
+      "the room's page to be read",
+    )
+    const row = find(`a[href="/c/${ROOM}"]`)
+    assert.ok(
+      wordsOf(row).includes("I'll take the API and the routes."),
+      "the row says the last message received in it",
+    )
+    assert.ok(
+      !wordsOf(row).includes("Who takes the release?"),
+      "and not the message the reader sent",
+    )
+    // The pictures are the one place left that can name a room's members to a reader who cannot see them.
+    assert.equal(
+      row?.querySelector("[data-room-faces]")?.getAttribute("aria-label"),
+      "Coder, Writer",
+      "the mark is one picture, labelled with the members it draws",
+    )
+  })
+})
+
 test("a room's pin lifts it above a newer chat in a bot's list", async () => {
   await fresh({ layout: "bots" })
   await merged()
@@ -574,7 +612,11 @@ test("a pinned chat is lifted into the pinned band, and a room stays in Rooms", 
   await mount(screen("/"), async () => {
     await until(async () => band("pinned").includes(`/c/${CHAT_OLDER}`), "the pinned chat")
     assert.deepEqual(band("pinned"), [`/c/${CHAT_OLDER}`], "the pin lifts the chat alone")
-    assert.deepEqual(band("recents"), [`/c/${CHAT_NEWER}`], "Recents holds what is left of the chats")
+    assert.deepEqual(
+      band("recents"),
+      [`/c/${CHAT_NEWER}`],
+      "Recents holds what is left of the chats",
+    )
     assert.deepEqual(band("rooms"), [`/c/${ROOM}`], "and the room is its own section's row")
   })
 })
@@ -635,7 +677,10 @@ test("a room opened from a bot's list leads back to that list, by its control an
     assert.ok(find("[data-list]"), "and the room's screen is what was left")
   })
   await mount(roomFromList(), async () => {
-    await until(async () => Boolean(find(`[aria-label="Back to Coder"]`)), "the screen's own way out")
+    await until(
+      async () => Boolean(find(`[aria-label="Back to Coder"]`)),
+      "the screen's own way out",
+    )
     assert.equal(pressBack(), "screen", "Android's back is the same answer")
     await until(async () => path() === `/b/${CODER}`, "the list behind it")
   })
@@ -651,10 +696,7 @@ test("a room whose row moved is read again, and its mark follows the Host", asyn
     )
     // The user answers in the room on another device: the Host says the room moved, and its log
     // holds the user's words last — which ask for nobody.
-    log = [
-      ...asks(),
-      { seq: 3, eventId: "e3", kind: "message.user", text: "Coder, you take it." },
-    ]
+    log = [...asks(), { seq: 3, eventId: "e3", kind: "message.user", text: "Coder, you take it." }]
     moved.at = LAST_AT + 60_000
     await syncNow()
     await settle()
@@ -730,7 +772,7 @@ test("a room's row draws its members' pictures, four at most, and counts the res
   })
   await settle()
   await mount(screen("/"), async () => {
-    await until(async () => Boolean(find('[data-room-faces]')), "the room's faces")
+    await until(async () => Boolean(find("[data-room-faces]")), "the room's faces")
     const faces = findAll("[data-room-faces] img")
     assert.equal(faces.length, 4, "four pictures, and no more")
     assert.deepEqual(
