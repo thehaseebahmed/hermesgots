@@ -212,6 +212,38 @@ test.describe("a run already waiting when the chat opens", () => {
     })
   })
 
+  /**
+   * A phone coming back to a session whose run waits: the newest page is asked for, and the link
+   * fails it. The page joins the run from its status anyway — that is how the form comes back — and
+   * the read that answers afterwards has the turn the device missed. A run held on a prompt writes
+   * nothing more, so those rows are the turn, and the thread must take them rather than holding the
+   * transcript it opened with until the question is answered.
+   */
+  test("a read that failed at open still lands the turn that asked", async () => {
+    const host = setUp("q-stale")
+    let database
+    // A code session's shape: a turn with a lot of work in it, seen by the device.
+    await withDevice(openDevice(host), async (before) => {
+      database = before.database
+      const first = await sendFrom(before, host, "how much room is /var/log taking?")
+      for (let at = 0; at < 6; at++) first.tool("terminal", `du /var/log/${at}`, '{"exit_code": 0}')
+      first.finish("Here's where the space is going.")
+      await showsEverything(before, host, "the first turn, as the device saw it")
+    })
+
+    // Away: the host works the next turn and stops on a question.
+    const run = host.startElsewhere("ask me which logs count as old")
+    run.tool("terminal", "du -sh /var/log/*", '{"exit_code": 0}')
+    run.ask(TEA)
+
+    const broken = host.fail(0)
+    await withDevice(openDevice(host, { database }), async (phone) => {
+      await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question's form")
+      broken.fix()
+      await showsEverything(phone, host, "the turn that asked, drawn beside the question")
+    })
+  })
+
   // The follow ends without the run ending: a phone asleep, a host dropping a slow subscriber, a
   // network that goes. The question is the run's to settle, so the form must outlive the socket.
   test("the stream dies with the question still owed, and the form stays up", async () => {
