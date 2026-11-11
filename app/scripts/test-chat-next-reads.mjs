@@ -9,6 +9,7 @@ import {
   readPage,
   readRun,
   readTranscript,
+  respond,
 } from "../src/chat-next/api.ts"
 import { overlay, PAGE } from "../src/chat-next/pages.ts"
 import { promptFrom } from "../src/lib/run-prompt.ts"
@@ -347,4 +348,36 @@ test("a prompt reads as the agent wrote it, without Hermes's skip hint or its re
   // A question the agent wrote over several lines keeps them, a last line mentioning skip unquoted too.
   const own = "Which colour?\nSay if we should skip the logo."
   assert.equal(promptFrom({ ...live, question: own }, "r")?.question, own)
+})
+
+test("a question left without an answer is sent as the word Hermes reads as a skip", async () => {
+  // Hermes 0.23.1 takes an empty answer as no answer and ends the call there; its own word for a
+  // skip, "skip", is what lets the call go on to its next question.
+  const sent = []
+  globalThis.fetch = async (_, init) => {
+    sent.push(JSON.parse(String(init?.body)))
+    return new Response(JSON.stringify({ status: "resolved" }), { status: 200 })
+  }
+  const asked = {
+    kind: "question",
+    run: "r",
+    promptId: "p1",
+    generation: 1,
+    question: "Which?",
+    choices: [],
+    multiSelect: false,
+  }
+  await respond(connection, asked, "")
+  await respond(connection, asked, "   ")
+  await respond(connection, asked, "Red")
+  await respond(
+    connection,
+    { ...asked, kind: "approval", command: "ls", choices: ["once"] },
+    "once",
+  )
+  assert.deepEqual(
+    sent.map((body) => body.answer ?? body.choice),
+    ["skip", "skip", "Red", "once"],
+    "blank answers are skips; real answers and approval choices go as they are",
+  )
 })

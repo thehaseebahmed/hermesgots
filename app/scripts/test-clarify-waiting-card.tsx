@@ -78,3 +78,38 @@ test("an answered call reads its answer, without the form", async () => {
   assert.match(body, /Older than 90 days/, `the answer is shown: "${body}"`)
   assert.doesNotMatch(body, /No answer|Ask again/, `nothing is owed: "${body}"`)
 })
+
+test("a skipped question reads as an answer of its own, drawn like the others", async () => {
+  const mixed: ToolEvent = {
+    ...clarify,
+    status: "completed",
+    endedAt: 2,
+    result: JSON.stringify({
+      responses: [
+        {
+          question: "Which colour?",
+          choices_offered: ["Red", "Blue"],
+          status: "answered",
+          user_response: "Red",
+        },
+        { question: "Which size?", choices_offered: ["Small", "Large"], status: "skipped" },
+      ],
+      outcome: "submitted",
+    }),
+  }
+  await mount(<MessageItem message={reply(mixed)} showStats />, async () => {
+    const bubbles = findAll("[data-slot=card] p").filter((one) =>
+      /^(Red|Skipped)$/.test(one.textContent ?? ""),
+    )
+    assert.deepEqual(
+      bubbles.map((one) => one.textContent),
+      ["Red", "Skipped"],
+      "an answer and a skipped one, in the order asked",
+    )
+    assert.equal(
+      bubbles[1].className,
+      bubbles[0].className,
+      "the skipped one wears the answer's own look",
+    )
+  })
+})
