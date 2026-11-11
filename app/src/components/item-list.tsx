@@ -138,7 +138,7 @@ export function ItemRow({
     to: string
     replace?: boolean
     state?: unknown
-    /** The press this row answers itself, for a row that opens as a screen rather than a child. */
+    /** The press the link answers itself, for a row that opens a top-level screen. */
     onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
   }
 }) {

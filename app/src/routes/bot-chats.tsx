@@ -116,7 +116,7 @@ function BotChatsList({
   profileId: string
   /** The chat drawn open beside this list, which is the pane's to name and no screen's. */
   selected?: string
-  /** The chat a list pushed over one covers: what its own back leads to, marked as nothing. */
+  /** The chat a pushed list covers, which its own back leads to and which no row of it draws as open. */
   backTo?: string
   /** Whether this list is a screen pushed over the chat it covers rather than the app's own entry. */
   pushed?: boolean
@@ -340,7 +340,7 @@ export function BotChatItem({
   mark?: number
   selected?: boolean
   profileId: string
-  /** Where a plain press opens this row as the app's only entry, where the list is a screen. */
+  /** Where a plain press opens this row's chat as the app's only entry: set on a screen, never a pane. */
   pick?: () => void
   /** What the host says of this chat's run: `running` beats a reply still streaming here. */
   live?: LiveRunStatus
