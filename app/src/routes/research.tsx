@@ -701,18 +701,14 @@ function MissionHeader({
   const profile = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])
   const by = [profile?.name, mission.researcher?.model].filter(Boolean).join(" · ")
   return (
-    <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-      <div className="flex items-center gap-3">
-        {onBack && <BackButton label="Back to Research" onClick={onBack} />}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="truncate text-base font-semibold tracking-tight">{mission.title}</h1>
-          <p className="truncate text-xs text-muted-foreground">
-            {[type.name, by].filter(Boolean).join(" · ")}
-          </p>
-        </div>
-        {actions}
-      </div>
-    </header>
+    <ChatHeader
+      pinned
+      showBot={false}
+      leading={onBack ? <BackButton label="Back to Research" onClick={onBack} /> : undefined}
+      title={mission.title}
+      subtitle={[type.name, by].filter(Boolean).join(" · ")}
+      actions={actions}
+    />
   )
 }
 

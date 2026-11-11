@@ -29,7 +29,7 @@ const OWNERS = {
   ],
   spinner: ["src/components/ui/spinner.tsx", "src/components/ui/sonner.tsx"],
   card: ["src/components/chat/session-cards.tsx"],
-  confirm: ["src/components/settings-chrome.tsx", "src/components/chat/confirm-dialog.tsx"],
+  confirm: ["src/components/settings-chrome.tsx", "src/components/confirm-destructive.tsx"],
   empty: [],
   bubble: ["src/components/chat/user-bubble.tsx", "src/components/room/room-chat.tsx"],
 }
