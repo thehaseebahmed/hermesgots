@@ -87,6 +87,9 @@
 // Say "draw the map" for a reply whose block is a map: one `Map` of four labelled places on the
 // north waterfront, each with its detail, and a summary — the receipt under it long enough to
 // scroll a phone's thread past the map, so a scroll gesture has somewhere to go.
+// Say "draw a diagram" for a reply carrying a closed ```mermaid fence — a sequence diagram, said a
+// piece at a time and its fence slowly, so a stream shows the fence as code until its closer lands —
+// and "draw a diagram that won't parse" for the same with a body mermaid rejects.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/gots/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -1886,6 +1889,34 @@ const OPENUI_MAP = [
   "```",
 ].join("\n")
 
+// What a turn asked to draw a diagram says: a closed ```mermaid fence, so the app has a fence's
+// source to draw where the fence stood. Said a piece at a time like every other reply, which is what
+// a stream has to show: a fence's body without its closer is the code it is.
+const DIAGRAM_INTRO = "Here's the flow as a diagram.\n\n"
+const DIAGRAM_FENCE = [
+  "```mermaid",
+  "sequenceDiagram",
+  "  actor User",
+  "  participant Chat",
+  "  participant Rule as Fence rule",
+  "  User->>Chat: a reply holding a closed fence",
+  "  Chat->>Rule: cut the text at its fences",
+  "  Rule-->>Chat: the fence's source",
+  "  Chat-->>User: a diagram where the fence stood",
+  "```",
+].join("\n")
+const DIAGRAM_OUTRO = "\n\nThat's every step the app takes, from the fence to the picture."
+
+// The same reply for a fence mermaid rejects: closed, and its last line is an arrow to nowhere.
+const DIAGRAM_BROKEN = [
+  "Here's that flow as a diagram, as far as I got with it.\n\n",
+  "```mermaid",
+  "flowchart TD",
+  "  Request --> Parse",
+  "  Parse -->",
+  "```",
+].join("\n")
+
 /**
  * One of the calls a "think out loud" turn makes between its reasoning stretches: a look at the
  * disk. It goes out on whichever wire the turn is on — a completion's `hermes.tool.progress` frames or
@@ -2967,6 +2998,16 @@ async function playTurn(req, body, last, out) {
     }
   } else if (/routine message/i.test(last)) {
     await say("I'll watch the tide and tell you when it turns.")
+  } else if (/\bdraw a diagram that (?:will not|won't) parse\b/i.test(last)) {
+    // A closed fence mermaid rejects: its source is all a reader has to go on, which is the fallback
+    // a later step draws. Asked before the plain one, since "draw a diagram" is inside these words.
+    await say(DIAGRAM_BROKEN, 40)
+  } else if (/\bdraw a diagram\b/i.test(last)) {
+    // The fence is said slowly, so the reply is on the wire long enough to be seen as the code it is
+    // until its closer lands — the one state of a reply a finished string can't have.
+    await say(DIAGRAM_INTRO, 40)
+    await say(`${DIAGRAM_FENCE}\n\n`, 90)
+    await say(DIAGRAM_OUTRO, 40)
   } else if (/image|chart/i.test(last)) {
     await say(
       "Here's the chart:\n\n" +
