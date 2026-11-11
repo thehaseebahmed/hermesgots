@@ -12,6 +12,7 @@ import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
+import { Home } from "@/App"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
 import { db, deleteConversation, type Message } from "@/lib/db"
@@ -167,6 +168,32 @@ const screen = (entry = `/b/${bot.id}`) => (
     </Routes>
   </MemoryRouter>
 )
+
+test("Home is the active bot's screen: `/` sends the reader to its list", async () => {
+  // A bot with nothing to open, so the address `/` lands on is the list itself rather than the chat
+  // the landing would send the reader on to: the door, seen without another screen answering for it.
+  await seed([])
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <Path />
+      <Nav />
+      <Routes>
+        <Route index element={<Home />} />
+        <Route path="b/:profileId" element={<BotChatsPage />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await until(async () => path() === `/b/${bot.id}`, "the active bot's address")
+      await until(async () => Boolean(findText('[data-slot="header-title"]', bot.name)), "its list")
+      assert.equal(rowIds().length, 0, "the list a bot with no chats draws")
+      assert.equal(
+        nav(),
+        `REPLACE:/b/${bot.id}`,
+        "and `/` is replaced by it rather than left behind the reader",
+      )
+    },
+  )
+})
 
 test("a bot's screen lists the chats it holds, its pinned one first and then by what was last said", async () => {
   await seed([
