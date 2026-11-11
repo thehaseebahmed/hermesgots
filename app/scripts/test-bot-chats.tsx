@@ -17,8 +17,10 @@ import { BOT_CHATS } from "@/lib/chat-list"
 import { db, deleteConversation, type Message } from "@/lib/db"
 import { markRead } from "@/lib/read-marks"
 import {
+  Nav,
   Path,
   absent,
+  atDepth,
   botProfile,
   click,
   find,
@@ -27,6 +29,7 @@ import {
   json,
   missing,
   mount,
+  nav,
   path,
   seedSettings,
   settle,
@@ -137,6 +140,7 @@ const iconOf = (id: string) => rowOf(id)?.querySelector("svg.lucide-timer, svg.l
 const screen = (entry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
+    <Nav />
     <Routes>
       <Route path="b/:profileId" element={<BotChatsPage />} />
       <Route path="c/:id" element={<p data-chat />} />
@@ -527,6 +531,43 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
     await click(newRow("New room"))
     await until(async () => path() === "/new-room", "the room screen")
   })
+})
+
+test("a pick in a list that stands over a chat takes its entry, where a root list pushes", async () => {
+  // A list a chat's own control pushed stands a rung above that chat, so a pick from it — a row or
+  // the foot's New chat — takes the list's place: switching chats costs the reader no rung of the
+  // history behind them, and back returns the chat they started in. A list that is itself the root
+  // has nothing behind it to keep, so its picks push and back returns the list.
+  await seed([
+    { id: "a", title: "A chat", at: 100, said: "Hello" },
+    { id: "b", title: "Another", at: 200, said: "Hi" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    await click(rowOf("b"))
+    await until(async () => path() === "/c/b", "the chat it picked")
+    assert.equal(nav(), "PUSH:/c/b", "a row of the root list pushes, so back returns to the list")
+  })
+  // The list reached from a chat: one rung of history already behind it.
+  const history = atDepth(1)
+  try {
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 2, "the bot's chats")
+      await click(rowOf("b"))
+      await until(async () => path() === "/c/b", "the chat it picked")
+      assert.equal(nav(), "REPLACE:/c/b", "over a chat, the row takes the list's entry")
+    })
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 2, "the bot's chats")
+      await click(find("[data-new-menu]"))
+      await until(async () => picksOpen(), "the picks")
+      await click(newRow("New chat"))
+      await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
+      assert.ok(nav().startsWith("REPLACE:/c/"), "and so does the foot's New chat")
+    })
+  } finally {
+    history.restore()
+  }
 })
 
 test("a Host that cannot make a room offers no row for one", async () => {

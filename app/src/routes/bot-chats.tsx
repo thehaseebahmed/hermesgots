@@ -227,10 +227,12 @@ function ChatList({
   const shown = useMemo(() => chatList(rows, query), [rows, query])
 
   // A chat is made first and the address moved after it, so back from it has the list to return to.
-  // The entry says which bot it is for, so the list keeps its lane while the new row loads.
+  // The entry says which bot it is for, so the list keeps its lane while the new row loads. A list
+  // that stands over a chat takes its own entry instead of pushing one — the chat is made in the
+  // place a row picked from here would be, since either is a switch the reader made from this list.
   const start = async () => {
     const chat = await beginChat(bot.id)
-    navigate(`/c/${chat.id}`, { state: { bot: bot.id } })
+    navigate(`/c/${chat.id}`, { state: { bot: bot.id }, replace: pushed })
   }
 
   return (
@@ -289,6 +291,7 @@ function ChatList({
                 mark={marks[row.id]}
                 selected={row.id === selected}
                 profileId={bot.id}
+                replace={pushed}
               />
             </li>
           ))}
@@ -322,6 +325,8 @@ function ChatList({
  * screen says it too (ADR 0115, ADR 0126).
  *
  * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
+ * It takes the list's entry rather than pushing one where the list stands over a chat, so switching
+ * chats from a list the reader opened costs no rung of the history behind them.
  */
 export function BotChatItem({
   row,
@@ -329,12 +334,15 @@ export function BotChatItem({
   mark,
   selected,
   profileId,
+  replace,
 }: {
   row: ChatListRow
   now: number
   mark?: number
   selected?: boolean
   profileId: string
+  /** Whether the pick takes the entry the list itself stands on, which a list over a chat does. */
+  replace?: boolean
 }) {
   return (
     <ItemRow
@@ -354,7 +362,7 @@ export function BotChatItem({
       when={chatAge(row.at, now)}
       line={pinnedLine(row.pinned, row.needs ?? row.line)}
       warn={Boolean(row.needs)}
-      link={{ to: `/c/${row.id}`, state: { bot: profileId } }}
+      link={{ to: `/c/${row.id}`, state: { bot: profileId }, replace }}
     />
   )
 }

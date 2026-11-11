@@ -105,6 +105,27 @@ await flow(
     assert.equal(await rung(), chatRung, "back on the rung the chat stands at, nothing left over")
     pass("back from the pushed list returns the chat it covers")
 
+    // A row picked in a list that stands over a chat takes the list's entry — the rung the list
+    // itself stood on — so switching chats does not grow a rung per switch: the chat picked stands
+    // where the list was, and the chat the reader started in is what back returns them to.
+    await page.getByRole("link", { name: "Chats with Test bot" }).click()
+    await page.waitForURL(`**${list}`, { timeout: 20_000 })
+    await until(async () => (await rows()).length === expected.length, 20_000, "the list once more")
+    const listRung = await rung()
+    await page.locator(`main ul a[href="/c/${CHATS[0].id}"]`).click()
+    await page.waitForURL(`**/c/${CHATS[0].id}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[0].title, 20_000, "the chat picked")
+    assert.equal(await rung(), listRung, "the chat picked stands on the list's own rung")
+    assert.equal(await rung(), chatRung + 1, "one above the chat the reader started in, not two")
+    await shot("picked")
+    pass("a row picked in a list over a chat takes the list's entry, not a rung of its own")
+
+    await page.goBack()
+    await page.waitForURL(`**${chat}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat started in")
+    assert.equal(await rung(), chatRung, "back on the chat the reader started in")
+    pass("back from the chat picked returns the chat the reader started in")
+
     // Away in the app and back: the chat the reader left is where they land.
     await page.locator('aside a[href="/code"]').first().click()
     await page.waitForURL("**/code", { timeout: 20_000 })
