@@ -15,10 +15,12 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemRow, pinnedLine } from "@/components/item-list"
 import { ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
+import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
 import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { BOT_CHATS, chatAge, chatList, chatRowOf, type ChatListRow } from "@/lib/chat-list"
 import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib/db"
+import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
@@ -27,7 +29,8 @@ import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
 import { roomRowOf } from "@/lib/rooms"
-import { isUnread } from "@/lib/session-work"
+import { useAllLiveRuns } from "@/lib/waiting"
+import { isUnread, runInFlight } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -172,6 +175,9 @@ function ChatList({
 }) {
   const navigate = useNavigate()
   const marks = useReadMarks()
+  // The host's answer for each session, read once for the whole list: a run started on another device
+  // is in flight here too, and only the poll can say so.
+  const runs = useAllLiveRuns()
   // A room is made on a Host that advertises it, so the control is offered only where it can be used
   // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
   const canMakeRoom = useCanMakeRoom()
@@ -240,6 +246,7 @@ function ChatList({
                 mark={marks[row.id]}
                 selected={row.id === selected}
                 profileId={bot.id}
+                live={row.session ? runs[row.session] : undefined}
               />
             </li>
           ))}
@@ -262,9 +269,11 @@ function ChatList({
  * nothing — its title, the bot's last word, its age, and the dot this device's read mark decides. The
  * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
  *
- * A row that waits on the reader is drawn the way Code draws a session that waits: the alert icon in
- * the warning tone, and the reason in place of the line, where it is needed and why. No badge says it
- * twice — a reader scanning either list finds the same shape in the same place.
+ * The icon says what is happening, in the three states Code's rows use: a chat at rest is grey, the
+ * app's own colour for nothing to say; a run in flight — the host's answer, else a reply this device
+ * still watches arrive — is a spinner, so a list of quiet rows shows the one that is working; and a
+ * row that waits on the reader takes the alert icon in the warning tone, with the reason in place of
+ * the line. Yellow is spent on the one thing that wants the reader, never on nothing happening.
  *
  * A routine's delivery is a row of this list too, and wears the routine's icon rather than a chat's,
  * because it is a run rather than a chat with the bot: its line and time are the record's, since
@@ -283,24 +292,36 @@ export function BotChatItem({
   mark,
   selected,
   profileId,
+  live,
 }: {
   row: ChatListRow
   now: number
   mark?: number
   selected?: boolean
   profileId: string
+  /** What the host says of this chat's run: `running` beats a reply still streaming here. */
+  live?: LiveRunStatus
 }) {
+  const working = runInFlight(live, { streaming: row.streaming, waiting: Boolean(row.needs) })
   return (
     <ItemRow
       icon={
-        row.routine ? <TimerIcon /> : row.needs ? <CircleAlertIcon /> : <MessageCircleIcon />
+        row.routine ? (
+          <TimerIcon />
+        ) : row.needs ? (
+          <CircleAlertIcon />
+        ) : working ? (
+          <Spinner />
+        ) : (
+          <MessageCircleIcon />
+        )
       }
       avatar={
         row.room ? (
           <RoomFaces shown={row.room.shown} more={row.room.more} label={row.room.names} />
         ) : undefined
       }
-      tone={row.room ? undefined : row.needs ? "warning" : undefined}
+      tone={row.room ? undefined : row.needs ? "warning" : "muted"}
       unread={isUnread(row.at, mark)}
       selected={selected}
       title={row.title}

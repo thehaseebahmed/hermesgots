@@ -25,10 +25,10 @@ export const BOT_CHATS = 50
 
 export type ChatRecord = Pick<
   Conversation,
-  "id" | "title" | "pinned" | "updatedAt" | "routine" | "line"
+  "id" | "title" | "pinned" | "updatedAt" | "routine" | "line" | "hermesSessionId"
 >
 
-export type ChatTail = Pick<Message, "content" | "createdAt" | "clarify" | "approval">
+export type ChatTail = Pick<Message, "content" | "createdAt" | "clarify" | "approval" | "status">
 
 /**
  * A room is a row of this list like a chat: it wears its members' pictures where a chat wears its
@@ -59,6 +59,13 @@ export interface ChatListRow {
    * the line, the way Code's list says why a session waits, so a wait reads alike in every list.
    */
   needs?: string
+  /**
+   * The Hermes session this chat answers at, so the row can ask the host whether a run is in flight
+   * for it — a run started on another device is invisible to this one's own messages.
+   */
+  session?: string
+  /** This device's newest reply in the chat is still streaming: a run is in flight, here at least. */
+  streaming?: boolean
 }
 
 /**
@@ -114,6 +121,9 @@ export function chatRowOf(
     line: oneLine((reply ?? newest)?.content ?? ""),
     at: newest?.createdAt ?? chat.updatedAt,
     pinned: Boolean(chat.pinned),
+    ...(chat.hermesSessionId ? { session: chat.hermesSessionId } : {}),
+    // Nothing settled in a chat whose newest reply is still being written.
+    ...(newest?.status === "streaming" ? { streaming: true } : {}),
     ...(reason ? { needs: reasonText(reason) } : {}),
   }
 }

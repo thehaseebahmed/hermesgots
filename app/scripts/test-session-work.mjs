@@ -14,6 +14,7 @@ import {
   isUnread,
   lastActivityAt,
   rowTone,
+  runInFlight,
   sessionGroup,
   sessionState,
   threadState,
@@ -342,4 +343,15 @@ test("everything at rest is grey, finished pull requests included", () => {
     "muted",
     "merged and closed wait on nothing, their checks or not",
   )
+})
+
+test("a run is in flight when the host says so, and otherwise when a reply is arriving here", () => {
+  // The host answers first: a wait mark this device still holds never outranks a run it reports.
+  assert.equal(runInFlight("running", { waiting: true }), true, "the host's run is running")
+  assert.equal(runInFlight("waiting_for_approval", { streaming: true }), false, "blocked on the user")
+  // With no answer from the host, this device's own newest reply decides.
+  assert.equal(runInFlight(undefined, { streaming: true }), true, "a reply arriving here")
+  assert.equal(runInFlight(undefined, { streaming: true, waiting: true }), false, "unless it waits")
+  assert.equal(runInFlight(undefined, {}), false, "nothing at all")
+  assert.equal(runInFlight(undefined, undefined), false, "and a chat with no turn read")
 })

@@ -57,6 +57,8 @@ interface Seed {
   earlier?: string
   /** The reader's own message, newest of all: a row still says what the bot said above it. */
   mine?: string
+  /** The newest reply is still arriving, so the row has a run in flight to draw. */
+  streaming?: boolean
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
 }
@@ -116,7 +118,13 @@ async function seed(
                 : one.waits === "approval"
                   ? { approval: { runId: "run-1", command: one.said, choices: [] } }
                   : {}
-            return [...rows, message(one.id, one.said, at, waits)]
+            return [
+              ...rows,
+              message(one.id, one.said, at, {
+                ...waits,
+                ...(one.streaming ? { status: "streaming" } : {}),
+              }),
+            ]
           })()
       // The reader's own message is the newest row of all: a row that read it would say their words.
       return one.mine ? [...said, message(one.id, one.mine, one.at + 1000, { role: "user" })] : said
@@ -142,7 +150,7 @@ const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]")
 const iconOf = (id: string) =>
   rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle, svg.lucide-circle-alert")
 /** The disc a row's icon stands in, which is where a list picks its tone. */
-const discOf = (id: string) => iconOf(id)?.parentElement
+const discOf = (id: string) => rowOf(id)?.querySelector('[data-slot="row-mark"] span.rounded-full')
 
 const screen = (entry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -221,6 +229,36 @@ test("a row says what the bot last said, and the reader's own words only while i
       wordsOf(rowOf("only")).includes("are you there?"),
       "and says them while nothing came back",
     )
+  })
+})
+
+test("a chat's icon is grey at rest, a spinner while a run is in flight, and yellow only on a wait", async () => {
+  await seed([
+    { id: "rest", title: "At rest", at: 300, said: "All done." },
+    { id: "busy", title: "Working", at: 200, said: "Writing the answer…", streaming: true },
+    { id: "waiting", title: "Waiting", at: 100, said: "Shall I go on?", waits: "clarify" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 3, "the bot's chats")
+    // Grey is the app's colour for nothing to say: a bullet has no business being green here.
+    assert.ok(
+      rowOf("rest")?.querySelector("svg.lucide-message-circle"),
+      "a chat at rest wears its own icon",
+    )
+    assert.ok(discOf("rest")?.className.includes("bg-muted"), "on the muted disc")
+    assert.ok(!discOf("rest")?.className.includes("bg-primary"), "and never the green one")
+    // A run in flight is the one row that shows it is working.
+    assert.ok(
+      rowOf("busy")?.querySelector('[data-slot="spinner"]'),
+      "a reply still arriving draws the spinner",
+    )
+    assert.ok(discOf("busy")?.className.includes("bg-muted"), "in the same grey as a row at rest")
+    // Yellow is spent on what wants the reader, and on nothing else.
+    assert.ok(
+      rowOf("waiting")?.querySelector("svg.lucide-circle-alert"),
+      "the wait takes the alert icon",
+    )
+    assert.ok(discOf("waiting")?.className.includes("bg-warning/15"), "on the warning disc")
   })
 })
 
@@ -342,7 +380,11 @@ test("the list holds every chat the bot has, so a pin and a chat past the bound 
   await seed(many)
   await mount(screen(), async () => {
     await until(async () => rowIds().length === many.length, "every chat the bot has")
-    assert.equal(rowIds()[0], "pinned-old", "the pin lifts it above every chat newer than the bound")
+    assert.equal(
+      rowIds()[0],
+      "pinned-old",
+      "the pin lifts it above every chat newer than the bound",
+    )
     assert.ok(
       wordsOf(rowOf("pinned-old")).includes("Still here"),
       "and a pinned chat keeps the line its own tail gives it",
@@ -438,7 +480,8 @@ test("the search narrows the rows to the chats whose title or line it finds", as
       "on the bar the list's floating controls stand on",
     )
     assert.ok(
-      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
         0,
       "with the rows above it",
     )

@@ -1,4 +1,4 @@
-import { app, assert, flow, pass } from "./lib.mjs"
+import { app, assert, flow, mock, pass, startRun } from "./lib.mjs"
 
 const CHATS = [
   { id: "e2e-lisbon", title: "Trip to Lisbon" },
@@ -172,6 +172,37 @@ await flow(
     )
     await shot("room-mark")
     pass("a room's faces stand on the same axis as every chat's icon")
+
+    // A run the reader did not start: the host reports one in flight for a chat whose messages this
+    // device has not seen arrive, and the row shows a spinner while it works. The tool is the same one
+    // Code's rows read, so a chat and its session cannot disagree about what is running.
+    const busy = await page.evaluate(
+      async (id) =>
+        (await (await import("/src/lib/db.ts")).db.conversations.get(id)).hermesSessionId,
+      CHATS[1].id,
+    )
+    await startRun(busy, "long one, please")
+    const spinning = () =>
+      page.evaluate(
+        (href) =>
+          Boolean(document.querySelector(`main ul a[href="${href}"] [data-slot="spinner"]`)),
+        `/c/${CHATS[1].id}`,
+      )
+    await until(spinning, 20_000, "the spinner while the host's run is in flight")
+    assert.ok(await spinning(), "a chat the host is running draws the spinner")
+    assert.equal(
+      await page.evaluate(
+        (href) =>
+          document
+            .querySelector(`main ul a[href="${href}"] [data-slot="row-mark"] span.rounded-full`)
+            ?.className.includes("bg-muted"),
+        `/c/${CHATS[1].id}`,
+      ),
+      true,
+      "in the grey of a row at rest, rather than a colour of its own",
+    )
+    await shot("working")
+    pass("a run in flight, reported by the host, is a spinner on the row")
 
     await page.locator(`main ul a[href="${chat}"]`).click()
     await page.waitForURL(`**${chat}`, { timeout: 20_000 })

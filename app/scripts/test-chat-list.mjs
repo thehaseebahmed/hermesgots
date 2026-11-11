@@ -50,6 +50,22 @@ test("a chat the bot has not answered yet says the reader's own words", () => {
   )
 })
 
+test("a row names the session its chat answers at, and whether a reply is still arriving", () => {
+  // The list asks the host about this session, since a run started elsewhere shows in no message here.
+  const row = chatRowOf(chat("a", 100, { hermesSessionId: "sess-1" }), said("Writing…", 240))
+  assert.equal(row.session, "sess-1")
+  assert.equal(row.streaming, undefined, "a finished reply is not a run in flight")
+  assert.equal(
+    chatRowOf(chat("a", 100, { hermesSessionId: "sess-1" }), said("Writ", 240, { status: "streaming" }))
+      .streaming,
+    true,
+    "a reply still streaming is",
+  )
+  const routine = chatRowOf(chat("r", 100, { routine: true, line: "A delivery" }))
+  assert.equal(routine.session, undefined, "a routine's row asks the host nothing about a chat")
+  assert.equal(routine.streaming, undefined)
+})
+
 test("a chat nothing has been said in keeps its own clock and draws no line", () => {
   const row = chatRowOf(chat("a", 100))
   assert.equal(row.line, undefined, "nothing said, nothing to preview")
