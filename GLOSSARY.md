@@ -206,7 +206,7 @@ A message the user sends into a run already under way, drawn where it reached th
 _Avoid_: interrupt, injection, mid-run message
 
 **Share sheet**:
-The screen another app's share opens in Gots: what arrived, a note, the bot it goes to, and a row to send it into. Its rows are the picked bot's chats, code sessions and the rooms its roster seats, touched in the last seven days and newest first — ten drawn, Show more for the rest of the week, twenty-five at most — while the search at its foot reaches everything older. A room takes the message through its own store, as the room's composer does, rather than as a chat's turn.
+The screen another app's share opens in Gots: what arrived, a note, the bot it goes to, and a row to send it into. Its rows are the picked bot's chats, code sessions and the rooms its roster seats, touched in the last seven days and newest first — ten drawn, Show more for the rest of the week, twenty-five at most — while the search at its foot reaches everything the bot is in, not only what is older: every title it matches, the week's own rows and the ones past the twenty-five included, best match first. A room takes the message through its own store, as the room's composer does, rather than as a chat's turn.
 _Avoid_: share target, share dialog, share screen
 
 **Host**:

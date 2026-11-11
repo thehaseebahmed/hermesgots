@@ -195,16 +195,39 @@ test("a query that matches nothing answers nothing, and a blank one is no query 
   assert.deepEqual(searchTargets(rows, "   "), [], "a blank field is the window's, not every row's")
 })
 
-test("the matches keep the list's own order, not the order they matched in", () => {
+test("a query with nothing to search by answers nothing, rather than the bot's whole history", () => {
   const rows = [
+    chat("week", NOW - HOUR, { title: "Trip to Lisbon" }),
+    chat("old", NOW - MONTH, { title: "Last month's plans" }),
+  ]
+  // The matcher reads a query's words as letters and digits alone, so these plain to no words at all
+  // and it answers every row it was handed — the history in place of the window, and never narrowable.
+  assert.deepEqual(
+    searchTargets(rows, "!!!"),
+    [],
+    "punctuation alone finds nothing, not everything",
+  )
+  assert.deepEqual(searchTargets(rows, "…"), [], "nor does a lone ellipsis")
+  assert.deepEqual(
+    searchTargets(rows, "会議"),
+    [],
+    "a script the matcher keeps no letters of is no query either",
+  )
+})
+
+test("the matches keep the list's own order inside a rank, and a weaker match sorts below", () => {
+  const rows = [
+    // The newest title of all matches only as scattered letters, so it is the one a rank-blind order
+    // would put first: "auth" is nowhere in it run together.
+    chat("scattered", NOW - 30_000, { title: "Around the house" }),
     chat("oldest", NOW - 3 * HOUR, { title: "Auth at the end" }),
     chat("older", NOW - 2 * HOUR, { title: "auth Alpha" }),
     chat("newer", NOW - HOUR, { title: "Zeta auth" }),
   ]
   assert.deepEqual(
     searchTargets(rows, "auth").map((row) => row.id),
-    ["newer", "older", "oldest"],
-    "newest first, wherever in a title the words were found",
+    ["newer", "older", "oldest", "scattered"],
+    "the words found as typed first, newest first inside them, and the scattered match below both",
   )
 })
 

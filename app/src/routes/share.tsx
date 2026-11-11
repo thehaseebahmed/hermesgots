@@ -160,10 +160,14 @@ export function SharePage() {
   }, [share, profile, imagesAvailable])
 
   // What the sheet offers, and in what order, is the rule's to decide, so this read narrows nothing.
-  const conversations = useLiveQuery(async () => {
-    if (!profile) return []
-    return conversationsOf(profile.id).toArray()
+  // It answers with the bot it read for: `useLiveQuery` keeps its last answer on screen while the
+  // next read is out, and a pick made in that beat would draw one bot's chats beside another bot's
+  // rooms — a row a tap sends into under the name of the bot the sheet says it is going to.
+  const chats = useLiveQuery(async () => {
+    if (!profile) return undefined
+    return { of: profile.id, rows: await conversationsOf(profile.id).toArray() }
   }, [profile?.id])
+  const conversations = chats && profile && chats.of === profile.id ? chats.rows : undefined
   // The rooms this device lists, and the ones the picked bot's roster seats: a room's row is the room
   // list's rather than the read above's, so the sheet draws it once (ADR 0115). A room no bot of this
   // device answers for seats nobody, and is no list's row.
@@ -192,6 +196,9 @@ export function SharePage() {
     [conversations, query, searching, rooms],
   )
   const shown = matches ?? (showAll ? targets : targets?.slice(0, SHARE_FIRST))
+  // Both lists are what a query is answered from, so a sheet with one of them out has not answered a
+  // query at all: "Nothing matches." over a room that is a beat away is a lie about a row to come.
+  const answered = Boolean(conversations && roomNeeds)
 
   const pickBot = (id: string) => {
     setPicked(id)
@@ -235,6 +242,14 @@ export function SharePage() {
    * number rather than half sent — and refused only here, since a chat takes the same share whole.
    */
   const sendIntoRoom = async (id: string, bot: Profile) => {
+    // The row a tap was drawn from can be a beat behind the device, so the room is looked up again
+    // before anything is sent: a record that has gone is no room of this sheet any more, and the tap
+    // says so rather than posting into a room the sheet isn't offering.
+    const held = await db.conversations.get(id)
+    if (!held?.room) {
+      toast.error("That room isn't on the sheet any more.")
+      return
+    }
     const carried = carriedFiles(files)
     if (carried.length > ROOM_MAX_ATTACHMENTS) {
       toast.error(roomRefusal(carried.length).message)
@@ -254,8 +269,12 @@ export function SharePage() {
         ),
       )
       await sendRoomMessage(config, id, randomId(), shareText(share, note), manifests)
+      // The reader can shut the sheet while the note is out, and a screen that has gone neither takes
+      // them into the room nor says a word to nobody.
+      if (leaving.current) return
       handed(id, bot.id)
     } catch (error) {
+      if (leaving.current) return
       couldNot(error)
     }
   }
@@ -394,9 +413,10 @@ export function SharePage() {
           </section>
 
           <section className="flex flex-col gap-2">
-            <SectionLabel>Recent</SectionLabel>
+            {/* A query replaces the week with what it matches, so the heading says which list this is. */}
+            <SectionLabel>{searching ? "Matches" : "Recent"}</SectionLabel>
             <div
-              aria-label="Recent"
+              aria-label={searching ? "Matches" : "Recent"}
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
               {option({
@@ -429,7 +449,7 @@ export function SharePage() {
                 </button>
               )}
             </div>
-            {searching && shown?.length === 0 && (
+            {searching && answered && shown?.length === 0 && (
               <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>
             )}
           </section>
@@ -444,7 +464,7 @@ export function SharePage() {
           data-slot="share-search"
           className="sticky bottom-0 z-10 mt-auto shrink-0 bg-popover px-6 pt-4 pb-3"
         >
-          <SearchField value={query} onChange={setQuery} label="Search chats and sessions" />
+          <SearchField value={query} onChange={setQuery} label="Search chats, sessions and rooms" />
         </div>
       </PopupContent>
     </Popup>

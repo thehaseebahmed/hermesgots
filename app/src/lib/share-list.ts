@@ -126,19 +126,29 @@ export function recentTargets(
 }
 
 /**
+ * Whether a query holds anything the matcher can search by. `filterByFuzzy` reads a query's words as
+ * letters and digits alone, so a query of punctuation — or of a script it keeps no letters of — has
+ * no words at all, and the matcher answers it with every row it was handed. That is a bot's whole
+ * history in the window's place, and no further keystroke can narrow it, so the field answers
+ * nothing for it instead. The alphabet is the matcher's own (`plain` in `fuzzy.ts`).
+ */
+const searchable = (query: string) => /[a-z0-9]/i.test(query)
+
+/**
  * The rows a query keeps: every one of the bot's whose title answers it through the matcher the app's
  * lists already use. Every match is drawn, in full: the seven days and the twenty-five are the window
  * the field leads out of, not its edge, since a search that refused a row the sheet had just shown
  * would be a trap.
  *
- * An empty query answers nothing: the screen asks this only while there is something to search by,
- * and a blank field draws the window again.
+ * A query with nothing to search by answers nothing: the screen asks this only while there is
+ * something to search by, a blank field draws the window again, and a field of punctuation is the
+ * whole history where the window was — so it is no query either.
  */
 export function searchTargets(
   rows: readonly ShareCandidate[],
   query: string,
   rooms: readonly ShareRoom[] = [],
 ): ShareTarget[] {
-  if (!query.trim()) return []
+  if (!searchable(query)) return []
   return filterByFuzzy(orderedTargets(rows, rooms), query, (row) => [row.title])
 }

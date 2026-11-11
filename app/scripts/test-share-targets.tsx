@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { db } from "@/lib/db"
@@ -25,6 +26,8 @@ import {
   Path,
   path,
   seedChats,
+  settle,
+  shutSheet,
   text,
   type,
   until,
@@ -50,18 +53,29 @@ const screen = () => (
  * which is a control rather than a place to send.
  */
 const rows = () =>
-  [...document.querySelectorAll('[aria-label="Recent"] button')].filter((one) => {
+  [...document.querySelectorAll(`${LIST} button`)].filter((one) => {
     const words = wordsOf(one)
     return words !== "New chat" && !words.startsWith("Show more")
   })
 
 const row = (title: string) => rows().find((one) => wordsOf(one).includes(title)) ?? null
 
+/**
+ * The list the sheet's rows are in. It is the week's while no query is up and a match list while one
+ * is, and it says which in its own name, so a test follows it by either.
+ */
+const LIST = ':is([aria-label="Recent"], [aria-label="Matches"])'
+
+/** The heading over that list: what the sheet calls the rows under it. */
+const heading = () => wordsOf(find(LIST)?.parentElement?.querySelector("h2") ?? null)
+
 const shares = () => receiveShare(toShare({ text: "Read this later" }))
 
 const foot = () => document.querySelector('[data-slot="share-search"]')
+// The field's own name is the sheet's to choose, so a case reaches it by the start of that name and
+// the search test says what the name must be.
 const searchField = () =>
-  document.querySelector('input[aria-label="Search chats and sessions"]') as HTMLInputElement | null
+  document.querySelector('input[aria-label^="Search chats"]') as HTMLInputElement | null
 
 /**
  * Two bots of one Host, so a room's roster resolves to faces and to a seat: a profile name is unique
@@ -157,11 +171,81 @@ const notes = (count: number) =>
     (_, index) => new File(["bytes"], `note-${index}.txt`, { type: "text/plain", lastModified: 5 }),
   )
 
+/**
+ * A latch over one read: `shut()` makes the next read through it wait, `open()` lets every waiting
+ * read land, and `wait()` is asked at call time, so a read issued after the latch shut waits too.
+ */
+function latch() {
+  let release: () => void = () => {}
+  // Open until a case shuts it: a latch that started shut would hold the reads a case needs to begin.
+  let held: Promise<void> | undefined
+  return {
+    wait: () => held ?? Promise.resolve(),
+    open: () => {
+      release()
+      held = undefined
+    },
+    shut: () => {
+      held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    },
+  }
+}
+
+/**
+ * Holds the sheet's two live reads apart, so a case can stand in the beat between a pick and the rows
+ * that belong to it: the bot's chats (which `conversationsOf` reads through
+ * `where("[profileId+updatedAt]").between(...)`) and the device's room list (`useRoomNeeds` filters
+ * every conversation it holds). The app's own code runs either way; only when each read is answered
+ * is the test's.
+ */
+function holdReads() {
+  const chats = latch()
+  const rooms = latch()
+  const table = db.conversations as unknown as Record<string, unknown>
+  const own = (key: string) => {
+    const saved = table[key]
+    const had = Object.prototype.hasOwnProperty.call(table, key)
+    return () => (had ? (table[key] = saved) : delete table[key])
+  }
+  const restoreWhere = own("where")
+  const restoreFilter = own("filter")
+  const where = (db.conversations.where as (...args: unknown[]) => unknown).bind(db.conversations)
+  const filter = (db.conversations.filter as (...args: unknown[]) => unknown).bind(db.conversations)
+  table.where = (...args: unknown[]) => {
+    const clause = where(...args) as Record<string, unknown>
+    const between = (clause.between as (...all: unknown[]) => unknown).bind(clause)
+    clause.between = (...bounds: unknown[]) => {
+      const collection = between(...bounds) as Record<string, unknown>
+      const toArray = (collection.toArray as () => Promise<unknown>).bind(collection)
+      collection.toArray = () => chats.wait().then(() => toArray())
+      return collection
+    }
+    return clause
+  }
+  table.filter = (...args: unknown[]) => {
+    const collection = filter(...args) as Record<string, unknown>
+    const toArray = (collection.toArray as () => Promise<unknown>).bind(collection)
+    collection.toArray = () => rooms.wait().then(() => toArray())
+    return collection
+  }
+  return {
+    chats,
+    rooms,
+    restore() {
+      restoreWhere()
+      restoreFilter()
+    },
+  }
+}
+
 test("a room the picked bot's roster seats is a row among the chats, and switching bots changes them", async () => {
   const now = Date.now()
   await seedChats(
     [
-      { id: "c-chat", title: "Trip to Lisbon", at: now - HOUR },
+      { id: "c-chat", title: "Trip to Lisbon", at: now - HOUR, profileId: "bot-1" },
+      { id: "c-hex", title: "Hex's own log", at: now - 90 * 60_000, profileId: "bot-2" },
       { id: "room-both", title: "Weekly sync", at: now - 2 * HOUR },
       { id: "room-coder", title: "Coder standup", at: now - 3 * HOUR },
       { id: "room-orphan", title: "Orphan room", at: now - 4 * HOUR },
@@ -202,8 +286,52 @@ test("a room the picked bot's roster seats is a row among the chats, and switchi
       await until(async () => row("Coder standup") !== null, "the second bot's rooms")
       assert.ok(row("Weekly sync"), "the room both rosters seat is a row of each bot's sheet")
       assert.equal(row("Orphan room"), null, "and the room no bot answers for is still nobody's")
+      assert.equal(
+        row("Trip to Lisbon"),
+        null,
+        "the bot switched away from keeps no row on the sheet that is drawn now",
+      )
+      assert.ok(row("Hex's own log"), "while the bot picked draws its own chat")
     })
   } finally {
+    clearShare()
+  }
+})
+
+test("a pick draws nothing of the bot it left, even before the next bot's chats are read", async () => {
+  const now = Date.now()
+  await seedChats(
+    [
+      { id: "c-cubby", title: "Cubby's chat", at: now - HOUR, profileId: "bot-1" },
+      { id: "c-hex", title: "Hex's chat", at: now - 2 * HOUR, profileId: "bot-2" },
+      { id: "room-hex", title: "Hex's room", at: now - 3 * HOUR, profileId: "bot-2" },
+    ],
+    { bots: roomBots("share-switch"), active: "bot-1" },
+  )
+  await db.conversations.update("room-hex", { room: roomRecord("room-hex", ["coder"]) })
+  const held = holdReads()
+  try {
+    shares()
+    await mount(screen(), async () => {
+      await until(async () => row("Cubby's chat") !== null, "the first bot's chat")
+
+      // The pick lands, and the second bot's chats are still being read: the sheet must not answer
+      // with the first bot's rows beside the second bot's rooms, where a tap would send into one bot's
+      // chat under the other bot's name.
+      held.chats.shut()
+      await click(botCard("Hex"))
+      await settle()
+      assert.equal(row("Cubby's chat"), null, "the first bot's chat is gone the moment it is left")
+      assert.equal(row("Hex's chat"), null, "and the second's is not drawn before it is read")
+      assert.equal(row("Hex's room"), null, "no row at all, its own rooms included")
+
+      held.chats.open()
+      await until(async () => row("Hex's chat") !== null, "the second bot's chat")
+      assert.ok(row("Hex's room"), "the second bot's rows arrive together")
+      assert.equal(row("Cubby's chat"), null, "and the first bot's stay behind")
+    })
+  } finally {
+    held.restore()
     clearShare()
   }
 })
@@ -237,9 +365,9 @@ test("tapping a room uploads each file to its store and sends the note as one me
       assert.equal(minted.get("name"), "note-0.txt", "under its own name")
       assert.ok(minted.get("upload_id"), "and an upload id the sheet minted")
 
-      const sent = JSON.parse(
-        asked.find((one) => one.path.endsWith(`/rooms/${room}/send`))!.body ?? "{}",
-      ) as Record<string, unknown>
+      const sends = asked.filter((one) => one.path.endsWith(`/rooms/${room}/send`))
+      assert.equal(sends.length, 1, "one tap makes one send, and never a second")
+      const sent = JSON.parse(sends[0].body ?? "{}") as Record<string, unknown>
       assert.ok(sent.event_id, "one event id, minted here")
       assert.equal(
         sent.text,
@@ -295,6 +423,9 @@ test("a room that refuses the send says the Host's words and leaves the sheet op
         "one send was tried, and its refusal is not retried",
       )
       assert.ok(row("Weekly sync"), "the sheet stays open, as a chat's failed send leaves it")
+      const again = row("Weekly sync") as HTMLButtonElement | null
+      assert.ok(again, "with the room still on it")
+      assert.equal(again.disabled, false, "and its row offered again, ready for another tap")
       assert.equal(path(), "/share", "on its own address")
     })
   })
@@ -334,6 +465,140 @@ test("a share of nine files refuses the room in words naming eight, and sends no
       await until(async () => path() === "/c/c-chat", "the chat the share went into")
     })
   })
+})
+
+test('a query naming a room is not answered "nothing matches" before the room list is read', async () => {
+  const now = Date.now()
+  await seedChats(
+    [
+      { id: "c-chat", title: "Trip to Lisbon", at: now - HOUR },
+      { id: "room-weekly", title: "Weekly sync", at: now - 2 * HOUR },
+    ],
+    { bots: roomBots("share-rooms-out") },
+  )
+  await db.conversations.update("room-weekly", { room: roomRecord("room-weekly", ["default"]) })
+  const held = holdReads()
+  held.rooms.shut()
+  try {
+    shares()
+    await mount(screen(), async () => {
+      await until(async () => rows().length === 1, "the chat the sheet has read")
+      await type(searchField(), "Week")
+      assert.equal(rows().length, 0, "the room the query names is not drawn while its read is out")
+      assert.doesNotMatch(
+        text(),
+        /Nothing matches\./,
+        "and the sheet does not answer with nothing matches a row it has not read yet",
+      )
+
+      held.rooms.open()
+      await until(async () => row("Weekly sync") !== null, "the room the query names")
+      assert.doesNotMatch(
+        text(),
+        /Nothing matches\./,
+        "nor once the room has answered and is drawn",
+      )
+    })
+  } finally {
+    held.restore()
+    clearShare()
+  }
+})
+
+test("a tap on a room the sheet no longer offers says so, and posts nothing", async () => {
+  const now = Date.now()
+  const room = "room-weekly"
+  await seedChats(
+    [
+      { id: "c-chat", title: "Trip to Lisbon", at: now - HOUR },
+      { id: room, title: "Weekly sync", at: now - 2 * HOUR },
+    ],
+    { bots: roomBots("share-room-gone") },
+  )
+  await db.conversations.update(room, { room: roomRecord(room, ["default"]) })
+  const asked = roomHost("share-room-gone", room)
+  await withToasts(async (said) => {
+    receiveShare(toShare({ text: "Read this later" }))
+    await mount(screen(), async () => {
+      await until(async () => row("Weekly sync") !== null, "the room's row")
+      const stale = row("Weekly sync")
+      assert.ok(stale, "the room's row is on screen")
+
+      // The record goes while the reader's finger is already on the row: the tap lands before the list
+      // is redrawn without it, and the sheet must not send the note into a room it no longer offers.
+      await act(async () => {
+        await db.conversations.delete(room)
+        stale.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+      })
+      await until(async () => said.length > 0, "the sheet's word about the room")
+      assert.deepEqual(said, ["That room isn't on the sheet any more."], "it says the room is gone")
+      assert.equal(
+        asked.filter((one) => one.method === "POST").length,
+        0,
+        "and posts nothing there, neither the files nor the note",
+      )
+      assert.equal(path(), "/share", "leaving the reader where they are")
+    })
+  })
+})
+
+test("a sheet the reader shuts mid-send sends nothing on, and says nothing to nobody", async () => {
+  const now = Date.now()
+  const room = "room-weekly"
+  await seedChats(
+    [
+      { id: "c-chat", title: "Trip to Lisbon", at: now - HOUR },
+      { id: room, title: "Weekly sync", at: now - 2 * HOUR },
+    ],
+    { bots: roomBots("share-room-away") },
+  )
+  await db.conversations.update(room, { room: roomRecord(room, ["default"]) })
+  // A Host whose send is still out when the reader shuts the sheet, and answers after they have gone:
+  // `answer(true)` lands the note, `answer(false)` refuses it.
+  let answer: (lands: boolean) => void = () => {}
+  const asked: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    asked.push(url.pathname)
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["rooms", "room_media"] })
+    if (url.pathname.endsWith(`/rooms/${room}/send`))
+      return new Promise<Response>((resolve, reject) => {
+        answer = (lands) =>
+          lands
+            ? resolve(
+                json({
+                  object: "gots.room.sent",
+                  event: { seq: 1, eventId: "e1", kind: "message.user", text: "" },
+                }),
+              )
+            : reject(new Error("The room's Host didn't answer."))
+      })
+    return json({}, 404)
+  }) as typeof fetch
+
+  /**
+   * A reader who opens the sheet, taps the room, and shuts the sheet while the note is still out —
+   * then the Host's answer, which lands (`lands`) or is a refusal, to a screen that has gone.
+   */
+  const tapAndLeave = async (lands: boolean, said: string[]) => {
+    receiveShare(toShare({ text: "Read this later" }))
+    await mount(screen(), async () => {
+      await until(async () => row("Weekly sync") !== null, "the room's row")
+      await click(row("Weekly sync"))
+      await until(async () => asked.some((one) => one.endsWith("/send")), "the note on its way")
+      await shutSheet(() => find('[role="dialog"]'))
+      assert.equal(path(), "/", "the sheet's close leaves the reader on the home screen")
+
+      await act(async () => answer(lands))
+      await settle()
+      assert.equal(path(), "/", "and an answer that lands later does not take them into the room")
+      assert.deepEqual(said, [], "nor does a word about it land on the home screen")
+    })
+  }
+
+  await withToasts(async (said) => tapAndLeave(true, said))
+  await withToasts(async (said) => tapAndLeave(false, said))
 })
 
 test("the sheet offers a chat and a code session of the last week, each in its own mark", async () => {
@@ -380,12 +645,12 @@ test("the sheet draws ten rows, and Show more reveals the rest of the week", asy
     await mount(screen(), async () => {
       await until(async () => rows().length >= 10, "the sheet's ten rows")
       assert.equal(rows().length, 10, "ten rows, no more")
-      const more = findText('[aria-label="Recent"] button', "Show more")
+      const more = findText(`${LIST} button`, "Show more")
       assert.ok(more, "Show more is offered while the week holds more than ten")
       await click(more)
       await until(async () => rows().length > 10, "the rest of the week")
       assert.equal(rows().length, 25, "the rest of the window, and never past its twenty-five")
-      absentText('[aria-label="Recent"] button', "Show more")
+      absentText(`${LIST} button`, "Show more")
     })
   } finally {
     clearShare()
@@ -407,7 +672,7 @@ test("a week of ten rows draws no Show more", async () => {
     await mount(screen(), async () => {
       await until(async () => rows().length >= 10, "the sheet's ten rows")
       assert.equal(rows().length, 10, "every row of the week is drawn")
-      absentText('[aria-label="Recent"] button', "Show more")
+      absentText(`${LIST} button`, "Show more")
     })
   } finally {
     clearShare()
@@ -433,8 +698,14 @@ test("a search at the foot finds the chat the week left out, and clearing it put
       await until(async () => rows().length === 10, "the sheet's ten rows")
       const field = searchField()
       assert.ok(field, "the field is on the sheet")
+      assert.equal(
+        field.getAttribute("aria-label"),
+        "Search chats, sessions and rooms",
+        "and its name is everything it searches, rooms included",
+      )
       assert.ok(foot()?.contains(field), "in the box the sheet pins to its foot")
-      const list = find('[aria-label="Recent"]')
+      assert.equal(heading(), "Recent", "the list is the week's while no query is up")
+      const list = find(LIST)
       assert.ok(list, "the list it sits below")
       assert.ok(
         list.compareDocumentPosition(foot()!) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -448,12 +719,13 @@ test("a search at the foot finds the chat the week left out, and clearing it put
         /Last month's plans/,
         "a chat from last month, which the window leaves out",
       )
-      absentText('[aria-label="Recent"] button', "Show more")
+      assert.equal(heading(), "Matches", "the heading says the list is a match list, not the week")
+      absentText(`${LIST} button`, "Show more")
 
       // Every match, not the ten a window draws first: the week's twelve all say Row.
       await type(searchField(), "row")
       await until(async () => rows().length === 12, "every match")
-      absentText('[aria-label="Recent"] button', "Show more")
+      absentText(`${LIST} button`, "Show more")
 
       await type(searchField(), "qqqzzz")
       await until(async () => rows().length === 0, "no rows at all")
@@ -461,8 +733,9 @@ test("a search at the foot finds the chat the week left out, and clearing it put
 
       await type(searchField(), "")
       await until(async () => rows().length === 10, "the week back")
+      assert.equal(heading(), "Recent", "and the heading is the week's again")
       assert.ok(
-        findText('[aria-label="Recent"] button', "Show more"),
+        findText(`${LIST} button`, "Show more"),
         "with the window's ten rows and Show more behind them",
       )
     })

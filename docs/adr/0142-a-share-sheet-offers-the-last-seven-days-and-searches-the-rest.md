@@ -31,9 +31,10 @@ lists nowhere (ADR 0113), and a session the reader has thrown away is not a plac
 **The search at the foot reaches everything the bot is in, not only the rows past the window.** A window
 with no way out would be a trap: the chat the reader shared into last month is exactly what a share
 sheet is for. So the field matches titles through the matcher the app's lists already use
-(`filterByFuzzy`), and a query replaces the window with every match, in full, newest first, saying
-"Nothing matches." where nothing does. A search that stopped at the twenty-five would refuse rows the
-sheet had just shown, which no reader would understand.
+(`filterByFuzzy`), and a query replaces the window with every match, in full — in the matcher's own
+order, its best matches first and the newest first inside a rank, since a search narrows a list
+rather than re-ordering one — saying "Nothing matches." where nothing does. A search that stopped at
+the twenty-five would refuse rows the sheet had just shown, which no reader would understand.
 
 **A room is a row of the same list, and is sent through the room's own store.** The rooms whose roster
 seats the picked bot join the window and the search, wearing their members' faces where a chat wears an
@@ -63,8 +64,15 @@ sent.
 ## Consequences
 
 - The sheet reads every conversation of the picked bot off `[profileId+updatedAt]` and lets the rule
-  window it, rather than asking Dexie for a window the rule would have to agree with a second time. A
-  conversation record is cheap; the rows it draws are ten.
+  window it, rather than asking Dexie for a window the rule would have to agree with a second time —
+  and `useRoomNeeds`, which places the rooms beside them, scans every conversation the device holds.
+  Both are accepted as they stand: a conversation record is cheap, neither read reaches the network,
+  and the rows the sheet draws are ten, so opening it costs a bot's history and the room list rather
+  than the week.
+- A room send mints its event id per tap, where the room's own composer reuses the id a failed send
+  minted. So a tap whose answer was lost, made again, can post the note twice. Accepted: the sheet
+  holds no send across a failure to reuse an id from, and a tap is a deliberate act made with the
+  room and the note in front of the reader.
 - A window holding ten rows or fewer draws no Show more at all, and a bot whose week is one chat draws
   one row.
 - A chat older than the week is not a row of the sheet. The search is how it is found, so the field is
