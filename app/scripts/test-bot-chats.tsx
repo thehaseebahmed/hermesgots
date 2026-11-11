@@ -55,6 +55,10 @@ interface Seed {
   waits?: "clarify" | "approval"
   /** Another message under the newest one, so a case can prove the row reads the tail alone. */
   earlier?: string
+  /** The reader's own message, newest of all: a row still says what the bot said above it. */
+  mine?: string
+  /** The newest reply is still arriving, so the row has a run in flight to draw. */
+  streaming?: boolean
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
 }
@@ -98,21 +102,32 @@ async function seed(
   await db.messages.bulkPut(
     chats.flatMap((one) => {
       const rows = one.earlier ? [message(one.id, one.earlier, one.at)] : []
-      if (!one.said) return rows
-      const at = one.saidAt ?? one.at
-      const waits =
-        one.waits === "clarify"
-          ? {
-              clarify: {
-                runId: "run-1",
-                clarifyId: "ask-1",
-                questions: [{ id: "q1", question: one.said }],
-              },
-            }
-          : one.waits === "approval"
-            ? { approval: { runId: "run-1", command: one.said, choices: [] } }
-            : {}
-      return [...rows, message(one.id, one.said, at, waits)]
+      const said = !one.said
+        ? rows
+        : (() => {
+            const at = one.saidAt ?? one.at
+            const waits =
+              one.waits === "clarify"
+                ? {
+                    clarify: {
+                      runId: "run-1",
+                      clarifyId: "ask-1",
+                      questions: [{ id: "q1", question: one.said }],
+                    },
+                  }
+                : one.waits === "approval"
+                  ? { approval: { runId: "run-1", command: one.said, choices: [] } }
+                  : {}
+            return [
+              ...rows,
+              message(one.id, one.said, at, {
+                ...waits,
+                ...(one.streaming ? { status: "streaming" } : {}),
+              }),
+            ]
+          })()
+      // The reader's own message is the newest row of all: a row that read it would say their words.
+      return one.mine ? [...said, message(one.id, one.mine, one.at + 1000, { role: "user" })] : said
     }),
   )
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -132,7 +147,10 @@ const rowIds = () =>
 const rowOf = (id: string) => find(`ul a[href="/c/${id}"]`)
 const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]"))
 /** The picture a row wears where its title starts: its own icon, never the bot's face. */
-const iconOf = (id: string) => rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle")
+const iconOf = (id: string) =>
+  rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle, svg.lucide-circle-alert")
+/** The disc a row's icon stands in, which is where a list picks its tone. */
+const discOf = (id: string) => rowOf(id)?.querySelector('[data-slot="row-mark"] span.rounded-full')
 
 const screen = (entry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -185,7 +203,66 @@ test("a row says what was last said, when, and nothing of the rows above it", as
   })
 })
 
-test("a reply that waits on the reader marks its row, and keeps its line", async () => {
+test("a row says what the bot last said, and the reader's own words only while it has not answered", async () => {
+  const at = Date.now() - 60_000
+  await seed([
+    {
+      id: "asked",
+      title: "Trip",
+      at,
+      said: "Booked the flights",
+      saidAt: at - 5_000,
+      mine: "and the hotel?",
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(rowOf("asked")), "the chat's row")
+    const words = wordsOf(rowOf("asked"))
+    assert.ok(words.includes("Booked the flights"), "the row says the last thing received")
+    assert.ok(!words.includes("and the hotel?"), "not the reader's message under it")
+  })
+  // A chat the bot has never answered has only the reader's words to say.
+  await seed([{ id: "only", title: "New chat", at, mine: "are you there?" }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(rowOf("only")), "the chat's row")
+    assert.ok(
+      wordsOf(rowOf("only")).includes("are you there?"),
+      "and says them while nothing came back",
+    )
+  })
+})
+
+test("a chat's icon is grey at rest, a spinner while a run is in flight, and yellow only on a wait", async () => {
+  await seed([
+    { id: "rest", title: "At rest", at: 300, said: "All done." },
+    { id: "busy", title: "Working", at: 200, said: "Writing the answer…", streaming: true },
+    { id: "waiting", title: "Waiting", at: 100, said: "Shall I go on?", waits: "clarify" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 3, "the bot's chats")
+    // Grey is the app's colour for nothing to say: a bullet has no business being green here.
+    assert.ok(
+      rowOf("rest")?.querySelector("svg.lucide-message-circle"),
+      "a chat at rest wears its own icon",
+    )
+    assert.ok(discOf("rest")?.className.includes("bg-muted"), "on the muted disc")
+    assert.ok(!discOf("rest")?.className.includes("bg-primary"), "and never the green one")
+    // A run in flight is the one row that shows it is working.
+    assert.ok(
+      rowOf("busy")?.querySelector('[data-slot="spinner"]'),
+      "a reply still arriving draws the spinner",
+    )
+    assert.ok(discOf("busy")?.className.includes("bg-muted"), "in the same grey as a row at rest")
+    // Yellow is spent on what wants the reader, and on nothing else.
+    assert.ok(
+      rowOf("waiting")?.querySelector("svg.lucide-circle-alert"),
+      "the wait takes the alert icon",
+    )
+    assert.ok(discOf("waiting")?.className.includes("bg-warning/15"), "on the warning disc")
+  })
+})
+
+test("a waiting row is drawn the way Code draws a waiting session", async () => {
   await seed([
     { id: "asking", title: "Needs me", at: 200, said: "Shall I book it?", waits: "clarify" },
     { id: "approving", title: "Approval", at: 150, said: "Run the command", waits: "approval" },
@@ -193,17 +270,34 @@ test("a reply that waits on the reader marks its row, and keeps its line", async
   ])
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 3, "the bot's chats")
-    assert.ok(rowOf("asking")?.querySelector("[data-waiting]"), "a question marks its row")
-    assert.ok(rowOf("approving")?.querySelector("[data-waiting]"), "and so does an approval")
-    assert.equal(
-      rowOf("quiet")?.querySelector("[data-waiting]"),
-      null,
-      "a finished chat is not marked",
+    // The alert icon and the warning tone are Code's own two marks of a session that waits.
+    assert.ok(
+      rowOf("asking")?.querySelector("svg.lucide-circle-alert"),
+      "a question wears the alert icon",
     )
     assert.ok(
-      wordsOf(rowOf("asking")).includes("Shall I book it?"),
-      "the mark stands beside the line rather than in its place",
+      rowOf("approving")?.querySelector("svg.lucide-circle-alert"),
+      "and so does an approval",
     )
+    assert.ok(discOf("asking")?.className.includes("text-warning"), "in the warning tone")
+    assert.equal(
+      rowOf("asking")?.querySelector("[data-waiting]"),
+      null,
+      "and no badge beside the title says it twice",
+    )
+    assert.ok(
+      wordsOf(rowOf("asking")).includes("Awaiting your answer"),
+      "the reason stands where the line stands, in Code's words",
+    )
+    assert.ok(
+      wordsOf(rowOf("approving")).includes("Approve Run the command"),
+      "and an approval names the command it wants to run",
+    )
+    assert.ok(
+      rowOf("quiet")?.querySelector("svg.lucide-message-circle"),
+      "a chat at rest keeps the chat icon",
+    )
+    assert.ok(!discOf("quiet")?.className.includes("text-warning"), "and no warning tone")
   })
 })
 
@@ -286,7 +380,11 @@ test("the list holds every chat the bot has, so a pin and a chat past the bound 
   await seed(many)
   await mount(screen(), async () => {
     await until(async () => rowIds().length === many.length, "every chat the bot has")
-    assert.equal(rowIds()[0], "pinned-old", "the pin lifts it above every chat newer than the bound")
+    assert.equal(
+      rowIds()[0],
+      "pinned-old",
+      "the pin lifts it above every chat newer than the bound",
+    )
     assert.ok(
       wordsOf(rowOf("pinned-old")).includes("Still here"),
       "and a pinned chat keeps the line its own tail gives it",
@@ -382,7 +480,8 @@ test("the search narrows the rows to the chats whose title or line it finds", as
       "on the bar the list's floating controls stand on",
     )
     assert.ok(
-      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
         0,
       "with the rows above it",
     )

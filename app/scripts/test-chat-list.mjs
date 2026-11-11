@@ -22,12 +22,48 @@ const chat = (id, at, patch = {}) => ({
 /** The newest message this device holds for a chat. */
 const said = (text, at, patch = {}) => ({ content: text, createdAt: at, ...patch })
 
-test("a row's line and its time are its chat's newest message", () => {
+test("a row's line is the bot's last word, and its time the chat's newest message", () => {
   const row = chatRowOf(chat("a", 100), said("the last thing said", 240))
   assert.equal(row.line, "the last thing said", "the line is the newest words")
   assert.equal(row.at, 240, "and its time is that message's, not the record's")
   assert.equal(row.title, "Chat a")
   assert.equal(row.id, "a")
+})
+
+test("a row says what the reader was told, not what they typed under it", () => {
+  // The reader spoke last: the row's place is when the chat moved, its words are the bot's.
+  const mine = said("now do the next thing please", 300, { role: "user" })
+  const told = said("The build is green.", 240)
+  const row = chatRowOf(chat("a", 100), mine, told)
+  assert.equal(row.line, "The build is green.", "the line is the last thing received")
+  assert.equal(row.at, 300, "and the row is ordered by the newest message of any role")
+})
+
+test("a chat the bot has not answered yet says the reader's own words", () => {
+  // Nothing has come back, so the reader's message is all this chat has said.
+  const mine = said("are you there?", 300, { role: "user" })
+  assert.equal(chatRowOf(chat("a", 100), mine, undefined).line, "are you there?")
+  assert.equal(
+    chatRowOf(chat("a", 100), mine).line,
+    "are you there?",
+    "a row read in one go is the same",
+  )
+})
+
+test("a row names the session its chat answers at, and whether a reply is still arriving", () => {
+  // The list asks the host about this session, since a run started elsewhere shows in no message here.
+  const row = chatRowOf(chat("a", 100, { hermesSessionId: "sess-1" }), said("Writing…", 240))
+  assert.equal(row.session, "sess-1")
+  assert.equal(row.streaming, undefined, "a finished reply is not a run in flight")
+  assert.equal(
+    chatRowOf(chat("a", 100, { hermesSessionId: "sess-1" }), said("Writ", 240, { status: "streaming" }))
+      .streaming,
+    true,
+    "a reply still streaming is",
+  )
+  const routine = chatRowOf(chat("r", 100, { routine: true, line: "A delivery" }))
+  assert.equal(routine.session, undefined, "a routine's row asks the host nothing about a chat")
+  assert.equal(routine.streaming, undefined)
 })
 
 test("a chat nothing has been said in keeps its own clock and draws no line", () => {
@@ -36,21 +72,47 @@ test("a chat nothing has been said in keeps its own clock and draws no line", ()
   assert.equal(row.at, 100, "so the row is placed by when the chat was made")
 })
 
-test("a reply that waits on the reader marks its row", () => {
+test("a reply that waits on the reader says why, in Code's words", () => {
   const asking = said("Shall I?", 240, {
     clarify: { runId: "r", clarifyId: "c", questions: [{ id: "q", question: "Shall I?" }] },
   })
-  assert.equal(chatRowOf(chat("a", 100), asking).waiting, true, "an unanswered question waits")
+  assert.equal(chatRowOf(chat("a", 100), asking).needs, "Awaiting your answer", "a question waits")
   const answered = {
     ...asking,
     clarify: { ...asking.clarify, resolved: { answers: { q: "Yes" }, outcome: "submitted" } },
   }
-  assert.equal(chatRowOf(chat("a", 100), answered).waiting, false, "an answered one does not")
+  assert.equal(chatRowOf(chat("a", 100), answered).needs, undefined, "an answered one does not")
   const approved = said("Run it?", 240, {
-    approval: { runId: "r", choices: [{ id: "once", label: "Allow once" }] },
+    approval: {
+      runId: "r",
+      command: "rm -rf build",
+      choices: [{ id: "once", label: "Allow once" }],
+    },
   })
-  assert.equal(chatRowOf(chat("a", 100), approved).waiting, true, "so does an approval")
-  assert.equal(chatRowOf(chat("a", 100)).waiting, false, "a chat with nothing said is not waiting")
+  assert.equal(
+    chatRowOf(chat("a", 100), approved).needs,
+    "Approve rm -rf build",
+    "so does an approval",
+  )
+  assert.equal(
+    chatRowOf(chat("a", 100)).needs,
+    undefined,
+    "a chat with nothing said is not waiting",
+  )
+})
+
+test("two of the reader's questions are counted, not named", () => {
+  const asking = said("Two things:", 240, {
+    clarify: {
+      runId: "r",
+      clarifyId: "c",
+      questions: [
+        { id: "a", question: "Now?" },
+        { id: "b", question: "Or later?" },
+      ],
+    },
+  })
+  assert.equal(chatRowOf(chat("a", 100), asking).needs, "2 questions to answer")
 })
 
 test("a chat whose newest row is the reader's own still waits on the reply above it", () => {
@@ -59,12 +121,20 @@ test("a chat whose newest row is the reader's own still waits on the reply above
   })
   const mine = said("yes, go on", 300, { role: "user" })
   assert.equal(
-    chatRowOf(chat("a", 100), mine, asking).waiting,
-    true,
+    chatRowOf(chat("a", 100), mine, asking).needs,
+    "Awaiting your answer",
     "typing does not answer the reply that asked",
   )
-  assert.equal(chatRowOf(chat("a", 100), mine).waiting, false, "a row with no reply named asks its newest one")
-  assert.equal(chatRowOf(chat("a", 100), mine, asking).line, "yes, go on", "and the line is still the newest words")
+  assert.equal(
+    chatRowOf(chat("a", 100), mine).needs,
+    undefined,
+    "a row with no reply named asks its newest one",
+  )
+  assert.equal(
+    chatRowOf(chat("a", 100), mine, asking).line,
+    "Shall I?",
+    "and the line is the reply that asked, not the reader's answer to it",
+  )
 })
 
 test("pinned rows come first, and the rest by their last message", () => {

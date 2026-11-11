@@ -15,12 +15,14 @@ import {
   openDevice,
   sendFrom,
   showsEverything,
+  turn,
   wait,
   type Device,
   type Host,
   withDevice,
 } from "./chat-next-devices.tsx"
 import { WAITING_ON_ANSWER } from "@/lib/format"
+import { storeFor } from "@/chat-next/store"
 
 const TEA: Ask = {
   question: "Which do you prefer?",
@@ -209,6 +211,72 @@ test.describe("a run already waiting when the chat opens", () => {
       )
       run.finish("It was denied.")
       await showsEverything(phone, host, "the turn, the denied call counted")
+    })
+  })
+
+  test("a wait is read a few times at most, however long it stands", async () => {
+    const host = setUp("q-quiet")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    await withDevice(openDevice(host), async (phone) => {
+      await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question's form")
+      const read = host.asked.transcript
+      await wait(1_000)
+      const asked = host.asked.transcript - read
+      assert.ok(asked >= 1, "the wait is read for its rows")
+      assert.ok(asked <= 4, `and a few times over while they are owed (${asked} reads)`)
+      assert.deepEqual(questionOf(phone), asking, "and the form stands")
+    })
+  })
+
+  /**
+   * A reply this device watched that stops on a question still says what it cost, under the reply:
+   * the read that lands the waiting turn's rows must not take the measurement with it.
+   */
+  test("a reply that asks a question keeps what it cost", async () => {
+    const host = setUp("q-cost")
+    await withDevice(openDevice(host), async (phone) => {
+      const run = await sendFrom(phone, host, "how much room is /var/log taking?")
+      run.tool("terminal", "du -sh /var/log", '{"exit_code": 0}')
+      run.ask(TEA)
+      await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question's form")
+      await phone.choose("tea")
+      run.finish("Tea it is.")
+      await showsEverything(phone, host, "the turn, with the question and its answer")
+      const store = storeFor(phone.database, host.session)
+      await store.loaded()
+      assert.equal(
+        Object.keys(store.get().stats ?? {}).length,
+        1,
+        "the reply's cost is kept for the row that opened the turn",
+      )
+    })
+  })
+
+  /** The link fails the read the open makes, so the turn can only arrive on a later one. */
+  test("a read that failed at open still lands the turn that asked", async () => {
+    const host = setUp("q-stale")
+    const database = await withDevice(openDevice(host), async (before) => {
+      await turn(
+        before,
+        host,
+        "how much room is /var/log taking?",
+        "Here's where the space is going.",
+        6,
+      )
+      await showsEverything(before, host, "the first turn, as the device saw it")
+      return before.database
+    })
+
+    const run = host.startElsewhere("ask me which logs count as old")
+    run.tool("terminal", "du -sh /var/log/*", '{"exit_code": 0}')
+    run.ask(TEA)
+
+    const broken = host.fail(0)
+    await withDevice(openDevice(host, { database }), async (phone) => {
+      await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question's form")
+      broken.fix()
+      await showsEverything(phone, host, "the turn that asked, drawn beside the question")
     })
   })
 
