@@ -99,7 +99,6 @@ function answer(known: PluginInfo | undefined, feature: string): PluginFeatureAn
  */
 function useConnectionAnswer(server: PluginServer): {
   held: PluginAnswer | undefined
-  key: string
 } {
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
@@ -109,7 +108,7 @@ function useConnectionAnswer(server: PluginServer): {
     active: Boolean(key),
     onShow: false,
   })
-  return { held, key }
+  return { held }
 }
 
 /**

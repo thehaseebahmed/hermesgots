@@ -11,7 +11,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react"
 
-export function useReadAttempt() {
+/**
+ * `readFor` is what the read is about — a server's name, a bot's connection, a page's tab. When it
+ * changes, the throw belongs to the thing that is gone: the screen has not asked about the new one
+ * yet, so nothing may offer to retry it.
+ */
+export function useReadAttempt(readFor?: string) {
   const [attempt, setAttempt] = useState(0)
   // Whether the attempt that last landed threw. Sticky until the next attempt lands: a reload is no
   // answer, and the notice stands with its control while one is out.
@@ -51,6 +56,16 @@ export function useReadAttempt() {
       setAttempt(next)
     })
   }, [release])
+
+  // A read about something else starts with nothing to retry, and the tap waiting on the old thing
+  // stops waiting: this effect is registered before the caller's, so it lands before that read runs.
+  const lastReadFor = useRef(readFor)
+  useEffect(() => {
+    if (lastReadFor.current === readFor) return
+    lastReadFor.current = readFor
+    release()
+    setThrew(false)
+  }, [readFor, release])
 
   // The screen closing is a teardown no read of its own can report.
   useEffect(() => () => release(), [release])

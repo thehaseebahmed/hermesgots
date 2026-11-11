@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
+import { useOnline } from "@/lib/online"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { cachedHost, keepHost } from "@/lib/host-cache"
 import {
@@ -351,9 +352,9 @@ function useReadOnOpen<T extends { name: string }>(
   noting: string,
 ) {
   const [value, setValue] = useState<T | undefined>(undefined)
-  const { attempt, landed, retry } = useReadAttempt()
   const config = serverConfig(server)
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
+  const { attempt, landed, retry } = useReadAttempt(`${key}:${name ?? ""}`)
   usePoll(
     (signal) => {
       const bounded = AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
@@ -374,14 +375,18 @@ function useReadOnOpen<T extends { name: string }>(
     [key, name, attempt],
     { active: active && Boolean(key) && Boolean(name), onShow: false },
   )
+  const online = useOnline()
   return {
     value: name !== undefined && value?.name === name ? value : undefined,
     /**
      * The same read, asked again, where it threw — the only way this read comes back empty-handed:
      * a Host that answers without the thing asked for has answered, and asking again changes
-     * nothing.
+     * nothing. Offered only while the device has a network: this read runs on the app's own poll,
+     * which refuses to ask a host while there is none, so a control here would be one that could
+     * not do anything until the sheet was reopened. The tab says the read failed; the retry waits
+     * for a network to ask over.
      */
-    retry,
+    retry: online ? retry : undefined,
   }
 }
 

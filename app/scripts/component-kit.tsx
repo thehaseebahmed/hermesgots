@@ -771,6 +771,7 @@ export const GENERAL: GeneralFixture = {
 export function mediaHost({
   host = "",
   features = ["attachments", "media", "media_url"],
+  version = null,
   fail = [],
   failure = 404,
   refusal,
@@ -784,6 +785,8 @@ export function mediaHost({
   host?: string
   /** What `info` advertises, or "away" for a host that didn't answer at all. */
   features?: string[] | "away"
+  /** The plugin version `info` names: null for a host that runs none, which is the default. */
+  version?: string | null
   /** Path suffixes the media route refuses. */
   fail?: string[]
   /** The status a refused path is answered with. */
@@ -816,7 +819,7 @@ export function mediaHost({
     if (url.pathname.endsWith("/plugins/gots/general"))
       return json({ object: "gots.general", general: general ?? null })
     if (url.pathname.endsWith("/plugins/gots/info"))
-      return features === "away" ? json({}, 503) : json({ name: "gots", features })
+      return features === "away" ? json({}, 503) : json({ name: "gots", features, version })
     if (url.pathname.endsWith("/plugins/gots/media/url")) {
       // The mint: a URL for one path, signed by the host and good for minutes. Nothing is read
       // into the app here — an <img> or a <video> draws from this URL itself.

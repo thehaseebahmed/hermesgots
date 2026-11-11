@@ -969,8 +969,8 @@ function useLlmProviders(profile: Profile) {
   const handed = useRef((location.state as { llm?: LlmProviders } | null)?.llm)
   const [block, setBlock] = useState<LlmProviders | undefined>(handed.current)
   const [problem, setProblem] = useState<string>()
-  const { attempt, landed, release, retry } = useReadAttempt()
   const connection = connectionKey(profile)
+  const { attempt, landed, release, retry } = useReadAttempt(connection)
   // This screen's own address, for the replace that takes the block off the entry it rode in on.
   const here = `${location.pathname}${location.search}`
 

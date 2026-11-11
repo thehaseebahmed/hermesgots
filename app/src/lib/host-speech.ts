@@ -129,7 +129,7 @@ export function useSpeech(profile?: Server | null) {
   // The read's own sentence, where the request was refused, never landed, or timed out — and the
   // only failure the page offers to ask again.
   const [readProblem, setReadProblem] = useState<string | null>(null)
-  const { attempt, landed, release, retry } = useReadAttempt()
+  const { attempt, landed, release, retry } = useReadAttempt(key)
   // Kept with the connection they belong to, as `failed` is: another bot's probe is not this bot's.
   const [measuring, setMeasuring] = useState("")
   const [measureProblem, setMeasureProblem] = useState<{ key: string; message: string }>()
@@ -152,16 +152,19 @@ export function useSpeech(profile?: Server | null) {
   }, [key, attempt])
 
   useEffect(() => {
-    if (!baseUrl || !supported) return
+    if (!baseUrl || !supported) {
+      // Nothing was asked of the host, so nothing is coming: a tap waiting on this attempt stops
+      // waiting rather than leaving its control disabled for good.
+      release(attempt)
+      return
+    }
     let cancelled = false
     void getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((settings) => {
         if (cancelled) return
         setState({ key, settings })
-        // An answer is the host's word, so nothing a read before it said stands over it — including
-        // the sentence a reload was asked to clear.
+        // The read's own sentence goes; a write's refusal is not this read's to clear.
         setFailed("")
-        setProblem(null)
         setReadProblem(null)
         landed(false)
       })

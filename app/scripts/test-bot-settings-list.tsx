@@ -60,11 +60,11 @@ const settings = (entry: string) => (
  * A bot of this test's own: what a connection's plugin answered is remembered for the page, so each
  * test names its own host and no answer leaks into the next.
  */
-async function seed(name: string, features: string[] | "away", patch = {}) {
+async function seed(name: string, features: string[] | "away", patch = {}, host = {}) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name, patch))
-  mediaHost({ features, general: GENERAL })
+  mediaHost({ features, general: GENERAL, ...host })
 }
 
 const rows = () => findAll("[data-bot-page]").map((row) => row.getAttribute("data-bot-page"))
@@ -241,7 +241,7 @@ test("a fourth segment under a page with no sub-screens lands on the page too", 
 })
 
 test("an out-of-date plugin's banner leads the list, in the words the design settled", async () => {
-  await seed("banner-outdated", ALL, { pluginVersion: "0.1.0" })
+  await seed("banner-outdated", ALL, { pluginVersion: "0.1.0" }, { version: "0.1.0" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     const list = find("[data-bot-settings-list]")
     assert.equal(
@@ -254,7 +254,7 @@ test("an out-of-date plugin's banner leads the list, in the words the design set
 })
 
 test("a plugin that isn't out of date has no banner over the list", async () => {
-  await seed("banner-current", ALL, { pluginVersion: MIN_PLUGIN_VERSION })
+  await seed("banner-current", ALL, { pluginVersion: MIN_PLUGIN_VERSION }, { version: MIN_PLUGIN_VERSION })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.doesNotMatch(text(), /out of date/, "nothing says the plugin is old")
     assert.equal(rows().length, 8, "and the list is all there is")

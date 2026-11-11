@@ -18,6 +18,7 @@ import {
   type HermesConfig,
   type UsageWindow,
 } from "@/lib/hermes"
+import { connectionKey } from "@/lib/connection"
 import { modelInfoFor } from "@/lib/model-info"
 import { useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
@@ -38,7 +39,7 @@ function useBotAfk(config: HermesConfig) {
   const [threshold, setThreshold] = useState<number | null>(null)
   const [stale, setStale] = useState(false)
   const [problem, setProblem] = useState<string>()
-  const { attempt, landed, release, retry } = useReadAttempt()
+  const { attempt, landed, release, retry } = useReadAttempt(connectionKey(config))
 
   // A host from before the route answers nothing, which is the reason the tab says it couldn't read
   // it rather than drawing a number nobody wrote.

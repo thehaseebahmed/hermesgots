@@ -337,19 +337,21 @@ function PageRow({
 export function BotSettingsList({
   profile,
   replace,
-  canDelete = false,
   onDeleted,
 }: {
   profile: Profile
   /** Whether the row swaps the pane beside it rather than opening a screen of its own. */
   replace?: boolean
-  /** Whether this device holds a bot to fall back on: an unlinked bot can't be the last one. */
-  canDelete?: boolean
   onDeleted?: () => void
 }) {
   const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
   const [confirming, setConfirming] = useState(false)
   const linked = Boolean(profile.hostId)
+  // The rule is the device's own: an unlinked bot cannot be the last one, since removing it would
+  // leave nothing to fall back on. Counted here rather than handed in, so the page a withheld tab
+  // address falls back to carries the same answer as the page its own address opens.
+  const held = useLiveQuery(() => db.profiles.count(), [])
+  const canDelete = (held ?? 0) > 1
   const navigate = useNavigate()
   // A row the host says it hasn't got is not drawn; a row whose answer hasn't come back yet is, so
   // the card fills in rather than appearing a row at a time.
@@ -592,7 +594,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
   const [problem, setProblem] = useState<string>()
   const [read, setRead] = useState("")
   const [fresh, setFresh] = useState("")
-  const { attempt, landed, release, retry } = useReadAttempt()
+  const { attempt, landed, release, retry } = useReadAttempt(page)
 
   useEffect(() => {
     let cancelled = false
@@ -1036,8 +1038,12 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
   // open (ADR 0132), and only when the version moved: the banner and the Settings menu's tag read
   // this field, so they say what the Host said rather than what this device remembered.
   useEffect(() => {
-    if (!plugin?.fromHost || !plugin.version || plugin.version === profile.pluginVersion) return
-    void db.profiles.update(profile.id, { pluginVersion: plugin.version })
+    if (!plugin?.fromHost) return
+    // A host that answers without a plugin runs none, so no version is stored and the banner that
+    // read one goes; a host whose version moved replaces it. Either way the field follows the host.
+    const next = plugin.version ?? undefined
+    if (next === profile.pluginVersion) return
+    void db.profiles.update(profile.id, { pluginVersion: next })
   }, [profile.id, profile.pluginVersion, plugin])
 
   return (

@@ -36,6 +36,17 @@ const seedPlugin = (page, profileId) =>
     await db.profiles.update(id, { pluginVersion: "0.1.0" })
   }, profileId)
 
+/**
+ * A second bot on the device, so the bot on screen is one this device could be left without: the
+ * delete at its foot is a live control rather than the off one a lone unlinked bot wears.
+ */
+const seedSibling = (page) =>
+  page.evaluate(async () => {
+    const { db } = await import("/src/lib/db.ts")
+    const [profile] = await db.profiles.toArray()
+    await db.profiles.add({ ...profile, id: `${profile.id}-sibling`, name: "Sibling bot" })
+  })
+
 /** Opens the Settings menu and answers the row naming the flow's bot. */
 const openMenu = async (page, profileId) => {
   await page.goto(`${app}/settings`)
@@ -86,6 +97,18 @@ const assertBannerCentred = async (list, words) => {
 const assertDeleteAtFoot = async (page, column) => {
   const remove = column.getByRole("button", { name: "Delete bot", exact: true })
   assert.equal(await remove.count(), 1, "the page carries one button reading Delete bot")
+  // One on the screen, not one in the column: a second control anywhere else — a row, a card, the
+  // pane beside — is a second answer to where a bot is deleted.
+  assert.equal(
+    await page.getByRole("button", { name: "Delete bot", exact: true }).count(),
+    1,
+    "and it is the page's only one",
+  )
+  assert.equal(
+    await remove.isDisabled(),
+    false,
+    "the device holds a bot to fall back on, so the control is live",
+  )
   assert.equal(
     await page.locator("header").getByRole("button", { name: /delete|remove/i }).count(),
     0,
@@ -127,6 +150,26 @@ const assertDeleteAtFoot = async (page, column) => {
   assert.ok(
     Math.abs(geometry.column.bottom - geometry.button.bottom) <= 1,
     `the column ends on the button (${geometry.column.bottom.toFixed(1)} against ${geometry.button.bottom.toFixed(1)})`,
+  )
+
+  // A live control is one that does something: the tap asks first, in the words the bot's kind
+  // settled, and a cancel leaves the bot where it was. A disabled or dead button would pass every
+  // number above, so the tap is the proof that the foot is a control and not a label.
+  await remove.click()
+  const dialog = page.locator('[role="alertdialog"]')
+  await dialog.waitFor({ timeout: 15_000 })
+  assert.equal(
+    (await dialog.locator('[data-slot="alert-dialog-title"]').textContent())?.trim(),
+    "Delete Test bot?",
+    "the tap asks first, naming the bot",
+  )
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  await dialog.waitFor({ state: "detached", timeout: 15_000 })
+  await settled(page)
+  assert.equal(
+    await page.locator("[data-bot-settings-list]").count(),
+    1,
+    "and cancelling leaves the bot's page where it was",
   )
 }
 
@@ -199,6 +242,7 @@ const wide = async ({ page, profileId, shot }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   await seedPlugin(page, profileId)
+  await seedSibling(page)
   const botRow = await openMenu(page, profileId)
   await shot("menu")
 
@@ -284,6 +328,7 @@ const phone = async ({ page, profileId, shot }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   await seedPlugin(page, profileId)
+  await seedSibling(page)
   const botRow = await openMenu(page, profileId)
   await shot("menu")
 
@@ -351,5 +396,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner and its icon centred on that banner's text, and Delete bot at the foot of the column under the last card with nothing below it and no delete control in the header; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner and its icon centred on that banner's text, and one Delete bot at the foot of the column under the last card with nothing below it, no delete control in the header, and a tap that opens the confirm a cancel leaves; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
 )
