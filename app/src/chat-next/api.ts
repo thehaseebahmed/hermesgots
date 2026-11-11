@@ -1,6 +1,7 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
 import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "../lib/net-watch.ts"
+import { SKIP_WORD } from "../lib/clarify.ts"
 import { promptOf } from "../lib/run-prompt.ts"
 
 import type { Agent } from "./agents"
@@ -105,7 +106,9 @@ export class HostNoPage extends Error {}
  * One page of a session's transcript: the `PAGE` rows that end `offset` rows before the newest,
  * oldest first. A session the host has not heard of yet is an empty chat, not a failure; an answer
  * carrying no page raises `HostNoPage`, so a walk that has rows to keep says the read failed instead
- * of drawing the chat short.
+ * of drawing the chat short. The page is read without its inline attachments (`inline_images=false`):
+ * the host then renders a message's photo as the placeholder the app draws itself, instead of sending
+ * every stored attachment over the wire for a screen that paints none of them.
  */
 export async function readPage(
   connection: Connection,
@@ -117,7 +120,7 @@ export async function readPage(
   let response: Response
   try {
     response = await ask(
-      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
+      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}&inline_images=false${archived ? "&include_compacted=true" : ""}`,
       { headers: headers(connection), signal: within(signal) },
     )
   } catch {
@@ -394,6 +397,9 @@ export async function actOnQueued(
  */
 export async function respond(connection: Connection, waiting: Waiting, value: string) {
   const kind = waiting.kind === "approval" ? "approval" : "clarify"
+  // Hermes takes an empty answer as no answer at all and ends the whole call on it; the word it
+  // reads as a skipped question is `skip`, after which it asks the call's next one.
+  const sent = kind === "clarify" && !value.trim() ? SKIP_WORD : value
   const response = await ask(
     `${root(connection)}/v1/runs/${encodeURIComponent(waiting.run)}/${kind}`,
     {
@@ -402,7 +408,7 @@ export async function respond(connection: Connection, waiting: Waiting, value: s
       body: JSON.stringify({
         request_id: waiting.promptId,
         execution_generation: waiting.generation,
-        [kind === "approval" ? "choice" : "answer"]: value,
+        [kind === "approval" ? "choice" : "answer"]: sent,
       }),
       signal: within(),
     },

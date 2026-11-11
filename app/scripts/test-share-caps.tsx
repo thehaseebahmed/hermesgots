@@ -7,20 +7,19 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { toast } from "sonner"
 
 import { MAX_ATTACHMENTS, MAX_FILE_BYTES } from "@/lib/attachment-caps"
 import { db } from "@/lib/db"
-import { clearShare, readWebShare, receiveShare, toShare } from "@/lib/share"
+import { readWebShare, receiveShare, toShare } from "@/lib/share"
 import { SharePage } from "@/routes/share"
 
 import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
   click,
+  absent,
   find,
   findAll,
-  findText,
   mount,
   Path,
   path,
@@ -28,6 +27,7 @@ import {
   seedSettings,
   text,
   until,
+  withToasts,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -46,7 +46,7 @@ const screen = () => (
  * disabled until then, and a tap on a disabled control would prove nothing.
  */
 async function newOption() {
-  const at = () => find('[aria-label="Chat"] button') as HTMLButtonElement | null
+  const at = () => find('[aria-label="Recent"] button') as HTMLButtonElement | null
   await until(async () => Boolean(at()), "the chat list")
   await until(async () => !at()?.disabled, "the share ready to send")
   return at()!
@@ -104,21 +104,6 @@ function stubCaches(written: { meta?: unknown; files?: Record<string, string> })
       holder.caches = saved
       ;(globalThis as { caches?: CacheStorage }).caches = savedGlobal
     },
-  }
-}
-
-/** The share screen's refusals, collected from the toasts it shows. */
-async function withToasts(body: (said: string[]) => Promise<void>) {
-  const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
-  try {
-    await body(said)
-  } finally {
-    toast.error = original
-    clearShare()
   }
 }
 
@@ -287,6 +272,13 @@ test("Share's new-chat option starts a chat of the bot's", async () => {
     receiveShare(toShare({ text: "Read this later" }))
     await mount(screen(), async () => {
       assert.equal(await db.conversations.count(), 0, "nothing is written before the send")
+      const note = find('textarea[aria-label="Note"]') as HTMLTextAreaElement | null
+      assert.equal(
+        note?.value,
+        "Read this later",
+        "the sender's text opens the note, rather than a quote above it",
+      )
+      absent("blockquote", "nothing of the sender's text quoted above the note")
       const option = await newOption()
       assert.equal(wordsOf(option), "New chat", "the new-chat option says what it makes")
       assert.ok(option.querySelector("svg.lucide-plus"), "wearing an add, not a chat")
@@ -315,7 +307,9 @@ test("Share's new-chat option starts a chat of the bot's", async () => {
 test("a share into a chat this device holds sends into it, and a streaming one waits its turn", async () => {
   const bot = botProfile("share-busy")
   const main = "c-streaming"
-  await seedChats([{ id: main, messages: ["Still working on it"] }], { bots: [bot] })
+  await seedChats([{ id: main, at: Date.now() - 60_000, messages: ["Still working on it"] }], {
+    bots: [bot],
+  })
   await db.messages.where("conversationId").equals(main).modify({ status: "streaming" })
   const host = fakeHost(`gots-${main}`)
   await withToasts(async (said) => {
@@ -323,7 +317,7 @@ test("a share into a chat this device holds sends into it, and a streaming one w
     await mount(screen(), async () => {
       // The bot's chats stand under the new-chat option, so the one that is streaming is a row.
       const row = () =>
-        findAll('[aria-label="Chat"] button').find((one) =>
+        findAll('[aria-label="Recent"] button').find((one) =>
           wordsOf(one).startsWith("A chat"),
         ) ?? null
       await until(async () => Boolean(row()), "the chat's own row")

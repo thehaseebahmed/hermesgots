@@ -195,12 +195,7 @@ export function AppThreadView({
   // archive to offer — and whose read has answered, is offered its bot's greeting. One still being
   // read is not empty, since the greeting would say there is nothing here.
   const empty =
-    !flow.length &&
-    !held.length &&
-    !queue?.items.length &&
-    !earlier &&
-    !streaming &&
-    !firstReadOut
+    !flow.length && !held.length && !queue?.items.length && !earlier && !streaming && !firstReadOut
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   // The one loader a thread has, over a thread held nowhere (ADR 0084). `flow` is what the thread
   // draws — messages and compaction dividers — so a thread the device holds any of is never loading.
@@ -278,10 +273,7 @@ export function AppThreadView({
                     {drawn.map((entry) => {
                       if (entry.kind === "compaction")
                         return (
-                          <Compacted
-                            key={`compaction-${entry.at}`}
-                            compaction={entry.compaction}
-                          />
+                          <Compacted key={`compaction-${entry.at}`} compaction={entry.compaction} />
                         )
                       const message = entry.message
                       // A model change is a project session's mark; a chat draws none (ADR 0087).
@@ -455,7 +447,7 @@ const drawnFor = (waiting: QuestionWait, questions?: ClarifyQuestion[]): Clarify
  * Other. The cards read a message, so the wait is dressed as the reply it interrupts, and an answer
  * goes where chat-next sends it rather than through the old engine.
  */
-export function AppPrompt({ waiting, questions: read, answer, asker }: PromptProps) {
+export function AppPrompt({ waiting, questions: read, answer, asker, held }: PromptProps) {
   const message = useMemo((): Message => {
     const base = {
       id: `prompt-${waiting.promptId}`,
@@ -507,6 +499,7 @@ export function AppPrompt({ waiting, questions: read, answer, asker }: PromptPro
     <QuestionCard
       message={message}
       askedId={askedId}
+      held={held}
       onAnswer={(answers) => {
         const given = answers[askedId]
         return answer(Array.isArray(given) ? given.join(", ") : (given ?? ""))

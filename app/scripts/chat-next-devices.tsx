@@ -6,8 +6,8 @@
  * page opened again on the same one (`{ database: device.database }`).
  *
  * The contract the page is held to: a composer (`[data-composer]`, its send button `[data-send]`),
- * a turn is a `main > section`, and a device that comes back to the foreground (`visibilitychange`)
- * reads the chat again.
+ * a turn is a `main > section[data-turn]`, and a device that comes back to the foreground
+ * (`visibilitychange`) reads the chat again.
  */
 import Dexie from "dexie"
 import assert from "node:assert/strict"
@@ -21,6 +21,8 @@ import { click, settle, type } from "./component-kit.tsx"
 import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
 
 export type Host = ReturnType<typeof fakeHost>
+
+const TURN = "main > section[data-turn]"
 
 const unsentRow = (container: HTMLElement, text: string) =>
   [...container.querySelectorAll("[data-unsent]")].find(
@@ -120,7 +122,7 @@ export async function openDevice(
       await settle()
     },
     turns: (): ExpectedTurn[] =>
-      [...container.querySelectorAll("main > section")].map((section) => ({
+      [...container.querySelectorAll(TURN)].map((section) => ({
         user: section.querySelector("[data-user]")?.textContent ?? "",
         texts: [...section.querySelectorAll("[data-text]")].map((text) => text.textContent ?? ""),
         tools: [...section.querySelectorAll("[data-tools]")]
@@ -135,9 +137,7 @@ export async function openDevice(
       })),
     /** The line a wake turn opens with, saying which subagent's finish it answers. */
     wakes: () =>
-      [...container.querySelectorAll("main > section [data-wake]")].map(
-        (note) => note.textContent ?? "",
-      ),
+      [...container.querySelectorAll(`${TURN} [data-wake]`)].map((note) => note.textContent ?? ""),
     /** The child's own thread, once a card has been opened. */
     thread: () => {
       const open = one("[data-agent-thread]")
@@ -151,7 +151,7 @@ export async function openDevice(
         : undefined
     },
     /** The turns' own elements, which stay the same ones while the turns around them change. */
-    sections: () => [...container.querySelectorAll("main > section")],
+    sections: () => [...container.querySelectorAll(TURN)],
     /** What the screen says of the older pages: being read, or failed; nothing where it says nothing. */
     older: () => one("[data-older]")?.getAttribute("data-older") ?? undefined,
     async retryOlder() {

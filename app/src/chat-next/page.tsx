@@ -80,6 +80,7 @@ import {
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import {
   foldedOf,
+  heldOnPrompt,
   threadTurns,
   turnsOf,
   wantsCommandWords,
@@ -182,7 +183,7 @@ const TurnView = memo(
   }) {
     const byPart = cardsByPart(turn, cards)
     return (
-      <section className="space-y-3">
+      <section data-turn className="space-y-3">
         {turn.wake ? (
           <p data-wake className="text-sm text-muted-foreground">
             {turn.done ? "Resumed after " : "Resuming… "}
@@ -611,10 +612,25 @@ const AGENTS_COOLDOWN_MS = 60_000
 const HANDOFF_MS = 10_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
+/** How many reads a held run's rows are worth: a wait writes nothing more, and one lands them. */
+const WAIT_READ_TRIES = 4
 /** A run this quiet while holding no prompt on the page may be waiting on one it never heard. */
 const QUIET_RUN_MS = 1_500
 
 /** What a prompt drawn by the app is handed: the wait, and how to answer it. */
+/** How long the answered question holds the card's place while the host asks its call's next one. */
+const BETWEEN_MS = 5_000
+
+/**
+ * The card's key: a question one call put among several keeps one card across its prompts, so the
+ * next question slides in rather than the card being drawn again; anything else is its own prompt.
+ */
+function promptKey(waiting: Waiting, questions?: ClarifyQuestion[]): string {
+  if (waiting.kind !== "question" || !questions || questions.length < 2) return waiting.promptId
+  if (questionAt(questions, waiting.question) < 0) return waiting.promptId
+  return `call:${questions.map((one) => one.question).join("\u0000")}`
+}
+
 export interface PromptProps {
   waiting: Waiting
   /** The questions of the call the wait came out of, where the thread has read them. */
@@ -623,6 +639,8 @@ export interface PromptProps {
   answer: (value: string) => Promise<void>
   /** The tool the reply was running when it asked, where the host names none. */
   asker?: string
+  /** `waiting` is answered and the call's next question is still to be asked: nothing is sent. */
+  held?: boolean
 }
 
 /** What a composer drawn by the app is handed to drive the thread with. */
@@ -723,6 +741,14 @@ export function ChatNextThread({
   const store = useMemo(() => storeFor(database, session ?? ""), [database, session])
   const doing = useSyncExternalStore(store.subscribe, store.doing)
   const dispatch = useCallback((event: ThreadEvent) => void store.apply(event), [store])
+  // The question just answered holds the card's place until the call's next one is asked; a host
+  // that never asks it hands the place back to the composer after `BETWEEN_MS`.
+  const asking = doing.waiting ?? doing.between
+  useEffect(() => {
+    if (!doing.between) return
+    const lapse = setTimeout(() => dispatch({ type: "between-lapsed" }), BETWEEN_MS)
+    return () => clearTimeout(lapse)
+  }, [doing.between, dispatch])
   const rows = useLiveQuery(
     () => readRows(database, session ?? "", "live"),
     [database, session],
@@ -1186,6 +1212,12 @@ export function ChatNextThread({
     void catchUp()
   }, [unread, server, key, session, catchUp])
 
+  /** A held run's rows: the prompt read for, the newest row then, and how many reads it has had. */
+  const readInWait = useRef<{ prompt?: string; tip?: number; at: number; tries: number }>({
+    at: 0,
+    tries: 0,
+  })
+
   // A server that streams its changes says when this session moved, so the timer below only has to
   // be a safety net while the stream is open.
   const streamOpen = useLive(server && key ? { baseUrl: server, apiKey: key } : undefined)
@@ -1219,6 +1251,7 @@ export function ChatNextThread({
         // A followed run's stream is the read — but an away page has to reach its transcript read,
         // which is what takes the words back.
         if (streaming.current && !away) {
+          const waiting = now.current.waiting
           if (starting && server && key && session)
             void readAgents({ server, key }, session, alive.current.signal).then(
               (listed) => listed && dispatch({ type: "agents", agents: listed }),
@@ -1227,11 +1260,32 @@ export function ChatNextThread({
           // sends a prompt's request only to the subscribers it has at the time, so one raised while
           // the stream was being rejoined reaches nobody, and the page would sit on Waiting until the
           // chat was opened again. Ask the run's status; the reading set keeps a settled prompt off.
-          if (now.current.busy && !now.current.waiting && followingRun.current && server && key)
+          if (now.current.busy && !waiting && followingRun.current && server && key)
             if (Date.now() - lastEvent.current > QUIET_RUN_MS)
               void readRun({ server, key }, followingRun.current).then(
                 (prompt) => prompt && dispatch({ type: "waiting", waiting: prompt }),
               )
+          // The rows are read when the wait is learned, and tried again — quietly, and only while no
+          // read has landed — a few times over, since a wait can stand for hours and a link that
+          // failed as the page opened is worth another try.
+          const prompt = waiting?.promptId
+          const tip = store.get().rows.at(-1)?.id
+          const read = readInWait.current
+          if (
+            prompt &&
+            heldOnPrompt(store.get()) &&
+            read.tries < WAIT_READ_TRIES &&
+            (read.prompt !== prompt || read.tip === tip) &&
+            Date.now() - read.at > idleMs
+          ) {
+            readInWait.current = {
+              prompt,
+              tip,
+              at: Date.now(),
+              tries: (read.prompt === prompt ? read.tries : 0) + 1,
+            }
+            void catchUp()
+          }
           return
         }
         // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are
@@ -1573,6 +1627,7 @@ export function ChatNextThread({
       await respond({ server, key }, waiting, value)
       dispatch({
         type: "answered",
+        promptId: waiting.promptId,
         ...(waiting.kind === "question"
           ? {
               answer: {
@@ -1619,15 +1674,16 @@ export function ChatNextThread({
     ?.parts.findLast((part) => part.kind === "tools")
     ?.calls.at(-1)?.name
   const waitingCard =
-    doing.waiting && Prompt ? (
+    asking && Prompt ? (
       <Prompt
-        key={doing.waiting.promptId}
-        waiting={doing.waiting}
+        key={promptKey(asking, doing.questionSet)}
+        waiting={asking}
         questions={doing.questionSet}
         asker={asker}
+        held={!doing.waiting}
         answer={async (value) => {
-          const asked = doing.waiting as Waiting
-          await answer(asked, value)
+          if (!doing.waiting) return
+          await answer(doing.waiting, value)
         }}
       />
     ) : doing.waiting?.kind === "question" ? (

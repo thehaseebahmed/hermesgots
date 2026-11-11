@@ -202,11 +202,12 @@ One Hermes profile the user has linked to Gots: its own agent, skills and settin
 _Avoid_: profile, agent, assistant
 
 **Chat**:
-A bot's own conversation with you: one row of its list, drawn as a thread, and the screen its
-address opens. A bot's list holds every chat it has, so an older conversation is as reachable as the
-newest; a room and a routine's run are rows of the same list rather than chats, since one is shared
-with the bot's other members and the other is nobody's conversation. Main is a chat like any other:
-no mark, one place in the order, and the one chat that cannot be deleted.
+A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
+not a list of them, is the screen the app opens on and the one a reload keeps the reader in. A bot's
+list holds every chat it has, so an older conversation is as reachable as the newest, and a chat's bar
+carries the way to that list; a room and a routine's run are rows of the same list rather than chats,
+since one is shared with the bot's other members and the other is nobody's conversation. Main is a
+chat like any other: no mark, one place in the order, and the one chat that cannot be deleted.
 _Avoid_: thread, Main, bot chat, "the bot's screen"
 
 **Blank chat**:
@@ -216,6 +217,10 @@ _Avoid_: new chat screen, draft chat, empty chat
 **Steer**:
 A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
 _Avoid_: interrupt, injection, mid-run message
+
+**Share sheet**:
+The screen another app's share opens in Gots: what arrived, a note the sender's own text opens, the bot it goes to, and a row to send it into. Its rows are the picked bot's chats, code sessions and the rooms its roster seats, touched in the last seven days and newest first — ten drawn, Show more for the rest of the week, twenty-five at most — while the search at its foot reaches everything the bot is in, not only what is older: every title it matches, the week's own rows and the ones past the twenty-five included, best match first. A room takes the message through its own store, as the room's composer does, rather than as a chat's turn.
+_Avoid_: share target, share dialog, share screen
 
 **Host**:
 The machine a bot's Hermes runs on: where its profiles, its MCP servers and the keys they use live.
@@ -410,7 +415,7 @@ The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
 **Bar**:
-A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Every icon control on it is a frosted outline circle.
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. The leading control is the app's menu on a bot's chat, which is where the app is, so there is nothing behind it to go back to; it is a way back only where a screen was opened from another — a project session's "Back to Code", a bot's list's back to the chat it covers. Every icon control on it is a frosted outline circle.
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:

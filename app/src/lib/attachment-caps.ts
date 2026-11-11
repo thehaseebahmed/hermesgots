@@ -106,6 +106,16 @@ export const countRefusal = (left: number, cap = MAX_ATTACHMENTS): Refusal => ({
   message: `A message can carry ${cap} attachments, so ${left === 1 ? "1 was" : `${left} were`} left out.`,
 })
 
+/**
+ * What a share is refused with where it carries more files than one of a room's messages takes: the
+ * sheet sends nothing at all rather than the eight, so it names the room's own number instead of
+ * counting what was left out.
+ */
+export const roomRefusal = (files: number): Refusal => ({
+  limit: "count",
+  message: `A room's message can carry ${ROOM_MAX_ATTACHMENTS} attachments, so a share of ${files} can't go there.`,
+})
+
 export const inlineRefusal = (name: string): Refusal => ({
   limit: "inline",
   message: `${name} doesn't fit: a message's photos can add up to ${formatBytes(MAX_INLINE_BYTES)}. Send it in the next one.`,
@@ -118,6 +128,17 @@ export const unreadableRefusal = (name: string): Refusal => ({
 
 /** Whether a photo's bytes still leave the message's inline room, which only a read file knows. */
 export const fitsInline = (size: number, used: number) => used + size <= MAX_INLINE_BYTES
+
+/**
+ * The attachments a room's message carries: the ones this device holds the bytes of. A room's files go
+ * to its Host's own store before the message names them, so a file whose bytes are gone has nothing to
+ * put there. The share sheet and the room's composer both send through this one reading.
+ */
+export function carriedFiles<T extends { blob?: unknown }>(
+  files: readonly T[],
+): (T & { blob: Blob })[] {
+  return files.filter((file): file is T & { blob: Blob } => Boolean(file.blob))
+}
 
 /**
  * Whether an attachment carries the bytes the model is sent in the message itself: the one fact that

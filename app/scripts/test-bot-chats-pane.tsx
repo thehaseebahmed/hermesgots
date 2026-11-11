@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
+import { forgetRead, markRead } from "@/lib/read-marks"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import {
@@ -120,6 +121,8 @@ const laneClass = () => find('[data-slot="list-lane"]')?.getAttribute("class") ?
 const LANE = '[data-slot="list-lane"]'
 const CHAT_BESIDE = '[data-slot="item-lane"] [data-slot="chat-pane"]'
 const BACK_TO_BOT = 'button[aria-label="Back to Mainly"]'
+const LIST_CONTROL = 'a[aria-label="Chats with Mainly"]'
+const DRAWER = 'button[aria-label="Open conversations"]'
 const OPEN_ROW = '[data-slot="list-lane"] ul a[aria-current="page"]'
 
 test(
@@ -153,7 +156,7 @@ test(
       assert.equal(
         missing(BACK_TO_BOT),
         true,
-        "and the chat carries no way back: the list is beside it",
+        "and the chat carries no way back to its bot's list: the bar leads with the app's menu",
       )
     })
   }),
@@ -168,37 +171,106 @@ test(
       await until(async () => titles().includes("Beta"), "the chat's own header")
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
-      assert.equal(missing(BACK_TO_BOT), true, "the chat has nothing to go back to")
+      assert.equal(missing(BACK_TO_BOT), true, "the chat carries no way back to the list either")
+      assert.equal(missing(LIST_CONTROL), true, "and no way to it in the bar: it stands on screen beside")
     })
   }),
 )
 
 test(
-  "with the sidebar open at 1024px the list is a screen the chat pushes",
+  "with the sidebar open at 1024px the chat stands alone, its bar leading with the drawer",
   atWidth(1024, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(
-        missing(BACK_TO_BOT),
-        false,
-        "and the chat is a screen of its own, leading back to the list",
+      assert.equal(missing(BACK_TO_BOT), true, "and the chat leads with no way back to it")
+      assert.match(
+        find(DRAWER)?.getAttribute("class") ?? "",
+        /\bmd:hidden\b/,
+        "the drawer's own control leads instead, hidden from md up where the sidebar is the menu",
       )
     })
   }),
 )
 
 test(
-  "a phone shows the bot's list as the screen its chat pushes",
+  "a phone draws the chat alone, its bar leading with the drawer",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(missing(BACK_TO_BOT), false, "and the chat leads back to it")
+      assert.equal(missing(DRAWER), false, "and the bar leads with the drawer's own control")
+      assert.equal(missing(BACK_TO_BOT), true, "with no way back to the list")
+    })
+  }),
+)
+
+test(
+  "a phone's chat carries the way to its bot's chats, beside the options menu",
+  atWidth(390, async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-a"), async () => {
+      await until(async () => titles().includes("Alpha"), "the chat's own header")
+      const control = find(LIST_CONTROL)
+      assert.equal(control?.getAttribute("href"), `/b/${bot.id}`, "the bar carries the way to the bot's chats")
+      assert.deepEqual(
+        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map((one) =>
+          one.getAttribute("aria-label"),
+        ),
+        ["Chats with Mainly", "Chat options"],
+        "and it stands immediately beside the options menu",
+      )
+      assert.match(
+        control?.getAttribute("class") ?? "",
+        /\bsize-11\b.*\bbackdrop-blur\b/,
+        "wearing the frosted circle the bar's other controls wear",
+      )
+    })
+  }),
+)
+
+test(
+  "the list control says when another of the bot's chats waits unread",
+  atWidth(390, async () => {
+    localStorage.clear()
+    await seed()
+    // Beta has moved since this device last read it. The marks outlive a case in this process, so the
+    // one an earlier case wrote for this chat is dropped first, and the mark put back behind its record.
+    forgetRead("c-b")
+    markRead("c-b", 11)
+    await mount(screen("/c/c-a"), async () => {
+      await until(async () => titles().includes("Alpha"), "the chat's own header")
+      const control = () => find('[data-slot="header-actions"] a[href^="/b/"]')
+      assert.equal(
+        control()?.getAttribute("aria-label"),
+        "Chats with Mainly, unread chats",
+        "the control names the row of the list that waits",
+      )
+      assert.equal(
+        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
+        false,
+        "and wears the dot the app's rows wear",
+      )
+      markRead("c-b", 13)
+      await until(
+        async () =>
+          control()?.getAttribute("aria-label") === "Chats with Mainly",
+        "the dot to go once that chat has been read",
+      )
+      // The chat on screen moving is not news to the reader sitting in it, so it never dots the
+      // control that opens the rest of the list.
+      await db.conversations.update("c-a", { updatedAt: Date.now() })
+      await settle()
+      assert.equal(
+        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
+        true,
+        "with nothing of the bot's left waiting, and the chat on screen not counted",
+      )
     })
   }),
 )

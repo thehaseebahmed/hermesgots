@@ -7,6 +7,7 @@
  * `approval` while the run waits on one), and among `pending_controls`. Reading it here keeps one
  * account of where the fields are, whichever screen wants the prompt.
  */
+import { questionAt } from "./clarify.ts"
 
 /** A prompt the run waits on. Each question is a prompt of its own, one at a time. */
 export type RunPrompt =
@@ -42,6 +43,18 @@ const heldAll = (raw: unknown): Record<string, unknown>[] =>
         return entry ? [entry] : []
       })
     : []
+
+/**
+ * Hermes asks off its own local viewers with a hint on a last line of its own, in the host's
+ * language, telling a chat to reply "skip": every locale it ships quotes that word. The card has a
+ * Skip of its own, so the hint is not the agent's question and is not drawn.
+ */
+const SKIP_HINT = /\n[^\n]*["„“”«»「」]\s*skip\s*["„“”«»「」][^\n]*$/i
+
+/** Hermes's own mark on the choice the agent put first: the card draws its badge instead. */
+const RECOMMENDED = / \(Recommended\)$/
+
+const unhinted = (question: string) => question.replace(SKIP_HINT, "")
 
 const trimmedQuestion = (entry: Record<string, unknown>) =>
   typeof entry.question === "string" ? entry.question.trim() : ""
@@ -91,7 +104,13 @@ function askedOf(entry: Record<string, unknown>): Record<string, unknown> {
   const named = trimmedQuestion(entry)
   const listed = heldAll(entry.questions)
   if (!named) return listed[0] ?? entry
-  const twin = listed.find((one) => trimmedQuestion(one) === named)
+  const twin =
+    listed[
+      questionAt(
+        listed.map((one) => ({ question: trimmedQuestion(one) })),
+        named,
+      )
+    ]
   if (!twin) return entry
   return {
     ...entry,
@@ -125,8 +144,8 @@ export function promptFrom(raw: unknown, runId: string): RunPrompt | undefined {
   return {
     kind,
     ...base,
-    question: typeof asked.question === "string" ? asked.question : "",
-    choices: strings(asked.choices),
+    question: typeof asked.question === "string" ? unhinted(asked.question) : "",
+    choices: strings(asked.choices).map((choice) => choice.replace(RECOMMENDED, "")),
     multiSelect: Boolean(asked.multi_select),
   }
 }

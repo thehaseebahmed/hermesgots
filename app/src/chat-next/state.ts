@@ -62,7 +62,7 @@ export interface ThreadState {
   unsent?: Unsent[]
   /** The turn this device is streaming, drawn over the transcript's until the host's replaces it. */
   live?: LiveTurn
-  /** This device has a turn running; while it does, what the host's transcript says waits. */
+  /** A run is attached: the stream draws its turn, except while it waits, where the rows do. */
   running: boolean
   /**
    * Draws each progress reminder a reply would drop as a row of its own (ADR 0068). This page's own
@@ -85,6 +85,13 @@ export interface ThreadState {
    * a request whose answer already went in must not put its question back on the card.
    */
   answeredPrompts?: string[]
+  /**
+   * The question just answered, while its call still has questions after it: Hermes settles an
+   * answer and asks the next a moment later, and for that moment nothing waits. The card holds its
+   * place with this rather than the composer standing in for it, until the next question, the run's
+   * end or the page's own wait (`between-lapsed`) lets it go.
+   */
+  between?: Waiting
   /**
    * The results this page wrote onto calls the host's stream carries none for: a clarify's answer,
    * which Hermes serves with an empty preview and writes whole only into the transcript. Keyed by
@@ -161,12 +168,18 @@ export type ThreadEvent =
    * way to learn it.
    */
   | { type: "waiting"; waiting: Waiting }
-  /** The card goes; `answer` is what the question got, where the user gave one. */
+  /**
+   * The card goes; `answer` is what the question got, where the user gave one. `promptId` names the
+   * prompt it answered: the host may have raised the next one before this answer's response landed.
+   */
   | {
       type: "answered"
+      promptId?: string
       answer?: { question: string; choicesOffered: string[] | null; value: string }
     }
   | { type: "ended" }
+  /** The question held between two prompts waited long enough: the composer comes back. */
+  | { type: "between-lapsed" }
   /**
    * The host names no run on this session: one it still holds a prompt for is listed there, so the
    * prompt this page draws for `run` has settled without it — answered or stopped from another
@@ -369,6 +382,37 @@ const copyIsAhead = (copy: Turn | undefined, live: LiveTurn) =>
   live.replaces && copy !== undefined && reach(copy).calls >= reach(live.turn).calls
 
 /**
+ * Whether a run is attached and held on a prompt: it has asked, and the answer has not come. A held
+ * run writes nothing more, so the transcript's rows are its turn, and a read of them is taken.
+ */
+export const heldOnPrompt = (state: ThreadState) => Boolean(state.running && state.waiting)
+
+/**
+ * The streamed turn drawn on the copy the rows now hold: the rows' own turn — its request, its row,
+ * whether it ended — carrying the work, the thinking, the timing and the cost the stream drew, and
+ * the parts the copy carried among them. The floor a join put on the replay goes with it, since the
+ * rows are the turn now. A turn the rows do not have leaves the streamed one as it is, and so does a
+ * turn the run cannot be on — a wake turn, a routine's — which is other work landing while it waits.
+ */
+function anchored(live: LiveTurn | undefined, copy: Turn | undefined): LiveTurn | undefined {
+  if (!live) return undefined
+  if (!copy || copy.row === live.turn.row || copy.wake || copy.routine)
+    return live.replay ? { ...live, replay: undefined } : live
+  return {
+    ...live,
+    turn: {
+      ...copy,
+      parts: withCarried(live.turn, copy).parts,
+      ...(live.turn.pendingThought ? { pendingThought: live.turn.pendingThought } : {}),
+      ...(live.turn.timing ? { timing: live.turn.timing } : {}),
+      ...(live.turn.stats ? { stats: live.turn.stats } : {}),
+    },
+    replaces: true,
+    replay: undefined,
+  }
+}
+
+/**
  * The turns the screen draws: the transcript's, with the streamed one laid over the last. A run
  * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
  * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
@@ -384,11 +428,15 @@ export function turnsOf(
 
 function drawn(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
   if (!live || live.replay) return folded
+  const copy = folded.at(-1)
+  // The rows have moved past the turn the stream stands on — another's work landed while the run
+  // waits, a child's delivery or a wake turn: they are the thread now, and the streamed copy is a
+  // second copy of a turn they already hold.
+  if (copy && live.turn.row !== undefined && copy.row !== live.turn.row) return folded
   // A run held on a prompt writes nothing more, so the turn it holds is drawn from the transcript —
   // the copy that carries the call the question was asked by. A host sends a prompt's request only
   // to the subscribers it had at the time, so a join's rebuilt copy can hold less than that one, and
   // the thread would lose the one line it draws while the run waits.
-  const copy = folded.at(-1)
   if (waiting && copyIsAhead(copy, live)) return folded
   if (!live.replaces || !copy) return [...folded, live.turn]
   return [...folded.slice(0, -1), withCarried(live.turn, copy)]
@@ -619,6 +667,13 @@ function sameQuestions(a: ClarifyQuestion[], b?: ClarifyQuestion[]): boolean {
   )
 }
 
+/** The question to hold the card's place with once `gone` leaves it: one with more of its call after it. */
+function heldBetween(state: ThreadState, gone: Waiting | undefined): Waiting | undefined {
+  if (gone?.kind !== "question" || !state.questionSet) return undefined
+  const at = questionAt(state.questionSet, gone.question)
+  return at >= 0 && at < state.questionSet.length - 1 ? gone : undefined
+}
+
 /** What a live event says the run is waiting on, if it says anything. */
 function waitingAfter(state: ThreadState, event: RunEvent): Waiting | undefined {
   const waiting = state.waiting
@@ -651,7 +706,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The call's row is the only place the rest of its questions survive, so it is read for a prompt
       // that names one, even mid-stream.
       const found = questionsFor(state, state.waiting, event.rows)
-      if (state.running && !event.final) {
+      // A run at work keeps the stream as its turn — its rows are the turn's partial writing — so a
+      // read in between only words the calls it drew.
+      const midRun = state.running && !event.final
+      const held = midRun && heldOnPrompt(state)
+      if (midRun && !held) {
         // A call the stream drew as a count of commands is worded from its row, mid-stream too.
         const worded = state.live && withCommandWords(state.live, event.rows)
         const next = worded && worded !== state.live ? { ...state, live: worded } : state
@@ -663,17 +722,34 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       if (!rows) return state
       const partial = event.more ?? state.partial
       const last = foldedOf(rows, { ...state, partial }).at(-1)
+      // A held read takes the rows only when the turn they end on is one the run can be on: a child's
+      // delivery or a routine's message landing while it waits is other work, and the streamed turn
+      // would be moved onto a turn it never wrote.
+      if (held && last && (last.wake || last.routine)) return state
+      // A read that shows the turn ended is the turn's end, as a final read is: the rows are the
+      // reply, and nothing is left following. A wait standing over a finished turn goes with it.
+      const ended = Boolean(last?.done)
+      const live = held && !ended ? anchored(state.live, last) : undefined
+      // A read that brought nothing is no change: the store writes nothing and nothing folds.
+      if (
+        held &&
+        rows.length === state.rows.length &&
+        rows.at(-1)?.id === state.rows.at(-1)?.id &&
+        live === state.live &&
+        (!found || sameQuestions(found, state.questionSet))
+      )
+        return state
       const done = last?.done
       // What the turn this device watched cost goes with the row that opened it, which the
-      // transcript has now written.
+      // transcript has now written. The turn is the one the streamed copy stands on, or a row this
+      // state has not seen — a repeated prompt read before the host wrote the new request would
+      // otherwise take the previous turn's row.
       const measured = state.live?.turn.stats
-      // The turn is the one the transcript just gained: a repeated prompt read before the host has
-      // written the new request would otherwise take the previous turn's row.
       const stats =
         measured &&
         last?.row !== undefined &&
         last.user === state.live?.turn.user &&
-        last.row !== state.lastRow
+        (last.row !== state.lastRow || last.row === state.live?.turn.row)
           ? { ...state.stats, [last.row]: measured }
           : state.stats
       return {
@@ -683,15 +759,15 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         lastRow: last?.row,
         partial: partial ? true : undefined,
         stats,
-        running: false,
-        // The host's own rows are the turn now, in place of the copy this page streamed.
-        live: undefined,
+        running: held && !ended,
+        live,
         // A turn that finished waits on nothing. A whole read of a thread whose last turn is still
         // unfinished says nothing about a prompt the run holds: a stream that dies mid-wait (a phone
         // asleep, a host dropping its subscriber) ends the follow without ending the run, and the
         // question must not go with the socket. Only the turn's own end, an answer given here or the
         // host's `*.settled` event takes a wait away.
         waiting: done ? undefined : state.waiting,
+        between: done ? undefined : state.between,
         ...(done
           ? { questionSet: undefined }
           : { questionSet: questionsFor(state, state.waiting, rows) }),
@@ -799,7 +875,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "waiting": {
       const { waiting } = event
       if (readChangesNothing(state, waiting)) return state
-      return { ...state, waiting, questionSet: questionsFor(state, waiting) }
+      return { ...state, waiting, between: undefined, questionSet: questionsFor(state, waiting) }
     }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
@@ -807,7 +883,9 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The stream is over, however it ended, so the thread is no longer held by it. What the turn
       // was comes from the transcript, which a later read may supply if the one for this end was
       // superseded.
-      return { ...state, running: false }
+      return { ...state, running: false, between: undefined }
+    case "between-lapsed":
+      return state.between ? { ...state, between: undefined } : state
     case "gone":
       // Only the run this page was following can have settled that way: a wait raised since belongs
       // to another run, and a `gone` still in flight from an earlier look is not about it.
@@ -815,6 +893,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         ...state,
         waiting: undefined,
+        between: undefined,
         questionSet: undefined,
         answeredPrompts: undefined,
         settled: settledWith(state),
@@ -832,15 +911,23 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // page's own turn does not hold yet; the answer goes onto that one, and onto the record.
       const call = wrote?.call ?? (answer ? answeredOnScreen(state, answer) : undefined)
       const answers = call?.result ? { ...state.answers, [call.id]: call.result } : state.answers
+      // Hermes settles an answer and raises the call's next question before the answer's own
+      // response lands, so the prompt on screen may already be the next one: only the prompt this
+      // answer named leaves it.
+      const gone =
+        state.waiting && (!event.promptId || event.promptId === state.waiting.promptId)
+          ? state.waiting
+          : undefined
       // An answer that changed nothing on screen and nothing in the record is no state at all.
-      if (state.waiting === undefined && live === held && answers === state.answers) return state
+      if (gone === undefined && live === held && answers === state.answers) return state
       return {
         ...state,
-        waiting: undefined,
-        ...(state.waiting
+        ...(gone
           ? {
+              waiting: undefined,
+              between: heldBetween(state, gone),
               settled: settledWith(state),
-              answeredPrompts: [...(state.answeredPrompts ?? []), state.waiting.promptId],
+              answeredPrompts: [...(state.answeredPrompts ?? []), gone.promptId],
             }
           : {}),
         ...(live ? { live } : {}),
@@ -856,6 +943,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           ? questionsFor(state, waiting)
           : state.questionSet
       const answeredPrompts = ended ? undefined : state.answeredPrompts
+      // A settle that took the question off leaves it holding the card's place while its call has
+      // more to ask; any prompt raised, or the run's end, takes that place.
+      const between =
+        waiting || ended
+          ? undefined
+          : state.waiting && !waiting
+            ? heldBetween(state, state.waiting)
+            : state.between
       // A prompt the stream says is settled is not raised again by a status read still carrying it.
       const settled =
         SETTLED.includes(event.event.event) && event.event.prompt_id
@@ -882,10 +977,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         moved === held &&
         sameSettled(settled, state.settled) &&
         questionSet === state.questionSet &&
-        answeredPrompts === state.answeredPrompts
+        answeredPrompts === state.answeredPrompts &&
+        between === state.between
       )
         return state
-      return { ...state, waiting, settled, live: moved, questionSet, answeredPrompts }
+      return { ...state, waiting, settled, live: moved, questionSet, answeredPrompts, between }
     }
     case "failed":
       // What this page could not read is not what the host settled.

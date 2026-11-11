@@ -1,5 +1,7 @@
 # A bot's screen is the list of its chats
 
+**Superseded in part by [ADR 0144](0144-a-chat-is-the-root.md)** (2026-11-11): a bot's address lands in the chat this device last had open there, taking the entry the address stood on rather than pushing one — so back from a chat is the app's rather than the list's, a memory that no longer holds opens the list rather than the bot's newest chat, and the list is a screen the chat opens from a control in its bar. What this record says about the list itself — its one order, its rows and the tails they read, its foot and its routines control — stands.
+
 A bot's screen was its **Main** — one permanent chat — with every other chat drawn inside it as a
 card, a thread lane beside it, and a triage model deciding which of Main's messages left for one. A
 bot that has been talking for a year therefore kept its own history in a list *inside* a chat, opened

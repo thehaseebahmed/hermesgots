@@ -13,7 +13,7 @@ import {
 } from "@/lib/db"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { byName } from "@/lib/compare"
-import { oneLine } from "@/lib/words"
+import { plainLine } from "@/lib/words"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 import { isUnread } from "@/lib/session-work"
@@ -117,7 +117,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
         const preview = newestChat?.routine
           ? newestChat.line
           : words
-            ? oneLine(words.content)
+            ? plainLine(words.content)
             : undefined
         return { bot, chats, local, preview }
       }),
