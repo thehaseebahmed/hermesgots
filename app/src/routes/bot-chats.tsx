@@ -183,8 +183,9 @@ function ChatList({
   const [query, setQuery] = useState("")
   const shown = useMemo(() => chatList(rows, query), [rows, query])
 
-  // A chat is made first and the address moved after it, so back from it has the list to return to.
-  // The entry says which bot it is for, so the list keeps its lane while the new row loads.
+  // A chat is made first and the address moved after it: onto the list's own entry where the list
+  // was pushed, so a switch costs no rung, and above it where the list is the root. The entry says
+  // which bot it is for, so the list keeps its lane while the new row loads.
   const start = async () => {
     const chat = await beginChat(bot.id)
     navigate(`/c/${chat.id}`, { state: { bot: bot.id }, replace: pushed })
