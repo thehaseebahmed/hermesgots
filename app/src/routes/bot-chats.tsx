@@ -52,7 +52,7 @@ export function BotChatsPage() {
   // drawn for a frame.
   if (landing) return null
   if (pane) return <NoChatOpen />
-  return <BotChatsList profileId={profileId} selected={place.open} pushed={!place.root} />
+  return <BotChatsList profileId={profileId} backTo={place.open} pushed={!place.root} />
 }
 
 function useListPlace() {
@@ -109,12 +109,15 @@ function NoChatOpen() {
 function BotChatsList({
   profileId,
   selected,
+  backTo,
   pushed,
   pane,
 }: {
   profileId: string
-  /** The chat this list stands over: beside it in the pane, or under it where it was pushed. */
+  /** The chat drawn open beside this list, which is the pane's to name and no screen's. */
   selected?: string
+  /** The chat a list pushed over one covers: what its own back leads to, marked as nothing. */
+  backTo?: string
   /** Whether this list is a screen pushed over the chat it covers rather than the app's own entry. */
   pushed?: boolean
   /** Whether this list is the pane beside a chat rather than a screen: its rows open beside it. */
@@ -161,7 +164,14 @@ function BotChatsList({
     .filter((room) => room.seated.includes(profileId))
     .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return (
-    <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} pushed={pushed} pane={pane} />
+    <ChatList
+      bot={fresh.bot}
+      rows={[...fresh.rows, ...seated]}
+      selected={selected}
+      backTo={backTo}
+      pushed={pushed}
+      pane={pane}
+    />
   )
 }
 
@@ -169,12 +179,14 @@ function ChatList({
   bot,
   rows,
   selected,
+  backTo,
   pushed,
   pane,
 }: {
   bot: Profile
   rows: ChatListRow[]
   selected?: string
+  backTo?: string
   pushed?: boolean
   pane?: boolean
 }) {
@@ -182,7 +194,7 @@ function ChatList({
   const { root, back } = useNav()
   // What stands behind this screen, as far as the entry that opened it says: a chat's own control is
   // the only thing that pushes a list, but a typed or restored address can land it on any entry.
-  const backToChat = Boolean(selected)
+  const backToChat = Boolean(backTo)
   const marks = useReadMarks()
   // The press is the app's at its first entry — where this list stands when nothing opened it — and a
   // step back wherever something did, which `back()` answers itself.

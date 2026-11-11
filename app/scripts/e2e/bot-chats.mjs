@@ -209,14 +209,12 @@ await flow(
     await until(async () => (await rows()).length === expected.length, 20_000, "the list again")
     assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat it covers")
     assert.equal(
-      await page.evaluate(
-        () => document.querySelector('main ul a[aria-current="page"]')?.getAttribute("href") ?? null,
-      ),
-      chat,
-      "with the chat's row marked as the one it covers",
+      await page.evaluate(() => document.querySelectorAll("main ul a[aria-current]").length),
+      0,
+      "and no row of it is marked as the one it covers, which is not open beside it",
     )
     await shot("list-over-chat")
-    pass("the chat's list control opens the bot's chats above it, the chat's row marked")
+    pass("the chat's list control opens the bot's chats above it, with no row marked")
 
     await back().click()
     await page.waitForURL(`**${chat}`, { timeout: 20_000 })

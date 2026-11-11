@@ -710,6 +710,32 @@ test("a pick in a bot's list opens the chat as the app's only entry", async () =
   })
 })
 
+test("a list a chat opens marks no row, where a list beside a chat marks the one it draws", async () => {
+  await seed([
+    { id: "a", title: "A chat", at: 100, said: "Hello" },
+    { id: "b", title: "Another", at: 200, said: "Hi" },
+  ])
+  // The list a chat's own control opens names the chat it covers, and that chat is not open beside it:
+  // the mark a row carries for "this is the one drawn here" would say something untrue.
+  await mount(
+    <MemoryRouter initialEntries={[{ pathname: `/b/${bot.id}`, state: { open: "a" } }]}>
+      <Path />
+      <Routes>
+        <Route path="b/:profileId" element={<BotChatsPage />} />
+        <Route path="c/:id" element={<p data-chat />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await until(async () => rowIds().length === 2, "the bot's chats")
+      assert.equal(
+        findAll("ul a[aria-current]").length,
+        0,
+        "no row of the list a chat opened is marked as the one open",
+      )
+    },
+  )
+})
+
 test("a Host that cannot make a room offers no row for one", async () => {
   // A Host of its own, so the answer about rooms is that Host's and no other case's remembered one.
   const plain = botProfile("bot-chats-no-rooms", {
