@@ -50,18 +50,20 @@ export function useNav() {
   )
 
   /**
-   * The guard a screen gives the back button where the menu and a list both open it: a list pushes
-   * it, so the press steps up to `to`; the menu opens it as the first entry, where nothing is behind
-   * it, so the press is left to the app — which leaves, as back does from any top-level screen.
+   * The guard a screen gives the back button where the menu and a list both open it: whatever
+   * opened it stands behind it, so the press steps back to that; the menu opens it as the first
+   * entry, where nothing is behind it, so the press is left to the app — which leaves, as back does
+   * from any top-level screen. The screen behind it is never named: a step back is the browser's
+   * own move, wherever it lands.
    */
-  const step = useCallback(
-    (to: string) => () => {
+  const back = useCallback(
+    () => () => {
       if (!depth()) return false
-      up(to)
+      window.history.back()
       return true
     },
-    [up],
+    [],
   )
 
-  return { root, up, step }
+  return { root, up, back }
 }

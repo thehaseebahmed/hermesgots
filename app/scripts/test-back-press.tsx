@@ -34,10 +34,10 @@ import {
 const State = () => <p data-state>{JSON.stringify(useLocation().state ?? null)}</p>
 const state = () => find("[data-state]")?.textContent ?? ""
 
-/** The guard a screen the menu and a list both open registers: `step` to the screen behind it. */
-function Stepping({ to }: { to: string }) {
-  const { step } = useNav()
-  useEffect(() => setBackGuard(step(to)), [step, to])
+/** The guard a screen the menu and a list both open registers: `back()` to the screen behind it. */
+function Stepping() {
+  const { back } = useNav()
+  useEffect(() => setBackGuard(back()), [back])
   return null
 }
 
@@ -46,7 +46,7 @@ test("a screen a list pushed steps up to the list behind it", async () => {
   try {
     await mount(
       <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Stepping to="/canvas" />
+        <Stepping />
       </MemoryRouter>,
       async () => {
         assert.equal(pressBack(), "screen", "the screen takes the press")
@@ -63,7 +63,7 @@ test("a screen the menu opened leaves the press to the app", async () => {
   try {
     await mount(
       <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Stepping to="/canvas" />
+        <Stepping />
       </MemoryRouter>,
       async () => {
         assert.equal(pressBack(), "app", "the press is the app's, which leaves it")

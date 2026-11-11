@@ -23,7 +23,7 @@ import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib
 import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
-import { BACK_ON_LIST } from "@/lib/nav"
+import { BACK_ON_LIST, depth } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
@@ -62,6 +62,20 @@ export function BotChatsPage() {
 }
 
 /**
+ * Where this list stands, asked once: `root` is this list being the app's own entry, `listed` is the
+ * state a chat leaves the entry it steps back into it with (`BACK_ON_LIST`), and `landed` is the one
+ * arrival that opens a chat — forwards, at the app's entry, with nobody having asked for the list.
+ * A reload of the address, a step back onto it, or a list pushed over a chat (from that width's list
+ * control) is none of them.
+ */
+function useListPlace() {
+  const type = useNavigationType()
+  const listed = Boolean((useLocation().state as typeof BACK_ON_LIST | null)?.listed)
+  const root = depth() === 0
+  return { root, listed, landed: root && type !== "POP" && !listed }
+}
+
+/**
  * The chat a bot's address opens: the one this device last had open there, while it is still one of
  * the bot's. A reader who arrives at the address steps into that chat; one who steps back onto the
  * list gets the list — the press arrives as a pop, and the entry a chat's own control leaves in its
@@ -74,8 +88,7 @@ export function BotChatsPage() {
  */
 function useLanding(profileId: string | undefined, enabled: boolean | undefined) {
   const navigate = useNavigate()
-  const type = useNavigationType()
-  const listed = Boolean((useLocation().state as typeof BACK_ON_LIST | null)?.listed)
+  const { landed } = useListPlace()
   const answer = useLiveQuery(
     async () =>
       profileId && enabled
@@ -84,7 +97,7 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined)
     [profileId, enabled],
   )
   const chat = answer && answer.profileId === profileId ? answer.chat : undefined
-  const opens = type !== "POP" && !listed && Boolean(chat)
+  const opens = landed && Boolean(chat)
   // One landing per visit: a second effect (a strict-mode double run) opens nothing again, and the
   // push it leaves is the entry the chat's own control steps back from.
   const opened = useRef(false)
