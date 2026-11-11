@@ -25,7 +25,7 @@ import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
-import { BACK_ON_LIST, depth, useNav } from "@/lib/nav"
+import { BACK_ON_LIST, depth, openedChat, useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
@@ -47,7 +47,8 @@ import { cn } from "@/lib/utils"
  *
  * Where there is room the list is the pane and the chat it opened stands beside it
  * (`useBotChatsPane`), so this screen is then the item lane with nothing open; below that width the
- * list is the whole screen and a chat is pushed over it, with the way back a screen of its own has.
+ * list is the whole screen, and a chat of it takes the list's own entry — the chat, not the list, is
+ * then where the app stands.
  */
 export function BotChatsPage() {
   const { profileId } = useParams()
@@ -55,8 +56,7 @@ export function BotChatsPage() {
   const enabled = legacy === false
   const pane = useBotChatsPane(enabled)
   const place = useListPlace()
-  // The chat a pushed list covers, named by the state the chat's control left with it.
-  const open = (useLocation().state as { open?: string } | null)?.open
+  // The chat a pushed list covers is in `place.open`, named by the state the chat's control left.
   const landing = useLanding(profileId, enabled, place.landed)
   // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
@@ -66,21 +66,22 @@ export function BotChatsPage() {
   // drawn for a frame.
   if (landing) return null
   if (pane) return <NoChatOpen />
-  return <BotChatsList profileId={profileId} selected={open} pushed={!place.root} />
+  return <BotChatsList profileId={profileId} selected={place.open} pushed={!place.root} />
 }
 
 /**
- * Where this list stands, asked once: `root` is this list being the app's own entry, `listed` is the
- * state a chat leaves the entry it steps back into it with (`BACK_ON_LIST`), and `landed` is the one
- * arrival that opens a chat — forwards, at the app's entry, with nobody having asked for the list.
- * A reload of the address, a step back onto it, or a list a chat's own control pushed over that chat
+ * Where this list stands, asked once: `root` is this list being the app's own entry, `open` the chat a
+ * chat's own control pushed it over, and `landed` the one arrival that opens a chat — forwards, at the
+ * app's entry, with nobody having asked for the list. A reload of the address, a step back onto it
+ * (the state a chat leaves with `BACK_ON_LIST`), or a list a chat's own control pushed over that chat
  * is none of them.
  */
 function useListPlace() {
   const type = useNavigationType()
-  const listed = Boolean((useLocation().state as typeof BACK_ON_LIST | null)?.listed)
+  const state = useLocation().state
+  const listed = Boolean((state as typeof BACK_ON_LIST | null)?.listed)
   const root = depth() === 0
-  return { root, listed, landed: root && type !== "POP" && !listed }
+  return { root, open: openedChat(state), landed: root && type !== "POP" && !listed }
 }
 
 /**
@@ -96,16 +97,17 @@ function useListPlace() {
  *
  * Answers whether the address is still being settled — the read is out, or a chat is taking it —
  * which the screen draws nothing for, so neither the list it is leaving nor an empty pane is drawn
- * for a frame.
+ * for a frame. A list that is not `landed`'s arrival never opens a chat, so the device is asked
+ * nothing for it and the list draws at once.
  */
 function useLanding(profileId: string | undefined, enabled: boolean | undefined, landed: boolean) {
   const navigate = useNavigate()
   const answer = useLiveQuery(
     async () =>
-      profileId && enabled
+      profileId && enabled && landed
         ? { profileId, chat: (await landingChat(profileId)) ?? null }
         : undefined,
-    [profileId, enabled],
+    [profileId, enabled, landed],
   )
   const chat = answer && answer.profileId === profileId ? answer.chat : undefined
   const opens = landed && Boolean(chat)
@@ -118,7 +120,7 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined,
     opened.current = true
     navigate(`/c/${chat}`, { replace: true, state: { bot: profileId } })
   }, [opens, chat, profileId, navigate])
-  return chat === undefined || opens
+  return landed && (chat === undefined || opens)
 }
 
 /**

@@ -361,9 +361,9 @@ export function ChatPage(props: ChatPageProps) {
  * draw a chat. Nothing leads but a session's own way out to Code (`underCode` and `leave`, which
  * only the screen holding the session knows): for a bot's chat the bar draws its own default, the
  * drawer — the app's menu, which is how a reader reaches a screen of the app's. `listPath` is the
- * address of the list a chat of a bot's has, and `besideList` whether that list already stands on
- * screen beside it: the bar carries a control to it only where it doesn't, since a list on screen is
- * its own way. Android's press is a plain step back, wherever that lands.
+ * address of the list a chat of a bot's opens, and nothing where that list already stands on screen
+ * beside it: the bar carries a control to it only where it doesn't, since a list on screen is its
+ * own way. Android's press is a plain step back, wherever that lands.
  */
 function useChatLead(
   chat: Conversation | null | undefined,
@@ -386,7 +386,7 @@ function useChatLead(
     // A session leads back to Code unless it is drawn beside Code's list.
     <BackButton label="Back to Code" onClick={() => void leave()} floating />
   ) : undefined
-  return { listPath, besideList, leading }
+  return { listPath: besideList ? undefined : listPath, leading }
 }
 
 /** A chat drawn by chat-next, under the chat's own header: a bot's chat is a chat, Main among them. */
@@ -462,7 +462,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       profile={bot}
       session={session}
       wide={wide}
-      listPath={lead.besideList ? undefined : lead.listPath}
+      listPath={lead.listPath}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -1036,7 +1036,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       profile={profile}
       session={session}
       wide={wide}
-      listPath={lead.besideList ? undefined : lead.listPath}
+      listPath={lead.listPath}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}

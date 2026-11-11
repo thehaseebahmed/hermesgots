@@ -3,7 +3,7 @@
 // again with the sidebar open, and the list beside the item (the sidebar a third pane) from 1280px.
 // The item pane opens the one opened last, New research asks in it, and New session picks the project
 // of the chip in use. With no console errors.
-import { app, assert, environmentNoise, flow, pass } from "./lib.mjs"
+import { app, assert, environmentNoise, flow, pass, rung } from "./lib.mjs"
 
 const errors = []
 // [width, sidebar collapsed, panes]
@@ -197,11 +197,10 @@ for (const [width, collapsed, panes] of CASES) {
         assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
         // The chat's bar carries the way to the list where the list isn't beside it, and the list it
         // pushes stands a rung above the chat: its back is the chat it covers.
-        const rung = () => page.evaluate(() => window.history.state?.idx ?? null)
-        const chatRung = await rung()
+        const chatRung = await rung(page)
         await page.getByRole("link", { name: "Chats with Test bot" }).click()
         await page.waitForURL(`**/b/${profileId}`, { timeout: 15_000 })
-        assert.equal(await rung(), chatRung + 1, "the list stands a rung above the chat")
+        assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat")
         // The screen draws nothing while the address settles, so the rows are waited for.
         await until(
           async () => (await page.locator(`main ul a[href="${botChat}"]`).count()) === 1,

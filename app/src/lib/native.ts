@@ -178,7 +178,7 @@ export function pressBack(): BackPress {
 }
 
 /** What a whole press came to: a layer took it, it armed the exit, or the app left. */
-export type BackAnswer = "popup" | "screen" | "armed" | "leave"
+export type BackAnswer = Exclude<BackPress, "app"> | "armed" | "leave"
 
 /**
  * The arm the toast promises: when the exit was armed, and the address it was armed at. Nothing

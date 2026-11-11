@@ -16,6 +16,15 @@ export const stayHere = (current: boolean) =>
 export const BACK_ON_LIST = { listed: true }
 
 /**
+ * The state a chat gives the list its own control pushes: the chat the list stands over, which is the
+ * row the list marks as the one open.
+ */
+export const OPENED_CHAT = (id: string) => ({ open: id })
+
+/** The chat a pushed list stands over, read off the state `OPENED_CHAT` left with it. */
+export const openedChat = (state: unknown) => (state as { open?: string } | null)?.open
+
+/**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
  * entry, and each entry after it is a child of the one before. So back from a top-level screen
  * leaves the app, and back from a deeper one returns to its parent.

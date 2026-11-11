@@ -29,6 +29,9 @@ export const runId = () => Math.random().toString(36).slice(2, 8)
 /** The page's own words, in the order the app drew them. */
 export const drawn = (page) => page.evaluate(() => document.body.innerText)
 
+/** How deep in the browser's history the page stands: 0 is a press from leaving the app. */
+export const rung = (page) => page.evaluate(() => window.history.state?.idx ?? null)
+
 /** A user's words, long enough that a few turns fill a phone's pane. */
 export const long = (name, turns = 10) =>
   `${name}: ` + Array.from({ length: turns }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")

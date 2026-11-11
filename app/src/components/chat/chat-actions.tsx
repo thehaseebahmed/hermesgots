@@ -48,6 +48,7 @@ import {
 } from "@/lib/db"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
+import { OPENED_CHAT } from "@/lib/nav"
 import {
   effectiveProvider,
   limitNotice,
@@ -286,7 +287,7 @@ export function ChatActions({
           // the row the list draws as the one open.
           <Link
             to={listPath}
-            state={{ open: chat.id }}
+            state={OPENED_CHAT(chat.id)}
             aria-label={`Chats with ${profile?.name ?? "the bot"}`}
             className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
           >

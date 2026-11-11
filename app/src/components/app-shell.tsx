@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -195,8 +196,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
   useBubbleMirror()
   useBubbleTakeaways()
   const [open, setOpen] = useState(false)
-  // The drawer is the app's menu, and a press at the app's edge offers it beside the exit toast.
-  useEffect(() => setMenuOpener(() => setOpen(true)), [setOpen])
+  // The drawer is the app's menu: a header's own control opens it, and so does a press at the app's
+  // edge, which the shell hands the app's native side here. One opener, so the two can't drift.
+  const openDrawer = useCallback(() => setOpen(true), [])
+  useEffect(() => setMenuOpener(openDrawer), [openDrawer])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)
@@ -246,7 +249,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   return (
     <BreakReminderProvider>
       <KeyboardShortcuts />
-      <DrawerContext.Provider value={() => setOpen(true)}>
+      <DrawerContext.Provider value={openDrawer}>
         <div className="flex h-dvh overflow-hidden bg-background">
           {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}
           {wide && (
