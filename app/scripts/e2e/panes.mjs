@@ -163,8 +163,14 @@ for (const [width, collapsed, panes] of CASES) {
       await page.waitForURL(`**${botChat}`, { timeout: 15_000 })
       await until(
         async () =>
-          (await page.evaluate(() => document.querySelector('[data-slot="header-title"]')?.textContent?.trim())) ===
-          "Garden plan",
+          (await page.evaluate(
+            () =>
+              // The list lane draws the same bar, and it comes first in the DOM: the chat's title is
+              // the one in the item lane, not simply the first one on the page.
+              document
+                .querySelector('[data-slot="item-lane"] [data-slot="header-title"]')
+                ?.textContent?.trim(),
+          )) === "Garden plan",
         15_000,
         "the chat's own title",
       )
