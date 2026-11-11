@@ -72,7 +72,8 @@ component with its importers; `references/deviations.md` is what is currently of
    full-screen takeover. Pop-ups are push, not edit-in-place.
 5. **One question.** A destructive confirmation is `ConfirmDestructive`: `AlertDialog`, `size="sm"`,
    Cancel plus the one destructive action, and it owns the write — a promise that rejects keeps it
-   open with the host's words. The six dialogs that are not yes-or-no questions (a rename form, a
+   open with the host's words (`staysOpen` where the caller tracks the answer itself). The six
+   dialogs that are not yes-or-no questions (a rename form, a
    three-way exit, a permission question, a reminder, a one-action notice, the recorder's stop) keep
    their own, and say why in their file.
 6. **Notices have three homes and they are not interchangeable.** `Banner` is a state of the screen;
