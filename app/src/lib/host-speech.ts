@@ -129,8 +129,6 @@ export function useSpeech(profile?: Server | null) {
   // The read's own sentence, where the request was refused, never landed, or timed out — and the
   // only failure the page offers to ask again.
   const [readProblem, setReadProblem] = useState<string | null>(null)
-  // The read's own attempt: its effect is keyed on it, so `retry` is the same read asked again
-  // rather than a second path to the host.
   const { attempt, landed, release, retry } = useReadAttempt()
   // Kept with the connection they belong to, as `failed` is: another bot's probe is not this bot's.
   const [measuring, setMeasuring] = useState("")
@@ -310,7 +308,7 @@ export function useSpeech(profile?: Server | null) {
     /** This bot's own sentence for a probe it refused, drawn under the rows rather than as a page failure. */
     measureProblem: measureProblem?.key === key ? measureProblem.message : null,
     saving,
-    /** A write's refusal, in the host's own words: no control, since a write has nothing to re-run. */
+    /** A write's refusal, in the host's own words. */
     problem,
     measure,
     choose: (model: string) => write({ model }),

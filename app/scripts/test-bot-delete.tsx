@@ -72,7 +72,6 @@ const buttonNamed = (name: string) =>
  * carries no label of its own — and never by a header selector: the header holds none.
  */
 const removeBot = () => buttonNamed("Delete bot")
-/** Every control in a screen's header that would remove or delete something: there are none. */
 const headerRemovals = () =>
   findAll("header button").filter((one) => /delete|remove/i.test(nameOf(one)))
 

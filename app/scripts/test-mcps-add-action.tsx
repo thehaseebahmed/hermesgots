@@ -106,7 +106,6 @@ async function seed(
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
   const asked: HostAsk[] = []
-  // The reads of one named thing — a server's block, an entry's values — refused `refusals` times.
   const reads: string[] = []
   const refuseRead = refuseFirst(refusals, "This bot's config.yaml can't be read right now.")
   mediaHost({ host: name, features, asked })
@@ -119,7 +118,6 @@ async function seed(
       asked.push({ host: url.host, path: url.pathname, search: url.search, authorization: null })
       return json({ object: { servers } })
     }
-    // The entries the Catalogue offers, each marked with whether this bot already has it.
     if (url.pathname.endsWith("/plugins/gots/mcp/catalogue"))
       return json({ object: { entries: [ENTRY] } })
     // One named thing, read on its own: a server's block (what the Config tab is built from) or a

@@ -19,7 +19,6 @@ const WRAPPED =
 /** The alert's rule for its icon, as the primitive writes it on its own root: cva's `*:[svg]:…`. */
 const rule = (utility: string) => `*:[svg]:${utility}`
 
-/** Every rule the alert's root carries, as class tokens. */
 const rules = () => (find('[data-slot="alert"]')?.getAttribute("class") ?? "").split(/\s+/)
 
 test("an alert centres its icon on the text beside it", async () => {

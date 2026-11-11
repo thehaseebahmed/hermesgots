@@ -125,9 +125,6 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
     )
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
-      {/* Two sentences, each about its own fact: the read's own failure — the cached copy under it
-          may be older than it looks — with the one control that asks that read again; and a write's
-          refusal, which has nothing to re-run and so draws no control. */}
       {speech.readProblem && (
         <Banner
           tone="error"
@@ -136,6 +133,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           {speech.readProblem}
         </Banner>
       )}
+      {/* A write's refusal has nothing a retry could re-run, so it draws no control. */}
       {speech.problem && <Banner tone="error">{speech.problem}</Banner>}
 
       {/* A host that carries only the model draws the page it always had — no captions to name

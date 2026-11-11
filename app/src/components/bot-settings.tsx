@@ -359,8 +359,6 @@ export function BotSettingsList({
     return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
   })
 
-  // The delete is the page's own last control, in the column its captions and cards stand in: the
-  // button MCP Details wears as *Remove server*, in this page's words (ADR 0106).
   return (
     <div className="flex flex-col gap-4" data-bot-settings-list>
       {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
@@ -372,6 +370,8 @@ export function BotSettingsList({
       <BotCard profile={profile} onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))} />
       <Caption>Settings</Caption>
       <Group>{rows}</Group>
+      {/* The page's own last control, under its last card: the button MCP Details wears as *Remove
+          server*, in this page's words. */}
       <DestructiveButton onClick={() => setConfirming(true)} disabled={!linked && !canDelete}>
         Delete bot
       </DestructiveButton>
@@ -1027,9 +1027,7 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
   const character = BOTS.find((bot) => bot.id === profile.botId)
-  // The version the bot's host runs, off the `info` read the page already makes for its gates. What
-  // the row reads comes off that one value: nothing while the answer is owed, the host's version
-  // where there is one, and that it runs no plugin where the host answered without one.
+  // The version the bot's host runs, off the `info` read the page already makes for its gates.
   const plugin = usePluginVersion(profile)
   const reported = plugin && (plugin.version ?? "No plugin")
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
@@ -1044,8 +1042,6 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
 
   return (
     <div className="flex flex-col gap-4" data-bot-card>
-      {/* The bot's own switches, then the plugin its host runs: one row reports what is there, and
-          no row is a tap a thumb has to find. */}
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />

@@ -653,7 +653,6 @@ test("a read the host refused says so, with a way to ask again, and the tap draw
     [...FEATURES, "general_page"],
     { generalRefusals: 1 },
   )
-  /** The page's own read: every request it made for the host's General block. */
   const reads = () => calls.filter((one) => one.path.endsWith("/plugins/gots/general"))
 
   await mount(general("/settings/bots/bot-1/general"), async () => {

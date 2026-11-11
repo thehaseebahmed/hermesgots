@@ -153,8 +153,7 @@ export function useRoomSeatable(server: PluginServer): string[] | null | undefin
  * one — no plugin there — and **undefined** while the read is still owed, so nothing is claimed
  * before an answer lands. `fromHost` says the answer drawn came from a live read of the Host in this
  * session rather than the copy this device kept from an earlier open (ADR 0132): only that answer is
- * a fact about the Host, so only it may be written to the profile. Both facts are read off the one
- * value the hook subscribes to, so a render can never pair an answer with another one's provenance.
+ * a fact about the Host, so only it may be written to the profile.
  */
 export function usePluginVersion(
   server: PluginServer,

@@ -29,10 +29,9 @@ import { cn } from "@/lib/utils"
  * the host's last answer is drawn until the read lands.
  *
  * `problem` is the host's own sentence where the read threw — the one way this read comes back
- * empty-handed, since a host that answers without a budget draws the default it would itself use —
- * and `retry` asks the same read again, existing only while that sentence stands. A write answers
- * the numbers the host now holds, so `keepBudget` and `keepThreshold` fold it in rather than reading
- * again.
+ * empty-handed, since a host that answers without a budget draws the default it would itself use. A
+ * write answers the numbers the host now holds, so `keepBudget` and `keepThreshold` fold it in
+ * rather than reading again.
  */
 function useBotAfk(config: HermesConfig) {
   const [budget, setBudget] = useState<number | null>(null)
@@ -252,8 +251,6 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   return (
     <div className="flex flex-col gap-4" data-bot-coding>
-      {/* A read that threw is said above the rows it couldn't fill, in the host's own words, with
-          the one control that asks it again; the numbers below stay shut until that read lands. */}
       {problem && (
         <Banner tone="warning" action={afk.retry && <Retry onRetry={afk.retry} />}>
           {problem}

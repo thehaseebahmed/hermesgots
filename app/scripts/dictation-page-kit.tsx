@@ -248,7 +248,6 @@ export function host(
         if (options.refuse) return json({ error: { message: options.refuse } }, 400)
         return json({ speech: options.next ?? options.speech })
       }
-      // Recorded like every other read the page makes, so a case can count the reads a retry adds.
       calls.push({ path, method, body: undefined })
       if (options.stallSpeech) return new Promise<Response>(() => {})
       if (options.refuseSpeech) return json({ error: { message: options.refuseSpeech } }, 500)
@@ -427,10 +426,6 @@ export async function seed(
   return server.calls
 }
 
-/**
- * The answer this device already read for the seeded bot, written where the page looks for it: what
- * a phone that opened this page five minutes ago opens on again (ADR 0082).
- */
 /** The page's writes, whichever route they went to: its `calls` record its reads beside them. */
 export const writes = (calls: { method: string }[]) =>
   calls.filter((call) => call.method === "POST")
@@ -439,6 +434,10 @@ export const writes = (calls: { method: string }[]) =>
 export const speechReads = (calls: { path: string; method: string }[]) =>
   calls.filter((call) => call.method === "GET" && call.path.endsWith("/api/plugins/gots/speech"))
 
+/**
+ * The answer this device already read for the seeded bot, written where the page looks for it: what
+ * a phone that opened this page five minutes ago opens on again (ADR 0082).
+ */
 export async function seedCache(patch: Record<string, unknown> = {}) {
   const profile = await db.profiles.get("bot-1")
   if (!profile) return

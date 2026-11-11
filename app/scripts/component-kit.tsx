@@ -984,7 +984,6 @@ export function afkHost({
   let budget = pickBudget
   // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
   let threshold = usageThreshold
-  // How many times its bot-level route has been read, so a case can refuse the first.
   const refuseAfk = refuseFirst(
     afkReadsRefused,
     "This bot's config.yaml can't be read right now.",
