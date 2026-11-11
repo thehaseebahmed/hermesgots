@@ -216,7 +216,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await page.getByRole("button", { name: "Choose from library" }).click()
   const library = page.locator("[data-prompt-library]")
   await library.waitFor({ timeout: 15_000 })
-  const use = library.getByRole("button", { name: `Use ${ENTRY}` })
+  const use = library.getByRole("radio", { name: `Use ${ENTRY}` })
   await use.waitFor({ timeout: 15_000 })
   assert.match(await library.innerText(), /quality/, "the entry keeps the tags it was saved with")
   await use.click()

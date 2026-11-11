@@ -31,6 +31,7 @@ export function ConfirmDestructive({
   confirmLabel,
   cancelLabel = "Cancel",
   busy,
+  staysOpen,
   onOpenChange,
   onConfirm,
 }: {
@@ -42,6 +43,8 @@ export function ConfirmDestructive({
   cancelLabel?: string
   /** A write the caller is already tracking: the dialog waits with it. */
   busy?: boolean
+  /** The caller closes the question itself, once its write has an answer worth reading. */
+  staysOpen?: boolean
   onOpenChange: (open: boolean) => void
   /** Does it. A rejection keeps the dialog open and prints its message. */
   onConfirm: () => unknown
@@ -55,7 +58,9 @@ export function ConfirmDestructive({
     setFailure(undefined)
     try {
       await onConfirm()
-      onOpenChange(false)
+      // A caller whose write can answer without saying it landed (`staysOpen`) closes the question
+      // itself, so an unreadable answer can keep it up.
+      if (!staysOpen) onOpenChange(false)
     } catch (error) {
       setFailure(error instanceof Error && error.message ? error.message : "That didn't work.")
     } finally {
