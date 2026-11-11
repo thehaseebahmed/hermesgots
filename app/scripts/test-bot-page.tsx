@@ -25,6 +25,7 @@ import {
   find,
   findAll,
   json,
+  labelled,
   laptop,
   missing,
   mount,
@@ -83,6 +84,16 @@ const DELEGATION = {
   },
 }
 
+/** The host's General block, as its schema offers it: a key at the top level and one in a section. */
+const GENERAL = {
+  fields: [
+    { key: "timezone", kind: "string" as const, section: "" },
+    { key: "session.terminal_continue", kind: "boolean" as const, section: "session" },
+  ],
+  values: { timezone: "Europe/London" },
+  defaults: {},
+}
+
 function LivePage() {
   const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
@@ -127,6 +138,8 @@ function host({
   refuse,
   noDelegation = false,
   customDelegation = false,
+  generalRefusals = 0,
+  noGeneral = false,
 }: {
   features?: string[]
   version?: string | null
@@ -143,8 +156,13 @@ function host({
   noDelegation?: boolean
   /** A host whose delegation section points at an endpoint written by hand. */
   customDelegation?: boolean
+  /** How many of its General settings reads this host refuses before it answers with the block. */
+  generalRefusals?: number
+  /** A host whose schema carries no General block, so its page reads as an answer without one. */
+  noGeneral?: boolean
 } = {}) {
   const calls: Sent[] = []
+  let generalReads = 0
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
@@ -154,6 +172,12 @@ function host({
       return away
         ? json({ error: { message: "Not home." } }, 503)
         : json({ name: "gots", version, features })
+    if (url.pathname.endsWith("/plugins/gots/general")) {
+      generalReads += 1
+      if (generalReads <= generalRefusals)
+        return json({ error: { message: "This bot's config.yaml can't be read right now." } }, 500)
+      return json(noGeneral ? {} : { general: GENERAL })
+    }
     if (url.pathname.endsWith("/plugins/gots/delegation-settings"))
       return noDelegation
         ? json({ error: { message: "No delegation category." } }, 501)
@@ -624,6 +648,64 @@ test("the Delegation page's Subagent model row opens the host's models, and a pi
       "openrouter/cheap-model",
       "and the row shows what the host now holds",
     )
+  })
+})
+
+test("a read the host refused says so, with a way to ask again, and the tap draws the page", async () => {
+  const calls = await seed(
+    "general-refused-once",
+    { hostId: "host-1" },
+    [...FEATURES, "general_page"],
+    { generalRefusals: 1 },
+  )
+  /** The page's own read: every request it made for the host's General block. */
+  const reads = () => calls.filter((one) => one.path.endsWith("/plugins/gots/general"))
+
+  await mount(general("/settings/bots/bot-1/general"), async () => {
+    const notice = '[data-bot-general] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.match(
+      wordsOf(find(notice)),
+      /config\.yaml can't be read right now/,
+      "the notice holds the host's own sentence",
+    )
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(
+      retry.getAttribute("title"),
+      "Try again",
+      "an icon, so the words it is named are what a reader hears",
+    )
+    assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
+    assert.equal(reads().length, 1, "the page asked its General settings once, and was refused")
+
+    await click(retry)
+    await until(async () => Boolean(row("timezone")), "the page's rows")
+
+    assert.deepEqual(
+      reads().map((one) => one.method),
+      ["GET", "GET"],
+      "the tap asked the same route again, once",
+    )
+    absent(notice, "the notice goes with it")
+    assert.equal(accent("timezone"), "Europe/London", "and the rows draw what the host holds")
+  })
+})
+
+test("a host that answers without its General block says so, and offers no retry", async () => {
+  await seed("general-no-block", { hostId: "host-1" }, [...FEATURES, "general_page"], {
+    noGeneral: true,
+  })
+  await mount(general("/settings/bots/bot-1/general"), async () => {
+    const notice = '[data-bot-general] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the answer")
+    assert.equal(
+      wordsOf(find(notice)),
+      "This host doesn't carry its General settings.",
+      "the notice says what the host answered",
+    )
+    absent(`${notice} button`, "and no control asks again a question the host already answered")
   })
 })
 

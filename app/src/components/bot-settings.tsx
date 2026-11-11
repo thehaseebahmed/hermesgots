@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
@@ -613,10 +613,19 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
   const [read, setRead] = useState("")
   const [fresh, setFresh] = useState("")
   const [attempt, setAttempt] = useState(0)
+  // The promise a reload hands back: the notice's retry waits on it, so one tap is one read and the
+  // control can't be tapped again until that read has answered.
+  const settle = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     let cancelled = false
     let landed = false
+    /** The reload that asked for this read is answered: it landed, or the host refused it. */
+    const done = () => {
+      const resolve = settle.current
+      settle.current = null
+      resolve?.()
+    }
     // The page opens on the last answer this host gave this device, and the fresh read replaces it;
     // until it lands the rows are drawn shut, so a stale value is never what a write starts from.
     setBlock(undefined)
@@ -637,6 +646,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
           setFresh(page)
           void keepHost(profile, route, next)
         }
+        done()
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -648,6 +658,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
             ? error.message
             : `Couldn't read this bot's ${GENERAL_ROUTES[tab].label} settings.`,
         )
+        done()
       })
     return () => {
       cancelled = true
@@ -666,6 +677,19 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
     [profile, route, page],
   )
 
+  /**
+   * The same read, asked again — the attempt its effect is keyed on — answering with a promise that
+   * settles once that read has answered, which is what the notice's retry waits on.
+   */
+  const reload = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        settle.current = resolve
+        setAttempt((count) => count + 1)
+      }),
+    [],
+  )
+
   return {
     block,
     problem,
@@ -679,8 +703,7 @@ function useGeneralSettings(profile: Profile, tab: GeneralTab) {
     seeded: read === connection || Boolean(block),
     /** The block a write answered: it is the host's word, so it is drawn without a read. */
     keep,
-    /** The same read, asked again — the attempt its effect is keyed on. */
-    reload: () => setAttempt((count) => count + 1),
+    reload,
   }
 }
 
@@ -714,7 +737,9 @@ function GeneralPage({
   const chain = useFallbackModels(delegation ? null : profile)
   const subagent = useDelegationModel(delegation ? profile : null)
   const settings = useGeneralSettings(profile, tab)
-  const { block, problem, stale, seeded, keep } = settings
+  const { block, problem, failure, stale, seeded, keep, reload } = settings
+  // Only a read that threw can be asked again: a host that answered without its block has answered.
+  const retry = failure === "threw" ? reload : undefined
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
 
@@ -766,7 +791,9 @@ function GeneralPage({
           onClose={close}
         />
       ) : problem ? (
-        <Banner tone="warning">{problem}</Banner>
+        <Banner tone="warning" onRetry={retry}>
+          {problem}
+        </Banner>
       ) : (
         <div className="flex items-center justify-center py-16" data-general-loading>
           <Spinner />
@@ -802,7 +829,11 @@ function GeneralPage({
     const others = first?.section === "" ? rest : groups
     return (
       <div className="flex flex-col gap-4" {...{ [`data-bot-${tab}`]: true }}>
-        {problem && <Banner tone="warning">{problem}</Banner>}
+        {problem && (
+          <Banner tone="warning" onRetry={retry}>
+            {problem}
+          </Banner>
+        )}
         <Group>
           {/* The row is the page's own lead row, drawn only over a page the host let this app read: a
               refused page says so in its banner and carries no row (#992). */}
