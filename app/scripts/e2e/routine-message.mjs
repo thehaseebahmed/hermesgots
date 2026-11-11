@@ -45,7 +45,7 @@ async function drive({ page, profileId, send, newChat, lastReply, until, shot })
   assert.match(words, new RegExp(TITLE), "the row names the routine")
   assert.match(words, new RegExp(SAID), "and carries the delivery's first line")
   assert.equal(
-    await row.locator("svg.lucide-timer").count(),
+    await row.locator("svg.lucide-rotate-ccw-clock").count(),
     1,
     "the row wears the routine's icon rather than a chat's",
   )

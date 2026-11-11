@@ -54,9 +54,13 @@ export function toShare(input: {
   } satisfies IncomingShare
 }
 
-/** The message a share becomes: the user's note, then what was shared. */
+/**
+ * The message a share becomes: the user's note, then what was shared. The sender's own text is not
+ * repeated here — the sheet opens its note with it, so it is the note the message carries, and what
+ * this adds is the title a link came with and the links themselves.
+ */
 export function shareText(share: IncomingShare, note: string) {
-  const shared = [share.links.length ? share.title : undefined, share.text, ...share.links]
+  const shared = [share.links.length ? share.title : undefined, ...share.links]
   return [note.trim(), shared.filter(Boolean).join("\n")].filter(Boolean).join("\n\n")
 }
 

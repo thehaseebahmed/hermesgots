@@ -13,10 +13,10 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PlusIcon,
+  RotateCcwClockIcon,
   SearchIcon,
   ShieldAlertIcon,
   TelescopeIcon,
-  TimerIcon,
   TriangleAlertIcon,
   UserIcon,
 } from "lucide-react"
@@ -721,7 +721,7 @@ export function ConversationList({
               aria-label={collapsed ? "Routines" : undefined}
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
             >
-              <TimerIcon className="size-5 text-muted-foreground" />
+              <RotateCcwClockIcon className="size-5 text-muted-foreground" />
               {!collapsed && "Routines"}
             </RootLink>
           )}
