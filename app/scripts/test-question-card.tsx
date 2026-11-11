@@ -174,7 +174,7 @@ test("an open-ended question is its own answer, with no choices to pick", async 
   )
 })
 
-test("a host that asks one question at a time draws the whole ask, and only the page it asks answers", async () => {
+test("a host that asks one question at a time draws the whole ask, and only the page it asks is sent", async () => {
   answered()
   await mount(
     <QuestionCard
@@ -195,12 +195,12 @@ test("a host that asks one question at a time draws the whole ask, and only the 
       assert.equal(
         (findText("[data-slot=button]", "staging") as HTMLButtonElement).disabled,
         true,
-        "a question the host is not on yet cannot be answered",
+        "a question the host has already taken is answered and stays so",
       )
       assert.equal(
         (findText("[data-slot=button]", "Platform") as HTMLButtonElement).disabled,
-        true,
-        "nor one it has not reached at all",
+        false,
+        "one the host has yet to ask can be chosen ahead",
       )
       assert.equal(arrow("Next question")?.disabled, false, "the arrows still read the whole ask")
 
@@ -210,6 +210,63 @@ test("a host that asks one question at a time draws the whole ask, and only the 
       assert.deepEqual(answers, [{ q1: "rename it" }], "only the question asked is answered")
     },
   )
+})
+
+test("a question chosen ahead is held until the host asks it, and nothing is sent or skipped from its page", async () => {
+  answered()
+  const ask = [
+    { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+    { id: "q1", question: "Who reviews it?", choices: ["Platform", "Product"] },
+  ]
+  let ask1: (id: string) => void = () => {}
+  function Host() {
+    const [asked, setAsked] = useState("q0")
+    useEffect(() => {
+      ask1 = setAsked
+    }, [])
+    return (
+      <QuestionCard
+        message={message(ask)}
+        askedId={asked}
+        onAnswer={async (given) => {
+          answers.push(given)
+        }}
+      />
+    )
+  }
+  await mount(<Host />, async () => {
+    const row = pagesRow()
+    await settle()
+    await click(arrow("Next question"))
+    row.scrollLeft = 320
+    row.dispatchEvent(new Event("scroll"))
+    await settle()
+    assert.match(text(), /2 of 2/)
+    await click(findText("[data-slot=button]", "Product"))
+    assert.equal(
+      (findText("[data-slot=button]", "Send") as HTMLButtonElement).disabled,
+      true,
+      "Send is for the question the host asked, not this one",
+    )
+    assert.equal(
+      (findText("[data-slot=button]", "Skip") as HTMLButtonElement).disabled,
+      true,
+      "and Skip would skip that question, not this one",
+    )
+    assert.deepEqual(answers, [], "nothing went")
+
+    await act(async () => ask1("q1"))
+    await settle()
+    assert.match(text(), /2 of 2/)
+    assert.equal(
+      (findText("[data-slot=button]", "Send") as HTMLButtonElement).disabled,
+      false,
+      "asked now, the choice made ahead is ready to send",
+    )
+    await click(findText("[data-slot=button]", "Send"))
+    await settle()
+    assert.deepEqual(answers, [{ q1: "Product" }])
+  })
 })
 
 test("the card opens on the page the host asks, not on the first of the ask", async () => {

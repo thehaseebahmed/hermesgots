@@ -187,7 +187,7 @@ const HALF_SCREEN = "max-h-[50dvh]"
  *
  * `askedId` is what a host that asks one prompt at a time needs (Hermes's own route): the question
  * the host waits on, of every question the agent put in one call. The card opens on it, follows it
- * as the host moves on, and answers only it — the rest are the call's other questions, read ahead.
+ * as the host moves on, and sends only it. The questions after it can be chosen ahead and wait until the host asks them; the ones before it are answered.
  */
 export function QuestionCard({
   message,
@@ -402,7 +402,7 @@ export function QuestionCard({
                 <Question
                   question={question}
                   picked={pickOf(question.id)}
-                  disabled={pending || (oneAtATime && i !== askedPage)}
+                  disabled={pending || (oneAtATime && i < askedPage)}
                   onChange={onChange(question.id)}
                 />
               </div>
@@ -425,7 +425,7 @@ export function QuestionCard({
           variant="outline"
           size="lg"
           className="h-11 flex-1 sm:min-w-28 sm:flex-none"
-          disabled={pending}
+          disabled={pending || (oneAtATime && page !== askedPage)}
           onClick={skip}
         >
           Skip
