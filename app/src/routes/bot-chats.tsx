@@ -1,7 +1,14 @@
 import type { CSSProperties, ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MenuIcon, MessageCircleIcon, PlusIcon, SearchIcon, TimerIcon, UsersIcon } from "lucide-react"
+import {
+  MenuIcon,
+  MessageCircleIcon,
+  PlusIcon,
+  SearchIcon,
+  TimerIcon,
+  UsersIcon,
+} from "lucide-react"
 import {
   Link,
   Navigate,
@@ -144,11 +151,11 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
       chats.map(async (chat) => {
         if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
         const newest = await newestMessage(chat.id)
-        // A question or an approval sits on a reply, so a chat whose newest row is the reader's own
-        // still waits while the reply above it does.
-        const waits =
-          newest && !isReply(newest) ? await newestMessage(chat.id, isReply) : undefined
-        return chatRowOf(chat, newest, waits)
+        // The row says what the bot last said, and a question or an approval sits on a reply: a read
+        // of the newest message that already is one answers both, and one that is the reader's own
+        // asks for the reply above it.
+        const reply = newest && isReply(newest) ? newest : await newestMessage(chat.id, isReply)
+        return chatRowOf(chat, newest, reply)
       }),
     )
     return { profileId, bot, rows }
@@ -434,11 +441,11 @@ export function BotChatItem({
     <ItemRow
       icon={row.routine ? <TimerIcon /> : <MessageCircleIcon />}
       avatar={row.room ? <RoomFaces shown={row.room.shown} more={row.room.more} /> : undefined}
-      tone={row.room ? undefined : row.waiting ? "warning" : undefined}
+      tone={row.room ? undefined : row.needs ? "warning" : undefined}
       unread={isUnread(row.at, mark)}
       selected={selected}
       badge={
-        row.waiting && !row.room ? (
+        row.needs && !row.room ? (
           <Badge data-waiting className="bg-warning/15 text-warning">
             Needs you
           </Badge>

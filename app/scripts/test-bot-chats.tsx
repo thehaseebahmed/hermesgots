@@ -55,6 +55,8 @@ interface Seed {
   waits?: "clarify" | "approval"
   /** Another message under the newest one, so a case can prove the row reads the tail alone. */
   earlier?: string
+  /** The reader's own message, newest of all: a row still says what the bot said above it. */
+  mine?: string
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
 }
@@ -98,21 +100,26 @@ async function seed(
   await db.messages.bulkPut(
     chats.flatMap((one) => {
       const rows = one.earlier ? [message(one.id, one.earlier, one.at)] : []
-      if (!one.said) return rows
-      const at = one.saidAt ?? one.at
-      const waits =
-        one.waits === "clarify"
-          ? {
-              clarify: {
-                runId: "run-1",
-                clarifyId: "ask-1",
-                questions: [{ id: "q1", question: one.said }],
-              },
-            }
-          : one.waits === "approval"
-            ? { approval: { runId: "run-1", command: one.said, choices: [] } }
-            : {}
-      return [...rows, message(one.id, one.said, at, waits)]
+      const said = !one.said
+        ? rows
+        : (() => {
+            const at = one.saidAt ?? one.at
+            const waits =
+              one.waits === "clarify"
+                ? {
+                    clarify: {
+                      runId: "run-1",
+                      clarifyId: "ask-1",
+                      questions: [{ id: "q1", question: one.said }],
+                    },
+                  }
+                : one.waits === "approval"
+                  ? { approval: { runId: "run-1", command: one.said, choices: [] } }
+                  : {}
+            return [...rows, message(one.id, one.said, at, waits)]
+          })()
+      // The reader's own message is the newest row of all: a row that read it would say their words.
+      return one.mine ? [...said, message(one.id, one.mine, one.at + 1000, { role: "user" })] : said
     }),
   )
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -132,7 +139,8 @@ const rowIds = () =>
 const rowOf = (id: string) => find(`ul a[href="/c/${id}"]`)
 const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]"))
 /** The picture a row wears where its title starts: its own icon, never the bot's face. */
-const iconOf = (id: string) => rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle")
+const iconOf = (id: string) =>
+  rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle")
 
 const screen = (entry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -185,7 +193,36 @@ test("a row says what was last said, when, and nothing of the rows above it", as
   })
 })
 
-test("a reply that waits on the reader marks its row, and keeps its line", async () => {
+test("a row says what the bot last said, and the reader's own words only while it has not answered", async () => {
+  const at = Date.now() - 60_000
+  await seed([
+    {
+      id: "asked",
+      title: "Trip",
+      at,
+      said: "Booked the flights",
+      saidAt: at - 5_000,
+      mine: "and the hotel?",
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(rowOf("asked")), "the chat's row")
+    const words = wordsOf(rowOf("asked"))
+    assert.ok(words.includes("Booked the flights"), "the row says the last thing received")
+    assert.ok(!words.includes("and the hotel?"), "not the reader's message under it")
+  })
+  // A chat the bot has never answered has only the reader's words to say.
+  await seed([{ id: "only", title: "New chat", at, mine: "are you there?" }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(rowOf("only")), "the chat's row")
+    assert.ok(
+      wordsOf(rowOf("only")).includes("are you there?"),
+      "and says them while nothing came back",
+    )
+  })
+})
+
+test("a reply that waits on the reader marks its row, and says what it waits for", async () => {
   await seed([
     { id: "asking", title: "Needs me", at: 200, said: "Shall I book it?", waits: "clarify" },
     { id: "approving", title: "Approval", at: 150, said: "Run the command", waits: "approval" },
@@ -201,8 +238,12 @@ test("a reply that waits on the reader marks its row, and keeps its line", async
       "a finished chat is not marked",
     )
     assert.ok(
-      wordsOf(rowOf("asking")).includes("Shall I book it?"),
-      "the mark stands beside the line rather than in its place",
+      wordsOf(rowOf("asking")).includes("Awaiting your answer"),
+      "the row says why it waits, in Code's words",
+    )
+    assert.ok(
+      wordsOf(rowOf("approving")).includes("Approve Run the command"),
+      "and an approval names the command it wants to run",
     )
   })
 })
@@ -286,7 +327,11 @@ test("the list holds every chat the bot has, so a pin and a chat past the bound 
   await seed(many)
   await mount(screen(), async () => {
     await until(async () => rowIds().length === many.length, "every chat the bot has")
-    assert.equal(rowIds()[0], "pinned-old", "the pin lifts it above every chat newer than the bound")
+    assert.equal(
+      rowIds()[0],
+      "pinned-old",
+      "the pin lifts it above every chat newer than the bound",
+    )
     assert.ok(
       wordsOf(rowOf("pinned-old")).includes("Still here"),
       "and a pinned chat keeps the line its own tail gives it",
@@ -372,7 +417,8 @@ test("the search narrows the rows to the chats whose title or line it finds", as
       "on the bar the list's floating controls stand on",
     )
     assert.ok(
-      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
         0,
       "with the rows above it",
     )
@@ -465,7 +511,7 @@ test("one floating button at the foot's right holds New chat and New room", asyn
     )
     await settle()
     assert.equal(
-      findAll('[data-new-menu]').length,
+      findAll("[data-new-menu]").length,
       1,
       "one button, not a foot of two: the actions are the menu's rows",
     )

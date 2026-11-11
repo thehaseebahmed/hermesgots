@@ -146,7 +146,6 @@ export function roomRowOf(
     pinned: Boolean(chat.pinned),
     // A room's need is `needs`, drawn as its line in the warning tone: a room is never a chat whose
     // reply is waiting, so it never wears the badge that says one is.
-    waiting: false,
     room: faces,
     needs: roomNeedsOf(chat),
   }
