@@ -8,7 +8,7 @@
  * an assistant's words and a tool row's result both reach the thread through it, so every reader
  * after the fold holds a string. A part of a kind the app keeps no bytes for stands as the
  * placeholder the host itself draws, since the thread paints media from its own markers. Import-free,
- * so `scripts/test-row-text.mjs` runs it as a pure rule.
+ * so `scripts/test-row-text.mjs` runs it as a pure rule. ADR 0142.
  */
 
 /** The kinds whose own words are their text, so they are joined without a line of their own. */
