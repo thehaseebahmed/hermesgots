@@ -23,18 +23,9 @@ import { Link } from "react-router"
 
 import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   InputGroup,
@@ -764,53 +755,6 @@ export function ModelPick({
         <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
       )}
     </PickSurface>
-  )
-}
-
-/**
- * A destructive confirmation: the question, what it does, and a Cancel that writes nothing. `busy`
- * holds the dialog open on the write, so a refused one can be read before it is dismissed by hand.
- */
-export function ConfirmDestructive({
-  open,
-  title,
-  description,
-  confirmLabel,
-  cancelLabel = "Cancel",
-  busy,
-  onOpenChange,
-  onConfirm,
-}: {
-  open: boolean
-  title: string
-  description: ReactNode
-  confirmLabel: string
-  /** The way out of the question, where Cancel isn't the word the dialog wants. */
-  cancelLabel?: string
-  busy?: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => void
-}) {
-  return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && !busy) onOpenChange(false)
-      }}
-    >
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>{cancelLabel}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={busy} onClick={onConfirm}>
-            {confirmLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   )
 }
 

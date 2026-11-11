@@ -12,7 +12,7 @@ import {
   XIcon,
 } from "lucide-react"
 import { Banner } from "@/components/banner"
-import { ConfirmDialog } from "@/components/chat/confirm-dialog"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { RenameDialog } from "@/components/chat/rename-dialog"
 import {
   ContextIcon,
@@ -365,7 +365,7 @@ export function ChatActions({
         onSave={(name) => updateConversation(chat.id, { title: name, titleEdited: true })}
       />
 
-      <ConfirmDialog
+      <ConfirmDestructive
         open={deleting}
         onOpenChange={setDeleting}
         title={session ? "Delete this session?" : "Delete this chat?"}
@@ -374,7 +374,7 @@ export function ChatActions({
             ? "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. It's removed from the app; Hermes keeps its own copy of the session."
             : "It's removed from this device. Hermes keeps its own copy of the session."
         }
-        confirm="Delete"
+        confirmLabel="Delete"
         onConfirm={async () => {
           if (session) closeSession()
           else stopMessage(chat.id)
@@ -385,12 +385,12 @@ export function ChatActions({
         }}
       />
 
-      <ConfirmDialog
+      <ConfirmDestructive
         open={discarding}
         onOpenChange={setDiscarding}
         title="Discard this session?"
         description="Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. The session moves to Discarded meanwhile."
-        confirm="Discard"
+        confirmLabel="Discard"
         onConfirm={async () => {
           if (!session) return
           closeSession()

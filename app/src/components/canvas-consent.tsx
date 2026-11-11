@@ -9,8 +9,8 @@ import { useCallback, useState } from "react"
 import { Trash2Icon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
-  ConfirmDestructive,
   FormActions,
   Group,
   RowText,
