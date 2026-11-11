@@ -178,15 +178,8 @@ function ChatList({
   const canMakeRoom = useCanMakeRoom()
   const now = useNow()
   const [query, setQuery] = useState("")
-  const [searching, setSearching] = useState(false)
   const shown = useMemo(() => chatList(rows, query), [rows, query])
 
-  // The foot's field takes the focus as it opens and gives it back as it closes; the screen only says
-  // whether the search is up, and clears what the field asked the list for.
-  const closeSearch = () => {
-    setSearching(false)
-    setQuery("")
-  }
   // A chat is made first and the address moved after it, so back from it has the list to return to.
   // The entry says which bot it is for, so the list keeps its lane while the new row loads.
   const start = async () => {
@@ -256,11 +249,8 @@ function ChatList({
 
       <ListFoot
         canMakeRoom={canMakeRoom}
-        searching={searching}
         query={query}
         onQueryChange={setQuery}
-        onSearchOpen={() => setSearching(true)}
-        onSearchClose={closeSearch}
         onNewChat={() => void start()}
         onNewRoom={() => navigate("/new-room")}
       />

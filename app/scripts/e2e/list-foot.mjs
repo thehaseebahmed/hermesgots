@@ -10,8 +10,13 @@ const FOOT = '[data-slot="list-foot"]'
 const NEW = "[data-new-menu]"
 const PICKS = "[data-picks]"
 
-/** The picks' own state, since a closed cluster stays mounted and invisible. */
-const picksOpen = async (page) => (await page.locator(PICKS).getAttribute("class"))?.includes("is-shown")
+/**
+ * The picks' own state, read off the attributes the component test reads too: a closed cluster stays
+ * mounted, so its presence in the tree says nothing.
+ */
+const picksOpen = async (page) =>
+  (await page.locator(PICKS).getAttribute("aria-hidden")) === "false" &&
+  !(await page.locator(PICKS).evaluate((el) => el.hasAttribute("inert")))
 
 /** Where the focus is, named by the attribute that says what the control is. */
 const focused = (page, attribute) =>
@@ -136,8 +141,17 @@ async function drive({ page, profileId, until, shot }) {
   assert.equal(await page.locator("#chats-search").inputValue(), "", "and it is empty")
 }
 
-for (const width of [390, 1024]) {
-  await flow(`list-foot-${width}`, drive, { viewport: { width, height: width === 390 ? 844 : 768 } })
+// Both widths, and the phone in the dark as well: the foot's surfaces are theme tokens, and a muted X
+// that reads as disabled on one theme is the risk the plan names.
+for (const { width, dark } of [
+  { width: 390, dark: false },
+  { width: 390, dark: true },
+  { width: 1024, dark: false },
+]) {
+  await flow(`list-foot-${width}${dark ? "-dark" : ""}`, drive, {
+    viewport: { width, height: width === 390 ? 844 : 768 },
+    dark,
+  })
 }
 
 pass("the foot's New opens two pills above its button, and its search becomes a bar as tall as it")

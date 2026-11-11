@@ -35,24 +35,24 @@ const PICKS_ID = "new-picks"
  */
 export function ListFoot({
   canMakeRoom,
-  searching,
   query,
   onQueryChange,
-  onSearchOpen,
-  onSearchClose,
   onNewChat,
   onNewRoom,
 }: {
   canMakeRoom: boolean
-  searching: boolean
+  /** The words the list is narrowed by. The foot holds whether its field is up; the screen holds what
+   * the field asked for, since the rows are the screen's. */
   query: string
   onQueryChange: (query: string) => void
-  onSearchOpen: () => void
-  onSearchClose: () => void
   onNewChat: () => void
   onNewRoom: () => void
 }) {
-  const [open, setOpen] = useState(false)
+  // One value, three states: the foot shows the search, the picks, or neither — never two of them,
+  // and no pair of booleans that could both be true (ADR 0141).
+  const [surface, setSurface] = useState<"closed" | "picks" | "search">("closed")
+  const open = surface === "picks"
+  const searching = surface === "search"
   // The exit is one quiet fade, played while the pills are already inert: the class is what starts it,
   // and it is taken off again once it has run.
   const [hiding, setHiding] = useState(false)
@@ -61,18 +61,15 @@ export function ListFoot({
   const field = useRef<HTMLInputElement>(null)
 
   const closePicks = () => {
-    setOpen(false)
+    setSurface("closed")
     window.requestAnimationFrame(() => newToggle.current?.focus())
   }
-  // One surface at a time: a foot showing both at once would leave one button saying two different
-  // things about what it closes.
-  const togglePicks = () => {
-    if (open) return closePicks()
-    if (searching) onSearchClose()
-    setOpen(true)
-  }
+  const togglePicks = () => (open ? closePicks() : setSurface("picks"))
+  // Closing the field takes its words with it: a list narrowed by a query nobody can see reads as a
+  // list that lost rows.
   const closeSearch = () => {
-    onSearchClose()
+    setSurface("closed")
+    onQueryChange("")
     window.requestAnimationFrame(() => searchToggle.current?.focus())
   }
 
@@ -131,12 +128,9 @@ export function ListFoot({
             variant="outline"
             size="icon-lg"
             className="pointer-events-auto size-14 shrink-0 rounded-full bg-background shadow-lg"
-            onClick={() => {
-              // A keyboard reaches this while the picks are up, where a tap cannot: one surface at a
-              // time, whichever control opened the other.
-              if (open) closePicks()
-              onSearchOpen()
-            }}
+            // A keyboard reaches this while the picks are up, where a tap cannot; one state means the
+            // field simply takes their place.
+            onClick={() => setSurface("search")}
             aria-label="Search"
             data-search-toggle
           >

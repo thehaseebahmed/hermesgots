@@ -176,7 +176,7 @@
 }
 
 /*
-  The foot's two transitions, from transitions-dev, verbatim but for the selectors' names.
+  The foot's two transitions, from transitions-dev.
 
   Icon swap: both faces sit in one grid cell and the state picks which one shows, so the plus and the
   cross cross-fade in the slot rather than one replacing the other.
@@ -209,7 +209,9 @@
 
 /*
   Texts reveal: the picks rise into place one behind the other. The exit is one quiet fade for every
-  line, with no Y return and no blur, so shutting them does not replay the rise backwards.
+  line, with no Y return and no blur, so shutting them does not replay the rise backwards. Our own two
+  changes are marked where they sit: an inline-flex line, and a will-change held only while a rise or
+  a fade runs, since these pills outlive their animation.
 */
 .t-stagger-line {
   display: inline-flex;
