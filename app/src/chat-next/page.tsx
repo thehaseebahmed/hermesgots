@@ -612,6 +612,8 @@ const AGENTS_COOLDOWN_MS = 60_000
 const HANDOFF_MS = 10_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
+/** How many reads a held run's rows are worth: a wait writes nothing more, and one lands them. */
+const WAIT_READ_TRIES = 4
 /** A run this quiet while holding no prompt on the page may be waiting on one it never heard. */
 const QUIET_RUN_MS = 1_500
 
@@ -1186,7 +1188,12 @@ export function ChatNextThread({
     readFor.current = unread
     void catchUp()
   }, [unread, server, key, session, catchUp])
-  const readForWait = useRef<string | undefined>(undefined)
+
+  /** A held run's rows: the prompt read for, the newest row then, and how many reads it has had. */
+  const readInWait = useRef<{ prompt?: string; tip?: number; at: number; tries: number }>({
+    at: 0,
+    tries: 0,
+  })
 
   // A server that streams its changes says when this session moved, so the timer below only has to
   // be a safety net while the stream is open.
@@ -1235,13 +1242,25 @@ export function ChatNextThread({
               void readRun({ server, key }, followingRun.current).then(
                 (prompt) => prompt && dispatch({ type: "waiting", waiting: prompt }),
               )
-          // The rows are read once per wait — and again while a read has not landed, since a wait
-          // can stand for hours and the rows it brings arrive once.
+          // The rows are read when the wait is learned, and tried again — quietly, and only while no
+          // read has landed — a few times over, since a wait can stand for hours and a link that
+          // failed as the page opened is worth another try.
+          const prompt = waiting?.promptId
+          const tip = store.get().rows.at(-1)?.id
+          const read = readInWait.current
           if (
+            prompt &&
             heldOnPrompt(store.get()) &&
-            (readForWait.current !== waiting?.promptId || store.get().status === "failed")
+            read.tries < WAIT_READ_TRIES &&
+            (read.prompt !== prompt || read.tip === tip) &&
+            Date.now() - read.at > idleMs
           ) {
-            readForWait.current = waiting?.promptId
+            readInWait.current = {
+              prompt,
+              tip,
+              at: Date.now(),
+              tries: (read.prompt === prompt ? read.tries : 0) + 1,
+            }
             void catchUp()
           }
           return
