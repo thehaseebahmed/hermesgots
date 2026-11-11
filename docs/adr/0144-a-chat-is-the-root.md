@@ -1,5 +1,7 @@
 # A chat is the root, and a bot's list is a screen it opens
 
+**Superseded in part by [ADR 0145](0145-a-picked-chat-opens-as-the-apps-only-entry.md)** (2026-11-11): a row picked from a bot's list opens that chat as the app's only entry, rather than taking the list's own entry and leaving the chat it covered behind — so a picked chat stands at rung 0, and its press is the app's. The rest of what this record says about a picked row stands: the pick is still what makes the chat the bot's chat on screen.
+
 [ADR 0136](0136-a-bots-screen-is-the-list-of-its-chats.md) made a bot's screen the list of its chats
 and opened it on the chat this device was last in there — with the chat standing *on* that list. The
 landing pushed `/c/<chat>` over `/b/<bot>`, the chat's leading control was "Back to <bot>", and back

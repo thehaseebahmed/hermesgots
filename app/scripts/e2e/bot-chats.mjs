@@ -301,9 +301,26 @@ await flow(
     assert.equal(await rung(page), 0, "back at the app's entry, nothing left over")
     pass("back from the pushed list returns the chat, at the app's entry")
 
+    // The foot's New chat is the same move from the same list: the list does not stand behind the new
+    // chat either, so it is the bot's chat on screen with the press a root chat answers.
+    await page.getByRole("link", { name: "Chats with Test bot" }).click()
+    await page.waitForURL(`**${list}`, { timeout: 20_000 })
+    await until(async () => (await rows()).length === expected.length, 20_000, "the list for a new chat")
+    assert.equal(await rung(page), 1, "the list stands a rung above the chat at the app's entry")
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("button", { name: "New chat", exact: true }).click()
+    await until(
+      async () => here().startsWith("/c/") && here() !== picked,
+      20_000,
+      "the chat the foot made",
+    )
+    assert.equal(await rung(page), 0, "the new chat is the app's only entry, the list gone")
+    await shot("new-chat")
+    pass("a chat started from a pushed list's foot takes the app's only entry")
+
     await page.goBack()
     await until(async () => !here().startsWith("/"), 10_000, "the app to be left")
-    pass("back from the chat at the app's entry leaves the app")
+    pass("back from the new chat at the app's entry leaves the app")
   },
   { viewport: { width: 1024, height: 900 } },
 )
