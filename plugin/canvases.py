@@ -65,9 +65,9 @@ from . import (
     mcp_call,
     outbox,
     page_calls,
+    new_chats,
     sessions,
     tools_common,
-    triage,
 )
 from .store import connect
 
@@ -610,7 +610,7 @@ def title_of(prompt: Any) -> str:
 
     The chat's title too, both on a canvas's first run and on a rename, so the two never disagree.
     """
-    return triage.one_line(prompt, TITLE_CHARS) or "Canvas"
+    return new_chats.one_line(prompt, TITLE_CHARS) or "Canvas"
 
 
 def _tool_name(name: Any) -> str:
@@ -1406,7 +1406,7 @@ def create(
 ) -> Dict[str, Any]:
     """A canvas from a prompt: its record, its chat and the run that builds it, in that order.
 
-    The chat is the one the app makes for a thread — ``triage.open_thread``'s record, keyed by the
+    The chat is the one the app makes for a chat — ``new_chats.open_thread``'s record, keyed by the
     session the canvas is edited in, carrying ``canvasId`` so no list or card ever draws it, titled
     with the canvas's own name and marked ``titleEdited`` so Hermes's auto-title never replaces it.
     A caller that made the chat itself names it with ``chat_id`` and hands the records of the files
@@ -1431,7 +1431,7 @@ def create(
     now = int(time.time() * 1000)
     canvas_id = str(uuid.uuid4())
     title = title_of(prompt)
-    opened, session_id = triage.open_thread(
+    opened, session_id = new_chats.open_thread(
         path,
         bot_id,
         chats.pick(run.get("provider"), run.get("model")),
@@ -1450,7 +1450,7 @@ def create(
     _insert(path, found)
     try:
         # The canvas row is in first: the run this queues may write to it the moment it starts.
-        item = triage.queue_first_turn(path, request_profile, opened, session_id, prompt, saved, body)
+        item = new_chats.queue_first_turn(path, request_profile, opened, session_id, prompt, saved, body)
     except Exception:
         _drop(path, canvas_id)
         raise

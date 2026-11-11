@@ -1,5 +1,7 @@
 # Chat threads are off by default, and Developer switches them on
 
+**Superseded by [ADR 0136](0136-a-bots-screen-is-the-list-of-its-chats.md)** (2026-11-10): threads are gone, so the switch that started one has nothing left to decide. What survives of the layout switch is ADR 0110's, and it chooses the legacy Recents sidebar rather than a chat's rules.
+
 A bot's threads — every chat of its Main but the Main itself — were something a reader could always
 start: `/thread` in Main, a new chat's first send, a share, or triage opening one on the host. They
 are off by default now. Off means the reader loses the ability to start a **new** one, never the ones

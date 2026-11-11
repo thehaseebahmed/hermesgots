@@ -10,7 +10,7 @@
 // in its reply. A tap opens the app's Previewer on it, the copy this device keeps draws it again
 // after a reload with the Host never asked, and a file the test host won't take is refused in the
 // plugin's words, naming the test host's own limit.
-import { assert, flow, mock, pass, pick, png, settled } from "./lib.mjs"
+import { app, assert, flow, mock, pass, pick, png, settled } from "./lib.mjs"
 
 const SENT = "Plan the next release."
 const FIRST = "I'll take the API and the routes."
@@ -20,7 +20,7 @@ const PHOTO = "plan.png"
 const WITH_PHOTO = "Here is the plan."
 const DECK = "deck.zip"
 
-await flow("rooms", async ({ page, until, shot }) => {
+await flow("rooms", async ({ page, profileId, until, shot }) => {
   // The room's members are Hermes profiles, so this device holds a bot for each of them: the bot the
   // flow set up is the Host's own profile, and a second one stands for the other member.
   await page.evaluate(async (baseUrl) => {
@@ -37,7 +37,9 @@ await flow("rooms", async ({ page, until, shot }) => {
     })
   }, mock)
 
-  // The room's row reaches every device from the Host's own projection into the chat list.
+  // A room is a row of every bot's list, so it is opened from one: the bot's own screen, where its
+  // chats and the rooms it is seated in stand together (ADR 0115).
+  await page.goto(`${app}/b/${profileId}`)
   const row = page.getByRole("link", { name: /Planning/ })
   await row.waitFor({ timeout: 20_000 })
   await row.click()

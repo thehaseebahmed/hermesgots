@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
 import { db } from "@/lib/db"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { useLarge, useXLarge } from "@/lib/media"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 
@@ -75,6 +76,42 @@ export function useCodePane(): FeaturePane | undefined {
   return found?.projectId || (found === undefined && hint)
     ? { open: true, selected: chat }
     : undefined
+}
+
+/** A bot's list beside the chat it opened: which bot's list it is, and the chat open in it. */
+export interface BotPane extends FeaturePane {
+  profileId: string
+}
+
+/**
+ * A bot's own chats stay beside the chat they opened, the way Code's sessions stay beside theirs:
+ * its screen (`/b/<bot>`, and the routines under it) keeps the list's lane with nothing selected,
+ * and a chat of that bot's (`/c/<id>`) opens it with the chat's row selected. A chat is read from
+ * its address's row, and the list's own links say which bot they are for in `state.bot`, so the
+ * lane holds while the row loads.
+ *
+ * A project session, a room and a canvas are none of a bot's list — each belongs to its own
+ * screen's pane — which is why this asks `listsAsChat`, and why the shell asks Code first (ADR
+ * 0115).
+ */
+export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefined {
+  const split = useSplit()
+  const { pathname, state } = useLocation()
+  const id = matchPath("/c/:id", pathname)?.params.id
+  // Tagged with the id it ran for, since a new id still sees the last answer for a moment.
+  const read = useLiveQuery(async () => {
+    const found = id ? await db.conversations.get(id) : undefined
+    return { id, profileId: found && listsAsChat(found) ? found.profileId : undefined }
+  }, [id])
+  if (!split || !enabled) return undefined
+  // A bot's own screen, and everything the list opens over it: the splat matches the bare address
+  // too, so one pattern answers every address under a bot.
+  const own = matchPath("/b/:profileId/*", pathname)
+  if (own) return { open: true, profileId: own.params.profileId ?? "" }
+  if (!id) return undefined
+  const answered = read?.id === id ? read : undefined
+  const profileId = answered ? answered.profileId : (state as { bot?: string } | null)?.bot
+  return profileId ? { open: true, selected: id, profileId } : undefined
 }
 
 /** The features whose item pane opens on the one opened last, per device. */

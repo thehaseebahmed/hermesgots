@@ -9,8 +9,7 @@ import {
   useState,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { XIcon } from "lucide-react"
-import { matchPath, Navigate, useLocation, useNavigate, useParams } from "react-router"
+import { Navigate, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import {
@@ -30,7 +29,6 @@ import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
-import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -42,10 +40,8 @@ import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
-import { ModelChange } from "@/components/chat/model-change"
-import { DayHeading } from "@/components/chat/day-heading"
+import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { PreviewerProvider } from "@/components/chat/previewer"
-import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
 import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
 import { PrPill } from "@/components/chat/pr-pill"
@@ -78,8 +74,6 @@ import {
   HOST_QUEUE_SETTLE_MS,
   refreshQueue,
   reattachRun,
-  sendFromMain,
-  settleTriaging,
   sendMessage,
   steerText,
   stopMessage,
@@ -92,11 +86,8 @@ import {
   type Message,
   type ModelChoice,
   db,
-  ensureMainThread,
   getActiveProfile,
   getMessages,
-  mainThreadId,
-  mainThreadProfile,
   setActiveProfile,
   updateConversation,
 } from "@/lib/db"
@@ -111,12 +102,13 @@ import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
-import { useCodePane, useRememberOpened } from "@/lib/pane"
+import { useCodePane, useRememberOpened, useSplit } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
-import { useNav } from "@/lib/nav"
+import { BACK_ON_LIST, useNav } from "@/lib/nav"
+import { rememberLastChat } from "@/lib/last-chat"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
@@ -132,8 +124,8 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { beginThread, takeHandover, useBotThreads, useThreads } from "@/lib/threads"
-import { EmptyState, MainEmptyState, MissingThread } from "@/components/chat/empty-states"
+import { useLegacyChat } from "@/lib/legacy-chat"
+import { EmptyChatState, MissingThread } from "@/components/chat/empty-states"
 import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { reportUnreadThread } from "@/lib/sentry"
@@ -141,8 +133,8 @@ import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
 import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
-import { announceMove } from "@/lib/triage"
-import { useMainFlow } from "@/components/chat/main-flow"
+import { botChatsPath } from "@/lib/bot-tabs"
+import { chatFlow } from "@/lib/chat-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
 import { dictationHint } from "@/lib/dictation-hint"
@@ -235,17 +227,12 @@ const loadBlankChat = () => import("@/chat-next/blank")
 const ChatNextBlank = lazy(() => loadBlankChat().then((m) => ({ default: m.ChatNextBlank })))
 const loadRoomChat = () => import("@/components/room/room-chat")
 const RoomChat = lazy(() => loadRoomChat().then((m) => ({ default: m.RoomChat })))
+// A routine's row is a run, not a chat: it opens on the screen that reads the run and nothing else.
+const loadRoutineChat = () => import("@/components/chat/routine-chat")
+const RoutineChat = lazy(() => loadRoutineChat().then((m) => ({ default: m.RoutineChat })))
 
 interface ChatPageProps {
-  chatId?: string
-  paneThread?: string
   slot: HoldSlot
-  /**
-   * Puts the thread beside Main away, wherever the lane holds one: the thread's header draws it as
-   * the close cross, and where the address names that thread it comes back to Main instead.
-   * Absent where closing can't take effect.
-   */
-  closeThread?: () => void
 }
 
 /**
@@ -262,9 +249,26 @@ interface ChatPageProps {
  */
 const roomsDrawn = new Set<string>()
 
+/**
+ * The chat the address names is the one this device will open its bot on next time, so it is written
+ * here — where every screen that draws a chat passes — and only for one of a bot's chats: a project
+ * session, a room and a canvas are none of a bot's list.
+ */
+function useRememberedChat(id: string | undefined) {
+  const chat = useLiveQuery(async () => (id ? await db.conversations.get(id) : undefined), [id])
+  useEffect(() => {
+    // A routine's run is read-only, so it is never the chat its bot opens on.
+    if (!chat || chat.id !== id || !listsAsChat(chat) || chat.routine) return
+    rememberLastChat(chat.profileId, chat.id)
+  }, [chat, id])
+}
+
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
-  const id = props.chatId ?? params.id
+  const id = params.id
+  // The chat the address names is remembered as the one its bot opens next.
+  useRememberedChat(id)
+  // The push that named this chat leaves the tray now that its screen is open (ADR 0132).
   useDismissChatPushes(id)
   const verdict = useLiveQuery(async () => {
     const chat = id ? await db.conversations.get(id) : undefined
@@ -282,6 +286,13 @@ export function ChatPage(props: ChatPageProps) {
     if (!chat && id && roomsDrawn.has(id)) {
       void loadRoomChat()
       return `room\n${id}`
+    }
+    // A routine's run is no chat, whatever else it looks like: the plugin publishes one row per
+    // delivery, whose session is the run's own, so the row opens the run read-only — before the
+    // chat screens' own paths, neither of which can take a turn in a `cron` session anyway.
+    if (chat?.routine) {
+      void loadRoutineChat()
+      return `routine\n${id}`
     }
     const bot = chat
       ? await db.profiles.get(chat.profileId)
@@ -317,6 +328,10 @@ export function ChatPage(props: ChatPageProps) {
       <Suspense fallback={null}>
         <RoomChat key={id} id={id} slot={props.slot} />
       </Suspense>
+    ) : screenKind === "routine" && verdict === `routine\n${id}` && id ? (
+      <Suspense fallback={null}>
+        <RoutineChat key={id} id={id} slot={props.slot} />
+      </Suspense>
     ) : screenKind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat
         // Keyed by the chat it draws: a thread opened from Main is a fresh instance, which is what
@@ -324,9 +339,6 @@ export function ChatPage(props: ChatPageProps) {
         key={id}
         id={id}
         slot={props.slot}
-        pinned={Boolean(props.chatId)}
-        paneThread={props.paneThread}
-        closeThread={props.closeThread}
       />
     ) : screenKind === "current" ? (
       <CurrentChatPage {...props} />
@@ -344,61 +356,36 @@ export function ChatPage(props: ChatPageProps) {
   )
 }
 
-/**
- * A chat drawn by chat-next, under the chat's own header. A bot's Main is drawn as the current screen
- * draws it: under the bot's name and its count of threads, with its threads as cards in its flow,
- * and every message it sends triaged by the host first (ADR 0029); a thread of it leads back to it.
- */
-function NextChat({
-  id,
-  slot,
-  pinned,
-  paneThread,
-  closeThread,
-}: {
-  id: string
-  slot: HoldSlot
-  /** This instance draws a chat the address may not name: a Main beside its thread. */
-  pinned: boolean
-  paneThread?: string
-  closeThread?: () => void
-}) {
+/** A chat drawn by chat-next, under the chat's own header: a bot's chat is a chat, Main among them. */
+function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
   const bot = useLiveQuery(
     async () => (chat ? db.profiles.get(chat.profileId) : undefined),
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
-  const botThreads = useBotThreads()
-  const { pathname, state: address } = useLocation()
+  const legacy = useLegacyChat()
+  const { state: address } = useLocation()
   const { root, up } = useNav()
   // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
   const upRef = useRef(up)
   upRef.current = up
-  // A thread Main opened with `/thread` is handed the message it was opened for, by its own id: taken
-  // once, here, so the screen that draws this thread is the one that sends it (ADR 0096).
-  const [start] = useState(() => takeHandover(id))
-  const routeChat = matchPath("/c/:id", pathname)?.params.id
-  const isMain = Boolean(chat?.main)
-  const mainOn = Boolean(botThreads && isMain)
-  const threadList = useThreads(mainOn ? chat?.profileId : undefined)
-  // The thread the address names when this instance is a Main drawn beside it.
-  const routeThread =
-    pinned && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
-  const mainPath =
-    botThreads && chat && listsAsChat(chat) && !isMain
-      ? `/c/${mainThreadId(chat.profileId)}`
-      : undefined
+  // A chat of a bot answers its bot's list: where its own control and Android's back step when
+  // nothing stands behind it, and — since a row opens the chat from that list — where they land
+  // after one. A Main is one of the bot's chats, so it answers the same address.
+  const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
   const xl = useXLarge()
   const wide = useWide()
-  const besideMain = Boolean(mainPath) && xl
+  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
+  // there is nothing behind it for its header to lead back to.
+  const besideList = useSplit() && Boolean(listPath)
   useEffect(() => {
-    if (!mainPath) return
+    if (!listPath) return
     return setBackGuard(() => {
-      upRef.current(mainPath)
+      upRef.current(listPath, BACK_ON_LIST)
       return true
     })
-  }, [mainPath])
+  }, [listPath])
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
   // and a session nothing was sent in isn't kept.
   const session = chat?.projectId ? chat : undefined
@@ -437,10 +424,12 @@ function NextChat({
     if (!projectId || !unstarted || !botBase || botKeyOf === undefined) return
     readProjects({ baseUrl: botBase, apiKey: botKeyOf }).catch(quietly("Reading projects"))
   }, [projectId, unstarted, botBase, botKeyOf])
-  const mainOf = isMain ? chat?.profileId : undefined
+  // Opening one of a bot's own chats makes that bot the app's active one, its list and its screens
+  // reading it from there.
+  const ownedBy = chat && listsAsChat(chat) ? chat.profileId : undefined
   useEffect(() => {
-    if (mainOf) void setActiveProfile(mainOf)
-  }, [mainOf])
+    if (ownedBy) void setActiveProfile(ownedBy)
+  }, [ownedBy])
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   }, [ready, slot, id])
@@ -455,13 +444,12 @@ function NextChat({
       chat={chat}
       profile={bot}
       session={session}
-      mainChrome={mainOn}
       wide={wide}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
-      onDeleted={() => (session ? up("/code") : root(mainPath ?? "/"))}
+      onDeleted={() => (session ? up("/code") : root("/"))}
     />
   )
   return (
@@ -476,45 +464,32 @@ function NextChat({
       {chat && bot && ready ? (
         <>
           <ChatHeader
-            // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
             // A session not started has no title yet, and its bot is the big one in the middle.
-            title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+            title={unstarted ? "" : chat.title}
             // The header never follows the reply: what the thread is doing is drawn in the thread.
             subtitle={
               awayLine(away, online) ??
-              (mainOn && threadList
-                ? threadsLine(threadCount(threadList))
-                : session && !unstarted
-                  ? sessionSubtitle({
-                      botName: bot.name,
-                      names: sessionRepos.map((repo) => repo.name),
-                      cap: repoCap({ wide, xlarge: xl }),
-                    })
-                  : undefined)
+              (session && !unstarted
+                ? sessionSubtitle({
+                    botName: bot.name,
+                    names: sessionRepos.map((repo) => repo.name),
+                    cap: repoCap({ wide, xlarge: xl }),
+                  })
+                : undefined)
             }
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
-            centered={Boolean(session) || besideMain}
-            showBot={!session && !besideMain}
+            centered={Boolean(session)}
+            showBot={!session}
             actions={actions}
             leading={
-              // Beside Main the bot is already on screen with the thread, so the way out is the
-              // one that puts this pane away, in the slot a phone's Back takes. Below `xl` the
-              // thread is a screen of its own and leads back; a session leads back to Code,
-              // unless it is drawn beside Code's list.
-              besideMain ? (
-                closeThread && (
-                  <BackButton
-                    label="Close thread"
-                    onClick={closeThread}
-                    floating
-                    icon={<XIcon />}
-                  />
-                )
-              ) : mainPath ? (
+              // Beside the bot's list there is nothing behind this chat, so it carries no way
+              // back; below that width the chat is a screen the list pushed and leads back to it,
+              // and a session leads back to Code unless it is drawn beside Code's list.
+              besideList ? undefined : listPath ? (
                 <BackButton
                   label={`Back to ${bot.name || "bot"}`}
-                  onClick={() => up(mainPath)}
+                  onClick={() => up(listPath, BACK_ON_LIST)}
                   floating
                 />
               ) : (
@@ -529,20 +504,7 @@ function NextChat({
             bot={bot}
             summaries={summaries}
             blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
-            main={
-              mainOn
-                ? {
-                    profileId: chat.profileId,
-                    botId: bot.botId,
-                    openThread: routeThread ?? paneThread,
-                    beside: Boolean(routeThread),
-                    routeChat,
-                  }
-                : undefined
-            }
-            start={start}
             onAway={setAway}
-            home={mainPath}
             limit={limit}
           />
           {leaveDialog}
@@ -559,23 +521,16 @@ function NextChat({
  * in the order the current screen draws them — closed, blocked, then a plan waiting to be approved —
  * and a chat this device holds nothing of draws none of it.
  */
-function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProps) {
+function CurrentChatPage({ slot }: ChatPageProps) {
   const params = useParams()
-  const { pathname, state: address } = useLocation()
-  const id = chatId ?? params.id
-  // The id the address names, which differs from this instance's own: a Main drawn beside a
-  // thread is keyed to the Main while the address holds the thread.
-  const routeChat = matchPath("/c/:id", pathname)?.params.id
-  // A message left triaging by a page that closed mid-triage was never sent.
-  useEffect(() => {
-    if (id) void settleTriaging(id)
-  }, [id])
+  const { state: address } = useLocation()
+  const id = params.id
   const navigate = useNavigate()
   const { root, up } = useNav()
   // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
   // rather than the `undefined` a query that has not run hands back.
   const settings = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
@@ -638,30 +593,15 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
     () => compactionMarks(thread ?? [], conversation?.compactions),
     [thread, conversation?.compactions],
   )
-  const {
-    threadList,
-    flow,
-    moveThatOpenedThread,
-    undo: undoMoveOutMain,
-    itemRow,
-  } = useMainFlow({
-    chatId: id,
-    profileId: conversation?.profileId ?? "",
-    thread,
-    moves: conversation?.moves,
-    compacted,
-    on: Boolean(botThreads && conversation?.main),
-    listFor: gone ? profile?.id : undefined,
-    afterUndo: refreshQueue,
-    routeChat,
-  })
+  // What the chat draws: its messages, with a compaction's divider above the message it sits over,
+  // and nothing else — a Main is drawn like any other chat.
+  const flow = useMemo(() => chatFlow({ thread, compacted }), [thread, compacted])
   const answered =
     settings !== undefined &&
-    botThreads !== undefined &&
+    legacy !== undefined &&
     (id === undefined || conversation !== undefined) &&
     profile !== undefined &&
-    messages !== undefined &&
-    (!(botThreads && conversation?.main) || threadList !== undefined)
+    messages !== undefined
   const keptReady = readyRef.current !== undefined && readyRef.current.id === id
   const ready = answered || keptReady
   useLayoutEffect(() => {
@@ -1034,38 +974,27 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
       ? projectRepos(project)
       : []
 
-  const mainOf = conversation?.main ? conversation.profileId : undefined
+  // Opening one of a bot's own chats makes that bot the app's active one, its list and its screens
+  // reading it from there.
+  const ownedBy = conversation && listsAsChat(conversation) ? conversation.profileId : undefined
   useEffect(() => {
-    if (mainOf) void setActiveProfile(mainOf)
-  }, [mainOf])
+    if (ownedBy) void setActiveProfile(ownedBy)
+  }, [ownedBy])
 
-  const mainOwner = id ? mainThreadProfile(id) : undefined
-  useEffect(() => {
-    if (!id || conversation !== null || !mainOwner || !botThreads) return
-    void db.profiles
-      .get(mainOwner)
-      .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
-  }, [id, conversation, root, botThreads, mainOwner])
-
-  const isMain = Boolean(conversation?.main)
-  // The thread the address itself names, when this instance is a bot's Main drawn beside it: a
-  // Main id is never a thread, so a Main drawn beside another Main carries no item of its own.
-  const routeThread =
-    chatId && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
-  const mainPath =
-    botThreads && conversation && !session && !isMain
-      ? `/c/${mainThreadId(conversation.profileId)}`
+  // A chat of a bot answers its bot's list, Main among them.
+  const listPath =
+    !legacy && conversation && !session && listsAsChat(conversation)
+      ? botChatsPath(conversation.profileId)
       : undefined
-  // `beside` stays on the address alone, so a card tapped from Main still pushes a history entry
-  // Back can return to, while the thread the pane really holds is still the one marked open.
-  const openThread = routeThread ?? (isMain ? paneThread : undefined)
   // A session opens beside Code's list where there's room, and is then a top-level screen with
   // nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
-  const besideMain = Boolean(mainPath) && xl
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
+  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
+  // there is nothing behind it for its header to lead back to.
+  const besideList = useSplit() && Boolean(listPath)
   const codePath = session && "/code"
   const {
     leave,
@@ -1090,28 +1019,13 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
   useEffect(() => {
     if (seenId && seenAt > 0) markRead(seenId, seenAt)
   }, [seenId, seenAt])
-  // A thread beside Main says how many replies it has under its title.
-  const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
-  const repliesLine =
-    mainPath && xl && replyCount
-      ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
-      : undefined
   useEffect(() => {
-    if (!mainPath) return
+    if (!listPath) return
     return setBackGuard(() => {
-      up(mainPath)
+      up(listPath, BACK_ON_LIST)
       return true
     })
-  }, [mainPath, up])
-
-  // Main's messages are triaged even while its reply runs, so one for another thread goes there at
-  // once; the rest steer or queue behind the reply.
-  const sendMidReply = (id: string, steer: boolean, text: string, attachments: Attachment[] = []) =>
-    sendFromMain(id, text, attachments, { steer })
-      .then(announceMove)
-      .catch((error: unknown) => {
-        toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
-      })
+  }, [listPath, up])
 
   const send = async (text: string, attachments: Attachment[] = [], at?: number) => {
     if (!id) return
@@ -1120,87 +1034,33 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
       // that caught up a moment ago doesn't wait again.
       if (!caughtUpWithin(id, SEND_CAUGHT_UP_MS))
         await Promise.race([reconcileHistory(id).catch(() => undefined), wait(1500)])
-      // Main's messages are triaged by the host first; a thread never is.
-      if (conversation?.main) await announceMove(await sendFromMain(id, text, attachments))
-      else await sendMessage(id, text, { attachments, at })
+      await sendMessage(id, text, { attachments, at })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
     }
   }
 
-  // The thread opens on the message the reader typed with `/thread`, and sends it from its own
-  // screen — the same handover chat-next's Main makes (ADR 0096).
-  const startThread = async (text: string, attachments: Attachment[] = []) => {
-    if (!profile || !conversation?.main) return
-    try {
-      // A pick made in Main comes with the thread; the Default row's marker doesn't, or the thread
-      // would follow the default without ever fixing the model it started on.
-      const thread = await beginThread(profile.id, {
-        modelChoice: chosenOf(keptModel),
-        text,
-        attachments,
-      })
-      navigate(`/c/${thread.id}`, { state: { bot: profile.id } })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
-      throw error
-    }
-  }
-
-  // The message Main handed this thread with `/thread`, sent here as the thread's first turn: the
-  // same handover chat-next's screen takes, so the thread draws its message as it opens (ADR 0096).
-  // Read by the address's id, because this screen keeps its instance as the address moves from Main
-  // to the thread it just made; the take is once, so a second run of this effect finds nothing.
-  useEffect(() => {
-    if (!ready || !id) return
-    const first = takeHandover(id)
-    if (!first) return
-    void send(first.text, first.attachments, first.at).catch(
-      quietly("Sending a thread's first message"),
-    )
-  }, [ready, id, send])
-
-  const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <ChatActions
       chat={conversation}
       profile={profile}
       session={session}
-      mainChrome={mainChrome}
       wide={wide}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
-      onDeleted={() => (codePath ? up(codePath) : root(mainPath ?? "/"))}
+      onDeleted={() => (codePath ? up(codePath) : root("/"))}
     />
   )
 
-  // A session is a place in a project, and a thread beside Main is a place within the bot, so both
-  // are centred; the bot's own face reads from the left.
-  const centered = Boolean(session) || besideMain
-  // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
-  // face, so its title is the bot's name rather than the `Main` its record is stored under: the
-  // name Bot settings edits, so a rename shows here at once.
-  // A chat that answered gone keeps the title it is still known by: Main is its bot's name, and a
-  // thread is the one the list this device last read carries for it. Nothing once that list has
-  // nothing left — a gone chat is never drawn as a new one, and its header standing empty is the
-  // honest answer. The scan runs only on the branch that draws it.
-  const goneTitle = !gone
-    ? ""
-    : mainOwner
-      ? (profile?.name ?? "")
-      : (threadList?.find((one) => one.chat.id === id)?.chat.title ?? "")
-  const headerTitle = gone
-    ? goneTitle
-    : unstarted
-      ? ""
-      : isMain
-        ? profile?.name || conversation?.title || ""
-        : (conversation?.title ?? "New chat")
-  const mainLine =
-    botThreads && isMain && threadList ? threadsLine(threadCount(threadList)) : undefined
+  // A session is a place in a project, so it is centred; a chat's own face reads from the left.
+  const centered = Boolean(session)
+  // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
+  // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
+  // answer. A bot's Main is titled with its own name, like any other chat.
+  const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? "New chat")
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -1210,7 +1070,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
           names: sessionRepos.map((repo) => repo.name),
           cap: repoCap({ wide, xlarge: xl }),
         })
-      : activity || mainLine || repliesLine
+      : activity
 
   const frame = ready ? (
     <>
@@ -1220,27 +1080,16 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // A chat is with its bot, so its picture stays — until the bot is drawn beside its own
-        // thread, where the picture is Main's and the thread is within it.
-        showBot={!session && !unstarted && !besideMain}
+        // A chat is with its bot, so its picture stays.
+        showBot={!session && !unstarted}
         actions={actions}
         leading={
-          besideMain ? (
-            // The bot is on screen with the thread, so the way out is the one that puts this pane
-            // away, in the slot a phone's Back takes.
-            closeThread && (
-              <BackButton
-                label="Close thread"
-                onClick={closeThread}
-                floating
-                icon={<XIcon />}
-              />
-            )
-          ) : mainPath ? (
-            // Below `xl` the thread is a screen over Main, and leads back to it.
+          // Beside the bot's list there is nothing behind this chat, so it carries no way back;
+          // below that width the chat is a screen the list pushed and leads back to it.
+          besideList ? undefined : listPath ? (
             <BackButton
               label={`Back to ${profile?.name ?? "bot"}`}
-              onClick={() => up(mainPath)}
+              onClick={() => up(listPath, BACK_ON_LIST)}
               floating
             />
           ) : (
@@ -1266,22 +1115,13 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
                 )}
                 <AgentsContext.Provider value={agentsSource}>
                   {drawn.map((entry) => {
-                    if (entry.kind === "heading")
-                      return <DayHeading key={`day-${entry.at}`} day={entry.day} />
-                    if (entry.kind === "card")
+                    if (entry.kind === "compaction")
                       return (
-                        <ThreadCard
-                          key={`card-${entry.thread.chat.id}`}
-                          thread={entry.thread}
-                          profileId={conversation?.profileId ?? ""}
-                          open={entry.thread.chat.id === openThread}
-                          beside={Boolean(routeThread)}
-                          current={entry.thread.chat.id === routeChat}
-                          move={moveThatOpenedThread.get(entry.thread.chat.id)}
-                          onUndo={undoMoveOutMain}
+                        <Compacted
+                          key={`compaction-${entry.at}`}
+                          compaction={entry.compaction}
                         />
                       )
-                    if (entry.kind !== "message") return itemRow(entry)
                     const message = entry.message
                     // A model change is a project session's mark; a chat draws none (ADR 0087).
                     const change = session ? changes.get(message.id) : undefined
@@ -1340,15 +1180,15 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
         // discarded: the card below says both, and a new session's face would say neither. The pane
         // still takes its room, so the card keeps the composer's own place at the foot.
         <div className="flex flex-1" />
-      ) : conversation?.main && botThreads && configured ? (
-        <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
       ) : (
-        <EmptyState
+        <EmptyChatState
           botId={profile?.botId}
           configured={configured && Boolean(id)}
           session={session && { repos: sessionRepos }}
           id={conversation?.id}
           line={!gone}
+          // A bot's chat nothing has been said in yet offers the message that starts it.
+          onSend={session ? undefined : send}
         />
       )}
 
@@ -1377,7 +1217,7 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
             </div>
           </div>
         )}
-        {!id && profile && !botThreads && (
+        {!id && profile && legacy && (
           <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={profile} />
           </div>
@@ -1432,31 +1272,22 @@ function CurrentChatPage({ chatId, paneThread, slot, closeThread }: ChatPageProp
             onSend={send}
             onQueue={(text, attachments) => {
               if (!id) return send(text, attachments)
-              if (conversation?.main) return sendMidReply(id, false, text, attachments)
               void queueMessage(id, text, attachments)
             }}
             steerByDefault={resolved.steerByDefault}
             sendOnEnter={resolved.sendOnEnter}
             canSteer={steerable}
             onSteer={(text, attachments) =>
-              id
-                ? conversation?.main
-                  ? sendMidReply(id, true, text, attachments)
-                  : steerText(id, text, attachments)
-                : send(text, attachments)
+              id ? steerText(id, text, attachments) : send(text, attachments)
             }
             filesFeature={filesFeature}
             imagesAvailable={profile?.imageInput !== false}
             subagentsRunning={subagentsRunning}
             onStop={stopEverything}
             runId={runId}
-            main={Boolean(botThreads && isMain)}
-            onCommand={(command, message) => {
+
+            onCommand={(command) => {
               switch (command) {
-                case "thread":
-                  return startThread(message?.text ?? "", message?.attachments ?? [])
-                case "new":
-                  return root(mainPath ?? "/")
                 case "settings":
                   return navigate("/settings")
                 case "cheatsheet":

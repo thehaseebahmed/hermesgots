@@ -1,47 +1,88 @@
-// A routine's answer arrives in the chat that asked for it, as the bot's own message, with a chip
-// that opens the run read-only (ADR 0081). The mock's "routine message" turn answers first and then
-// delivers the routine's message into the same chat, which is what a real host does when a job fires.
-import { assert, flow, pass } from "./lib.mjs"
+// A routine's delivery is a row of the bot's own list (G4): the host publishes one record per run,
+// the list draws it wearing the routine's icon and the delivery's first line, and opening it draws
+// the run's transcript read-only — no composer, and the sentence saying why — at 390 and 1024px in
+// both themes.
+//
+// This flow used to assert the other premise: a delivery written into the chat that asked for it as an
+// assistant row of the bot's own, opening as an aside, with a chip above it that opened the run in a
+// sheet. The chip and the sheet are gone and a delivery no longer lands in a chat at all, so what the
+// browser's own width is needed for survives: the record the host publishes reaching the device's
+// list, and the run's own screen reading the session it names.
+import { app, assert, flow, pass } from "./lib.mjs"
 
-const LINE = "[data-slot=routine-receipt] p"
-const SHEET = "[data-slot=routine-run]"
-const SAID = "the tide turns at 06:40"
-const RAN = "The tide turns at 06:40"
+const ROW = 'a[href^="/c/routine-"]'
+const SCREEN = "[data-routine-chat]"
+const NOTE = "[data-slot=routine-note]"
+const TITLE = "Morning watch"
+const SAID = "The tide turns at 06:40"
+/** The run's own prompt: the transcript on its screen is its session, read whole. */
+const ASKED = "Watch the tide and tell me in a chat when it turns."
 
-/** The two claims are the same at every look: the message stands apart, and its run has no composer. */
-async function drive({ page, send, lastReply, until, shot }) {
+/** The same claims at every look: the list's row, then the run read-only where the row leads. */
+async function drive({ page, profileId, send, newChat, lastReply, until, shot }) {
+  // The routine is asked for in a chat of its own; its delivery is a row of the bot's list, not
+  // something said in this thread.
+  const chatId = await newChat({ title: "Watching the tide" })
   await send("routine message")
-  await page.waitForURL("**/c/**", { timeout: 15_000 })
-  const chatId = new URL(page.url()).pathname.split("/").at(-1)
+  await page
+    .locator("[aria-label=Messages]")
+    .getByText("I'll watch the tide and tell you when it turns.")
+    .waitFor({ timeout: 30_000 })
   await until(
     async () => {
       const reply = await lastReply(chatId)
-      return reply?.status === "done" ? reply : null
+      return reply?.status === "done"
     },
     20_000,
     "the reply to finish",
   )
-  // The routine's row lands after the reply: a reload reads the chat's transcript again, which is
-  // where a routine's message is drawn from.
-  await page.waitForTimeout(500)
-  await page.reload()
-  await until(async () => (await page.locator(LINE).count()) === 1, 15_000, "the routine's line")
-  const thread = await page.getByRole("main").innerText()
-  assert.ok(thread.includes(SAID), "the routine's words are in the thread")
-  // The chat was active moments ago, so the message opens as an aside rather than as an answer.
-  assert.match(thread, /On a side note, |As a quick aside, /, "the aside opener is there")
-  // The line above the words says which run wrote them and how long it took (ADR 0081).
-  assert.match(thread, /Ran “Morning watch” in \d/, "the line says how long the run took")
-  await shot("message")
+  // The row is the host's record, and this device reads its chats when the app starts: the list is
+  // reached by its own address, the way a reader finds it after closing the app.
+  await page.goto(`${app}/b/${profileId}`)
+  await until(async () => (await page.locator(ROW).count()) > 0, 30_000, "the routine's row")
+  const row = page.locator(ROW).first()
+  const words = await row.innerText()
+  assert.match(words, new RegExp(TITLE), "the row names the routine")
+  assert.match(words, new RegExp(SAID), "and carries the delivery's first line")
+  assert.equal(
+    await row.locator("svg.lucide-timer").count(),
+    1,
+    "the row wears the routine's icon rather than a chat's",
+  )
+  assert.equal(await row.locator("svg.lucide-message-circle").count(), 0, "no chat's icon on it")
+  await shot("list")
 
-  // A reader aims at the sentence, not at the name: the whole line is the target.
-  await page.locator(LINE).click({ position: { x: 10, y: 20 } })
-  await until(async () => (await page.locator(SHEET).count()) === 1, 10_000, "the run sheet")
-  const dialog = page.locator(SHEET)
-  assert.equal(await dialog.getByRole("textbox").count(), 0, "the sheet carries no composer")
-  const sheet = await dialog.innerText()
-  assert.ok(sheet.includes(RAN), "the run's own words are drawn")
+  await row.click()
+  await until(async () => (await page.locator(SCREEN).count()) === 1, 20_000, "the run's screen")
+  const screen = page.locator(SCREEN)
+  await screen.getByText(SAID).first().waitFor({ timeout: 20_000 })
+  assert.ok(
+    (await screen.innerText()).includes(ASKED),
+    "the run's own session is what was read, its prompt as well as its answer",
+  )
+  assert.equal(await screen.getByRole("textbox").count(), 0, "a run's screen carries no composer")
+  assert.match(
+    await page.locator(NOTE).innerText(),
+    /won't take a reply/i,
+    "and the composer's place says why nothing can be sent",
+  )
   await shot("run")
+
+  // The way back is the bot's list, where this screen is the one the list pushed; where the list keeps
+  // its lane beside the run, there is nothing to lead back to and the row stays on screen.
+  const back = page.getByRole("button", { name: /^Back to / })
+  if (await back.count()) {
+    await back.click()
+    await until(
+      async () => new URL(page.url()).pathname === `/b/${profileId}`,
+      10_000,
+      "the bot's list",
+    )
+    assert.equal(await page.locator(SCREEN).count(), 0, "and the run's screen is what was left")
+    await shot("back")
+  } else {
+    assert.ok(await page.locator(ROW).first().isVisible(), "the list stays beside the run")
+  }
 }
 
 for (const { width, dark } of [
@@ -56,4 +97,4 @@ for (const { width, dark } of [
   })
 }
 
-pass("a routine's message drew as the bot's own, apart from the reply, and its run opened read-only")
+pass("a routine's delivery listed as its own row, and its run opened read-only with no composer")

@@ -3,7 +3,7 @@
 // drawing the room's needs-you mark, and Stop cancelling a round the transcript then says was
 // stopped. The rounds run on the Host with no client attached, so every card here came from a read
 // of the Host's own state.
-import { assert, flow, mock, pass, settled } from "./lib.mjs"
+import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 const CLEAN = "clean the build"
 const APPROVED = "Approved — clearing the build."
@@ -22,7 +22,7 @@ async function card(page, kind) {
   return found
 }
 
-await flow("room-waiting", async ({ page, until, shot }) => {
+await flow("room-waiting", async ({ page, profileId, until, shot }) => {
   // The room's members are Hermes profiles, so this device holds a bot for each of them.
   await page.evaluate(async (baseUrl) => {
     const { addProfile, db } = await import("/src/lib/db.ts")
@@ -38,6 +38,9 @@ await flow("room-waiting", async ({ page, until, shot }) => {
     })
   }, mock)
 
+  // The room's row reaches every device from the Host's own projection into the chat list, and it is
+  // a row of this bot's list, among its chats.
+  await page.goto(`${app}/b/${profileId}`)
   const row = page.getByRole("link", { name: /Planning/ })
   await row.waitFor({ timeout: 20_000 })
   await row.click()

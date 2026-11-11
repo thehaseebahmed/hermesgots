@@ -433,7 +433,7 @@ export async function handleCanvas(
       if (!prompt) return fail(400, "A canvas needs a prompt to build it from."), true
       const now = Date.now()
       const title = titleOf(prompt)
-      // The chat the canvas is edited in is the one `triage.open_thread` makes: an app-kind id, a
+      // The chat the canvas is edited in is the one `new_chats.open_thread` makes: an app-kind id, a
       // session named for it, the canvas's own name marked `titleEdited`, and `canvasId` so no list
       // or card ever draws it (canvases.py's `create`).
       const chatId = randomUUID()

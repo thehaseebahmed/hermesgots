@@ -1,5 +1,5 @@
-// Projects, a project, Code, Routines, a chat and a coding session load their data at phone and
-// tablet widths, in light and dark mode, with no errors in the console; the session's header is
+// Projects, a project, Code, a bot's routines, a chat and a coding session load their data at phone
+// and tablet widths, in light and dark mode, with no errors in the console; the session's header is
 // centred, with its bot and its repositories under the title rather than a picture beside it.
 import {
   app,
@@ -39,7 +39,13 @@ for (const width of [390, 1024]) {
         await page.goto(`${app}/code`)
         await page.getByRole("button", { name: "New session" }).first().waitFor({ timeout: 15_000 })
         await shot("code")
-        await page.goto(`${app}/routines`)
+        // A bot's routines are the bot's own screen: its list's control opens it, at both widths. The
+        // control is the link it is, not a button wearing a link's clothes.
+        await page.goto(`${app}/b/${profileId}`)
+        await page.getByRole("link", { name: "Routines" }).first().waitFor({ timeout: 15_000 })
+        await shot("bot-chats")
+        await page.getByRole("link", { name: "Routines" }).first().click()
+        await page.waitForURL(`**/b/${profileId}/routines`, { timeout: 15_000 })
         await page.getByText("Inbox triage").first().waitFor({ timeout: 15_000 })
         await shot("routines")
 
@@ -149,7 +155,7 @@ for (const width of [390, 1024]) {
           }
         }
         pass(
-          `Projects, a project, Code, Routines, a chat and a session's centred header load at ${look}`,
+          `Projects, a project, Code, a bot's routines, a chat and a session's centred header load at ${look}`,
         )
       },
       { viewport: { width, height: width < 768 ? 844 : 768 }, dark },

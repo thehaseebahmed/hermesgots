@@ -1,5 +1,7 @@
 # A room is a sidebar section of its own
 
+**Superseded by [ADR 0138](0138-a-room-lists-in-every-bot-it-seats.md)** (2026-11-10): a room is a row of every bot's chat list whose roster seats it, and the bot layout's sidebar has no Rooms section. The legacy Recents layout keeps one.
+
 Rooms used to be rows of whatever list the sidebar was showing: among Recents with the chats, and after
 the bots in the bot-threads layout. That was the honest reading while rooms were few and the app only
 read them — a room is nobody's thread, so it belonged to no bot's row, and nowhere else was there to put

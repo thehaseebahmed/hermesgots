@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { DeviceStateSheet, readDeviceDiagnostics } from "@/components/device-state"
-import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { markResume, startResumeTrace } from "@/lib/resume-trace"
-import { lastThreadKey } from "@/lib/threads"
+import { lastChatKey } from "@/lib/last-chat"
 import { botProfile, json, mount, seedSettings, until } from "./component-kit.tsx"
 
 const bot = botProfile("device-state", { id: "bot-1", name: "Mainly" })
@@ -15,8 +15,18 @@ async function seed(patch: { legacyChat?: boolean } = {}) {
   await db.profiles.put(bot)
   await db.messages.clear()
   await db.conversations.clear()
-  await ensureMainThread(bot.id)
   await db.conversations.bulkPut([
+    {
+      id: "main-bot-1",
+      profileId: bot.id,
+      title: "Main",
+      titleEdited: true,
+      main: true,
+      hermesSessionId: "gots-main-bot-1",
+      createdAt: 1_000,
+      updatedAt: 1_001,
+      changedAt: 0,
+    },
     {
       id: "t1",
       profileId: bot.id,
@@ -40,7 +50,7 @@ async function seed(patch: { legacyChat?: boolean } = {}) {
   await db.messages.bulkPut([
     {
       id: "m1",
-      conversationId: mainThreadId(bot.id),
+      conversationId: "main-bot-1",
       role: "user",
       content: "private thoughts",
       status: "done",
@@ -48,41 +58,39 @@ async function seed(patch: { legacyChat?: boolean } = {}) {
     },
     {
       id: "m2",
-      conversationId: mainThreadId(bot.id),
+      conversationId: "main-bot-1",
       role: "assistant",
       content: "on it",
       status: "done",
       createdAt: 1_001,
     },
   ])
-  localStorage.setItem(lastThreadKey(bot.id), "t1")
+  localStorage.setItem(lastChatKey(bot.id), "t1")
 }
 
-test("the device state names a bot's Main, its threads and its host's answers, with no secrets", async () => {
+test("the device state names a bot's chats and its host's answers, with no secrets", async () => {
   await seed()
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage", "moves"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue", "pending"] })
   const device = await readDeviceDiagnostics()
   assert.equal(device.botThreads, true, "nothing stored means the bot-first layout")
   assert.equal(device.developer, true)
   const found = device.bots.find((one) => one.id === bot.id)
   assert.ok(found, "the bot is in the dump")
-  assert.equal(found.main?.id, mainThreadId(bot.id), "its Main thread is named")
-  assert.deepEqual(found.main?.messages, { user: 1, assistant: 1 }, "Main's messages are counted")
-  assert.equal(found.threads, 1)
   assert.deepEqual(
     found.chats.map((one) => one.id).sort(),
-    [mainThreadId(bot.id), "t1"].sort(),
-    "the window holds the thread and any main-flagged chat, and no project session",
+    ["main-bot-1", "t1"].sort(),
+    "the window holds every chat of the bot's, a Main among them, and no project session",
   )
-  assert.equal(found.lastThread, "t1", "the pane's remembered thread rides along")
+  assert.equal(found.chats.find((one) => one.id === "main-bot-1")?.main, true, "Main rides as a flag")
+  assert.equal(found.lastThread, "t1", "the chat its own screen opens rides along")
   assert.equal(found.lastStored, "t1", "and so does what storage holds")
   assert.equal(found.plugin, "0.99.0", "the host's plugin version was read")
-  assert.deepEqual(found.features, ["triage", "moves"], "the host's features were read")
+  assert.deepEqual(found.features, ["queue", "pending"], "the host's features were read")
 })
 
 test("the dump reports the layout the device is on, not the switch's stored key", async () => {
   await seed({ legacyChat: true })
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   const device = await readDeviceDiagnostics()
   assert.equal(device.botThreads, false, "the legacy layout is reported as bot threads off")
   assert.equal("legacyChat" in device, false, "and the switch itself never rides along")
@@ -90,7 +98,7 @@ test("the dump reports the layout the device is on, not the switch's stored key"
 
 test("the sheet shows the state as a copy block, with no message text or key in it", async () => {
   await seed()
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   const sheet = <DeviceStateSheet open onOpenChange={() => {}} />
   await mount(sheet, async () => {
     await until(
@@ -98,7 +106,7 @@ test("the sheet shows the state as a copy block, with no message text or key in 
       "the state",
     )
     const text = document.querySelector("pre")?.textContent ?? ""
-    assert.ok(text.includes(mainThreadId(bot.id)), "Main is named on screen")
+    assert.ok(text.includes("main-bot-1"), "the chat is named on screen")
     assert.ok(!text.includes(bot.apiKey), "the key is never shown")
     assert.ok(!text.includes("device-state.test"), "the server address is never shown")
     assert.ok(!text.includes("private thoughts"), "no message text is shown")
@@ -107,7 +115,7 @@ test("the sheet shows the state as a copy block, with no message text or key in 
 
 test("the dump and the sheet carry a return's stage offsets", async () => {
   await seed()
-  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   startResumeTrace({ at: 1_000, started: 10_000 })
   markResume("sync-start", { now: 10_400 })
   markResume("chats-merge-end", { requests: 1, now: 10_800 })

@@ -15,7 +15,8 @@ the registry and Firebase see the title, never what was asked.
 A device that has the app open (it holds an ``events`` stream) is skipped: it already knows. A
 session another surface started is no device's news at all: a push about a session goes only when
 that session, or an ancestor of it, is one of the app's chats — the chat compression moved it
-onto, and the chat a subagent forked it off, are both the chat's news.
+onto, and the chat a subagent forked it off, are both the chat's news — or when a chat record names
+it, which is how a routine's run is the app's news.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
 Hermes.
 """
@@ -457,12 +458,18 @@ def clear(path: Path, key: str) -> None:
 
 
 def _gots_chat(path: Path, session_id: str) -> bool:
-    """Whether a session is a Gots chat's, by ``sessions.is_chat``: the app minted its id, or one
-    of its ancestors' — the chat compression moved it onto, and the chat a subagent forked it off.
-    An id the app never minted, with no such ancestor, is another surface's and nobody's news."""
-    from . import sessions
+    """Whether a session is one of this app's: one it minted (or an ancestor it minted), or one a
+    chat record names.
 
-    return sessions.is_chat(home_of(path), session_id)
+    ``sessions.is_chat`` answers the ids the app made; a routine's run wrote in a session of its own,
+    which the app never minted, and the chat record its delivery published names it — that record is
+    what makes the run the app's news. An id with neither is another surface's and nobody's news.
+    """
+    from . import chats, sessions
+
+    if sessions.is_chat(home_of(path), session_id):
+        return True
+    return chats.by_session(path, session_id) is not None
 
 
 def notify(
@@ -476,10 +483,11 @@ def notify(
     (``clone_failed``), the research mission's id (``research_*``) or the room's id
     (``room_input``); it only picks what a tap opens. ``title`` names what it is about when that
     isn't a session (whose chat title is looked up). A kind about a session (``SESSION_KINDS``) is
-    only pushed for a session that is one of Gots's chats; another surface's session is no device's
-    news. Answers whether a push will be sent — a device exists that asked for this category, and one
-    of this kind for this id wasn't told a moment ago — so a caller that remembers what it has told
-    the user doesn't remember a push that was dropped. Never raises: it runs inside Hermes's hooks."""
+    only pushed for a session that is one of the app's chats, or one a chat record names; another
+    surface's session is no device's news. Answers whether a push will be sent — a device exists that
+    asked for this category, and one of this kind for this id wasn't told a moment ago — so a caller
+    that remembers what it has told the user doesn't remember a push that was dropped. Never raises:
+    it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return False

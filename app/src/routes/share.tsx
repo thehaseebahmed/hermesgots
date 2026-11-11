@@ -11,7 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { isPhoto } from "@/lib/attachment-caps"
-import { listsAsChat, listsAsThread } from "@/lib/lists-as-chat"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
@@ -25,7 +25,7 @@ import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
-import { beginChat, useNow, useThreadSwitches } from "@/lib/threads"
+import { beginChat, useNow } from "@/lib/threads"
 
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
@@ -65,8 +65,8 @@ function SharedFiles({
 }
 
 /**
- * What another app shared into Gots: add a note, pick the bot and a chat (or thread) of it, or a
- * new one, and send. The message goes like one typed in that chat, images as its attachments.
+ * What another app shared into Gots: add a note, pick the bot and a chat of it, or a new one, and
+ * send. The message goes like one typed in that chat, images as its attachments.
  */
 export function SharePage() {
   const navigate = useNavigate()
@@ -75,13 +75,6 @@ export function SharePage() {
   const webId = params.get("id")
   const share = useIncomingShare()
   const [opening, setOpening] = useState(Boolean(webId))
-  // A label is not a permission: an unanswered read leaves the screen as it stands.
-  const switches = useThreadSwitches()
-  const botThreads = switches?.botThreads ?? true
-  // Until the settings answer, the option is Main: a label that promises a thread nothing may start
-  // is the one guess that breaks a promise, and this one only flickers.
-  const offersMain = switches?.opensInMain ?? true
-  const noun = botThreads ? "thread" : "chat"
   const now = useNow()
 
   // The installed PWA's share target lands here with the service worker's id for it.
@@ -166,13 +159,11 @@ export function SharePage() {
         .where("[profileId+updatedAt]")
         .between([profile.id, -Infinity], [profile.id, Infinity])
         .reverse()
-        // With chat threads off the first option is Main itself, so the list leaves it out where it is
-        // offered above — inside the read, so the limit counts the chats actually drawn.
-        .filter((c) => (offersMain ? listsAsThread(c) : listsAsChat(c)) && !c.discardedAt)
+        .filter((c) => listsAsChat(c) && !c.discardedAt)
         .limit(MORE)
         .toArray()
     )
-  }, [profile?.id, offersMain])
+  }, [profile?.id])
   const shown = showAll ? chats : chats?.slice(0, FIRST)
 
   const pickBot = (id: string) => {
@@ -210,7 +201,7 @@ export function SharePage() {
         ])
       const chat = existing ?? (await beginChat(profile.id))
       const id = chat.id
-      // Main is asked what any chat is: a turn still streaming there means the note waits in the
+      // A chat is asked what any chat is: a turn still streaming there means the note waits in the
       // queue rather than being dropped by a second send. Read through the `status` index, so the
       // check costs the one running row rather than every message the chat holds.
       const busy = Boolean(
@@ -311,21 +302,17 @@ export function SharePage() {
           </section>
 
           <section className="flex flex-col gap-2">
-            <SectionLabel>{botThreads ? "Thread" : "Chat"}</SectionLabel>
+            <SectionLabel>Chat</SectionLabel>
             <div
-              aria-label={noun}
+              aria-label="Chat"
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
               {option(
                 "new",
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                  {offersMain ? (
-                    <MessageCircleIcon className="size-5" />
-                  ) : (
-                    <PlusIcon className="size-5" />
-                  )}
+                  <PlusIcon className="size-5" />
                 </span>,
-                offersMain ? "Main" : `New ${noun}`,
+                "New chat",
               )}
               {shown?.map((chat) =>
                 option(

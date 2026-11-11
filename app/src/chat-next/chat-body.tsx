@@ -14,7 +14,6 @@ import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
-import { listsAsChat } from "@/lib/lists-as-chat"
 import { LimitNotice, type useChatUsage } from "@/components/chat/chat-actions"
 import { Composer } from "@/components/chat/composer"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -48,9 +47,7 @@ import { draftKey } from "@/lib/drafts"
 import { usePluginFeature } from "@/lib/features"
 import { mayHoldArchive } from "@/lib/history-window"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
-import { useNav } from "@/lib/nav"
 import { quietly } from "@/lib/report"
-import { beginThread } from "@/lib/threads"
 import { useProjects } from "@/lib/projects"
 import { markRead } from "@/lib/read-marks"
 import { lastActivityAt, runFinished } from "@/lib/session-work"
@@ -63,8 +60,8 @@ import {
   setSessionMode,
 } from "@/lib/workspace"
 import type { ComposerControls } from "./page"
-import { prepareTurn, queueTurn, steerTurn, triageTurn } from "./turn"
-import type { BlankView, MainView } from "./app-view"
+import { prepareTurn, queueTurn, steerTurn } from "./turn"
+import type { BlankView } from "./app-view"
 
 const ChatNextThread = lazy(() =>
   import("./app-view").then((m) => ({ default: m.AppChatNextThread })),
@@ -76,15 +73,9 @@ export interface ChatBodyProps {
   summaries: ComponentProps<typeof ChatNextThread>["summaries"]
   /** A project session not started yet: said in the thread's place. */
   blank?: BlankView
-  /** A bot's Main: its threads are cards in its flow, and its messages are triaged first. */
-  main?: MainView
-  /** The message a thread opened by `/thread` is handed, taken once by the route. */
-  start: ComponentProps<typeof ChatNextThread>["start"]
   /** Said when the chat leaves or comes back to the screen; a container that never leaves one has
    * no use for it. */
   onAway?: (away: boolean) => void
-  /** Where `/new` goes from the composer: a thread's Main, else home. */
-  home?: string
   limit: LimitValue
   /**
    * The container's own read at a turn's end, run after the body's follow-up reads (the plugin's
@@ -104,26 +95,20 @@ export function ChatBody({
   bot,
   summaries,
   blank,
-  main,
-  start,
   onAway,
-  home,
   limit,
   afterSettled,
 }: ChatBodyProps) {
   const id = chat.id
-  const mainOn = Boolean(main)
   const botKey = bot.id
   // One component per chat and bot, so the composer keeps its text across the thread's renders:
   // a write to the bot's row hands back a new object, which mustn't remount it.
   const composer = useMemo(
     () =>
       function ChatNextComposer({ controls }: { controls: ComposerControls }) {
-        return (
-          <NextComposer controls={controls} chatId={id} botId={botKey} main={mainOn} home={home} />
-        )
+        return <NextComposer controls={controls} chatId={id} botId={botKey} />
       },
-    [id, botKey, mainOn, home],
+    [id, botKey],
   )
   return (
     <LimitContext.Provider value={limit}>
@@ -135,20 +120,12 @@ export function ChatBody({
           compacted={mayHoldArchive(chat.compactions)}
           summaries={summaries}
           blank={blank}
-          main={main}
           server={bot.baseUrl}
           apiKey={bot.apiKey}
           session={chat.hermesSessionId}
-          start={start}
           prepareTurn={(text, attachments, at) => prepareTurn(id, text, attachments, at)}
           queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
           steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-          // Only Main's messages are triaged; a thread and a project session never are.
-          triageTurn={
-            mainOn
-              ? (text, attachments, options) => triageTurn(id, text, attachments, options)
-              : undefined
-          }
           // What the plugin holds beside the transcript — the title, the context, the todos, a
           // session's workspace, pull requests and library — read as every chat reads it, and then
           // whatever the container reads of its own: a canvas re-reads the page its session edited.
@@ -185,13 +162,7 @@ const LimitContext = createContext<LimitValue | null>(null)
  * handed back to the field. A project session's own cards take its place in the order the current
  * screen draws them: closed, blocked, then a plan waiting to be approved.
  */
-function NextComposer(props: {
-  controls: ComposerControls
-  chatId: string
-  botId: string
-  main: boolean
-  home?: string
-}) {
+function NextComposer(props: { controls: ComposerControls; chatId: string; botId: string }) {
   const limit = useContext(LimitContext)
   return (
     <>
@@ -297,21 +268,14 @@ function NextComposerBody({
   controls,
   chatId,
   botId,
-  main,
-  home,
   notice,
 }: {
   controls: ComposerControls
   chatId: string
   botId: string
-  /** A bot's Main: `/thread` starts a thread of it. */
-  main: boolean
-  /** Where `/new` goes: a thread's Main, else home. */
-  home?: string
   /** The account's warning, which the composer draws above its text while it holds. */
   notice?: ReactNode
 }) {
-  const { root } = useNav()
   const navigate = useNavigate()
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
   const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
@@ -327,23 +291,6 @@ function NextComposerBody({
     : project
       ? projectRepos(project)
       : []
-  // `/thread` from Main: a thread of its own, with Main's pick, opened on the message the reader
-  // typed with it. The thread's own screen sends that message, so the turn is drawn there as it
-  // arrives and Main's card has the opener to show (ADR 0096).
-  const startThread = async (text: string, attachments: Attachment[]) => {
-    try {
-      const from = await db.conversations.get(chatId)
-      const thread = await beginThread(botId, {
-        modelChoice: chosenOf(from?.modelChoice),
-        text,
-        attachments,
-      })
-      navigate(`/c/${thread.id}`, { state: { bot: botId } })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
-      throw error
-    }
-  }
   const filesFeature = usePluginFeature(bot, "attachments")
   const sheet = useCheatsheet()
   const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
@@ -426,12 +373,7 @@ function NextComposerBody({
               }
             : undefined
         }
-        main={main}
-        botChat={listsAsChat(chat)}
-        onCommand={async (command, message) => {
-          if (command === "thread")
-            return startThread(message?.text ?? "", message?.attachments ?? [])
-          if (command === "new") return root(home ?? "/")
+        onCommand={async (command) => {
           if (command === "settings") return navigate("/settings")
           if (command === "cheatsheet") return void sheet.show()
         }}

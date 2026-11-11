@@ -63,6 +63,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | Flow | Checks |
 |---|---|
 | `chat-message` | A new chat sends its message, gets the whole reply, and shows in Recents |
+| `bot-chats` | A bot opens the chat this device left it in — from a sidebar row or a cold load, and across a reload — with its list behind that chat so its own control steps back to it, and the list's own back leaving the app; a bot never opened draws its list |
 | `bot-threads` | A bot opens its Main, its threads are cards where they began, `/thread` with text opens a thread with that message, back returns to its card, and triage's two answers read as a card with Undo or a Moved marker with its link |
 | `card-widths` | A chat's subagent card and its waiting Question fill each container's own gutter at 1024 and 390px, where the pane is narrower than the reading column's 768px box, and stop at that box and centre at 1440px where the pane is wider; message text keeps its 736px reading column at 1440px and fills the pane where that is narrower |
 | `thinking-line` | A turn told to think out loud and stall shows its working line before any thinking, with no row yet; two calls then run back to back with reasoning after each, so the thinking before them is one row above a single tool group and the two stretches that follow are drawn as ONE row under it, holding both stretches' words; the row a call ended stays open over the span it measured while the next one streams, all rows fold together at the first answer token, the merged row reading the sum of the two spans it holds, and a reload draws the same rows in the same places with the same numbers, every folded body out of the tree and the tab order. A second turn thinks at length in one run: opening it lands the thread on its newest words and keeps them there as the pieces arrive, a wheel up stops that follow, and the finished row opened by a tap draws its whole body — taller than the 30% of the screen the old cap held, its last words present, nothing clipped — with no cap, no fade and no Show more anywhere, at 390px and 1024px in light and dark |
@@ -216,6 +217,9 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
   (`[data-slot=bubble-content]`, which takes it from the frame's variant) while its dimming sits on
   the frame (`[data-slot=bubble]`, the `opacity-*` class). A child's own `opacity` is `1` whatever its
   parent wears, so probe the element that carries the property.
+- A bot's list rows are `main ul a[href^="/c/"]`, not `ul a[href^="/c/"]`: the sidebar's Rooms
+  section links rooms at `/c/<room>` too, so an unscoped sweep counts a room as one of the bot's
+  chats and a count of two never comes true. Read the list in the main pane.
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
 - A chat's pane is not the window's width: at a 1024px viewport the docked sidebar takes 320px, so

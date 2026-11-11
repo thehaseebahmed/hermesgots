@@ -10,7 +10,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { toast } from "sonner"
 
 import { MAX_ATTACHMENTS, MAX_FILE_BYTES } from "@/lib/attachment-caps"
-import { db, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
 import { clearShare, readWebShare, receiveShare, toShare } from "@/lib/share"
 import { SharePage } from "@/routes/share"
 
@@ -19,6 +19,8 @@ import {
   botProfile,
   click,
   find,
+  findAll,
+  findText,
   mount,
   Path,
   path,
@@ -44,7 +46,7 @@ const screen = () => (
  * disabled until then, and a tap on a disabled control would prove nothing.
  */
 async function newOption() {
-  const at = () => find('[aria-label="thread"] button') as HTMLButtonElement | null
+  const at = () => find('[aria-label="Chat"] button') as HTMLButtonElement | null
   await until(async () => Boolean(at()), "the chat list")
   await until(async () => !at()?.disabled, "the share ready to send")
   return at()!
@@ -277,81 +279,56 @@ test("a photo lands as a photo, and only a model that takes images is given its 
   })
 })
 
-test("with chat threads off, Share's new-chat option opens the bot's Main", async () => {
+test("Share's new-chat option starts a chat of the bot's", async () => {
   const bot = botProfile("share-main")
-  const main = mainThreadId(bot.id)
   await seedChats([], { bots: [bot] })
-  const host = fakeHost(`gots-${main}`)
+  const host = fakeHost("share-main-host")
   await withToasts(async (said) => {
     receiveShare(toShare({ text: "Read this later" }))
     await mount(screen(), async () => {
       assert.equal(await db.conversations.count(), 0, "nothing is written before the send")
       const option = await newOption()
-      assert.equal(wordsOf(option), "Main", "the new-chat option reads Main")
-      assert.ok(option.querySelector("svg.lucide-message-circle"), "wearing a chat, not an add")
-      assert.equal(option.querySelector("svg.lucide-plus"), null, "and no plus")
+      assert.equal(wordsOf(option), "New chat", "the new-chat option says what it makes")
+      assert.ok(option.querySelector("svg.lucide-plus"), "wearing an add, not a chat")
       await click(option)
-      await until(async () => path() === `/c/${main}`, "the address on the bot's Main")
-      const chats = await db.conversations.toArray()
-      assert.equal(chats.length, 1, "Main alone, with no thread made beside it")
-      assert.equal(chats[0].id, main, "the bot's Main")
-      assert.equal(chats[0].main, true, "marked as the bot's Main")
-      const written = () => db.messages.where("conversationId").equals(main).toArray()
+      await until(async () => (await db.conversations.count()) === 1, "the chat the send made")
+      const [chat] = await db.conversations.toArray()
+      await until(async () => path() === `/c/${chat.id}`, "the address on the chat it made")
+      assert.ok(!chat.main, "a plain chat: nothing makes a Main any more (G1)")
+      const written = () => db.messages.where("conversationId").equals(chat.id).toArray()
       await until(
         async () => (await written()).some((message) => message.content === "Read this later"),
-        "the note in Main",
+        "the note in the chat",
       )
-      await until(async () => host.asked.runs === 1, "Main sent the note as a turn")
+      await until(async () => host.asked.runs === 1, "the chat sent the note as a turn")
       assert.deepEqual(
         host.latest.body?.input,
         [{ role: "user", content: "Read this later" }],
         "the note the share carried",
       )
-      assert.equal(host.latest.body?.session_id, `gots-${main}`, "on Main's own session")
+      assert.equal(host.latest.body?.session_id, chat.hermesSessionId, "on the chat's own session")
     })
     assert.deepEqual(said, [], "nothing was refused")
   })
 })
 
-test("with chat threads on, Share's new-chat option still makes a thread", async () => {
-  const bot = botProfile("share-thread")
-  const main = mainThreadId(bot.id)
-  await seedChats([], { bots: [bot], settings: { chatThreads: true } })
-  const host = fakeHost("share-thread-host")
-  await withToasts(async (said) => {
-    receiveShare(toShare({ text: "Plan the trip" }))
-    await mount(screen(), async () => {
-      const option = await newOption()
-      assert.equal(wordsOf(option), "New thread", "the wording threads had before")
-      await click(option)
-      await until(async () => (await db.conversations.count()) === 1, "the thread the send made")
-      const [thread] = await db.conversations.toArray()
-      assert.notEqual(thread.id, main, "a thread of its own, not Main")
-      assert.ok(!thread.main, "and no Main mark on it")
-      await until(async () => path() === `/c/${thread.id}`, "the address on the thread")
-      const written = () => db.messages.where("conversationId").equals(thread.id).toArray()
-      await until(
-        async () => (await written()).some((message) => message.content === "Plan the trip"),
-        "the note in the thread",
-      )
-      await until(async () => host.asked.runs === 1, "the thread sent the note as a turn")
-      assert.equal(host.latest.body?.session_id, thread.hermesSessionId, "on the thread's session")
-    })
-    assert.deepEqual(said, [], "nothing was refused")
-  })
-})
-
-test("with chat threads off, a share into a streaming Main waits its turn", async () => {
+test("a share into a chat this device holds sends into it, and a streaming one waits its turn", async () => {
   const bot = botProfile("share-busy")
-  const main = mainThreadId(bot.id)
-  await seedChats([{ id: main, main: true, messages: ["Still working on it"] }], { bots: [bot] })
+  const main = "c-streaming"
+  await seedChats([{ id: main, messages: ["Still working on it"] }], { bots: [bot] })
   await db.messages.where("conversationId").equals(main).modify({ status: "streaming" })
   const host = fakeHost(`gots-${main}`)
   await withToasts(async (said) => {
     receiveShare(toShare({ text: "One more thing" }))
     await mount(screen(), async () => {
-      await click(await newOption())
-      await until(async () => path() === `/c/${main}`, "the address on the bot's Main")
+      // The bot's chats stand under the new-chat option, so the one that is streaming is a row.
+      const row = () =>
+        findAll('[aria-label="Chat"] button').find((one) =>
+          wordsOf(one).startsWith("A chat"),
+        ) ?? null
+      await until(async () => Boolean(row()), "the chat's own row")
+      await click(row())
+      await until(async () => path() === `/c/${main}`, "the address on the chat")
       const written = () => db.messages.where("conversationId").equals(main).toArray()
       await until(
         async () =>

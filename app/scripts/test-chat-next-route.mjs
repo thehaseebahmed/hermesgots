@@ -15,7 +15,7 @@ test("a project session opens on chat-next too, which posts its workspace before
   assert.equal(opensOnChatNext({ projectId: "p1" }, bot), true)
 })
 
-test("a bot's Main opens on chat-next too, which triages its messages before they send", () => {
+test("a bot's Main opens on chat-next too, as any chat of the bot's does", () => {
   assert.equal(opensOnChatNext({ main: true }, bot), true)
 })
 

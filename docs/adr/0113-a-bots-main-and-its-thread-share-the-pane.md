@@ -1,5 +1,7 @@
 # A bot's Main and its thread share the pane, and a close is a forget
 
+**Superseded by [ADR 0136](0136-a-bots-screen-is-the-list-of-its-chats.md)** (2026-11-10): a bot's second pane holds the list of its chats rather than a thread beside Main, so there is no share to drag and no closed lane to remember.
+
 ADR 0034 made Main the pane at `xl`, with the open thread as the item beside it at the list lane's
 width — 412px for Main, the rest for the thread — and a thread once opened reopened beside Main
 forever. On a laptop that reads as a cramped Main and a lane that cannot be shut, so the bot's lane

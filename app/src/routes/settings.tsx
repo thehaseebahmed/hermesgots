@@ -18,7 +18,6 @@ import {
   GitPullRequestArrowIcon,
   GitPullRequestIcon,
   MessageCircleQuestionIcon,
-  MessageSquarePlusIcon,
   SlidersHorizontalIcon,
   TerminalIcon,
   DatabaseIcon,
@@ -86,7 +85,6 @@ import {
   db,
   getSettings,
   listProfiles,
-  saveChatThreads,
   saveSettings,
   type Profile,
 } from "@/lib/db"
@@ -94,6 +92,7 @@ import { formatRelative } from "@/lib/format"
 import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
+import { legacyChatOn } from "@/lib/legacy-chat"
 import { useLarge } from "@/lib/media"
 import { isNative, openNotificationSettings, setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -644,19 +643,11 @@ export function DeveloperSettings() {
     <>
       <Group>
         <SwitchRow
-          id="chat-threads"
-          icon={MessageSquarePlusIcon}
-          title="Chat threads"
-          subtitle="Start a thread from a bot's Main"
-          checked={Boolean(settings?.chatThreads)}
-          onCheckedChange={(checked) => saveChatThreads(checked)}
-        />
-        <SwitchRow
           id="legacy-chat"
           icon={MessagesSquareIcon}
           title="Enable legacy chat UX"
           subtitle="Recents in the sidebar, chats in one list"
-          checked={Boolean(settings?.legacyChat)}
+          checked={legacyChatOn(settings)}
           onCheckedChange={(checked) => saveSettings({ legacyChat: checked })}
         />
         <SwitchRow

@@ -88,6 +88,20 @@ export function botPath(botId: string): string {
   return `/settings/bots/${botId}`
 }
 
+/**
+ * A bot's screen: the list of its chats, which is also where back from a chat and from everything
+ * under the list returns. One definition, so the address the whole shell is built on cannot
+ * disagree with itself.
+ */
+export function botChatsPath(botId: string): string {
+  return `/b/${botId}`
+}
+
+/** A bot's routines, which its own list opens and its list is the way back from. */
+export function botRoutinesPath(botId: string): string {
+  return `${botChatsPath(botId)}/routines`
+}
+
 /** A page's address: every page carries its own segment, General's included. */
 export function botTabPath(botId: string, tab: BotTab): string {
   return `${botPath(botId)}/${tab}`

@@ -4,7 +4,7 @@ import { assert, flow, pass } from "./lib.mjs"
 
 const FIXTURE = ["github-pr-workflow", "log-triage", "plan"]
 
-const run = async ({ page, until, shot }) => {
+const run = async ({ page, until, shot, newChat }) => {
   // What the app reads, and what it says about it: a failure a read carries on from is noted to the
   // console, which is the only trace a read that leaves the held list in place ever leaves.
   const plugin = []
@@ -19,6 +19,9 @@ const run = async ({ page, until, shot }) => {
   const composer = page.getByLabel("Message", { exact: true })
   const menu = page.getByRole("listbox", { name: "Commands and skills" })
 
+  // A chat of its own: a bot's screen is the list of its chats, so the composer is a chat's, never
+  // the home screen's.
+  await newChat()
   await composer.fill("/")
   await menu.waitFor({ timeout: 15_000 })
   for (const name of FIXTURE) {
@@ -48,14 +51,15 @@ const run = async ({ page, until, shot }) => {
   )
   await until(async () => !(await menu.isVisible()), 5_000, "the menu to stay closed on the pick")
 
-  // A command is offered only when its token is the whole message: `/new` with text after it isn't,
-  // since running it would clear the composer and drop that text — while the skills are still there.
-  await composer.fill("/new do the thing")
+  // A command is offered only when its token is the whole message: `/cheatsheet` with text after it
+  // isn't, since running it would clear the composer and drop that text — while the skills are still
+  // there.
+  await composer.fill("/cheatsheet do the thing")
   await composer.press("Home")
   await until(
     async () => {
       const texts = await menu.getByRole("option").allInnerTexts()
-      return texts.length > 0 && texts.every((text) => !/^\/new\b/.test(text))
+      return texts.length > 0 && texts.every((text) => !/^\/cheatsheet\b/.test(text))
     },
     10_000,
     "the skills behind the token, with no command on offer",
@@ -66,10 +70,15 @@ const run = async ({ page, until, shot }) => {
   // message: `fill` writes the field and leaves the app's own state to keep it, which a synthetic
   // write can lose — while a keystroke is one the app has to answer.
   await composer.press("Control+a")
-  await composer.type("/new")
-  await until(async () => (await composer.inputValue()) === "/new", 5_000, "the composer to hold /new")
+  await composer.type("/cheatsheet")
   await until(
-    async () => (await menu.getByRole("option").allInnerTexts()).some((t) => /^\/new\b/.test(t)),
+    async () => (await composer.inputValue()) === "/cheatsheet",
+    5_000,
+    "the composer to hold /cheatsheet",
+  )
+  await until(
+    async () =>
+      (await menu.getByRole("option").allInnerTexts()).some((t) => /^\/cheatsheet\b/.test(t)),
     10_000,
     "a command alone in the message to be offered",
   )

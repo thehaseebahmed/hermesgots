@@ -10,7 +10,7 @@ import { connectionKey, hasServer } from "@/lib/connection"
 import { equal } from "@/lib/equal"
 import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
-import type { Compaction, ModelChange, Move, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
+import type { Compaction, ModelChange, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
 import type { PromptEntry } from "@/lib/prompt-library"
 import type { SpeechSettings } from "@/lib/speech"
 import type { ReasoningRun } from "@/lib/thinking"
@@ -22,9 +22,6 @@ import type { CanvasPoint } from "@/lib/point-marker"
 import type { SortDir } from "@/lib/sort"
 
 export type BotSort = "recent" | "waiting" | "name" | "added"
-
-/** The keys the sidebar's Rooms section ranks by (ADR 0127). */
-export type RoomSort = "recent" | "name" | "added"
 
 export type LibrarySort = "date" | "name"
 
@@ -39,15 +36,6 @@ export interface Settings {
   breakReminders?: boolean
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
-  /**
-   * Whether a bot may start a new thread at all: Developer's switch, off by default, and the one
-   * fact that decides it. It rides the account's `settings` document as a record of its own, with
-   * `chatThreadsAt` as its clock, so a device that has not pulled yet cannot carry a stale value
-   * over it by saving an Appearance switch (ADR 0120).
-   */
-  chatThreads?: boolean
-  /** When this account last changed `chatThreads`: its own clock, apart from `appearanceAt`. */
-  chatThreadsAt?: number
   /**
    * Enter sends the message instead of starting a new line; off by default, and then Ctrl+Enter
    * sends. Local, and never in `APPEARANCE_FIELDS`: it describes this device's keyboard, so a phone
@@ -65,9 +53,9 @@ export interface Settings {
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /**
-   * The layout the app drew before bot threads: Recents in the sidebar and a New chat screen. Local
-   * and off by default, since bot threads — bots in the sidebar, each chat a thread in its bot — are
-   * the layout a device gets; on is the opt-out, read by `useBotThreads` in `threads.ts`.
+   * The layout the app drew before a bot's screen became the list of its chats: Recents in the
+   * sidebar and a New chat screen. Local and off by default; on is the opt-out, read by
+   * `useLegacyChat` in `legacy-chat.ts`.
    */
   legacyChat?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
@@ -89,12 +77,6 @@ export interface Settings {
    */
   botSort?: BotSort
   botSortDir?: SortDir
-  /**
-   * How the sidebar's Rooms section orders the rooms — the key it ranks by and the arrow it reads in;
-   * unset is `recent`, newest first (ADR 0091, ADR 0127). Local.
-   */
-  roomSort?: RoomSort
-  roomSortDir?: SortDir
   /** Whether the sidebar is shrunk to icons on tablet and wider; unset is expanded. Local. */
   sidebarCollapsed?: boolean
   /** How the Library tab orders folders and files; unset is newest first. Local. */
@@ -235,11 +217,6 @@ export interface Conversation {
    * only; every device reads the same list.
    */
   compactions?: Compaction[]
-  /**
-   * The messages triage moved out of this Main thread, oldest first, for its Moved markers. Local
-   * only; every device reads the same list from the host.
-   */
-  moves?: Move[]
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**
@@ -264,6 +241,18 @@ export interface Conversation {
    * carry it.
    */
   afk?: boolean
+  /**
+   * A routine's run, as the plugin publishes it: one row per run, whose session is the run's own, so
+   * opening it opens that run's transcript rather than a chat. The marker is the host's, written
+   * once with the record; the user's own chats never carry it.
+   */
+  routine?: boolean
+  /**
+   * The first line of what landed here, for a row whose line this device can't read from a message of
+   * its own: a routine's is written onto its record by the delivery, since the run's words are in the
+   * run's session and not in this chat. Synced with the record, like `afk`.
+   */
+  line?: string
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
   /**
@@ -606,7 +595,7 @@ export interface Seam {
 }
 
 /** `queued` is a user message waiting for the current reply to finish. */
-export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
+export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
 
 /**
  * A progress reminder a thread keeps behind *Show progress reminders* (`progress-reminder.ts`,
@@ -936,7 +925,6 @@ export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
-  chatThreads: false,
   sendOnEnter: false,
 }
 
@@ -1333,9 +1321,9 @@ db.version(17).upgrade((tx) =>
 db.version(18).stores({ meetingRecordings: "id" })
 
 // v19: the message the host is deciding on is triaging, not routing — the same state, named for the
-// decision the host makes, which the GLOSSARY has always called triage. The field is indexed, so the
-// rows a closed page left behind are read through that index and rewritten, rather than left as a
-// name nothing checks for.
+// decision the host made. The field is indexed, so the rows a closed page left behind are read
+// through that index and rewritten. Triage is gone now, and this upgrade stays because a device
+// that has not opened since v19 still holds the old name.
 db.version(19).upgrade((tx) =>
   tx.table("messages").where("status").equals("routing").modify({ status: "triaging" }),
 )
@@ -1380,9 +1368,17 @@ db.version(22).stores({ prompts: "id" })
  * `botThreads` is the layout's old switch: bot threads became the default and the switch now stores
  * `legacyChat`, so a row that still says `botThreads` says nothing and is shed the same way.
  * `chatNext` is the chat screen's old switch: a chat now opens on chat-next whenever its bot can be
- * called, so a row that still says `chatNext` decides nothing.
+ * called, so a row that still says `chatNext` decides nothing. `chatThreads` and its clock are the
+ * account's old "may a bot start a thread" record: a chat is a plain chat now, so the pair decides
+ * nothing, and leaving it behind would keep a switch this build has lost alive on every save.
  */
-const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault", "botThreads", "chatNext"] as const
+const RETIRED_SETTINGS_KEYS = [
+  "foldThinkingByDefault",
+  "botThreads",
+  "chatNext",
+  "chatThreads",
+  "chatThreadsAt",
+] as const
 
 // v23: "Fold thinking by default" is retired — a reply's thinking opens in a sheet now, so nothing
 // opens on its own and there is nothing left to fold. The key goes from every device's settings
@@ -1586,22 +1582,6 @@ export async function saveAppearance(patch: Partial<Appearance>) {
 }
 
 /**
- * Saves Developer's **Chat threads** switch. It keeps a clock of its own — its own record in the
- * `settings` document — because a device that has not pulled yet would otherwise carry its stale
- * value over the account's when it saves any Appearance switch, and the account would lose the
- * choice for good (ADR 0120).
- */
-export async function saveChatThreads(on: boolean) {
-  await saveSettings({ chatThreads: on, chatThreadsAt: Date.now() })
-}
-
-/** Takes the chat threads record another device wrote, clock and all. */
-export async function adoptChatThreads(value: unknown, at: number) {
-  if (typeof value !== "boolean") return
-  await saveSettings({ chatThreads: value, chatThreadsAt: at })
-}
-
-/**
  * Takes the appearance record another device wrote, clock and all, so this one doesn't push it back.
  * A record can name a switch this build doesn't have — one that was retired, or one from a newer
  * build — and writing that name back would put a field nothing reads in this device's settings row.
@@ -1797,45 +1777,6 @@ export async function createConversation(
   return conversation
 }
 
-/** A bot's Main thread has an id every device derives, so two devices never make two. */
-export const mainThreadId = (profileId: string) => `main-${profileId}`
-
-/** The bot a Main thread's id names, or undefined for any other chat. */
-export const mainThreadProfile = (id: string) =>
-  id.startsWith("main-") ? id.slice("main-".length) : undefined
-
-/**
- * Makes the bot's Main thread the first time it's asked for. Its change clock is 0, so a record
- * another device already synced always wins the merge over this empty copy.
- */
-export async function ensureMainThread(profileId: string): Promise<Conversation> {
-  const id = mainThreadId(profileId)
-  return db.transaction("rw", db.conversations, async () => {
-    const existing = await db.conversations.get(id)
-    if (existing) {
-      // A Main row that lost the flag reads as a plain thread and takes Main's whole behaviour
-      // with it, so it is healed here — the one place that owns the row.
-      if (existing.main) return existing
-      await updateConversation(id, { main: true })
-      return (await db.conversations.get(id)) ?? existing
-    }
-    const now = Date.now()
-    const conversation: Conversation = {
-      id,
-      profileId,
-      title: "Main",
-      titleEdited: true,
-      hermesSessionId: `gots-${id}`,
-      createdAt: now,
-      updatedAt: now,
-      changedAt: 0,
-      main: true,
-    }
-    await db.conversations.add(conversation)
-    return conversation
-  })
-}
-
 /** Every change to a chat's synced fields goes through here so sync sees it. */
 export async function updateConversation(
   id: string,
@@ -1871,7 +1812,10 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     if (conversation && !remote) {
       await db.tombstones.put({
         id: `chat:${id}`,
-        deletedAt: Date.now(),
+        // Stamped past the record it kills, the way the host's own tombstone is (`chats.tombstone`):
+        // the merge keeps only a strictly newer record, and a record written from a host clock ahead
+        // of this device's would otherwise outlive the deletion and draw the row again.
+        deletedAt: Math.max(Date.now(), conversation.changedAt + 1),
         profileId: conversation.profileId,
       })
     }
@@ -1960,6 +1904,28 @@ export async function getMessages(conversationId: string) {
     .where("[conversationId+createdAt]")
     .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
     .toArray()
+}
+
+export const hasWords = (message: Message) => Boolean(message.content.trim())
+
+/** A reply — the only row a question or an approval sits on. */
+export const isReply = (message: Message) => message.role === "assistant"
+
+/**
+ * The newest message this device holds for a chat, or the newest one `keep` accepts: the one read a
+ * list's line, its clock and what it waits on all come from. The range over a chat's tail is written
+ * here alone, so every list that reads one reads the same rows.
+ */
+export async function newestMessage(
+  conversationId: string,
+  keep: (message: Message) => boolean = hasWords,
+) {
+  return db.messages
+    .where("[conversationId+createdAt]")
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+    .reverse()
+    .filter(keep)
+    .first()
 }
 
 export async function clearAllData() {

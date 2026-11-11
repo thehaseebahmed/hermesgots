@@ -217,7 +217,6 @@ export function CanvasPage() {
             onSend={create}
             onQueue={create}
             onStop={() => false}
-            botChat={false}
           />
           {blocked && <p className="text-sm text-muted-foreground">{blocked}</p>}
         </section>
@@ -695,7 +694,8 @@ export function CanvasView() {
           )}
         </div>
         {/* The house's list lane: 412px, the width the app already asks its text to read in
-            (`w-103`, `SPLIT_FLOOR` in `lib/split.ts`), with the page beside it never narrower. */}
+            (`w-103`, `LIST_LANE` in `components/app-shell.tsx`), with the page beside it never
+            narrower. */}
         {large && (
           <CanvasChat
             canvas={canvas}
@@ -940,7 +940,6 @@ function CanvasChat({
         chat={chat}
         bot={bot}
         summaries={summaries}
-        start={undefined}
         limit={limit}
         afterSettled={() => {
           // Every turn's end re-reads what this screen draws: a stream can be open and silent (a

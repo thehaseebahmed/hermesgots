@@ -20,7 +20,7 @@ const skill = (name, category = null, description = null) => ({
 })
 
 const items = [
-  ...localCommands("new"),
+  ...localCommands(),
   ...SEND_COMMANDS,
   skill("grill-with-docs", "quality", "Interview relentlessly, writing docs as we go"),
   skill("grilling", "quality", "Stress-test a plan"),
@@ -129,20 +129,20 @@ test("a category match comes before a description one, and a name beats both", (
 })
 
 test("commands are pinned above the skills and match by prefix alone", () => {
-  const found = names(rankSlashItems(items, tokenAt("/n")))
-  assert.equal(found[0], "new")
-  assert.equal(names(rankSlashItems(items, tokenAt("/ew"))).includes("new"), false)
+  const found = names(rankSlashItems(items, tokenAt("/s")))
+  assert.equal(found[0], "settings")
+  assert.equal(names(rankSlashItems(items, tokenAt("/ettings"))).includes("settings"), false)
 })
 
 test("a command doesn't match off the message's own shape, where running one means nothing", () => {
   // Mid-sentence: nothing to run.
   assert.equal(
-    names(rankSlashItems(items, slashToken("tell me about /n", 16))).includes("new"),
+    names(rankSlashItems(items, slashToken("tell me about /s", 16))).includes("settings"),
     false,
   )
   // At the front but not alone: running it would drop the rest of the message, so it isn't offered.
   assert.equal(
-    names(rankSlashItems(items, slashToken("/new do the thing", 4))).includes("new"),
+    names(rankSlashItems(items, slashToken("/settings dark mode", 9))).includes("settings"),
     false,
   )
 })
@@ -220,5 +220,5 @@ test("the slash menu offers no goal command", () => {
   // Typed in full, with the caret on the word, the menu offers no command to run: it goes to the
   // agent as a message.
   assert.deepEqual(names(rankSlashItems(items, tokenAt("/goal fix the tests", 5))), [])
-  assert.equal(localCommand("/goal fix the tests", null), null)
+  assert.equal(localCommand("/goal fix the tests"), null)
 })

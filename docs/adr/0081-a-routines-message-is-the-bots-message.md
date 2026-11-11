@@ -1,5 +1,7 @@
 # A routine's message is the bot's message
 
+**Superseded on one point by [ADR 0137](0137-a-routines-delivery-is-a-chat.md)** (2026-11-10): a delivery publishes a chat record for the run rather than writing a message into a chat. The rest of this — the platform, the ledger, the wrapper, the suppression — stands.
+
 A **routine** works with the phone away and has no way to speak in a chat. Hermes delivers a finished
 job to a platform chat — Telegram, Slack, a webhook — or into a profile's own Bot Chat, and to nothing
 else. A job created from a Gots chat captures an `api_server` origin, and that origin is dropped

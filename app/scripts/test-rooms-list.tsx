@@ -1,12 +1,13 @@
 /**
  * A room on a device that has never opened it: the plugin's chat list carries the room's record, the
- * merge writes one `Conversation` for it, and Recents draws that row once — its name, its members and
- * its last activity — while no bot's Main lists it as a thread. A second merge of the same record
- * writes nothing (ADR 0116).
+ * merge writes one `Conversation` for it, and every bot whose roster seats it draws that row once —
+ * its name, its members and its last activity — while no bot's Main lists it as a thread. A second
+ * merge of the same record writes nothing (ADR 0116).
  *
- * A room then takes part in the room it joined: it is ordered among Recents by its last activity, a
- * pinned room stands in the pinned band rather than a section of its own, and the row says the room
- * needs the user until the device has drawn what asks — which is the room's own screen opening.
+ * A room's row is the chat list's own: it stands among a bot's chats by its last activity, its pin
+ * lifts it above a newer chat, and it says the room needs the user — naming the member who asked —
+ * until the device has drawn what asks, which is the room's own screen opening. The legacy layout,
+ * whose Recents is the only list it has, keeps a Rooms section of its own for the same rows.
  *
  * The record is the plugin's answer, not a document: the fake below answers `GET`/`POST /chats` the
  * way the plugin does, projecting the room beside whatever the device sent, and one read of the
@@ -19,29 +20,39 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
 import { RoomChat } from "@/components/room/room-chat"
+import { BotChatsPage } from "@/routes/bot-chats"
 import { chatOwner } from "@/lib/chat-owner"
 import { db, chatTombstones, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { connectionKey, noteChange } from "@/lib/live"
 import { syncNow } from "@/lib/sync"
-import { useBotPane, useThreads } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
+import { pressBack } from "@/lib/native"
+import { useBotChatsPane } from "@/lib/pane"
+
 import {
   Path,
+  absent,
   atWidth,
   botProfile,
+  click,
   find,
   findAll,
+  findText,
   json,
   missing,
   mount,
+  path,
   seedSettings,
   settle,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const HOST = "http://rooms.test/v1"
 const CARRIER = "bot-carrier"
 const CODER = "bot-coder"
+const WRITER = "bot-writer"
 
 const ROOM = "room-1"
 const LAST_AT = Date.now() - 5 * 60_000
@@ -69,6 +80,15 @@ const bots: Profile[] = [
     baseUrl: HOST,
     apiKey: "rooms-key",
     hermesProfile: "coder",
+  }),
+  // The room's second member: it lists in this bot's list as well, and answers second.
+  botProfile("rooms", {
+    id: WRITER,
+    name: "Writer",
+    baseUrl: HOST,
+    apiKey: "rooms-key",
+    hermesProfile: "writer",
+    botId: "hex",
   }),
 ]
 
@@ -116,7 +136,7 @@ const record = () => ({
       id: ROOM,
       members: [
         { memberId: "m1", profile: "coder", handle: "coder", displayName: "Coder" },
-        { memberId: "m2", profile: "writer", handle: "writer" },
+        { memberId: "m2", profile: "writer", handle: "writer", displayName: "Writer" },
       ],
     },
   },
@@ -174,14 +194,22 @@ db.conversations.hook("updating", () => void writes.rows++)
 db.conversations.hook("deleting", () => void writes.rows++)
 
 async function fresh(
-  { chats = false, ask = false }: { chats?: boolean; ask?: boolean } = {},
+  {
+    chats = false,
+    ask = false,
+    layout = "legacy",
+  }: { chats?: boolean; ask?: boolean; layout?: "legacy" | "bots" } = {},
 ) {
   moved.at = LAST_AT
   moved.title = "Planning"
   retired = false
   split = false
   log = ask ? asks() : []
-  await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
+  await seedSettings({
+    onboarded: true,
+    legacyChat: layout === "legacy",
+    movedChats: bots.map((bot) => bot.id),
+  })
   await db.profiles.clear()
   await db.profiles.bulkPut(bots)
   await db.conversations.clear()
@@ -243,6 +271,20 @@ const roomScreen = () => (
 const band = (name: string) =>
   findAll(`[data-band="${name}"] a[href^="/c/"]`).map((row) => row.getAttribute("href"))
 
+/** A bot's list, at the address the sidebar's row for that bot takes. */
+const listScreen = (profileId: string) => (
+  <MemoryRouter initialEntries={[`/b/${profileId}`]}>
+    <Path />
+    <Routes>
+      <Route path="b/:profileId" element={<BotChatsPage />} />
+      <Route path="c/:id" element={<p data-chat />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+/** The rows one bot's list drew, by the chat each leads to, in the order it drew them. */
+const listRows = () =>
+  findAll('ul a[href^="/c/"]').map((row) => (row.getAttribute("href") ?? "").slice(3))
 
 test("a room's record merged onto a fresh device is one row, carried by one bot", async () => {
   await fresh()
@@ -283,32 +325,6 @@ test("Recents draws the room once, with its name, its members and its last activ
   })
 })
 
-function Threads({ profileId }: { profileId: string }) {
-  const threads = useThreads(profileId) ?? []
-  return <span data-threads={profileId}>{threads.map((thread) => thread.chat.id).join(",")}</span>
-}
-
-test("no bot's Main lists the room as one of its threads", async () => {
-  await fresh()
-  await merged()
-  await mount(
-    <>
-      <Threads profileId={CARRIER} />
-      <Threads profileId={CODER} />
-    </>,
-    async () => {
-      await settle()
-      for (const held of findAll("[data-threads]")) {
-        const ids = (held.textContent ?? "").split(",").filter(Boolean)
-        assert.ok(
-          !ids.includes(ROOM),
-          `${held.getAttribute("data-threads")}'s Main must not list a room among its threads`,
-        )
-      }
-    },
-  )
-})
-
 test("a second merge of an unchanged record writes nothing", async () => {
   await fresh()
   await merged()
@@ -339,7 +355,7 @@ test("a record that moved is written, and the row takes the Host's newer words",
 })
 
 test(
-  "a room's address opens no bot's pane: it is not one of a bot's threads",
+  "a room's address opens no bot's pane: it is its own screen's",
   atWidth(1400, async () => {
     await fresh()
     await merged()
@@ -354,7 +370,7 @@ test(
         assert.equal(
           find("[data-pane]")?.textContent,
           "null",
-          "a room is its own screen, so nothing stands beside it as a thread",
+          "a room is its own screen, so no bot's list stands beside it",
         )
       },
     )
@@ -362,8 +378,8 @@ test(
 )
 
 function Pane() {
-  const pane = useBotPane(true)
-  return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId, lane: pane.lane } : null)}</span>
+  const pane = useBotChatsPane(useLegacyChat() === false)
+  return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId } : null)}</span>
 }
 
 test("a room the Host disbands leaves the device that merged it", async () => {
@@ -402,14 +418,91 @@ test("a room follows the Host though the bot that first carried it is turned off
   )
 })
 
-test("the sidebar every device gets draws the room's row", async () => {
-  await fresh()
-  // The default layout: bots, not Recents.
-  await seedSettings({ onboarded: true, legacyChat: false, movedChats: bots.map((bot) => bot.id) })
+test("the bot layout's sidebar draws no room: a room is a row of the bots' lists", async () => {
+  await fresh({ layout: "bots" })
   await merged()
   await mount(screen("/"), async () => {
+    await until(async () => Boolean(find("#bots-heading")), "the bots")
+    absent('[data-band="rooms"]', "the sidebar has no Rooms section")
+    absent(`a[href="/c/${ROOM}"]`, "and draws no room of its own")
+    absent('a[href="/new-room"]', "and offers New room nowhere in the drawer")
+  })
+})
+
+test("a room draws in the list of every bot it seats, and in no other bot's", async () => {
+  await fresh({ layout: "bots" })
+  await merged()
+  // The roster seats coder and writer; the bot that carried the record is neither of them.
+  for (const [bot, seats] of [
+    [CODER, true],
+    [WRITER, true],
+    [CARRIER, false],
+  ] as const) {
+    await mount(listScreen(bot), async () => {
+      if (seats) {
+        await until(async () => Boolean(find(`a[href="/c/${ROOM}"]`)), "the room's row")
+        const row = find(`a[href="/c/${ROOM}"]`)
+        assert.ok(row?.querySelector("[data-room-faces]"), "the row wears its members' pictures")
+        assert.ok(
+          wordsOf(row).includes("Coder, Writer"),
+          "and names them in the line a chat gives its last words",
+        )
+        return
+      }
+      // The carrier's list settles on its own empty answer, so nothing is the list's own word.
+      await until(
+        async () => Boolean(findText("p", "No chats yet.")),
+        "a list with nothing in it",
+      )
+      assert.ok(
+        missing(`a[href="/c/${ROOM}"]`),
+        "a bot the room does not seat never draws it",
+      )
+    })
+  }
+})
+
+test("a room's pin lifts it above a newer chat in a bot's list", async () => {
+  await fresh({ layout: "bots" })
+  await merged()
+  // A chat of the writer's, newer than the room's own last activity.
+  await db.conversations.put({
+    id: "chat-writer",
+    profileId: WRITER,
+    title: "Newer",
+    hermesSessionId: "gots-chat-writer",
+    createdAt: LAST_AT + 119_000,
+    updatedAt: LAST_AT + 120_000,
+    changedAt: LAST_AT + 120_000,
+  })
+  // A room's record carries no pin, so this one is the device's own (ADR 0121).
+  await db.conversations.update(ROOM, { pinned: true })
+  await syncNow()
+  await settle()
+  await mount(listScreen(WRITER), async () => {
+    await until(async () => listRows().length === 2, "the chat and the room")
+    assert.deepEqual(listRows(), [ROOM, "chat-writer"], "the pin lifts the room above a newer chat")
+  })
+  await db.conversations.update(ROOM, { pinned: false })
+  await mount(listScreen(WRITER), async () => {
+    await until(async () => listRows().length === 2, "the chat and the room")
+    assert.deepEqual(
+      listRows(),
+      ["chat-writer", ROOM],
+      "and unpinned, it stands by its own last activity",
+    )
+  })
+})
+
+test("a room that needs the reader says so on its row in a bot's list", async () => {
+  await fresh({ ask: true, layout: "bots" })
+  await merged()
+  await mount(listScreen(CODER), async () => {
     await until(async () => Boolean(find(`a[href="/c/${ROOM}"]`)), "the room's row")
-    assert.equal(findAll(`a[href="/c/${ROOM}"]`).length, 1, "one row for the room")
+    const row = () => wordsOf(find(`a[href="/c/${ROOM}"]`))
+    await until(async () => row().includes("needs you"), "the room's needs-you line")
+    assert.match(row(), /Coder needs you — reply in the room\./, "naming the member who asked")
+    assert.ok(row().includes("Planning"), "beside the room's own name")
   })
 })
 
@@ -519,6 +612,35 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
   })
 })
 
+test("a room opened from a bot's list leads back to that list, by its control and by back", async () => {
+  // A room is a row of every bot's list it seats, and the shell lays no bot list beside a room — it
+  // is no bot's chat (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width. The
+  // room's screen is therefore a screen the list pushed wherever it is opened from, and without a
+  // control of its own the only way out would be Android's hardware back.
+  await fresh({ chats: true, layout: "bots" })
+  await merged()
+  const roomFromList = () => (
+    <MemoryRouter initialEntries={[{ pathname: `/c/${ROOM}`, state: { bot: CODER } }]}>
+      <Path />
+      <Routes>
+        <Route path="/c/:id" element={<RoomChat id={ROOM} slot="route" />} />
+        <Route path="/b/:profileId" element={<p data-list />} />
+      </Routes>
+    </MemoryRouter>
+  )
+  await mount(roomFromList(), async () => {
+    await until(async () => Boolean(find(`[aria-label="Back to Coder"]`)), "the way back")
+    await click(find(`[aria-label="Back to Coder"]`))
+    await until(async () => path() === `/b/${CODER}`, "the list the row stands in")
+    assert.ok(find("[data-list]"), "and the room's screen is what was left")
+  })
+  await mount(roomFromList(), async () => {
+    await until(async () => Boolean(find(`[aria-label="Back to Coder"]`)), "the screen's own way out")
+    assert.equal(pressBack(), "screen", "Android's back is the same answer")
+    await until(async () => path() === `/b/${CODER}`, "the list behind it")
+  })
+})
+
 test("a room whose row moved is read again, and its mark follows the Host", async () => {
   await fresh({ ask: true })
   await merged()
@@ -620,7 +742,7 @@ test("a room's row draws its members' pictures, four at most, and counts the res
   })
 })
 
-test("Rooms ranks by its own order, kept on the device, and pins above it", async () => {
+test("Rooms ranks a room by the list's own rule, and offers no order of its own", async () => {
   await fresh()
   const named = [
     { id: "room-zebra", title: "Zebra", at: LAST_AT + 30_000 },
@@ -638,18 +760,17 @@ test("Rooms ranks by its own order, kept on the device, and pins above it", asyn
       changedAt: at,
     })),
   )
-  // The section's order is a device setting like every other list's (ADR 0091, ADR 0127).
-  await db.settings.update("settings", { roomSort: "name", roomSortDir: "asc" })
   await settle()
   await mount(screen("/"), async () => {
     await until(async () => band("rooms").length === 3, "all three rooms")
     assert.deepEqual(
       band("rooms"),
-      ["/c/room-alpha", "/c/room-mid", "/c/room-zebra"],
-      "A to Z by the section's own key, whatever order the clocks are in",
+      ["/c/room-zebra", "/c/room-mid", "/c/room-alpha"],
+      "newest first, as every list here ranks a row — a room has no order of its own to keep",
     )
+    absent('[aria-label^="Sort rooms"]', "and no control offers it one")
   })
-  // A pin is lifted above the arrow rather than ranked by it.
+  // A pin is still lifted above the rest, as a chat's is.
   await db.conversations.update("room-zebra", { pinned: true })
   await settle()
   await mount(screen("/"), async () => {

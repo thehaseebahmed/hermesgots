@@ -102,7 +102,6 @@ import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
-import { useTriageModel } from "@/lib/triage-model"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
 
@@ -154,9 +153,6 @@ function gatedFeatures(meta: Record<BotTab, PageMeta>): Record<string, string> {
 function gated(page: BotTab): boolean {
   return page in PAGE_FEATURES
 }
-
-/** What the Models page's row needs: the Gots triage pick. */
-const MODELS_ANSWERS = { triage: "triage_model" } as const
 
 const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 
@@ -596,8 +592,6 @@ const BOT_EDITS = {
 function botEdit(id: string): BotEdit | undefined {
   return id in BOT_EDITS ? BOT_EDITS[id as keyof typeof BOT_EDITS] : undefined
 }
-
-const TRIAGE_PURPOSE = "Whether a message from Main starts a new thread or continues one"
 
 /** What the page says of a key its host only opens when its process starts. */
 const RESTART_NOTE = "Applies when this bot's Hermes restarts."
@@ -1135,40 +1129,14 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
   )
 }
 
-/** The Models page: Gots's triage model over the bot's Hermes models, each a value that opens its pick. */
+/** The Models page: the bot's Hermes models, each a value that opens its pick. */
 function ModelsPage({ profile }: { profile: Profile }) {
-  const answers = usePluginFeatureAnswers(profile, MODELS_ANSWERS)
-  const triage = answers.triage === "yes"
   const [pick, setPick] = useState<string>()
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
-  const triageRecord = useTriageModel(profile)
 
   return (
     <div className="flex flex-col gap-4" data-bot-models>
-      {triage && triageRecord.supported && (
-        <>
-          <Caption>Gots</Caption>
-          <Group>
-            <ValueRow
-              title="Triage model"
-              purpose={TRIAGE_PURPOSE}
-              value={triageRecord.pick ? fullModel(triageRecord.pick) : "Default model"}
-              disabled={triageRecord.saving}
-              busy={triageRecord.saving}
-              onClick={() => setPick("triage-model")}
-              data-setting="triage-model"
-            />
-            {triageRecord.withheld && (
-              <Banner>
-                This host doesn't let Gots pick the model. Allow it with{" "}
-                <code className="font-mono text-[13px]">hermes plugins enable gots</code>.
-              </Banner>
-            )}
-          </Group>
-        </>
-      )}
-
       <Caption>Hermes</Caption>
       <Group>
         <ValueRow
@@ -1187,16 +1155,6 @@ function ModelsPage({ profile }: { profile: Profile }) {
         choice={own}
         fallback={{ label: "Default model", model: own?.model }}
         onPick={(next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined)}
-        onClose={() => setPick(undefined)}
-      />
-
-      <ModelPick
-        open={pick === "triage-model"}
-        title="Triage model"
-        profile={profile}
-        choice={triageRecord.pick}
-        fallback={{ label: "Default model", model: own?.model }}
-        onPick={(next) => triageRecord.save(next)}
         onClose={() => setPick(undefined)}
       />
     </div>

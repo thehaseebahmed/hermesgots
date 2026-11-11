@@ -1,7 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { hasServer, serverConfig } from "@/lib/connection"
+import { connectionKey, hasServer, serverConfig } from "@/lib/connection"
 import {
   ROOM_LOG_ROWS,
   db,
@@ -13,8 +13,8 @@ import {
   type RoomMember,
   type RoomNeeds,
 } from "@/lib/db"
-import { chatOwner } from "@/lib/chat-owner"
 import { equal } from "@/lib/equal"
+import { usePluginFeatureByServer } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, ROOM_NEEDS_MS } from "@/lib/freshness"
 import {
   HermesError,
@@ -30,7 +30,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { onChanges, useChanges } from "@/lib/live"
-import { roomFaces } from "@/lib/rooms"
+import { roomAnswerers, roomFaces } from "@/lib/rooms"
 import { usePoll } from "@/lib/poll"
 import { AttachmentError } from "@/lib/send-turn"
 import { randomId } from "@/lib/utils"
@@ -202,10 +202,16 @@ async function readNeeds({ chat, bot }: RoomNeedsRow, { paced }: { paced: boolea
   }
 }
 
-/** One room the list lists, and the bot that answers for it: what the list's reader works from. */
+/** One room a list draws, and the bots it lists in: what the list's reader works from. */
 export interface RoomNeedsRow {
   chat: Conversation
+  /** The bot that answers for it: the first of the bots it lists in (ADR 0115). */
   bot?: Profile
+  /**
+   * The bots this room lists in, by id — the ones its roster seats — so a bot's own list asks whether
+   * the room is one of its rows without resolving the roster again (ADR 0115).
+   */
+  seated: string[]
   /** The members' pictures the row draws, and how many it could not draw (ADR 0126). */
   faces: { shown: string[]; more: number }
   /** The record's clock this device last read the room's page at, or nothing before it has. */
@@ -213,7 +219,21 @@ export interface RoomNeedsRow {
 }
 
 /**
- * Keeps the chat list's rooms read: a room whose record moved since this device last read its page,
+ * Whether this device may make a room at all: a Host that advertises `rooms_write`, through a bot that
+ * has a profile to be seated as. The control is offered only where one can be made, rather than one
+ * that can only come back refused — and it is every Host's question, not one bot's, because a room
+ * belongs to its Host and seats whichever profiles its reader picks (ADR 0115, ADR 0129).
+ */
+export function useCanMakeRoom(): boolean {
+  const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
+  const answers = usePluginFeatureByServer(bots, "rooms_write")
+  return bots.some(
+    (bot) => bot.hermesProfile && !bot.disabled && answers[connectionKey(bot)] === "yes",
+  )
+}
+
+/**
+ * Keeps the chat lists' rooms read: a room whose record moved since this device last read its page,
  * and every listed room the Host says has moved — one read a second per room at most, and none at
  * all for a room at rest.
  *
@@ -227,16 +247,20 @@ export function useRoomNeeds(): RoomNeedsRow[] | undefined {
   const rooms = useLiveQuery(async () => {
     const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
     const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
-    return held
-      .filter((chat) => chatOwner(chat, bots).listed)
-      .map((chat) => ({
+    return held.map((chat) => {
+      const answerers = chat.room
+        ? roomAnswerers(chat.room, bots, bots.get(chat.profileId))
+        : []
+      return {
         chat,
-        bot: chatOwner(chat, bots).bot,
+        bot: answerers[0],
+        seated: answerers.map((one) => one.id),
         faces: chat.room
           ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId))
           : { shown: [], more: 0 },
         read: chat.roomNeeds?.at,
-      }))
+      }
+    })
   }, [])
   const current = useRef(rooms)
   useEffect(() => {

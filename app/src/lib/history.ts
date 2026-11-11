@@ -13,7 +13,6 @@ import { quietly } from "@/lib/report"
 import { markResume } from "@/lib/resume-trace"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
-import { refreshMoves } from "@/lib/moves"
 import { refreshTodos } from "@/lib/todos"
 import { refreshLibrary, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
@@ -765,7 +764,6 @@ function followUps(conversationId: string, moved: boolean) {
     refreshContext(conversationId),
     refreshChatProviderUsage(conversationId),
     refreshTodos(conversationId),
-    refreshMoves(conversationId),
     refreshWorkspace(conversationId),
     refreshLibrary(conversationId),
     refreshPrs(conversationId),

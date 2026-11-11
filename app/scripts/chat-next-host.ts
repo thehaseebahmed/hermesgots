@@ -232,16 +232,6 @@ export function fakeHost(
     planFile: "plans/hermes-x.md",
     blocked: null as string | null,
   }
-  /**
-   * What the plugin's triage answers for a Main's message (ADR 0029): stay, or the thread it queued
-   * the message on; and the moves it then lists, as its moves route does.
-   */
-  const triage = {
-    decision: "main" as "main" | "thread" | "new",
-    thread: "",
-    asked: [] as { text: string; steer: boolean }[],
-    moves: [] as Record<string, unknown>[],
-  }
   /** The title Hermes gave the session; none until it has one. */
   const titled: { title: string | null } = { title: null }
   /** The session's todo list as the plugin reads it from the transcript; none until it is set. */
@@ -695,21 +685,10 @@ export function fakeHost(
           "queue",
           "media",
           "media_url",
-          "triage",
-          "moves",
           "subagents_stop_all",
         ],
       })
     }
-    if (plugin && path === `/api/plugins/gots/sessions/${session}/triage`) {
-      const { text, steer } = JSON.parse(String(init?.body))
-      triage.asked.push({ text, steer: Boolean(steer) })
-      return triage.decision === "main"
-        ? reply({ decision: "main" })
-        : reply({ decision: triage.decision, thread: triage.thread, item: { id: "q_triage" } })
-    }
-    if (plugin && path === `/api/plugins/gots/sessions/${session}/moves`)
-      return reply({ moves: triage.moves })
     // The plugin's media route: a URL minted for one path, which the route serves as the image or
     // file its suffix names.
     if (plugin && path === "/api/plugins/gots/media/url") {
@@ -1108,7 +1087,6 @@ export function fakeHost(
     workspace,
     todos,
     titled,
-    triage,
     session,
     dropConnections,
     breakConnections,

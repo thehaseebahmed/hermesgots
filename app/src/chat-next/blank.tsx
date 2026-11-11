@@ -1,7 +1,8 @@
 /**
  * A chat with no record yet, as chat-next draws it (ADR 0065): the bot's face, an empty thread and
- * the app's own composer — nothing more, and nothing written. Its first send makes the chat and
- * hands the message to the screen that draws it (ADR 0096), so this surface posts nothing itself.
+ * the app's own composer — nothing more, and nothing written. Its first send makes the chat of the
+ * bot's, sends the message as its opening turn and moves the address to it, so the chat screen that
+ * opens there reads the turn as any other device's send.
  */
 import { useLiveQuery } from "dexie-react-hooks"
 import { useLayoutEffect, useRef, useState } from "react"
@@ -11,14 +12,16 @@ import { toast } from "sonner"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { EmptyState } from "@/components/chat/empty-states"
+import { EmptyChatState } from "@/components/chat/empty-states"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
+import { sendMessage } from "@/lib/chat"
 import { db, type Attachment, type ModelChoice } from "@/lib/db"
 import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { chosenOf, storedPick } from "@/lib/model-pick"
-import { beginChat, useBotThreads } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
+import { beginChat } from "@/lib/threads"
 
 /**
  * The bot a new chat would go to, drawn before the chat exists. The picker writes the active bot and
@@ -27,7 +30,7 @@ import { beginChat, useBotThreads } from "@/lib/threads"
  */
 export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }) {
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const navigate = useNavigate()
   const [modelPick, setModelPick] = useState<ModelChoice>()
   // A press that lands while the first chat is being made must not make a second one.
@@ -41,11 +44,9 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
     if (starting.current) return
     starting.current = true
     try {
-      const chat = await beginChat(bot.id, {
-        modelChoice: chosenOf(modelPick),
-        text,
-        attachments,
-      })
+      const chat = await beginChat(bot.id, { modelChoice: chosenOf(modelPick) })
+      if (text.trim() || attachments.length)
+        await sendMessage(chat.id, text, { attachments })
       navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
     } catch (error) {
       starting.current = false
@@ -62,13 +63,13 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
       className="relative flex min-h-0 flex-1 flex-col"
     >
       <ChatHeader title="" showBot={false} />
-      <EmptyState botId={bot.botId} configured />
+      <EmptyChatState botId={bot.botId} configured onSend={(text) => send(text, [])} />
       <div
         data-slot="composer-slot"
         data-toast-above
         className={COMPOSER_SLOT}
       >
-        {botThreads === false && (
+        {legacy === true && (
           <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={bot} />
           </div>

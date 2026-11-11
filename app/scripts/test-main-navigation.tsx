@@ -4,27 +4,36 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { Home } from "@/App"
 import { ConversationList } from "@/components/conversation-list"
-import { BotThreadsPage } from "@/routes/bot-threads"
+import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
-import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { db } from "@/lib/db"
+import { rememberLastChat } from "@/lib/last-chat"
 
 import {
-  Nav,
-  absent,
   botProfile,
-  click,
-  find,
   findAll,
   findText,
   json,
   mount,
-  nav,
   seedSettings,
   until,
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly", apiKey: undefined })
-const MAIN = mainThreadId(bot.id)
+const MAIN = "main-bot-1"
+
+/** The bot's Main, as the record a device already holds it carries it (G1: a chat like any other). */
+const mainRow = () => ({
+  id: MAIN,
+  profileId: bot.id,
+  title: "Main",
+  titleEdited: true,
+  main: true,
+  hermesSessionId: `gots-${MAIN}`,
+  createdAt: 10,
+  updatedAt: 10,
+  changedAt: 0,
+})
 async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
   await seedSettings({
     activeProfileId: bot.id,
@@ -52,6 +61,15 @@ const homeScreen = (
         }
       />
       <Route
+        path="b/:profileId"
+        element={
+          <>
+            <BotChatsPage />
+            <Where />
+          </>
+        }
+      />
+      <Route
         path="c/:id"
         element={
           <>
@@ -68,7 +86,15 @@ const staleScreen = (
   <MemoryRouter initialEntries={["/b/bot-1"]}>
     <Routes>
       <Route index element={<Where />} />
-      <Route path="b/:profileId" element={<BotThreadsPage />} />
+      <Route
+        path="b/:profileId"
+        element={
+          <>
+            <BotChatsPage />
+            <Where />
+          </>
+        }
+      />
       <Route
         path="c/:id"
         element={
@@ -83,98 +109,15 @@ const staleScreen = (
 )
 
 
-const paneScreen = (entry: string) => (
-  <MemoryRouter initialEntries={[entry]}>
-    <ChatPage key={bot.id} chatId={MAIN} slot="route" />
-    <Routes>
-      <Route path="/c/:id" element={<ChatPage slot="route" />} />
-    </Routes>
-    <Nav />
-  </MemoryRouter>
-)
-
-const cardLink = (threadId: string) => find(`a[href="/c/${threadId}"]`)
-const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
-
-test("with room, a card beside Main swaps the thread in place and reads as open", async () => {
-  await paneSeed()
-  await ensureMainThread(bot.id)
-  globalThis.fetch = async () => json({})
-  await mount(paneScreen("/c/t-a"), async () => {
-    await until(async () => Boolean(cardLink("t-b")), "Main's cards beside the open thread")
-    assert.equal(openCards().length, 1, "exactly the thread on screen is marked open")
-    assert.equal(
-      openCards()[0].getAttribute("href"),
-      "/c/t-a",
-      "and it is the one the address names",
-    )
-
-    await click(cardLink("t-b"))
-    await until(() => nav().startsWith("REPLACE:"), "a replace, not another history entry")
-    assert.equal(nav(), "REPLACE:/c/t-b", "the thread swapped in where the last one was")
-    assert.equal(openCards()[0].getAttribute("href"), "/c/t-b", "and the open mark moved with it")
-  })
-})
-
-test("with no room, a tapped card pushes its thread so back returns to Main", async () => {
-  await paneSeed()
-  await ensureMainThread(bot.id)
-  globalThis.fetch = async () => json({})
-  await mount(
-    <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
-      <Routes>
-        <Route path="/c/:id" element={<ChatPage slot="route" />} />
-      </Routes>
-      <Nav />
-    </MemoryRouter>,
-    async () => {
-      await until(async () => Boolean(cardLink("t-b")), "Main's cards")
-      assert.equal(openCards().length, 0, "Main on its own has no open thread to mark")
-      await click(cardLink("t-b"))
-      await until(() => nav().startsWith("PUSH:"), "a push, so back has somewhere to return to")
-      assert.equal(nav(), "PUSH:/c/t-b")
-    },
-  )
-})
-
-async function paneSeed() {
-  await seed()
-  await db.profiles.update(bot.id, { baseUrl: "http://bot-pane.test/v1" })
-  await seedThreads()
-}
-
-async function seedThreads() {
-  await db.conversations.bulkPut(
-    ["t-a", "t-b"].map((id) => ({
-      id,
-      profileId: bot.id,
-      title: `Thread ${id}`,
-      hermesSessionId: `gots-${id}`,
-      createdAt: 10,
-      updatedAt: 10,
-      changedAt: 0,
-    })),
-  )
-  await db.messages.bulkPut(
-    ["t-a", "t-b"].map((id) => ({
-      id: `${id}-open`,
-      conversationId: id,
-      role: "user" as const,
-      content: `Opened ${id}`,
-      status: "done" as const,
-      createdAt: 11,
-    })),
-  )
-}
-
 test("with nothing stored the app is the bot-first layout", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    await until(
-      async () => Boolean(await db.conversations.get(MAIN)),
-      "Main is made so the address lands somewhere",
+    await until(async () => where() === `/b/${bot.id}`, "the bot's own address")
+    assert.equal(
+      await db.conversations.count(),
+      0,
+      "a bot with nothing to open draws its list rather than making a chat for it",
     )
   })
   await mount(
@@ -183,7 +126,7 @@ test("with nothing stored the app is the bot-first layout", async () => {
     </MemoryRouter>,
     async () => {
       await until(
-        async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        async () => findAll("a").some((row) => row.getAttribute("href") === `/b/${bot.id}`),
         "the bot row",
       )
       assert.ok(!findText("button", "New chat"), "no New chat button beside the bots")
@@ -191,28 +134,30 @@ test("with nothing stored the app is the bot-first layout", async () => {
   )
 })
 
-test("home opens the bot's Main thread", async () => {
+test("home opens the chat this device last had open in the bot", async () => {
   await seed()
+  await db.conversations.put(mainRow())
+  rememberLastChat(bot.id, MAIN)
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    await until(
-      async () => Boolean(await db.conversations.get(MAIN)),
-      "Main is made so the address lands somewhere",
+    await until(async () => where() === `/c/${MAIN}`, "the chat the bot was left in")
+  })
+})
+
+test("a link to a bot's screen draws the bot's list, and makes no Main", async () => {
+  await seed()
+  globalThis.fetch = async () => json({})
+  await mount(staleScreen, async () => {
+    await until(async () => where() === `/b/${bot.id}`, "the bot's own address")
+    assert.equal(
+      await db.conversations.count(),
+      0,
+      "the list reads the chats it has rather than making one",
     )
   })
 })
 
-test("a stale link to the old bot screen lands on Main", async () => {
-  await seed()
-  globalThis.fetch = async () => json({})
-  await mount(staleScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "Main's address")
-    assert.equal(await db.conversations.count(), 1, "only Main, never a card screen's thread")
-  })
-})
-
-test("the Chats list's bot row opens the bot's Main thread", async () => {
+test("the Chats list's bot row opens the bot's screen", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(
@@ -221,12 +166,12 @@ test("the Chats list's bot row opens the bot's Main thread", async () => {
     </MemoryRouter>,
     async () => {
       await until(
-        async () => findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        async () => findAll("a").some((row) => row.getAttribute("href") === `/b/${bot.id}`),
         "the bot row",
       )
       assert.ok(
-        !findAll("a").some((row) => row.getAttribute("href") === "/b/bot-1"),
-        "no row points at the old screen",
+        !findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
+        "and no row opens Main over the list's head",
       )
     },
   )

@@ -37,7 +37,6 @@ import {
   type Unsent,
 } from "@/lib/db"
 import { randomId } from "@/lib/utils"
-import type { ThreadStart } from "@/lib/threads"
 import { toast } from "sonner"
 
 import { equal } from "@/lib/equal"
@@ -659,15 +658,6 @@ interface ThreadOptions {
    */
   steerTurn?: (text: string, attachments: Attachment[]) => Promise<boolean>
   /**
-   * Asks the host where a message belongs before it is sent here (a bot's Main, ADR 0029): answers
-   * the attachments to send it with where it stays, or nothing where the host sent it elsewhere.
-   */
-  triageTurn?: (
-    text: string,
-    attachments: Attachment[],
-    options: { steer: boolean },
-  ) => Promise<Attachment[] | undefined>
-  /**
    * Called once the thread has read the host (`opened`), and each time a turn has ended (`turn`):
    * where the app reads again what the plugin holds for the chat beside its transcript.
    */
@@ -676,12 +666,6 @@ interface ThreadOptions {
   onAway?: (away: boolean) => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
-  /**
-   * The message the screen that opened this thread was asked to send (a thread Main started with
-   * `/thread`): sent once, as this thread's first turn, so the message is drawn where it went and
-   * the record keeps the opener Main's card shows (ADR 0096).
-   */
-  start?: ThreadStart
   /** What draws the prompt a run is held up on; without it, chat-next's own bare cards. */
   Prompt?: ComponentType<PromptProps>
   /** What draws the thread; without it, chat-next's own plain markup. */
@@ -727,14 +711,12 @@ export function ChatNextThread({
   prepareTurn,
   queueTurn,
   steerTurn,
-  triageTurn,
   onSettled,
   onAway,
   Composer,
   Prompt,
   View = PlainView,
   summaries,
-  start,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
   // says what the page is doing.
@@ -1397,7 +1379,6 @@ export function ChatNextThread({
    * Sends a message as a turn. A send that does not reach the host keeps the message in the thread,
    * in the app's not-sent shape, with the files it was sent with — `resend` is the row it is, sent
    * again — so the words never go back to the field and nothing has to be typed twice (ADR 0071).
-   * A retry (ADR 0112) is not triaged: it re-asks where that request was made.
    */
   async function sendTurn(
     text: string,
@@ -1430,15 +1411,7 @@ export function ChatNextThread({
     let prepared: PreparedTurn | undefined
     let run: string
     try {
-      // A message the host sends to a thread leaves this one, as any message the user sent would. A
-      // retry is not asked again: it re-asks the request where that request was made.
-      const kept =
-        triageTurn && !retry ? await triageTurn(words, attachments, { steer: false }) : attachments
-      if (!kept) {
-        streaming.current = false
-        return dispatch({ type: "moved" })
-      }
-      prepared = prepareTurn ? await prepareTurn(words, kept, at) : undefined
+      prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1493,18 +1466,6 @@ export function ChatNextThread({
     await sendTurn(text)
   }
 
-  // A thread Main opened with `/thread` is sent from here, not from Main: the turn is drawn in the
-  // thread as its reader arrives and the run is followed by the screen that owns it, where posting
-  // it from Main left the thread blank until something opened it again (ADR 0096). Taken once, so a
-  // remount cannot send it twice, and only with a host to send it to.
-  const pendingStart = useRef(start)
-  useEffect(() => {
-    const first = pendingStart.current
-    if (!first || !ready || !server || !key || !session) return
-    pendingStart.current = undefined
-    void sendTurn(first.text, first.attachments, { at: first.at })
-  }, [ready, server, key, session])
-
   function retryUnsent(id: string) {
     const row = store.get().unsent?.find((one) => one.id === id)
     if (row) void sendTurn(row.text, row.attachments, { resend: row })
@@ -1529,23 +1490,17 @@ export function ChatNextThread({
     [held?.unsent, heldActions],
   )
 
-  // Mid-reply too, a Main's message is triaged first: one for another thread goes there at once,
-  // and the rest queue or steer behind the reply.
   async function queueMessage(text: string, attachments: Attachment[]) {
     if (!queueTurn) throw new Error("This bot can't hold a message until the reply is over.")
-    const kept = triageTurn ? await triageTurn(text, attachments, { steer: false }) : attachments
-    if (!kept) return
-    await queueTurn(text, kept)
+    await queueTurn(text, attachments)
     void catchUp()
   }
 
   async function steerMessage(text: string, attachments: Attachment[]) {
     if (!steerTurn) throw new Error("This reply can't be steered.")
-    const kept = triageTurn ? await triageTurn(text, attachments, { steer: true }) : attachments
-    if (!kept) return
     // A steer the host took stands in the reply at once: its transcript row lands only when the run
     // reads it. One it refused stays queued, and the queue row is what draws it.
-    if (await steerTurn(text, kept)) dispatch({ type: "steered", text })
+    if (await steerTurn(text, attachments)) dispatch({ type: "steered", text })
     void catchUp()
   }
 

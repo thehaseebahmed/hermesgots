@@ -88,7 +88,7 @@ for (const dark of [false, true]) {
       )
 
       // Every destination is still there, still named, and still a 44px target.
-      for (const name of ["Projects", "Code", "Research", "Routines", "Settings"]) {
+      for (const name of ["Projects", "Code", "Research", "Settings"]) {
         assert.equal(
           await page.getByRole("link", { name }).first().isVisible(),
           true,
@@ -167,10 +167,12 @@ for (const dark of [false, true]) {
         true,
         "a bot keeps its icon",
       )
+      // The bot layout has no Rooms section: a room is a row of every bot's chat list, so the
+      // sidebar has none to draw.
       assert.equal(
-        await aside.getByRole("link", { name: "New room" }).first().isVisible(),
-        true,
-        "the Rooms section's New room keeps its icon",
+        await aside.getByRole("link", { name: "New room" }).count(),
+        0,
+        "and the sidebar offers no New room in the bot layout",
       )
       await shot("bots-collapsed")
 

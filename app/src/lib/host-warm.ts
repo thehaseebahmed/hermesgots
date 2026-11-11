@@ -19,13 +19,12 @@ export async function warmBotSettings(server: Server) {
   if (warming.has(key)) return
   warming.add(key)
   try {
-    const [hermes, host, delegation, fallbacks, reminders, triage] = await Promise.all([
+    const [hermes, host, delegation, fallbacks, reminders] = await Promise.all([
       import("@/lib/hermes"),
       import("@/lib/host-record"),
       import("@/lib/delegation"),
       import("@/lib/fallbacks"),
       import("@/lib/reminders"),
-      import("@/lib/triage-model"),
     ])
     refreshAnswer(server)
     const signal = () => AbortSignal.timeout(READ_TIMEOUT_MS)
@@ -59,7 +58,6 @@ export async function warmBotSettings(server: Server) {
       attempt("delegation model", () => host.warmHostRecord(server, delegation.DELEGATION)),
       attempt("fallbacks", () => host.warmHostRecord(server, fallbacks.FALLBACKS)),
       attempt("reminders", () => host.warmHostRecord(server, reminders.REMINDERS)),
-      attempt("triage model", () => host.warmHostRecord(server, triage.TRIAGE)),
     ])
   } finally {
     warming.delete(key)

@@ -20,8 +20,6 @@ export interface DiagChat {
   changedAt: string
   /** This device holds only part of the host's transcript for it. */
   older?: boolean
-  /** The moves triage recorded on the host for it (a Main thread's Moved markers). */
-  moves?: number
   messages?: { user: number; assistant: number }
 }
 
@@ -39,16 +37,11 @@ export interface DiagBot {
   plugin: string | null
   /** The features the plugin advertises; null where the host couldn't be asked. */
   features: string[] | null
-  /** The thread this device's pane last opened for the bot, as the pane itself reads it. */
+  /** The chat this device's bot screen opens, as the bot's own address reads it. */
   lastThread: string | null
-  /** The thread storage holds for the pane, even where the pane refuses it. */
+  /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
   lastStored: string | null
-  /** Its Main thread, read by its own id; null where this device has no Main row for it. */
-  main: DiagChat | null
-  /** How many threads the bot has, counted through the index. */
-  threads: number
-  /** The newest chats, most recently touched first, as far back as the window reached; Main may
-   * be among them. */
+  /** The newest chats, most recently touched first, as far back as the window reached. */
   chats: DiagChat[]
   /** Its own reads failed, so what sits above is what could be read around them. */
   unread?: true
@@ -64,10 +57,8 @@ export interface DiagDevice {
   /** The Dexie schema version this device is on. */
   schema: number
   developer: boolean
-  /** Whether the bot-first layout is the one this device draws: false under the legacy switch. */
+  /** Whether the bot-chats layout is the one this device draws: false under the legacy switch. */
   botThreads: boolean
-  /** Developer's chat threads switch: whether a bot may start one at all. */
-  chatThreads: boolean
   /** The latest return to the foreground, timed; absent before this launch's first one. */
   resume?: DiagResume
   bots: DiagBot[]
@@ -102,7 +93,6 @@ export function diagChat(
   }
   if (chat.main) built.main = true
   if (chat.olderThan) built.older = true
-  if (chat.moves?.length) built.moves = chat.moves.length
   if (messages) built.messages = messages
   return built
 }
@@ -117,9 +107,9 @@ export interface DiagHost {
   plugin: string | null
   /** The features the plugin advertises. */
   features: string[] | null
-  /** The thread the pane last opened for the bot, as the pane itself reads it. */
+  /** The chat this device's bot screen opens, as the bot's own address reads it. */
   lastThread: string | null
-  /** The thread storage holds for the pane, even where the pane refuses it. */
+  /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
   lastStored: string | null
 }
 
@@ -127,14 +117,10 @@ export function diagBot(input: {
   profile: Profile
   host: DiagHost
   chats: DiagChat[]
-  /** Main itself, read by its own id rather than from the window. */
-  main: DiagChat | null
-  /** How many threads the bot has, counted through the index. */
-  threads: number
   /** Whether the bot's own reads failed, leaving what follows as what could be read. */
   unread?: boolean
 }): DiagBot {
-  const { profile, host, chats, main, threads, unread } = input
+  const { profile, host, chats, unread } = input
   const built: DiagBot = {
     id: profile.id,
     name: profile.name,
@@ -145,8 +131,6 @@ export function diagBot(input: {
     features: host.features,
     lastThread: host.lastThread,
     lastStored: host.lastStored,
-    main,
-    threads,
     chats,
   }
   if (unread) built.unread = true

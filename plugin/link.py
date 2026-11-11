@@ -381,7 +381,12 @@ def default_url(home: Path, state: Dict[str, Any]) -> str:
     return f"http://{socket.gethostname()}:{port}"
 
 
-def _set_env(home: Path, key: str, value: str) -> None:
+def set_env(home: Path, key: str, value: str) -> None:
+    """Writes one line into a profile's ``.env``, replacing what the file held for that key.
+
+    The writer linking uses for the lines Gots needs to reach a profile, and the one the platform
+    adapter uses for its home channel (`platform_gots.name_channel`).
+    """
     try:
         from hermes_cli.config import get_env_path, save_env_value
 
@@ -473,7 +478,7 @@ def set_url(home: Path, state: Dict[str, Any], url: str) -> str:
 
 def apply_env(home: Path, changes: Dict[str, str]) -> None:
     for key, value in changes.items():
-        _set_env(home, key, value)
+        set_env(home, key, value)
 
 
 # Where a profile turns Gots on as a delivery platform (ADR 0081). Hermes reads it at startup, so a

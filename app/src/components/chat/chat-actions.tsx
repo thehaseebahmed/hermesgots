@@ -8,12 +8,9 @@ import {
   PencilIcon,
   PinIcon,
   RotateCcwIcon,
-  SettingsIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
-import { useNavigate } from "react-router"
-
 import { Banner } from "@/components/banner"
 import { ConfirmDialog } from "@/components/chat/confirm-dialog"
 import { RenameDialog } from "@/components/chat/rename-dialog"
@@ -56,9 +53,8 @@ import {
   refreshProviderUsage,
   resetsInText,
 } from "@/lib/provider-usage"
-import { setBotMuted, setThreadMuted } from "@/lib/push"
+import { setThreadMuted } from "@/lib/push"
 import { quietly } from "@/lib/report"
-import { botPath } from "@/lib/bot-tabs"
 import { closeSessionWork } from "@/lib/workspace"
 
 /**
@@ -227,14 +223,14 @@ export function LimitNotice({
 
 /**
  * The chat's header controls and what they open: the context ring and its usage sheet, and the
- * options menu — rename, pin, mute, resolve or reopen, discard and delete, or a bot's mute and
- * settings on its Main — with the dialogs they ask in. Both chat screens draw it.
+ * options menu — rename, pin, mute, resolve or reopen, discard and delete — with the dialogs they
+ * ask in. Both chat screens draw it, a bot's Main among the chats it draws: Main carries the whole
+ * of an ordinary chat's menu but Delete, since it is the bot's one chat that cannot go.
  */
 export function ChatActions({
   chat,
   profile,
   session,
-  mainChrome,
   wide,
   usage,
   providerUsage,
@@ -246,8 +242,6 @@ export function ChatActions({
   profile?: Profile | null
   /** The chat as a project session, where it is one. */
   session?: Conversation
-  /** A bot's Main drawn as the bot's face: its options are the bot's. */
-  mainChrome: boolean
   wide: boolean
   usage: ContextUsage
   providerUsage?: Profile["providerUsage"]
@@ -257,9 +251,7 @@ export function ChatActions({
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
-  const navigate = useNavigate()
   const configured = Boolean(profile?.baseUrl.trim())
-  const isMain = Boolean(chat.main)
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
@@ -274,9 +266,7 @@ export function ChatActions({
   return (
     <>
       <div className="flex items-center gap-2">
-        {/* Main carries no reading of the context window: it belongs to a chat, and Main is the
-            bot's face — the account's own notice below the composer still answers for the account. */}
-        {wide && configured && !isMain && (
+        {wide && configured && (
           <ContextRing usage={usage} onClick={() => onUsageOpenChange(true)} />
         )}
         <DropdownMenu>
@@ -286,14 +276,14 @@ export function ChatActions({
                 variant="outline"
                 size="icon-lg"
                 className={HEADER_BUTTON}
-                aria-label={mainChrome ? "Bot options" : "Chat options"}
+                aria-label="Chat options"
               />
             }
           >
             <EllipsisIcon />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-44">
-            {configured && !wide && !isMain && (
+            {configured && !wide && (
               <>
                 <DropdownMenuItem onClick={() => onUsageOpenChange(true)}>
                   <ContextIcon usage={usage} />
@@ -303,76 +293,56 @@ export function ChatActions({
                 <DropdownMenuSeparator />
               </>
             )}
-            {/* Main has no title of its own to give: its header carries the bot's name, which Bot
-                settings edits. */}
-            {!isMain && (
-              <DropdownMenuItem onClick={() => setRenaming(true)}>
-                <PencilIcon />
-                {session ? "Edit" : "Rename"}
+            <DropdownMenuItem onClick={() => setRenaming(true)}>
+              <PencilIcon />
+              {session ? "Edit" : "Rename"}
+            </DropdownMenuItem>
+            {session && (
+              <DropdownMenuItem
+                onClick={() =>
+                  void updateConversation(session.id, {
+                    pinned: session.pinned ? undefined : true,
+                  }).catch(quietly("Pinning a session"))
+                }
+              >
+                <PinIcon />
+                {session.pinned ? "Unpin" : "Pin"}
               </DropdownMenuItem>
             )}
-            {mainChrome && profile ? (
-              <>
-                <DropdownMenuItem onClick={() => void setBotMuted(profile.id, !profile.muted)}>
-                  {profile.muted ? <BellIcon /> : <BellOffIcon />}
-                  {profile.muted ? "Unmute notifications" : "Mute notifications"}
+            <DropdownMenuItem onClick={() => void setThreadMuted(chat.id, !chat.muted)}>
+              {chat.muted ? <BellIcon /> : <BellOffIcon />}
+              {chat.muted ? "Unmute notifications" : "Mute notifications"}
+            </DropdownMenuItem>
+            {session &&
+              !session.discardedAt &&
+              (session.resolvedAt ? (
+                <DropdownMenuItem
+                  onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
+                >
+                  <RotateCcwIcon />
+                  Reopen
                 </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
+                >
+                  <CheckIcon />
+                  Resolve
+                </DropdownMenuItem>
+              ))}
+            {!chat.main && (
+              <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate(botPath(profile.id))}>
-                  <SettingsIcon />
-                  Bot settings
-                </DropdownMenuItem>
-              </>
-            ) : (
-              <>
-                {session && (
-                  <DropdownMenuItem
-                    onClick={() =>
-                      void updateConversation(session.id, {
-                        pinned: session.pinned ? undefined : true,
-                      }).catch(quietly("Pinning a session"))
-                    }
-                  >
-                    <PinIcon />
-                    {session.pinned ? "Unpin" : "Pin"}
+                {session && !session.discardedAt && (
+                  <DropdownMenuItem onClick={() => setDiscarding(true)}>
+                    <ArchiveXIcon />
+                    Discard
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => void setThreadMuted(chat.id, !chat.muted)}>
-                  {chat.muted ? <BellIcon /> : <BellOffIcon />}
-                  {chat.muted ? "Unmute notifications" : "Mute notifications"}
+                <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+                  <Trash2Icon />
+                  Delete
                 </DropdownMenuItem>
-                {session &&
-                  !session.discardedAt &&
-                  (session.resolvedAt ? (
-                    <DropdownMenuItem
-                      onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
-                    >
-                      <RotateCcwIcon />
-                      Reopen
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem
-                      onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
-                    >
-                      <CheckIcon />
-                      Resolve
-                    </DropdownMenuItem>
-                  ))}
-                {!chat.main && (
-                  <>
-                    <DropdownMenuSeparator />
-                    {session && !session.discardedAt && (
-                      <DropdownMenuItem onClick={() => setDiscarding(true)}>
-                        <ArchiveXIcon />
-                        Discard
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-                      <Trash2Icon />
-                      Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
               </>
             )}
           </DropdownMenuContent>

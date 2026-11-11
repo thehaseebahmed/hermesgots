@@ -42,8 +42,8 @@ type Slot = { kind: "divider"; divider: Divider } | typeof WORDS
  * rather than what the host recorded:
  *
  * - It stands between two drawn messages: a user's words, or a reply's words or calls. A divider with
- *   nothing drawn above it — the top of a chat whose archive isn't loaded, a Main whose turns were all
- *   triaged away — is this device guessing at a row it hasn't read, and the archive puts the divider
+ *   nothing drawn above it — the top of a chat whose archive isn't loaded, a chat this device holds
+ *   nothing of — is this device guessing at a row it hasn't read, and the archive puts the divider
  *   back where it happened once the reader loads it. One with nothing drawn below it — a compaction
  *   after everything written, a reply still being typed — marks a boundary whose other side doesn't
  *   exist yet, and it would move down the thread as the run goes on.

@@ -55,7 +55,6 @@ from . import (
     media,
     model_changes,
     merges,
-    moves,
     openui,
     outbox,
     page_calls,
@@ -71,7 +70,6 @@ from . import (
     rooms,
     speech,
     speech_probe,
-    triage,
     sessions,
     skill_catalog,
     push,
@@ -457,6 +455,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 await asyncio.to_thread(closes.resume, served)
         except Exception:
             logger.debug("gots: couldn't resume the session closes", exc_info=True)
+        # And a routine delivery an older plugin queued is published as its run's row rather than
+        # lost at the upgrade; see platform_gots.py.
+        await platform_gots.resume(link.served_homes(adapter))
+        # Every home this process serves is given the channel a bare `deliver: gots` resolves to.
+        # `register` names the profile it was loaded into; a multiplexed host serves more than one,
+        # and each profile's cron reads its own file, so the rest are named here where the adapter
+        # that knows them is in hand (see platform_gots.name_channel).
+        platform_gots.name_channel(link.served_homes(adapter))
         # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
         # sessions.heal_sources.
         failed = await repair_labelled_sources(link.served_homes(adapter))
@@ -467,9 +473,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
-            # A routine's message that waited for its chat writes once the chat is free; see
-            # platform_gots.py.
-            asyncio.ensure_future(platform_gots.run(adapter, home)),
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
@@ -697,11 +700,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # advertised only where its tools reach a canvas's session and that session is
                     # told the design guide (openui.py) — a canvas with neither can't be worked.
                     *(["canvas"] if canvases.ready() and openui.canvas_ready() else []),
-                    # A message sent from Main is sorted into a thread by the host; see triage.py.
-                    *(["triage", "moves", "triage_model"] if triage.available() is None else []),
-                    # A routine's answer delivered into a chat as the bot's own message, and the
-                    # route that names the run behind it (platform_gots.py, ADR 0081).
-                    *([platform_gots.FEATURE] if platform_gots.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -1044,13 +1042,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "gots.delegation", "delegation": pick, "custom": custom}
         )
 
-    async def get_triage_model(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        pick = await asyncio.to_thread(triage.read_model, store_path())
-        return web.json_response({"object": "gots.triage_model", "triage_model": pick})
-
     async def get_openui(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1091,33 +1082,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, 'Body must be {"enabled": true} or {"enabled": false}', 400)
         on = await asyncio.to_thread(openui.set_enabled, store_path(), body["enabled"])
         return web.json_response(openui.record(on))
-
-    async def set_triage_model(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            pick = host_model.clean_triage_model(await json_body(request))
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        config_path = host_config_path()
-        scope = profile_scope()
-        path = store_path()
-        gate = await asyncio.to_thread(research.llm_gate)
-
-        def run() -> Optional[Dict[str, str]]:
-            with scope():
-                return triage.set_model(config_path, path, pick, gate)
-
-        try:
-            saved = await asyncio.to_thread(run)
-        except triage.Withheld as error:
-            return _error(web, str(error), 403)
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        except ImportError:
-            return _error(web, "This Hermes version can't switch models from here.", 501)
-        return web.json_response({"object": "gots.triage_model", "triage_model": saved})
 
     async def set_delegation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1591,19 +1555,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             body["compactions"] = compacted
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(body)
-
-    async def session_routines(request: "web.Request") -> "web.Response":
-        """The routine messages a chat holds, each with the row it is drawn at now (ADR 0081)."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        session_id = request.match_info["session_id"]
-        path = store_path()
-        found = await asyncio.to_thread(
-            platform_gots.routines, path, profile_home(), session_id
-        )
-        # An empty list for a chat with none, never a 404: the app draws no chip and asks nothing more.
-        return web.json_response({"object": platform_gots.OBJECT, "routines": found})
 
     async def read_usage(provider: str) -> Dict[str, Any]:
         scope = profile_scope()
@@ -2460,7 +2411,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
-    app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
     app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/reminders", get_reminders)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
@@ -2488,14 +2438,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_delete(f"{PREFIX}/mcp/{{name}}", remove_mcp_server)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_post(f"{PREFIX}/delegation", set_delegation)
-    app.router.add_post(f"{PREFIX}/triage-model", set_triage_model)
     app.router.add_post(f"{PREFIX}/openui", set_openui)
     app.router.add_post(f"{PREFIX}/reminders", set_reminders)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/routines", session_routines)
     app.router.add_get(f"{PREFIX}/usage", account_usage)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
@@ -3177,213 +3125,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         follow_queue(request, session_id, path)
         return web.json_response({"object": "gots.queued", "item": item})
 
-    async def record_move(
-        path, key, session_id, text, thread, thread_session, item, body, files, new=False, at=None
-    ) -> None:
-        # Main shows a marker where the message went; it never entered Main's session. The message
-        # is already on its thread, so a marker that can't be kept must not fail the answer.
-        try:
-            await asyncio.to_thread(
-                moves.record, path, key, session_id, text, thread,
-                thread_session=thread_session, item=item, new=new, body=body.get("body"),
-                files=files, at=at,
-            )
-        except Exception:
-            logger.debug("gots: couldn't record a move", exc_info=True)
-
-    async def triage_message(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        session_id, text = request.match_info["session_id"], body.get("text")
-        if not isinstance(text, str):
-            return _error(web, "text must be a string", 400)
-        key = body.get("id") if isinstance(body.get("id"), str) else None
-        at = body.get("at")
-        memo = f"{session_id}:{key}" if key else None
-        # A repeat of an ask still being decided waits for it and gets its answer, so the message
-        # is queued once however the app's retry races the first request.
-        async with triage.lock(memo):
-            answered = triage.given(memo)
-            if answered is not None:
-                return web.json_response(answered)
-            path = store_path()
-            deadline = time.monotonic() + triage.DEADLINE_S
-            try:
-                found = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        triage.triage, path, hermes_home(), session_id, text, deadline
-                    ),
-                    triage.DEADLINE_S,
-                )
-            except asyncio.TimeoutError:
-                found = {"decision": triage.MAIN}
-            answer: Dict[str, Any] = {"object": "gots.triage", "decision": triage.MAIN}
-            if time.monotonic() > deadline + 0.5:
-                found = {"decision": triage.MAIN}
-            files = outbox.clean_files(body.get("attachments"))
-            if found["decision"] == triage.NEW:
-                # Made here and not in the decision, so one nobody waited for leaves no thread.
-                try:
-                    started = await asyncio.to_thread(
-                        triage.start_thread,
-                        path,
-                        _request_profile(),
-                        found["profile_id"],
-                        text,
-                        files,
-                        body.get("body"),
-                        at,
-                    )
-                    # Main shows a marker where the message went; it never entered Main's session.
-                    await record_move(
-                        path, key, session_id, text, started["thread"], started["session_id"],
-                        started["item"]["id"], body, files, new=True, at=at,
-                    )
-                    events.note("session", session_id, path, True)
-                    answer = {"object": "gots.triage", "decision": triage.NEW, **started}
-                except Exception:
-                    logger.debug("gots: triage couldn't open a thread", exc_info=True)
-                # Outside the try: the thread and its queued message exist by now, and a failure
-                # here must not tell the app to send the message to Main as well.
-                if answer["decision"] == triage.NEW:
-                    try:
-                        follow_queue(request, answer["session_id"], path)
-                    except Exception:
-                        logger.debug("gots: triage couldn't follow a new thread", exc_info=True)
-            elif found["decision"] == triage.THREAD:
-                try:
-                    delivered = await triage.deliver(
-                        adapter,
-                        path,
-                        _request_profile(),
-                        found,
-                        text,
-                        files,
-                        body.get("body"),
-                        body.get("steer") is True,
-                        request.headers.get("Authorization"),
-                    )
-                except ValueError:
-                    delivered = None
-                if delivered is not None:
-                    follow_queue(request, found["session_id"], path)
-                    await record_move(
-                        path, key, session_id, text, found["thread"], found["session_id"],
-                        delivered["item"]["id"], body, files, at=at,
-                    )
-                    events.note("session", session_id, path, True)
-                    answer = {"object": "gots.triage", "decision": triage.THREAD, **delivered}
-            triage.remember(memo, answer)
-        return web.json_response(answer)
-
-    async def move_phases(path: Path, found: List[Dict[str, Any]]) -> Dict[str, Tuple[str, Any]]:
-        """Each move's ``(phase, outbox item)``: one outbox read per thread, not per move. The outbox
-        forgets a sent item after an hour, so an older move is a reply that finished."""
-        recent = time.time() * 1000 - outbox.KEEP_SENT_MS
-        open_ = [m for m in found if m["at"] >= recent and m["thread_session"] and m["item"]]
-        threads = sorted({m["thread_session"] for m in open_})
-        reads = dict(
-            zip(threads, await asyncio.gather(*(asyncio.to_thread(outbox.read, path, t) for t in threads)))
-        )
-        statuses = getattr(adapter, "_run_statuses", None)
-        statuses = statuses if isinstance(statuses, dict) else {}
-        phases = {}
-        for move in found:
-            read = reads.get(move["thread_session"]) if move in open_ else None
-            item = read and next((i for i in read["items"] + read["sent"] if i["id"] == move["item"]), None)
-            status = statuses.get(item.get("run_id")) if item else None
-            phases[move["id"]] = (moves.phase(item, status), item)
-        return phases
-
-    async def get_moves(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        path = store_path()
-        found = await asyncio.to_thread(moves.read, path, request.match_info["session_id"])
-        phases = await move_phases(path, [m for m in found if not m["undone"]])
-        return web.json_response(
-            {
-                "object": "gots.moves",
-                "moves": [
-                    moves.public(m, m["id"] in phases and moves.undoable(m, phases[m["id"]][0]))
-                    for m in found
-                ],
-            }
-        )
-
-    async def undo_move(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        path, session_id, key = store_path(), request.match_info["session_id"], request.match_info["move_id"]
-        # A double tap, or two devices, wait for each other and the second finds it undone.
-        async with triage.lock(f"undo:{session_id}:{key}"):
-            move = await asyncio.to_thread(moves.get, path, session_id, key)
-            if move is None:
-                return _error(web, "No such move.", 404)
-            if move["undone"]:
-                return web.json_response({"object": "gots.move.undone", "undone": True})
-            where, item = (await move_phases(path, [move]))[key]
-            if not moves.undoable(move, where) or (where != moves.QUEUED and item is None):
-                return _error(web, "The thread has already replied to this message.", 409)
-            try:
-                # Built first, so a body the host refuses leaves the message where it is.
-                run = outbox.clean_body(session_id, move["body"])
-            except ValueError as error:
-                return _error(web, str(error), 400)
-            thread_session = move["thread_session"]
-            taken = None
-            if where == moves.QUEUED:
-                taken = await asyncio.to_thread(outbox.take, path, thread_session, move["item"])
-                if taken is None:
-                    # The dispatcher started it between the read and now: the thread is replying.
-                    return _error(web, "The thread has already started on this message.", 409)
-            elif where == moves.RUNNING:
-                try:
-                    await outbox.post(
-                        adapter,
-                        _request_profile(),
-                        f"/v1/runs/{item['run_id']}/stop",
-                        {},
-                        authorization=request.headers.get("Authorization"),
-                    )
-                except outbox.StartError as error:
-                    return _error(web, f"Couldn't stop the thread's reply: {error}", 502)
-            try:
-                await asyncio.to_thread(
-                    outbox.add, path, session_id, _request_profile(), move["text"], move["files"], run
-                )
-            except Exception:
-                logger.debug("gots: couldn't queue an undone move on Main", exc_info=True)
-                if taken is not None:
-                    await asyncio.to_thread(outbox.put_back, path, taken)
-                return _error(web, "Couldn't put the message back in Main.", 500)
-            await asyncio.to_thread(moves.mark_undone, path, key)
-            if taken is None:
-                # Main has the message now; what is left in the thread is tidied best effort.
-                await asyncio.to_thread(outbox.remove_sent, path, thread_session, move["item"])
-                await asyncio.to_thread(
-                    moves.take_from_transcript,
-                    hermes_home(),
-                    thread_session,
-                    move["text"],
-                    item.get("sent_at") or 0,
-                )
-            if move["new"]:
-                left = await asyncio.to_thread(outbox.read, path, thread_session)
-                if not left["items"] and not left["sent"]:
-                    # The thread existed only for this message.
-                    await asyncio.to_thread(triage.discard, path, move["thread"])
-        follow_queue(request, session_id, path)
-        events.note("session", session_id, path, True)
-        events.note("session", thread_session, path, True)
-        return web.json_response({"object": "gots.move.undone", "undone": True})
-
     async def remove_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -3426,9 +3167,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/queue", get_queue)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue", add_queued)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/triage", triage_message)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/moves", get_moves)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/moves/{{move_id}}/undo", undo_move)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)
@@ -4100,8 +3838,6 @@ def register(ctx) -> None:
         register_hook("on_session_end", events.on_turn_end)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
-        # And a routine's message that waited for this chat's turn is written now; see platform_gots.py.
-        register_hook("on_session_end", lambda **_kwargs: platform_gots.wake())
         # And AFK looks for the next task now when a project session ends; see afk.py.
         register_hook("on_session_end", afk.after_run)
         # A subagent's own session id and core's, so a card's Stop can name the live child it stops;
@@ -4127,7 +3863,8 @@ def register(ctx) -> None:
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
     openui.register(ctx)
-    # Gots is a delivery platform, so a routine can speak in a chat (platform_gots.py, ADR 0081).
+    # Gots is a delivery platform, so a routine's run is a row of this bot's chats
+    # (platform_gots.py).
     platform_gots.register(ctx)
     platform_gots.register_section(ctx)
     # A reply is read in the app's markdown, and the host's plain-text default is wrong here

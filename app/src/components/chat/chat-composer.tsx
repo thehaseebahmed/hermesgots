@@ -16,7 +16,6 @@ import {
 } from "@/lib/db"
 import { usePluginFeature } from "@/lib/features"
 import { chosenOf } from "@/lib/model-pick"
-import { useNav } from "@/lib/nav"
 
 /**
  * The chat's composer, from what a send needs rather than a chat's row: the bot, the model it runs
@@ -31,9 +30,6 @@ export function ChatComposer({
   dictationHint,
   session,
   notice,
-  main = false,
-  botChat = true,
-  home,
   busy,
   canSteer,
   subagents,
@@ -42,7 +38,6 @@ export function ChatComposer({
   onQueue,
   onSteer,
   onStop,
-  onThread,
 }: {
   bot: Profile
   /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
@@ -57,12 +52,6 @@ export function ChatComposer({
   session?: ModeSettings
   /** The account's warning, which the composer draws above its text while it holds. */
   notice?: ReactNode
-  /** A bot's Main: `/thread` starts a thread of it. */
-  main?: boolean
-  /** A bot's chat: Main or one of its threads. `false` elsewhere. */
-  botChat?: boolean
-  /** Where `/new` goes: a thread's Main, else home. */
-  home?: string
   busy: boolean
   canSteer: boolean
   /** How many of the session's subagents are still at work, which keep Stop rather than Send. */
@@ -73,10 +62,7 @@ export function ChatComposer({
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
   onSteer: (text: string, attachments: Attachment[]) => Promise<void> | void
   onStop: () => boolean | void | Promise<boolean>
-  /** `/thread` in Main: a thread of the bot, opened on the message sent with it. */
-  onThread?: (message: { text: string; attachments: Attachment[] }) => Promise<void> | void
 }) {
-  const { root } = useNav()
   const navigate = useNavigate()
   const filesFeature = usePluginFeature(bot, "attachments")
   const sheet = useCheatsheet()
@@ -116,15 +102,7 @@ export function ChatComposer({
         onStop={onStop}
         runId={runId}
         session={session}
-        main={main}
-        botChat={botChat}
-        onCommand={async (command, message) => {
-          if (command === "thread")
-            return onThread?.({
-              text: message?.text ?? "",
-              attachments: message?.attachments ?? [],
-            })
-          if (command === "new") return root(home ?? "/")
+        onCommand={async (command) => {
           if (command === "settings") return navigate("/settings")
           if (command === "cheatsheet") return void sheet.show()
         }}

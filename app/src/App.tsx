@@ -4,19 +4,20 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, Route, Routes, useParams } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { getActiveProfile, mainThreadId } from "@/lib/db"
+import { botChatsPath } from "@/lib/bot-tabs"
+import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
 import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
-import { useBotThreads } from "@/lib/threads"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
 
 // Only a chat is on the startup path; every other screen loads when it's first opened.
-const BotThreadsPage = lazy(() =>
-  import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
+const BotChatsPage = lazy(() =>
+  import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPage })),
 )
 const BotsPage = lazy(() => import("@/routes/bots").then((m) => ({ default: m.BotsPage })))
 const OpenSessionPage = lazy(() =>
@@ -47,6 +48,10 @@ const MissionPage = lazy(() =>
 )
 const RoutinesPage = lazy(() =>
   import("@/routes/routines").then((m) => ({ default: m.RoutinesPage })),
+)
+/** The address the sidebar's row used to open: the active bot's routines, in its place. */
+const RoutinesHome = lazy(() =>
+  import("@/routes/routines").then((m) => ({ default: m.RoutinesHome })),
 )
 const SharePage = lazy(() => import("@/routes/share").then((m) => ({ default: m.SharePage })))
 const SettingsPage = lazy(() =>
@@ -84,18 +89,15 @@ function ThemeColor() {
   return null
 }
 
+/** Home is the selected bot's screen: the list of its chats, which opens where the reader left it. */
 export function Home() {
-  const botThreads = useBotThreads()
+  const legacy = useLegacyChat()
   const active = useLiveQuery(
-    async () => (botThreads ? ((await getActiveProfile()) ?? null) : null),
-    [botThreads],
+    async () => (legacy === false ? ((await getActiveProfile()) ?? null) : null),
+    [legacy],
   )
-  if (botThreads === undefined || (botThreads && active === undefined)) return null
-  return active ? (
-    <Navigate to={`/c/${mainThreadId(active.id)}`} replace />
-  ) : (
-    <ChatPage slot="route" />
-  )
+  if (legacy === undefined || (legacy === false && active === undefined)) return null
+  return active ? <Navigate to={botChatsPath(active.id)} replace /> : <ChatPage slot="route" />
 }
 
 /** A project's old address, from before projects had a place of their own. */
@@ -118,7 +120,8 @@ function AppRoutes() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
-        <Route path="b/:profileId" element={<BotThreadsPage />} />
+        <Route path="b/:profileId" element={<BotChatsPage />} />
+        <Route path="b/:profileId/routines" element={<RoutinesPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}
         <Route path="new-room" element={<NewRoomScreen slot="route" />} />
@@ -130,7 +133,7 @@ function AppRoutes() {
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:id" element={<MeetingPage />} />
         <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
-        <Route path="routines" element={<RoutinesPage />} />
+        <Route path="routines" element={<RoutinesHome />} />
         <Route path="canvas" element={<CanvasPage />} />
         <Route path="canvas/:id" element={<CanvasView />} />
         <Route path="canvas/:id/edit" element={<CanvasEdit />} />

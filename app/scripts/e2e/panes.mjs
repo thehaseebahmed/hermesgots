@@ -1,8 +1,9 @@
-// The list beside what it opened, for Projects, Code, Meetings and Research: one pane on a phone and on a tablet in
-// portrait, two on a tablet in landscape with the sidebar as a rail, one again with the sidebar
-// open, and the list beside the item (the sidebar a third pane) from 1280px. The item pane opens the
-// one opened last, New research asks in it, and New session picks the project of the chip in use. With no console errors.
-import { app, assert, flow, pass } from "./lib.mjs"
+// The list beside what it opened, for Meetings, Projects, Code, a bot's chats and Research: one pane
+// on a phone and on a tablet in portrait, two on a tablet in landscape with the sidebar as a rail, one
+// again with the sidebar open, and the list beside the item (the sidebar a third pane) from 1280px.
+// The item pane opens the one opened last, New research asks in it, and New session picks the project
+// of the chip in use. With no console errors.
+import { app, assert, environmentNoise, flow, pass } from "./lib.mjs"
 
 const errors = []
 // [width, sidebar collapsed, panes]
@@ -22,7 +23,8 @@ for (const [width, collapsed, panes] of CASES) {
     async ({ page, profileId, seed, shot, until }) => {
       page.on("pageerror", (error) => errors.push(`${width}: ${error.message}`))
       page.on("console", (message) => {
-        if (message.type() === "error") errors.push(`${width}: ${message.text()}`)
+        if (message.type() === "error" && !environmentNoise(message.text()))
+          errors.push(`${width}: ${message.text()}`)
       })
       const look = `${width}${collapsed ? " with the rail" : ""}`
       await page.evaluate(
@@ -40,6 +42,26 @@ for (const [width, collapsed, panes] of CASES) {
       await page.getByText("Weekly product sync").first().waitFor({ timeout: 15_000 })
       if (panes === 2) {
         await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
+        // The panes settle a frame or two after the redirect: the sidebar's own answer is read
+        // asynchronously, so the meeting can be drawn once as a phone's before the list comes
+        // beside it. What "with room" means is the settled screen — the list in its lane, and no
+        // Back to Meetings in the meeting's header — so both are waited for rather than caught
+        // mid-paint. A screen that never gets its list still fails, naming what is missing.
+        await until(
+          async () => {
+            const lane = page.locator('[data-slot="list-lane"]')
+            if ((await lane.count()) !== 1) return false
+            const width = await lane.evaluate((element) => element.getBoundingClientRect().width)
+            return width > 0 && width < 600
+          },
+          5_000,
+          "the meeting's list in its lane beside it",
+        )
+        await until(
+          async () => (await page.getByRole("button", { name: "Back to Meetings" }).count()) === 0,
+          5_000,
+          "the meeting drawn beside its list, no Back to Meetings in its header",
+        )
         await shot("meetings")
         assert.equal(await page.getByRole("button", { name: "Back to Meetings" }).count(), 0)
         // Opening another takes the place of the one open, and it's the one open next time.
@@ -126,6 +148,47 @@ for (const [width, collapsed, panes] of CASES) {
         await shot("code-new")
         await page.keyboard.press("Escape")
         pass(`${look}: code is one pane, New session takes the chip's project`)
+      }
+
+      // A bot's own chats: the list keeps the 412px lane beside the chat it opened, and that chat
+      // carries no way back; below that width the list is a screen the chat pushes.
+      await seed([
+        { id: "pane-lisbon", title: "Trip to Lisbon" },
+        { id: "pane-garden", title: "Garden plan" },
+      ])
+      await page.goto(`${app}/b/${profileId}`)
+      await page.getByText("Garden plan").first().waitFor({ timeout: 15_000 })
+      const botChat = `/c/pane-garden`
+      await page.locator(`main ul a[href="${botChat}"]`).click()
+      await page.waitForURL(`**${botChat}`, { timeout: 15_000 })
+      await until(
+        async () =>
+          (await page.evaluate(() => document.querySelector('[data-slot="header-title"]')?.textContent?.trim())) ===
+          "Garden plan",
+        15_000,
+        "the chat's own title",
+      )
+      if (panes === 2) {
+        const lane = await page.evaluate(() => {
+          const list = document.querySelector('[data-slot="list-lane"]')
+          const row = list?.querySelector('ul a[aria-current="page"]')
+          return {
+            width: list ? Math.round(list.getBoundingClientRect().width) : 0,
+            open: row?.getAttribute("href") ?? null,
+          }
+        })
+        assert.ok(
+          Math.abs(lane.width - 412) <= 1,
+          `the bot's list keeps its 412px lane beside the chat (${lane.width})`,
+        )
+        assert.equal(lane.open, botChat, "and marks the chat on screen as the open one")
+        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
+        await shot("bot-chats")
+        pass(`${look}: a bot's list beside its chat, the list's row marked open`)
+      } else {
+        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 1)
+        await shot("bot-chats")
+        pass(`${look}: a bot's list is the screen its chat pushes`)
       }
 
       // Research.

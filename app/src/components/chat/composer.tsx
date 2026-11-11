@@ -57,7 +57,6 @@ import { waitInserted, type TakeId } from "@/lib/dictation-wait"
 import { writeDictation } from "@/lib/dictations"
 import {
   SEND_COMMANDS,
-  carriesMessage,
   isSendMode,
   localCommand,
   localCommands,
@@ -74,7 +73,6 @@ import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
-import { useStartCommandFor } from "@/lib/threads"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -125,8 +123,6 @@ export function Composer({
   canSteer = false,
   onSteer,
   notice,
-  main = false,
-  botChat = true,
   plain = false,
   files = !plain,
   maxAttachments,
@@ -170,9 +166,6 @@ export function Composer({
    */
   notice?: ReactNode
   disabled?: boolean
-  main?: boolean
-  /** A bot's chat: Main or one of its threads. `false` for a project session, a canvas or a room. */
-  botChat?: boolean
   onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: a send queues the message. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
@@ -186,10 +179,7 @@ export function Composer({
   runId?: string
   /** How many subagents the session has at work: with the turn over, Stop is still the session's. */
   subagentsRunning?: number
-  onCommand?: (
-    command: LocalCommand,
-    message?: { text: string; attachments: Attachment[] },
-  ) => Promise<void> | void
+  onCommand?: (command: LocalCommand) => Promise<void> | void
   /**
    * A surface with no `/` menu and no local command carried out — a room's composer, which appends
    * one message rather than driving a session. It no longer decides whether files land: `files` does,
@@ -396,14 +386,10 @@ export function Composer({
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
-  const startable = useStartCommandFor(main, botChat)
   const items =
     plain || !token
       ? []
-      : rankSlashItems(
-          [...localCommands(startable), ...(busy ? SEND_COMMANDS : []), ...skillItems],
-          token,
-        )
+      : rankSlashItems([...localCommands(), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
   // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
   const menuOpen =
     !plain &&
@@ -430,24 +416,17 @@ export function Composer({
     if (field.selectionStart !== caret) setCaret(field.selectionStart)
   }, [value, caret])
 
-  const runCommand = (command: LocalCommand, text = "") => {
-    const carried = carriesMessage(command) ? attachments : []
+  const runCommand = (command: LocalCommand) => {
     setValue("")
-    if (carried.length) setAttachments([])
-    void Promise.resolve(onCommand?.(command, { text, attachments: carried })).catch(() => {
-      setValue((current) => current || `/${command}${text ? ` ${text}` : ""}`)
-      setAttachments((current) => (current.length ? current : carried))
+    void Promise.resolve(onCommand?.(command)).catch(() => {
+      setValue((current) => current || `/${command}`)
     })
   }
 
   const pick = (item: SlashItem) => {
-    // A command that takes the rest of the message as its own says where the next message goes
-    // rather than doing something on the press: it lands in the field like a skill's name, and Send
-    // carries it out with whatever was typed after it (ADR 0096).
-    if (item.kind === "command" && !isSendMode(item.name) && !carriesMessage(item.name)) {
-      const run = localCommand(value, startable)
-      return runCommand(item.name, run?.command === item.name ? run.text : "")
-    }
+    // A command does something on the press, so a pick runs it there; a skill's name lands in the
+    // field instead, for the words the user types after it.
+    if (item.kind === "command" && !isSendMode(item.name)) return runCommand(item.name)
     if (!token) return
     const next =
       item.kind === "command" && isSendMode(item.name)
@@ -635,8 +614,8 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
-    const command = plain ? null : localCommand(value, startable)
-    if (command && !disabled) return runCommand(command.command, command.text)
+    const command = plain ? null : localCommand(value)
+    if (command && !disabled) return runCommand(command.command)
     if (!canSend) return
     submitText(value)
     textarea.current?.focus()

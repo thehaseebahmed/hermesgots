@@ -16,20 +16,17 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { AgentPopup } from "@/components/chat/agent-card"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
-import { DayHeading } from "@/components/chat/day-heading"
-import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
-import { useMainFlow } from "@/components/chat/main-flow"
+import { EmptyChatState } from "@/components/chat/empty-states"
 import { Markdown } from "@/components/chat/markdown"
 import { PointChips } from "@/components/chat/canvas-points"
 import { MessageItem } from "@/components/chat/message-item"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
-import { ModelChange } from "@/components/chat/model-change"
+import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
 import { LineRow } from "@/components/chat/status-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
-import { ThreadCard } from "@/components/chat/thread-card"
 import { Button } from "@/components/ui/button"
 import {
   MessageScroller,
@@ -43,6 +40,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { attachmentsText } from "@/lib/attachment-text"
+import { chatFlow } from "@/lib/chat-flow"
 import { pointText } from "@/lib/point-marker"
 import { compactionMarks } from "@/lib/compactions"
 import { questionAt, questionsIn } from "@/lib/clarify"
@@ -62,22 +60,9 @@ import { messagesOf, heldMessage, messageParts, replyId } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 import type { Waiting } from "./state"
 
-/** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
-export interface MainView {
-  profileId: string
-  botId?: string
-  /** The thread open beside Main, or the one the address names. */
-  openThread?: string
-  /** The address is a thread, drawn beside Main. */
-  beside: boolean
-  /** The chat the address names. */
-  routeChat?: string
-}
-
-/** The chat a view draws, and its Main where it is one: a context, so the view is one component. */
+/** The chat a view draws: a context, so the view is one component. */
 const ChatOf = createContext<{
   chatId: string
-  main?: MainView
   blank?: BlankView
   /** A project session, which draws the marks a chat does not (ADR 0087). */
   code?: boolean
@@ -115,7 +100,7 @@ export function AppThreadView({
   stats,
   send,
 }: ThreadViewProps) {
-  const { chatId, main, blank, code } = useContext(ChatOf)
+  const { chatId, blank, code } = useContext(ChatOf)
   const messages = useMemo(
     () => messagesOf(chatId, turns, { streaming, inFlight, stats, origin }),
     [chatId, turns, streaming, inFlight, stats, origin],
@@ -167,11 +152,9 @@ export function AppThreadView({
     () => ({ agents: agents.map(delegated), server: config, sessionId: session, onOpen: setShown }),
     [agents, config, session],
   )
-  // The chat's own record, read once: a bot's Main draws the messages it sent off as markers from
-  // it, and beside the transcript the plugin recorded where its model changed and where its context
-  // was compacted, which the dividers between the turns are drawn from.
+  // The chat's own record, read once: beside the transcript the plugin recorded where its model
+  // changed and where its context was compacted, which the dividers between the turns are drawn from.
   const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
-  const moves = main ? chat?.moves : undefined
   const record = {
     changes: chat?.modelChanges,
     compactions: chat?.compactions,
@@ -204,21 +187,23 @@ export function AppThreadView({
     () => compactionMarks(messages, record.compactions),
     [messages, record.compactions],
   )
-  const { flow, moveThatOpenedThread, undo, itemRow } = useMainFlow({
-    chatId,
-    profileId: main?.profileId ?? "",
-    thread: messages,
-    moves,
-    compacted,
-    on: Boolean(main),
-    routeChat: main?.routeChat,
-  })
+  // What the chat draws: its messages, with a compaction's divider above the message it sits over,
+  // and nothing else — a Main is drawn like any other chat.
+  const flow = useMemo(() => chatFlow({ thread: messages, compacted }), [messages, compacted])
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
-  // A Main still being read is not an empty one: its greeting would say there is nothing here.
-  const empty = Boolean(main) && !flow.length && !streaming && !firstReadOut
+  // A chat with nothing said, and nothing held for it — no message that didn't go, nothing queued, no
+  // archive to offer — and whose read has answered, is offered its bot's greeting. One still being
+  // read is not empty, since the greeting would say there is nothing here.
+  const empty =
+    !flow.length &&
+    !held.length &&
+    !queue?.items.length &&
+    !earlier &&
+    !streaming &&
+    !firstReadOut
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   // The one loader a thread has, over a thread held nowhere (ADR 0084). `flow` is what the thread
-  // draws — messages, cards, markers — so a thread the device holds of any of them is never loading.
+  // draws — messages and compaction dividers — so a thread the device holds any of is never loading.
   const loadingFresh = firstReadOut && !flow.length && !streaming && !unstarted
   const running = runningAgents(source.agents).length
   const last = messages.at(-1)
@@ -241,9 +226,19 @@ export function AppThreadView({
     <AskAgainContext.Provider value={ask}>
       <div className="flex min-h-0 flex-1 flex-col">
         {unstarted && blank ? (
-          <EmptyState botId={blank.botId} configured session={{ repos: blank.repos }} id={chatId} />
-        ) : empty && main ? (
-          <MainEmptyState botId={main.botId} id={chatId} onSend={(text) => send(text, [])} />
+          <EmptyChatState
+            botId={blank.botId}
+            configured
+            session={{ repos: blank.repos }}
+            id={chatId}
+          />
+        ) : empty ? (
+          <EmptyChatState
+            botId={profile?.botId}
+            configured={Boolean(profile?.baseUrl.trim())}
+            id={chatId}
+            onSend={(text) => send(text, [])}
+          />
         ) : loadingFresh ? (
           <div className="flex min-h-0 flex-1 items-center justify-center" data-loading-fresh>
             <Spinner className="size-6 text-primary" />
@@ -281,22 +276,13 @@ export function AppThreadView({
                   )}
                   <AgentsContext.Provider value={source}>
                     {drawn.map((entry) => {
-                      if (entry.kind === "heading")
-                        return <DayHeading key={`day-${entry.at}`} day={entry.day} />
-                      if (entry.kind === "card")
+                      if (entry.kind === "compaction")
                         return (
-                          <ThreadCard
-                            key={`card-${entry.thread.chat.id}`}
-                            thread={entry.thread}
-                            profileId={main?.profileId ?? ""}
-                            open={entry.thread.chat.id === main?.openThread}
-                            beside={Boolean(main?.beside)}
-                            current={entry.thread.chat.id === main?.routeChat}
-                            move={moveThatOpenedThread.get(entry.thread.chat.id)}
-                            onUndo={undo}
+                          <Compacted
+                            key={`compaction-${entry.at}`}
+                            compaction={entry.compaction}
                           />
                         )
-                      if (entry.kind !== "message") return itemRow(entry)
                       const message = entry.message
                       // A model change is a project session's mark; a chat draws none (ADR 0087).
                       const change = code ? changes.get(message.id) : undefined
@@ -532,29 +518,26 @@ export function AppPrompt({ waiting, questions: read, answer, asker }: PromptPro
 /** The thread as a chat opens it in the app: chat-next, drawn with the app's rows. */
 export function AppChatNextThread({
   chatId,
-  main,
   blank,
   code,
   ...props
 }: ComponentProps<typeof ChatNextThread> & {
   chatId: string
-  main?: MainView
   blank?: BlankView
   /** A code session: what is said in it reads in the code face. */
   code?: boolean
 }) {
-  // Held by its fields, so a parent's render that changes nothing about Main draws nothing again.
-  const mainKey = main ? JSON.stringify(main) : ""
+  // Held by its fields, so a parent's render that changes nothing about what is drawn draws nothing
+  // again.
   const blankKey = blank ? JSON.stringify(blank) : ""
   const session = Boolean(code)
   const chat = useMemo(
     () => ({
       chatId,
-      main: mainKey ? (JSON.parse(mainKey) as MainView) : undefined,
       blank: blankKey ? (JSON.parse(blankKey) as BlankView) : undefined,
       code: session,
     }),
-    [chatId, mainKey, blankKey, session],
+    [chatId, blankKey, session],
   )
   return (
     <CodeFaceProvider value={code ? CODE_FACE : undefined}>

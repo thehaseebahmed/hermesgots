@@ -14,7 +14,6 @@ import { toast } from "sonner"
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { SortMenu } from "@/components/sort-menu"
 import { defaultSort, type Sort } from "@/lib/sort"
-import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
@@ -23,7 +22,6 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
-import { useTriageModel } from "@/lib/triage-model"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
@@ -615,101 +613,6 @@ export function DefaultModelSetting({
         </PopupContent>
       </Popup>
     </>
-  )
-}
-
-/**
- * A bot's model setting held on its host, in its settings: a button over the host's model list whose
- * first row, Default model, is the bot's own. `children` sits above the button (a notice).
- */
-function HostModelField({
-  profile,
-  name,
-  label,
-  record: { pick, saving, save },
-  subtitle,
-  children,
-}: {
-  profile: Profile
-  name: string
-  label: string
-  record: {
-    pick?: ModelChoice
-    saving: boolean
-    save: (pick: ModelChoice | undefined) => Promise<unknown>
-  }
-  /** What the setting is for, under its label: the row's subtitle. */
-  subtitle?: string
-  children?: ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  const field = useRef<HTMLButtonElement>(null)
-  const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
-  // The bot's own model, which is what a call that inherits runs on.
-  const own = botModel(profile, info)
-
-  return (
-    <Field aria-labelledby={`${name}-label`} aria-busy={saving || undefined}>
-      <div className="flex items-center gap-2">
-        <FieldLabel id={`${name}-label`}>{label}</FieldLabel>
-        {saving && <Spinner className="size-3.5" />}
-      </div>
-      {subtitle && <FieldDescription>{subtitle}</FieldDescription>}
-      {children}
-      <Button
-        ref={field}
-        id={name}
-        type="button"
-        variant="outline"
-        aria-label={`${label}: ${pick ? fullModel(pick) : "Default model"}`}
-        className="h-11 w-full justify-between gap-2 font-normal"
-        disabled={!providers.length || saving}
-        onClick={() => setOpen(true)}
-      >
-        <span className="truncate">{pick ? fullModel(pick) : "Default model"}</span>
-        <ChevronDownIcon className="shrink-0 text-muted-foreground" />
-      </Button>
-      <Popup open={open} onOpenChange={setOpen} anchor={field}>
-        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
-          <ModelPicker
-            providers={providers}
-            fallback={{ label: "Default model", model: own?.model }}
-            recent={profile.recentModels}
-            choice={pick}
-            onChoose={(next) => {
-              reportWrite(save(next))
-              setOpen(false)
-            }}
-          />
-        </PopupContent>
-      </Popup>
-    </Field>
-  )
-}
-
-/**
- * A bot's triage model, in its settings: the model its host decides with where a message sent from
- * Main goes. Nothing set means the bot's own model decides.
- */
-export function TriageModelSetting({ profile }: { profile: Profile }) {
-  const record = useTriageModel(profile)
-  if (!record.supported) return null
-  return (
-    <HostModelField
-      profile={profile}
-      name="triage-model"
-      label="Triage model"
-      record={record}
-      subtitle="Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own."
-    >
-      {record.withheld && (
-        <Banner>
-          This host doesn't let Gots pick the model. Allow it with{" "}
-          <code className="font-mono text-[13px]">hermes plugins enable gots</code>.
-        </Banner>
-      )}
-    </HostModelField>
   )
 }
 

@@ -1,5 +1,7 @@
 # A gap in Main's flow is one timeline, not one producer's list after another
 
+**Superseded by [ADR 0136](0136-a-bots-screen-is-the-list-of-its-chats.md)** (2026-11-10): Main's flow — cards, moved markers and day headings in one timeline — is gone with Main's screen; what a chat draws is its messages with a compaction's divider above the message it sits over, and the one-timeline lesson stands as the flow that remains.
+
 **Amended by [ADR 0107](0107-a-compaction-divider-stands-between-two-messages.md)** (2026-11-05) on
 one of the three items: a compaction divider stands between two drawn messages, so the gap above a
 message still holds one, and the foot of a flow holds none. The one-timeline rule stands.

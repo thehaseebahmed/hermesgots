@@ -1,16 +1,15 @@
-"""A routine's answer, delivered into a chat as the bot's own message (ADR 0081).
+"""A routine's delivery is a row of the bot's chat list: one per run (G4).
 
 The seams are Hermes's own: the adapter's ``send()`` with routing metadata, and the scheduler's
-standalone sender with none. Hermes's session store is faked at its own boundary — the methods the
-plugin calls — and the plugin's store and ``state.db`` are real files, so a message's row, the queue
-and the route's read are exercised as they are written.
+standalone sender with none. Hermes's session store is faked at the one method a delivery asks it —
+the run ledger — and the plugin's store is a real file, so the row a delivery publishes is read back
+the way the app reads it.
 
 Run: python3 -m unittest plugin.tests.test_platform_gots -v
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import sys
 import tempfile
@@ -23,13 +22,15 @@ from unittest import mock
 from plugin import chats, platform_gots
 from plugin.store import connect, db_path
 
-CHAT = "main-bot"
-SESSION = "gots-main-bot"
+JOB = "job-1"
+RUN = "cron_job-1_99"
+ROW = f"routine-{JOB}-{RUN}"
+LINE = "The tide turns at 06:40."
 WRAPPED = (
     "Cronjob Response: Morning watch\n"
-    "(job_id: job-1)\n"
+    f"(job_id: {JOB})\n"
     "-------------\n\n"
-    "The tide turns at 06:40.\n\n"
+    f"{LINE}\n\n"
     "To stop or manage this job, send me a new message (e.g. \"stop reminder Morning watch\")."
 )
 
@@ -69,417 +70,346 @@ def _host():
     gateway = types.ModuleType("gateway")
     gateway.config = config
     gateway.platforms = platforms
+    # The host's own routine list, which a delivery Hermes didn't wrap a name into reads.
+    jobs = types.ModuleType("cron.jobs")
+    jobs.list_jobs = lambda include_disabled=False: [{"id": JOB, "name": "Tide watch"}]
+    cron = types.ModuleType("cron")
+    cron.jobs = jobs
     return {
         "gateway": gateway,
         "gateway.config": config,
         "gateway.platforms": platforms,
         "gateway.platforms.base": base,
         "gateway.platforms.send_targets": send_targets,
+        "cron": cron,
+        "cron.jobs": jobs,
     }
 
 
 class FakeStore:
-    """Hermes's session store, at the boundary the plugin uses."""
+    """Hermes's session store, at the boundary a delivery uses: the run ledger, and nothing else.
 
-    def __init__(self, home: Path, *, busy: bool = False):
+    It has no writer at all, which is the point: a delivery publishes a chat record, and the
+    transcript is the run's own business.
+    """
+
+    def __init__(self, home: Path):
         self.home = home
-        self.busy = busy
-        self.rows = []
-        self.leases = {}
         self.runs = []
-
-    # -- the turn lease ---------------------------------------------------
-    def try_acquire_session_turn_lease(self, session_id, holder, *, ttl_seconds=300.0):
-        if self.busy:
-            return False
-        self.leases[session_id] = holder
-        return True
-
-    def release_session_turn_lease(self, session_id, holder):
-        if self.leases.get(session_id) == holder:
-            self.leases.pop(session_id, None)
-
-    # -- the transcript ---------------------------------------------------
-    def resolve_resume_session_id(self, session_id):
-        return session_id
 
     def list_cron_job_runs(self, job_id, limit=20):
         return [run for run in self.runs if run.get("cron_job_id") in (None, job_id)][:limit]
 
-    def append_message(self, session_id, role, content=None, display_kind=None,
-                       display_metadata=None, turn_lease_holder=None, finish_reason=None, **kwargs):
-        conn = sqlite3.connect(self.home / "state.db", isolation_level=None)
-        try:
-            cursor = conn.execute(
-                """INSERT INTO messages (session_id, role, content, timestamp, display_kind,
-                                         display_metadata, finish_reason)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, role, content, time.time(), display_kind,
-                 json.dumps(display_metadata) if display_metadata else None, finish_reason),
-            )
-            row = int(cursor.lastrowid)
-        finally:
-            conn.close()
-        self.rows.append({"id": row, "session_id": session_id, "role": role, "content": content,
-                          "display_kind": display_kind, "display_metadata": display_metadata})
-        return row
 
-
-class RoutineMessage(unittest.TestCase):
+class RoutineRow(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         self.store = db_path(self.home)
-        self.state = self.home / "state.db"
-        self._plant_state()
-        chats.merge(self.store, {CHAT: {"at": 1, "value": {"hermesSessionId": SESSION, "title": "Main"}}})
+        connect(self.store).close()
         self.db = FakeStore(self.home)
         self.pushes = []
         patches = [
             mock.patch.dict(sys.modules, _host()),
             mock.patch.object(platform_gots, "current_path", lambda: self.store),
             mock.patch.object(platform_gots, "_store", lambda: self.db),
-            mock.patch.object(platform_gots, "WAIT_SECONDS", 0),
-            mock.patch.object(platform_gots.push, "notify",
-                              lambda kind, session, path=None, title=None: self.pushes.append((kind, session))),
+            mock.patch.object(
+                platform_gots.push,
+                "notify",
+                lambda kind, session, path=None, title=None: self.pushes.append((kind, session)),
+            ),
         ]
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
-        self.addCleanup(self._close_state)
-
-    def _plant_state(self):
-        conn = sqlite3.connect(self.state, isolation_level=None)
-        conn.executescript(
-            """
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT, source TEXT,
-                model_config TEXT, started_at REAL, last_activity_at REAL, title TEXT
-            );
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT,
-                timestamp REAL, display_kind TEXT, display_metadata TEXT, finish_reason TEXT
-            );
-            CREATE TABLE session_turn_leases (
-                conversation_id TEXT PRIMARY KEY, holder TEXT, acquired_at REAL, expires_at REAL
-            );
-            """
-        )
-        conn.execute(
-            "INSERT INTO sessions (id, started_at, last_activity_at, title) VALUES (?, ?, ?, ?)",
-            (SESSION, time.time() - 86400, time.time() - 86400, "Main"),
-        )
-        conn.close()
-
-    def _close_state(self):
-        try:
-            self.state.unlink()
-        except OSError:
-            pass
 
     # -- helpers ----------------------------------------------------------
-    def _deliver(self, content=WRAPPED, metadata=None, media=None):
-        return platform_gots.deliver("main", content, metadata or {}, media)
+    def _deliver(self, ref="gots", content=WRAPPED, metadata=None):
+        return platform_gots.deliver(ref, content, metadata or {}, [])
 
-    def _runs(self):
-        return platform_gots.routines(self.store, self.home, SESSION)
+    def _records(self):
+        return chats.read(self.store)
 
-    def _rows(self):
-        conn = sqlite3.connect(self.state)
+    def _one(self, row=ROW):
+        return self._records()[row]["value"]
+
+    def _forget(self, *rows):
+        """Takes records out of the store, as a device that never heard of them."""
+        conn = sqlite3.connect(self.store, isolation_level=None)
         try:
-            return conn.execute(
-                "SELECT role, content, display_kind, display_metadata, finish_reason"
-                " FROM messages ORDER BY id"
-            ).fetchall()
+            for row in rows:
+                conn.execute("DELETE FROM chats WHERE id = ?", (row,))
         finally:
             conn.close()
 
-    def _age(self, seconds):
-        conn = sqlite3.connect(self.state, isolation_level=None)
-        conn.execute("UPDATE sessions SET last_activity_at = ?", (time.time() - seconds,))
-        conn.close()
+    def _runs(self, run=RUN):
+        self.db.runs = [{"id": run, "cron_job_id": JOB}]
 
     # -- registration -----------------------------------------------------
-    def test_the_platform_is_registered_with_no_home_channel(self):
+    def test_the_platform_is_registered_for_a_bare_gots_delivery(self):
         ctx = mock.Mock()
         self.assertTrue(platform_gots.register(ctx))
         registered = ctx.register_platform.call_args.kwargs
         self.assertEqual(registered["name"], "gots")
-        # The env var is declared and never set: a bare `deliver: gots` must fail loudly.
         self.assertEqual(registered["cron_deliver_env_var"], "GOTS_HOME_CHANNEL")
-        self.assertNotIn("home_channel", registered)
         self.assertTrue(callable(registered["standalone_sender_fn"]))
         # A hint, never an authority: a parser makes cron strict and drops what it cannot parse.
         self.assertTrue(callable(registered["target_ref_syntax_fn"]))
         self.assertIsNone(registered.get("parse_target_ref_fn"))
 
+    def test_register_names_the_channel_a_bare_delivery_resolves_to(self):
+        platform_gots.register(mock.Mock())
+        env = (self.home / ".env").read_text(encoding="utf-8")
+        self.assertIn("GOTS_HOME_CHANNEL=gots", env)
+
+    def test_the_channel_is_named_in_every_home_it_is_given(self):
+        # A multiplexed host serves more than the profile it was launched as, and each home has its
+        # own `.env`: a line written into one leaves every other profile's bare `gots` with no legal
+        # target (`link.served_homes`, the list the wiring pass and `resume` both publish for).
+        others = [Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())]
+        failed = platform_gots.name_channel([self.home, *others])
+        self.assertEqual(failed, [])
+        for home in (self.home, *others):
+            self.assertIn("GOTS_HOME_CHANNEL=gots", (home / ".env").read_text(encoding="utf-8"))
+
+    def test_a_home_that_refuses_the_line_is_reported_and_the_rest_are_named(self):
+        # A file that can't be written is not a reason to leave every other profile without a
+        # channel, and it is not something to swallow either: the caller is told which homes missed
+        # it, and the log names the file.
+        broken = Path(tempfile.mkdtemp())
+        (broken / ".env").mkdir()
+        other = Path(tempfile.mkdtemp())
+        with self.assertLogs("plugin.platform_gots", level="WARNING") as logs:
+            failed = platform_gots.name_channel([broken, other])
+        self.assertEqual(failed, [broken], "the home that refused it is answered, not dropped")
+        self.assertIn("GOTS_HOME_CHANNEL=gots", (other / ".env").read_text(encoding="utf-8"))
+        self.assertTrue(
+            any("GOTS_HOME_CHANNEL" in line for line in logs.output), "and the file is named"
+        )
+
     def test_the_adapter_cannot_promise_a_turn(self):
         adapter = platform_gots.adapter_factory(mock.Mock())
         self.assertFalse(adapter.supports_async_delivery)
 
-    # -- the message ------------------------------------------------------
-    def test_the_wrapper_never_reaches_the_thread(self):
-        self._deliver()
-        rows = self._rows()
-        self.assertEqual(len(rows), 1)
-        content = rows[0][1]
-        self.assertEqual(content, "The tide turns at 06:40.")
-        self.assertNotIn("Cronjob Response", content)
-        self.assertNotIn("job_id", content)
-        self.assertNotIn("To stop or manage", content)
-
-    def test_the_message_is_the_bots_own_row(self):
-        self._deliver()
-        role, content, kind, metadata, stopped = self._rows()[0]
-        self.assertEqual(role, "assistant")
-        self.assertEqual(kind, "routine_message")
-        # A finished reply, as far as the app's fold is concerned: a row with no finish reason reads
-        # as one still streaming, so the thread would sit "working" until the next turn.
-        self.assertEqual(stopped, "stop")
-        self.assertEqual(self._runs()[0]["job_id"], "job-1")
-
-    def test_a_chat_is_named_by_main_or_by_its_own_id(self):
-        self.assertEqual(platform_gots.resolve_chat(self.store, "main")["session"], SESSION)
-        self.assertEqual(platform_gots.resolve_chat(self.store, CHAT)["session"], SESSION)
-        self.assertIsNone(platform_gots.resolve_chat(self.store, "somewhere-else"))
-        refused = platform_gots.deliver("somewhere-else", "hi", {}, [])
-        self.assertIn("error", refused)
-        self.assertEqual(self._rows(), [])
-
-    def test_the_run_is_the_jobs_newest_session(self):
-        self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1"}]
-        self._deliver()
-        routine = self._runs()[0]
-        self.assertEqual(routine["run_session"], "cron_job-1_99")
-        self.assertEqual(routine["title"], "Morning watch")
-
-    def test_the_card_is_told_what_ran_and_how_long_it_took(self):
-        # The card says "Ran for 12s · claude-sonnet-4-5", and both come from the run's own session
-        # row — the same row the session id does, so nothing extra is read.
-        self.db.runs = [
-            {
-                "id": "cron_job-1_99",
-                "cron_job_id": "job-1",
-                "model": "claude-sonnet-4-5",
-                "started_at": 1_760_000_000.0,
-                "ended_at": 1_760_000_012.0,
-            }
-        ]
-        self._deliver()
-        routine = self._runs()[0]
-        self.assertEqual(routine["model"], "claude-sonnet-4-5")
-        self.assertEqual(routine["seconds"], 12.0)
-
-    def test_the_model_is_named_with_the_provider_that_billed_it(self):
-        self.db.runs = [
-            {
-                "id": "cron_job-1_99",
-                "cron_job_id": "job-1",
-                "model": "claude-sonnet-4-5",
-                "billing_provider": "anthropic",
-                "started_at": 1_760_000_000.0,
-                "ended_at": 1_760_000_012.0,
-            }
-        ]
-        self._deliver()
-        self.assertEqual(self._runs()[0]["model"], "anthropic/claude-sonnet-4-5")
-
-    def test_a_run_that_names_no_model_is_read_from_its_config(self):
-        self.db.runs = [
-            {
-                "id": "cron_job-1_99",
-                "cron_job_id": "job-1",
-                "model_config": '{"model": "gpt-5-mini"}',
-                "started_at": 1_760_000_000.0,
-                "ended_at": 1_760_000_090.0,
-            }
-        ]
-        self._deliver()
-        routine = self._runs()[0]
-        self.assertEqual(routine["model"], "gpt-5-mini")
-        self.assertEqual(routine["seconds"], 90.0)
-
-    def test_a_run_with_no_end_says_nothing_about_its_length(self):
-        self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1", "started_at": 1_760_000_000.0}]
-        self._deliver()
-        routine = self._runs()[0]
-        self.assertIsNone(routine["seconds"])
-        self.assertIsNone(routine["model"])
-
-    def test_the_scheduler_lane_attributes_from_the_wrapper(self):
-        self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1"}]
-        platform_gots.deliver("main", WRAPPED, {}, [])
-        self.assertEqual(self._runs()[0]["run_session"], "cron_job-1_99")
-
-    def test_a_message_with_no_identity_carries_no_run(self):
-        result = self._deliver(content="The tide turns at 06:40.")
+    # -- one row per run --------------------------------------------------
+    def test_a_delivery_publishes_one_row_for_its_run(self):
+        self._runs()
+        result = self._deliver()
         self.assertTrue(result["success"])
-        self.assertIsNone(self._runs()[0]["run_session"])
+        records = self._records()
+        self.assertEqual(list(records), [ROW])
+        value = records[ROW]["value"]
+        self.assertEqual(value["hermesSessionId"], RUN, "the row opens the run's own transcript")
+        self.assertEqual(value["title"], "Morning watch")
+        self.assertTrue(value["routine"], "the list draws it with the routine's icon")
 
-    def test_a_replayed_delivery_writes_one_message(self):
-        self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1"}]
+    def test_the_row_carries_the_runs_line_and_its_time(self):
+        self._runs()
+        before = int(time.time() * 1000)
         self._deliver()
+        value = self._one()
+        self.assertEqual(value["line"], LINE)
+        self.assertGreaterEqual(value["updatedAt"], before)
+        self.assertEqual(value["updatedAt"], self._records()[ROW]["at"], "one clock, one row")
+
+    def test_the_wrapper_never_reaches_the_line(self):
+        self._runs()
+        self._deliver()
+        line = self._one()["line"]
+        self.assertNotIn("Cronjob Response", line)
+        self.assertNotIn("job_id", line)
+        self.assertNotIn("To stop or manage", line)
+
+    def test_a_repeat_delivery_of_one_execution_writes_nothing(self):
+        self._runs()
+        self._deliver()
+        written = self._records()
         again = self._deliver()
         self.assertTrue(again["success"])
-        self.assertEqual(len(self._rows()), 1)
+        self.assertEqual(self._records(), written, "the same execution is one row, unchanged")
 
-    def test_an_empty_delivery_writes_nothing(self):
-        result = platform_gots.deliver("main", "", {"job_id": "job-1"}, [])
+    def test_a_row_the_reader_deleted_is_not_resurrected(self):
+        self._runs()
+        self._deliver()
+        chats.tombstone(self.store, ROW)
+        self._deliver()
+        self.assertTrue(self._records()[ROW].get("deleted"), "a row they are done with stays gone")
+
+    def test_a_silent_run_publishes_nothing(self):
+        self._runs()
+        result = self._deliver(content="")
         self.assertTrue(result["success"])
-        self.assertEqual(self._rows(), [])
+        self.assertEqual(self._records(), {})
 
-    # -- the aside --------------------------------------------------------
-    def test_a_quiet_chat_gets_no_aside(self):
-        self._age(3600)
+    def test_a_stored_jobs_channel_still_delivers(self):
+        # `deliver: gots:main` hands the adapter `main`, an older job a chat id, and a bare
+        # `deliver: gots` the home channel: the ref is a channel, not an address, so none of them is
+        # read and no stored job has to be rewritten.
+        self._runs()
+        for ref in ("gots", "main", "main-bot", "an-old-chat-id"):
+            with self.subTest(ref=ref):
+                self._forget(ROW)
+                self._deliver(ref=ref)
+                self.assertIn(ROW, self._records())
+
+    def test_a_delivery_it_cannot_attribute_publishes_nothing(self):
+        # No run in the ledger: the row would open nothing, so there is no row to publish.
+        result = self._deliver()
+        self.assertTrue(result["success"])
+        self.assertEqual(self._records(), {})
+
+    def test_a_delivery_with_no_job_at_all_publishes_nothing(self):
+        self._runs()
+        result = self._deliver(content=LINE)
+        self.assertTrue(result["success"])
+        self.assertEqual(self._records(), {})
+
+    def test_the_row_wears_the_routines_own_name(self):
+        # Hermes wraps a delivery with the job's name; a host that doesn't is asked for it instead.
+        self._runs()
+        self._deliver(content=LINE, metadata={"job_id": JOB})
+        self.assertEqual(self._one()["title"], "Tide watch")
+
+    def test_one_row_for_each_run_of_one_routine(self):
+        self._runs("cron_job-1_1")
         self._deliver()
-        self.assertEqual(self._rows()[0][1], "The tide turns at 06:40.")
-
-    def test_a_chat_active_moments_ago_reads_as_an_aside(self):
-        self._age(60)
+        self._runs("cron_job-1_2")
         self._deliver()
-        content = self._rows()[0][1]
-        self.assertTrue(content.endswith("The tide turns at 06:40."))
-        self.assertIn(content[: -len("The tide turns at 06:40.")], platform_gots.ASIDE_OPENERS)
+        self.assertEqual(
+            sorted(self._records()),
+            sorted([f"routine-{JOB}-cron_job-1_1", f"routine-{JOB}-cron_job-1_2"]),
+        )
 
-    def test_a_chat_in_a_turn_reads_as_an_aside(self):
-        self._age(3600)
-        self.db.busy = False
-        # A lease another writer holds is what a chat in a turn looks like.
-        conn = sqlite3.connect(self.state, isolation_level=None)
+    # -- the boundary: a delivery an older plugin queued -------------------
+    def _queue(self, job_id=JOB, run_session=RUN, text=LINE, at=1_760_000_000_000, notify=1):
+        conn = sqlite3.connect(self.store, isolation_level=None)
+        conn.executescript(
+            """CREATE TABLE IF NOT EXISTS routine_messages (
+                   execution TEXT PRIMARY KEY, session_id TEXT NOT NULL, chat_id TEXT NOT NULL,
+                   job_id TEXT, title TEXT, run_session TEXT, text TEXT NOT NULL, at INTEGER NOT NULL,
+                   row INTEGER, notify INTEGER NOT NULL DEFAULT 1, model TEXT, seconds REAL
+               )"""
+        )
         conn.execute(
-            "INSERT INTO session_turn_leases (conversation_id, holder, acquired_at, expires_at)"
-            " VALUES (?, 'a-turn', ?, ?)",
-            (SESSION, time.time(), time.time() + 300),
+            "INSERT INTO routine_messages (execution, session_id, chat_id, job_id, title, run_session,"
+            " text, at, row, notify) VALUES (?, 'gots-main', 'main', ?, 'Morning watch', ?, ?, ?,"
+            " NULL, ?)",
+            (f"{job_id}:{run_session}", job_id, run_session, text, at, notify),
         )
         conn.close()
-        self.db.busy = True
-        self._deliver()
-        queued = platform_gots.queued(self.store)
-        self.assertEqual(len(queued), 1)
-        self.assertTrue(queued[0]["text"].endswith("The tide turns at 06:40."))
-        self.assertIn(queued[0]["text"][: -len("The tide turns at 06:40.")], platform_gots.ASIDE_OPENERS)
 
-    # -- the queue --------------------------------------------------------
-    def test_a_busy_chat_queues_and_writes_once_when_free(self):
-        self.db.busy = True
-        result = self._deliver()
-        self.assertTrue(result["queued"])
-        self.assertEqual(self._rows(), [])
-        self.assertEqual(len(platform_gots.queued(self.store)), 1)
-        # The chat's turn ends: the message is written, once, and only then.
-        self.db.busy = False
-        self.assertEqual(platform_gots.write_queued(self.home, self.store), 1)
-        self.assertEqual(platform_gots.write_queued(self.home, self.store), 0)
-        self.assertEqual(len(self._rows()), 1)
-        self.assertEqual(platform_gots.queued(self.store), [])
+    def _tables(self):
+        conn = sqlite3.connect(self.store)
+        try:
+            return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        finally:
+            conn.close()
 
-    def test_a_queued_message_keeps_the_words_it_was_taken_with(self):
-        self.db.busy = True
-        self._deliver()
-        taken = platform_gots.queued(self.store)[0]["text"]
-        self.db.busy = False
-        platform_gots.write_queued(self.home, self.store)
-        self.assertEqual(self._rows()[0][1], taken)
+    def test_a_delivery_queued_by_an_older_plugin_is_published(self):
+        self._queue()
+        self.assertEqual(platform_gots.publish_waiting(self.home), 1)
+        value = self._one()
+        self.assertEqual(value["hermesSessionId"], RUN)
+        self.assertEqual(value["title"], "Morning watch")
+        self.assertEqual(value["line"], LINE)
+        self.assertEqual(self._records()[ROW]["at"], 1_760_000_000_000, "its own delivery time, kept")
 
-    # -- the files --------------------------------------------------------
-    def test_a_delivery_stages_its_files_and_names_them(self):
-        source = self.home / "chart.png"
-        source.write_bytes(b"png")
-        result = self._deliver(media=[(str(source), False)])
-        self.assertTrue(result["success"])
-        content = self._rows()[0][1]
-        staged = platform_gots._media_paths(content)
-        self.assertEqual(len(staged), 1)
-        self.assertTrue(staged[0].startswith(str(self.home / "plugin-data" / "gots" / "attachments")))
-        self.assertTrue(Path(staged[0]).is_file())
+    def test_the_old_queue_is_dropped_once_it_is_published(self):
+        self._queue()
+        platform_gots.publish_waiting(self.home)
+        self.assertNotIn("routine_messages", self._tables())
 
-    def test_a_sixth_file_is_dropped_and_named(self):
-        files = []
-        for index in range(6):
-            source = self.home / f"file{index}.txt"
-            source.write_text("x")
-            files.append((str(source), False))
-        result = self._deliver(media=files)
-        self.assertEqual(len(platform_gots._media_paths(self._rows()[0][1])), platform_gots.MAX_ATTACHMENTS)
-        self.assertEqual(len(result["dropped"]), 1)
+    def test_publishing_what_waited_twice_writes_one_row(self):
+        self._queue()
+        platform_gots.publish_waiting(self.home)
+        written = self._records()
+        self.assertEqual(platform_gots.publish_waiting(self.home), 0)
+        self.assertEqual(self._records(), written)
 
-    def test_a_file_lands_on_the_message_the_adapter_wrote(self):
-        # Two routines deliver into one chat, and Hermes hands the first delivery's file over after
-        # the second message exists: the adapter names the delivery, so the file goes to its message.
-        self.db.runs = [{"id": "cron_job-1_1", "cron_job_id": "job-1"}]
-        first = platform_gots.deliver("main", WRAPPED, {"job_id": "job-1"}, [])
-        self.db.runs = [{"id": "cron_job-2_1", "cron_job_id": "job-2"}]
-        second = platform_gots.deliver(
-            "main", "Cronjob Response: Night watch\n(job_id: job-2)\n---\n\nAll quiet.", {"job_id": "job-2"}, []
-        )
-        self.assertNotEqual(first["execution"], second["execution"])
-        source = self.home / "chart.png"
-        source.write_bytes(b"png")
-        platform_gots.attach("main", str(source), first["execution"])
-        rows = self._rows()
-        self.assertEqual(len(platform_gots._media_paths(rows[0][1])), 1, "the file's own message carries it")
-        self.assertEqual(platform_gots._media_paths(rows[1][1]), [], "not the newer one")
+    def test_a_home_with_no_store_has_nothing_to_publish(self):
+        self.assertEqual(platform_gots.publish_waiting(Path(tempfile.mkdtemp())), 0)
 
-    def test_a_routine_with_no_files_names_none(self):
-        self._deliver()
-        self.assertEqual(platform_gots._media_paths(self._rows()[0][1]), [])
+    def test_a_delivery_published_at_the_upgrade_is_announced_like_a_live_one(self):
+        # A row queued before the plugin upgraded reaches the app as a row like any other, so the
+        # device is told about it the way a delivery landing now tells it — otherwise the first
+        # anyone hears of that run is a list they happened to open.
+        self._queue()
+        platform_gots.publish_waiting(self.home)
+        self.assertEqual(self.pushes, [(platform_gots.KIND, RUN)])
+
+    def test_a_queued_row_stored_as_not_notifying_is_published_silently(self):
+        self._queue(notify=0)
+        self.assertEqual(platform_gots.publish_waiting(self.home), 1)
+        self.assertEqual(self.pushes, [], "the queue said not to announce this one")
+
+    def test_a_queued_row_nothing_can_publish_keeps_the_table_and_is_named(self):
+        # A row with no routine, or no run, is one nothing can open: publishing it would be a row
+        # whose chat is empty. It is kept — the table is the only place it exists — and said out
+        # loud, rather than deleted along with the queue that held it.
+        self._queue()
+        self._queue(job_id=None, run_session="cron_job-1_98")
+        self._queue(run_session=None, job_id="job-2")
+        with self.assertLogs("plugin.platform_gots", level="WARNING") as logs:
+            published = platform_gots.publish_waiting(self.home)
+        self.assertEqual(published, 1, "the row that can be published still is")
+        self.assertIn("routine_messages", self._tables(), "the queue is kept while a row is in it")
+        self.assertEqual(len(logs.output), 2, "each row that could not be published is named")
+        self.assertTrue(all("kept" in line for line in logs.output))
 
     # -- the push ---------------------------------------------------------
-    def test_a_delivery_tells_the_device(self):
-        self._deliver(metadata={"job_id": "job-1", "notify": True})
-        self.assertEqual(self.pushes, [("routine_message", SESSION)])
+    def test_a_delivery_tells_the_device_about_the_run(self):
+        self._runs()
+        self._deliver(metadata={"job_id": JOB, "notify": True})
+        self.assertEqual(self.pushes, [("routine_message", RUN)])
 
     def test_a_silent_delivery_tells_no_one(self):
-        self._deliver(metadata={"job_id": "job-1", "notify": False})
+        self._runs()
+        self._deliver(metadata={"job_id": JOB, "notify": False})
         self.assertEqual(self.pushes, [])
 
-    # -- the route --------------------------------------------------------
-    def test_the_route_resolves_the_row_a_compaction_moved(self):
-        self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1"}]
-        self._deliver()
-        written = self._rows()[0]
-        self.assertEqual(platform_gots.routines(self.store, self.home, SESSION)[0]["row"], 1)
-        # A compaction re-emits the carried row under a fresh id in a child session.
-        conn = sqlite3.connect(self.state, isolation_level=None)
-        conn.execute(
-            "INSERT INTO sessions (id, parent_session_id, started_at) VALUES ('tip', ?, ?)",
-            (SESSION, time.time()),
-        )
-        conn.execute("UPDATE sessions SET end_reason = 'compression' WHERE id = ?", (SESSION,))
-        conn.execute(
-            """INSERT INTO messages (session_id, role, content, timestamp, display_kind, display_metadata)
-               VALUES ('tip', 'assistant', ?, ?, 'routine_message', ?)""",
-            (written[1], time.time(), written[3]),
-        )
-        moved = int(conn.execute("SELECT MAX(id) FROM messages").fetchone()[0])
-        conn.close()
-        found = platform_gots.routines(self.store, self.home, SESSION)
-        self.assertEqual([one["row"] for one in found], [moved])
-        self.assertEqual(found[0]["run_session"], "cron_job-1_99")
-
-    def test_a_chat_with_no_routine_messages_answers_nothing(self):
-        self.assertEqual(platform_gots.routines(self.store, self.home, SESSION), [])
+    def test_a_repeat_delivery_tells_no_one_again(self):
+        self._runs()
+        self._deliver(metadata={"job_id": JOB, "notify": True})
+        self.pushes.clear()
+        self._deliver(metadata={"job_id": JOB, "notify": True})
+        self.assertEqual(self.pushes, [], "a retry is not news")
 
     # -- the model is told, and the default is filled ---------------------
-    def test_the_section_says_where_a_routine_delivers(self):
-        self.assertIn("deliver: gots:main", platform_gots.PROMPT)
+    def test_the_section_says_a_routine_delivers_to_gots(self):
+        self.assertIn("deliver: gots", platform_gots.PROMPT)
+        self.assertNotIn("gots:main", platform_gots.PROMPT)
 
-    def test_deliver_is_filled_only_when_the_model_named_nothing(self):
+    def _asked_in_a_chat(self):
+        """A chat of this bot's, as the directive reads one: the record names its session."""
+        chats.merge(
+            self.store,
+            {"gots-asked-here": {"at": 1, "value": {"hermesSessionId": "gots-asked-here"}}},
+        )
+
+    def test_deliver_is_filled_with_the_channel_only(self):
+        self._asked_in_a_chat()
         filled = platform_gots.fill_deliver(
             tool_name="cronjob",
-            session_id=SESSION,
+            session_id="gots-asked-here",
             args={"action": "create", "prompt": "watch"},
         )
-        self.assertEqual(filled, {"action": "modify", "args": {"deliver": "gots:main", "attach_to_session": False}})
+        self.assertEqual(filled, {"action": "modify", "args": {"deliver": "gots", "attach_to_session": False}})
         kept = platform_gots.fill_deliver(
             tool_name="cronjob",
-            session_id=SESSION,
+            session_id="gots-asked-here",
             args={"action": "create", "deliver": "telegram:1", "attach_to_session": True},
         )
         self.assertIsNone(kept)
 
+    def test_a_gots_job_never_mirrors_itself_into_the_chat(self):
+        self._asked_in_a_chat()
+        named = platform_gots.fill_deliver(
+            tool_name="cronjob",
+            session_id="gots-asked-here",
+            args={"action": "create", "deliver": "gots:main", "attach_to_session": True},
+        )
+        self.assertEqual(named, {"action": "modify", "args": {"attach_to_session": False}})
+
     def test_a_routine_asked_for_elsewhere_is_left_alone(self):
-        # Asked for in another platform's chat, the routine belongs where it was asked for: sweeping
-        # it into this bot's Main thread would be a delivery nobody here asked for.
         self.assertIsNone(
             platform_gots.fill_deliver(
                 tool_name="cronjob",
@@ -489,24 +419,17 @@ class RoutineMessage(unittest.TestCase):
         )
         self.assertIsNone(platform_gots.fill_deliver(tool_name="cronjob", args={"action": "create"}))
 
-    def test_a_gots_job_never_mirrors_itself_into_the_chat(self):
-        named = platform_gots.fill_deliver(
-            tool_name="cronjob",
-            session_id=SESSION,
-            args={"action": "create", "deliver": "gots:main", "attach_to_session": True},
-        )
-        self.assertEqual(named, {"action": "modify", "args": {"attach_to_session": False}})
-
     def test_nothing_else_is_rewritten(self):
+        self._asked_in_a_chat()
         self.assertIsNone(platform_gots.fill_deliver(tool_name="terminal", args={"command": "ls"}))
         self.assertIsNone(
-            platform_gots.fill_deliver(tool_name="cronjob", session_id=SESSION, args={"action": "list"})
+            platform_gots.fill_deliver(
+                tool_name="cronjob", session_id="gots-asked-here", args={"action": "list"}
+            )
         )
         self.assertIsNone(
-            platform_gots.fill_deliver(tool_name="cronjob", args={"action": "create", "deliver": "gots:main",
-                                                                  "attach_to_session": False})
+            platform_gots.fill_deliver(
+                tool_name="cronjob",
+                args={"action": "create", "deliver": "gots:main", "attach_to_session": False},
+            )
         )
-
-    def test_a_host_without_a_session_store_says_so(self):
-        # These tests import the plugin outside Hermes, which is exactly a host it can't write on.
-        self.assertIsNotNone(platform_gots.available())

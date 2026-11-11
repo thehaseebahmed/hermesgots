@@ -1,31 +1,13 @@
-export type LocalCommand = "new" | "thread" | "settings" | "cheatsheet"
-/** The command that starts a chat on purpose: `/thread` where threads are a thing, `/new` where not. */
-export type StartCommand = Extract<LocalCommand, "new" | "thread">
-/** Commands that carry the message after them, while a reply runs. */
+export type LocalCommand = "settings" | "cheatsheet"
+/** How a message sent while a reply runs goes: steered into it now, or queued behind it. */
 export type SendMode = "steer" | "queue"
 
 export type SlashItem =
   | { kind: "command"; name: LocalCommand | SendMode; description: string }
   | { kind: "skill"; name: string; description?: string | null; category?: string | null }
 
-/**
- * Whether a command takes the rest of the message as its own: `/thread` does, since that text opens
- * the thread it starts.
- */
-export const carriesMessage = (name: string) => name === "thread"
-
-export function localCommands(start: StartCommand | null): SlashItem[] {
-  const starter: SlashItem[] = start
-    ? [
-        {
-          kind: "command",
-          name: start,
-          description: start === "thread" ? "Start a thread" : "Start a new chat",
-        },
-      ]
-    : []
+export function localCommands(): SlashItem[] {
   return [
-    ...starter,
     { kind: "command", name: "settings", description: "Open settings" },
     { kind: "command", name: "cheatsheet", description: "See the keyboard shortcuts" },
   ]
@@ -45,17 +27,14 @@ export function sendMode(text: string): { mode: SendMode; text: string } | null 
   return match ? { mode: match[1] as SendMode, text: (match[2] ?? "").trim() } : null
 }
 
-export function localCommand(
-  text: string,
-  start: StartCommand | null,
-): { command: LocalCommand; text: string } | null {
+export function localCommand(text: string): { command: LocalCommand; text: string } | null {
   const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim())
   if (!match) return null
   const [, name, rest = ""] = match
-  const command = localCommands(start).find((item) => item.name === name)
-  if (!command) return null
-  if (rest.trim() && !carriesMessage(name)) return null
-  return { command: name as LocalCommand, text: rest.trim() }
+  const command = localCommands().find((item) => item.name === name)
+  // No local command carries the message after it, so one followed by words is the user's prose.
+  if (!command || rest.trim()) return null
+  return { command: name as LocalCommand, text: "" }
 }
 
 const isSpace = (char: string | undefined) => char === undefined || /\s/.test(char)
@@ -97,7 +76,7 @@ export function rankSlashItems(items: SlashItem[], token: SlashToken): SlashItem
     (item) =>
       item.kind === "command" &&
       (!query || item.name.toLowerCase().startsWith(query)) &&
-      (token.alone || (carriesMessage(item.name) && token.start === 0)),
+      token.alone,
   )
   const skills = items.filter((item): item is SkillItem => item.kind === "skill")
   if (!query) return [...commands, ...skills]

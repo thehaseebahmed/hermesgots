@@ -23,16 +23,14 @@ const MOCKS = {
   polling: { port: MOCK_BASE + 1, env: { MOCK_NO_EVENTS: "1" } },
   legacy: { port: MOCK_BASE + 2, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
   "no-dictation": { port: MOCK_BASE + 3, env: { MOCK_DICTATION: "off" } },
-  "triage-new": { port: MOCK_BASE + 4, env: { MOCK_TRIAGE: "new" } },
-  "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
-  withheld: { port: MOCK_BASE + 6, env: { MOCK_WITHHOLD_PROMPT: "1" } },
+  withheld: { port: MOCK_BASE + 4, env: { MOCK_WITHHOLD_PROMPT: "1" } },
   dropped: {
-    port: MOCK_BASE + 7,
+    port: MOCK_BASE + 5,
     env: { MOCK_WITHHOLD_PROMPT: "1", MOCK_DROP_EVENTS_MS: "1500" },
   },
-  muted: { port: MOCK_BASE + 8, env: { MOCK_MUTE_PROMPT: "1", MOCK_LIVE_CLARIFY: "1" } },
+  muted: { port: MOCK_BASE + 6, env: { MOCK_MUTE_PROMPT: "1", MOCK_LIVE_CLARIFY: "1" } },
   // The shape Hermes's own route asks: one prompt per question, no plugin batch fields.
-  "live-clarify": { port: MOCK_BASE + 9, env: { MOCK_LIVE_CLARIFY: "1" } },
+  "live-clarify": { port: MOCK_BASE + 7, env: { MOCK_LIVE_CLARIFY: "1" } },
 }
 // How many ports a lane's mocks take, and so how far apart two lanes' sets start.
 const LANE_PORTS = Object.keys(MOCKS).length
@@ -61,10 +59,15 @@ export const FLOWS = {
     about:
       "A room that needs the user, answered there: a member's approval Once and then Denied, a member's question answered with one of its choices, a reply addressed to @user drawing needs-you, and Stop cancelling a round the transcript then says was stopped — at a phone's width and a tablet's",
   },
+  "list-foot": {
+    script: "e2e/list-foot.mjs",
+    about:
+      "A bot list's foot: its button opens New chat and New room as pills standing entirely above it, one line each and right-aligned to it, its face turning from a plus to a cross; and its search circle becomes a field the button's own height in the same row, the muted X in the button's slot closing it, with the bar's height unmoved by either — at 390 and 1024px",
+  },
   "routine-message": {
     script: "e2e/routine-message.mjs",
     about:
-      "A routine's answer arrives in the chat that asked for it as the bot's own message, apart from the reply above it and opening as an aside, with a chip that opens the run's transcript read-only — at 390 and 1024px in both themes",
+      "A routine's delivery is a row of the bot's chat list, wearing the routine's icon and the delivery's first line, and opening it draws the run's own transcript read-only with no composer and the sentence saying why — at 390 and 1024px in both themes",
   },
   "chat-title": {
     script: "e2e/chat-title.mjs",
@@ -270,11 +273,6 @@ export const FLOWS = {
     about:
       "A question replaces the composer while the subagent a turn dispatched still runs, then the result lands as the bot's message and the wake turn streams",
   },
-  "wake-window": {
-    script: "e2e/wake-window.mjs",
-    about:
-      "A chat whose turn and subagents have both ended keeps reading working through the whole window its wake turn is owed, and settles only once the wake has run",
-  },
   mcps: {
     script: "e2e/mcps.mjs",
     about:
@@ -412,7 +410,7 @@ export const FLOWS = {
   screens: {
     script: "e2e/screens.mjs",
     about:
-      "Projects, a project, Code, Routines, a chat and a started session load at 390 and 1024px, light and dark, the session's header centred with its repositories and no bot picture",
+      "Projects, a project, Code, a bot's routines opened from its list's control, a chat and a started session load at 390 and 1024px, light and dark, the session's header centred with its repositories and no bot picture",
   },
   "sidebar-collapse": {
     script: "e2e/sidebar-collapse.mjs",
@@ -489,11 +487,10 @@ export const FLOWS = {
     about:
       "A live composer's text stays on the device; saving the draft on the way out carries it through the plugin's chat record, and a picked mode still syncs",
   },
-  "bot-threads": {
-    script: "e2e/bot-threads.mjs",
-    extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },
+  "bot-chats": {
+    script: "e2e/bot-chats.mjs",
     about:
-      "A bot opens Main, its threads are cards where they began, each under the message that opened it, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
+      "A bot opens the chat this device left it in — from the sidebar, and after a reload — with its list behind that chat, whose own press back leaves the app; a bot never opened draws its list, with nothing made for it",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",

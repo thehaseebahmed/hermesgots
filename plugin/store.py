@@ -816,37 +816,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             """CREATE INDEX IF NOT EXISTS close_ended
                    ON session_closes (ended_at) WHERE ended_at IS NOT NULL"""
         )
-        # v51: the routine messages a chat holds (platform_gots.py, ADR 0081). One row per delivery,
-        # keyed by the execution that wrote it so a replayed delivery is one message; `row` is NULL
-        # while the message waits for its chat to be free, and the row it landed at afterwards — the
-        # route resolves that row again at read time, since a compaction re-emits it under a new id.
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS routine_messages (
-                   execution TEXT PRIMARY KEY,
-                   session_id TEXT NOT NULL,
-                   chat_id TEXT NOT NULL,
-                   job_id TEXT,
-                   title TEXT,
-                   run_session TEXT,
-                   text TEXT NOT NULL,
-                   at INTEGER NOT NULL,
-                   row INTEGER,
-                   notify INTEGER NOT NULL DEFAULT 1
-               )"""
-        )
-        # The writer asks for what is waiting on every look; the route asks for one chat's messages.
-        conn.execute(
-            """CREATE INDEX IF NOT EXISTS routine_waiting
-                   ON routine_messages (at) WHERE row IS NULL"""
-        )
-        conn.execute(
-            """CREATE INDEX IF NOT EXISTS routine_chat
-                   ON routine_messages (session_id, at)"""
-        )
-        routine_columns = {row[1] for row in conn.execute("PRAGMA table_info(routine_messages)")}
-        for column, kind in (("model", "TEXT"), ("seconds", "REAL")):
-            if column not in routine_columns:
-                conn.execute(f"ALTER TABLE routine_messages ADD COLUMN {column} {kind}")
+        # v51's `routine_messages` (a routine's message waiting for its chat to be free) is gone with
+        # the write path: a delivery publishes the run's chat record now, so a new store never makes
+        # the table, and a store that still has one is read once at start and dropped
+        # (`platform_gots.publish_waiting`) so no queued delivery is lost at the upgrade.
         # v53: when the host wrote a move, beside the time the reader sent it. `at` is the reader's
         # clock (ADR 0089), so retention — which asks how old a row is on this host — cannot read it:
         # a device an hour behind would have its own move's body dropped the moment it landed. Rows

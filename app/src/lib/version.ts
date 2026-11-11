@@ -8,8 +8,11 @@ export const APP_VERSION = __APP_VERSION__
  * second wire: a plugin from before it cannot hear a take at all. 0.109.0 is the first that is the
  * `gots` plugin, served under `/api/plugins/gots`; the `memento` plugin's routes are not read.
  * 0.113.0 is the first that holds canvases (`canvases`, `canvas_write`), which the Canvas screen and
- * a canvas's chat both need (ADR 0113). */
-export const MIN_PLUGIN_VERSION = "0.114.0"
+ * a canvas's chat both need (ADR 0113). 0.115.0 is the first whose routine delivery is a row of its
+ * own — one per run, whose session is the run's — rather than a message written into a chat, and the
+ * first whose `gots` channel takes no target. 0.116.0 is the first a canvas is started on the chat
+ * the app names, with the files it saved for it (ADR 0131). */
+export const MIN_PLUGIN_VERSION = "0.116.0"
 
 function parts(version: string) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())

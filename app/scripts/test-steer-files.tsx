@@ -1,19 +1,28 @@
 /**
  * A message sent while a reply runs, by what it carries: one whose attachments are all files steers,
  * so the running agent reads the log or document at once, and one carrying a photo waits in the
- * queue instead. What a steer the agent never read comes back to the queue as the message it was,
- * and a row waiting there with its files still sends first or goes.
+ * queue instead (`midReply`, `scripts/test-steer.mjs`). What a steer the agent never read comes back
+ * to the queue as the message it was, and a row waiting there with its files still sends first or
+ * goes.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { toast } from "sonner"
 
 import { attachmentsText } from "@/lib/attachment-text"
-import { removeQueued, requeueSteer, sendFromMain, sendQueued, stopMessage } from "@/lib/chat"
-import { db, mainThreadId, type Attachment } from "@/lib/db"
+import {
+  queueMessage,
+  removeQueued,
+  requeueSteer,
+  sendMessage,
+  sendQueued,
+  steerText,
+  stopMessage,
+} from "@/lib/chat"
+import { db, type Attachment } from "@/lib/db"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
-const MAIN = mainThreadId("bot-1")
+const MAIN = "main-bot-1"
 const MAIN_SESSION = `gots-${MAIN}`
 
 type Seen = { path: string; method?: string; body: any }
@@ -131,7 +140,7 @@ const photo = (): Attachment => ({
 /** Starts Main's reply and leaves it running, so the next message arrives mid-reply. */
 async function startReply(name: string, seen: Seen[]) {
   hangingRuns.add(name)
-  void sendFromMain(MAIN, "first")
+  void sendMessage(MAIN, "first")
   // The turn has its run once its events stream is opened, which is what a steer reaches.
   await until(async () => seen.some((r) => /\/runs\/r1\/events$/.test(r.path)), "Main's reply to run")
 }
@@ -150,7 +159,7 @@ test("a mid-reply message carrying a file steers, and the steer names the file",
   const seen = host("steer-file")
   try {
     await startReply("steer-file", seen)
-    await sendFromMain(MAIN, "read this", [note()], { steer: true })
+    await steerText(MAIN, "read this", [note()])
     assert.equal(steerAsks(seen).length, 1, "the waiting item is handed to the reply that runs")
     const said = textOf(queuedTurn(seen)?.input)
     assert.match(said, /name="notes.txt"/)
@@ -163,13 +172,13 @@ test("a mid-reply message carrying a file steers, and the steer names the file",
   }
 })
 
-test("a mid-reply message carrying a photo waits in the queue instead of steering", async () => {
+test("a mid-reply message carrying a photo waits in the queue", async () => {
   await seed("steer-photo")
   const seen = host("steer-photo")
   try {
     await startReply("steer-photo", seen)
-    await sendFromMain(MAIN, "look at this", [photo()], { steer: true })
-    assert.deepEqual(steerAsks(seen), [], "a steer can't carry what the model reads itself")
+    await queueMessage(MAIN, "look at this", [photo()])
+    assert.deepEqual(steerAsks(seen), [], "a photo steers nothing")
     const held = (await messagesOf(MAIN)).filter((m) => m.content === "look at this")
     assert.equal(held.length, 1)
     assert.equal(held[0].status, "queued")
@@ -190,7 +199,7 @@ test("a steer on a host without the queue saves the file before its marker names
   const seen = host("steer-no-queue", { features: [] })
   try {
     await startReply("steer-no-queue", seen)
-    await sendFromMain(MAIN, "read this", [note()], { steer: true })
+    await steerText(MAIN, "read this", [note()])
     assert.ok(
       seen.some((r) => r.path.endsWith("/attachments") && r.method === "POST"),
       "the file is saved on the host first",
@@ -217,7 +226,7 @@ test("a steer whose file the host won't take stays in the queue, with the reason
   }) as typeof toast.error
   try {
     await startReply("steer-unuploaded", seen)
-    await sendFromMain(MAIN, "read this", [note()], { steer: true })
+    await steerText(MAIN, "read this", [note()])
     assert.deepEqual(
       seen.filter((r) => /\/runs\/[^/]+\/steer$/.test(r.path)),
       [],

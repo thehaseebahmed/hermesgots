@@ -309,7 +309,7 @@ export function CanvasOptions({
               <SwitchRow
                 id="canvas-pinned"
                 title="Pin to sidebar"
-                subtitle="Keep it in the sidebar after Routines, on every device."
+                subtitle="Keep it in the sidebar under the app's own screens, on every device."
                 checked={canvas?.pinned === true}
                 disabled={!canvas || busy}
                 onCheckedChange={(checked) =>

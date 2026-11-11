@@ -12,9 +12,8 @@ export const FAILED = "Failed"
 export const REFUSED = "Refused"
 
 /**
- * How much of the message that opened a thread a chat's record keeps: matched to the host's own cut
- * (`_line`'s `MAX_TEXT` in `plugin/triage.py`), so a card reads the same whichever side wrote the
- * opener (ADR 0090, ADR 0096).
+ * How much of the message that opened a chat its record keeps: matched to the host's own cut
+ * (`MAX_TEXT` in `plugin/new_chats.py`), so a value reads the same whichever side wrote it.
  */
 export const OPENER_CHARS = 2000
 

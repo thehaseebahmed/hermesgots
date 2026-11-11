@@ -308,7 +308,7 @@ test(
 )
 
 test("a page still holds what its page held, each setting over its value", async () => {
-  const CHAT = [...ALL, "delegation_model", "triage_model", "fallbacks"]
+  const CHAT = [...ALL, "delegation_model", "fallbacks"]
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(titles(), ["A bot"], "the bot's own page")
