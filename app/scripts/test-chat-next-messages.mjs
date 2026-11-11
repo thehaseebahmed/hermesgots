@@ -210,6 +210,74 @@ test("a live turn's unplaced thinking draws as the run still to come", () => {
   assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
 })
 
+test("a tool row whose result is a parts list draws as a completed call", () => {
+  // The host stores a result that carried an image as its parts: the text part is what the call's
+  // outcome is read from, and the image part is no reason for the thread to throw.
+  const rows = [
+    row(1, "user", "snap it"),
+    row(2, "assistant", "", { tool_calls: [call("a", "terminal", { command: "true" })] }),
+    row(
+      3,
+      "tool",
+      [
+        { type: "text", text: '{"exit_code": 0}' },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+      ],
+      { tool_call_id: "a" },
+    ),
+    row(4, "assistant", "Snapped.", { finish_reason: "stop" }),
+  ]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  const [tool] = reply.tools
+  assert.equal(tool.status, "completed")
+  assert.equal(tool.error, undefined, "a call that exited zero failed at nothing")
+})
+
+test("a tool row whose result is one structured dict draws as a completed call", () => {
+  const rows = [
+    row(1, "user", "say hi"),
+    row(2, "assistant", "", { tool_calls: [call("a", "terminal", { command: "echo hi" })] }),
+    row(3, "tool", { output: "hi", exit_code: 0 }, { tool_call_id: "a" }),
+    row(4, "assistant", "Said it.", { finish_reason: "stop" }),
+  ]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  const [tool] = reply.tools
+  assert.equal(tool.status, "completed")
+  assert.equal(tool.error, undefined)
+})
+
+test("a user row whose content is a parts list draws the words it typed", () => {
+  // A message that carried a photo is stored as its parts, so its words are the text parts' words
+  // and the photo stands as the placeholder the host itself draws for a client keeping no bytes.
+  const rows = [
+    row(1, "user", [
+      { type: "text", text: "look at this" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+    ]),
+    row(2, "assistant", "A cat.", { finish_reason: "stop" }),
+  ]
+  const [user] = messagesOf("chat", foldTurns(rows))
+  assert.match(user.content, /look at this/)
+  assert.match(user.content, /\[image\]/)
+})
+
+test("an assistant row whose content is a parts list draws its text", () => {
+  const rows = [
+    row(1, "user", "show me"),
+    row(
+      2,
+      "assistant",
+      [
+        { type: "text", text: "Here it is." },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+      ],
+      { finish_reason: "stop" },
+    ),
+  ]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  assert.match(reply.content, /Here it is\./)
+})
+
 test("a not-sent retry draws its words alone: no retry marker, no attachment marker", () => {
   const file = { name: "sky.jpg", type: "image/jpeg", size: 2048, image: true, path: "/h/sky.jpg" }
   const text = retryText(attachmentsText("Look around", [file]))
