@@ -107,7 +107,7 @@ import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
-import { BACK_ON_LIST, useNav } from "@/lib/nav"
+import { useNav } from "@/lib/nav"
 import { rememberLastChat } from "@/lib/last-chat"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
@@ -357,40 +357,35 @@ export function ChatPage(props: ChatPageProps) {
 }
 
 /**
- * What a chat's bar leads with, and the press behind that, asked once for both screens that draw a
- * chat: the bot's list a chat of a bot's steps back to, whether that list already stands on screen
- * beside it, the guard Android's back press is given, and the control the bar is handed. `underCode`
- * and `leave` are a session's way out to Code, which only the screen holding the session knows.
+ * What a chat's bar leads with, and the press its screen answers, asked once for both screens that
+ * draw a chat. Nothing leads but a session's own way out to Code (`underCode` and `leave`, which
+ * only the screen holding the session knows): for a bot's chat the bar draws its own default, the
+ * drawer — the app's menu, which is how a reader reaches a screen of the app's, the bot's list
+ * among them — so no control in a chat names a destination of the chat's own. `listPath` is the
+ * address of the list a chat of a bot's has, and `besideList` whether that list already stands on
+ * screen beside it. Android's press is a plain step back, wherever that lands.
  */
 function useChatLead(
   chat: Conversation | null | undefined,
-  { botName, underCode, leave }: { botName: string; underCode: boolean; leave: () => void },
+  { underCode, leave }: { underCode: boolean; leave: () => void },
 ) {
   const legacy = useLegacyChat()
-  const { up } = useNav()
-  // `useNav` hands back a fresh `up` each render; the back guard must not re-register every time.
-  const upRef = useRef(up)
-  upRef.current = up
-  // A chat of a bot answers its bot's list: where its own control and Android's back step when
-  // nothing stands behind it, and — since a row opens the chat from that list — where they land
-  // after one. A Main is one of the bot's chats, so it answers the same address.
+  const { back } = useNav()
+  // A Main is one of the bot's chats, so it answers the same address as the rest of them.
   const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
-  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`), so
-  // there is nothing behind it for its header to lead back to.
+  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`).
   const besideList = useSplit() && Boolean(listPath)
+  // A press with history behind the chat steps back to it, and a press at the app's entry is left
+  // to the app. Only a chat with a list of its own registers it: a session's press is its leave's
+  // to take (`useSessionLeave`), so this never stands in for one.
   useEffect(() => {
     if (!listPath) return
-    return setBackGuard(() => {
-      upRef.current(listPath, BACK_ON_LIST)
-      return true
-    })
-  }, [listPath])
-  const leading = besideList ? undefined : listPath ? (
-    <BackButton label={`Back to ${botName}`} onClick={() => up(listPath, BACK_ON_LIST)} floating />
-  ) : (
+    return setBackGuard(back())
+  }, [listPath, back])
+  const leading = underCode ? (
     // A session leads back to Code unless it is drawn beside Code's list.
-    underCode && <BackButton label="Back to Code" onClick={() => void leave()} floating />
-  )
+    <BackButton label="Back to Code" onClick={() => void leave()} floating />
+  ) : undefined
   return { listPath, besideList, leading }
 }
 
@@ -422,7 +417,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     unsent: isUnsent,
   })
   // What this chat's bar leads with, and the press behind it: one answer, asked by both screens.
-  const lead = useChatLead(chat, { botName: bot?.name || "bot", underCode, leave })
+  const lead = useChatLead(chat, { underCode, leave })
   // The repos a session not started yet will work in; the project screen hands its project over.
   const handed = (address as { project?: HermesProject } | null)?.project
   const projectId = session?.projectId
@@ -1005,7 +1000,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     beside,
     unsent: hasNoMessages,
   })
-  const lead = useChatLead(conversation, { botName: profile?.name ?? "bot", underCode, leave })
+  const lead = useChatLead(conversation, { underCode, leave })
   // This device has the chat's thread on screen as of now — its read mark, written when the thread
   // renders and again while new activity lands in front of the reader, which is what clears a row's
   // dot (never synced: a mark is about where the reader was sitting). Every chat writes one, not

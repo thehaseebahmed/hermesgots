@@ -18,8 +18,8 @@ import {
   atDepth,
   atWidth,
   botProfile,
-  click,
   find,
+  findAll,
   GENERAL,
   json,
   mediaHost,
@@ -141,14 +141,16 @@ test("an open pop-up takes the press before any screen", async () => {
   }
 })
 
-/** A chat of a bot's on screen, with the list its bot's address draws reachable from it. */
+/**
+ * A chat of a bot's on screen at the app's only entry: nothing behind it, and nothing in its bar
+ * naming a screen of the app's, since the drawer opens those.
+ */
 const chatAt = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Path />
     <State />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
-      <Route path="b/:profileId" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -175,34 +177,7 @@ async function seedChatOfBot() {
 }
 
 test(
-  "a chat of a bot's own control answers its bot's list",
-  atWidth(390, async () => {
-    await seedChatOfBot()
-    const history = atDepth(0)
-    try {
-      await mount(chatAt("back-chat"), async () => {
-        const back = () =>
-          [...document.querySelectorAll("button")].find(
-            (one) => one.getAttribute("aria-label") === "Back to Mainly",
-          ) ?? null
-        await until(async () => Boolean(back()), "the chat's way out")
-        await click(back())
-        await until(async () => path() === "/b/bot-1", "the bot's list")
-        assert.deepEqual(history.backs, [], "nothing was stepped back: nothing stood behind it")
-        assert.deepEqual(
-          JSON.parse(state()),
-          { listed: true },
-          "and the list knows the reader stepped back onto it, so it draws itself",
-        )
-      })
-    } finally {
-      history.restore()
-    }
-  }),
-)
-
-test(
-  "a chat opened as the app's only entry leaves its bot's list in its place",
+  "a chat's bar leads with the app's menu, not its bot's list",
   atWidth(390, async () => {
     await seedChatOfBot()
     const history = atDepth(0)
@@ -212,14 +187,38 @@ test(
           async () => Boolean(document.querySelector('[data-slot="header-title"]')),
           "the chat",
         )
-        assert.equal(pressBack(), "screen", "the chat takes the press rather than the app")
-        await until(async () => path() === "/b/bot-1", "the bot's list in the chat's place")
-        assert.deepEqual(history.backs, [], "nothing was stepped back: nothing stood behind it")
-        assert.deepEqual(
-          JSON.parse(state()),
-          { listed: true },
-          "and the list knows the reader stepped back onto it, so it draws itself",
+        assert.equal(
+          find('[data-slot="header-row"] button')?.getAttribute("aria-label"),
+          "Open conversations",
+          "the bar leads with the drawer's own control",
         )
+        assert.equal(
+          findAll('[aria-label="Back to Mainly"]').length,
+          0,
+          "and nothing anywhere leads back to the bot's list",
+        )
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "a chat at the app's entry leaves the press to the app",
+  atWidth(390, async () => {
+    await seedChatOfBot()
+    const history = atDepth(0)
+    try {
+      await mount(chatAt("back-chat"), async () => {
+        await until(
+          async () => Boolean(document.querySelector('[data-slot="header-title"]')),
+          "the chat",
+        )
+        assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
+        assert.deepEqual(history.backs, [], "and nothing steps")
+        assert.equal(path(), "/c/back-chat", "so the chat is still what is on")
+        assert.deepEqual(JSON.parse(state()), null, "with nothing written in its place")
       })
     } finally {
       history.restore()

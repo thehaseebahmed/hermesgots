@@ -150,8 +150,9 @@ for (const [width, collapsed, panes] of CASES) {
         pass(`${look}: code is one pane, New session takes the chip's project`)
       }
 
-      // A bot's own chats: the list keeps the 412px lane beside the chat it opened, and that chat
-      // carries no way back; below that width the list is a screen the chat pushes.
+      // A bot's own chats: the list keeps the 412px lane beside the chat it opened, and with one
+      // pane the list and the chat are screens of their own. The chat carries no way back to the
+      // list at either width: its bar leads with the app's menu, which is how the list is reached.
       await seed([
         { id: "pane-lisbon", title: "Trip to Lisbon" },
         { id: "pane-garden", title: "Garden plan" },
@@ -192,9 +193,9 @@ for (const [width, collapsed, panes] of CASES) {
         await shot("bot-chats")
         pass(`${look}: a bot's list beside its chat, the list's row marked open`)
       } else {
-        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 1)
+        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
         await shot("bot-chats")
-        pass(`${look}: a bot's list is the screen its chat pushes`)
+        pass(`${look}: the chat is a screen of its own, with no way back to the list`)
       }
 
       // Research.

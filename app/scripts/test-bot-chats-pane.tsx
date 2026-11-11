@@ -120,6 +120,7 @@ const laneClass = () => find('[data-slot="list-lane"]')?.getAttribute("class") ?
 const LANE = '[data-slot="list-lane"]'
 const CHAT_BESIDE = '[data-slot="item-lane"] [data-slot="chat-pane"]'
 const BACK_TO_BOT = 'button[aria-label="Back to Mainly"]'
+const DRAWER = 'button[aria-label="Open conversations"]'
 const OPEN_ROW = '[data-slot="list-lane"] ul a[aria-current="page"]'
 
 test(
@@ -153,7 +154,7 @@ test(
       assert.equal(
         missing(BACK_TO_BOT),
         true,
-        "and the chat carries no way back: the list is beside it",
+        "and the chat carries no way back to its bot's list: the bar leads with the app's menu",
       )
     })
   }),
@@ -168,37 +169,39 @@ test(
       await until(async () => titles().includes("Beta"), "the chat's own header")
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
-      assert.equal(missing(BACK_TO_BOT), true, "the chat has nothing to go back to")
+      assert.equal(missing(BACK_TO_BOT), true, "the chat carries no way back to the list either")
     })
   }),
 )
 
 test(
-  "with the sidebar open at 1024px the list is a screen the chat pushes",
+  "with the sidebar open at 1024px the chat stands alone, its bar leading with the drawer",
   atWidth(1024, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(
-        missing(BACK_TO_BOT),
-        false,
-        "and the chat is a screen of its own, leading back to the list",
+      assert.equal(missing(BACK_TO_BOT), true, "and the chat leads with no way back to it")
+      assert.match(
+        find(DRAWER)?.getAttribute("class") ?? "",
+        /\bmd:hidden\b/,
+        "the drawer's own control leads instead, hidden from md up where the sidebar is the menu",
       )
     })
   }),
 )
 
 test(
-  "a phone shows the bot's list as the screen its chat pushes",
+  "a phone draws the chat alone, its bar leading with the drawer",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(missing(BACK_TO_BOT), false, "and the chat leads back to it")
+      assert.equal(missing(DRAWER), false, "and the bar leads with the drawer's own control")
+      assert.equal(missing(BACK_TO_BOT), true, "with no way back to the list")
     })
   }),
 )
