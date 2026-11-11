@@ -175,7 +175,7 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
     await page.getByRole("button", { name: /^Model:/ }).click()
     const picker = page.getByRole("dialog")
     await picker.getByRole("textbox", { name: "Search models" }).fill(model)
-    await picker.getByRole("button", { name: new RegExp(`^${model} `) }).click()
+    await picker.getByRole("radio", { name: new RegExp(`^${model} `) }).click()
     await picker.waitFor({ state: "hidden" })
   }
   await pick("gpt-oss:120b")
