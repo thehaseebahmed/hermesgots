@@ -63,7 +63,7 @@ import { useDelegationModel } from "@/lib/delegation"
 import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
-import { usePluginFeatureAnswers } from "@/lib/features"
+import { usePluginFeatureAnswers, usePluginVersion } from "@/lib/features"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
 import {
@@ -79,11 +79,8 @@ import {
   type GeneralSettings,
 } from "@/lib/general-settings"
 import {
-  checkHealth,
   GENERAL_ROUTES,
   getGeneralSettings,
-  getPluginVersion,
-  listModels,
   REMINDER_LEVELS,
   setGeneralSetting,
   type GeneralTab,
@@ -95,7 +92,6 @@ import { LLM_PROVIDERS } from "@/lib/llm-providers"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
-import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
 import type { ReadFailure } from "@/lib/read-outcome"
 import { useReminders } from "@/lib/reminders"
@@ -105,12 +101,6 @@ import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
-
-type Connection =
-  | { state: "idle" }
-  | { state: "testing" }
-  | { state: "ok"; plugin: string | null; key: string }
-  | { state: "error"; message: string; key: string }
 
 /** What a page wears, and the plugin feature it needs where a host can withhold it. */
 type PageMeta = {
@@ -1060,75 +1050,44 @@ function FieldForm({
 }
 
 /**
- * What a bot is, on its own page: its switches, then what it looks like and how it connects, then
- * what sits on its Hermes. Every setting is a value that opens its edit or its pick — no card holds
- * a field (ADR 0055).
+ * What a bot is, on its own page: its switches and the plugin its host runs, then what it looks like
+ * and how it connects, then what sits on its Hermes. Every setting is a value that opens its edit or
+ * its pick — no card holds a field (ADR 0055) — but the plugin is a fact the page reports, so its
+ * row opens nothing (ADR 0143).
  */
 function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) => void }) {
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
   const character = BOTS.find((bot) => bot.id === profile.botId)
-  const [connection, setConnection] = useState<Connection>({ state: "idle" })
-  // The answer belongs to the connection it tested: an edited address or key is a connection nothing
-  // has asked yet, so the row reads idle rather than claiming a server it never reached.
-  const key = connectionKey(profile)
-  const tested = connection.state === "ok" || connection.state === "error" ? connection : undefined
-  const answer = tested?.key === key ? tested : undefined
+  // The version the bot's host runs, off the `info` read the page already makes for its gates.
+  const plugin = usePluginVersion(profile)
+  const version = plugin?.version
+  const fromHost = plugin?.fromHost ?? false
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
+  // What the row reads: nothing while the answer is owed, the host's version, or that it runs none.
+  const reported = plugin === undefined ? undefined : (version ?? "No plugin")
 
-  const test = async () => {
-    // Bounded like every read: a host that stops answering mid-way leaves no row testing.
-    const signal = AbortSignal.timeout(READ_TIMEOUT_MS)
-    setConnection({ state: "testing" })
-    try {
-      await checkHealth(profile, signal)
-      const ids = await listModels(profile, signal)
-      if (ids.length && !ids.includes(profile.model)) save({ model: ids[0] })
-      const plugin = await getPluginVersion(profile)
-      setConnection({ state: "ok", plugin, key })
-      if (plugin) await db.profiles.update(profile.id, { pluginVersion: plugin })
-      const saved = await db.profiles.get(profile.id)
-      if (saved) await syncContextWindow(saved)
-    } catch (error) {
-      setConnection({
-        state: "error",
-        message: error instanceof Error ? error.message : String(error),
-        key,
-      })
-    }
-  }
+  // What this device keeps follows the Host's own answer, never the copy it cached from an earlier
+  // open (ADR 0132), and only when the version moved: the banner and the Settings menu's tag read
+  // this field, so they say what the Host said rather than what this device remembered.
+  useEffect(() => {
+    if (!fromHost || !version || version === profile.pluginVersion) return
+    void db.profiles.update(profile.id, { pluginVersion: version })
+  }, [profile.id, profile.pluginVersion, version, fromHost])
 
   return (
     <div className="flex flex-col gap-4" data-bot-card>
-      {/* The bot's own three switches, and the tap that asks its server how it is: the row is the
-          action, so nothing sits beside it that a thumb has to find. */}
+      {/* The bot's own switches, then the plugin its host runs: one row reports what is there, and
+          no row is a tap a thumb has to find. */}
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
         <ValueRow
-          title="Test connection"
-          purpose="Ask this bot's server how it is"
-          onClick={test}
-          disabled={profile.disabled}
-          busy={connection.state === "testing"}
-          data-setting="test"
-        >
-          {answer && (
-            <span
-              role={answer.state === "error" ? "alert" : "status"}
-              className={cn(
-                "line-clamp-2 text-sm",
-                answer.state === "error" ? "text-destructive" : "text-primary",
-              )}
-            >
-              {answer.state === "error"
-                ? answer.message
-                : answer.plugin
-                  ? `Connected · Plugin ${answer.plugin}`
-                  : "Connected · No plugin"}
-            </span>
-          )}
-        </ValueRow>
+          title="Plugin"
+          value={reported}
+          muted={!version}
+          data-setting="plugin"
+        />
       </Group>
 
       <Caption>Bot Profile</Caption>

@@ -24,7 +24,12 @@ const PACES = [
 /** A Settings row of the menu, which the bot's own list takes the place of. */
 const menuRow = (page) => page.locator('a[href="/settings/appearance"]')
 
-/** Puts the bot's plugin one release behind, so the list wears its banner without a Test connection. */
+/**
+ * Puts the bot's plugin behind the app's floor before the page first draws, so the banner is there the
+ * moment the list is. The page then writes the version its host answers — the mock's own 0.29.1, which
+ * is behind `MIN_PLUGIN_VERSION` too — so the banner stands on the host's answer, and the seed only
+ * spares the flow the beat before that answer lands.
+ */
 const seedPlugin = (page, profileId) =>
   page.evaluate(async (id) => {
     const { db } = await import("/src/lib/db.ts")

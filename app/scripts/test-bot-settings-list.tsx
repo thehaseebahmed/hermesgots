@@ -312,7 +312,7 @@ test("a page still holds what its page held, each setting over its value", async
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(titles(), ["A bot"], "the bot's own page")
-    for (const label of ["Enabled", "Name", "Image", "Test connection"])
+    for (const label of ["Enabled", "Name", "Image", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
     assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
     absent('[data-setting="subagent-model"]', "and nothing of the Hermes side is forced on it")

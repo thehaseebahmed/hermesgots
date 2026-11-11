@@ -96,7 +96,10 @@ function answer(known: PluginInfo | undefined, feature: string): PluginFeatureAn
  * What one connection answered, in one place: the guard on the key, the remembered value and the
  * poll that asks for it, so every question about a connection reads that one answer.
  */
-function useConnectionAnswer(server: PluginServer): PluginInfo | undefined {
+function useConnectionAnswer(server: PluginServer): {
+  known: PluginInfo | undefined
+  key: string
+} {
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
@@ -105,7 +108,7 @@ function useConnectionAnswer(server: PluginServer): PluginInfo | undefined {
     active: Boolean(key),
     onShow: false,
   })
-  return known
+  return { known, key }
 }
 
 /**
@@ -117,7 +120,7 @@ export function usePluginFeatureAnswers<K extends string>(
   server: PluginServer,
   features: Record<K, string>,
 ): Record<K, PluginFeatureAnswer> {
-  const known = useConnectionAnswer(server)
+  const { known } = useConnectionAnswer(server)
   return Object.fromEntries(
     (Object.keys(features) as K[]).map((name) => [name, answer(known, features[name])]),
   ) as Record<K, PluginFeatureAnswer>
@@ -140,8 +143,23 @@ export function usePluginFeatureOn(server: PluginServer, feature: string): boole
  * remembered answer as the features, keyed by the same connection: one read answers both.
  */
 export function useRoomSeatable(server: PluginServer): string[] | null | undefined {
-  const known = useConnectionAnswer(server)
+  const { known } = useConnectionAnswer(server)
   return known === undefined ? undefined : known.rooms.seatable
+}
+
+/**
+ * The version the bot's plugin runs (`info`'s version), or **null** where its Host answered without
+ * one — no plugin there — and **undefined** while the read is still owed, so nothing is claimed
+ * before an answer lands. `fromHost` says the answer drawn came from a read this page took from the
+ * Host rather than the copy this device kept from an earlier open (ADR 0132): only that answer is a
+ * fact about the Host, so only it may be written to the profile.
+ */
+export function usePluginVersion(
+  server: PluginServer,
+): { version: string | null; fromHost: boolean } | undefined {
+  const { known, key } = useConnectionAnswer(server)
+  if (known === undefined) return undefined
+  return { version: known.version, fromHost: confirmed.has(key) }
 }
 
 /**

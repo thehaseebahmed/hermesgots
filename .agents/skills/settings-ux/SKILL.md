@@ -69,7 +69,7 @@ back over a card is a pop-up closing, and nothing is asked.
   in a dialog or a child screen; a setting with a dependency is gated by its parent.
 - **Dialogs** (m3.material.io/components/dialogs): a full-screen dialog is for form fields and only
   at compact widths; from the expanded breakpoint a basic dialog is the answer, centred, and it holds
-  at most two actions — which is why Test connection never sits inside a Save/Cancel form.
+  at most two actions — which is why a row that acts in place never sits inside a Save/Cancel form.
 - **Bottom sheets** (m3.material.io/components/bottom-sheets): modal sheets are a mobile pattern;
   on a large screen a sheet gives way to a side sheet, which is for content, not for choosing.
 - **Menus** (m3.material.io/components/menus): a list of choices is a menu with an optional filter,

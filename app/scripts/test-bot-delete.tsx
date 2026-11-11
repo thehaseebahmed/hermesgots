@@ -171,7 +171,7 @@ test("the bot's own page holds no remove or delete control but the header's tras
       assert.equal(buttonNamed(name), null, `no button named ${name} on the page`)
     absentText("button", "Remove")
     assert.ok(missing('[data-slot="alert-dialog-trigger"]'), "and nothing there asks first")
-    for (const label of ["Enabled", "Mute notifications", "Bot Profile", "Test connection"])
+    for (const label of ["Enabled", "Mute notifications", "Bot Profile", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
   })
 })

@@ -1,10 +1,11 @@
 /**
- * A bot's own page, over a seeded device database and a faked host (ADR 0055, ADR 0104): what the
- * bot is under the caption *Bot* — its switches, its profile, and how it connects — with no heading
- * at all, every setting a title over the line saying what it is for and the value it holds in the
- * accent colour, "Not set" where it holds nothing, a value's tap opening its edit as a pushed screen
- * and its pick as a bottom sheet, and the write each lands at the fetch boundary. The settings behind
- * it — every other page's row — sit in one card under *Settings*, which the list's own test holds.
+ * A bot's own page, over a seeded device database and a faked host (ADR 0055, ADR 0104, ADR 0143):
+ * what the bot is under the caption *Bot* — its switches, the plugin its host runs, its profile, and
+ * how it connects — with no heading at all, every setting a title over the line saying what it is for
+ * and the value it holds in the accent colour, "Not set" where it holds nothing, a value's tap
+ * opening its edit as a pushed screen and its pick as a bottom sheet, and the write each lands at the
+ * fetch boundary. The settings behind it — every other page's row — sit in one card under *Settings*,
+ * which the list's own test holds.
  */
 import { toast } from "sonner"
 import assert from "node:assert/strict"
@@ -26,7 +27,6 @@ import {
   findAll,
   json,
   labelled,
-  laptop,
   missing,
   mount,
   path,
@@ -125,14 +125,13 @@ const general = (entry = "/settings/bots/bot-1") => (
 type Sent = { method: string; path: string; body: Record<string, unknown> | null }
 
 /**
- * A host answering the plugin's `info` (its features and version), the delegation route, its models
- * and the health check a connection test makes, and recording every request it was sent.
+ * A host answering the plugin's `info` (its features and version), the delegation route and its
+ * models, and recording every request it was sent.
  */
 function host({
   features = FEATURES,
   version = "0.81.0" as string | null,
   models = ["own-model", "cheap-model"],
-  health,
   away = false,
   level = "normal" as string | null,
   refuse,
@@ -144,8 +143,6 @@ function host({
   features?: string[]
   version?: string | null
   models?: string[]
-  /** What the health check refuses with, where the test is of a host that isn't well. */
-  health?: string
   /** A host that hasn't answered at all: no feature list, so no page has a gate to read. */
   away?: boolean
   /** The level this host holds — `frequent` from a plugin written before the four names. */
@@ -201,15 +198,12 @@ function host({
           },
         ],
       })
-    if (url.pathname.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
     if (url.pathname.endsWith("/plugins/gots/reminders")) {
       // A host older than the four names refuses one it doesn't hold, in its own words (ADR 0068).
       if (refuse && body?.level === refuse)
         return json({ error: { message: `level must be one of off, normal, frequent` } }, 400)
       return json({ object: "gots.progress_reminders", level: body?.level ?? level })
     }
-    if (url.pathname.endsWith("/health"))
-      return health ? json({ error: { message: health } }, 500) : json({ ok: true })
     return json({})
   }
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch }
@@ -260,8 +254,6 @@ const accent = (id: string) => row(id)?.querySelector(".text-primary")?.textCont
 /** A button the page draws, by the words on it. */
 const button = (label: string) =>
   findAll("[data-general-page] button").find((one) => wordsOf(one) === label) ?? null
-/** The row that asks the bot's server how it is: the row itself is the control, with no button. */
-const testRow = () => find('[data-setting="test"]')
 
 /** The bottom sheet a pick opens on a phone: its list of buttons, and the choices it offers. */
 const sheet = (label: string) => find(`[data-pick-list="${label}"]`)
@@ -295,8 +287,8 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
     assert.match(switches, /Mute notifications/)
     assert.match(
       switches,
-      /Test connection/,
-      "and the tap that asks its server how it is, under them",
+      /Plugin/,
+      "and the plugin its host runs, at the foot of the card under them",
     )
     assert.doesNotMatch(switches, /Name|Image/, "and nothing of the profile block")
 
@@ -322,7 +314,7 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
     const order = [
       "Enabled",
       "Mute notifications",
-      "Test connection",
+      "Plugin",
       "Bot Profile",
       "Name",
       "Image",
@@ -362,10 +354,8 @@ test("every setting is a title over the line saying what it is for, and the valu
     )
     assert.ok(!enabled, "an unlinked bot has no registry switch to draw")
 
-    assert.ok(
-      rowText("test").startsWith("Test connectionAsk this bot's server how it is"),
-      "Test connection says what the button does",
-    )
+    await until(() => rowText("plugin") === "Plugin0.81.0", "the plugin's own answer")
+    assert.equal(accent("plugin"), "0.81.0", "Plugin holds the version the bot's host runs")
     absent('[data-setting="subagent-model"]', "the subagent model is not on the bot's page")
     assert.ok(
       rowText("server-key").startsWith("Server keyThe key this app sends to that server"),
@@ -709,81 +699,70 @@ test("a host that answers without its General block says so, and offers no retry
   })
 })
 
-test("Test connection answers Connected, with the plugin version the host runs", async () => {
-  await seed("general-test-ok")
+test("the bot's own page names the plugin its host runs, and asks nothing else about its connection", async () => {
+  const calls = await seed(
+    "plugin-named",
+    { hostId: "host-1", pluginVersion: "0.120.0" },
+    FEATURES,
+    { version: "0.81.0" },
+  )
   await mount(general(), async () => {
-    await click(testRow())
-    await until(async () => wordsOf(page()).includes("Connected"), "the test's answer")
-    const answer = find('[data-setting="test"] [role="status"]')
-    assert.equal(
-      wordsOf(answer),
-      "Connected · Plugin 0.81.0",
-      "the row's answer line says it connected and names the plugin the host runs",
-    )
-    assert.match(answer?.className ?? "", /text-primary/, "in the accent colour, as a value is")
-    absent('[data-setting="test"] [role="alert"]', "and nothing is raised")
-  })
+    await until(() => rowText("plugin") === "Plugin0.81.0", "the plugin's answer")
+    assert.equal(accent("plugin"), "0.81.0", "the row holds the version the host runs")
 
-  await seed("general-test-bare", {}, FEATURES, { version: null })
+    await until(
+      async () => (await db.profiles.get("bot-1"))?.pluginVersion === "0.81.0",
+      "the stored version to follow the host's answer",
+    )
+    await until(
+      () => /out of date/.test(wordsOf(page())),
+      "the banner to follow the version it reads",
+    )
+
+    const info = calls.filter((one) => one.path.endsWith("/plugins/gots/info"))
+    assert.equal(info.length, 1, "opening the page read its plugin's info once")
+    assert.deepEqual(
+      calls.filter((one) => one.path.endsWith("/health")),
+      [],
+      "and asked nothing about its connection",
+    )
+    assert.deepEqual(
+      calls.filter((one) => one.path.endsWith("/models")),
+      [],
+      "nor for its models",
+    )
+  })
+})
+
+test("a host that answers without a plugin says No plugin, and nothing is written", async () => {
+  await seed(
+    "plugin-absent",
+    { hostId: "host-1", pluginVersion: "0.120.0" },
+    FEATURES,
+    { version: null },
+  )
   await mount(general(), async () => {
-    await click(testRow())
-    await until(async () => wordsOf(page()).includes("Connected"), "the test's answer")
+    await until(() => rowText("plugin") === "PluginNo plugin", "the host's answer")
+    assert.equal(accent("plugin"), null, "an absence reads muted rather than as a value")
     assert.equal(
-      wordsOf(find('[data-setting="test"] [role="status"]')),
-      "Connected · No plugin",
-      "a host without the plugin says so in the same place",
+      (await db.profiles.get("bot-1"))?.pluginVersion,
+      "0.120.0",
+      "an answer without a version writes nothing",
     )
   })
 })
 
-test("a test the host refuses shows its own sentence in the row's alert", async () => {
-  await seed("general-test-fail", {}, FEATURES, { health: "Hermes is restarting." })
+test("a plugin answer still owed draws no value line at all", async () => {
+  await seed("plugin-owed", { hostId: "host-1" }, FEATURES, { away: true })
   await mount(general(), async () => {
-    await click(testRow())
-    await until(async () => Boolean(find('[role="alert"]')), "the host's refusal")
-    const alert = find('[role="alert"]')
-    assert.equal(wordsOf(alert), "Hermes is restarting.", "in the host's own words")
-    assert.match(alert?.className ?? "", /text-destructive/, "in red, as a refusal is")
+    assert.equal(rowText("plugin"), "Plugin", "the row names the plugin and holds nothing yet")
     assert.equal(
-      wordsOf(row("test")).match(/Hermes is restarting\./g)?.length ?? 0,
-      1,
-      "the row's value carries the sentence, once",
+      row("plugin")?.querySelector(".text-primary") ?? null,
+      null,
+      "with no value line to read",
     )
-    assert.doesNotMatch(wordsOf(row("test")), /Connected/, "and nothing claims it connected")
   })
 })
-
-test(
-  "a test's answer belongs to the connection it tested, and reads idle once that changes",
-  laptop(async () => {
-    await seed("general-test-stale")
-    await mount(general(), async () => {
-      await click(testRow())
-      await until(async () => wordsOf(page()).includes("Connected"), "the test's answer")
-      // The answer's own writes land after it: the page is read again, and its rows come back.
-      await until(async () => Boolean(row("base-url")), "the page's rows")
-
-      // The edit rides over the page at this width, so the page that holds the answer stays mounted.
-      await click(row("base-url"))
-      const field = find("#edit-api-base-url") as HTMLInputElement | null
-      assert.ok(field, "the address's edit")
-      await type(field, "http://elsewhere.test/v1")
-      // The card is a dialog, drawn in a portal: its Save is not inside the page's own subtree.
-      await click(findAll("button").find((one) => wordsOf(one) === "Save") ?? null)
-      await until(
-        async () => (await db.profiles.get("bot-1"))?.baseUrl === "http://elsewhere.test/v1",
-        "the new address to land",
-      )
-
-      assert.doesNotMatch(
-        wordsOf(row("test")),
-        /Connected/,
-        "the row claims nothing about a server it never reached",
-      )
-      absent('[data-setting="test"] [role="status"]', "and no answer is left standing over it")
-    })
-  }),
-)
 
 test("an address into a page this bot doesn't have draws no edit of it, and writes no key", async () => {
   const calls = await seed("general-foreign-sub", {}, FEATURES, { away: true })
