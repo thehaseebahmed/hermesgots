@@ -116,7 +116,7 @@ export function ListFoot({
               onChange={onQueryChange}
               label="Search chats"
               inputRef={field}
-              className="h-14 rounded-full bg-background text-base [&_input]:h-full"
+              className="rounded-full bg-background text-base [&_input]:h-full"
               onKeyDown={(event) => {
                 if (event.key === "Escape") closeSearch()
               }}
@@ -127,14 +127,14 @@ export function ListFoot({
             ref={searchToggle}
             variant="outline"
             size="icon-lg"
-            className="pointer-events-auto size-14 shrink-0 rounded-full bg-background shadow-lg"
+            className="pointer-events-auto size-11 shrink-0 rounded-full bg-background shadow-lg"
             // A keyboard reaches this while the picks are up, where a tap cannot; one state means the
             // field simply takes their place.
             onClick={() => setSurface("search")}
             aria-label="Search"
             data-search-toggle
           >
-            <SearchIcon className="size-5" />
+            <SearchIcon />
           </Button>
         )}
 
@@ -198,7 +198,7 @@ export function ListFoot({
             data-search-close={searching || undefined}
             size="icon-lg"
             className={cn(
-              "pointer-events-auto relative z-10 size-14 shrink-0 rounded-full",
+              "pointer-events-auto relative z-10 size-11 shrink-0 rounded-full",
               searching ? "bg-muted text-foreground shadow-none hover:bg-muted/80" : "shadow-lg",
             )}
             onClick={() => (searching ? closeSearch() : togglePicks())}
@@ -208,8 +208,8 @@ export function ListFoot({
           >
             {/* transitions-dev's icon swap: both faces in one cell, the state picks which shows. */}
             <span aria-hidden className="t-icon-swap" data-state={searching || open ? "b" : "a"}>
-              <PlusIcon className="t-icon size-6" data-icon="a" />
-              <XIcon className="t-icon size-6" data-icon="b" />
+              <PlusIcon className="t-icon" data-icon="a" />
+              <XIcon className="t-icon" data-icon="b" />
             </span>
           </Button>
         </div>

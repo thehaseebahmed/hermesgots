@@ -29,6 +29,16 @@ async function drive({ page, profileId, until, shot }) {
   const fab = await page.locator(NEW).boundingBox()
   const foot = await page.locator(FOOT).boundingBox()
   assert.ok(fab && foot, "the button stands on the foot's bar")
+  // The foot's controls are the bar's controls: the same 44px circles the bar's routines link wears,
+  // so one size serves a thumb at the top of the screen and at the bottom (ADR 0145).
+  const routines = await page.locator('header a[aria-label="Routines"]').boundingBox()
+  assert.ok(routines, "the bar's own circle, for the foot's to be measured against")
+  assert.equal(Math.round(fab.width), 44, `the foot's button is 44 wide (${fab.width})`)
+  assert.equal(Math.round(fab.height), 44, `and 44 tall (${fab.height})`)
+  assert.ok(
+    Math.abs(fab.width - routines.width) <= 1 && Math.abs(fab.height - routines.height) <= 1,
+    `and the box the bar's circle wears (${fab.width}×${fab.height} against ${routines.width}×${routines.height})`,
+  )
   assert.equal(await page.locator("#chats-search").count(), 0, "no field until it is asked for")
   await shot("closed")
 
