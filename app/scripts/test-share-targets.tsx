@@ -8,7 +8,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { toast } from "sonner"
 
 import { db } from "@/lib/db"
 import { clearShare, receiveShare, toShare } from "@/lib/share"
@@ -29,6 +28,7 @@ import {
   text,
   type,
   until,
+  withToasts,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -289,12 +289,7 @@ test("a room that refuses the send says the Host's words and leaves the sheet op
     room: roomRecord("room-weekly", ["default"]),
   })
   const asked = roomHost("share-room-refused", "room-weekly", { refuse: REFUSED })
-  const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
-  try {
+  await withToasts(async (said) => {
     shares()
     await mount(screen(), async () => {
       await until(async () => row("Weekly sync") !== null, "the room's row")
@@ -309,10 +304,7 @@ test("a room that refuses the send says the Host's words and leaves the sheet op
       assert.ok(row("Weekly sync"), "the sheet stays open, as a chat's failed send leaves it")
       assert.equal(path(), "/share", "on its own address")
     })
-  } finally {
-    toast.error = original
-    clearShare()
-  }
+  })
 })
 
 test("a share of nine files refuses the room in words naming eight, and sends nothing", async () => {
@@ -326,12 +318,7 @@ test("a share of nine files refuses the room in words naming eight, and sends no
   )
   await db.conversations.update("room-weekly", { room: roomRecord("room-weekly", ["default"]) })
   const asked = roomHost("share-room-cap", "room-weekly")
-  const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
-  try {
+  await withToasts(async (said) => {
     receiveShare(toShare({ text: "Read this later", files: notes(9) }))
     await mount(screen(), async () => {
       await until(async () => row("Weekly sync") !== null, "the room's row")
@@ -353,10 +340,7 @@ test("a share of nine files refuses the room in words naming eight, and sends no
       await click(row("Trip to Lisbon"))
       await until(async () => path() === "/c/c-chat", "the chat the share went into")
     })
-  } finally {
-    toast.error = original
-    clearShare()
-  }
+  })
 })
 
 test("the sheet offers a chat and a code session of the last week, each in its own mark", async () => {

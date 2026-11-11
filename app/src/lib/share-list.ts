@@ -18,6 +18,7 @@
  * behind the limit is dropped — the search at the foot is the way to the rest, and the sheet is not the
  * only door to a chat — it is simply not this window's.
  */
+import type { Conversation } from "./db.ts"
 import { filterByFuzzy } from "./fuzzy.ts"
 
 /** How long a row has to have been touched in to be offered: seven days, on `updatedAt`. */
@@ -38,16 +39,26 @@ export interface ShareFaces {
   more: number
 }
 
-/** One row of the sheet: what it is, what it says, and the clock that placed it. */
-export interface ShareTarget {
-  id: string
-  kind: ShareKind
-  title: string
-  /** When the row was last touched, which is the clock the window and the order read. */
-  at: number
-  /** A room's members, where a chat wears an icon: absent on every row that is not a room. */
-  faces?: ShareFaces
-}
+/**
+ * One row of the sheet: what it is, what it says, and the clock that placed it. A room is the one kind
+ * that wears something a chat doesn't — its members' faces, where a chat wears its disc — so the type
+ * carries them only on a room, and no reader has to hedge with a fallback.
+ */
+export type ShareTarget =
+  | {
+      id: string
+      kind: "chat" | "session"
+      title: string
+      /** When the row was last touched, which is the clock the window and the order read. */
+      at: number
+    }
+  | {
+      id: string
+      kind: "room"
+      title: string
+      at: number
+      faces: ShareFaces
+    }
 
 /**
  * A room, as the device's own room list hands it to the sheet. A room is a conversation too, so the
@@ -63,29 +74,22 @@ export interface ShareRoom {
 }
 
 /**
- * The fields of a conversation this rule reads. Spelled out here rather than imported, because the
- * rule is pure: a record is a row of the bot's list, whatever else its schema carries.
+ * The fields of a conversation this rule reads: a row of the bot's list, and only the parts of it the
+ * sheet places. Read off the schema rather than spelled out again, so a field the record moves is a
+ * compile error here instead of a row that quietly stops being offered. A type-only import, so nothing
+ * of the database is loaded and `scripts/test-share-list.mjs` still runs the rule as a pure one.
  */
-export interface ShareCandidate {
-  id: string
-  title: string
-  updatedAt: number
-  /** A code session of this project; absent for a plain chat. */
-  projectId?: string
-  /** A canvas's own chat, which is its screen's and never a list's. */
-  canvasId?: string
-  /** A room, whose row is its own and whose words are the Host's. */
-  room?: unknown
-  /** A session in the project's discarded pile. */
-  discardedAt?: number
-}
+export type ShareCandidate = Pick<
+  Conversation,
+  "id" | "title" | "updatedAt" | "projectId" | "canvasId" | "room" | "discardedAt"
+>
 
 /**
  * What a conversation is to the sheet, or nothing where the sheet doesn't offer it: a canvas is its
  * own screen's, a room is the room list's row rather than this read's, and a discarded session is a
  * pile rather than a place a note is sent from (ADR 0115).
  */
-function kindOf(row: ShareCandidate): ShareKind | undefined {
+function kindOf(row: ShareCandidate): "chat" | "session" | undefined {
   if (row.canvasId || row.room || row.discardedAt) return undefined
   return row.projectId ? "session" : "chat"
 }
@@ -121,15 +125,20 @@ function orderedTargets(
  * The window: the week's chats, code sessions and rooms, newest first, and never more than
  * `SHARE_MOST` of them. `rooms` are the ones the picked bot's roster seats, which the device's room
  * list holds rather than the bot's read.
+ *
+ * The week is taken off the read before the order is built, so the rows the sheet could never draw are
+ * neither mapped nor sorted — a bot's whole history arrives here, and only its week is a row.
  */
 export function recentTargets(
   rows: readonly ShareCandidate[],
   now: number,
   rooms: readonly ShareRoom[] = [],
 ): ShareTarget[] {
-  return orderedTargets(rows, rooms)
-    .filter((target) => now - target.at <= SHARE_WINDOW_MS)
-    .slice(0, SHARE_MOST)
+  const since = now - SHARE_WINDOW_MS
+  return orderedTargets(
+    rows.filter((row) => row.updatedAt >= since),
+    rooms.filter((room) => room.updatedAt >= since),
+  ).slice(0, SHARE_MOST)
 }
 
 /**

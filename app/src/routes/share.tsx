@@ -12,7 +12,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { RoomFaces } from "@/components/room/room-faces"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { ROOM_MAX_ATTACHMENTS, isPhoto, roomRefusal } from "@/lib/attachment-caps"
+import { ROOM_MAX_ATTACHMENTS, carriedFiles, isPhoto, roomRefusal } from "@/lib/attachment-caps"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import { serverConfig } from "@/lib/connection"
@@ -23,6 +23,7 @@ import {
   listEnabledProfiles,
   setActiveProfile,
   type Attachment,
+  type Profile,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { sendRoomMessage, uploadRoomAttachment } from "@/lib/hermes"
@@ -164,8 +165,8 @@ export function SharePage() {
     }
   }, [share, profile, imagesAvailable])
 
-  // The picked bot's conversations, newest first off the clock a row is placed by. What the sheet
-  // offers is the rule's to decide, so this read narrows nothing.
+  // The picked bot's conversations as the index holds them, oldest activity first. What the sheet
+  // offers, and in what order, is the rule's to decide, so this read narrows nothing.
   const conversations = useLiveQuery(async () => {
     if (!profile) return []
     return conversationsOf(profile.id).toArray()
@@ -223,6 +224,23 @@ export function SharePage() {
     Boolean(profile) && configured && !imagesBlocked && !empty && !sending && !preparing
 
   /**
+   * The sheet's way out once the share has gone: the bot it went to is the active one, the share is
+   * cleared, and its screen opens in the sheet's place.
+   */
+  const handed = (id: string, bot: string) => {
+    void setActiveProfile(bot)
+    leaving.current = true
+    clearShare()
+    root(`/c/${id}`)
+  }
+
+  /** A send that failed: its row stops turning, and the reason is said in its own words. */
+  const couldNot = (error: unknown) => {
+    setSending(false)
+    toast.error(error instanceof Error ? error.message : "Couldn't share that.")
+  }
+
+  /**
    * One message into a room, the way the room's own composer sends one: every file to the Host's room
    * store under an upload id minted here, then the note as one event under an id minted here (ADR
    * 0116). A room is not a chat, so nothing catches up, nothing queues and no chat is made: the Host
@@ -231,16 +249,15 @@ export function SharePage() {
    * The Host takes eight files to a message, so a bigger share is refused here in the room's own
    * number rather than half sent — and refused only here, since a chat takes the same share whole.
    */
-  const sendIntoRoom = async (id: string) => {
-    if (!profile || !canSend) return
-    const carried = files.filter((file): file is Attachment & { blob: Blob } => Boolean(file.blob))
+  const sendIntoRoom = async (id: string, bot: Profile) => {
+    const carried = carriedFiles(files)
     if (carried.length > ROOM_MAX_ATTACHMENTS) {
       toast.error(roomRefusal(carried.length).message)
       return
     }
     setSending(id)
     try {
-      const config = serverConfig(profile)
+      const config = serverConfig(bot)
       const manifests = await Promise.all(
         carried.map((file) =>
           uploadRoomAttachment(
@@ -252,19 +269,15 @@ export function SharePage() {
         ),
       )
       await sendRoomMessage(config, id, randomId(), shareText(share, note), manifests)
-      void setActiveProfile(profile.id)
-      leaving.current = true
-      clearShare()
-      root(`/c/${id}`)
+      handed(id, bot.id)
     } catch (error) {
-      setSending(false)
-      toast.error(error instanceof Error ? error.message : "Couldn't share that.")
+      couldNot(error)
     }
   }
 
   const send = async (target: string, kind?: ShareKind) => {
-    if (kind === "room") return sendIntoRoom(target)
     if (!profile || !canSend) return
+    if (kind === "room") return sendIntoRoom(target, profile)
     setSending(target)
     try {
       const text = shareText(share, note)
@@ -284,38 +297,40 @@ export function SharePage() {
       const busy = Boolean(
         await db.messages.where("[conversationId+status]").equals([id, "streaming"]).first(),
       )
-      void setActiveProfile(profile.id)
-      leaving.current = true
-      clearShare()
-      root(`/c/${id}`)
+      handed(id, profile.id)
       if (busy) await queueMessage(id, text, attachments)
       else await sendMessage(id, text, { attachments })
     } catch (error) {
-      setSending(false)
-      toast.error(error instanceof Error ? error.message : "Couldn't share that.")
+      couldNot(error)
     }
   }
 
-  const option = (
-    id: string,
-    icon: React.ReactNode,
-    title: string,
-    subtitle?: string,
-    kind?: ShareKind,
-  ) => (
+  /**
+   * One row of the sheet: its mark, its words, and the place a tap sends into — a chat's, a session's or
+   * a room's, absent on New chat, which starts one rather than sending into something.
+   */
+  const option = (row: {
+    id: string
+    icon: React.ReactNode
+    title: string
+    subtitle?: string
+    kind?: ShareKind
+  }) => (
     <button
-      key={id}
+      key={row.id}
       type="button"
       disabled={!canSend}
-      onClick={() => void send(id, kind)}
+      onClick={() => void send(row.id, row.kind)}
       className="flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground outline-none hover:bg-muted focus-visible:bg-muted disabled:opacity-60"
     >
-      {icon}
+      {row.icon}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{title}</span>
-        {subtitle && <span className="truncate text-sm text-muted-foreground">{subtitle}</span>}
+        <span className="truncate">{row.title}</span>
+        {row.subtitle && (
+          <span className="truncate text-sm text-muted-foreground">{row.subtitle}</span>
+        )}
       </span>
-      {sending === id && <Spinner className="size-5 shrink-0" />}
+      {sending === row.id && <Spinner className="size-5 shrink-0" />}
     </button>
   )
 
@@ -326,7 +341,7 @@ export function SharePage() {
    */
   const mark = (target: ShareTarget) =>
     target.kind === "room" ? (
-      <RoomFaces shown={target.faces?.shown ?? []} more={target.faces?.more ?? 0} />
+      <RoomFaces shown={target.faces.shown} more={target.faces.more} />
     ) : (
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted">
         {target.kind === "session" ? (
@@ -408,21 +423,23 @@ export function SharePage() {
               aria-label="Recent"
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
-              {option(
-                "new",
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                  <PlusIcon className="size-5" />
-                </span>,
-                "New chat",
-              )}
-              {shown?.map((target) =>
-                option(
-                  target.id,
-                  mark(target),
-                  target.title,
-                  formatRelative(target.at, now),
-                  target.kind,
+              {option({
+                id: "new",
+                icon: (
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                    <PlusIcon className="size-5" />
+                  </span>
                 ),
+                title: "New chat",
+              })}
+              {shown?.map((target) =>
+                option({
+                  id: target.id,
+                  icon: mark(target),
+                  title: target.title,
+                  subtitle: formatRelative(target.at, now),
+                  kind: target.kind,
+                }),
               )}
               {!searching && !showAll && (targets?.length ?? 0) > SHARE_FIRST && (
                 <button

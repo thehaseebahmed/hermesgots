@@ -7,11 +7,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { toast } from "sonner"
 
 import { MAX_ATTACHMENTS, MAX_FILE_BYTES } from "@/lib/attachment-caps"
 import { db } from "@/lib/db"
-import { clearShare, readWebShare, receiveShare, toShare } from "@/lib/share"
+import { readWebShare, receiveShare, toShare } from "@/lib/share"
 import { SharePage } from "@/routes/share"
 
 import { fakeHost } from "./chat-next-host.ts"
@@ -27,6 +26,7 @@ import {
   seedSettings,
   text,
   until,
+  withToasts,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -103,21 +103,6 @@ function stubCaches(written: { meta?: unknown; files?: Record<string, string> })
       holder.caches = saved
       ;(globalThis as { caches?: CacheStorage }).caches = savedGlobal
     },
-  }
-}
-
-/** The share screen's refusals, collected from the toasts it shows. */
-async function withToasts(body: (said: string[]) => Promise<void>) {
-  const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
-  try {
-    await body(said)
-  } finally {
-    toast.error = original
-    clearShare()
   }
 }
 

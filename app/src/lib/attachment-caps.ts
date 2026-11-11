@@ -130,6 +130,17 @@ export const unreadableRefusal = (name: string): Refusal => ({
 export const fitsInline = (size: number, used: number) => used + size <= MAX_INLINE_BYTES
 
 /**
+ * The attachments a room's message carries: the ones this device holds the bytes of. A room's files go
+ * to its Host's own store before the message names them, so a file whose bytes are gone has nothing to
+ * put there. The share sheet and the room's composer both send through this one reading.
+ */
+export function carriedFiles<T extends { blob?: unknown }>(
+  files: readonly T[],
+): (T & { blob: Blob })[] {
+  return files.filter((file): file is T & { blob: Blob } => Boolean(file.blob))
+}
+
+/**
  * Whether an attachment carries the bytes the model is sent in the message itself: the one fact that
  * makes it a part. `inline` is that fact, never `image`, which says only what the file is — so every
  * reader of "does this ride inline" asks here rather than testing the field itself.
