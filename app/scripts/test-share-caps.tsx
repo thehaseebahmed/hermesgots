@@ -315,7 +315,9 @@ test("Share's new-chat option starts a chat of the bot's", async () => {
 test("a share into a chat this device holds sends into it, and a streaming one waits its turn", async () => {
   const bot = botProfile("share-busy")
   const main = "c-streaming"
-  await seedChats([{ id: main, messages: ["Still working on it"] }], { bots: [bot] })
+  await seedChats([{ id: main, at: Date.now() - 60_000, messages: ["Still working on it"] }], {
+    bots: [bot],
+  })
   await db.messages.where("conversationId").equals(main).modify({ status: "streaming" })
   const host = fakeHost(`gots-${main}`)
   await withToasts(async (said) => {

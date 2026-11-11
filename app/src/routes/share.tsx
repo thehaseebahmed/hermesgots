@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
 import { toast } from "sonner"
-import { ChevronDownIcon, LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react"
+import { ChevronDownIcon, CodeXmlIcon, LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import { BotCard } from "@/components/bot-card"
@@ -11,10 +11,10 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { isPhoto } from "@/lib/attachment-caps"
-import { listsAsChat } from "@/lib/lists-as-chat"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
+  conversationsOf,
   db,
   getActiveProfile,
   listEnabledProfiles,
@@ -25,11 +25,9 @@ import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
+import { recentTargets, SHARE_FIRST, type ShareTarget } from "@/lib/share-list"
 import { beginChat, useNow } from "@/lib/threads"
 
-/** How many of a bot's newest chats are offered before Show more. */
-const FIRST = 5
-const MORE = 30
 /** No files at all, kept as one array so a share with nothing read yet doesn't rebuild on render. */
 const NO_FILES: Attachment[] = []
 
@@ -152,19 +150,17 @@ export function SharePage() {
     }
   }, [share, profile, imagesAvailable])
 
-  const chats = useLiveQuery(async () => {
+  // The picked bot's conversations, newest first off the clock a row is placed by. What the sheet
+  // offers is the rule's to decide, so this read narrows nothing.
+  const conversations = useLiveQuery(async () => {
     if (!profile) return []
-    return (
-      db.conversations
-        .where("[profileId+updatedAt]")
-        .between([profile.id, -Infinity], [profile.id, Infinity])
-        .reverse()
-        .filter((c) => listsAsChat(c) && !c.discardedAt)
-        .limit(MORE)
-        .toArray()
-    )
+    return conversationsOf(profile.id).toArray()
   }, [profile?.id])
-  const shown = showAll ? chats : chats?.slice(0, FIRST)
+  const targets = useMemo(
+    () => (conversations ? recentTargets(conversations, now) : undefined),
+    [conversations, now],
+  )
+  const shown = showAll ? targets : targets?.slice(0, SHARE_FIRST)
 
   const pickBot = (id: string) => {
     setPicked(id)
@@ -234,6 +230,17 @@ export function SharePage() {
       </span>
       {sending === id && <Spinner className="size-5 shrink-0" />}
     </button>
+  )
+
+  /** The tile a row leads with: Code's mark for a session, a chat's own bubble for a chat. */
+  const mark = (kind: ShareTarget["kind"]) => (
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted">
+      {kind === "session" ? (
+        <CodeXmlIcon className="size-5 text-muted-foreground" />
+      ) : (
+        <MessageCircleIcon className="size-5 text-muted-foreground" />
+      )}
+    </span>
   )
 
   return (
@@ -314,17 +321,10 @@ export function SharePage() {
                 </span>,
                 "New chat",
               )}
-              {shown?.map((chat) =>
-                option(
-                  chat.id,
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted">
-                    <MessageCircleIcon className="size-5 text-muted-foreground" />
-                  </span>,
-                  chat.title,
-                  formatRelative(chat.updatedAt, now),
-                ),
+              {shown?.map((target) =>
+                option(target.id, mark(target.kind), target.title, formatRelative(target.at, now)),
               )}
-              {!showAll && (chats?.length ?? 0) > FIRST && (
+              {!showAll && (targets?.length ?? 0) > SHARE_FIRST && (
                 <button
                   type="button"
                   onClick={() => setShowAll(true)}
