@@ -38,7 +38,7 @@ const PICKS_ID = "new-picks"
  */
 export function ListFoot({
   canMakeRoom,
-  searchable = true,
+  searchable,
   query,
   onQueryChange,
   onNewChat,
@@ -46,7 +46,7 @@ export function ListFoot({
 }: {
   canMakeRoom: boolean
   /** Whether the search is this bar's to offer: from the laptop width up the bar's own field holds it. */
-  searchable?: boolean
+  searchable: boolean
   /** The words the list is narrowed by. The foot holds whether its field is up; the screen holds what
    * the field asked for, since the rows are the screen's. */
   query: string

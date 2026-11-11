@@ -44,6 +44,11 @@ import {
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
 
+/** A filter pill, by the word it wears — the group is the bar's one pill row. */
+const filterPill = (label: string) =>
+  findAll('header [role="group"] button').find((one) => (one.textContent ?? "").trim() === label) ??
+  null
+
 /** What this bot's Host says its plugin offers: a room may be made where the Host advertises it. */
 let offers = ["chats", "rooms", "rooms_write"]
 /** How many times a Host was asked what its plugin offers, so a case can wait for its answer. */
@@ -814,27 +819,25 @@ test("the pills narrow the rows to the kind each names, and say what their empti
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 3, "the list")
     const pills = () => findAll('header [role="group"] button')
-    const pill = (label: string) =>
-      pills().find((one) => (one.textContent ?? "").trim() === label) ?? null
     assert.deepEqual(
       pills().map((one) => (one.textContent ?? "").trim()),
       ["All", "Unread", "Chats", "Rooms", "Routines"],
       "the five pills, in the rule's own order",
     )
-    assert.equal(pill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
+    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
 
-    await click(pill("Unread"))
+    await click(filterPill("Unread"))
     assert.deepEqual(rowIds(), ["trip"], "Unread keeps the rows that wear this device's dot")
-    await click(pill("Chats"))
+    await click(filterPill("Chats"))
     assert.deepEqual(rowIds(), ["trip", "dinner"], "Chats is a row that is neither a room nor a run")
-    await click(pill("Rooms"))
+    await click(filterPill("Rooms"))
     assert.deepEqual(rowIds(), ["planning"], "Rooms is the room's own row")
-    await click(pill("Routines"))
+    await click(filterPill("Routines"))
     assert.deepEqual(rowIds(), [], "no routine has delivered here")
     assert.ok(findText("p", "No routines."), "so the pill says what its emptiness is, in its own words")
 
     // A search inside a pill that holds rows is the search's emptiness, not the pill's.
-    await click(pill("Rooms"))
+    await click(filterPill("Rooms"))
     await click(find("[data-search-toggle]"))
     await until(async () => Boolean(find("#chats-search")), "the foot's field")
     await type(find("#chats-search"), "lisbon")
@@ -902,14 +905,10 @@ test("the filter a device kept is the one its list opens on", async () => {
   ])
   // A device that has never chosen: the ground the first visit stands on.
   await seedSettings({ developer: true, activeProfileId: bot.id })
-  const pill = (label: string) =>
-    findAll('header [role="group"] button').find(
-      (one) => (one.textContent ?? "").trim() === label,
-    ) ?? null
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 2, "the list")
-    assert.equal(pill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
-    await click(pill("Rooms"))
+    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
+    await click(filterPill("Rooms"))
     assert.deepEqual(rowIds(), ["planning"], "the press narrows the rows")
     assert.equal((await getSettings()).chatFilter, "rooms", "and is what this device keeps")
   })
@@ -917,6 +916,6 @@ test("the filter a device kept is the one its list opens on", async () => {
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 1, "the list opened on the pill this device kept")
     assert.deepEqual(rowIds(), ["planning"], "the rows it keeps")
-    assert.equal(pill("Rooms")?.getAttribute("aria-pressed"), "true", "with Rooms pressed")
+    assert.equal(filterPill("Rooms")?.getAttribute("aria-pressed"), "true", "with Rooms pressed")
   })
 })
