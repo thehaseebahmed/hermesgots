@@ -6,11 +6,6 @@ const CHATS = [
 ]
 
 /**
- * Where a bot opens, and where back goes from there: the chat the reader left it in, standing at the
- * app's own entry with nothing behind it, so a press back from it leaves the app. The list is a
- * screen the chat opens from its own bar, a rung above it — and it is the app's entry itself only for
- * a bot this device has nothing to open.
- *
  * The claims are the browser's own history stack, rung by rung — `window.history.state.idx`, the
  * address the browser shows, and a press of its back button — which is what no DOM without a
  * session history and no faked `history.back` has (ADR 0019). A tablet's width, where the sidebar is
@@ -46,9 +41,6 @@ await flow(
         )
       })
 
-    // A bot this device has never opened: nothing is remembered and nothing is made, so its list is
-    // what draws — the rooms it is seated in are already rows of it — and with nothing to open the
-    // list is the app's entry itself.
     await until(async () => here() === list, 20_000, "the bot's own address")
     await until(async () => (await rows()).length > 0, 20_000, "the list's rows")
     assert.deepEqual(
@@ -82,8 +74,6 @@ await flow(
     await shot("chat")
     pass("a row opens its chat, on an address of its own")
 
-    // The chat's own bar carries the way to its bot's chats: a push, so the chat stays behind the
-    // list, and the list leads back to the chat it covers.
     const chatRung = await rung(page)
     await page.getByRole("link", { name: "Chats with Test bot" }).click()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
@@ -105,9 +95,6 @@ await flow(
     assert.equal(await rung(page), chatRung, "back on the rung the chat stands at, nothing left over")
     pass("back from the pushed list returns the chat it covers")
 
-    // A row picked in a list that stands over a chat takes the list's entry — the rung the list
-    // itself stood on — so switching chats does not grow a rung per switch: the chat picked stands
-    // where the list was, and the chat the reader started in is what back returns them to.
     await page.getByRole("link", { name: "Chats with Test bot" }).click()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
     await until(async () => (await rows()).length === expected.length, 20_000, "the list once more")
@@ -126,10 +113,6 @@ await flow(
     assert.equal(await rung(page), chatRung, "back on the chat the reader started in")
     pass("back from the chat picked returns the chat the reader started in")
 
-    // Away in the app and back: the chat the reader left is where they land, at the app's own entry
-    // rather than on a rung above it — a sidebar row opens a bot as the only entry, and the landing
-    // takes that entry instead of pushing the chat over the bot's address. So nothing, the list
-    // included, stands behind the chat.
     await page.locator('aside a[href="/code"]').first().click()
     await page.waitForURL("**/code", { timeout: 20_000 })
     await page.locator(`aside a[href="${list}"]`).first().click()
@@ -145,9 +128,6 @@ await flow(
     assert.equal(await rung(page), 0, "and the entry it stood on, the chat being the address")
     pass("a reload keeps the reader where they were")
 
-    // The chat at the app's entry still opens its bot's list from its bar, and the list is pushed a
-    // rung above it: a list standing over a chat is no entry of the app's, so it draws itself rather
-    // than landing in the chat it covers.
     await page.getByRole("link", { name: "Chats with Test bot" }).click()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
     await until(async () => (await rows()).length === expected.length, 20_000, "the list above it")
@@ -161,8 +141,6 @@ await flow(
     assert.equal(await rung(page), 0, "back at the app's entry, nothing left over")
     pass("back from the pushed list returns the chat, at the app's entry")
 
-    // The browser's own back from the chat: the chat is where the app's history begins, so this press
-    // takes the page off the app.
     await page.goBack()
     await until(async () => !here().startsWith("/"), 10_000, "the app to be left")
     pass("back from the chat at the app's entry leaves the app")

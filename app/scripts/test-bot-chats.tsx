@@ -534,10 +534,6 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
 })
 
 test("a pick in a list that stands over a chat takes its entry, where a root list pushes", async () => {
-  // A list a chat's own control pushed stands a rung above that chat, so a pick from it — a row or
-  // the foot's New chat — takes the list's place: switching chats costs the reader no rung of the
-  // history behind them, and back returns the chat they started in. A list that is itself the root
-  // has nothing behind it to keep, so its picks push and back returns the list.
   await seed([
     { id: "a", title: "A chat", at: 100, said: "Hello" },
     { id: "b", title: "Another", at: 200, said: "Hi" },
@@ -548,7 +544,6 @@ test("a pick in a list that stands over a chat takes its entry, where a root lis
     await until(async () => path() === "/c/b", "the chat it picked")
     assert.equal(nav(), "PUSH:/c/b", "a row of the root list pushes, so back returns to the list")
   })
-  // The list reached from a chat: one rung of history already behind it.
   const history = atDepth(1)
   try {
     await mount(screen(), async () => {

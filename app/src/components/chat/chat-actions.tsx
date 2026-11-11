@@ -225,18 +225,6 @@ export function LimitNotice({
   )
 }
 
-/**
- * The chat's header controls and what they open: the context ring and its usage sheet, the way to the
- * bot's chats, and the options menu — rename, pin, mute, resolve or reopen, discard and delete — with
- * the dialogs they ask in. Both chat screens draw it, a bot's Main among the chats it draws: Main
- * carries the whole of an ordinary chat's menu but Delete, since it is the bot's one chat that cannot
- * go.
- *
- * `listPath` is the bot's list of its chats, for the chat that has one and is not drawn beside it: the
- * control stands immediately beside the options menu and pushes the list, so the chat stays behind it.
- * A screen that passes nothing — a routine's run, a room, a canvas — draws no control at all, since
- * what it would open is not a list of chats it is one of.
- */
 export function ChatActions({
   chat,
   profile,
@@ -283,8 +271,6 @@ export function ChatActions({
           <ContextRing usage={usage} onClick={() => onUsageOpenChange(true)} />
         )}
         {listPath && (
-          // A push, so the chat stays behind the list: the state names the chat it covers, which is
-          // the row the list draws as the one open.
           <Link
             to={listPath}
             state={OPENED_CHAT(chat.id)}

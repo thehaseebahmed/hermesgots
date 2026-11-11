@@ -356,34 +356,19 @@ export function ChatPage(props: ChatPageProps) {
   )
 }
 
-/**
- * What a chat's bar leads with, and the press its screen answers, asked once for both screens that
- * draw a chat. Nothing leads but a session's own way out to Code (`underCode` and `leave`, which
- * only the screen holding the session knows): for a bot's chat the bar draws its own default, the
- * drawer — the app's menu, which is how a reader reaches a screen of the app's. `listPath` is the
- * address of the list a chat of a bot's opens, and nothing where that list already stands on screen
- * beside it: the bar carries a control to it only where it doesn't, since a list on screen is its
- * own way. Android's press is a plain step back, wherever that lands.
- */
 function useChatLead(
   chat: Conversation | null | undefined,
   { underCode, leave }: { underCode: boolean; leave: () => void },
 ) {
   const legacy = useLegacyChat()
   const { back } = useNav()
-  // A Main is one of the bot's chats, so it answers the same address as the rest of them.
   const listPath = !legacy && chat && listsAsChat(chat) ? botChatsPath(chat.profileId) : undefined
-  // Where there is room the bot's list stands on screen beside this chat (`useBotChatsPane`).
   const besideList = useSplit() && Boolean(listPath)
-  // A press with history behind the chat steps back to it, and a press at the app's entry is left
-  // to the app. Only a chat with a list of its own registers it: a session's press is its leave's
-  // to take (`useSessionLeave`), so this never stands in for one.
   useEffect(() => {
     if (!listPath) return
     return setBackGuard(back())
   }, [listPath, back])
   const leading = underCode ? (
-    // A session leads back to Code unless it is drawn beside Code's list.
     <BackButton label="Back to Code" onClick={() => void leave()} floating />
   ) : undefined
   return { listPath: besideList ? undefined : listPath, leading }
@@ -416,7 +401,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     beside,
     unsent: isUnsent,
   })
-  // What this chat's bar leads with, and the press behind it: one answer, asked by both screens.
   const lead = useChatLead(chat, { underCode, leave })
   // The repos a session not started yet will work in; the project screen hands its project over.
   const handed = (address as { project?: HermesProject } | null)?.project

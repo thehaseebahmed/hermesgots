@@ -35,28 +35,12 @@ import { useLegacyChat } from "@/lib/legacy-chat"
 import { beginChat, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
-/**
- * A bot's screen: the list of its chats, one flat band — the pinned ones first and the rest by what
- * was last said in them. Its header is the bot itself, whose name is the way to its settings, and the
- * two controls it floats over the foot search the list and start something in it: a chat, or a room.
- * A bot's address opens the chat this device last had here, taking the entry the address stood on, so
- * the chat — not this list — is where the app is and back from it is the app's. A bot with nothing to
- * open draws this list at the app's entry instead, where its own back leaves the app. Pushed over a
- * chat — which is what a chat's own list control does — the list stands on that chat instead: its bar
- * leads back to it, Android's press steps to it, and the chat it covers is the row it marks as open.
- *
- * Where there is room the list is the pane and the chat it opened stands beside it
- * (`useBotChatsPane`), so this screen is then the item lane with nothing open; below that width the
- * list is the whole screen, and a chat of it takes the list's own entry — the chat, not the list, is
- * then where the app stands.
- */
 export function BotChatsPage() {
   const { profileId } = useParams()
   const legacy = useLegacyChat()
   const enabled = legacy === false
   const pane = useBotChatsPane(enabled)
   const place = useListPlace()
-  // The chat a pushed list covers is in `place.open`, named by the state the chat's control left.
   const landing = useLanding(profileId, enabled, place.landed)
   // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
@@ -69,13 +53,6 @@ export function BotChatsPage() {
   return <BotChatsList profileId={profileId} selected={place.open} pushed={!place.root} />
 }
 
-/**
- * Where this list stands, asked once: `root` is this list being the app's own entry, `open` the chat a
- * chat's own control pushed it over, and `landed` the one arrival that opens a chat — forwards, at the
- * app's entry, with nobody having asked for the list. A reload of the address, a step back onto it
- * (the state a chat leaves with `BACK_ON_LIST`), or a list a chat's own control pushed over that chat
- * is none of them.
- */
 function useListPlace() {
   const type = useNavigationType()
   const state = useLocation().state
@@ -84,22 +61,6 @@ function useListPlace() {
   return { root, open: openedChat(state), landed: root && type !== "POP" && !listed }
 }
 
-/**
- * The chat a bot's address opens: the one this device last had open there, while it is still one of
- * the bot's. A reader who arrives at the address takes its entry into that chat — a replacement,
- * never a push — so the chat stands where the bot's address stood and the list is not left behind
- * it. One who steps back onto the list gets the list — the press arrives as a pop, and the entry a
- * chat's own control leaves in its place says the reader is back on the list — so a press back never
- * bounces into the chat it came from.
- *
- * `landed` is the arrival `useListPlace` read, since only that one opens a chat: a list a chat's own
- * control pushed over it, at a rung of its own, is not one.
- *
- * Answers whether the address is still being settled — the read is out, or a chat is taking it —
- * which the screen draws nothing for, so neither the list it is leaving nor an empty pane is drawn
- * for a frame. A list that is not `landed`'s arrival never opens a chat, so the device is asked
- * nothing for it and the list draws at once.
- */
 function useLanding(profileId: string | undefined, enabled: boolean | undefined, landed: boolean) {
   const navigate = useNavigate()
   const answer = useLiveQuery(
@@ -111,9 +72,7 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined,
   )
   const chat = answer && answer.profileId === profileId ? answer.chat : undefined
   const opens = landed && Boolean(chat)
-  // One landing per visit: a second effect (a strict-mode double run) opens nothing again. The bot
-  // rides the entry the chat takes, so the shell keeps its list's lane while the chat's own record
-  // loads, as a row's link does.
+  // One landing per visit: a second effect (a strict-mode double run) opens nothing again.
   const opened = useRef(false)
   useEffect(() => {
     if (!opens || opened.current) return
@@ -123,11 +82,6 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined,
   return landed && (chat === undefined || opens)
 }
 
-/**
- * The list kept on screen beside the chat it opened (see `useBotChatsPane`). It lands in nothing: a
- * chat this device would open is the address the chat's own list row takes. And it leads nowhere,
- * since the chat it covers is already beside it: its bar keeps the drawer, and there is no back.
- */
 export function BotChatsPane({ pane }: { pane: BotPane }) {
   return <BotChatsList profileId={pane.profileId} selected={pane.selected} />
 }
@@ -221,9 +175,6 @@ function ChatList({
   const navigate = useNavigate()
   const { back } = useNav()
   const marks = useReadMarks()
-  // A list pushed over a chat stands on that chat, so Android's press steps back to it — the same
-  // move its bar's back control makes. At the app's entry there is nothing behind the list, so the
-  // press is the app's own, which is what the bar's drawer is there for.
   useEffect(() => (pushed ? setBackGuard(back()) : undefined), [pushed, back])
   // A room is made on a Host that advertises it, so the control is offered only where it can be used
   // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
@@ -233,9 +184,7 @@ function ChatList({
   const shown = useMemo(() => chatList(rows, query), [rows, query])
 
   // A chat is made first and the address moved after it, so back from it has the list to return to.
-  // The entry says which bot it is for, so the list keeps its lane while the new row loads. A list
-  // that stands over a chat takes its own entry instead of pushing one — the chat is made in the
-  // place a row picked from here would be, since either is a switch the reader made from this list.
+  // The entry says which bot it is for, so the list keeps its lane while the new row loads.
   const start = async () => {
     const chat = await beginChat(bot.id)
     navigate(`/c/${chat.id}`, { state: { bot: bot.id }, replace: pushed })
@@ -243,13 +192,6 @@ function ChatList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      {/*
-        The bot's bar, as the app draws it (ADR 0140): the pinned form, because this screen's content
-        scrolls under it. The drawer control on a phone — or, on a list pushed over a chat, the way
-        back to the chat it covers — the bot's picture and name as the screen's heading and the way
-        to its settings, and the routine control — the one screen a bot's list opens that is not a
-        chat (ADR 0139) — as the bar's own action.
-      */}
       <ChatHeader
         pinned
         showBot={false}
@@ -331,8 +273,6 @@ function ChatList({
  * screen says it too (ADR 0115, ADR 0126).
  *
  * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
- * It takes the list's entry rather than pushing one where the list stands over a chat, so switching
- * chats from a list the reader opened costs no rung of the history behind them.
  */
 export function BotChatItem({
   row,

@@ -4,9 +4,7 @@
  * A bot opens where the reader left it: the chat whose address was last on screen for that bot, kept
  * per bot in this device's storage alone and never synced, since it is where a reader was sitting
  * rather than a fact about the chat. A memory that no longer holds — the chat deleted, or one that
- * has come to belong to another bot — opens nothing at all, so the bot's list is what draws: the
- * newest chat would be a guess about where a reader was sitting, and the list is where a chat is
- * picked from.
+ * has come to belong to another bot — opens nothing at all, so the bot's list is what draws.
  */
 import { db, type Conversation } from "./db.ts"
 import { listsAsChat } from "./lists-as-chat.ts"

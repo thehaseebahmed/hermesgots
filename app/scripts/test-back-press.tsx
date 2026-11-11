@@ -35,7 +35,6 @@ import {
 const State = () => <p data-state>{JSON.stringify(useLocation().state ?? null)}</p>
 const state = () => find("[data-state]")?.textContent ?? ""
 
-/** The guard a screen the menu and a list both open registers: `back()` to the screen behind it. */
 function Stepping() {
   const { back } = useNav()
   useEffect(() => setBackGuard(back()), [back])
@@ -142,10 +141,6 @@ test("an open pop-up takes the press before any screen", async () => {
   }
 })
 
-/**
- * Takes back whatever arm a case left — even one that failed before its own second press — so the
- * app's exit is nobody's inheritance. Two presses always end unarmed: one arms, one leaves.
- */
 function disarm() {
   for (let press = 0; press < 2; press += 1) if (answerBackPress() === "leave") return
 }
@@ -198,10 +193,6 @@ test("a change of address clears the arm", async () => {
   }
 })
 
-/**
- * The shell over a chat, the way `test-bot-chats-pane.tsx` mounts it: the drawer is the shell's, so
- * what a press at the root opens is drawn by it and not by a spy.
- */
 const shellAt = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Path />
@@ -213,13 +204,8 @@ const shellAt = (id: string) => (
   </MemoryRouter>
 )
 
-/** The drawer's own dialog, as the shell opens it: the sheet whose title is the app's menu. */
 const DRAWER_DIALOG = '[role="dialog"][data-open] [data-slot="sheet-title"]'
 
-/**
- * A chat of a bot's on screen at the app's only entry: nothing behind it, and nothing in its bar
- * naming a screen of the app's, since the drawer opens those.
- */
 const chatAt = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Path />

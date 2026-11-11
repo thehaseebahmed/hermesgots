@@ -1,10 +1,4 @@
 /**
- * A bot opens where the reader left it: `/b/<bot>` takes its own entry into the chat this device last
- * had open there — a replacement, never a push, so the list is not left standing behind the chat —
- * and draws the list where there is nothing to open: a bot never opened, a memory whose chat has gone
- * or belongs to another bot, or a list the reader stepped back onto. The chat's own way out is
- * `scripts/test-back-press.tsx`'s.
- *
  * The memory is this device's own, so a case writes it where the app keeps it — the address of the
  * chat a bot was last in, under the bot's id — and never through the module that reads it.
  */
@@ -110,16 +104,10 @@ test("a bot opens the chat this device last had open there", async () => {
     await click(theBot())
     await until(async () => path() === "/c/a", "the chat the bot was left in")
     assert.deepEqual(rowIds(), [], "the list is not what was drawn")
-    // The bot's own entry is where the chat stands, so nothing — the list it would have opened
-    // from — is behind it and back from the chat is the app's.
     assert.equal(nav(), "REPLACE:/c/a", "taking the address's entry rather than pushing one")
   })
 })
 
-/**
- * The landing settled, either way: the list drew its rows, or the chat the memory holds took the
- * address. What the case then asserts is which one it was, so the red names the chat a run landed in.
- */
 const settled = () => rowIds().length > 0 || path().startsWith("/c/")
 
 test("a memory of another bot's chat draws the list, not a chat it guessed at", async () => {

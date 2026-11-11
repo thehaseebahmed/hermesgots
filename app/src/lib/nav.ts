@@ -15,13 +15,8 @@ export const stayHere = (current: boolean) =>
  */
 export const BACK_ON_LIST = { listed: true }
 
-/**
- * The state a chat gives the list its own control pushes: the chat the list stands over, which is the
- * row the list marks as the one open.
- */
 export const OPENED_CHAT = (id: string) => ({ open: id })
 
-/** The chat a pushed list stands over, read off the state `OPENED_CHAT` left with it. */
 export const openedChat = (state: unknown) => (state as { open?: string } | null)?.open
 
 /**
@@ -62,8 +57,7 @@ export function useNav() {
    * The guard a screen gives the back button where the menu and a list both open it: whatever
    * opened it stands behind it, so the press steps back to that; the menu opens it as the first
    * entry, where nothing is behind it, so the press is left to the app — which leaves, as back does
-   * from any top-level screen. The screen behind it is never named: a step back is the browser's
-   * own move, wherever it lands.
+   * from any top-level screen.
    */
   const back = useCallback(
     () => () => {

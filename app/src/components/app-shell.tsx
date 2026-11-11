@@ -196,8 +196,6 @@ export function AppShell({ children }: { children?: ReactNode }) {
   useBubbleMirror()
   useBubbleTakeaways()
   const [open, setOpen] = useState(false)
-  // The drawer is the app's menu: a header's own control opens it, and so does a press at the app's
-  // edge, which the shell hands the app's native side here. One opener, so the two can't drift.
   const openDrawer = useCallback(() => setOpen(true), [])
   useEffect(() => setMenuOpener(openDrawer), [openDrawer])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
