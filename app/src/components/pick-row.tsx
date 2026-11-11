@@ -12,7 +12,7 @@
  * what its rows are, and a row that carried its own mode could put `role="option"` inside one.
  * A row with no group is an `open` row: the only promise a list can make without neighbours.
  */
-import { createContext, useContext, type ReactNode } from "react"
+import { createContext, useContext, type CSSProperties, type ReactNode } from "react"
 import { CheckIcon, ChevronRightIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,9 @@ export function PickGroup({
   surface = "bare",
   heading,
   label,
+  id,
   className,
+  style,
   children,
 }: {
   mode: PickMode
@@ -40,16 +42,22 @@ export function PickGroup({
   heading?: string
   /** What the list is called where the heading would name the wrong thing. */
   label?: string
+  /** The list's own id, for the field that points at its options. */
+  id?: string
   /** Layout only: a scroll, a max height, a gap. */
   className?: string
+  /** The one thing a class cannot say: a room measured in pixels. */
+  style?: CSSProperties
   children: ReactNode
 }) {
   const plate = surface === "plate"
   const role = mode === "option" ? "listbox" : mode === "choose" ? "radiogroup" : undefined
   const list = (
     <ul
+      id={id}
       role={role}
       aria-label={label ?? heading}
+      style={style}
       className={cn(
         plate && "flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1",
         className,
