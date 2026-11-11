@@ -1131,3 +1131,49 @@ test("a question Hermes asks with its skip hint is found in the call that asked 
   assert.equal(state.questionSet?.length, 3, "the card holds the call's three questions")
   assert.equal(questionAt(state.questionSet!, state.waiting!.question), 0, "on the first page")
 })
+
+test("between two questions of one call, the one just answered holds the card's place", () => {
+  // Hermes settles an answer and asks the call's next question a moment later: nothing waits in
+  // between, and the composer would stand there for that moment.
+  let state = play([
+    { event: "tool.started", run_id: "r", tool: "clarify", tool_call_id: "call_1" } as RunEvent,
+    askedLive("p1", "Which colour?"),
+  ])
+  state = reduce(state, { type: "transcript", rows: LIVE_CALL })
+  const settle = (prompt: string) =>
+    ({
+      event: "clarify.settled",
+      run_id: "r",
+      prompt_id: prompt,
+      execution_generation: 1,
+    }) as RunEvent
+  const settled = reduce(state, { type: "run", event: settle("p1") })
+  assert.equal(settled.waiting, undefined, "nothing waits")
+  assert.equal(settled.between?.promptId, "p1", "the answered question holds the place")
+  const next = reduce(settled, { type: "run", event: askedLive("p2", "Which size?") })
+  assert.equal(next.waiting?.promptId, "p2")
+  assert.equal(next.between, undefined, "the next question takes it")
+
+  // The answer's own response landing first holds it the same way.
+  const answered = reduce(state, {
+    type: "answered",
+    promptId: "p1",
+    answer: { question: "Which colour?", choicesOffered: ["Red", "Blue"], value: "Blue" },
+  })
+  assert.equal(answered.between?.promptId, "p1")
+
+  // The call's last question has nothing to hold the place for.
+  const last = reduce(reduce(state, { type: "run", event: askedLive("p3", "Any notes?") }), {
+    type: "run",
+    event: settle("p3"),
+  })
+  assert.equal(last.between, undefined, "the last question leaves the composer")
+
+  // A run that ends lets go, and so does the page's own wait running out.
+  assert.equal(
+    reduce(settled, { type: "run", event: { event: "run.completed", run_id: "r" } as RunEvent })
+      .between,
+    undefined,
+  )
+  assert.equal(reduce(settled, { type: "between-lapsed" }).between, undefined)
+})

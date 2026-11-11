@@ -86,6 +86,13 @@ export interface ThreadState {
    */
   answeredPrompts?: string[]
   /**
+   * The question just answered, while its call still has questions after it: Hermes settles an
+   * answer and asks the next a moment later, and for that moment nothing waits. The card holds its
+   * place with this rather than the composer standing in for it, until the next question, the run's
+   * end or the page's own wait (`between-lapsed`) lets it go.
+   */
+  between?: Waiting
+  /**
    * The results this page wrote onto calls the host's stream carries none for: a clarify's answer,
    * which Hermes serves with an empty preview and writes whole only into the transcript. Keyed by
    * the call, so an answer stands wherever that call is drawn from.
@@ -171,6 +178,8 @@ export type ThreadEvent =
       answer?: { question: string; choicesOffered: string[] | null; value: string }
     }
   | { type: "ended" }
+  /** The question held between two prompts waited long enough: the composer comes back. */
+  | { type: "between-lapsed" }
   /**
    * The host names no run on this session: one it still holds a prompt for is listed there, so the
    * prompt this page draws for `run` has settled without it — answered or stopped from another
@@ -623,6 +632,13 @@ function sameQuestions(a: ClarifyQuestion[], b?: ClarifyQuestion[]): boolean {
   )
 }
 
+/** The question to hold the card's place with once `gone` leaves it: one with more of its call after it. */
+function heldBetween(state: ThreadState, gone: Waiting | undefined): Waiting | undefined {
+  if (gone?.kind !== "question" || !state.questionSet) return undefined
+  const at = questionAt(state.questionSet, gone.question)
+  return at >= 0 && at < state.questionSet.length - 1 ? gone : undefined
+}
+
 /** What a live event says the run is waiting on, if it says anything. */
 function waitingAfter(state: ThreadState, event: RunEvent): Waiting | undefined {
   const waiting = state.waiting
@@ -696,6 +712,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         // question must not go with the socket. Only the turn's own end, an answer given here or the
         // host's `*.settled` event takes a wait away.
         waiting: done ? undefined : state.waiting,
+        between: done ? undefined : state.between,
         ...(done
           ? { questionSet: undefined }
           : { questionSet: questionsFor(state, state.waiting, rows) }),
@@ -803,7 +820,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "waiting": {
       const { waiting } = event
       if (readChangesNothing(state, waiting)) return state
-      return { ...state, waiting, questionSet: questionsFor(state, waiting) }
+      return { ...state, waiting, between: undefined, questionSet: questionsFor(state, waiting) }
     }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
@@ -811,7 +828,9 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The stream is over, however it ended, so the thread is no longer held by it. What the turn
       // was comes from the transcript, which a later read may supply if the one for this end was
       // superseded.
-      return { ...state, running: false }
+      return { ...state, running: false, between: undefined }
+    case "between-lapsed":
+      return state.between ? { ...state, between: undefined } : state
     case "gone":
       // Only the run this page was following can have settled that way: a wait raised since belongs
       // to another run, and a `gone` still in flight from an earlier look is not about it.
@@ -819,6 +838,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         ...state,
         waiting: undefined,
+        between: undefined,
         questionSet: undefined,
         answeredPrompts: undefined,
         settled: settledWith(state),
@@ -850,6 +870,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         ...(gone
           ? {
               waiting: undefined,
+              between: heldBetween(state, gone),
               settled: settledWith(state),
               answeredPrompts: [...(state.answeredPrompts ?? []), gone.promptId],
             }
@@ -867,6 +888,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           ? questionsFor(state, waiting)
           : state.questionSet
       const answeredPrompts = ended ? undefined : state.answeredPrompts
+      // A settle that took the question off leaves it holding the card's place while its call has
+      // more to ask; any prompt raised, or the run's end, takes that place.
+      const between =
+        waiting || ended
+          ? undefined
+          : state.waiting && !waiting
+            ? heldBetween(state, state.waiting)
+            : state.between
       // A prompt the stream says is settled is not raised again by a status read still carrying it.
       const settled =
         SETTLED.includes(event.event.event) && event.event.prompt_id
@@ -893,10 +922,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         moved === held &&
         sameSettled(settled, state.settled) &&
         questionSet === state.questionSet &&
-        answeredPrompts === state.answeredPrompts
+        answeredPrompts === state.answeredPrompts &&
+        between === state.between
       )
         return state
-      return { ...state, waiting, settled, live: moved, questionSet, answeredPrompts }
+      return { ...state, waiting, settled, live: moved, questionSet, answeredPrompts, between }
     }
     case "failed":
       // What this page could not read is not what the host settled.
