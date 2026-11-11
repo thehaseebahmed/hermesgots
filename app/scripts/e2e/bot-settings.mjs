@@ -42,6 +42,36 @@ const openMenu = async (page, profileId) => {
 }
 
 /**
+ * The banner's icon on its text: the alert centres the icon in the rows the text takes rather than
+ * lining it up with the first line, and that is a fact only a browser with layout can measure
+ * (ADR 0019). The banner's words take two lines at both widths the flow runs, so the centres are
+ * compared where the text is taller than one line: a pixel apart at most — the icon spans the text's
+ * row and the empty one under it, so half the grid's 2px row gap is the one pixel — and both numbers
+ * are printed, so a regression reads as a number.
+ */
+const assertBannerCentred = async (list, words) => {
+  const banner = list.locator('[data-slot="alert"]').filter({ hasText: words })
+  assert.equal(await banner.count(), 1, "the out-of-date banner is one alert")
+  const { icon, text } = await banner.evaluate((element) => {
+    const middle = (node) => {
+      if (!node) return null
+      const box = node.getBoundingClientRect()
+      return box.top + box.height / 2
+    }
+    return {
+      icon: middle(element.querySelector(":scope > svg")),
+      text: middle(element.querySelector('[data-slot="alert-description"]')),
+    }
+  })
+  assert.ok(icon !== null, "the banner draws its icon")
+  assert.ok(text !== null, "the banner draws its text")
+  assert.ok(
+    Math.abs(icon - text) <= 1,
+    `the banner's icon is centred on its text (${icon.toFixed(1)} against ${text.toFixed(1)})`,
+  )
+}
+
+/**
  * The bot's list of pages: drawn, wholly on screen, its rows there at both widths, and — the one
  * thing a browser is here for — the banner over them and a row's own words. Answers the list.
  */
@@ -56,11 +86,13 @@ const assertList = async (page, viewport) => {
     box.x >= -1 && box.x + box.width <= viewport.width + 1,
     `the list is on screen at ${viewport.width}px (${Math.round(box.x)}…${Math.round(box.x + box.width)})`,
   )
+  const banner = await bannerOf(page)
   assert.equal(
-    await list.getByText(await bannerOf(page), { exact: true }).count(),
+    await list.getByText(banner, { exact: true }).count(),
     1,
     "the list wears the out-of-date plugin's banner, in its own words",
   )
+  await assertBannerCentred(list, banner)
   for (const [segment, title] of PACES) {
     const row = list.locator(`[data-bot-page="${segment}"]`)
     await row.waitFor({ timeout: 15_000 })
@@ -118,21 +150,29 @@ const wide = async ({ page, profileId, shot }) => {
   await settled(page)
   assert.equal(await menuRow(page).count(), 0, "the bot's list takes the Settings menu's pane")
   const list = await assertList(page, viewport)
-  const before = await list.boundingBox()
+  const top = await list.boundingBox()
   const kept = await list.elementHandle()
-  assert.ok(before && kept, "the list is a box and an element of its own")
+  assert.ok(top && kept, "the list is a box and an element of its own")
 
   const general = page.getByRole("heading", { level: 1, name: "General", exact: true })
   await general.waitFor({ timeout: 15_000 })
   const generalBox = await general.boundingBox()
   assert.ok(generalBox, "General's page has a box")
   assert.ok(
-    before.x + before.width <= generalBox.x + 1,
-    `General sits in the pane beside the list (list ends at ${Math.round(before.x + before.width)}, page starts at ${Math.round(generalBox.x)})`,
+    top.x + top.width <= generalBox.x + 1,
+    `General sits in the pane beside the list (list ends at ${Math.round(top.x + top.width)}, page starts at ${Math.round(generalBox.x)})`,
   )
   await shot("general")
 
-  await list.locator('[data-bot-page="models"]').click()
+  // The click's own scroll moves the list's box: the pane holds 1645px of rows in 768px, so reaching
+  // Models scrolls it 741px. The box the swap is measured from is taken with the row already in
+  // view, so what it reads afterwards is the swap's doing rather than the scroll's.
+  const models = list.locator('[data-bot-page="models"]')
+  await models.scrollIntoViewIfNeeded()
+  await settled(page)
+  const before = await list.boundingBox()
+  assert.ok(before, "the list has a box to hold its place by")
+  await models.click()
   await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models`, {
     timeout: 15_000,
   })
@@ -250,5 +290,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner and its icon centred on that banner's text; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
 )
