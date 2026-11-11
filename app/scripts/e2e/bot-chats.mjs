@@ -116,7 +116,12 @@ await flow(
           row: box(row),
           mark: box(mark),
           line: box(line),
-          words: { ...box(words), scroll: words.scrollWidth, client: words.clientWidth },
+          words: {
+            ...box(words),
+            said: words.textContent ?? "",
+            scroll: words.scrollWidth,
+            client: words.clientWidth,
+          },
         }
       }, href)
 
@@ -130,7 +135,7 @@ await flow(
 
     const long = () => boxesOf(`/c/${CHATS[0].id}`)
     await until(
-      async () => (await long())?.words.height === oneLine,
+      async () => (await long())?.words.said === LONG,
       20_000,
       "the long reply as a chat's line",
     )

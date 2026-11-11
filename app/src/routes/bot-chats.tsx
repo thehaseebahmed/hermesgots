@@ -154,7 +154,7 @@ function BotChatsList({ profileId, selected }: { profileId: string; selected?: s
         // The row says what the bot last said, and a question or an approval sits on a reply: a read
         // of the newest message that already is one answers both, and one that is the reader's own
         // asks for the reply above it.
-        const reply = newest && isReply(newest) ? newest : await newestMessage(chat.id, isReply)
+        const reply = !newest || isReply(newest) ? newest : await newestMessage(chat.id, isReply)
         return chatRowOf(chat, newest, reply)
       }),
     )

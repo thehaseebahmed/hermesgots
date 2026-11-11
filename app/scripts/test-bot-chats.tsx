@@ -342,11 +342,7 @@ test("the list holds every chat the bot has, so a pin and a chat past the bound 
   await seed(many)
   await mount(screen(), async () => {
     await until(async () => rowIds().length === many.length, "every chat the bot has")
-    assert.equal(
-      rowIds()[0],
-      "pinned-old",
-      "the pin lifts it above every chat newer than the bound",
-    )
+    assert.equal(rowIds()[0], "pinned-old", "the pin lifts it above every chat newer than the bound")
     assert.ok(
       wordsOf(rowOf("pinned-old")).includes("Still here"),
       "and a pinned chat keeps the line its own tail gives it",
@@ -432,8 +428,7 @@ test("the search narrows the rows to the chats whose title or line it finds", as
       "on the bar the list's floating controls stand on",
     )
     assert.ok(
-      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) &
-        Node.DOCUMENT_POSITION_FOLLOWING) !==
+      ((find("ul")?.compareDocumentPosition(toggle ?? null) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING) !==
         0,
       "with the rows above it",
     )
