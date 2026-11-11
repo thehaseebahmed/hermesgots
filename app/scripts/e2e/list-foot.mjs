@@ -210,6 +210,42 @@ async function driveLaptop({ page, profileId, until, shot }) {
   await shot("laptop")
 }
 
+/**
+ * A reader searching at a tablet's width widens the window: the bar takes the field over, and there is
+ * ever only one of them. A live resize is the browser's own event, so no DOM without layout hears it
+ * (ADR 0019). The words they typed do not cross with it: at this width the shell hands the list to its
+ * pane, so the list is mounted afresh — the same remount a reader gets today by widening a window at a
+ * bot's list, and the reason ADR 0145 says the field moves rather than the query surviving.
+ */
+async function driveCrossing({ page, profileId, until }) {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await page.goto(`${app}/b/${profileId}`)
+  await until(
+    async () => (await page.locator("[data-search-toggle]").count()) === 1,
+    30_000,
+    "the foot's circle",
+  )
+  await page.locator("[data-search-toggle]").click()
+  await until(async () => (await page.locator("#chats-search").count()) === 1, 5_000, "the foot's field")
+  await page.locator("#chats-search").fill("zzz-not-a-chat")
+  await page.setViewportSize({ width: 1280, height: 900 })
+  // The field moving is the sign the screen has taken the width in: the foot's has gone and the bar's
+  // stands in the header, one of the two and never both.
+  await until(
+    async () =>
+      (await page.locator('header [data-slot="input-group"]:has(#chats-search)').count()) === 1,
+    5_000,
+    "the bar to take the search over",
+  )
+  assert.equal(await page.locator("#chats-search").count(), 1, "one field, not two")
+  assert.equal(await page.locator("[data-search-toggle]").count(), 0, "with no circle left in the foot")
+  assert.equal(
+    await page.locator("#chats-search").inputValue(),
+    "",
+    "and the list is mounted afresh: the shell handed it to its pane, so the typed words went with the mount",
+  )
+}
+
 // Both widths, and the phone in the dark as well: the foot's surfaces are theme tokens, and a muted X
 // that reads as disabled on one theme is the risk the plan names.
 for (const { width, dark } of [
@@ -232,6 +268,7 @@ for (const dark of [false, true]) {
     dark,
   })
 }
+await flow("list-foot-crossing", driveCrossing, { viewport: { width: 1024, height: 768 } })
 
 pass(
   "the foot's New opens two pills above its button, its search becomes a bar as tall as it on a phone and a tablet, and from a laptop the field stands in the bar above the pills",

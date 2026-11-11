@@ -7,8 +7,10 @@ is a tap spent on a field that has room to be there always, and the list has no 
 **So from 1280px up — the app's `useXLarge`, its own name for a laptop — the foot draws no search at
 all, and the field stands in the bar's pinned slot, above the filter pills; below that width the foot's
 circle and its field are exactly what they were.** The screen decides which of the two exists and tells
-the foot whether it offers a search at all, so `#chats-search` is never in the tree twice, and the words
-a reader typed move between the two with them rather than being cleared.
+the foot whether it offers a search at all, so `#chats-search` is never in the tree twice. The words a
+reader typed belong to the screen rather than to either field, so the move itself clears nothing — but a
+crossing that also hands the list to the shell's pane mounts the list afresh, and a half-typed search
+goes with that mount, which is what widening a window at this address already did.
 
 **The pills filter the rows.** All, Unread, Chats, Rooms and Routines stand under the search in the same
 pinned slot, at every width, as the app's shared `Chip`s; the one pressed is remembered on this device,
