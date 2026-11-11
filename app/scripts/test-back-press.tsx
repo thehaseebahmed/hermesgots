@@ -16,6 +16,7 @@ import { SettingsPage } from "@/routes/settings"
 
 import {
   Path,
+  absent,
   atDepth,
   atWidth,
   botProfile,
@@ -238,11 +239,7 @@ test(
         await act(async () => {
           assert.equal(answerBackPress(), "armed", "the press still arms the exit")
         })
-        assert.equal(
-          find(DRAWER_DIALOG),
-          null,
-          "and offers no drawer over the list the sidebar already draws",
-        )
+        absent(DRAWER_DIALOG, "and offers no drawer over the list the sidebar already draws")
       })
     } finally {
       disarm()
