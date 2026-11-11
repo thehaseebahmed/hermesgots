@@ -183,7 +183,7 @@ export function ItemRow({
           )}
         </span>
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
           {badge}

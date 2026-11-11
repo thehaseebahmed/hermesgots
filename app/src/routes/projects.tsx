@@ -456,7 +456,7 @@ function ProjectItem({
       link={{ to: `/projects/${key}`, replace: Boolean(pane?.open), state: { project } }}
     >
       {project.description && (
-        <span className="truncate text-sm text-muted-foreground">{project.description}</span>
+        <span className="mt-1 truncate text-sm text-muted-foreground">{project.description}</span>
       )}
     </ItemRow>
   )
