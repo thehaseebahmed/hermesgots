@@ -20,7 +20,6 @@ import {
   click,
   find,
   findAll,
-  findText,
   mount,
   Path,
   path,
@@ -46,7 +45,7 @@ const screen = () => (
  * disabled until then, and a tap on a disabled control would prove nothing.
  */
 async function newOption() {
-  const at = () => find('[aria-label="Chat"] button') as HTMLButtonElement | null
+  const at = () => find('[aria-label="Recent"] button') as HTMLButtonElement | null
   await until(async () => Boolean(at()), "the chat list")
   await until(async () => !at()?.disabled, "the share ready to send")
   return at()!
@@ -325,7 +324,7 @@ test("a share into a chat this device holds sends into it, and a streaming one w
     await mount(screen(), async () => {
       // The bot's chats stand under the new-chat option, so the one that is streaming is a row.
       const row = () =>
-        findAll('[aria-label="Chat"] button').find((one) =>
+        findAll('[aria-label="Recent"] button').find((one) =>
           wordsOf(one).startsWith("A chat"),
         ) ?? null
       await until(async () => Boolean(row()), "the chat's own row")

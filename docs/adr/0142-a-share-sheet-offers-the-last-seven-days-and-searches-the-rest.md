@@ -32,7 +32,7 @@ lists nowhere (ADR 0113), and a session the reader has thrown away is not a plac
 with no way out would be a trap: the chat the reader shared into last month is exactly what a share
 sheet is for. So the field matches titles through the matcher the app's lists already use
 (`filterByFuzzy`), and a query replaces the window with every match, in full, newest first, saying
-"No chats match." where nothing does. A search that stopped at the twenty-five would refuse rows the
+"Nothing matches." where nothing does. A search that stopped at the twenty-five would refuse rows the
 sheet had just shown, which no reader would understand.
 
 **A room is a row of the same list, and is sent through the room's own store.** The rooms whose roster
@@ -76,5 +76,5 @@ sent.
 - The window and the cap read the record's clock, not the newest message's, so a chat whose last message
   landed from another device moves into the week when its record does.
 - The search at the foot and the rooms as rows are the rest of this decision and land behind it in the
-  same change; until they do, a share into a room has no row here, and the rows past the twenty-five are
-  not drawn at all.
+  same change. The search is how a row past the twenty-five is reached; until the rooms land, a share
+  into a room has no row here.

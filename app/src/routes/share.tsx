@@ -7,6 +7,7 @@ import { ChevronDownIcon, CodeXmlIcon, LinkIcon, MessageCircleIcon, PlusIcon } f
 import { Banner } from "@/components/banner"
 import { BotCard } from "@/components/bot-card"
 import { AttachmentTile } from "@/components/chat/attachments"
+import { SearchField } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,7 +26,7 @@ import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
-import { recentTargets, SHARE_FIRST, type ShareTarget } from "@/lib/share-list"
+import { recentTargets, searchTargets, SHARE_FIRST, type ShareTarget } from "@/lib/share-list"
 import { beginChat, useNow } from "@/lib/threads"
 
 /** No files at all, kept as one array so a share with nothing read yet doesn't rebuild on render. */
@@ -107,6 +108,7 @@ export function SharePage() {
   const [picked, setPicked] = useState<string>()
   const profile = bots?.find((bot) => bot.id === (picked ?? active)) ?? bots?.[0]
   const [showAll, setShowAll] = useState(false)
+  const [query, setQuery] = useState("")
   const [note, setNote] = useState("")
   const [removed, setRemoved] = useState<string[]>([])
   const [read, setRead] = useState<{ share: string; files: Attachment[] } | undefined>(undefined)
@@ -128,6 +130,7 @@ export function SharePage() {
     setNote("")
     setRemoved([])
     setShowAll(false)
+    setQuery("")
     setSending(false)
   }
 
@@ -160,7 +163,15 @@ export function SharePage() {
     () => (conversations ? recentTargets(conversations, now) : undefined),
     [conversations, now],
   )
-  const shown = showAll ? targets : targets?.slice(0, SHARE_FIRST)
+  // A query is the search's, and it draws every match: the ten rows and the window's twenty-five are
+  // what the field leads out of, not its edge. A blank field is no query at all, so the window is
+  // drawn again with its Show more.
+  const searching = Boolean(query.trim())
+  const matches = useMemo(
+    () => (searching && conversations ? searchTargets(conversations, query) : undefined),
+    [conversations, query, searching],
+  )
+  const shown = matches ?? (showAll ? targets : targets?.slice(0, SHARE_FIRST))
 
   const pickBot = (id: string) => {
     setPicked(id)
@@ -309,9 +320,9 @@ export function SharePage() {
           </section>
 
           <section className="flex flex-col gap-2">
-            <SectionLabel>Chat</SectionLabel>
+            <SectionLabel>Recent</SectionLabel>
             <div
-              aria-label="Chat"
+              aria-label="Recent"
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
               {option(
@@ -324,7 +335,7 @@ export function SharePage() {
               {shown?.map((target) =>
                 option(target.id, mark(target.kind), target.title, formatRelative(target.at, now)),
               )}
-              {!showAll && (targets?.length ?? 0) > SHARE_FIRST && (
+              {!searching && !showAll && (targets?.length ?? 0) > SHARE_FIRST && (
                 <button
                   type="button"
                   onClick={() => setShowAll(true)}
@@ -335,7 +346,22 @@ export function SharePage() {
                 </button>
               )}
             </div>
+            {searching && shown?.length === 0 && (
+              <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>
+            )}
           </section>
+        </div>
+        {/*
+          The search at the foot. The sheet's content is its scroller, so this stays on screen while
+          the rows pass under it, and `mt-auto` keeps it at the foot of a sheet taller than the list.
+          The pop-up already reserves the phone's safe area below the scroller, so this adds only its
+          own breathing room.
+        */}
+        <div
+          data-slot="share-search"
+          className="sticky bottom-0 z-10 mt-auto shrink-0 bg-popover px-6 pt-4 pb-3"
+        >
+          <SearchField value={query} onChange={setQuery} label="Search chats and sessions" />
         </div>
       </PopupContent>
     </Popup>
