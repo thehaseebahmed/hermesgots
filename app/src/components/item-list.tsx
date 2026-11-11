@@ -148,34 +148,42 @@ export function ItemRow({
   )
   const body = (
     <>
-      <span className="relative mt-0.5 shrink-0">
-        {avatar ?? (
-          <span
-            className={cn(
-              "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
-              tone ? TONES[tone] : TONES.success,
-            )}
-          >
-            {icon}
-          </span>
-        )}
-        {botId && (
-          <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-full bg-background ring-2 ring-background">
-            <Bot id={botId} className="size-[85%]" />
-          </span>
-        )}
-        {unread && (
-          <>
-            <span className="sr-only">New activity</span>
+      {/*
+        The mark's column is the icon disc's own height, and whatever stands in it is centred on that
+        column's axis. A row with a disc fills it; a row whose mark is smaller than a disc — a room's
+        cluster of faces — stands on the same centre line as every other row's icon rather than on the
+        column's top edge, which is where a mark of its own height would otherwise sit.
+      */}
+      <span data-slot="row-mark" className="mt-0.5 flex h-10 shrink-0 items-center">
+        <span className="relative">
+          {avatar ?? (
             <span
-              data-unread
-              aria-hidden
-              className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-info ring-2 ring-background"
-            />
-          </>
-        )}
+              className={cn(
+                "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
+                tone ? TONES[tone] : TONES.success,
+              )}
+            >
+              {icon}
+            </span>
+          )}
+          {botId && (
+            <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-full bg-background ring-2 ring-background">
+              <Bot id={botId} className="size-[85%]" />
+            </span>
+          )}
+          {unread && (
+            <>
+              <span className="sr-only">New activity</span>
+              <span
+                data-unread
+                aria-hidden
+                className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-info ring-2 ring-background"
+              />
+            </>
+          )}
+        </span>
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
           {badge}
@@ -183,6 +191,7 @@ export function ItemRow({
         </span>
         {line && (
           <span
+            data-slot="row-line"
             className={cn(
               "flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground",
               warn && "text-warning",
