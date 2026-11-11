@@ -80,6 +80,7 @@ import {
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import {
   foldedOf,
+  heldOnPrompt,
   threadTurns,
   turnsOf,
   wantsCommandWords,
@@ -182,7 +183,7 @@ const TurnView = memo(
   }) {
     const byPart = cardsByPart(turn, cards)
     return (
-      <section className="space-y-3">
+      <section data-turn className="space-y-3">
         {turn.wake ? (
           <p data-wake className="text-sm text-muted-foreground">
             {turn.done ? "Resumed after " : "Resuming… "}
@@ -1185,6 +1186,7 @@ export function ChatNextThread({
     readFor.current = unread
     void catchUp()
   }, [unread, server, key, session, catchUp])
+  const readForWait = useRef<string | undefined>(undefined)
 
   // A server that streams its changes says when this session moved, so the timer below only has to
   // be a safety net while the stream is open.
@@ -1219,6 +1221,7 @@ export function ChatNextThread({
         // A followed run's stream is the read — but an away page has to reach its transcript read,
         // which is what takes the words back.
         if (streaming.current && !away) {
+          const waiting = now.current.waiting
           if (starting && server && key && session)
             void readAgents({ server, key }, session, alive.current.signal).then(
               (listed) => listed && dispatch({ type: "agents", agents: listed }),
@@ -1227,15 +1230,20 @@ export function ChatNextThread({
           // sends a prompt's request only to the subscribers it has at the time, so one raised while
           // the stream was being rejoined reaches nobody, and the page would sit on Waiting until the
           // chat was opened again. Ask the run's status; the reading set keeps a settled prompt off.
-          if (now.current.busy && !now.current.waiting && followingRun.current && server && key)
+          if (now.current.busy && !waiting && followingRun.current && server && key)
             if (Date.now() - lastEvent.current > QUIET_RUN_MS)
               void readRun({ server, key }, followingRun.current).then(
                 (prompt) => prompt && dispatch({ type: "waiting", waiting: prompt }),
               )
-          // A run held on a prompt writes nothing more, so its turn is the host's rows: read them,
-          // as a busy chat does, so a page that joined the run before they landed takes them. The
-          // stream is the turn while the run works, and its rows land when it ends.
-          if (now.current.waiting) void catchUp()
+          // The rows are read once per wait — and again while a read has not landed, since a wait
+          // can stand for hours and the rows it brings arrive once.
+          if (
+            heldOnPrompt(store.get()) &&
+            (readForWait.current !== waiting?.promptId || store.get().status === "failed")
+          ) {
+            readForWait.current = waiting?.promptId
+            void catchUp()
+          }
           return
         }
         // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are

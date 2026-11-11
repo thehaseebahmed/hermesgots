@@ -62,7 +62,7 @@ export interface ThreadState {
   unsent?: Unsent[]
   /** The turn this device is streaming, drawn over the transcript's until the host's replaces it. */
   live?: LiveTurn
-  /** This device has a turn running; while it does, what the host's transcript says waits. */
+  /** A run is attached: the stream draws its turn, except while it waits, where the rows do. */
   running: boolean
   /**
    * Draws each progress reminder a reply would drop as a row of its own (ADR 0068). This page's own
@@ -369,6 +369,34 @@ const copyIsAhead = (copy: Turn | undefined, live: LiveTurn) =>
   live.replaces && copy !== undefined && reach(copy).calls >= reach(live.turn).calls
 
 /**
+ * Whether a run is attached and held on a prompt: it has asked, and the answer has not come. A held
+ * run writes nothing more, so the transcript's rows are its turn, and a read of them is taken.
+ */
+export const heldOnPrompt = (state: ThreadState) => Boolean(state.running && state.waiting)
+
+/**
+ * The streamed turn on the copy the rows now hold: the rows' turn, carrying the work, the thinking,
+ * the timing and the cost the stream drew, and no floor on the replay — the rows are the turn now.
+ */
+function anchored(live: LiveTurn | undefined, copy: Turn | undefined): LiveTurn | undefined {
+  if (!live) return undefined
+  if (!copy || copy.row === live.turn.row)
+    return live.replay ? { ...live, replay: undefined } : live
+  return {
+    ...live,
+    turn: {
+      ...copy,
+      parts: withCarried(live.turn, copy).parts,
+      ...(live.turn.pendingThought ? { pendingThought: live.turn.pendingThought } : {}),
+      ...(live.turn.timing ? { timing: live.turn.timing } : {}),
+      ...(live.turn.stats ? { stats: live.turn.stats } : {}),
+    },
+    replaces: true,
+    replay: undefined,
+  }
+}
+
+/**
  * The turns the screen draws: the transcript's, with the streamed one laid over the last. A run
  * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
  * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
@@ -651,12 +679,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The call's row is the only place the rest of its questions survive, so it is read for a prompt
       // that names one, even mid-stream.
       const found = questionsFor(state, state.waiting, event.rows)
-      // A run held on a prompt writes nothing more, so its rows are the turn as far as the host has
-      // it: a read that lands while it waits is taken, and the run stays attached, because a read
-      // ends no wait. A run at work keeps the stream as its turn — its rows are the turn's partial
-      // writing — and they land when the turn ends, which is also the read that ends the follow.
-      const heldOnPrompt = Boolean(state.running && state.waiting && !event.final)
-      if (state.running && !event.final && !heldOnPrompt) {
+      // A run at work keeps the stream as its turn — its rows are the turn's partial writing — so a
+      // read in between only words the calls it drew.
+      const midRun = state.running && !event.final
+      const held = midRun && heldOnPrompt(state)
+      if (midRun && !held) {
         // A call the stream drew as a count of commands is worded from its row, mid-stream too.
         const worded = state.live && withCommandWords(state.live, event.rows)
         const next = worded && worded !== state.live ? { ...state, live: worded } : state
@@ -668,30 +695,16 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       if (!rows) return state
       const partial = event.more ?? state.partial
       const last = foldedOf(rows, { ...state, partial }).at(-1)
-      if (heldOnPrompt) {
-        // The streamed turn moves onto the copy the rows now hold. A turn the transcript did not
-        // have is the run's own, and the parts the stream drew are that turn's; and the floor the
-        // join put on the replay goes with it, since the rows are the turn now — `drawn` weighs the
-        // two copies against each other while the wait stands, so the fuller one is what shows.
-        const live = state.live
-        const turn = !live
-          ? undefined
-          : last && last.row !== live.turn.row
-            ? {
-                ...live,
-                turn: { ...last, parts: live.turn.parts },
-                replaces: true,
-                replay: undefined,
-              }
-            : { ...live, replay: undefined }
-        return {
-          ...state,
-          rows,
-          partial: partial ? true : undefined,
-          live: turn,
-          questionSet: found ?? state.questionSet,
-        }
-      }
+      const live = held ? anchored(state.live, last) : undefined
+      // A read that brought nothing is no change: the store writes nothing and nothing folds.
+      if (
+        held &&
+        rows.length === state.rows.length &&
+        rows.at(-1)?.id === state.rows.at(-1)?.id &&
+        live === state.live &&
+        (!found || sameQuestions(found, state.questionSet))
+      )
+        return state
       const done = last?.done
       // What the turn this device watched cost goes with the row that opened it, which the
       // transcript has now written.
@@ -712,9 +725,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         lastRow: last?.row,
         partial: partial ? true : undefined,
         stats,
-        running: false,
-        // The host's own rows are the turn now, in place of the copy this page streamed.
-        live: undefined,
+        running: held,
+        live,
         // A turn that finished waits on nothing. A whole read of a thread whose last turn is still
         // unfinished says nothing about a prompt the run holds: a stream that dies mid-wait (a phone
         // asleep, a host dropping its subscriber) ends the follow without ending the run, and the

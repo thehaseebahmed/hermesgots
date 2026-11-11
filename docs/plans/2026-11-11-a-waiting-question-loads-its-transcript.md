@@ -84,12 +84,26 @@ sequenceDiagram
   copy; a wait writes nothing more, so the rows are complete as far as they go.
 - **The page had to read at all.** Made by the agent, from the red run: while a followed run's stream
   is open the poll reads the run's status and nothing else, so the read the reducer was waiting for
-  never happened. A run held on a prompt is quiet — that is what held means — so its poll reads the
-  rows at the busy pace it already keeps, and stops when the answer takes the prompt away.
+  never happened.
+- **That read is once per prompt, not once a tick.** Made by the agent, from the review pass: a
+  question can stand for hours, so a read per tick would ask the host for a transcript nobody is
+  writing — 2 s apart, three requests each, for as long as nobody answers. The page reads when the
+  wait is learned, and again only while the last read has not landed (`status === "failed"`), which
+  is the failed-open case this change is about. `scripts/test-chat-next-waiting.tsx` holds it to one
+  read over a second ("a wait is not asked for its rows on every tick": 49 reads before the fix).
+- **The held read keeps every rule the shared body holds.** Made by the agent, from the review: the
+  branch first copied the body's `rows`/`partial` handling and lost two of its invariants — a finished
+  turn must still take the wait away, and a read is not a reason to leave the follow. The held case is
+  now the same return, with `running` and `live` chosen by it.
+- **A read that brings nothing new is no change.** Made by the agent, from the review: a fresh state
+  per read would write the device's record and re-fold the thread every time a page it already held
+  came back. The reducer returns the state it has, and `drawn`'s copy of the turn keeps the parts,
+  thinking, timing and cost the stream drew.
 - **The harness counted the prompt's card as a turn.** Made by the agent: a question's card and an
   approval's are `<section>`s in the thread's own column (`main`), so `device.turns()` read the form
-  as a third, empty turn and the scenario looked like it drew a turn too many. The helper now leaves
-  out the prompt's sections; no other test changes, since none asserts with a prompt up.
+  as a third, empty turn and the scenario looked like it drew a turn too many. One selector now says
+  what a turn is, for `turns`, `sections` and `wakes`; no other test changes, since none asserts with
+  a prompt up.
 - **The regression belongs at the component tier.** Made by the agent, per ADR 0019: the rule is
   about which rows the thread takes, which a page over the fake host can fail for that reason alone.
 

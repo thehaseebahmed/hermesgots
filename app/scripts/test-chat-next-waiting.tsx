@@ -15,6 +15,7 @@ import {
   openDevice,
   sendFrom,
   showsEverything,
+  turn,
   wait,
   type Device,
   type Host,
@@ -212,26 +213,35 @@ test.describe("a run already waiting when the chat opens", () => {
     })
   })
 
-  /**
-   * A phone coming back to a session whose run waits: the newest page is asked for, and the link
-   * fails it. The page joins the run from its status anyway — that is how the form comes back — and
-   * the read that answers afterwards has the turn the device missed. A run held on a prompt writes
-   * nothing more, so those rows are the turn, and the thread must take them rather than holding the
-   * transcript it opened with until the question is answered.
-   */
+  test("a wait is not asked for its rows on every tick", async () => {
+    const host = setUp("q-quiet")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    await withDevice(openDevice(host), async (phone) => {
+      await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question's form")
+      const read = host.asked.transcript
+      await wait(1_000)
+      const asked = host.asked.transcript - read
+      assert.ok(asked <= 1, `the held run is read once, not once a tick (${asked} reads)`)
+      assert.deepEqual(questionOf(phone), asking, "and the form stands")
+    })
+  })
+
+  /** The link fails the read the open makes, so the turn can only arrive on a later one. */
   test("a read that failed at open still lands the turn that asked", async () => {
     const host = setUp("q-stale")
-    let database
-    // A code session's shape: a turn with a lot of work in it, seen by the device.
-    await withDevice(openDevice(host), async (before) => {
-      database = before.database
-      const first = await sendFrom(before, host, "how much room is /var/log taking?")
-      for (let at = 0; at < 6; at++) first.tool("terminal", `du /var/log/${at}`, '{"exit_code": 0}')
-      first.finish("Here's where the space is going.")
+    const database = await withDevice(openDevice(host), async (before) => {
+      await turn(
+        before,
+        host,
+        "how much room is /var/log taking?",
+        "Here's where the space is going.",
+        6,
+      )
       await showsEverything(before, host, "the first turn, as the device saw it")
+      return before.database
     })
 
-    // Away: the host works the next turn and stops on a question.
     const run = host.startElsewhere("ask me which logs count as old")
     run.tool("terminal", "du -sh /var/log/*", '{"exit_code": 0}')
     run.ask(TEA)
