@@ -142,7 +142,8 @@ export function SharePage() {
   const profile = bots.find((bot) => bot.id === picked) ?? bots[0]
   const [showAll, setShowAll] = useState(false)
   const [query, setQuery] = useState("")
-  const [note, setNote] = useState("")
+  // The sender's own text opens the note: it is the message's words, and the sheet's one field for them.
+  const [note, setNote] = useState(share?.text ?? "")
   const [removed, setRemoved] = useState<string[]>([])
   const [read, setRead] = useState<{ share: string; files: Attachment[] } | undefined>(undefined)
   const readStarted = useRef<string | undefined>(undefined)
@@ -160,7 +161,7 @@ export function SharePage() {
   const [shareId, setShareId] = useState(share?.id)
   if (share && share.id !== shareId) {
     setShareId(share.id)
-    setNote("")
+    setNote(share.text ?? "")
     setRemoved([])
     setShowAll(false)
     setQuery("")
@@ -436,11 +437,6 @@ export function SharePage() {
                 </span>
               </div>
             ))}
-            {share.text && (
-              <blockquote className="line-clamp-6 rounded-2xl bg-muted/60 px-4 py-3 text-[15px] whitespace-pre-wrap">
-                {share.text}
-              </blockquote>
-            )}
             <Textarea
               value={note}
               onChange={(event) => setNote(event.target.value)}
@@ -451,15 +447,11 @@ export function SharePage() {
           </section>
 
           <section className="flex flex-col gap-2">
-            <SectionLabel>Send to</SectionLabel>
+            {/* A query replaces the week with what it matches, so the heading says which list this is. */}
+            <SectionLabel>{searching ? "Matches" : "Recent"}</SectionLabel>
             {profile && <BotPicker profile={profile} onPick={(bot) => pickBot(bot.id)} />}
             {imagesBlocked && <Banner>{profile?.name}'s model can't take images.</Banner>}
             {!configured && profile && <Banner>{profile.name} isn't set up yet.</Banner>}
-          </section>
-
-          <section className="flex flex-col gap-2">
-            {/* A query replaces the week with what it matches, so the heading says which list this is. */}
-            <SectionLabel>{searching ? "Matches" : "Recent"}</SectionLabel>
             <div
               aria-label={searching ? "Matches" : "Recent"}
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
@@ -498,6 +490,8 @@ export function SharePage() {
               <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>
             )}
           </section>
+
+
         </div>
         {/*
           The search at the foot. The sheet's content is its scroller, so this stays on screen while

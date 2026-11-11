@@ -1,17 +1,14 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { ChevronDownIcon, PlusIcon } from "lucide-react"
+import { ChevronDownIcon } from "lucide-react"
 import { useMemo } from "react"
-import { useNavigate } from "react-router"
 
 import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { listEnabledProfiles, setActiveProfile, type Profile } from "@/lib/db"
@@ -30,7 +27,6 @@ export function BotPicker({
   profile: Profile
   onPick?: (bot: Profile) => void
 }) {
-  const navigate = useNavigate()
   const answering = useLiveQuery(listEnabledProfiles, [])
   const profiles = useMemo(
     () => [...(answering ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
@@ -75,11 +71,6 @@ export function BotPicker({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="min-h-11" onClick={() => navigate("/settings/bots?link=1")}>
-          <PlusIcon />
-          Link a bot
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

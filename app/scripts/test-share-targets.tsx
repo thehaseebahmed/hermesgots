@@ -300,6 +300,11 @@ test("the bot picker lists the bots by name and starts on the first, whatever wa
         ["Alpha", "Mango", "Zeta"],
         "listed by name",
       )
+      assert.equal(
+        findAll('[role="menuitem"]').filter((one) => wordsOf(one).includes("Link a bot")).length,
+        0,
+        "the menu is the bots and nothing else: linking one is Settings' own row",
+      )
       await click(findText('[role="menuitemradio"], [role="menuitem"]', "Zeta"))
       await until(async () => row("Zeta's own chat") !== null, "the picked bot's rows")
       assert.equal(row("Alpha's own chat"), null, "the list follows the bot picked")
@@ -422,7 +427,10 @@ test("tapping a room uploads each file to its store and sends the note as one me
     receiveShare(toShare({ text: "Read this later", files: notes(1) }))
     await mount(screen(), async () => {
       await until(async () => row("Weekly sync") !== null, "the room's row")
-      await type(find('textarea[aria-label="Note"]'), "Have a look")
+      const note = find('textarea[aria-label="Note"]') as HTMLTextAreaElement | null
+      assert.equal(note?.value, "Read this later", "the sender's text opens the note")
+      // What the reader writes joins it: the field is the message's only account of the words.
+      await type(find('textarea[aria-label="Note"]'), "Read this later\n\nHave a look")
       await click(row("Weekly sync"))
       await until(
         () => Promise.resolve(asked.some((one) => one.path.endsWith(`/rooms/${room}/send`))),
@@ -441,8 +449,8 @@ test("tapping a room uploads each file to its store and sends the note as one me
       assert.ok(sent.event_id, "one event id, minted here")
       assert.equal(
         sent.text,
-        "Have a look\n\nRead this later",
-        "the note, then what was shared, as one message",
+        "Read this later\n\nHave a look",
+        "the field's words as one message, the sender's text in them once",
       )
       assert.deepEqual(
         sent.attachments,
@@ -524,7 +532,10 @@ test("a room send tapped again after a refusal is the one message, and a changed
     receiveShare(toShare({ text: "Read this later", files: notes(2) }))
     await mount(screen(), async () => {
       await until(async () => row("Weekly sync") !== null, "the room's row")
-      await type(find('textarea[aria-label="Note"]'), "Have a look")
+      const note = find('textarea[aria-label="Note"]') as HTMLTextAreaElement | null
+      assert.equal(note?.value, "Read this later", "the sender's text opens the note")
+      // What the reader writes joins it: the field is the message's only account of the words.
+      await type(find('textarea[aria-label="Note"]'), "Read this later\n\nHave a look")
       await click(row("Weekly sync"))
       await until(async () => said.length === 1, "the Host's refusal")
       const first = sends()[0]

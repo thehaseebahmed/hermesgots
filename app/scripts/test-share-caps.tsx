@@ -17,6 +17,7 @@ import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
   click,
+  absent,
   find,
   findAll,
   mount,
@@ -271,6 +272,13 @@ test("Share's new-chat option starts a chat of the bot's", async () => {
     receiveShare(toShare({ text: "Read this later" }))
     await mount(screen(), async () => {
       assert.equal(await db.conversations.count(), 0, "nothing is written before the send")
+      const note = find('textarea[aria-label="Note"]') as HTMLTextAreaElement | null
+      assert.equal(
+        note?.value,
+        "Read this later",
+        "the sender's text opens the note, rather than a quote above it",
+      )
+      absent("blockquote", "nothing of the sender's text quoted above the note")
       const option = await newOption()
       assert.equal(wordsOf(option), "New chat", "the new-chat option says what it makes")
       assert.ok(option.querySelector("svg.lucide-plus"), "wearing an add, not a chat")
