@@ -21,19 +21,15 @@
 import type { Conversation } from "./db.ts"
 import { filterByFuzzy } from "./fuzzy.ts"
 
-/** How long a row has to have been touched in to be offered: seven days, on `updatedAt`. */
 export const SHARE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
-/** The most rows the sheet ever draws: a hard limit, not a page size. */
 export const SHARE_MOST = 25
 
-/** How many rows the sheet draws before Show more, which reveals the rest of the window. */
 export const SHARE_FIRST = 10
 
 /** What a row sends into: a chat of the bot's, a code session of one of its projects, or a room. */
 export type ShareKind = "chat" | "session" | "room"
 
-/** The members' pictures a room's row wears, and how many it could not draw (ADR 0126). */
 export interface ShareFaces {
   shown: string[]
   more: number
@@ -49,7 +45,6 @@ export type ShareTarget =
       id: string
       kind: "chat" | "session"
       title: string
-      /** When the row was last touched, which is the clock the window and the order read. */
       at: number
     }
   | {
@@ -60,12 +55,6 @@ export type ShareTarget =
       faces: ShareFaces
     }
 
-/**
- * A room, as the device's own room list hands it to the sheet. A room is a conversation too, so the
- * bot's read carries its record — and the rule drops it from there, because its row is the room
- * list's and is drawn once. The fields are the record's own, whatever else it carries: the rule is
- * pure, and a room's faces are what the list read off its roster.
- */
 export interface ShareRoom {
   id: string
   title: string
@@ -84,11 +73,6 @@ export type ShareCandidate = Pick<
   "id" | "title" | "updatedAt" | "projectId" | "canvasId" | "room" | "discardedAt"
 >
 
-/**
- * What a conversation is to the sheet, or nothing where the sheet doesn't offer it: a canvas is its
- * own screen's, a room is the room list's row rather than this read's, and a discarded session is a
- * pile rather than a place a note is sent from (ADR 0115).
- */
 function kindOf(row: ShareCandidate): "chat" | "session" | undefined {
   if (row.canvasId || row.room || row.discardedAt) return undefined
   return row.projectId ? "session" : "chat"
@@ -143,10 +127,9 @@ export function recentTargets(
 
 /**
  * The rows a query keeps: every one of the bot's whose title answers it through the matcher the app's
- * lists already use, best match first and the list's own order inside a rank — a search narrows the
- * sheet, it never re-orders it. Every match is drawn, in full: the seven days and the twenty-five are
- * the window the field leads out of, not its edge, since a search that refused a row the sheet had
- * just shown would be a trap.
+ * lists already use. Every match is drawn, in full: the seven days and the twenty-five are the window
+ * the field leads out of, not its edge, since a search that refused a row the sheet had just shown
+ * would be a trap.
  *
  * An empty query answers nothing: the screen asks this only while there is something to search by,
  * and a blank field draws the window again.

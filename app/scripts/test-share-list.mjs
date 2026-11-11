@@ -12,7 +12,6 @@ import { recentTargets, searchTargets, SHARE_MOST, SHARE_WINDOW_MS } from "../sr
 
 const HOUR = 3_600_000
 
-/** A conversation's record, as the sheet's read hands it to the rule. */
 const chat = (id, at, patch = {}) => ({ id, title: `Chat ${id}`, updatedAt: at, ...patch })
 
 const NOW = Date.UTC(2026, 10, 11, 12)
@@ -92,11 +91,6 @@ test("the newest row comes first, and two touched at one moment keep one order",
 
 const MONTH = 30 * 24 * HOUR
 
-/**
- * A room as the device's own room list hands it to the rule — the record's own id, title and clock,
- * and the faces its row wears. A room is no conversation of the bot's read: the sheet is handed it
- * from the room list, and the rule places it among the chats.
- */
 const room = (id, at, faces = { shown: ["bot-1"], more: 0 }) => ({
   id,
   title: `Room ${id}`,

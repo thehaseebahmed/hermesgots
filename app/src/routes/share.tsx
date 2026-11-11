@@ -56,7 +56,6 @@ function SectionLabel({ children }: { children: string }) {
   return <h2 className="px-1 text-sm font-medium text-muted-foreground">{children}</h2>
 }
 
-/** Thumbnails of the shared files, each with a button that leaves it out. */
 function SharedFiles({
   files,
   onRemove,
@@ -75,10 +74,6 @@ function SharedFiles({
   )
 }
 
-/**
- * What another app shared into Gots: add a note, pick the bot and a chat of it, or a new one, and
- * send. The message goes like one typed in that chat, images as its attachments.
- */
 export function SharePage() {
   const navigate = useNavigate()
   const { root, up } = useNav()
@@ -146,7 +141,6 @@ export function SharePage() {
     setSending(false)
   }
 
-  // Every file under the same caps a pick is held to, refused out loud where it doesn't fit.
   const imagesAvailable = profile?.imageInput !== false
   useEffect(() => {
     if (!share || !profile || readStarted.current === share.id) return
@@ -165,8 +159,7 @@ export function SharePage() {
     }
   }, [share, profile, imagesAvailable])
 
-  // The picked bot's conversations as the index holds them, oldest activity first. What the sheet
-  // offers, and in what order, is the rule's to decide, so this read narrows nothing.
+  // What the sheet offers, and in what order, is the rule's to decide, so this read narrows nothing.
   const conversations = useLiveQuery(async () => {
     if (!profile) return []
     return conversationsOf(profile.id).toArray()
@@ -193,9 +186,6 @@ export function SharePage() {
     () => (conversations ? recentTargets(conversations, now, rooms) : undefined),
     [conversations, now, rooms],
   )
-  // A query is the search's, and it draws every match: the ten rows and the window's twenty-five are
-  // what the field leads out of, not its edge. A blank field is no query at all, so the window is
-  // drawn again with its Show more.
   const searching = Boolean(query.trim())
   const matches = useMemo(
     () => (searching && conversations ? searchTargets(conversations, query, rooms) : undefined),
@@ -223,10 +213,6 @@ export function SharePage() {
   const canSend =
     Boolean(profile) && configured && !imagesBlocked && !empty && !sending && !preparing
 
-  /**
-   * The sheet's way out once the share has gone: the bot it went to is the active one, the share is
-   * cleared, and its screen opens in the sheet's place.
-   */
   const handed = (id: string, bot: string) => {
     void setActiveProfile(bot)
     leaving.current = true
@@ -234,7 +220,6 @@ export function SharePage() {
     root(`/c/${id}`)
   }
 
-  /** A send that failed: its row stops turning, and the reason is said in its own words. */
   const couldNot = (error: unknown) => {
     setSending(false)
     toast.error(error instanceof Error ? error.message : "Couldn't share that.")
@@ -275,7 +260,7 @@ export function SharePage() {
     }
   }
 
-  const send = async (target: string, kind?: ShareKind) => {
+  const send = async (target: string, kind: ShareKind | "new") => {
     if (!profile || !canSend) return
     if (kind === "room") return sendIntoRoom(target, profile)
     setSending(target)
@@ -305,16 +290,12 @@ export function SharePage() {
     }
   }
 
-  /**
-   * One row of the sheet: its mark, its words, and the place a tap sends into — a chat's, a session's or
-   * a room's, absent on New chat, which starts one rather than sending into something.
-   */
   const option = (row: {
     id: string
     icon: React.ReactNode
     title: string
     subtitle?: string
-    kind?: ShareKind
+    kind: ShareKind | "new"
   }) => (
     <button
       key={row.id}
@@ -334,11 +315,6 @@ export function SharePage() {
     </button>
   )
 
-  /**
-   * The tile a row leads with: Code's mark for a session, a chat's own bubble for a chat, and a room's
-   * members' faces where a chat wears its disc — the cluster is the app's own mark for a room wherever
-   * it is drawn (ADR 0126).
-   */
   const mark = (target: ShareTarget) =>
     target.kind === "room" ? (
       <RoomFaces shown={target.faces.shown} more={target.faces.more} />
@@ -431,6 +407,7 @@ export function SharePage() {
                   </span>
                 ),
                 title: "New chat",
+                kind: "new",
               })}
               {shown?.map((target) =>
                 option({

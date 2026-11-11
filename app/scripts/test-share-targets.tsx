@@ -55,13 +55,10 @@ const rows = () =>
     return words !== "New chat" && !words.startsWith("Show more")
   })
 
-/** The one row a title is drawn on, or none. */
 const row = (title: string) => rows().find((one) => wordsOf(one).includes(title)) ?? null
 
-/** A share of a link, which is what a reader sends into a row. */
 const shares = () => receiveShare(toShare({ text: "Read this later" }))
 
-/** The box the sheet pins to its foot, and the field inside it. */
 const foot = () => document.querySelector('[data-slot="share-search"]')
 const searchField = () =>
   document.querySelector('input[aria-label="Search chats and sessions"]') as HTMLInputElement | null
@@ -76,7 +73,6 @@ const roomBots = (name: string) => [
   botProfile(name, { id: "bot-2", name: "Hex", hermesProfile: "coder", botId: "hex" }),
 ]
 
-/** A room's record as the read carries it: its roster, one member per profile it seats. */
 const roomRecord = (id: string, profiles: string[]) => ({
   id,
   members: profiles.map((profile, at) => ({
@@ -87,11 +83,9 @@ const roomRecord = (id: string, profiles: string[]) => ({
   })),
 })
 
-/** The strip of bots the sheet sends through, and the card that picks one by name. */
 const botCard = (name: string) =>
   findAll('[aria-label="Bot"] button').find((one) => wordsOf(one) === name) ?? null
 
-/** One request a room's Host was sent, as the sheet made it. */
 interface RoomAsk {
   method: string
   path: string
@@ -157,7 +151,6 @@ function roomHost(name: string, roomId: string, { refuse }: { refuse?: string } 
   return asked
 }
 
-/** The files a share brought, as the sender hands them over. */
 const notes = (count: number) =>
   Array.from(
     { length: count },
@@ -374,8 +367,6 @@ test("the sheet offers a chat and a code session of the last week, each in its o
 
 test("the sheet draws ten rows, and Show more reveals the rest of the week", async () => {
   const now = Date.now()
-  // Thirty chats touched this week: ten are drawn, and the window's own twenty-five is behind Show
-  // more.
   await seedChats(
     Array.from({ length: 30 }, (_, index) => ({
       id: `c-${index}`,
@@ -425,8 +416,6 @@ test("a week of ten rows draws no Show more", async () => {
 
 test("a search at the foot finds the chat the week left out, and clearing it puts the week back", async () => {
   const now = Date.now()
-  // Twelve chats of the week, so Show more is offered over the ten, and one from last month that
-  // only the search can reach.
   await seedChats(
     [
       ...Array.from({ length: 12 }, (_, index) => ({
