@@ -151,6 +151,65 @@ async function drive({ page, profileId, until, shot }) {
   assert.equal(await page.locator("#chats-search").inputValue(), "", "and it is empty")
 }
 
+/**
+ * From the laptop width the foot holds no search at all: the field stands in the bar, above the pills,
+ * and the foot keeps the New pick alone at its right edge. All of it is geometry — where the field sits
+ * against the bar, the pills and the first row — so it is measured here rather than in a DOM without
+ * layout (ADR 0019).
+ */
+async function driveLaptop({ page, profileId, until, shot }) {
+  await page.goto(`${app}/b/${profileId}`)
+  await until(async () => (await page.locator(NEW).count()) === 1, 30_000, "the foot's button")
+  assert.equal(
+    await page.locator("[data-search-toggle]").count(),
+    0,
+    "the foot has no search circle: the bar holds the field",
+  )
+  // The sidebar keeps a field of its own at this width, so the bar's is the one holding the list's id.
+  const field = page.locator('[data-slot="input-group"]:has(#chats-search)')
+  await until(async () => (await field.count()) === 1, 10_000, "the bar's field")
+  const bar = await page.locator("header").first().boundingBox()
+  const fieldBox = await field.boundingBox()
+  const pills = await page.locator('[role="group"][aria-label="Filter chats"]').boundingBox()
+  assert.ok(bar && fieldBox && pills, "the bar, its field and the pills are drawn")
+  assert.equal(Math.round(fieldBox.height), 44, `the field is the bar's own height (${fieldBox.height})`)
+  assert.ok(
+    fieldBox.y >= bar.y - 0.5 && fieldBox.y + fieldBox.height <= bar.y + bar.height + 0.5,
+    "and stands inside the bar, not under it",
+  )
+  assert.ok(
+    pills.y >= fieldBox.y + fieldBox.height - 0.5,
+    `the pills stand under the field (${pills.y} against ${fieldBox.y + fieldBox.height})`,
+  )
+  const first = await page.locator('ul a[href^="/c/"]').first().boundingBox()
+  if (first) {
+    assert.ok(
+      first.y >= pills.y + pills.height - 0.5,
+      `and the rows under the pills (${first.y} against ${pills.y + pills.height})`,
+    )
+  }
+  const fab = await page.locator(NEW).boundingBox()
+  const foot = await page.locator(FOOT).boundingBox()
+  assert.ok(fab && foot, "the New pick stands on the foot's bar")
+  assert.equal(
+    await page.locator(`${FOOT} ${NEW}`).count(),
+    1,
+    "the foot holds its one round control, with no search beside it",
+  )
+  assert.equal(
+    await page.locator(`${FOOT} [data-search-toggle]`).count(),
+    0,
+    "and nothing of a search in it",
+  )
+  assert.ok(
+    Math.abs(fab.x + fab.width - (foot.x + foot.width - 16)) <= 1,
+    "and keeps the foot's right edge, where the thumb found it",
+  )
+  await page.locator(NEW).click()
+  await until(() => picksOpen(page), 5_000, "the picks still rise above it")
+  await shot("laptop")
+}
+
 // Both widths, and the phone in the dark as well: the foot's surfaces are theme tokens, and a muted X
 // that reads as disabled on one theme is the risk the plan names.
 for (const { width, dark } of [
@@ -165,4 +224,15 @@ for (const { width, dark } of [
   })
 }
 
-pass("the foot's New opens two pills above its button, and its search becomes a bar as tall as it")
+// The laptop's own arrangement: the field in the bar, the pills under it, and the foot down to one
+// control (ADR 0145).
+for (const dark of [false, true]) {
+  await flow(`list-foot-laptop${dark ? "-dark" : ""}`, driveLaptop, {
+    viewport: { width: 1280, height: 900 },
+    dark,
+  })
+}
+
+pass(
+  "the foot's New opens two pills above its button, its search becomes a bar as tall as it on a phone and a tablet, and from a laptop the field stands in the bar above the pills",
+)

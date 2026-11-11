@@ -13,7 +13,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { Home } from "@/App"
-import { BotChatsPage } from "@/routes/bot-chats"
+import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
 import { db, deleteConversation, type Message } from "@/lib/db"
 import { pressBack } from "@/lib/native"
@@ -23,12 +23,14 @@ import {
   Path,
   absent,
   atDepth,
+  atWidth,
   botProfile,
   click,
   find,
   findAll,
   findText,
   json,
+  laptop,
   missing,
   mount,
   nav,
@@ -840,3 +842,55 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     assert.ok(findText("p", "No chats match."), "which is the search's sentence")
   })
 })
+
+/**
+ * The list as the shell draws it at the laptop width, where the screen is the pane's list: the page
+ * itself answers "No chat open" there, and the list beside the chat is the same component.
+ */
+const listPane = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+    <Nav />
+    <BotChatsPane pane={{ profileId: bot.id, open: true }} />
+  </MemoryRouter>
+)
+
+test(
+  "from the laptop width the search stands in the bar, above the pills, and the foot has no circle",
+  laptop(async () => {
+    await seed([
+      { id: "a", title: "A chat", at: 100, said: "Hello there" },
+      { id: "b", title: "Another", at: 90, said: "Other words" },
+    ])
+    await mount(listPane(), async () => {
+      await until(async () => rowIds().length === 2, "the list")
+      assert.equal(missing("[data-search-toggle]"), true, "the foot's circle is gone")
+      const field = find("header #chats-search")
+      const pills = find('header [role="group"][aria-label="Filter chats"]')
+      const rows = find("ul")
+      assert.ok(field && pills && rows, "the field, the pills and the rows are all on screen")
+      assert.ok(
+        field!.compareDocumentPosition(pills!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the field stands above the pills",
+      )
+      assert.ok(
+        pills!.compareDocumentPosition(rows!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and the pills above the rows",
+      )
+      assert.equal(findAll("#chats-search").length, 1, "one field, never two")
+      await type(field, "another")
+      assert.deepEqual(rowIds(), ["b"], "and it narrows the rows where it stands")
+    })
+  }),
+)
+
+test(
+  "below the laptop width the search is still the foot's, and the bar holds no field",
+  atWidth(1024, async () => {
+    await seed([{ id: "a", title: "A chat", at: 100, said: "Hello there" }])
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the list")
+      assert.equal(missing("[data-search-toggle]"), false, "the circle is in the foot")
+      assert.equal(missing("header #chats-search"), true, "and the bar holds no field")
+    })
+  }),
+)

@@ -5,8 +5,11 @@ import { SearchField } from "@/components/item-list"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-/** The field's own name, for the control that shows and hides it. */
-const CHATS_SEARCH_FIELD_ID = "chats-search"
+/**
+ * The field's own name, for the control that shows and hides it — and for the bar's field, which takes
+ * the same name because only one of the two is ever in the tree (ADR 0145).
+ */
+export const CHATS_SEARCH_FIELD_ID = "chats-search"
 
 /** The picks' own name, for the control that shows and hides them. */
 const PICKS_ID = "new-picks"
@@ -35,12 +38,15 @@ const PICKS_ID = "new-picks"
  */
 export function ListFoot({
   canMakeRoom,
+  searchable = true,
   query,
   onQueryChange,
   onNewChat,
   onNewRoom,
 }: {
   canMakeRoom: boolean
+  /** Whether the search is this bar's to offer: from the laptop width up the bar's own field holds it. */
+  searchable?: boolean
   /** The words the list is narrowed by. The foot holds whether its field is up; the screen holds what
    * the field asked for, since the rows are the screen's. */
   query: string
@@ -52,7 +58,7 @@ export function ListFoot({
   // and no pair of booleans that could both be true (ADR 0141).
   const [surface, setSurface] = useState<"closed" | "picks" | "search">("closed")
   const open = surface === "picks"
-  const searching = surface === "search"
+  const searching = searchable && surface === "search"
   // The exit is one quiet fade, played while the pills are already inert: the class is what starts it,
   // and it is taken off again once it has run.
   const [hiding, setHiding] = useState(false)
@@ -104,7 +110,14 @@ export function ListFoot({
       data-slot="list-foot"
       className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
     >
-      <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-2xl items-center gap-2",
+          // Where the bar holds the search, the New cluster is the row's only control and keeps its
+          // right edge, which is the slot a thumb finds it in at every width.
+          searchable ? "justify-between" : "justify-end",
+        )}
+      >
         {searching ? (
           <div className="pointer-events-auto min-w-0 flex-1">
             <SearchField
@@ -122,7 +135,7 @@ export function ListFoot({
               }}
             />
           </div>
-        ) : (
+        ) : searchable ? (
           <Button
             ref={searchToggle}
             variant="outline"
@@ -136,7 +149,7 @@ export function ListFoot({
           >
             <SearchIcon />
           </Button>
-        )}
+        ) : null}
 
         <div className="relative flex shrink-0 flex-col items-end">
           {/*

@@ -14,8 +14,8 @@ import { Bot } from "@/components/bot"
 import { BackButton } from "@/components/back-button"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Chip, ChipRow } from "@/components/chip"
-import { ItemRow, pinnedLine } from "@/components/item-list"
-import { ListFoot } from "@/components/list-foot"
+import { ItemRow, pinnedLine, SearchField } from "@/components/item-list"
+import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
@@ -35,6 +35,7 @@ import { conversationsOf, db, isReply, newestMessage, type Profile } from "@/lib
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { landingChat } from "@/lib/last-chat"
+import { useXLarge } from "@/lib/media"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
 import { BACK_ON_LIST, depth, openedChat, useNav } from "@/lib/nav"
@@ -198,6 +199,9 @@ function ChatList({
   // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
   const canMakeRoom = useCanMakeRoom()
   const now = useNow()
+  // From the laptop width up the list has room for the field to stand in the bar, and the foot draws no
+  // search at all there: one field, in the one place this width puts it (ADR 0145).
+  const wide = useXLarge()
   const [query, setQuery] = useState("")
   // The pill the reader pressed: All until they choose otherwise.
   const [filter, setFilter] = useState<ChatFilter>("all")
@@ -256,13 +260,23 @@ function ChatList({
         // The pills are pinned with the bar, in the slot the routines page fills with its state chips, so
         // a long list is filtered without scrolling back up to reach them (ADR 0145).
         below={
-          <ChipRow label="Filter chats">
-            {CHAT_FILTERS.map(({ key, label }) => (
-              <Chip key={key} active={filter === key} onClick={() => setFilter(key)}>
-                {label}
-              </Chip>
-            ))}
-          </ChipRow>
+          <div className="flex flex-col gap-2">
+            {wide && (
+              <SearchField
+                id={CHATS_SEARCH_FIELD_ID}
+                value={query}
+                onChange={setQuery}
+                label="Search chats"
+              />
+            )}
+            <ChipRow label="Filter chats">
+              {CHAT_FILTERS.map(({ key, label }) => (
+                <Chip key={key} active={filter === key} onClick={() => setFilter(key)}>
+                  {label}
+                </Chip>
+              ))}
+            </ChipRow>
+          </div>
         }
       />
 
@@ -290,6 +304,7 @@ function ChatList({
 
       <ListFoot
         canMakeRoom={canMakeRoom}
+        searchable={!wide}
         query={query}
         onQueryChange={setQuery}
         onNewChat={() => void start()}
