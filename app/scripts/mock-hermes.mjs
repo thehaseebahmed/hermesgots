@@ -3106,6 +3106,11 @@ async function streamCompletion(req, res, body) {
 // question, a `prompt_id` and never the plugin's `clarify_id` or `questions`, so a screen that only
 // knows the plugin's batch shape sees nothing and one that reads prompts draws a single question.
 const LIVE_CLARIFY = process.env.MOCK_LIVE_CLARIFY === "1"
+// Hermes 0.23.1 words a question asked off its own local viewers with a newline and a localized
+// hint after it (`gateway.clarify.skip_hint`), and settles an answer and raises the call's next
+// question on the run's stream before the answer's own response is written. Both are this mode's.
+const SKIP_HINT = '\nReply "skip" to skip this question.'
+const CLARIFY_REPLY_MS = 100
 const runs = new Map()
 // Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
 // reports between a turn ending and its wake turn starting, so no screen reads the session at rest
@@ -3887,7 +3892,7 @@ function startRun(req, body, options = {}) {
           timestamp: Date.now() / 1000,
           prompt_id: `${clarify_id}-${at}`,
           execution_generation: 0,
-          question: question.question,
+          question: LIVE_CLARIFY ? question.question + SKIP_HINT : question.question,
           choices: question.choices ?? [],
           multi_select: Boolean(question.multi_select),
         }
@@ -5622,6 +5627,7 @@ http
           error: { message: `Run has no pending question: ${request_id ?? ""}` },
         })
       pending({ answer: typeof answer === "string" ? answer : String(answer ?? "") })
+      if (LIVE_CLARIFY) await sleep(CLARIFY_REPLY_MS)
       return json(res, 200, {
         object: "hermes.clarify_response",
         run_id: runClarifyRoute[1],

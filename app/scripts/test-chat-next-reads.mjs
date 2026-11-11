@@ -302,3 +302,49 @@ test("a prompt that names its own question asks it, off the status and off the e
     multiSelect: false,
   })
 })
+
+test("a prompt Hermes words with its skip hint still takes its row off the call's list", () => {
+  const asked = {
+    event: "clarify.request",
+    run_id: "run_hint",
+    prompt_id: "p-hint",
+    execution_generation: 1,
+    questions: [
+      { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+      { id: "q1", question: "Which services?", choices: ["api", "worker"], multi_select: true },
+    ],
+    question: 'Which services?\nReply "skip" to skip this question.',
+  }
+  const prompt = promptFrom(asked, "run_hint")
+  assert.deepEqual(prompt?.choices, ["api", "worker"])
+  assert.equal(prompt?.multiSelect, true)
+})
+
+test("a prompt reads as the agent wrote it, without Hermes's skip hint or its recommendation label", () => {
+  // The event exactly as a live Hermes 0.23.1 run sent it.
+  const live = {
+    event: "clarify.request",
+    run_id: "run_live",
+    kind: "clarify",
+    prompt_id: "7615663041",
+    execution_generation: 1,
+    question: 'Which colour?\nReply "skip" to skip this question.',
+    choices: ["Red (Recommended)", "Blue"],
+    multi_select: false,
+  }
+  const prompt = promptFrom(live, "run_live")
+  assert.equal(prompt?.question, "Which colour?")
+  assert.deepEqual(prompt?.choices, ["Red", "Blue"])
+  // Every locale Hermes ships quotes the word it asks for.
+  for (const hint of [
+    "Ответьте «skip», чтобы пропустить этот вопрос.",
+    "回复“skip”即可跳过此问题。",
+  ])
+    assert.equal(
+      promptFrom({ ...live, question: `Which colour?\n${hint}` }, "r")?.question,
+      "Which colour?",
+    )
+  // A question the agent wrote over several lines keeps them, a last line mentioning skip unquoted too.
+  const own = "Which colour?\nSay if we should skip the logo."
+  assert.equal(promptFrom({ ...live, question: own }, "r")?.question, own)
+})

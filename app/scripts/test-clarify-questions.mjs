@@ -8,6 +8,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { questionAt } from "../src/lib/clarify.ts"
 import { questionsAround, questionsOf } from "../src/lib/clarify-questions.ts"
 
 const ASKED = JSON.stringify({
@@ -94,4 +95,28 @@ test("a question the agent asked alone is still a set, of one", () => {
   assert.deepEqual(questionsAround("Which environment?", [row("clarify", alone)]), [
     { id: "q0", question: "Which environment?" },
   ])
+})
+
+test("a question Hermes words with its own hint after it is still the question the call put", () => {
+  // Hermes 0.23.1 adds a newline and a localized "skip" hint to every question it asks off its own
+  // local viewers, so the prompt's words are the row's, then more.
+  const set = questionsOf(ASKED)
+  const hinted = `${set[1].question}\nReply "skip" to skip this question.`
+  assert.equal(questionAt(set, hinted), 1)
+  assert.equal(questionsAround(hinted, [row("clarify", ASKED)])?.length, set.length)
+  assert.equal(
+    questionAt(set, `${set[1].question} and more`),
+    -1,
+    "words run on are another question",
+  )
+})
+
+test("an exact match wins over a question that is another's first line", () => {
+  const set = [
+    { id: "q0", question: "Which?\nThe long one" },
+    { id: "q1", question: "Which?" },
+  ]
+  assert.equal(questionAt(set, "Which?\nThe long one"), 0)
+  assert.equal(questionAt(set, "Which?"), 1)
+  assert.equal(questionAt(set, "Which?\nReply skip"), 1)
 })

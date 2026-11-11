@@ -1058,3 +1058,122 @@ test("a call streamed as a count of commands is worded whole from its transcript
   const early = reduce(streamed, { type: "transcript", rows: [rows[0]] })
   assert.equal(early, streamed, "a row the host has not written yet changes nothing")
 })
+
+/**
+ * Hermes 0.23.1's wording of a question on any surface but its own local viewers: the question the
+ * agent wrote, a newline, then a localized hint to type "skip" (`gateway.clarify.skip_hint`).
+ */
+const HINT = '\nReply "skip" to skip this question.'
+
+const askedLive = (promptId: string, question: string) =>
+  ({
+    event: "clarify.request",
+    run_id: "r",
+    kind: "clarify",
+    prompt_id: promptId,
+    execution_generation: 1,
+    question: question + HINT,
+    choices: ["Red (Recommended)", "Blue"],
+    multi_select: false,
+  }) as RunEvent
+
+const LIVE_CALL: Row[] = [
+  { id: 1, role: "user", content: "hi" },
+  {
+    id: 2,
+    role: "assistant",
+    content: "Two quick questions.",
+    finish_reason: "tool_calls",
+    tool_calls: [
+      {
+        id: "call_1",
+        function: {
+          name: "clarify",
+          arguments: JSON.stringify({
+            questions: [
+              { question: "Which colour?", choices: ["Red", "Blue"] },
+              { question: "Which size?", choices: ["Small", "Large"] },
+              { question: "Any notes?" },
+            ],
+          }),
+        },
+      },
+    ],
+  },
+]
+
+test("an answer that lands after the next question's request leaves that question up", () => {
+  // The order a live Hermes 0.23.1 run was seen to deliver: the answer's settle and the next
+  // question's request reach the stream before the answer's own POST comes back.
+  const before = play([
+    { event: "tool.started", run_id: "r", tool: "clarify", tool_call_id: "call_1" } as RunEvent,
+    askedLive("p1", "Which colour?"),
+    { event: "clarify.settled", run_id: "r", prompt_id: "p1", execution_generation: 1 } as RunEvent,
+    askedLive("p2", "Which size?"),
+  ])
+  assert.equal(before.waiting?.promptId, "p2", "the stream raised the second question")
+  const after = reduce(before, {
+    type: "answered",
+    promptId: "p1",
+    answer: { question: "Which colour?" + HINT, choicesOffered: ["Red", "Blue"], value: "Blue" },
+  })
+  assert.equal(after.waiting?.promptId, "p2", "the first answer leaves the second question up")
+  const status = reduce(after, { type: "waiting", waiting: { ...after.waiting! } })
+  assert.equal(status.waiting?.promptId, "p2", "and a status read still carrying it keeps it")
+})
+
+test("a question Hermes asks with its skip hint is found in the call that asked it", () => {
+  let state = play([
+    { event: "tool.started", run_id: "r", tool: "clarify", tool_call_id: "call_1" } as RunEvent,
+    askedLive("p1", "Which colour?"),
+  ])
+  state = reduce(state, { type: "transcript", rows: LIVE_CALL })
+  assert.equal(state.questionSet?.length, 3, "the card holds the call's three questions")
+  assert.equal(questionAt(state.questionSet!, state.waiting!.question), 0, "on the first page")
+})
+
+test("between two questions of one call, the one just answered holds the card's place", () => {
+  // Hermes settles an answer and asks the call's next question a moment later: nothing waits in
+  // between, and the composer would stand there for that moment.
+  let state = play([
+    { event: "tool.started", run_id: "r", tool: "clarify", tool_call_id: "call_1" } as RunEvent,
+    askedLive("p1", "Which colour?"),
+  ])
+  state = reduce(state, { type: "transcript", rows: LIVE_CALL })
+  const settle = (prompt: string) =>
+    ({
+      event: "clarify.settled",
+      run_id: "r",
+      prompt_id: prompt,
+      execution_generation: 1,
+    }) as RunEvent
+  const settled = reduce(state, { type: "run", event: settle("p1") })
+  assert.equal(settled.waiting, undefined, "nothing waits")
+  assert.equal(settled.between?.promptId, "p1", "the answered question holds the place")
+  const next = reduce(settled, { type: "run", event: askedLive("p2", "Which size?") })
+  assert.equal(next.waiting?.promptId, "p2")
+  assert.equal(next.between, undefined, "the next question takes it")
+
+  // The answer's own response landing first holds it the same way.
+  const answered = reduce(state, {
+    type: "answered",
+    promptId: "p1",
+    answer: { question: "Which colour?", choicesOffered: ["Red", "Blue"], value: "Blue" },
+  })
+  assert.equal(answered.between?.promptId, "p1")
+
+  // The call's last question has nothing to hold the place for.
+  const last = reduce(reduce(state, { type: "run", event: askedLive("p3", "Any notes?") }), {
+    type: "run",
+    event: settle("p3"),
+  })
+  assert.equal(last.between, undefined, "the last question leaves the composer")
+
+  // A run that ends lets go, and so does the page's own wait running out.
+  assert.equal(
+    reduce(settled, { type: "run", event: { event: "run.completed", run_id: "r" } as RunEvent })
+      .between,
+    undefined,
+  )
+  assert.equal(reduce(settled, { type: "between-lapsed" }).between, undefined)
+})

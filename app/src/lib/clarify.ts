@@ -51,11 +51,17 @@ export function questionsIn(list: unknown): ClarifyQuestion[] {
   })
 }
 
-/** The page a question is on, by its words: the one rule every reader of a question set matches by. */
-export function questionAt(questions: ClarifyQuestion[], asked: string): number {
+/**
+ * The page a question is on, by its words: the one rule every reader of a question set matches by.
+ * Hermes asks off its own local viewers with a localized hint on the lines after the question, so
+ * where no question is the words exactly, the one they start with, up to a newline, is.
+ */
+export function questionAt(questions: Pick<ClarifyQuestion, "question">[], asked: string): number {
   const text = asked.trim()
   if (!text) return -1
-  return questions.findIndex((one) => one.question === text)
+  const exact = questions.findIndex((one) => one.question === text)
+  if (exact >= 0) return exact
+  return questions.findIndex((one) => text.startsWith(`${one.question}\n`))
 }
 
 const listOf = (value: unknown) =>

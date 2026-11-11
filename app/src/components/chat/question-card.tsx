@@ -193,6 +193,7 @@ export function QuestionCard({
   message,
   askedId,
   from,
+  held = false,
   onAnswer = (answers) => answerClarify(message, answers),
 }: {
   message: Message
@@ -200,6 +201,8 @@ export function QuestionCard({
   askedId?: string
   /** Who asks — a room's member — where the screen drawing the card knows and a chat's row doesn't. */
   from?: string
+  /** The question shown is answered and the host has yet to ask the next: nothing can be sent. */
+  held?: boolean
   /** Where the answers go; the chat's own engine unless the screen drawing the card answers itself. */
   onAnswer?: (answers: ClarifyAnswers) => Promise<void>
 }) {
@@ -207,12 +210,15 @@ export function QuestionCard({
   const paged = questions.length > 1
   const askedPage = askedId ? questions.findIndex((one) => one.id === askedId) : -1
   const oneAtATime = askedPage >= 0
-  const [pending, setPending] = useState(false)
+  const [sending, setPending] = useState(false)
+  const pending = sending || held
   const [page, setPage] = useState(oneAtATime ? askedPage : 0)
   const card = useRef<HTMLDivElement>(null)
   const head = useRef<HTMLDivElement>(null)
   const foot = useRef<HTMLDivElement>(null)
   const row = useRef<HTMLDivElement>(null)
+  /** The page a slide the card started is headed for, until the row lands on it. */
+  const steering = useRef<number | null>(null)
   const pages = useRef<(HTMLDivElement | null)[]>([])
   // The row is as tall as the page showing, so a short question leaves no gap above the buttons.
   const [height, setHeight] = useState<number>()
@@ -231,14 +237,29 @@ export function QuestionCard({
     let frame = 0
     const read = () => {
       frame = 0
-      if (el.clientWidth) setPage(Math.round(el.scrollLeft / el.clientWidth))
+      if (!el.clientWidth) return
+      const at = Math.round(el.scrollLeft / el.clientWidth)
+      // A slide the card started passes the pages between: the count waits for where it lands.
+      if (steering.current !== null) {
+        if (at !== steering.current) return
+        steering.current = null
+      }
+      setPage(at)
     }
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(read)
     }
+    // The reader taking the row ends a slide the card started: the count follows them.
+    const taken = () => {
+      steering.current = null
+    }
     el.addEventListener("scroll", onScroll, { passive: true })
+    for (const kind of ["pointerdown", "touchstart", "wheel"]) {
+      el.addEventListener(kind, taken, { passive: true })
+    }
     return () => {
       el.removeEventListener("scroll", onScroll)
+      for (const kind of ["pointerdown", "touchstart", "wheel"]) el.removeEventListener(kind, taken)
       cancelAnimationFrame(frame)
     }
   }, [paged])
@@ -273,8 +294,9 @@ export function QuestionCard({
     return () => observer.disconnect()
   }, [page, paged])
 
-  const goTo = (index: number) => {
-    row.current?.scrollTo({ left: index * row.current.clientWidth, behavior: motion() })
+  const goTo = (index: number, behavior: ScrollBehavior = motion()) => {
+    steering.current = index
+    row.current?.scrollTo({ left: index * row.current.clientWidth, behavior })
   }
 
   // Turns with the host, without taking the arrows away between its turns.
@@ -283,8 +305,14 @@ export function QuestionCard({
     setTurnedTo(askedPage)
     setPage(askedPage)
   }
-  useEffect(() => {
-    if (oneAtATime) goTo(askedPage)
+  // A host that asks one prompt at a time has the card drawn again for each: it lands on the asked
+  // page before it is painted, since an animated scroll from the first would read every page it
+  // passes and the count would flash back. Later turns within one card still slide.
+  const landed = useRef(false)
+  useLayoutEffect(() => {
+    if (!oneAtATime) return
+    goTo(askedPage, landed.current ? motion() : "instant")
+    landed.current = true
   }, [oneAtATime, askedPage])
 
   // Leaves this question unanswered (a skipped question is null to Hermes) and moves on.
@@ -316,9 +344,7 @@ export function QuestionCard({
         <CardTitle className="flex items-center gap-2 text-base text-primary">
           <MessageCircleQuestionIcon className="size-5 shrink-0" />
           {paged ? "Questions" : "Question"}
-          {from && (
-            <span className="text-sm font-normal text-muted-foreground">{from}</span>
-          )}
+          {from && <span className="text-sm font-normal text-muted-foreground">{from}</span>}
           {paged && (
             <div className="ml-auto flex items-center gap-1">
               <span

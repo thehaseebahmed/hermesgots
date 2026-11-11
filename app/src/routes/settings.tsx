@@ -27,6 +27,7 @@ import {
   MessageSquareTextIcon,
   PaletteIcon,
   PlusIcon,
+  RotateCcwClockIcon,
   SmartphoneIcon,
   TrophyIcon,
   TelescopeIcon,
@@ -541,7 +542,7 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
 const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
   chats: MessagesSquareIcon,
   code: CodeXmlIcon,
-  routines: TimerIcon,
+  routines: RotateCcwClockIcon,
   research: TelescopeIcon,
   meetings: AudioLinesIcon,
 }
