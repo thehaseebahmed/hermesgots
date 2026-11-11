@@ -10,14 +10,29 @@ import { progressReminderNotes } from "../lib/progress-reminder.ts"
 import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
 import { requestIn } from "../lib/retry-message.ts"
+import { rowText } from "../lib/row-text.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
+
+/** A part of a row's words, or the one dict a row's whole content can be: its kind and its text. */
+export interface ContentPart {
+  type?: string
+  text?: unknown
+  [field: string]: unknown
+}
+
+/**
+ * What the host stores as a row's `content`: a string, a list of parts (a message that carried a
+ * photo, or a tool result carrying an image), one structured dict, or nothing. `rowText` is the one
+ * reader of every shape.
+ */
+export type RowContent = string | ContentPart[] | ContentPart | null
 
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
   id: number
   role: string
-  content: string | null
+  content: RowContent
   tool_call_id?: string | null
   finish_reason?: string | null
   display_kind?: string | null
@@ -189,15 +204,24 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   ]
 }
 
-const isScaffold = (row: Row) =>
+/** A row whose words the fold has read: the shape everything inside it is handed. */
+type ReadRow = Omit<Row, "content"> & { content: string }
+
+/** A row with its words read through `rowText`, the one reader of the shapes the host stores. */
+const readRow = (row: Row): ReadRow => ({ ...row, content: rowText(row.content) })
+
+const isScaffold = (row: ReadRow) =>
   row.display_kind === "hidden" ||
   row.display_kind === "model_switch" ||
   row.display_kind === "steer" ||
-  RESTATED.test(row.content ?? "") ||
+  RESTATED.test(row.content) ||
   isSeamScaffolding(row)
 
-const isRequest = (row: Row) =>
-  row.role === "user" && !DELIVERY.test(row.content ?? "") && !isScaffold(row)
+const isRequest = (row: Row) => {
+  if (row.role !== "user") return false
+  const read = readRow(row)
+  return !DELIVERY.test(read.content) && !isScaffold(read)
+}
 
 function pushCall(parts: Part[], call: ToolCall) {
   const last = parts.at(-1)
@@ -259,7 +283,10 @@ export function foldTurns(
 ): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
-  const refusals = progressReminderNotes(rows)
+  // One read of every row's words at the door: a parts list or a structured dict reaches nothing
+  // below as anything but the text the host itself makes of it.
+  const read = rows.map(readRow)
+  const refusals = progressReminderNotes(read)
   // The refused calls already accounted for: a carried copy of a row must not draw its reminder twice.
   const noted = new Set<string>()
   /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
@@ -288,7 +315,7 @@ export function foldTurns(
     turns.push(turn)
     return turn
   }
-  for (let row of rows) {
+  for (let row of read) {
     // What the host wrote after the compaction closes the reply above it.
     if (pending && !isScaffold(row) && writtenAfter(row)) openSeam()
     const boundary = boundaryOf(row, summaries)
@@ -305,7 +332,7 @@ export function foldTurns(
     if (row.role === "user") {
       // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
       if (row.display_kind === "steer") {
-        turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content ?? "") })
+        turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content) })
         continue
       }
       // A model switch, a restatement, the task snapshot and the pruned-skills notice are the model's
@@ -342,8 +369,8 @@ export function foldTurns(
     if (row.role === "tool") {
       const call = row.tool_call_id ? callOf.get(row.tool_call_id) : undefined
       // A carried copy of a call can hold the cleared notice where the original kept its output.
-      if (call && !(call.result && PRUNED.test(row.content ?? ""))) {
-        call.result = row.content ?? ""
+      if (call && !(call.result && PRUNED.test(row.content))) {
+        call.result = row.content
         const at = msOf(row)
         if (at !== undefined) call.endedAt = at
       }
@@ -378,7 +405,7 @@ export function foldTurns(
     // before it and is read with the words or the call it led to.
     let thought = row.reasoning ?? row.reasoning_content ?? undefined
     if (row.content || (thought && !drawn.length)) {
-      turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
+      turn.parts.push({ kind: "text", text: row.content, ...(thought ? { thought } : {}) })
       thought = undefined
     }
     const callAt = msOf(row)
