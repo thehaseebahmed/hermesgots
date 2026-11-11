@@ -431,6 +431,66 @@ test("a room that refuses the send says the Host's words and leaves the sheet op
   })
 })
 
+test("a room send tapped again after a refusal is the one message, and a changed note is another", async () => {
+  const now = Date.now()
+  const room = "room-weekly"
+  const REFUSED = "That room takes no more messages until its round ends."
+  await seedChats(
+    [
+      { id: "c-chat", title: "Trip to Lisbon", at: now - HOUR },
+      { id: room, title: "Weekly sync", at: now - 2 * HOUR },
+    ],
+    { bots: roomBots("share-room-retry") },
+  )
+  await db.conversations.update(room, { room: roomRecord(room, ["default"]) })
+  const asked = roomHost("share-room-retry", room, { refuse: REFUSED })
+  const sends = () =>
+    asked
+      .filter((one) => one.path.endsWith(`/rooms/${room}/send`))
+      .map((one) => JSON.parse(one.body ?? "{}") as { event_id?: string; attachments?: unknown[] })
+  const uploads = () => asked.filter((one) => one.path.endsWith(`/rooms/${room}/attachment`))
+
+  await withToasts(async (said) => {
+    receiveShare(toShare({ text: "Read this later", files: notes(2) }))
+    await mount(screen(), async () => {
+      await until(async () => row("Weekly sync") !== null, "the room's row")
+      await type(find('textarea[aria-label="Note"]'), "Have a look")
+      await click(row("Weekly sync"))
+      await until(async () => said.length === 1, "the Host's refusal")
+      const first = sends()[0]
+
+      // Nothing of that message is in the room — the Host refused it — so a tap again sends the same
+      // one: the answer to the first tap may only have been lost, and the room's own composer would
+      // post it under the id it minted, naming the files it already stored.
+      await click(row("Weekly sync"))
+      await until(async () => said.length === 2, "the second refusal")
+
+      assert.deepEqual(
+        sends().map((one) => one.event_id),
+        [first.event_id, first.event_id],
+        "both taps post the one event the first minted",
+      )
+      assert.equal(
+        uploads().length,
+        2,
+        "each of the share's files went to the store once, the second tap sending no bytes again",
+      )
+
+      // A note the reader changed is a different message, and mints its own ids: the Host binds an id
+      // to its content, so the id the first tap minted would be refused for these words.
+      await type(find('textarea[aria-label="Note"]'), "Have another look")
+      await click(row("Weekly sync"))
+      await until(async () => said.length === 3, "the third refusal")
+      assert.notEqual(sends()[2].event_id, first.event_id, "a changed note is a new message")
+      assert.equal(
+        uploads().length,
+        4,
+        "and sends every file again, as a message no store has yet must",
+      )
+    })
+  })
+})
+
 test("a share of nine files refuses the room in words naming eight, and sends nothing", async () => {
   const now = Date.now()
   await seedChats(
@@ -599,6 +659,40 @@ test("a sheet the reader shuts mid-send sends nothing on, and says nothing to no
 
   await withToasts(async (said) => tapAndLeave(true, said))
   await withToasts(async (said) => tapAndLeave(false, said))
+})
+
+test("a chat send the Host never answers, shut mid-send, leaves the reader on the home screen", async () => {
+  const now = Date.now()
+  await seedChats([{ id: "c-chat", title: "Trip to Lisbon", at: now - HOUR }], {
+    bots: [botProfile("share-chat-away")],
+  })
+  // A Host that answers nothing at all: the chat's catch-up read is still out when the reader shuts
+  // the sheet, and the note it was sent for has not been posted.
+  const asked: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    asked.push(new URL(String(input)).pathname)
+    return new Promise<Response>(() => {})
+  }) as typeof fetch
+
+  await withToasts(async (said) => {
+    shares()
+    await mount(screen(), async () => {
+      await until(async () => row("Trip to Lisbon") !== null, "the chat's row")
+      await click(row("Trip to Lisbon"))
+      await until(async () => asked.length > 0, "the chat's catch-up read")
+      await shutSheet(() => find('[role="dialog"]'))
+      assert.equal(path(), "/", "the sheet's close leaves the reader on the home screen")
+
+      // The catch-up read is raced out after a beat, and the tap would then land on the chat it was
+      // aimed at: a screen the reader has left neither takes them there nor says a word to nobody.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1_600))
+      })
+      await settle()
+      assert.equal(path(), "/", "and a send left out does not take them into the chat")
+      assert.deepEqual(said, [], "nor does a word about it land on the home screen")
+    })
+  })
 })
 
 test("the sheet offers a chat and a code session of the last week, each in its own mark", async () => {

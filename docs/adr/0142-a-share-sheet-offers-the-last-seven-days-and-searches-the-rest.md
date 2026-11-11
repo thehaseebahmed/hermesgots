@@ -69,10 +69,12 @@ sent.
   Both are accepted as they stand: a conversation record is cheap, neither read reaches the network,
   and the rows the sheet draws are ten, so opening it costs a bot's history and the room list rather
   than the week.
-- A room send mints its event id per tap, where the room's own composer reuses the id a failed send
-  minted. So a tap whose answer was lost, made again, can post the note twice. Accepted: the sheet
-  holds no send across a failure to reuse an id from, and a tap is a deliberate act made with the
-  room and the note in front of the reader.
+- A room send keeps what a failed tap minted — the event id, and each file's upload id with the
+  manifest the Host answered — and reuses them while the same words and the same files are sent into
+  the same room again, as the room's own composer reuses them. A retry of the same share into the
+  same room is therefore one message and one upload per file, where a note or a file set the reader
+  changed is a new message and mints anew; a file whose manifest is already in hand is not uploaded
+  again.
 - A window holding ten rows or fewer draws no Show more at all, and a bot whose week is one chat draws
   one row.
 - A chat older than the week is not a row of the sheet. The search is how it is found, so the field is

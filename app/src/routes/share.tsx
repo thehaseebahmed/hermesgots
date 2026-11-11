@@ -24,6 +24,7 @@ import {
   setActiveProfile,
   type Attachment,
   type Profile,
+  type RoomAttachment,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { sendRoomMessage, uploadRoomAttachment } from "@/lib/hermes"
@@ -52,6 +53,19 @@ function hostOf(link: string) {
   }
 }
 
+/**
+ * What a room send that failed minted: the message it was a tap for, the Host's event id, and per
+ * file its upload id with the manifest the Host answered. A tap made again while the share is
+ * unchanged reuses all three, as the room's own composer does (`failed` in `lib/room.ts`), so one
+ * message lands and a file the store already holds is not bought twice — the store is idempotent on
+ * an upload id, but every byte re-sent is still the wire's.
+ */
+type Minted = {
+  key: string
+  eventId: string
+  uploads: Map<string, { uploadId: string; manifest?: RoomAttachment }>
+}
+
 function SectionLabel({ children }: { children: string }) {
   return <h2 className="px-1 text-sm font-medium text-muted-foreground">{children}</h2>
 }
@@ -74,6 +88,12 @@ function SharedFiles({
   )
 }
 
+/**
+ * The share sheet: what arrived, a note to go with it, and the rows it can go to — the picked bot's
+ * chats and code sessions of the week, and the rooms whose roster seats that bot. A chat's or a
+ * session's row sends a turn into it, while a room's sends through the room's own store, as a message
+ * typed in the room does, because a room is the Host's log rather than a chat's thread.
+ */
 export function SharePage() {
   const navigate = useNavigate()
   const { root, up } = useNav()
@@ -99,6 +119,8 @@ export function SharePage() {
 
   // Set once the screen sends or closes, which clears the share on its way out.
   const leaving = useRef(false)
+  /** The room send the last tap left unmade, if it did. */
+  const failed = useRef<Minted | undefined>(undefined)
   const missing = !share && !opening && !webId
   useEffect(() => {
     if (missing && !leaving.current) root("/")
@@ -258,17 +280,37 @@ export function SharePage() {
     setSending(id)
     try {
       const config = serverConfig(bot)
+      const words = shareText(share, note)
+      // What the Host binds is the message rather than the tap: this share, sent into this room with
+      // these words and these files, is the one the last attempt minted ids for, and anything else —
+      // another share, another room, a note or a file the reader changed — is a new message.
+      const key = [share.id, id, words, ...carried.map((file) => file.id)].join("\u0000")
+      const reused = failed.current?.key === key ? failed.current : undefined
+      const eventId = reused?.eventId ?? randomId()
+      const uploads =
+        reused?.uploads ?? new Map<string, { uploadId: string; manifest?: RoomAttachment }>()
+      failed.current = { key, eventId, uploads }
       const manifests = await Promise.all(
-        carried.map((file) =>
-          uploadRoomAttachment(
+        carried.map(async (file) => {
+          const kept = uploads.get(file.id)
+          // A file the Host has answered for is named by its manifest: this retry sends the message
+          // those bytes were stored for, so sending them again would buy nothing.
+          if (kept?.manifest) return kept.manifest
+          // The id is kept before the upload, so a retry after a lost answer stores the file once.
+          const uploadId = kept?.uploadId ?? randomId()
+          uploads.set(file.id, { uploadId })
+          const manifest = await uploadRoomAttachment(
             config,
             id,
             { name: file.name, type: file.type, blob: file.blob },
-            randomId(),
-          ),
-        ),
+            uploadId,
+          )
+          uploads.set(file.id, { uploadId, manifest })
+          return manifest
+        }),
       )
-      await sendRoomMessage(config, id, randomId(), shareText(share, note), manifests)
+      await sendRoomMessage(config, id, eventId, words, manifests)
+      failed.current = undefined
       // The reader can shut the sheet while the note is out, and a screen that has gone neither takes
       // them into the room nor says a word to nobody.
       if (leaving.current) return
@@ -283,6 +325,10 @@ export function SharePage() {
     if (!profile || !canSend) return
     if (kind === "room") return sendIntoRoom(target, profile)
     setSending(target)
+    // Set once this tap has taken the reader into the chat: a note that fails from then on is said on
+    // the screen they are on, while one that fails before it is the sheet's, and goes unsaid where the
+    // sheet has gone.
+    let handedOver = false
     try {
       const text = shareText(share, note)
       const attachments = files
@@ -301,10 +347,15 @@ export function SharePage() {
       const busy = Boolean(
         await db.messages.where("[conversationId+status]").equals([id, "streaming"]).first(),
       )
+      // As the room's path does: the reader can shut the sheet while the chat catches up, and a screen
+      // that has gone does not take them into the chat afterwards.
+      if (leaving.current) return
       handed(id, profile.id)
+      handedOver = true
       if (busy) await queueMessage(id, text, attachments)
       else await sendMessage(id, text, { attachments })
     } catch (error) {
+      if (!handedOver && leaving.current) return
       couldNot(error)
     }
   }
@@ -334,6 +385,10 @@ export function SharePage() {
     </button>
   )
 
+  /**
+   * A row's mark: a room wears its members' faces where a chat or a session wears its icon, the
+   * cluster being the app's own mark for a room wherever one is drawn (ADR 0126).
+   */
   const mark = (target: ShareTarget) =>
     target.kind === "room" ? (
       <RoomFaces shown={target.faces.shown} more={target.faces.more} />

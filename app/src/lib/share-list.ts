@@ -73,6 +73,11 @@ export type ShareCandidate = Pick<
   "id" | "title" | "updatedAt" | "projectId" | "canvasId" | "room" | "discardedAt"
 >
 
+/**
+ * What a row sends into, and nothing where the sheet has no place to send it: a canvas's chat is its
+ * own screen's and lists nowhere (ADR 0113), a room's record is the room list's and is drawn once
+ * from there (ADR 0115), and a session the reader has thrown away is not a place a note is sent from.
+ */
 function kindOf(row: ShareCandidate): "chat" | "session" | undefined {
   if (row.canvasId || row.room || row.discardedAt) return undefined
   return row.projectId ? "session" : "chat"
