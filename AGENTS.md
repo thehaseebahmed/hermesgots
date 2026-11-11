@@ -415,7 +415,7 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 - **Input labels on settings are styled the same everywhere**; the label on an edit screen or edit card — Name on the bot page's edit — is the baseline.
 - **An edit's actions are one bar**: _Reset_ (or _Cancel_ where the form has no nothing-value), a hairline, _Save_, in a pill centred under the form, and a back that would throw away a change asks first. The field above is a filled pill with its label in the muted tone the value rows use; on a phone the form fills the screen so the bar stands at its foot, and a centred card stops under its field — a card is a pop-up, so closing it is the whole of saying no and it asks nothing (ADR 0105). A form that isn't an edit — a create sheet with one action — keeps the action it has.
 - **1024px is the app's one breakpoint** for panes, pop-ups and these screens; Material's 840dp expansion point is a later, app-wide change (ADR 0055), never a per-screen one.
-- **A destructive action stays where its spec puts it** — the bot-settings list's trash, for one — and a page earns an overflow menu only where it needs more than one action.
+- **A destructive action stays where its spec puts it** — the bot's page *Delete bot* button at its foot, for one — and a page earns an overflow menu only where it needs more than one action.
 
 ## Conventions
 

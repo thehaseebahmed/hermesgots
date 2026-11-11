@@ -5,7 +5,7 @@
  * that land on General instead, the segments that named pages before the list landing on the pages
  * that took their place, a fourth segment that names nothing landing on the page it was asked under,
  * the out-of-date banner leading the list, a row pushing its page on a phone and swapping the pane
- * beside the list on a laptop, the header's trash named for the bot it deletes, and each page still
+ * beside the list on a laptop, the list ending on the button that deletes the bot, and each page still
  * holding what its tab held — values that open their edits.
  */
 import assert from "node:assert/strict"
@@ -161,9 +161,10 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
       "the bot's switches lead its card",
     )
     assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
-    assert.ok(
-      find('header button[aria-label="Delete A bot"]'),
-      "and its header carries the trash named for the bot it deletes",
+    assert.equal(
+      wordsOf(find("[data-bot-settings-list]")?.lastElementChild ?? null),
+      "Delete bot",
+      "and the list ends on the button that deletes the bot",
     )
   })
 })

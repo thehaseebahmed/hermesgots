@@ -327,9 +327,9 @@ function PageRow({
 /**
  * A bot's own page: the plugin banner when it is out of date, then what the bot is — its switches,
  * its profile and how it connects — under the caption *Bot*, and the settings behind it in one card
- * under *Settings* (ADR 0106). A page the plugin withholds draws no row. The header's trash deletes
- * the bot, asking first; an unlinked bot is left alone where this device holds no other bot to fall
- * back on.
+ * under *Settings* (ADR 0106). A page the plugin withholds draws no row. The page ends on *Delete bot*
+ * at the foot of its column, asking first; an unlinked bot is left alone where this device holds no
+ * other bot to fall back on.
  */
 export function BotSettingsList({
   profile,
@@ -356,23 +356,8 @@ export function BotSettingsList({
     return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
   })
 
-  // The trash is the screen's own action, and its handler is the setter: the header reads the node
-  // it was published with, and never re-renders for a change in the list below it.
-  useHeaderAction(
-    "delete",
-    <Button
-      variant="outline"
-      size="icon-lg"
-      className="size-11 rounded-full"
-      aria-label={`Delete ${profile.name}`}
-      title={`Delete ${profile.name}`}
-      disabled={!linked && !canDelete}
-      onClick={() => setConfirming(true)}
-    >
-      <Trash2Icon />
-    </Button>,
-  )
-
+  // The delete is the page's own last control, in the column its captions and cards stand in: the
+  // button MCP Details wears as *Remove server*, in this page's words (ADR 0106).
   return (
     <div className="flex flex-col gap-4" data-bot-settings-list>
       {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
@@ -384,6 +369,16 @@ export function BotSettingsList({
       <BotCard profile={profile} onOpen={(id) => navigate(botSubPath(profile.id, "bot", id))} />
       <Caption>Settings</Caption>
       <Group>{rows}</Group>
+      <Button
+        type="button"
+        variant="ghost"
+        className="h-11 rounded-full text-destructive"
+        onClick={() => setConfirming(true)}
+        disabled={!linked && !canDelete}
+      >
+        <Trash2Icon data-icon="inline-start" />
+        Delete bot
+      </Button>
       <DeleteBotDialog
         profile={profile}
         open={confirming}
@@ -415,7 +410,7 @@ type PageBody = {
 function botPage({ profile, sub, close, large }: PageBody) {
   // The page asked for is withheld, or its host hasn't answered: what is left to draw is the bot's
   // own page. Where a pane sits beside this one, that page is already in it — drawing it again
-  // would put two cards, two trash buttons and two feature reads on one screen.
+  // would put two cards, two Delete bot buttons and two feature reads on one screen.
   if (!sub) return large ? null : <BotSettingsList profile={profile} />
   if (!large) return <BotEditScreen profile={profile} sub={sub} close={close} />
   // From 1024px the bot's page is the pane beside this one, so the pane holds its edit alone.

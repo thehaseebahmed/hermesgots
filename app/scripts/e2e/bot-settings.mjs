@@ -77,6 +77,60 @@ const assertBannerCentred = async (list, words) => {
 }
 
 /**
+ * The page's foot, which only a browser with layout can prove (ADR 0019): *Delete bot* sits under the
+ * last card, inside the column the page's captions and cards stand in, with nothing of that column
+ * below it — and no header on the screen carries a delete control, since the trash that used to live
+ * there is this button now. The column is the page's own (`[data-bot-settings-list]`), not the pane
+ * beside it, so the button's box has to fall inside the column's own.
+ */
+const assertDeleteAtFoot = async (page, column) => {
+  const remove = column.getByRole("button", { name: "Delete bot", exact: true })
+  assert.equal(await remove.count(), 1, "the page carries one button reading Delete bot")
+  assert.equal(
+    await page.locator("header").getByRole("button", { name: /delete|remove/i }).count(),
+    0,
+    "and no header carries a delete control",
+  )
+  const cards = column.locator("[data-settings-group]")
+  const last = await cards.nth((await cards.count()) - 1).boundingBox()
+  assert.ok(last, "the page's last card has a box")
+  const geometry = await column.evaluate((element) => {
+    const box = (node) => {
+      const rect = node.getBoundingClientRect()
+      return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }
+    }
+    const button = [...element.querySelectorAll("button")].find(
+      (one) => (one.textContent ?? "").trim() === "Delete bot",
+    )
+    if (!button) return null
+    const at = box(button)
+    const below = [...element.querySelectorAll("*")].filter(
+      (node) => !button.contains(node) && box(node).bottom > at.bottom + 1,
+    )
+    return { button: at, column: box(element), below: below.map((node) => node.tagName) }
+  })
+  assert.ok(geometry, "the button is inside the page's own column")
+  assert.ok(
+    geometry.button.top >= last.y + last.height,
+    `the button's top is below the last card's bottom (${Math.round(geometry.button.top)} over ${Math.round(last.y + last.height)})`,
+  )
+  assert.ok(
+    geometry.button.left >= geometry.column.left - 1 &&
+      geometry.button.right <= geometry.column.right + 1,
+    `the button is inside the column's own width (${Math.round(geometry.button.left)}…${Math.round(geometry.button.right)} in ${Math.round(geometry.column.left)}…${Math.round(geometry.column.right)})`,
+  )
+  assert.deepEqual(
+    geometry.below,
+    [],
+    `nothing in the column sits below the button (${geometry.below.join(", ")})`,
+  )
+  assert.ok(
+    Math.abs(geometry.column.bottom - geometry.button.bottom) <= 1,
+    `the column ends on the button (${geometry.column.bottom.toFixed(1)} against ${geometry.button.bottom.toFixed(1)})`,
+  )
+}
+
+/**
  * The bot's list of pages: drawn, wholly on screen, its rows there at both widths, and — the one
  * thing a browser is here for — the banner over them and a row's own words. Answers the list.
  */
@@ -155,6 +209,7 @@ const wide = async ({ page, profileId, shot }) => {
   await settled(page)
   assert.equal(await menuRow(page).count(), 0, "the bot's list takes the Settings menu's pane")
   const list = await assertList(page, viewport)
+  await assertDeleteAtFoot(page, list)
   const top = await list.boundingBox()
   const kept = await list.elementHandle()
   assert.ok(top && kept, "the list is a box and an element of its own")
@@ -242,6 +297,7 @@ const phone = async ({ page, profileId, shot }) => {
   await back.waitFor({ timeout: 15_000 })
   assert.ok(await back.isVisible(), "the list screen pushes with a back control")
   const list = await assertList(page, viewport)
+  await assertDeleteAtFoot(page, list)
   await shot("list")
 
   await list.locator('[data-bot-page="models"]').click()
@@ -295,5 +351,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner and its icon centred on that banner's text; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: the bot's own rows above one card holding every settings page, the cards separated by gaps under the out-of-date plugin's banner and its icon centred on that banner's text, and Delete bot at the foot of the column under the last card with nothing below it and no delete control in the header; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu; and a page opened from AI Dictation's Bots tab comes back to AI Dictation, not to the menu, at 1024px — light and dark at both widths",
 )
