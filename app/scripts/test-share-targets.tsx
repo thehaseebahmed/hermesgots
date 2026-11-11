@@ -64,7 +64,7 @@ const row = (title: string) => rows().find((one) => wordsOf(one).includes(title)
  * The list the sheet's rows are in. It is the week's while no query is up and a match list while one
  * is, and it says which in its own name, so a test follows it by either.
  */
-const LIST = ':is([aria-label="Recent"], [aria-label="Matches"])'
+const LIST = ':is([aria-label="Recent"], [aria-label="Search Results"])'
 
 /** The heading over that list: what the sheet calls the rows under it. */
 const heading = () => wordsOf(find(LIST)?.parentElement?.querySelector("h2") ?? null)
@@ -894,7 +894,7 @@ test("a search at the foot finds the chat the week left out, and clearing it put
         /Last month's plans/,
         "a chat from last month, which the window leaves out",
       )
-      assert.equal(heading(), "Matches", "the heading says the list is a match list, not the week")
+      assert.equal(heading(), "Search Results", "the heading says the list is a search's, not the week")
       absentText(`${LIST} button`, "Show more")
 
       // Every match, not the ten a window draws first: the week's twelve all say Row.

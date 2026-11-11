@@ -448,12 +448,12 @@ export function SharePage() {
 
           <section className="flex flex-col gap-2">
             {/* A query replaces the week with what it matches, so the heading says which list this is. */}
-            <SectionLabel>{searching ? "Matches" : "Recent"}</SectionLabel>
+            <SectionLabel>{searching ? "Search Results" : "Recent"}</SectionLabel>
             {profile && <BotPicker profile={profile} onPick={(bot) => pickBot(bot.id)} />}
             {imagesBlocked && <Banner>{profile?.name}'s model can't take images.</Banner>}
             {!configured && profile && <Banner>{profile.name} isn't set up yet.</Banner>}
             <div
-              aria-label={searching ? "Matches" : "Recent"}
+              aria-label={searching ? "Search Results" : "Recent"}
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
               {option({
