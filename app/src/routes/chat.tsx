@@ -893,7 +893,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         stopSubagents(source.server, sessionId, source.agents, { stopAll: hostStopsAll }),
       ).then(refusal.refuse)
     return true
-  }, [id, agentsSource, hostStopsAll, refusal])
+  }, [id, agentsSource, hostStopsAll, refusal.refuse])
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
     isBackgroundSafeRunActive({
