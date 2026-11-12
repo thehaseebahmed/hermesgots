@@ -1,12 +1,11 @@
 // `at` indexes into the string given to `openuiParts`, and the parts tile that string in order,
 // with no gaps or overlaps.
-import { closes, fenceOf, linesOf, unixLength, unixLines, type Fence } from "./fences.ts"
+import { closes, FENCE, fenceOf, linesOf, unixLength, unixLines, type Fence } from "./fences.ts"
 
 export type OpenuiPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "openui"; at: number; source: string; id?: string; open: boolean }
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const LIST_ITEM = /^( *)([*+-]|[0-9]{1,9}[.)])( +|$)/
 const ID = /^# id: ([a-z0-9-]{1,40})$/
 export const INFO = "openui-lang"

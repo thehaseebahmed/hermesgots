@@ -1,10 +1,13 @@
 import { memo, useEffect, useId, useRef, useState } from "react"
 
-import { CodeBlock, CodeFrame, PAINT, SOURCE_TEXT, type Tone } from "@/components/chat/code-block"
+import { CodeBlock, CodeFrame, PAINT, SOURCE_MEASURE, type Tone } from "@/components/chat/code-block"
+import { useMonoFace } from "@/components/chat/code-face"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { DIAGRAM_TOKENS, mermaidTheme, type DiagramPalette } from "@/lib/mermaid-theme"
+import { paletteOf } from "@/lib/diagram-palette"
+import { failureLine, NotLoaded } from "@/lib/mermaid-failure"
+import { mermaidTheme } from "@/lib/mermaid-theme"
 import { quietly } from "@/lib/report"
-import { toHex, useDark } from "@/lib/theme"
+import { useDark } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
 /** A closed ```mermaid fence, drawn where the fence stood, in the code block's own chrome (ADR 0146). */
@@ -15,7 +18,10 @@ export const Diagram = memo(function Diagram({
   source: string
   tone?: Tone
 }) {
+  // The frame's own plate, not a wrapper around it: the palette reads the surface the drawing really
+  // stands on, which for the page tone is the frame's grey and not the page's background.
   const frame = useRef<HTMLDivElement>(null)
+  const mono = useMonoFace()
   const dark = useDark()
   const [drawing, setDrawing] = useState<Drawing>(WAITING)
   const [open, setOpen] = useState(false)
@@ -27,9 +33,9 @@ export const Diagram = memo(function Diagram({
     const element = frame.current
     if (!element) return
     let live = true
-    draw(element, id, source, dark, () => live).then(
+    draw({ element, id, source, dark, live: () => live }).then(
       (svg) => live && setDrawing({ kind: "drawn", svg }),
-      (error) => live && setDrawing({ kind: "failed", line: lineOf(error) }),
+      (error) => live && setDrawing({ kind: "failed", line: failureLine(error) }),
     )
     return () => {
       live = false
@@ -47,8 +53,15 @@ export const Diagram = memo(function Diagram({
     )
 
   return (
-    <div ref={frame} className="my-3">
-      <CodeFrame data-slot="diagram" language="mermaid" code={source} tone={tone} className="my-0">
+    <div className="my-3">
+      <CodeFrame
+        ref={frame}
+        data-slot="diagram"
+        language="mermaid"
+        code={source}
+        tone={tone}
+        className="my-0"
+      >
         {drawing.kind === "drawn" ? (
           <button
             type="button"
@@ -65,7 +78,9 @@ export const Diagram = memo(function Diagram({
             />
           </button>
         ) : (
-          <div className={SOURCE_TEXT}>{source}</div>
+          // The source in the code face, at the measure a code block reads it at, so the drawing's
+          // arrival moves nothing.
+          <pre className={cn(mono, SOURCE_MEASURE)}>{source}</pre>
         )}
       </CodeFrame>
       {drawing.kind === "drawn" ? (
@@ -114,26 +129,33 @@ function load() {
       // A failed fetch is asked for again by the next diagram, never answered from a cached rejection.
       loading = undefined
       quietly("mermaid's chunk")(error)
-      throw error
+      throw new NotLoaded(error)
     },
   )
   return loading
 }
 
-let turn: Promise<unknown> = Promise.resolve()
+/** The renders waiting their turn: mermaid keeps one global config, so two at once would share colours. */
+let renderQueue: Promise<unknown> = Promise.resolve()
 function serially<T>(work: () => Promise<T>): Promise<T> {
-  const next = turn.then(work, work)
-  turn = next.catch(() => undefined)
+  const next = renderQueue.then(work, work)
+  renderQueue = next.catch(() => undefined)
   return next
 }
 
-async function draw(
-  element: HTMLElement,
-  id: string,
-  source: string,
-  dark: boolean,
-  live: () => boolean,
-) {
+async function draw({
+  element,
+  id,
+  source,
+  dark,
+  live,
+}: {
+  element: HTMLElement
+  id: string
+  source: string
+  dark: boolean
+  live: () => boolean
+}) {
   const mermaid = await load()
   return serially(async () => {
     if (!live()) return ""
@@ -148,34 +170,4 @@ async function draw(
     const { svg } = await mermaid.render(id, source)
     return svg
   })
-}
-
-function paletteOf(element: HTMLElement): DiagramPalette {
-  const style = getComputedStyle(element)
-  const tokens: Record<string, string> = {}
-  for (const name of DIAGRAM_TOKENS) {
-    const value = style.getPropertyValue(`--${name}`).trim()
-    if (value) tokens[name] = toHex(value)
-  }
-  return { surface: surfaceOf(element), ink: toHex(style.color), tokens }
-}
-
-function surfaceOf(element: HTMLElement) {
-  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
-    const colour = toHex(getComputedStyle(node).backgroundColor)
-    if (!washed(colour)) return colour
-  }
-  return toHex(getComputedStyle(document.body).backgroundColor)
-}
-
-/** A wash is a colour with an alpha under 1, which is the only time `toHex` prints a fourth pair. */
-const washed = (hex: string) => hex.length !== 7
-
-function lineOf(error: unknown) {
-  const words = error instanceof Error ? error.message : String(error ?? "")
-  const own = words
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean)
-  return own && /^parse error/i.test(own) ? own : "Mermaid couldn't draw this diagram."
 }

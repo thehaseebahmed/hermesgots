@@ -6,6 +6,16 @@ export type Fence = { char: string; length: number }
 
 export type Opener = Fence & { rest: string }
 
+/**
+ * The fence a line opens where markdown lets a fence stand: up to three spaces of indent, which is
+ * what a closer and a fence already open are read with. `openui-lang` takes its opener this way, as
+ * markdown does, while a diagram's opener has to stand at the margin (`MARGIN_FENCE`).
+ */
+export const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
+
+/** The fence a line opens at the margin: the policy a diagram's opener is held to. */
+export const MARGIN_FENCE = /^(`{3,}|~{3,})(.*)$/
+
 /** The fence a line opens, read with the caller's own pattern: the indentation is the policy's. */
 export function fenceOf(line: string, pattern: RegExp): Opener | null {
   const match = pattern.exec(unixLine(line))

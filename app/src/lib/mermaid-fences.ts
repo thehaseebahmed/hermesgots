@@ -1,13 +1,27 @@
-import { closes, fenceOf, linesOf, unixLength, unixLines, type Fence } from "./fences.ts"
+import {
+  closes,
+  FENCE,
+  fenceOf,
+  linesOf,
+  MARGIN_FENCE,
+  unixLength,
+  unixLines,
+  type Fence,
+} from "./fences.ts"
 
 export type MermaidPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "mermaid"; at: number; source: string }
 
-const FENCE = /^(`{3,}|~{3,})(.*)$/
 const INFO = "mermaid"
 
 const mayDrawDiagram = (content: string) => content.includes(INFO)
+
+/** A line opening a diagram's fence: `mermaid` and nothing else, standing at the margin. */
+function diagramAt(line: string) {
+  const fence = fenceOf(line, MARGIN_FENCE)
+  return fence && fence.rest === INFO ? fence : null
+}
 
 /**
  * Splits a markdown text into the stretches it shows as they are and the closed ```mermaid fences
@@ -16,6 +30,10 @@ const mayDrawDiagram = (content: string) => content.includes(INFO)
  * indented, inside a list item, quoted or inside another fence is an example and stays text, and
  * one whose closer has yet to arrive leaves its tail as text, so a reply still streaming is drawn
  * as the code it is until it finishes.
+ *
+ * Only the opener is the margin's: a closer may be indented up to three spaces, as markdown allows,
+ * and so may a fence that is already open — so a fence markdown closed that way closes here too,
+ * rather than leaving every diagram after it inside one that never ends.
  */
 export function mermaidParts(content: string): MermaidPart[] {
   if (!mayDrawDiagram(content)) return content ? [{ kind: "text", at: 0, text: content }] : []
@@ -33,16 +51,17 @@ export function mermaidParts(content: string): MermaidPart[] {
       continue
     }
 
-    const fence = fenceOf(line, FENCE)
+    const diagram = diagramAt(line)
+    const fence = diagram ?? fenceOf(line, FENCE)
     if (!fence) continue
-    if (fence.rest !== INFO) {
+    if (!diagram) {
       plain = { char: fence.char, length: fence.length }
       continue
     }
 
     let close = -1
     for (let j = i + 1; j < lines.length; j++) {
-      if (closes(lines[j], fence, FENCE)) {
+      if (closes(lines[j], diagram, FENCE)) {
         close = j
         break
       }

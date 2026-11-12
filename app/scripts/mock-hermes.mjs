@@ -1889,14 +1889,10 @@ const OPENUI_MAP = [
 const DIAGRAM_INTRO = "Here's the flow as a diagram.\n\n"
 const DIAGRAM_FENCE = [
   "```mermaid",
-  "sequenceDiagram",
-  "  actor User",
-  "  participant Chat",
-  "  participant Rule as Fence rule",
-  "  User->>Chat: a reply holding a closed fence",
-  "  Chat->>Rule: cut the text at its fences",
-  "  Rule-->>Chat: the fence's source",
-  "  Chat-->>User: a diagram where the fence stood",
+  "flowchart LR",
+  "  Fence[The fence arrives] -->|at the margin| Closed[Closed, so it draws]",
+  "  Closed -->|a tap| Sheet[Filled, at its own width]",
+  "  Closed -->|a flip| Again[Drawn again, in the other mode]",
   "```",
 ].join("\n")
 const DIAGRAM_OUTRO = "\n\nThat's every step the app takes, from the fence to the picture."

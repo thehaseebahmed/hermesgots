@@ -11,9 +11,30 @@ const FENCE_CODE = "[data-slot=markdown] div[data-md-code]"
 const watchFence = (page) =>
   page.evaluate(() => {
     window.__fence = []
+    window.__frameAt = null
+    window.__mermaidChunks = []
+    // Resource timing is the page's own clock, so a chunk's start and the frame's first commit can
+    // be told apart: an observer sees each entry as it is recorded, whatever the buffer later holds.
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries())
+          if (/mermaid/i.test(entry.name) && /\.m?js(?:\?|$)/.test(entry.name))
+            window.__mermaidChunks.push(Math.round(entry.startTime))
+      }).observe({ type: "resource", buffered: true })
+    } catch {
+      /* no resource timing: the chunk count is then asserted by the flow's own request log */
+    }
+    const replyNow = () =>
+      [...document.querySelectorAll("[data-slot=message][data-align=start]")].at(-1)
+    // Marked on the mutation itself, not on the next frame: the import starts after this commit.
+    const markFrame = () => {
+      if (window.__frameAt !== null) return
+      if (replyNow()?.querySelector("[data-slot=diagram]"))
+        window.__frameAt = Math.round(performance.now())
+    }
     let waiting = false
     const read = () => {
-      const reply = [...document.querySelectorAll("[data-slot=message][data-align=start]")].at(-1)
+      const reply = replyNow()
       if (!reply) return
       window.__fence.push({
         code: reply.querySelectorAll("[data-slot=markdown] div[data-md-code]").length,
@@ -22,6 +43,7 @@ const watchFence = (page) =>
       })
     }
     const observer = new MutationObserver(() => {
+      markFrame()
       if (waiting) return
       waiting = true
       requestAnimationFrame(() => {
@@ -34,6 +56,7 @@ const watchFence = (page) =>
       observer.disconnect()
       return window.__fence
     }
+    window.__chunkRead = () => ({ frameAt: window.__frameAt, chunks: [...window.__mermaidChunks] })
   })
 
 const drawnFacts = (page) =>
@@ -154,6 +177,75 @@ const watchDrawing = (page) =>
     }
   })
 
+/**
+ * One drawing, as a reader's eye can judge it: the box a node is filled with against the words on
+ * it, and the colour the drawing was told it stands on. The app's own colours come back through a
+ * 1px canvas, since the tokens compute to `oklch()`.
+ */
+const readDrawing = (row) =>
+  row.evaluate((el) => {
+    const frame = el.querySelector("[data-slot=diagram]")
+    const svg = frame?.querySelector("svg[id]")
+    if (!frame || !svg) return { drawn: false }
+    const canvas = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext(
+      "2d",
+      { willReadFrequently: true },
+    )
+    const channels = (colour) => {
+      if (!colour || !canvas) return null
+      canvas.clearRect(0, 0, 1, 1)
+      canvas.fillStyle = colour
+      canvas.fillRect(0, 0, 1, 1)
+      const [r, g, b] = canvas.getImageData(0, 0, 1, 1).data
+      return [r, g, b]
+    }
+    const hex = (colour) => {
+      const read = channels(colour)
+      return read ? `#${read.map((n) => n.toString(16).padStart(2, "0")).join("")}` : ""
+    }
+    const luminance = (colour) => {
+      const read = channels(colour)
+      if (!read) return 0
+      const [r, g, b] = read.map((channel) => {
+        const value = channel / 255
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const ratio = (one, other) => {
+      const [high, low] = [luminance(one), luminance(other)].sort((a, b) => b - a)
+      return (high + 0.05) / (low + 0.05)
+    }
+    // mermaid's root rule, first in the style it writes: `#id{font-family:…;fill:<textColor>;}`.
+    const rule = /#[\w-]+\{([^}]*)\}/.exec(svg.querySelector("style")?.textContent ?? "")?.[1] ?? ""
+    const ink = /fill:\s*(#[0-9a-f]{6})/i.exec(rule)?.[1]?.toLowerCase() ?? ""
+    const box = svg.querySelector(".node rect")
+    const labelRect = svg.querySelector(".edgeLabel rect")
+    const labelBkg = svg.querySelector(".labelBkg")
+    const labelGroup = svg.querySelector(".edgeLabel")
+    // The surface a diagram was told it stands on is painted on its edge labels, which is the one
+    // place mermaid draws it: a rect's fill, an html label's background, or the group's own.
+    const labelPaint = labelRect
+      ? getComputedStyle(labelRect).fill
+      : labelBkg
+        ? getComputedStyle(labelBkg).backgroundColor
+        : labelGroup
+          ? getComputedStyle(labelGroup).backgroundColor
+          : ""
+    const boxFill = box ? getComputedStyle(box).fill : ""
+    return {
+      drawn: true,
+      dark: document.documentElement.classList.contains("dark"),
+      ink,
+      expected: hex(getComputedStyle(el.querySelector("[data-slot=markdown]") ?? el).color),
+      box: hex(boxFill),
+      boxVsInk: ink && boxFill ? ratio(boxFill, ink) : 0,
+      plate: hex(getComputedStyle(frame).backgroundColor),
+      page: hex(getComputedStyle(document.body).getPropertyValue("--background")),
+      label: hex(labelPaint),
+    }
+  })
+
 const flipping = (page) =>
   page.evaluate(
     () =>
@@ -255,6 +347,26 @@ await flow(
     )
     pass(
       `the fence was code for ${asCode.length} of ${states.length} states while the reply arrived, then a frame for the ${states.length - framed} after its closer landed`,
+    )
+
+    // The promise that whether a fence is worth a chunk is answered before any import: a chunk's
+    // request and the frame's first commit are both on the page's own clock.
+    const asked = await until(
+      async () => {
+        const read = await page.evaluate(() => window.__chunkRead())
+        return read.frameAt !== null && read.chunks.length > 0 ? read : null
+      },
+      20_000,
+      "mermaid's chunk to be asked for",
+    )
+    const early = asked.chunks.filter((at) => at < asked.frameAt).length
+    assert.equal(
+      early,
+      0,
+      `no mermaid chunk was asked for while the fence was still arriving (${early} of ${asked.chunks.length} came before the frame)`,
+    )
+    pass(
+      `the fence was code with nothing fetched: the first of ${asked.chunks.length} chunk requests came ${asked.chunks[0] - asked.frameAt}ms after the frame appeared`,
     )
 
     const seen = new Map()
@@ -553,6 +665,70 @@ await flow(
     const refusedPath = await shot("refused")
     pass(
       `a fence mermaid refused drew its source and one line: "${line}"${refusedPath ? ` (${refusedPath})` : ""}`,
+    )
+
+    // A page-tone drawing stands on the frame's own plate, never on the page behind it: the frame is
+    // `bg-muted` and the page's background is not, and mermaid's edge-label plate is filled with the
+    // surface the app told it about, so the two agree only when the plate is what was read.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ colorScheme: "light" })
+    const plateReply = page.locator(`${REPLY}:has([data-slot=diagram])`).first()
+    const plate = await until(
+      async () => {
+        const facts = await readDrawing(plateReply)
+        return facts.drawn && facts.label && facts.ink === facts.expected ? facts : null
+      },
+      30_000,
+      "the drawing's labelled edges",
+    )
+    assert.notEqual(
+      plate.plate,
+      plate.page,
+      `the frame stands on a plate of its own (${plate.plate} against the page's ${plate.page})`,
+    )
+    assert.equal(
+      plate.label,
+      plate.plate,
+      `and the drawing was told it stands on that plate, not on the page (${plate.label})`,
+    )
+    pass(
+      `a page-tone drawing was drawn on its frame's plate: ${plate.plate}, where the page's own background is ${plate.page}`,
+    )
+
+    // And one in the reader's own bubble: the fill tone's surface, whose words are near-white.
+    await send(["```mermaid", "flowchart LR", "  Ask[The fence] -->|closes| Draw[Drawn]", "```"].join("\n"))
+    const mine = page.locator("[data-slot=message][data-align=end]").last()
+    await until(
+      () => mine.locator("[data-slot=diagram] svg[id] .node").count().then((count) => count > 0),
+      30_000,
+      "the bubble's own diagram to draw",
+    )
+    const bubbleSeen = []
+    for (const theme of ["light", "dark"]) {
+      await page.emulateMedia({ colorScheme: theme })
+      const facts = await until(
+        async () => {
+          const read = await readDrawing(mine)
+          return read.box && read.dark === (theme === "dark") && read.ink === read.expected ? read : null
+        },
+        25_000,
+        `the bubble's diagram in ${theme}`,
+      )
+      assert.ok(
+        facts.boxVsInk >= 4.5,
+        `the bubble's box carries its words at ${facts.boxVsInk.toFixed(2)}:1 in ${theme} (${facts.box} under ${facts.ink})`,
+      )
+      if (theme === "light")
+        assert.notEqual(
+          facts.box,
+          "#ffffff",
+          `the page's white is no box inside a filled bubble (${facts.box})`,
+        )
+      bubbleSeen.push(`${theme} ${facts.box} under ${facts.ink} at ${facts.boxVsInk.toFixed(2)}:1`)
+    }
+    const bubblePath = await shot("bubble")
+    pass(
+      `a diagram in the user's own bubble reads: ${bubbleSeen.join("; ")}${bubblePath ? ` (${bubblePath})` : ""}`,
     )
   },
   { viewport: { width: 390, height: 844 } },

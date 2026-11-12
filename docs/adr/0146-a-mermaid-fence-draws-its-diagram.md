@@ -37,8 +37,10 @@ arithmetic reads hex where the app's tokens compute to `oklch()`. `toHex` (`app/
 applied where each token is read — off the element the diagram stands in, since the tokens are custom
 properties and inherit down to it — and `mermaidTheme` (`app/src/lib/mermaid-theme.ts`) maps them onto
 the `base` theme's variables, one per colour a box, a word, a connector, a label, a note and a section
-is drawn in. The surface is the first painted solid behind the frame, because a frame in a bubble is a
-wash of the words' own colour and a wash has no hex mermaid could draw on.
+is drawn in. The surface is the first painted solid under the frame — the frame's own plate on the page,
+and the bubble's own fill where the frame is a wash of the words' colour, since a wash has no hex mermaid
+could draw on — and a box or a plate the page's token cannot read on that surface is a shade of the
+surface instead.
 
 **`securityLevel: "strict"`, and `htmlLabels` left at mermaid's default.** A diagram is a model's markup
 drawn inside this document, so its labels are sanitised. `htmlLabels` stays on because a model writes
@@ -105,9 +107,12 @@ diagram type is a lazy import of its own.
   that to 184KB gzipped. On a slow connection the fence sits as its own source for a moment; it never
   flashes, because the code block is already drawn and the drawing replaces it in place.
 - Every diagram type together is 5049 KiB raw across 89 chunks, about 1.45MB gzipped. The build puts all
-  89 under `assets/mermaid/`, and the install's precache holds 164 entries with none of them — 253 entries
+  89 under `assets/mermaid/`, and the install's precache holds 167 entries with none of them — 256 entries
   without the rule, and that 5049 KiB on the install. If the exclusion drifts, it lands on every reader at
   install: the gate catches it at build time, and nothing catches it at deploy time.
+- A closer may be indented up to three spaces, as markdown allows, while a diagram's opener must stand at
+  the margin: markdown closes a fence a walker reading only the margin would leave open, and every diagram
+  after it would be swallowed by a fence that never ended.
 - The split sits beside `markdownBlocks`, which keeps a text whole when it holds link or footnote
   definitions. A text with a definition above a diagram and its use below is split across one — the same
   hole `openuiParts` already has.

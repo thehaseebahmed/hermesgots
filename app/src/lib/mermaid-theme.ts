@@ -50,9 +50,42 @@ function mix(surface: string, ink: string, share: number) {
   return `#${channel(1)}${channel(3)}${channel(5)}`
 }
 
-function light(colour: string) {
-  const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255)
+/** A colour's relative luminance, as WCAG measures it: the ratio below is the same one a contrast check is. */
+function luminance(colour: string) {
+  const [r, g, b] = [1, 3, 5].map((at) => {
+    const channel = parseInt(colour.slice(at, at + 2), 16) / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** WCAG's ratio for two colours: 1 for a pair that matches, 21 for black on white. */
+function contrast(one: string, two: string) {
+  const [high, low] = [luminance(one), luminance(two)].sort((a, b) => b - a)
+  return (high + 0.05) / (low + 0.05)
+}
+
+/** What words have to read at against the surface they are drawn on. */
+const READS = 4.5
+
+/** How far off a surface a box is carried when the page's own token doesn't read against its words. */
+const SHADE = 6
+
+/**
+ * A surface on `on`: the page's token where it reads against `words`, and otherwise a shade of the
+ * surface the diagram stands on, carried away from its words until it does. A token is the page's
+ * own paper — white in light mode, near-black in dark — which reads on the page's own background and
+ * nowhere else: on a filled bubble the same white sits under near-white words at 1.05:1, so the box
+ * there is derived from the fill rather than borrowed from the page.
+ */
+function surfaceColour(on: string, words: string, token: string | undefined) {
+  if (token && contrast(token, words) >= READS) return token
+  const away = luminance(words) > 0.5 ? "#000000" : "#ffffff"
+  for (let share = SHADE; share < 100; share += SHADE) {
+    const box = mix(on, away, share)
+    if (contrast(box, words) >= READS) return box
+  }
+  return away
 }
 
 /**
@@ -61,7 +94,7 @@ function light(colour: string) {
  */
 export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<string, string> {
   const on = opaque(read(surface) ?? PAPER)
-  const words = opaque(read(ink) ?? (light(on) > 0.5 ? INK : LIGHT_INK))
+  const words = opaque(read(ink) ?? (luminance(on) > 0.5 ? INK : LIGHT_INK))
   const token = (name: keyof DiagramTokens) => {
     const colour = read(tokens[name])
     if (!colour) return undefined
@@ -69,8 +102,8 @@ export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<s
     return alpha < 1 ? mix(on, opaque(colour), alpha * 100) : colour
   }
 
-  const card = token("card") ?? mix(on, words, 6)
-  const plate = token("muted") ?? mix(on, words, 10)
+  const card = surfaceColour(on, words, token("card"))
+  const plate = surfaceColour(on, words, token("muted"))
   const edge = token("border") ?? mix(on, words, 22)
   const connector = token("muted-foreground") ?? mix(on, words, 55)
   const accent = token("accent") ?? mix(on, words, 14)

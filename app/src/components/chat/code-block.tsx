@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react"
+import type { HTMLAttributes, ReactNode, Ref } from "react"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
 import { useMonoFace } from "@/components/chat/code-face"
@@ -25,7 +25,7 @@ export const PAINT: Record<Tone, { fill: string; chrome: string }> = {
  * The measure a source is read at, wherever it is drawn: the code block's `<pre>`, and the body a
  * frame shows in place of a drawing that has yet to land. One constant, so the two cannot drift.
  */
-export const SOURCE_TEXT =
+export const SOURCE_MEASURE =
   "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap"
 
 export function CodeFrame({
@@ -34,6 +34,7 @@ export function CodeFrame({
   tone = "page",
   className,
   children,
+  ref,
   ...root
 }: {
   /** What the body is written in: the fence's own label in a reply, the call's tool in an approval. */
@@ -43,12 +44,18 @@ export function CodeFrame({
   tone?: Tone
   /** The frame's own spacing, where it stands in something that already spaces its children. */
   className?: string
+  /** The plate itself, for a body that reads the surface it is about to draw on (a diagram). */
+  ref?: Ref<HTMLDivElement>
   children: ReactNode
 } & Omit<HTMLAttributes<HTMLDivElement>, "className" | "children">) {
   const { copied, noteCopied } = useCopied()
 
   return (
-    <div {...root} className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}>
+    <div
+      {...root}
+      ref={ref}
+      className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}
+    >
       <div
         className={cn(
           "flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs",
@@ -97,7 +104,7 @@ export function CodeBlock({
       <pre
         className={cn(
           mono,
-          SOURCE_TEXT,
+          SOURCE_MEASURE,
           scrolling && "max-h-[30dvh] overflow-y-auto overscroll-contain",
         )}
       >

@@ -115,6 +115,50 @@ test("a fence inside another fence stays text", () => {
   )
 })
 
+test("a margin opener is closed by a closer indented up to three spaces", () => {
+  for (const indent of [" ", "  ", "   "]) {
+    const text = ["```mermaid", "graph TD", "  A --> B", indent + "```"].join("\n")
+    const parts = mermaidParts(text)
+    assert.deepEqual(
+      parts.map((part) => part.kind),
+      ["mermaid"],
+      `a closer ${indent.length} space(s) in closes the fence markdown opened`,
+    )
+    assert.equal(parts[0].source, "graph TD\n  A --> B", "and the source is the body alone")
+  }
+})
+
+test("a closer four spaces in, or tabbed in, closes nothing", () => {
+  for (const indent of ["    ", "\t"]) {
+    const text = ["```mermaid", "graph TD", indent + "```", "", "After."].join("\n")
+    assert.deepEqual(
+      mermaidParts(text),
+      asText(text),
+      `${JSON.stringify(indent)} is not an indent markdown lets a closer wear`,
+    )
+  }
+})
+
+test("a fence closed by an indented closer ends where markdown says it does", () => {
+  const text = ["```js", "const one = 1", "  ```", "", "```mermaid", "graph TD", "```"].join("\n")
+  const parts = mermaidParts(text)
+  assert.deepEqual(
+    parts.map((part) => part.kind),
+    ["text", "mermaid"],
+    "the js fence closed, so the diagram after it is not inside one",
+  )
+  assert.equal(parts[1].source, "graph TD", "and draws with its own body")
+})
+
+test("a mermaid fence inside a fence indented two spaces stays text", () => {
+  const text = ["  ```md", "```mermaid", "graph TD", "```", "  ```"].join("\n")
+  assert.deepEqual(
+    mermaidParts(text),
+    asText(text),
+    "markdown draws that fence inside the outer one, so it is an example",
+  )
+})
+
 test("a fence that never closes leaves its tail as text", () => {
   const text = ["Before.", "", "```mermaid", "graph TD", "  A --> B"].join("\n")
   assert.deepEqual(mermaidParts(text), asText(text), "a reply still streaming draws no half diagram")
@@ -200,8 +244,11 @@ test("a text with no marker at all is answered as one part, without a line split
 test("the rule touches nothing but the string", () => {
   const raw = readFileSync(new URL("../src/lib/mermaid-fences.ts", import.meta.url), "utf8")
   const source = raw.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")
-  const imports = [...source.matchAll(/^[ \t]*import\b[^\n]*$/gm)].map(([line]) => line.trim())
+  // An import wrapped over several lines is still one import: read where each one comes from.
+  const imports = [...source.matchAll(/^[ \t]*import\b[\s\S]*?from\s+"([^"]+)"/gm)].map(
+    ([, from]) => from,
+  )
   assert.equal(imports.length, 1, "one import, and no other: a rule reached from the startup path")
-  assert.match(imports[0], /from "\.\/fences\.ts"$/, "and it is the scanner beside it")
+  assert.equal(imports[0], "./fences.ts", "and it is the scanner beside it")
   assert.doesNotMatch(source, /\bimport\s*\(/, "and nothing is loaded on demand")
 })

@@ -40,6 +40,20 @@ test("a closed fence draws its frame, not a block of code", async () => {
       "Here it is:",
       "the words above it still draw",
     )
+    // The body the frame shows while its chunk is on its way, which is only observable here: this is
+    // the first mount in the file, and the module registry answers every later import with the
+    // failure it already holds, so the frame would be past this state.
+    const pending = drawn?.querySelector("pre")
+    assert.ok(
+      pending,
+      "the source waits in a <pre>, so the drawing's arrival cannot reflow a line of it",
+    )
+    assert.ok(pending?.className.includes("font-mono"), `in the code face (${pending?.className})`)
+    assert.ok(
+      pending?.className.includes("text-[13px]"),
+      "at the measure a code block reads a source at",
+    )
+    assert.equal(pending?.textContent, DIAGRAM, "holding the source, whole")
   })
 })
 

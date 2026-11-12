@@ -57,6 +57,33 @@ test("a dark page's diagram is drawn dark, from the same tokens", () => {
     assert.notEqual(dark[name], light[name], `${name} follows the mode the page is in`)
 })
 
+/** WCAG's ratio for two hex colours, read here so the module's own arithmetic is not the judge. */
+const ratio = (one, other) => {
+  const luminance = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((at) => {
+      const channel = parseInt(hex.slice(at, at + 2), 16) / 255
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const [high, low] = [luminance(one), luminance(other)].sort((a, b) => b - a)
+  return (high + 0.05) / (low + 0.05)
+}
+
+test("a box on a filled surface is derived from that surface, not from the page's paper", () => {
+  const surface = "#008236"
+  const ink = "#f0fdf4"
+  const theme = mermaidTheme({ surface, ink, tokens: { ...LIGHT, card: "#ffffff" } })
+
+  assert.equal(theme.background, surface, "the drawing stands on the bubble's own fill")
+  assert.notEqual(theme.mainBkg, "#ffffff", "the page's white is no white on a green bubble")
+  assert.ok(
+    ratio(theme.mainBkg, ink) >= 4.5,
+    `its box carries the bubble's words at ${ratio(theme.mainBkg, ink).toFixed(2)}:1`,
+  )
+  assert.match(theme.mainBkg, HEX, "and it is still a colour mermaid can parse")
+})
+
 test("a token the page doesn't answer falls back to a shade of the two it did", () => {
   const theme = mermaidTheme({
     surface: "#0a0a0a",
