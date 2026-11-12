@@ -184,7 +184,10 @@ function Band({
   return (
     <>
       {!collapsed && (
-        <h2 id={`${name}-heading`} className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+        <h2
+          id={`${name}-heading`}
+          className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
+        >
           {label}
         </h2>
       )}

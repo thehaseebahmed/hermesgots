@@ -33,7 +33,8 @@ export function BotPicker({
   const answering = useLiveQuery(listEnabledProfiles, [])
   const labels = useMemo(() => botLabels(answering ?? []), [answering])
   const profiles = useMemo(
-    () => [...(answering ?? [])].sort((a, b) => labelOf(labels, a).localeCompare(labelOf(labels, b))),
+    () =>
+      [...(answering ?? [])].sort((a, b) => labelOf(labels, a).localeCompare(labelOf(labels, b))),
     [answering, labels],
   )
 

@@ -101,8 +101,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   // A bot no picked connection seats is one the create will add to the making profile's roster, and
   // its row says so before it is pressed. Nothing is marked until there is a pick, since until then
   // no connection is named (ADR 0129).
-  const needsHost = (bot: Profile) =>
-    picked.length > 0 && !seatedByAny(picks, bot.hermesProfile)
+  const needsHost = (bot: Profile) => picked.length > 0 && !seatedByAny(picks, bot.hermesProfile)
 
   const refusalFor = (bot: Profile): Refusal | null => {
     if (picked.includes(bot.id)) return null
@@ -124,9 +123,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       return
     }
     // The guards inside the updater too: a press that lands twice in one batch seats one bot once.
-    setPicked((held) =>
-      held.includes(id) || held.length >= MOST ? held : [...held, id],
-    )
+    setPicked((held) => (held.includes(id) || held.length >= MOST ? held : [...held, id]))
   }
 
   /** One seat per picked bot, minted when it is picked, so a retried create seats the same members. */
@@ -183,7 +180,9 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       <ChatHeader
         title="New room"
         subtitle={
-          chosen.length ? chosen.map((bot) => labelOf(labels, bot)).join(", ") : "No bots picked yet"
+          chosen.length
+            ? chosen.map((bot) => labelOf(labels, bot)).join(", ")
+            : "No bots picked yet"
         }
         showBot={false}
         centered
@@ -212,17 +211,12 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
             onClick={() => setPicking(true)}
           >
             {faces.length ? (
-              <RoomFaces
-                shown={faces.slice(0, FACES)}
-                more={Math.max(0, faces.length - FACES)}
-              />
+              <RoomFaces shown={faces.slice(0, FACES)} more={Math.max(0, faces.length - FACES)} />
             ) : (
               <UsersIcon className="size-4" />
             )}
             <span className="text-sm">
-              {chosen.length
-                ? `${chosen.length} of ${MOST} bots`
-                : `${LEAST} to ${MOST} bots`}
+              {chosen.length ? `${chosen.length} of ${MOST} bots` : `${LEAST} to ${MOST} bots`}
             </span>
           </Button>
         </div>
@@ -308,7 +302,11 @@ function SeatsPicker({
               />
             ))}
           </Group>
-          <Button size="lg" className="h-11 w-full rounded-full" onClick={() => onOpenChange(false)}>
+          <Button
+            size="lg"
+            className="h-11 w-full rounded-full"
+            onClick={() => onOpenChange(false)}
+          >
             Done
           </Button>
         </div>

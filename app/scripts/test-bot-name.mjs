@@ -23,16 +23,22 @@ test("a host reads as its short name", () => {
 })
 
 test("two hosts sharing a short name read as their domain parts", () => {
-  const pair = [
-    bot("a", "https://hermes.domain.com/v1"),
-    bot("b", "https://hermes.example.com/v1"),
-  ]
-  assert.deepEqual(pair.map((one) => botLabel(one, pair)), ["domain", "example"])
+  const pair = [bot("a", "https://hermes.domain.com/v1"), bot("b", "https://hermes.example.com/v1")]
+  assert.deepEqual(
+    pair.map((one) => botLabel(one, pair)),
+    ["domain", "example"],
+  )
 })
 
 test("a domain part long enough to still collide falls back to the whole host", () => {
-  const pair = [bot("a", "https://hermes.domain.co.uk/v1"), bot("b", "https://hermes.domain.com/v1")]
-  assert.deepEqual(pair.map((one) => botLabel(one, pair)), ["domain.co", "domain"])
+  const pair = [
+    bot("a", "https://hermes.domain.co.uk/v1"),
+    bot("b", "https://hermes.domain.com/v1"),
+  ]
+  assert.deepEqual(
+    pair.map((one) => botLabel(one, pair)),
+    ["domain.co", "domain"],
+  )
   const triple = [...pair, bot("c", "https://hermes.domain.co/v1")]
   assert.deepEqual(
     triple.map((one) => botLabel(one, triple)),
@@ -46,7 +52,10 @@ test("one host's several bots append the profile they are reached at", () => {
     bot("a", "https://hermes.domain.com/v1"),
     bot("b", "https://hermes.domain.com/p/work/v1", "work"),
   ]
-  assert.deepEqual(host.map((one) => botLabel(one, host)), ["hermes", "hermes/work"])
+  assert.deepEqual(
+    host.map((one) => botLabel(one, host)),
+    ["hermes", "hermes/work"],
+  )
   assert.deepEqual(
     host.map((one) => botLabel(one, [...host, bot("c", "https://other.example.com/p/home/v1")])),
     ["hermes", "hermes/work"],
@@ -61,16 +70,17 @@ test("two hosts' profiles read with the domain part and the profile", () => {
     bot("c", "https://hermes.example.com/v1"),
     bot("d", "https://hermes.example.com/p/home/v1", "home"),
   ]
-  assert.deepEqual(four.map((one) => botLabel(one, four)), [
-    "domain",
-    "domain/work",
-    "example",
-    "example/home",
-  ])
+  assert.deepEqual(
+    four.map((one) => botLabel(one, four)),
+    ["domain", "domain/work", "example", "example/home"],
+  )
 })
 
 test("two bots linked at one host and one profile are told apart by their own names", () => {
-  const twins = [bot("a", "https://hermes.domain.com/v1", "Work"), bot("b", "https://hermes.domain.com/v1", "Home")]
+  const twins = [
+    bot("a", "https://hermes.domain.com/v1", "Work"),
+    bot("b", "https://hermes.domain.com/v1", "Home"),
+  ]
   assert.deepEqual(
     twins.map((one) => botLabel(one, twins)),
     ["Work", "Home"],
@@ -92,10 +102,10 @@ test("a bot with no server keeps its own name, and one with no name at all is a 
 
 test("a bare host keeps its port, the only thing telling two of them apart", () => {
   const pair = [bot("a", "http://localhost:8642/v1"), bot("b", "http://localhost:8643/v1")]
-  assert.deepEqual(pair.map((one) => botLabel(one, pair)), [
-    "localhost:8642",
-    "localhost:8643",
-  ])
+  assert.deepEqual(
+    pair.map((one) => botLabel(one, pair)),
+    ["localhost:8642", "localhost:8643"],
+  )
 })
 
 test("a base URL that does not parse is its own host", () => {

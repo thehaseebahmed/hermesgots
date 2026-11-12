@@ -62,10 +62,7 @@ function domainOf(host: string) {
 
 /** The Hermes profile a bot is, where its host serves it under `/p/<profile>`; else the default one. */
 function placeOf(baseUrl: string) {
-  const root = baseUrl
-    .trim()
-    .replace(/\/+$/, "")
-    .replace(/\/v1$/, "")
+  const root = baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
   return root.match(/\/p\/([^/?#]+)$/)?.[1]
 }
 
@@ -90,15 +87,16 @@ export function botLabel(bot: NamedBot, peers: NamedBot[]): string {
   if (others.some((other) => other && other !== host && shortOf(other) === short)) {
     const part = domainOf(host)
     base = part ?? host
-    if (part && others.some((other) => other && other !== host && (domainOf(other) ?? other) === part))
+    if (
+      part &&
+      others.some((other) => other && other !== host && (domainOf(other) ?? other) === part)
+    )
       base = host
   }
   // One host holding several bots: the profile says which of them this is. The default profile is
   // the host itself, so it keeps the bare name — and two bots linked at one host *and* one profile
   // are told apart by their own name, the only thing left that holds them apart.
-  const sameHost = peers.filter(
-    (peer) => peer.id !== bot.id && hostOf(peer.baseUrl) === host,
-  )
+  const sameHost = peers.filter((peer) => peer.id !== bot.id && hostOf(peer.baseUrl) === host)
   const place = placeOf(bot.baseUrl)
   if (sameHost.some((peer) => placeOf(peer.baseUrl) === place)) base = ownName(bot)
   else if (sameHost.length && place) base = `${base}/${place}`

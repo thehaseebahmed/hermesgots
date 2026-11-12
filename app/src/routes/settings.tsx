@@ -270,10 +270,7 @@ function BotListScreen({
 }) {
   const { up } = useNav()
   return (
-    <Screen
-      title={label}
-      leading={<BackButton label="Back" onClick={() => up("/settings")} />}
-    >
+    <Screen title={label} leading={<BackButton label="Back" onClick={() => up("/settings")} />}>
       <BotSettingsList profile={profile} onDeleted={onDeleted} />
     </Screen>
   )
@@ -297,7 +294,10 @@ function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage
     [guard.back],
   )
   return (
-    <Screen title={sub?.title ?? page.title} leading={<BackButton label="Back" onClick={guard.back} />}>
+    <Screen
+      title={sub?.title ?? page.title}
+      leading={<BackButton label="Back" onClick={guard.back} />}
+    >
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />
       {guard.dialog}
     </Screen>

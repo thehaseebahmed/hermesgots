@@ -141,7 +141,6 @@ function BotChatsList({
   selected?: string
   place: ListPlace
 }) {
-
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
   const rooms = useRoomNeeds()
@@ -270,11 +269,7 @@ function ChatList({
         showBot={false}
         leading={
           place === "pushed" ? (
-            <BackButton
-              label={backToChat ? "Back to chat" : "Back"}
-              onClick={back()}
-              floating
-            />
+            <BackButton label={backToChat ? "Back to chat" : "Back"} onClick={back()} floating />
           ) : undefined
         }
         title={
@@ -340,9 +335,7 @@ function ChatList({
                 // whatever stood behind it: the chat picked is the chat its bot opens from then on. A
                 // room and a routine's run are screens of their own whose way back is this list, so
                 // they stay above it, and a pane's rows open beside the list rather than over it.
-                pick={
-                  pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)
-                }
+                pick={pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)}
                 live={row.session ? runs[row.session] : undefined}
               />
             </li>
