@@ -534,7 +534,6 @@ function MissionMenu({
   const [confirming, setConfirming] = useState(false)
   const [asking, setAsking] = useState(false)
   const [rewriting, setRewriting] = useState(false)
-  const refusal = useRefusal(mission.id)
   const made = format && mission.formats.includes(format)
   const canAsk =
     mission.type === "learn" &&
@@ -648,9 +647,11 @@ function MissionMenu({
         title="Delete this mission?"
         description="Its sources, claims and everything written from them go too."
         confirmLabel="Delete"
+        // The dialog holds its own failure, so the promise has to reach it: awaiting the removal
+        // here is what keeps the host's refusal in the question that asked.
         onConfirm={async () => {
-          if (await refusal.write("delete the mission", () => deleteMission(mission)))
-            navigate("/research", { replace: true })
+          await deleteMission(mission)
+          navigate("/research", { replace: true })
         }}
       />
     </>
