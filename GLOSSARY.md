@@ -189,6 +189,10 @@ _Avoid_: repo skill, repository skill
 One skill's own panel, opened by its row: its SKILL.md, its linked files, and where it came from, with the host's Readiness and Setup where it has them. No URL of its own — it is about one skill, not a place.
 _Avoid_: skill page, skill detail screen, editor
 
+**Skill category**:
+The `category` a skill's SKILL.md frontmatter names — `review`, `devops`, `media` — which the Skills tab groups its rows by and names its **filters** after, alphabetically, with the skills that name none standing last under _No category_. A category held by both of the tab's sections is one category, so it gets one pill and keeps both sections' rows; a skill that names no category is under All alone.
+_Avoid_: group, folder, tag; section (the tab's sections are where a skill came from, not what it is about)
+
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
@@ -423,8 +427,8 @@ The bar of floating controls a list keeps at the foot of its scroll, above the s
 _Avoid_: bottom bar, FAB row, dock
 
 **Filter**:
-One of the pills that narrow a bot's chat list: All, Unread, Chats, Rooms or Routines. They stand in the bar under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on. A filter only narrows and never re-orders, Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads.
-_Avoid_: tab, segment, tag, category
+One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
+_Avoid_: tab, segment, tag
 
 ## Rooms
 
