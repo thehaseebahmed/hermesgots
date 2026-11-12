@@ -438,6 +438,14 @@ _Avoid_: bottom bar, FAB row, dock
 One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
 _Avoid_: tab, segment, tag
 
+**Tell**:
+What the app says in passing: one line near the foot of the screen, about something that has just happened and needs no answer. Inside the Android app it is the phone's own toast; on the web it is the toaster. Every screen asks `lib/tell`, so the words are the same on both roads and the app's four tones are decided in one place: error, info, success and note (ADR 0147).
+_Avoid_: toast message, snackbar, popup, alert
+
+**Note**:
+A tell with no tone: something worth saying and neither good nor bad news — a log copied, a note copied, the exit toast. On the web it is the toaster's plain message, drawn without an icon; on a phone it is a toast like any other, since the platform's has no tone to draw. It goes as quickly as the platform's short toast, unless it asks to be held.
+_Avoid_: neutral toast, plain message, info
+
 ## Rooms
 
 **Room**:

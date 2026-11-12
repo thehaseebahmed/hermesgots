@@ -4,8 +4,10 @@
  * a list of files a person remembers to update, and names the few files that talk to something else.
  */
 import assert from "node:assert/strict"
-import { readdirSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import test from "node:test"
+
+import { sourceFiles } from "./source-tree.mjs"
 
 const SRC = new URL("../src/", import.meta.url)
 
@@ -25,16 +27,6 @@ const ELSEWHERE = new Set([
 /** A bare fetch, however it is reached: `globalThis.fetch(` and `window.fetch(` are not escapes. */
 const BARE = /(?<!\w)fetch\s*\(/
 
-function sources(dir, prefix = "") {
-  const found = []
-  for (const entry of readdirSync(new URL(dir, SRC), { withFileTypes: true })) {
-    const path = `${prefix}${entry.name}`
-    if (entry.isDirectory()) found.push(...sources(`${dir}${entry.name}/`, `${path}/`))
-    else if (/\.(ts|tsx)$/.test(entry.name)) found.push(path)
-  }
-  return found
-}
-
 /** The lines that make the call, ignoring the ones that only talk about it. */
 function callers(text) {
   return text
@@ -44,7 +36,7 @@ function callers(text) {
 }
 
 test("every request to a bot's host goes through the network log's seam", () => {
-  const stray = sources("").filter((path) => {
+  const stray = sourceFiles(SRC).filter((path) => {
     if (ELSEWHERE.has(path)) return false
     return callers(readFileSync(new URL(path, SRC), "utf8")).length > 0
   })

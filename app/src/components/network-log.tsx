@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CopyIcon, Trash2Icon } from "lucide-react"
-import { toast } from "sonner"
 
 import { Chip, ChipRow } from "@/components/chip"
 import { Group, useHeaderAction } from "@/components/settings-chrome"
@@ -12,6 +11,7 @@ import { db, listProfiles, type NetRequest } from "@/lib/db"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { clockText, DRAWN, endingLabel, figuresOf, formatNetLog, waitText } from "@/lib/net-log"
 import { clearNetLog } from "@/lib/net-recorder"
+import { tell } from "@/lib/tell"
 
 /**
  * Settings > Developer > Network log: this device's own requests to each bot's host, with the
@@ -46,7 +46,7 @@ export function NetworkLogScreen() {
         className="size-11 rounded-full"
         aria-label="Copy the network log"
         disabled={!all.length}
-        onClick={() => void copyText(formatNetLog(all), () => toast("Network log copied"))}
+        onClick={() => void copyText(formatNetLog(all), () => tell.note("Network log copied"))}
       >
         <CopyIcon />
       </Button>
@@ -58,8 +58,8 @@ export function NetworkLogScreen() {
         disabled={!all.length}
         onClick={() =>
           void clearNetLog().then(
-            () => toast("Network log cleared"),
-            () => toast.error("Couldn't clear the log."),
+            () => tell.note("Network log cleared"),
+            () => tell.error("Couldn't clear the log."),
           )
         }
       >

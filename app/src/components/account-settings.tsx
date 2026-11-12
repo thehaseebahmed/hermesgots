@@ -8,8 +8,8 @@ import {
   LogOutIcon,
   RefreshCwIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
+import { Refusal } from "@/components/banner"
 import { useCopiedCode } from "@/components/copied-code"
 import {
   AlertDialog,
@@ -41,11 +41,21 @@ import {
   unlockSyncWithRecoveryCode,
   useSyncState,
 } from "@/lib/sync"
+import { failed, type AttemptFailure } from "@/lib/refusal"
+import { useRefusal } from "@/lib/use-refusal"
 import { supportsPasskeys } from "@/lib/vault"
 
-function message(error: unknown) {
-  if (error instanceof DOMException && error.name === "NotAllowedError") return "Passkey cancelled."
-  return error instanceof Error ? error.message : "Something went wrong."
+/** What this screen says for a passkey the reader cancelled: the browser's own words say nothing. */
+const PASSKEY_CANCELLED = "Passkey cancelled."
+
+/**
+ * A write that threw: a cancelled passkey is the screen's own sentence, said in passing because the
+ * app wrote it, and anything else is the host's where it sent one and the app's where it didn't.
+ */
+function threw(error: unknown): AttemptFailure {
+  if (error instanceof DOMException && error.name === "NotAllowedError")
+    return { ok: false, caught: error, alone: PASSKEY_CANCELLED }
+  return failed(error, "Something went wrong.")
 }
 
 /** GitHub sign-in and end-to-end encrypted sync of bots and the chat list. */
@@ -55,6 +65,7 @@ export function AccountSettings() {
   const [pending, setPending] = useState<PendingSetup>()
   const [rotation, setRotation] = useState<{ code: string; confirm: () => Promise<void> }>()
   const [asking, setAsking] = useState(false)
+  const refusal = useRefusal("account")
 
   const { account } = sync
   if (account.status === "loading" || account.status === "unavailable") return null
@@ -66,8 +77,11 @@ export function AccountSettings() {
     setBusy(true)
     try {
       await action()
+      // The write landed, so the words of the last refusal go with it: a surface that only ever
+      // hands failures would keep them standing over a card that has answered since.
+      refusal.refuse({ ok: true })
     } catch (error) {
-      toast.error(message(error))
+      refusal.refuse(threw(error))
     } finally {
       setBusy(false)
     }
@@ -157,16 +171,7 @@ export function AccountSettings() {
                     Sync now
                   </Button>
                   {supportsPasskeys() && canAddPasskey() && (
-                    <Button
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() =>
-                        run(async () => {
-                          await addPasskey()
-                          toast.success("Passkey added")
-                        })
-                      }
-                    >
+                    <Button variant="outline" disabled={busy} onClick={() => run(addPasskey)}>
                       <FingerprintIcon data-icon="inline-start" />
                       Add passkey
                     </Button>
@@ -181,6 +186,8 @@ export function AccountSettings() {
           </FieldGroup>
         )}
       </CardContent>
+
+      <Refusal hold={refusal} className="mx-6 mt-4 mb-0" />
 
       <RecoveryCodeDialog
         code={pending?.recoveryCode}
@@ -204,7 +211,9 @@ export function AccountSettings() {
         onDone={() => {
           const confirm = rotation?.confirm
           setRotation(undefined)
-          if (confirm) void confirm().catch((error) => toast.error(message(error)))
+          // A rotation the host refused is the card's to say: `.catch` would answer with the failure
+          // and then throw it away, leaving a refused new code with nothing said at all.
+          if (confirm) void confirm().catch((error) => refusal.refuse(threw(error)))
         }}
       />
     </Card>
@@ -216,13 +225,14 @@ export function UnlockSync() {
   const sync = useSyncState()
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState("")
+  const refusal = useRefusal("unlock")
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true)
     try {
       await action()
     } catch (error) {
-      toast.error(message(error))
+      refusal.refuse(threw(error))
     } finally {
       setBusy(false)
     }
@@ -230,6 +240,7 @@ export function UnlockSync() {
 
   return (
     <>
+      <Refusal hold={refusal} />
       {sync.passkeys && supportsPasskeys() && (
         <Button className="self-start" disabled={busy} onClick={() => run(unlockSyncWithPasskey)}>
           <FingerprintIcon data-icon="inline-start" />

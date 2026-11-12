@@ -1,4 +1,4 @@
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 
 /**
  * End-to-end encryption for sync. One random data key encrypts everything Gots uploads; the
@@ -241,7 +241,7 @@ export function newVault(): Vault {
 
 export function supportsPasskeys() {
   // The app's WebView runs on `https://localhost`, which can't use the deploy's passkeys.
-  return !isNative && typeof window !== "undefined" && "PublicKeyCredential" in window
+  return !isNative() && typeof window !== "undefined" && "PublicKeyCredential" in window
 }
 
 /** Registers a passkey and wraps the data key with its PRF secret. */

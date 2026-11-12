@@ -8,6 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button"
 import { pickRoad } from "@/lib/attachment-caps"
 import type { SessionMode } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
-import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
@@ -53,6 +54,9 @@ export function AttachMenu({
 }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
+  // A source nothing can carry says why in the sheet, beside the source that was tapped: the sheet
+  // stays open, and the words are the rule's own.
+  const refusal = useRefusal()
   const inputs = useRef<Record<Source, HTMLInputElement | null>>({
     camera: null,
     photos: null,
@@ -64,10 +68,13 @@ export function AttachMenu({
     pickRoad({ picture: source !== "files", readsImages: imagesAvailable, route: filesFeature })
 
   const pick = (source: Source) => {
+    // A pick is the same control writing again, so the last refusal goes with it.
+    refusal.clear()
     const road = roadOf(source)
     // A source nothing can carry stays tappable and says why, so the sheet never leaves a dead
-    // button to guess at; the sheet is left open with its sentence said.
-    if (road.road === "none") return tell.error(road.message)
+    // button to guess at. The rule's sentence is the app's own, so it is said in passing rather than
+    // held in the sheet as though the host had written it.
+    if (road.road === "none") return refusal.refuse({ ok: false, alone: road.message })
     setOpen(false)
     inputs.current[source]?.click()
   }
@@ -154,6 +161,7 @@ export function AttachMenu({
           <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
+          <Refusal hold={refusal} className="mx-4 mb-2 sm:mx-6" />
           <div
             className={cn(
               "grid grid-cols-3 gap-4 px-4 sm:gap-5 sm:px-6",

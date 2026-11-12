@@ -84,3 +84,14 @@ export function oneLine(text: string, max = Number.POSITIVE_INFINITY): string | 
   if (!flat) return undefined
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
 }
+
+/**
+ * What a caught error says to a person, where it says anything: `otherwise` for a failure that is
+ * the browser's own — a `TypeError` from `fetch` reads "Failed to fetch", which is the network's
+ * sentence and not the host's — and for anything that isn't an error with words at all. A host that
+ * refused says why, and those words are its own.
+ */
+export function spoken(error: unknown, otherwise: string): string {
+  if (error instanceof TypeError) return otherwise
+  return error instanceof Error && error.message ? error.message : otherwise
+}

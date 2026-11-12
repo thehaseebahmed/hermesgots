@@ -16,9 +16,8 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { toast } from "sonner"
 
-import { Group, RowText, SwitchRow, rowClass } from "@/components/settings-chrome"
+import { Group, RowText, SwitchRow, rowClass, useScreenRefusal } from "@/components/settings-chrome"
 import { DEFAULT_SETTINGS, db, getActiveProfile, saveAppearance, saveSettings } from "@/lib/db"
 import { usePluginFeature, type PluginServer } from "@/lib/features"
 import { useHostRecord } from "@/lib/host-record"
@@ -44,6 +43,7 @@ function InterfaceSwitch({ server }: { server: PluginServer }) {
     UNANSWERED_IS_ON,
   )
   const offered = answer === "yes" && supported
+  const refusal = useScreenRefusal()
   return (
     <SwitchRow
       id="interfaces"
@@ -56,11 +56,7 @@ function InterfaceSwitch({ server }: { server: PluginServer }) {
       }
       checked={settled && value}
       disabled={!offered || saving}
-      onCheckedChange={(on) => {
-        void save(on).catch((error: unknown) =>
-          toast.error(error instanceof Error ? error.message : "Couldn't save that."),
-        )
-      }}
+      onCheckedChange={(on) => void refusal.write("save that", () => save(on))}
     />
   )
 }

@@ -7,7 +7,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { useLayoutEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatComposer } from "@/components/chat/chat-composer"
@@ -21,6 +20,7 @@ import { draftKey } from "@/lib/drafts"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { chosenOf, storedPick } from "@/lib/model-pick"
 import { useLegacyChat } from "@/lib/legacy-chat"
+import { tell } from "@/lib/tell"
 import { beginChat } from "@/lib/threads"
 
 /**
@@ -50,7 +50,7 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
       navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
     } catch (error) {
       starting.current = false
-      toast.error(error instanceof Error ? error.message : "Couldn't start the chat.")
+      tell.error(error instanceof Error ? error.message : "Couldn't start the chat.")
       throw error
     }
   }

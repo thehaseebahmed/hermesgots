@@ -10,7 +10,7 @@ import {
   XIcon,
 } from "lucide-react"
 
-import { Banner } from "@/components/banner"
+import { Banner, Refusal } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { attempt } from "@/lib/attempt"
+import { useRefusal } from "@/lib/use-refusal"
 import { db, rememberModel, type ModelChoice } from "@/lib/db"
 import { getResearchWriters } from "@/lib/hermes"
 import { useModelInfo } from "@/lib/model-info"
@@ -61,6 +61,7 @@ export function CompareBriefForm({ mission }: { mission: Mission }) {
   const [audience, setAudience] = useState(mission.audience)
   const [depth, setDepth] = useState<Depth>(mission.depth)
   const [saving, setSaving] = useState(false)
+  const refusal = useRefusal(mission.id)
   const named = options.filter((o) => o.trim())
   const judged = criteria.filter((k) => k.name.trim())
   const ready =
@@ -72,7 +73,7 @@ export function CompareBriefForm({ mission }: { mission: Mission }) {
 
   const save = async () => {
     setSaving(true)
-    await attempt("save the brief", () =>
+    await refusal.write("save the brief", () =>
       confirmComparison(mission, { goal, audience, depth, options: named, criteria: judged }),
     )
     setSaving(false)
@@ -196,6 +197,7 @@ export function CompareBriefForm({ mission }: { mission: Mission }) {
           onChange={setDepth}
         />
       </div>
+      <Refusal hold={refusal} />
       <Button
         size="lg"
         className="h-11 rounded-full md:self-end md:px-6"
@@ -306,6 +308,7 @@ export function CompareScopeForm({ mission, botId }: { mission: Mission; botId?:
   const [sources, setSources] = useState(mission.sources)
   const [judge, setJudge] = useState<ModelChoice | undefined>(mission.judge)
   const [starting, setStarting] = useState(false)
+  const refusal = useRefusal(mission.id)
 
   return (
     <>
@@ -331,13 +334,16 @@ export function CompareScopeForm({ mission, botId }: { mission: Mission; botId?:
         <SourceKinds value={sources} onChange={setSources} />
       </div>
       <JudgePicker mission={mission} choice={judge} onChoose={setJudge} />
+      <Refusal hold={refusal} />
       <Button
         size="lg"
         className="h-11 rounded-full md:self-end md:px-6"
         disabled={!sources.length || starting}
         onClick={async () => {
           setStarting(true)
-          await attempt("start the research", () => approveComparison(mission, sources, judge))
+          await refusal.write("start the research", () =>
+            approveComparison(mission, sources, judge),
+          )
           setStarting(false)
         }}
       >

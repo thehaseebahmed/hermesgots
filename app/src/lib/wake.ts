@@ -1,5 +1,5 @@
 import { App } from "@capacitor/app"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 
 /**
  * How long the app must have been out of view before coming back counts as waking. Hermes sends a
@@ -54,7 +54,7 @@ window.addEventListener("online", () => {
   returnToApp.announce()
   wakeTurn.announce()
 })
-if (isNative)
+if (isNative())
   void App.addListener("resume", () => {
     returnToApp.announce()
     wakeTurn.announce()

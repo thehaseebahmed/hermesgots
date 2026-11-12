@@ -13,11 +13,21 @@ import { MAX_FILE_BYTES } from "@/lib/attachment-caps"
 import { wireContent } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
-import { uploadAttachments } from "@/lib/send-turn"
+import { AttachmentError, uploadAttachments } from "@/lib/send-turn"
 
 import { PreviewerProvider } from "@/components/chat/previewer"
 
-import { click, connection, findAll, json, missing, mount, settle, until } from "./component-kit.tsx"
+import {
+  click,
+  connection,
+  findAll,
+  json,
+  missing,
+  mount,
+  settle,
+  until,
+  wordsOf,
+} from "./component-kit.tsx"
 
 const bot = connection("composer-intake")
 
@@ -584,4 +594,25 @@ test("a staged .html opens in the Previewer before it is sent", async () => {
     URL.revokeObjectURL = real.revoke
     globalThis.fetch = real.fetch
   }
+})
+
+test("a send refused for a file no tile can name says so above the field", async () => {
+  const refused = async () => {
+    throw new AttachmentError("Attaching notes.txt needs the Gots plugin.")
+  }
+  await mount(composer([], "yes", true, refused), async () => {
+    await paste([note("notes.txt")])
+    assert.deepEqual(tileNames(), ["notes.txt"], "the file is on the message")
+    await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Send"))
+    await until(
+      async () => Boolean(document.querySelector('[role="alert"]')),
+      "the send's own words above the field",
+    )
+    assert.equal(
+      wordsOf(document.querySelector('[role="alert"]')),
+      "Attaching notes.txt needs the Gots plugin.",
+      "a refusal naming no one file is drawn where the send's refusals are, not dropped",
+    )
+    assert.deepEqual(tileNames(), ["notes.txt"], "and the file is still there to retry")
+  })
 })

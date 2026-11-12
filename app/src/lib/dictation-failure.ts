@@ -1,3 +1,5 @@
+import { spoken } from "./words.ts"
+
 /** What broke, which is what decides what the bar suggests trying. */
 export type DictationFailureKind =
   /** The host went away, or the take it was holding ended. */
@@ -49,7 +51,7 @@ export function clipFailure(error: unknown, bound?: number): DictationFailure {
     return failure("clip", tookTooLong(bound), { discard: true })
   if (error instanceof TypeError)
     return failure("clip", "Couldn't reach the bot's host to finish the take.", { discard: true })
-  return failure("clip", messageOf(error, "Couldn't finish the take."), { discard: true })
+  return failure("clip", spoken(error, "Couldn't finish the take."), { discard: true })
 }
 
 /** What the bar says when the host never answered its Confirm inside the bound it stated. */
@@ -79,9 +81,3 @@ export function failureLine(failed: DictationFailure): string {
   return `${failed.message} ${failed.advice}`
 }
 
-function messageOf(error: unknown, otherwise: string): string {
-  // A browser's own TypeError ("Failed to fetch") is not a sentence to show a person; anything the
-  // host answered with carries the host's reason and is.
-  if (error instanceof TypeError) return otherwise
-  return error instanceof Error && error.message ? error.message : otherwise
-}

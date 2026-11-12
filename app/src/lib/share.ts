@@ -5,7 +5,7 @@ import { useNavigate } from "react-router"
 import { countRefusal, sizeRefusal, unreadableRefusal, type Refusal } from "@/lib/attachment-caps"
 import { createStore } from "@/lib/store"
 import { skipLaunchRestore } from "@/lib/launch"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { randomId } from "@/lib/utils"
 
 /** What another app shared into Gots, through Android's share sheet or the PWA's share target. */
@@ -188,7 +188,7 @@ export function useShareReceiver() {
       const dev = window as unknown as { gotsShare?: (input: object) => void }
       dev.gotsShare = (input) => open(toShare(input))
     }
-    if (!isNative) return
+    if (!isNative()) return
     let handle: PluginListenerHandle | undefined
     let cancelled = false
     void ShareTarget.addListener("share", (share) => {

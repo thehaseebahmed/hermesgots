@@ -1,7 +1,6 @@
 import { ArrowLeftIcon, ChevronRightIcon, Trash2Icon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { Markdown } from "@/components/chat/markdown"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
@@ -13,6 +12,7 @@ import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getSkillFile, getSkillView, type SkillFile, type SkillView } from "@/lib/hermes"
 import { skillDocument } from "@/lib/skill-frontmatter"
 import { skillOrigin, skillSetup } from "@/lib/skills-tab"
+import { tell } from "@/lib/tell"
 
 type Reading = { status: "reading" } | { status: "ok"; view: SkillView }
 
@@ -57,7 +57,7 @@ export function SkillDetail({
       },
       (error: unknown) => {
         if (controller.signal.aborted) return
-        toast.error(error instanceof Error ? error.message : "Couldn't open that skill.")
+        tell.error(error instanceof Error ? error.message : "Couldn't open that skill.")
         leave()
       },
     )
@@ -84,7 +84,7 @@ export function SkillDetail({
     } catch (error) {
       if (controller.signal.aborted) return
       setFile(null)
-      toast.error(error instanceof Error ? error.message : "Couldn't read that file.")
+      tell.error(error instanceof Error ? error.message : "Couldn't read that file.")
     }
   }
 
