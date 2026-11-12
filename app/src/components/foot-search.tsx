@@ -17,7 +17,7 @@
  * and the words go with it the same way.
  */
 import { useEffect, useRef } from "react"
-import { SearchIcon } from "lucide-react"
+import { SearchIcon, XIcon } from "lucide-react"
 
 import { SearchField } from "@/components/search-field"
 import { Button } from "@/components/ui/button"
@@ -95,5 +95,25 @@ export function FootSearch({
         }}
       />
     </div>
+  )
+}
+
+/**
+ * The field's way out where the foot has no button of its own to wear the X: the chat list's New button
+ * is the pick's toggle and wears the muted cross there (ADR 0141), while a foot given nothing but a
+ * search draws one beside it — the same 44px circle, muted so it reads as a way out rather than as the
+ * screen's accent, and standing in the slot a thumb already knows.
+ */
+export function FootSearchClose({ onClose }: { onClose: () => void }) {
+  return (
+    <Button
+      size="icon-lg"
+      className="pointer-events-auto size-11 shrink-0 rounded-full bg-muted text-foreground shadow-none hover:bg-muted/80"
+      onClick={onClose}
+      aria-label="Close search"
+      data-search-close
+    >
+      <XIcon />
+    </Button>
   )
 }

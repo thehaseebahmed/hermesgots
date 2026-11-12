@@ -356,7 +356,7 @@ export const FLOWS = {
   "skills-list": {
     script: "e2e/skills-list.mjs",
     about:
-      "A bot's Skills page: reached from its settings list's own Skills row, a search field and a row of category pills above its first section, both sections under heading boxes with Your skills above From plugins, every category titled by the first row of its own card over its N of M on line, and each row's name drawn inside the row's box, at phone and tablet widths, light and dark",
+      "A bot's Skills page: reached from its settings list's own Skills row, a row of category pills above its first section at every width — the search over them at a laptop's 1440px and, at 390 and 1024px, the chat list's circle at the foot of the tab's scroll with no field over the sections — both sections under heading boxes with Your skills above From plugins, every category titled by the first row of its own card over its N of M on line, and each row's name drawn inside the row's box, at phone, tablet and laptop widths, light and dark",
   },
   "skills-sheet": {
     script: "e2e/skills-sheet.mjs",
