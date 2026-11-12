@@ -1,27 +1,39 @@
 /**
- * The guard ADR 0148 asks for: a toast says the app's own words, never a failure's.
+ * The guard over toasts: a toast says the app's own words, never a failure's.
  *
  * It reads a file as syntax and resolves the names that file gives the two seams: `tell` under any
- * local name it is imported as, aliased (`const say = tell`), or taken apart by destructuring
- * (`const { error: announce } = tell`); and `attempt` imported, aliased, or read through a namespace
- * import. A call to any of them is a toast, and a call to `attempt` whose answer goes nowhere — bare,
- * `void`ed, awaited as a statement, or wrapped in parentheses — is a failure lost.
+ * local name it is imported as, aliased (`const say = tell`), taken apart by destructuring
+ * (`const { error: announce } = tell`), or read whole through a namespace import
+ * (`import * as seam`); and `attempt` imported, aliased, or read through a namespace import. A call
+ * to any of them is a toast, and a call to `attempt` whose answer goes nowhere — bare, `void`ed,
+ * awaited as a statement, or wrapped in parentheses — is a failure lost. The walk covers `.ts`,
+ * `.tsx` and `.js` alike, since a plain script says things in passing as freely as a component.
  *
  * What it objects to is shape, default-deny: an argument may be a string literal, a template, a
  * `+`, `??`, `||` or `&&` built from those, a conditional whose branches are, a read from one of the
- * app's own tables (`REFUSED.microphone`), or a property named `message`, `say` or `said`. Anything
+ * app's own tables (`REFUSED.overlay`), or a property named `message`, `say` or `said`. Anything
  * else — a call, any other read, an element — is a shape nobody has shown to be the app's words.
  *
+ * One sink carries a failure's words to a toast on purpose: `say` in `lib/use-refusal.ts`, the
+ * fallback for a surface with no notice in the tree to draw them in. It is named in the allowlist,
+ * so its being there is an edit somebody made rather than a shape the guard cannot see.
+ *
  * What that leaves out of its reach, and what review still has to catch: a local that holds the
- * words under a plain name (`const why = failure.say; tell.error(why)`), the words carried by
- * anything but those three properties, a helper of the app's that says them itself (`toastIt(f)` —
- * it knows only these two seams), a tone chosen at runtime (`tell[tone](...)`), and a module that
- * re-exports `tell` under another name. It is a guard over the spellings a failure is spoken by
- * today, not a proof that none ever is.
+ * words under a plain name (`const why = failure.say; tell.error(why)`) — including one the app
+ * passed in as a parameter, as the sink's own `said` is; the words carried by anything but those
+ * three properties; a helper of the app's that says them itself (`toastIt(f)` — it knows only these
+ * two seams); a tone chosen at runtime (`tell[tone](...)`); and a module that re-exports `tell`
+ * under another name. It is a guard over the spellings a failure is spoken by today, not a proof
+ * that none ever is.
  *
  * `error-toast-allowlist.json` names each place that keeps a failure's words: the file, the function
  * inside it, and why. An entry that no longer holds its call fails, so the list cannot rot, and the
- * file states its own ceiling so allowing one more is a visible edit.
+ * file states its own ceiling so allowing one more is a visible edit. The reasons are
+ * `not-yet-converted` (a screen still to convert), `read-at-a-control` (the words are drawn beside
+ * the control that asked rather than at a hold), `ends-elsewhere` (the write's answer is state the
+ * surface already draws), `screen-cannot-hold-it` (there is no notice in the tree to draw them, the
+ * fallback sink included), and `intake-words-are-the-apps` (a file's refusal is the app's own rule,
+ * or a read that never ran, so no failure of the host's is among them).
  */
 import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
@@ -34,7 +46,8 @@ import { TELL_TONES } from "../src/lib/tell-tones.ts"
 import { parsed, parseSource, sourceFiles } from "./source-tree.mjs"
 
 const SRC = resolve(import.meta.dirname, "../src")
-const SOURCE = /\.(ts|tsx)$/
+// A `.js` file says things in passing as freely as a `.tsx` one does, so the walk takes both.
+const SOURCE = /\.(ts|tsx|js)$/
 
 const allowlist = JSON.parse(
   readFileSync(join(import.meta.dirname, "error-toast-allowlist.json"), "utf8"),
@@ -49,6 +62,7 @@ const REASONS = new Set([
   "ends-elsewhere",
   "read-at-a-control",
   "not-yet-converted",
+  "intake-words-are-the-apps",
 ])
 
 /**
@@ -64,20 +78,17 @@ const TABLE = /^[A-Z][A-Z0-9_]*$/
 
 const isFailureName = (name) => FAILURE_NAMES.test(name) || /Error$/.test(name)
 
-/** A node with the parentheses the writer wrapped it in taken off. */
 function unwrap(node) {
   let it = node
   while (it && ts.isParenthesizedExpression(it)) it = it.expression
   return it
 }
 
-/** The text a node names where it is a string: `w["attempt"]`. */
 function stringOf(node) {
   const it = unwrap(node)
   return it && (ts.isStringLiteral(it) || ts.isNoSubstitutionTemplateLiteral(it)) ? it.text : undefined
 }
 
-/** Whether a node reads `name` off one of the namespace imports in `space`. */
 function memberOf(node, space, name) {
   const it = unwrap(node)
   if (!it) return false
@@ -94,14 +105,25 @@ function memberOf(node, space, name) {
  * a namespace as.
  */
 function seams(file) {
-  const found = { tell: new Set(), tone: new Map(), attempt: new Set(), space: new Set() }
+  const found = {
+    tell: new Set(),
+    tone: new Map(),
+    attempt: new Set(),
+    space: new Set(),
+    // The tell seam read whole (`import * as seam`), whose tones are its own members.
+    told: new Set(),
+  }
   const visitImports = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const from = node.moduleSpecifier.text
       const bindings = node.importClause?.namedBindings
-      if (/(^|\/)tell$/.test(from) && bindings && ts.isNamedImports(bindings)) {
-        for (const element of bindings.elements)
-          if ((element.propertyName ?? element.name).text === "tell") found.tell.add(element.name.text)
+      if (/(^|\/)tell$/.test(from) && bindings) {
+        if (ts.isNamespaceImport(bindings)) found.told.add(bindings.name.text)
+        else if (ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements)
+            if ((element.propertyName ?? element.name).text === "tell")
+              found.tell.add(element.name.text)
+        }
       }
       if (/(^|\/)attempt$/.test(from) && bindings) {
         if (ts.isNamespaceImport(bindings)) found.space.add(bindings.name.text)
@@ -143,21 +165,23 @@ function seams(file) {
   return found
 }
 
-/** The tone a call's callee names, where the callee is one of the seam's own. */
 function toneOf(callee, found) {
   const it = unwrap(callee)
   if (!it) return null
   if (ts.isIdentifier(it)) return found.tone.get(it.text) ?? null
   if (ts.isPropertyAccessExpression(it) && ts.isIdentifier(it.expression))
-    return found.tell.has(it.expression.text) && TONES.has(it.name.text) ? it.name.text : null
+    return (found.tell.has(it.expression.text) || found.told.has(it.expression.text)) &&
+      TONES.has(it.name.text)
+      ? it.name.text
+      : null
   if (ts.isElementAccessExpression(it) && ts.isIdentifier(it.expression)) {
     const name = stringOf(it.argumentExpression)
-    return found.tell.has(it.expression.text) && name && TONES.has(name) ? name : null
+    const seam = found.tell.has(it.expression.text) || found.told.has(it.expression.text)
+    return seam && name && TONES.has(name) ? name : null
   }
   return null
 }
 
-/** Whether a call's callee is the write seam under whatever name this file gives it. */
 function isAttempt(callee, found) {
   const it = unwrap(callee)
   if (!it) return false
@@ -187,7 +211,6 @@ function dropped(node) {
   return Boolean(parent && (ts.isVoidExpression(parent) || ts.isExpressionStatement(parent)))
 }
 
-/** The name of the function a node is, where it declares one. */
 function nameOf(node) {
   if (
     (ts.isFunctionDeclaration(node) ||
@@ -220,7 +243,6 @@ const isFunction = (node) =>
   ts.isSetAccessorDeclaration(node) ||
   ts.isConstructorDeclaration(node)
 
-/** Whether a node reads a failure's own words, as a sentence the red can print; else nothing. */
 function because(node) {
   if (ts.isParenthesizedExpression(node)) return because(node.expression)
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return undefined
@@ -257,7 +279,6 @@ function because(node) {
   return `a \`${node.getText()}\` expression`
 }
 
-/** Every place in these files that says a failure's words in a toast, or drops a write's answer. */
 function scan(sources) {
   const told = []
   const droppedCall = []
@@ -286,7 +307,6 @@ let everything
 const findings = () =>
   (everything ??= scan(sourceFiles(SRC, "", SOURCE).map((path) => ({ path, file: parsed(path, SRC) }))))
 
-/** One planted file, scanned as though it were the app's. */
 const planted = (text, path = "planted.tsx") => scan([{ path, file: parseSource(text, path) }])
 
 const place = (site) => `${site.file}:${site.line} in ${site.function || "the module"}`
@@ -381,6 +401,30 @@ test("the guard sees a tone taken off the seam", () => {
 
 test("the guard sees a tone read off the seam by name", () => {
   assert.equal(planted(`import { tell } from "@/lib/tell"\nexport const go = (error: Error) => tell["error"](error.message)`).told.length, 1)
+})
+
+test("the guard sees the whole toast seam read as a namespace", () => {
+  assert.equal(
+    planted(`import * as seam from "@/lib/tell"\nexport const go = (error: Error) => seam.error(error.message)`).told.length,
+    1,
+  )
+  assert.deepEqual(
+    planted(`import * as seam from "@/lib/tell"\nexport const go = () => seam.success("Copied")`).told,
+    [],
+    "and reads the app's own words there as its own",
+  )
+})
+
+test("the guard walks a .js file, and reads it as it reads a .tsx one", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gots-js-sources-"))
+  writeFileSync(
+    join(dir, "planted.js"),
+    `import { tell } from "@/lib/tell"\nexport const go = (cause) => tell.error(cause.message)\n`,
+  )
+  const found = scan(
+    sourceFiles(dir, "", SOURCE).map((path) => ({ path, file: parsed(path, dir) })),
+  )
+  assert.equal(found.told.length, 1, "a plain script's toast is read like a component's")
 })
 
 test("the guard sees the write seam read through a namespace", () => {

@@ -1,5 +1,5 @@
 {
-  "ceiling": 39,
+  "ceiling": 31,
   "entries": [
     {
       "file": "chat-next/blank.tsx",
@@ -44,7 +44,7 @@
     {
       "file": "components/chat/composer.tsx",
       "function": "addFiles",
-      "reason": "screen-cannot-hold-it"
+      "reason": "intake-words-are-the-apps"
     },
     {
       "file": "components/chat/composer.tsx",
@@ -77,19 +77,9 @@
       "reason": "not-yet-converted"
     },
     {
-      "file": "components/room/new-room-screen.tsx",
-      "function": "toggle",
-      "reason": "screen-cannot-hold-it"
-    },
-    {
       "file": "components/room/room-chat.tsx",
       "function": "write",
       "reason": "not-yet-converted"
-    },
-    {
-      "file": "components/settings/dictation.tsx",
-      "function": "BubbleCards",
-      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "components/skill-detail-sheet.tsx",
@@ -127,26 +117,6 @@
       "reason": "ends-elsewhere"
     },
     {
-      "file": "routes/canvas.tsx",
-      "function": "create",
-      "reason": "not-yet-converted"
-    },
-    {
-      "file": "routes/canvas.tsx",
-      "function": "grant",
-      "reason": "not-yet-converted"
-    },
-    {
-      "file": "routes/canvas.tsx",
-      "function": "remove",
-      "reason": "not-yet-converted"
-    },
-    {
-      "file": "routes/canvas.tsx",
-      "function": "update",
-      "reason": "not-yet-converted"
-    },
-    {
       "file": "routes/chat.tsx",
       "function": "CurrentChatPage",
       "reason": "read-at-a-control"
@@ -157,11 +127,6 @@
       "reason": "not-yet-converted"
     },
     {
-      "file": "routes/project.tsx",
-      "function": "remove",
-      "reason": "not-yet-converted"
-    },
-    {
       "file": "routes/projects.tsx",
       "function": "cancel",
       "reason": "not-yet-converted"
@@ -169,11 +134,6 @@
     {
       "file": "routes/routines.tsx",
       "function": "act",
-      "reason": "not-yet-converted"
-    },
-    {
-      "file": "routes/setup.tsx",
-      "function": "next",
       "reason": "not-yet-converted"
     },
     {
