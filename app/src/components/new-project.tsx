@@ -1,5 +1,5 @@
 import { SearchField } from "@/components/search-field"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { CheckIcon, CircleAlertIcon, LockIcon, PlusIcon, XIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import {
   createProject,
@@ -92,6 +92,7 @@ function ProjectForm({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const labels = useBotLabels()
+  const listed = useMemo(() => botsByLabel(profiles, labels), [profiles, labels])
 
   useEffect(() => {
     let cancelled = false
@@ -163,14 +164,14 @@ function ProjectForm({
             <FieldLabel htmlFor="project-bot">Bot</FieldLabel>
             <Select
               value={profile.id}
-              items={profiles.map((p) => ({ value: p.id, label: labelOf(labels, p) }))}
+              items={listed.map((p) => ({ value: p.id, label: labelOf(labels, p) }))}
               onValueChange={(value) => value && onPickBot(value)}
             >
               <SelectTrigger id="project-bot" className="h-11 w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {profiles.map((p) => (
+                {listed.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     <Bot id={p.botId} className="size-5" />
                     {labelOf(labels, p)}

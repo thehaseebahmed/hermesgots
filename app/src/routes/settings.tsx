@@ -43,7 +43,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
-import { labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
@@ -143,7 +143,7 @@ export function SettingsPage() {
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
   const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
-  // The bot's own screens are titled as the menu's row and the sidebar name it (ADR 0148).
+  // The bot's own screens are titled as the menu's row and the sidebar name it (ADR 0149).
   const labels = useBotLabels()
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)
@@ -355,7 +355,7 @@ function MenuScreen({
       <AccountRow />
       {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
       <Group>
-        {profiles?.map((profile) => (
+        {botsByLabel(profiles ?? [], labels).map((profile) => (
           <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
         ))}
         <LinkBotRow onLink={() => setLinking(true)} />
@@ -380,7 +380,7 @@ function MenuScreen({
   )
 }
 
-/** A bot in the menu: its connectivity dot, then the bot itself, then the host it answers at. */
+/** A bot in the menu: its connectivity dot, then the bot itself, then when its host last checked in. */
 function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
   const online = presence(profile, now)
@@ -688,7 +688,7 @@ export function DeveloperSettings() {
             }
           />
         )}
-        {bots?.map((bot) => (
+        {botsByLabel(bots ?? [], labels).map((bot) => (
           <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
         ))}
       </Group>

@@ -46,7 +46,7 @@ export function useNow() {
 
 export interface BotSummary {
   bot: Profile
-  /** What the row calls it: the host it answers at (ADR 0148). */
+  /** What the row calls it: the bot's own name, and its host only against a namesake (ADR 0149). */
   label: string
   latest?: Conversation
   /** The newest chat's latest message, cut to a line. */

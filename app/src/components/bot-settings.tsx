@@ -20,7 +20,7 @@ import { toast } from "sonner"
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
-import { labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { CodingTab } from "@/components/bot-coding-tab"
 import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
@@ -272,9 +272,10 @@ function DeleteBotDialog({
         : [],
     [open, profile.hostId, profile.id],
   )
-  // Bots of one host are the ones this sentence tells apart, so it names them by their hosts.
   const labels = useBotLabels()
-  const others = siblings?.map((p) => labelOf(labels, p)).join(", ")
+  const others = botsByLabel(siblings ?? [], labels)
+    .map((p) => labelOf(labels, p))
+    .join(", ")
 
   return (
     <ConfirmDestructive
@@ -559,12 +560,6 @@ type BotEdit = {
 }
 
 const BOT_EDITS = {
-  name: {
-    read: (profile) => profile.name,
-    placeholder: "Hermes profile name",
-    kind: "text",
-    patch: (value) => ({ name: value.trim() || "Hermes" }),
-  },
   "base-url": {
     read: (profile) => profile.baseUrl,
     placeholder: "http://localhost:8642/v1",
@@ -1062,12 +1057,6 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
 
       <Caption>Bot Profile</Caption>
       <Group>
-        <ValueRow
-          title="Name"
-          value={profile.name}
-          onClick={() => onOpen("name")}
-          data-setting="name"
-        />
         <ValueRow
           title="Image"
           value={character?.name ?? ""}
