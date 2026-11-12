@@ -1,8 +1,9 @@
 /**
- * What the Skills tab draws from the one skills list: how a row says it is doing, and the sections
- * and category groups it sits in. Kept import-free but for types and the one rule it shares with
- * `skills-cache.ts` (what "doesn't load" means), so `scripts/test-skills-tab.mjs` can drive it
- * without a browser (as `mcp-server.ts` is for the MCP rows).
+ * What the Skills tab draws from the one skills list: how a row says it is doing, the sections and
+ * category groups it sits in, and the pills that narrow it to one category. Kept import-free but for
+ * types and the one rule it shares with `skills-cache.ts` (what "doesn't load" means), so
+ * `scripts/test-skills-tab.mjs` can drive it without a browser (as `mcp-server.ts` is for the MCP
+ * rows).
  */
 import type { Skill, SkillView } from "@/lib/hermes"
 import { byName } from "./compare.ts"
@@ -93,6 +94,37 @@ export function skillSections(skills: Skill[]): SkillSection[] {
     heading: bothKinds ? title : null,
     groups,
   }))
+}
+
+/** What the pill that keeps every skill is called. */
+export const ALL_SKILLS = "All"
+
+export type SkillPill =
+  { id: "all"; label: string } | { id: "category"; label: string; category: string }
+
+/**
+ * The pills the tab offers, in the order it draws them: All first, then every category its skills
+ * name, alphabetically. One pill per category name however many sections hold a skill of it — the
+ * reader picks a category, not a category in a section — and a skill with none is kept by All alone,
+ * since a pill exists only for a category the tab holds.
+ */
+export function skillPills(skills: Skill[]): SkillPill[] {
+  const named = new Set(skills.map(categoryOf))
+  const categories = [...named]
+    .filter((category): category is string => category !== null)
+    .sort(byName)
+  return [
+    { id: "all", label: ALL_SKILLS },
+    ...categories.map((category) => ({ id: "category" as const, label: category, category })),
+  ]
+}
+
+/**
+ * The skills a pill keeps, in the order they were handed in: a filter narrows the list, it never
+ * re-orders it, and the tab groups what it kept the way it grouped the whole.
+ */
+export function pillKeeps(skills: Skill[], pill: SkillPill): Skill[] {
+  return pill.id === "all" ? skills : skills.filter((skill) => categoryOf(skill) === pill.category)
 }
 
 /** What a group with no category of its own is called. */
