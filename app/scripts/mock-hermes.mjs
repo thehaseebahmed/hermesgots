@@ -4267,6 +4267,7 @@ http
                 "research_rewrite",
                 "research_compare",
                 "research_verify",
+                "research_literature",
               ]
             : []),
           ...(CANVAS ? ["canvas"] : []),

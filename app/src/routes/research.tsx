@@ -12,6 +12,7 @@ import {
   EllipsisIcon,
   FileTextIcon,
   HistoryIcon,
+  LibraryBigIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
   PencilIcon,
@@ -31,6 +32,7 @@ import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
 import { VerdictCanvas, VerifyBriefForm, VerifyScopeForm } from "@/components/verify"
+import { LiteratureBriefForm, LiteratureScopeForm, ReviewCanvas } from "@/components/literature"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
@@ -90,8 +92,10 @@ import {
   retryMission,
   revisionReason,
   rewriteMission,
+  sourcesOf,
   toMarkdown,
   typeOf,
+  yearsLine,
   useMission,
   useMissions,
   type Mission,
@@ -109,6 +113,7 @@ const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   glossary: BookAIcon,
   memo: ScaleIcon,
   verdict: BadgeCheckIcon,
+  review: LibraryBigIcon,
 }
 
 /** The picture of the bot running the mission. */
@@ -150,12 +155,33 @@ const VIEWS: Partial<Record<MissionType, MissionView>> = {
       facts: [formatName(mission.format)],
     }),
   },
+  literature: {
+    Brief: LiteratureBriefForm,
+    Scope: LiteratureScopeForm,
+    Canvas: ReviewCanvas,
+    summary: (mission) => ({
+      line: mission.goal,
+      facts: [
+        formatName("review"),
+        mission.review?.field,
+        mission.review && yearsLine(mission.review),
+        mission.review && `${mission.review.criteria.length} criteria`,
+      ],
+    }),
+  },
 }
 const viewOf = (type: MissionType): MissionView =>
   VIEWS[type] ?? { Brief: BriefForm, Scope: ScopeForm, summary: guideSummary }
 
-/** The one format a comparison or a verification delivers, which isn't among `FORMATS`. */
-const SOLE_FORMATS: Partial<Record<OutputFormat, string>> = { memo: "Memo", verdict: "Verdict" }
+/**
+ * The one format a comparison, a verification or a literature review delivers, which isn't among
+ * `FORMATS`. A review is called narrative wherever it is named: it follows no registered protocol.
+ */
+const SOLE_FORMATS: Partial<Record<OutputFormat, string>> = {
+  memo: "Memo",
+  verdict: "Verdict",
+  review: "Narrative review",
+}
 const formatName = (format: OutputFormat) =>
   SOLE_FORMATS[format] ?? FORMATS.find((f) => f.id === format)!.name
 
@@ -335,7 +361,7 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
   )
 }
 
-/** The seven kinds of mission; only Learn & understand can be picked so far. */
+/** The seven kinds of mission; one not built yet says so when it is picked. */
 function MissionTypes({
   value,
   onChange,
@@ -1034,7 +1060,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
         : "making"
       : format
   const outputs = shown.outputs ?? {}
-  const found = mission.ledger?.sources.length ?? 0
+  const found = sourcesOf(mission.ledger).length
   const revised = (mission.revisions?.length ?? 0) > 1 || Boolean(mission.pending)
 
   const cite = (id: string) => setSources({ cited: id })
