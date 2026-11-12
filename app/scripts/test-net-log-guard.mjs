@@ -7,7 +7,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { sourceFiles } from "./source-files.mjs"
+import { sourceFiles } from "./source-tree.mjs"
 
 const SRC = new URL("../src/", import.meta.url)
 

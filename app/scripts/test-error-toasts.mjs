@@ -21,13 +21,14 @@
  * visible edit.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import test from "node:test"
 import ts from "typescript"
 
 import { TELL_TONES } from "../src/lib/tell-tones.ts"
-import { sourceFiles } from "./source-files.mjs"
+import { parsed, parseSource, sourceFiles } from "./source-tree.mjs"
 
 const SRC = resolve(import.meta.dirname, "../src")
 const SOURCE = /\.(ts|tsx)$/
@@ -59,17 +60,6 @@ const FAILURE_READS = new Set(["message", "say", "said"])
 const TABLE = /^[A-Z][A-Z0-9_]*$/
 
 const isFailureName = (name) => FAILURE_NAMES.test(name) || /Error$/.test(name)
-
-/** What a parsed file names, as `[{ node, file }]` every node carrying its parent. */
-function parsed(path) {
-  return ts.createSourceFile(
-    path,
-    readFileSync(join(SRC, path), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  )
-}
 
 /** The local name a file imported `attempt` under, or `null` where it imported none. */
 function attemptName(file) {
@@ -162,17 +152,17 @@ function because(node) {
   return `a \`${node.getText()}\` expression`
 }
 
-/** Every place in `src` that says a failure's words in a toast, or drops a write's answer. */
-function failures() {
+/** Every place in these files that says a failure's words in a toast, or drops a write's answer. */
+function scan(sources) {
   const told = []
-  const dropped = []
-  for (const path of sourceFiles(SRC, "", SOURCE)) {
-    const file = parsed(path)
+  const droppedCall = []
+  for (const { path, file } of sources) {
     const seam = attemptName(file)
     const visit = (node, scope) => {
       const inner = (isFunction(node) && nameOf(node)) || scope
       if (ts.isCallExpression(node)) {
         const callee = node.expression
+        const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
         if (
           ts.isPropertyAccessExpression(callee) &&
           ts.isIdentifier(callee.expression) &&
@@ -180,13 +170,7 @@ function failures() {
           TONES.has(callee.name.text)
         ) {
           const why = because(node.arguments[0])
-          if (why)
-            told.push({
-              file: path,
-              line: file.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-              function: inner,
-              why,
-            })
+          if (why) told.push({ file: path, line, function: inner, why })
         }
         if (seam && ts.isIdentifier(callee) && callee.text === seam) {
           const parent = node.parent
@@ -194,27 +178,36 @@ function failures() {
             (ts.isVoidExpression(parent) && parent) ||
             (ts.isAwaitExpression(parent) && ts.isExpressionStatement(parent.parent) && parent.parent) ||
             (ts.isExpressionStatement(parent) && parent)
-          if (statement)
-            dropped.push({
-              file: path,
-              line: file.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-              function: inner,
-            })
+          if (statement) droppedCall.push({ file: path, line, function: inner })
         }
       }
       ts.forEachChild(node, (child) => visit(child, inner))
     }
     visit(file, "")
   }
-  return { told, dropped }
+  return { told, dropped: droppedCall }
 }
+
+/** Every finding in the app, read once: a parse error throws here rather than passing silently. */
+let everything
+const findings = () =>
+  (everything ??= scan(sourceFiles(SRC, "", SOURCE).map((path) => ({ path, file: parsed(path, SRC) }))))
 
 const place = (site) => `${site.file}:${site.line} in ${site.function || "the module"}`
 
+test("a file that will not parse stops the guard, naming it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gots-sources-"))
+  writeFileSync(join(dir, "broken.tsx"), "export const = 1\n")
+  assert.throws(
+    () => sourceFiles(dir, "", /\.tsx$/).map((path) => parsed(path, dir)),
+    /broken\.tsx:\d+:\d+ could not be parsed/,
+    "a file a guard could not read is a file it must not pass",
+  )
+})
+
 test("a toast says the app's own words and never a failure's", () => {
-  const { told } = failures()
   const left = []
-  for (const site of told) {
+  for (const site of findings().told) {
     const entry = allowlist.entries.find(
       (one) => one.file === site.file && one.function === site.function,
     )
@@ -229,7 +222,7 @@ test("a toast says the app's own words and never a failure's", () => {
 })
 
 test("the allowlist holds only what is still there, and no more than its ceiling", () => {
-  const { told } = failures()
+  const { told } = findings()
   for (const entry of allowlist.entries) {
     assert.ok(REASONS.has(entry.reason), `${entry.file}'s entry names a known reason`)
     const here = told.filter(
@@ -255,7 +248,7 @@ test("the allowlist holds only what is still there, and no more than its ceiling
 
 test("a write's answer is drawn, not dropped", () => {
   assert.deepEqual(
-    failures().dropped.map((site) => place(site)),
+    findings().dropped.map((site) => place(site)),
     [],
     "these call `attempt` and throw its answer away: await it, and hand it to `refuse`",
   )

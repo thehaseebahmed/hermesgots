@@ -12,7 +12,7 @@ import { join, resolve } from "node:path"
 import test from "node:test"
 import ts from "typescript"
 
-import { sourceFiles } from "./source-files.mjs"
+import { parsed, sourceFiles } from "./source-tree.mjs"
 
 const SRC = resolve(import.meta.dirname, "../src")
 
@@ -20,15 +20,9 @@ const OWNERS = new Set(["components/ui/sonner.tsx", "lib/tell.ts"])
 
 const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 
-/** The module a parsed file names: `null` for one that names nothing to draw with. */
+/** The module a parsed file names. */
 function modulesIn(path) {
-  const file = ts.createSourceFile(
-    path,
-    readFileSync(join(SRC, path), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  )
+  const file = parsed(path, SRC)
   const named = []
   const namedImport = (node) => {
     const clause = node.importClause
