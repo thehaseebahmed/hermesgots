@@ -105,6 +105,24 @@ const LIBRARY_TAG =
   /<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/script>/gi
 
 /**
+ * The spans the page's comments cover, in the order they open: what a rule that works in offsets
+ * needs, since a tag inside one is no tag. An unterminated comment runs to the end of the document,
+ * as the host reads it.
+ */
+function commentSpans(html: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  let at = 0
+  for (;;) {
+    const opened = html.indexOf("<!--", at)
+    if (opened === -1) return spans
+    const closed = html.indexOf("-->", opened + 4)
+    const end = closed === -1 ? html.length : closed + 3
+    spans.push([opened, end])
+    at = end
+  }
+}
+
+/**
  * The document as its markup, with every comment cut out: a tag named in a comment is not a tag. The
  * host's scan reads a document the same way (`_markup` in `plugin/canvases.py`), and `findHead`
  * already reads the page's head this way, so an ask a bot wrote out in a comment is no ask on
@@ -113,18 +131,12 @@ const LIBRARY_TAG =
 function withoutComments(html: string): string {
   const pieces: string[] = []
   let at = 0
-  for (;;) {
-    const opened = html.indexOf("<!--", at)
-    if (opened === -1) {
-      pieces.push(html.slice(at))
-      return pieces.join(" ")
-    }
+  for (const [opened, end] of commentSpans(html)) {
     pieces.push(html.slice(at, opened))
-    const closed = html.indexOf("-->", opened + 4)
-    // An unterminated comment: nothing after it is markup, as the host reads it.
-    if (closed === -1) return pieces.join(" ")
-    at = closed + 3
+    at = end
   }
+  pieces.push(html.slice(at))
+  return pieces.join(" ")
 }
 
 /**
@@ -164,13 +176,20 @@ function scripted(source: string): string {
  * this rule answers with what it was given, so a name it has no source for, and a second ask for one
  * already inlined, leave nothing behind: the page draws without the library rather than carrying a
  * tag for one it never got, or the same source twice.
+ *
+ * A tag inside a comment is no ask (`canvasLibraryPlan` reads the page the same way): the comment is
+ * what the page's author wrote, so it is left whole, and a page that documents the ask above the one
+ * it makes still gets its library.
  */
 function inlineLibraries(
   html: string,
   libraries: Readonly<Record<string, CanvasLibrarySource>>,
 ): string {
   const placed = new Set<string>()
-  return html.replace(LIBRARY_TAG, (_tag, name: string) => {
+  const spans = commentSpans(html)
+  const commented = (at: number) => spans.some(([from, to]) => at >= from && at < to)
+  return html.replace(LIBRARY_TAG, (tag: string, name: string, at: number) => {
+    if (commented(at)) return tag
     // A handed record is a plain object, so a name it merely inherits (`constructor`) is no source.
     const library = Object.hasOwn(libraries, name) ? libraries[name] : undefined
     if (!library || placed.has(name)) return ""

@@ -479,3 +479,23 @@ test("the app's own policy keeps a canvas's frame from navigating itself away", 
   const page = readFileSync(new URL("../index.html", import.meta.url), "utf8")
   assert.match(page, /<meta http-equiv="Content-Security-Policy" content="frame-src 'self'" \/>/)
 })
+
+test("a commented ask is no ask, and the ask under it still draws", () => {
+  // A bot that documents the tag in a comment above the one it makes is the page shape the shared
+  // fixture table exists for: the comment is no ask on either side, and the source lands where the
+  // page actually asked — not inside the comment, which would leave the page drawing a hole.
+  const page = PAGE.replace(
+    "<h1>Tip</h1>",
+    '<!-- docs: <script data-canvas-lib="chart"></script> -->\n    <h1>Tip</h1>\n    <script data-canvas-lib="chart"></script>',
+  )
+  assert.deepEqual(canvasLibraryPlan(page), ["chart"])
+  const html = canvasDocument(page, {
+    mode: "light",
+    tokens: LIGHT,
+    libraries: { chart: { script: "window.Chart=function(){}" } },
+  })
+  assert.ok(html.includes('<!-- docs: <script data-canvas-lib="chart"></script> -->'), "the comment stands as written")
+  const at = html.indexOf("window.Chart=function(){}")
+  assert.ok(at > html.indexOf("-->"), "the source takes the ask's place, after the comment")
+  assert.equal(html.split("data-canvas-lib").length - 1, 1, "only the comment still names one")
+})
