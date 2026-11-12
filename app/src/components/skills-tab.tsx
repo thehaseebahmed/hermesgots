@@ -63,7 +63,6 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [query, setQuery] = useState("")
-  // The page's one refusal, held by the Screen this tab is drawn in.
   const refusal = useScreenRefusal()
   // The pill the reader pressed, by its key: the tab's own, gone when it remounts.
   const [chosen, setChosen] = useState(ALL_SKILLS_KEY)
@@ -139,7 +138,9 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
       confirmLabel="Remove"
       busy={pending}
       onOpenChange={(open) => !open && setRemoving(null)}
-      onConfirm={() => (removing === null ? undefined : confirmRemove(removing))}
+      onConfirm={async () => {
+        if (removing !== null) await confirmRemove(removing)
+      }}
     />
   )
 

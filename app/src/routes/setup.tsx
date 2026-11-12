@@ -23,7 +23,7 @@ import {
   type PendingSetup,
   type SyncState,
 } from "@/lib/sync"
-import { tell } from "@/lib/tell"
+import { type RefusalHold } from "@/lib/refusal"
 import { useRefusal } from "@/lib/use-refusal"
 import { PrfUnsupportedError, supportsPasskeys } from "@/lib/vault"
 import { cn } from "@/lib/utils"
@@ -227,7 +227,9 @@ function SetupPage({
 
         {step === "checking" && <Spinner className="self-center" />}
 
-        {step === "community" && <CommunityStep onDone={() => setLinkStep("link")} />}
+        {step === "community" && (
+          <CommunityStep hold={refusal} onDone={() => setLinkStep("link")} />
+        )}
 
         {step === "link" && (
           <Section title="Link your bots">
@@ -245,8 +247,11 @@ function SetupPage({
 /**
  * Joining the leaderboard is on by default, so a new user is counted unless they turn it off here.
  * Settings > Community can still leave it later.
+ *
+ * The write is the page's, through the hold the page draws: a host that refused said so above the
+ * steps, and the step stays where it is rather than advancing over a choice that was never saved.
  */
-function CommunityStep({ onDone }: { onDone: () => void }) {
+function CommunityStep({ hold, onDone }: { hold: RefusalHold; onDone: () => void }) {
   const { me, setMe } = useCommunity()
   const [on, setOn] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -254,21 +259,14 @@ function CommunityStep({ onDone }: { onDone: () => void }) {
 
   const next = async () => {
     setBusy(true)
-    try {
+    const landed = await hold.write("change the leaderboard", async () => {
       // A read that failed leaves nothing to compare, so the choice is sent as it stands.
       if (me !== undefined && on !== joined) {
         setMe(on ? await joinCommunity() : await leaveCommunity())
       }
-    } catch (error) {
-      tell.error(
-        error instanceof Error && error.message
-          ? error.message
-          : "Couldn't change that. You can change it in Settings.",
-      )
-    } finally {
-      setBusy(false)
-    }
-    onDone()
+    })
+    setBusy(false)
+    if (landed) onDone()
   }
 
   return (

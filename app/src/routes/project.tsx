@@ -142,6 +142,8 @@ export function ProjectPage() {
     }
   }
 
+  // The question prints the host's refusal itself, so this hands it on rather than saying it in a
+  // toast the dialog would already have closed over.
   const remove = async () => {
     if (!profile) return
     setBusy(true)
@@ -153,8 +155,6 @@ export function ProjectPage() {
       }
       setDeleting(false)
       leave()
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't delete the project.")
     } finally {
       setBusy(false)
     }

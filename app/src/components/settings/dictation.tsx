@@ -240,7 +240,9 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
         confirmLabel="Delete"
         busy={busy}
         onOpenChange={(next) => !next && setConfirming(false)}
-        onConfirm={() => (open ? remove(open) : undefined)}
+        onConfirm={async () => {
+          if (open) await remove(open)
+        }}
       />
     </>
   )
@@ -445,17 +447,13 @@ function OverviewTab() {
 
 type Grant = keyof Pick<BubbleState, "overlay" | "accessibility">
 
-/** Why the phone's answer means no Bubble, in the words the toast says it in. */
-function refusal(grant: Grant) {
-  return grant === "overlay"
-    ? "Without drawing over other apps there is no Bubble to tap."
-    : "Without the accessibility service the Bubble cannot type, so there is no Bubble."
-}
-
-/** What the phone said when it would not start, in the words the toast says it in. */
-const REFUSED: Record<string, string> = {
-  overlay: refusal("overlay"),
-  accessibility: refusal("accessibility"),
+/**
+ * What the phone said when it would not start, in the words the toast says it in: the two grants a
+ * Bubble needs, and the microphone it hears through.
+ */
+const REFUSED: Record<Grant | "microphone", string> = {
+  overlay: "Without drawing over other apps there is no Bubble to tap.",
+  accessibility: "Without the accessibility service the Bubble cannot type, so there is no Bubble.",
   microphone: "Allow the microphone first.",
 }
 
@@ -514,7 +512,11 @@ function BubbleCards() {
       return
     }
     const started = await enableBubble()
-    if (!started.started) tell.error(REFUSED[started.reason ?? ""] ?? "The Bubble couldn't start.")
+    if (!started.started) {
+      // The phone names the grant it withheld; anything else it says is no reason this table knows.
+      const why = REFUSED[started.reason as keyof typeof REFUSED]
+      tell.error(why ?? "The Bubble couldn't start.")
+    }
     await refresh()
   }, [refresh])
 
@@ -556,7 +558,7 @@ function BubbleCards() {
         if (!waiting) return
         setWaiting(undefined)
         if (!now?.[waiting]) {
-          tell.error(refusal(waiting))
+          tell.error(REFUSED[waiting])
           return
         }
         await ask(now)

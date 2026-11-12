@@ -16,7 +16,8 @@ import { UsageSheet } from "@/components/chat/usage-sheet"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
-import { useRefusal } from "@/lib/use-refusal"
+import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
+import { failed, type RefusalHold } from "@/lib/refusal"
 import { useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
 import { Refusal } from "@/components/banner"
@@ -61,7 +62,6 @@ import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
-import { AttachmentError } from "@/lib/send-turn"
 import { useDark } from "@/lib/theme"
 import { BUILDING_ACTIVITY, formatRelative } from "@/lib/format"
 import { tell } from "@/lib/tell"
@@ -151,16 +151,6 @@ export function CanvasPage() {
       // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
       // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
       navigate(`/canvas/${started.id}`)
-    } catch (failure) {
-      // A file the host refused is the composer's to say, on the tile it belongs to: another sentence
-      // here would say the same thing twice.
-      if (!(failure instanceof AttachmentError))
-        tell.error(
-          failure instanceof Error && failure.message
-            ? failure.message
-            : "Couldn't start the canvas.",
-        )
-      throw failure
     } finally {
       setStarting(false)
     }
@@ -275,9 +265,12 @@ function useAway(away: boolean) {
  * What both of a canvas's screens answer through its options: the reader's answers about the tools a
  * version declared, the canvas's own record, and its removal. One home for the three, so the preview
  * and the chat that is a phone's only screen of a canvas with no version cannot answer them
- * differently — and one place that says what a refusal looks like and where deleting leaves.
+ * differently — each refusal answered where its control stands: `grant` and `update` on the screen's
+ * hold, over the page they are about, and `remove` in the question that asked, which keeps itself
+ * open with the host's words in it. Every one of them still throws: a grant the host never recorded
+ * is never a yes, a sheet keeps what was typed, and a delete nothing happened from is no delete.
  */
-function useCanvasManagement(id: string) {
+function useCanvasManagement(id: string, hold: RefusalHold) {
   const navigate = useNavigate()
 
   /**
@@ -285,8 +278,7 @@ function useCanvasManagement(id: string) {
    * the screen draws. A grant that couldn't be posted answers no — the page's own promise hears the
    * refusal rather than being retried on a permission the host never recorded. A host that answered
    * and refused said why (a version rewritten while the dialog was up no longer declares the tool),
-   * and that is the page's answer in the host's own words, said to the reader too; only a host that
-   * never landed answers no.
+   * and those words are held over the page; only a host that never landed answers no in silence.
    */
   const grant = async (tool: string, allow: boolean) => {
     try {
@@ -294,7 +286,7 @@ function useCanvasManagement(id: string) {
       return allow
     } catch (failure) {
       if (!hostAnswered(failure)) return false
-      tell.error(failure.message)
+      hold.refuse(failed(failure, "Couldn't allow that tool."))
       throw failure
     }
   }
@@ -305,23 +297,13 @@ function useCanvasManagement(id: string) {
     try {
       await updateCanvas(id, changes)
     } catch (failure) {
-      if (hostAnswered(failure)) {
-        tell.error(failure instanceof Error ? failure.message : "Couldn't change the canvas.")
-      }
+      if (hostAnswered(failure)) hold.refuse(failed(failure, "Couldn't change the canvas."))
       throw failure
     }
   }
 
   const remove = async () => {
-    try {
-      await deleteCanvas(id)
-    } catch (failure) {
-      if (hostAnswered(failure)) {
-        tell.error(failure instanceof Error ? failure.message : "Couldn't delete the canvas.")
-      }
-      // Thrown on so the question stays up: nothing was deleted.
-      throw failure
-    }
+    await deleteCanvas(id)
     tell.success("Canvas deleted.")
     // The canvas is gone, so the list is where the reader lands — from either screen, and in this
     // entry's place: stepping back would draw the canvas that was just deleted.
@@ -459,7 +441,8 @@ export function CanvasView() {
 
   // The reader's answers about the canvas are the same three on either screen, so they are read from
   // one place: the options sheet, the page's own consent, and the delete.
-  const { grant, update, remove } = useCanvasManagement(id)
+  const refusal = useRefusal(id)
+  const { grant, update, remove } = useCanvasManagement(id, refusal)
   const consent = useCanvasConsent(grant)
   // The bridge is registered once per canvas, so the ask is read through a ref: a new ask must not
   // re-register the listener under a running page. The device's copy is read at call time from the
@@ -546,8 +529,6 @@ export function CanvasView() {
     setRedrawn(null)
     setEscapedFor("")
   }, [drawnDocument])
-  // A write this screen makes — the header's own Undo — is refused here, over the page it is about.
-  const refusal = useRefusal(id)
   const escaped = escapedFor === frameKey
   const frameLoaded = () => {
     if (loads.current.document !== shownDocument) {
@@ -779,7 +760,10 @@ export function CanvasEdit() {
   const { awayNow, words: awayWords } = useAway(away)
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const { grant, update, remove } = useCanvasManagement(id)
+  // This screen draws no notice of its own, so the answers its options give are said in passing: the
+  // preview beside it holds them over the page they are about.
+  const refusal = useSaidRefusal()
+  const { grant, update, remove } = useCanvasManagement(id, refusal)
   // The first version is what makes there be a page at all, so it is also what the corners follow.
   const versioned = hasVersion(canvas)
   /**

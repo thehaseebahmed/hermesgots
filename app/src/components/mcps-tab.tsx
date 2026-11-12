@@ -294,7 +294,9 @@ function RemoveDialog({
       confirmLabel="Remove"
       busy={busy}
       onOpenChange={onCancel}
-      onConfirm={() => (name ? onConfirm(name) : undefined)}
+      onConfirm={async () => {
+        if (name) await onConfirm(name)
+      }}
     />
   )
 }
@@ -1406,8 +1408,6 @@ function ServerAccessSheet({
     const address = pasted.trim()
     if (!address) return
     setSending(true)
-    // A delivered address the Host refuses is read in the sheet that asked for it, above the field
-    // it was pasted into.
     if (await refusal.write("use that address", () => deliver(server.name, address))) setPasted("")
     setSending(false)
   }
