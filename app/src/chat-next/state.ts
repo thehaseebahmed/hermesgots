@@ -175,7 +175,7 @@ export type ThreadEvent =
   | {
       type: "answered"
       promptId?: string
-      answer?: { question: string; choicesOffered: string[] | null; value: string }
+      answer?: Answer
     }
   | { type: "ended" }
   /** The question held between two prompts waited long enough: the composer comes back. */
@@ -307,7 +307,7 @@ function withCommandWords(held: LiveTurn, rows: Row[]): LiveTurn {
 }
 
 /** One question, answered: the shape the app gives the reducer when a card is sent. */
-type Answer = { question: string; choicesOffered: string[] | null; value: string }
+type Answer = { question: string; choicesOffered: string[] | null; value: string | string[] | null }
 
 /**
  * The answer the app just gave, written onto the call the question was asked by. Hermes's served
@@ -345,7 +345,7 @@ function withClarifyAnswer(
 const givenAnswer = (answer: Answer): ClarifyResponse => ({
   question: answer.question,
   choicesOffered: answer.choicesOffered,
-  answer: answer.value || null,
+  answer: answer.value ?? null,
 })
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */

@@ -350,9 +350,10 @@ test("a prompt reads as the agent wrote it, without Hermes's skip hint or its re
   assert.equal(promptFrom({ ...live, question: own }, "r")?.question, own)
 })
 
-test("a question left without an answer is sent as the word Hermes reads as a skip", async () => {
-  // Hermes 0.23.1 takes an empty answer as no answer and ends the call there; its own word for a
-  // skip, "skip", is what lets the call go on to its next question.
+test("a question left without an answer is sent as the skip Hermes's run route records", async () => {
+  // Hermes 0.23.1 takes an empty answer as no answer and ends the call there, and its run route
+  // stores the word "skip" as the answer itself — only a chat reply is turned into a skip. Its own
+  // skip value is what the route records as skipped, and the call goes on to its next question.
   const sent = []
   globalThis.fetch = async (_, init) => {
     sent.push(JSON.parse(String(init?.body)))
@@ -377,7 +378,7 @@ test("a question left without an answer is sent as the word Hermes reads as a sk
   )
   assert.deepEqual(
     sent.map((body) => body.answer ?? body.choice),
-    ["skip", "skip", "Red", "once"],
+    ["\u0000skipped", "\u0000skipped", "Red", "once"],
     "blank answers are skips; real answers and approval choices go as they are",
   )
 })
