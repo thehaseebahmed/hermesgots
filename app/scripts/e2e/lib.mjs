@@ -275,9 +275,9 @@ export async function flow(
 }
 
 /**
- * The address a flow's bot answers at, as the app reads it. A bot is named by its host (ADR 0148),
- * and a lane's port would land in every assertion about a row, so the mock is reached under a name
- * of its own: every request to it is handed to the mock by `flow`.
+ * The address a flow's bot answers at, as the app reads it. A row names a bot by its own name
+ * (ADR 0149), and a flow's bot carries a name of its own; the mock is still reached at a `.test`
+ * address, which every request to it is handed to the mock by `flow` for.
  */
 export const botHost = "http://test-bot.test"
 

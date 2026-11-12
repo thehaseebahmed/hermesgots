@@ -100,8 +100,15 @@ test("All draws every bot and a bot's pill shows only its own", async () => {
   await seedLog()
   await mount(<NetworkLogScreen />, async () => {
     assert.equal(findAll("tbody tr").length, 3, "All is every bot")
-    // A pill names the host its bot answers at (ADR 0148), so it reads the fixture's host.
-    const pill = findAll("button").find((button) => button.textContent === "network-grace")
+    // A pill names the bot by its own name, in the order every list runs (ADR 0149).
+    assert.deepEqual(
+      findAll("button")
+        .map((button) => button.textContent)
+        .filter((words) => words === "Ada" || words === "Grace"),
+      ["Ada", "Grace"],
+      "the pills run A to Z",
+    )
+    const pill = findAll("button").find((button) => button.textContent === "Grace")
     assert.ok(pill, "each bot the log heard from has a pill")
     await click(pill)
     assert.equal(findAll("tbody tr").length, 1, "Grace's own request")

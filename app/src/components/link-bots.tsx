@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { RotateCwIcon } from "lucide-react"
 
@@ -7,7 +7,7 @@ import { CopyBlock } from "@/components/copy-block"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { labelOf } from "@/lib/bot-name"
+import { byBotLabel, labelOf } from "@/lib/bot-name"
 import { db, type Profile } from "@/lib/db"
 import {
   linkCommands,
@@ -48,8 +48,10 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
     () => db.profiles.filter((p) => Boolean(p.hostId)).sortBy("createdAt"),
     [],
   )
-  // This is the list where a host's own bots arrive, so it is where two of them first read alike.
+  // This is the list where a host's own bots arrive, so it is where two of them first read alike —
+  // and where a host's suffix first earns its place, the namesakes being this list's own rows.
   const labels = useBotLabels()
+  const listed = useMemo(() => [...(bots ?? [])].sort(byBotLabel(labels)), [bots, labels])
   const [reachable, setReachable] = useState<Record<string, boolean>>({})
   const { registryError, vault } = useSyncState()
 
@@ -122,7 +124,7 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
         </div>
       )}
       <ul className="flex flex-col gap-2" aria-live="polite">
-        {bots?.map((bot) => (
+        {listed.map((bot) => (
           <LinkedBot
             key={bot.id}
             profile={bot}

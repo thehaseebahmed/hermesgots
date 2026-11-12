@@ -53,7 +53,7 @@ async function seed() {
   await db.dictationLog.clear()
   await db.dictationStats.clear()
   await db.speechCache.clear()
-  // A row is named by the host its bot answers at (ADR 0148), which is what the old names said.
+  // A row is named by the bot's own name (ADR 0149): two names, so no host.
   await db.profiles.put(botProfile("alpha", { id: "bot-1", name: "A bot" }))
   await db.profiles.put(
     botProfile("beta", {
@@ -90,7 +90,7 @@ test("the Overview draws the Bubble and its bot, and no rows for the phone's gra
     assert.match(text(), /Stats/, "and the totals have their own heading")
     assert.match(said("bubble"), /Bubble/)
     assert.equal(bubbleOn(), false, "a service that is not running reads off")
-    assert.match(said("bubble-bot"), /alpha/, "the bot is this device's selection")
+    assert.match(said("bubble-bot"), /A bot/, "the bot is this device's selection")
     assert.ok(
       missing('[data-setting="bubble-overlay"]'),
       "the draw-over grant is not a setting of this app's",
@@ -232,7 +232,7 @@ test("the bot list draws each bot's picture and speech model, in the order the B
     ),
   })
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const drawn = () =>
@@ -244,9 +244,9 @@ test("the bot list draws each bot's picture and speech model, in the order the B
     assert.equal(drawn().length, 2, "one row per bot")
     assert.ok(drawn()[0].querySelector("img"), "the picture is the bot's own")
     assert.deepEqual(
-      drawn().map((one) => one.textContent?.match(/alpha|beta/)?.[0]),
-      ["alpha", "beta"],
-      "the order the Bots tab draws its rows in",
+      drawn().map((one) => one.textContent?.match(/A bot|B bot/)?.[0]),
+      ["A bot", "B bot"],
+      "the order the Bots tab draws its rows in, which is their names'",
     )
   })
 })
@@ -278,7 +278,7 @@ test("the bot list names the model the provider hears with, not the host's local
     ),
   })
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const drawn = () =>
@@ -306,7 +306,7 @@ test("a local bot's line says local, whatever the resolver names it", async () =
     ),
   })
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const drawn = () =>
@@ -322,14 +322,14 @@ test("a local bot's line says local, whatever the resolver names it", async () =
 test("picking a bot moves the Bubble's bot, not the chat selection, and mirrors it to the phone", async () => {
   await seed()
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const picked = Array.from(
       find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [],
-    ).find((one) => one.textContent?.includes("beta"))
+    ).find((one) => one.textContent?.includes("B bot"))
     await click(picked ?? null)
-    await until(async () => said("bubble-bot").includes("beta"), "the new selection")
+    await until(async () => said("bubble-bot").includes("B bot"), "the new selection")
   })
   const settings = await db.settings.get("settings")
   assert.equal(settings?.bubbleProfileId, "bot-2", "the Bubble's own bot moved")

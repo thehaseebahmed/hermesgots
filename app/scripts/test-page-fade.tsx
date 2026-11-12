@@ -105,9 +105,9 @@ test(
         await until(async () => text().includes("alpha one"), "the bot on screen")
         const spy = spyAnimate()
         try {
-          // The sidebar's rows are named by the host each bot answers at (ADR 0148).
-          await click(findText("a", "fade-other"))
-          await until(async () => find("h1")?.textContent === "fade-other", "the bot asked for")
+          // The sidebar's rows are named by each bot's own name (ADR 0149).
+          await click(findText("a", "Otherly"))
+          await until(async () => find("h1")?.textContent === "Otherly", "the bot asked for")
           await settle()
         } finally {
           spy.restore()

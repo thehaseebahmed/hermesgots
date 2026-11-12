@@ -20,7 +20,7 @@ import { toast } from "sonner"
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
-import { labelOf } from "@/lib/bot-name"
+import { byBotLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { CodingTab } from "@/components/bot-coding-tab"
 import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
@@ -272,9 +272,13 @@ function DeleteBotDialog({
         : [],
     [open, profile.hostId, profile.id],
   )
-  // Bots of one host are the ones this sentence tells apart, so it names them by their hosts.
+  // Bots of one host are the ones this sentence tells apart, so it names them the way every list
+  // does, each host's suffix saying which one it is.
   const labels = useBotLabels()
-  const others = siblings?.map((p) => labelOf(labels, p)).join(", ")
+  const others = [...(siblings ?? [])]
+    .sort(byBotLabel(labels))
+    .map((p) => labelOf(labels, p))
+    .join(", ")
 
   return (
     <ConfirmDestructive

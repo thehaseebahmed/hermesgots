@@ -1,8 +1,8 @@
 /**
- * The chat's bot picker, named by the host each bot answers at: two linked hosts call their default
- * profile "Hermes", so the picker drew two identical rows (`bot-name.ts`, ADR 0148). The rows are the
- * hosts' short names, the domain part where two hosts share one, and the Hermes profile where one
- * host holds several bots.
+ * The chat's bot picker, named by the bots' own names: two linked hosts call their default profile
+ * "Hermes", so the picker says which host each is only where two namesakes live apart — and a name
+ * nobody shares stands alone (`bot-name.ts`, ADR 0149). Its rows run by name, not by the order the
+ * bots were linked in.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -33,11 +33,11 @@ async function seed(bots: ReturnType<typeof bot>[]) {
 
 const picker = (one: ReturnType<typeof bot>) => <BotPicker profile={one} />
 
-test("two hosts' default profiles read as their hosts, not as the name both were sealed with", async () => {
+test("two hosts' sealed defaults say which host each is, and a name nobody shares stands alone", async () => {
   const bots = [
     bot("a", "hermes.domain.com"),
     bot("b", "hermes.example.com"),
-    bot("c", "notes.third.dev"),
+    bot("c", "notes.third.dev", "/v1", "Notes"),
   ]
   await seed(bots)
   await mount(picker(bots[0]), async () => {
@@ -45,8 +45,8 @@ test("two hosts' default profiles read as their hosts, not as the name both were
     await until(async () => Boolean(pill()), "the picker's pill")
     assert.equal(
       pill()!.getAttribute("aria-label"),
-      "Bot: domain",
-      "the pill names the host its bot answers at",
+      "Bot: Hermes (domain)",
+      "the pill names the bot, and the host that tells it from its namesake",
     )
     await click(pill())
     await until(
@@ -55,19 +55,20 @@ test("two hosts' default profiles read as their hosts, not as the name both were
     )
     assert.deepEqual(
       findAll('[role="menuitemradio"]').map((one) => wordsOf(one)),
-      ["domain", "example", "notes"],
-      "the two hosts sharing a short name read as their domain parts, and one alone as its own name",
+      ["Hermes (domain)", "Hermes (example)", "Notes"],
+      "the two hosts sharing one name read as their domain parts, a name alone reads bare, and the "
+        + "rows run A to Z",
     )
     assert.equal(
       findAll('[role="menuitemradio"]').filter((one) => wordsOf(one) === "Hermes").length,
       0,
-      "and the app's own name is in none of them",
+      "a name two hosts share is never drawn without the host that tells them apart",
     )
     await settle()
   })
 })
 
-test("one host's several bots append the profile they are reached at", async () => {
+test("the rows run by name, and one host's several bots read by their own names", async () => {
   const bots = [
     bot("a", "hermes.domain.com"),
     bot("b", "hermes.domain.com", "/p/work/v1", "work"),
@@ -84,8 +85,31 @@ test("one host's several bots append the profile they are reached at", async () 
     )
     assert.deepEqual(
       findAll('[role="menuitemradio"]').map((one) => wordsOf(one)),
-      ["domain", "domain/work", "example"],
-      "the host holding two bots tells them apart by the profile each is reached at",
+      ["Hermes (domain)", "Hermes (example)", "work"],
+      "the second bot of one host is its own name, and the two sealed defaults still say their hosts",
+    )
+    await settle()
+  })
+})
+
+test("a name two bots of one host share is drawn without the host", async () => {
+  const bots = [
+    bot("a", "hermes.domain.com"),
+    bot("b", "hermes.domain.com", "/p/work/v1"),
+  ]
+  await seed(bots)
+  await mount(picker(bots[0]), async () => {
+    const pill = () => document.querySelector('button[aria-label^="Bot: "]')
+    await until(async () => Boolean(pill()), "the picker's pill")
+    await click(pill())
+    await until(
+      async () => findAll('[role="menuitemradio"]').length === 2,
+      "the picker's two bots",
+    )
+    assert.deepEqual(
+      findAll('[role="menuitemradio"]').map((one) => wordsOf(one)),
+      ["Hermes", "Hermes"],
+      "one host tells the two apart from nothing, so it is not drawn",
     )
     await settle()
   })

@@ -11,7 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { RoomFaces } from "@/components/room/room-faces"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { labelOf } from "@/lib/bot-name"
+import { byBotLabel, labelOf } from "@/lib/bot-name"
 import { connectionKey, hostKey, serverConfig } from "@/lib/connection"
 import {
   DEFAULT_SETTINGS,
@@ -63,7 +63,8 @@ const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Hos
 export function NewRoomScreen({ slot }: { slot?: string }) {
   const navigate = useNavigate()
   const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
-  // This is the one list where the host is the thing being picked, so its rows read by host.
+  // The rows read as every other list's do (ADR 0149): the bots' own names, a host only where two
+  // namesakes live apart.
   const labels = useBotLabels()
   const sendOnEnter = useLiveQuery(
     async () => (await getSettings()).sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter,
@@ -73,7 +74,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   const writes = features("rooms_write")
   const writers = bots
     .filter((bot) => bot.hermesProfile && !bot.disabled && writes[connectionKey(bot)] === "yes")
-    .sort((one, two) => one.name.localeCompare(two.name))
+    .sort(byBotLabel(labels))
   const [picked, setPicked] = useState<string[]>([])
   const [picking, setPicking] = useState(false)
   const [roomId] = useState(() => randomId())

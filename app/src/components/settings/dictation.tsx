@@ -9,7 +9,7 @@ import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
-import { labelOf } from "@/lib/bot-name"
+import { byBotLabel, labelOf } from "@/lib/bot-name"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
@@ -354,13 +354,13 @@ function EntrySheet({
 
 /** One row per bot: the Settings menu's own row, into that bot's speech settings. */
 function BotsTab({ profiles }: { profiles: Profile[] }) {
-  // Rows by the host each bot answers at, as every other list of them reads (ADR 0148).
+  // Rows by the bots' own names, as every other list of them reads (ADR 0149).
   const labels = useBotLabels()
   if (!profiles.length)
     return <p className="px-5 py-6 text-sm text-muted-foreground">No bots yet.</p>
   return (
     <Group>
-      {profiles.map((profile) => (
+      {[...profiles].sort(byBotLabel(labels)).map((profile) => (
         <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
       ))}
     </Group>
@@ -624,7 +624,7 @@ function BubbleCards() {
           // read, so offering it would move the row and the phone to a bot nobody picked.
           // The same order the Bots tab draws, and each row the bot's own picture with the model it
           // answers with: a name alone said nothing about which bot a take would be heard by.
-          options={(bots ?? []).map((profile) => ({
+          options={[...(bots ?? [])].sort(byBotLabel(labels)).map((profile) => ({
             id: profile.id,
             label: labelOf(labels, profile),
             // What hears the take, not what answers a chat: this list decides the bot the Bubble

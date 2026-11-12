@@ -43,7 +43,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
-import { labelOf } from "@/lib/bot-name"
+import { byBotLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
@@ -355,9 +355,11 @@ function MenuScreen({
       <AccountRow />
       {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
       <Group>
-        {profiles?.map((profile) => (
-          <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
-        ))}
+        {[...(profiles ?? [])]
+          .sort(byBotLabel(labels))
+          .map((profile) => (
+            <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
+          ))}
         <LinkBotRow onLink={() => setLinking(true)} />
       </Group>
       <Group>
@@ -688,9 +690,11 @@ export function DeveloperSettings() {
             }
           />
         )}
-        {bots?.map((bot) => (
-          <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
-        ))}
+        {[...(bots ?? [])]
+          .sort(byBotLabel(labels))
+          .map((bot) => (
+            <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
+          ))}
       </Group>
       <Group>
         <LinkRow
