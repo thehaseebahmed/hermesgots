@@ -12,6 +12,7 @@
  */
 import { useState } from "react"
 
+import { Refusal } from "@/components/banner"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,11 +82,7 @@ export function ConfirmDestructive({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        {failure && (
-          <p role="alert" className="text-sm text-destructive">
-            {failure}
-          </p>
-        )}
+        <Refusal hold={{ words: failure, dismiss: () => setFailure(undefined) }} />
         <AlertDialogFooter>
           <AlertDialogCancel disabled={held}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction

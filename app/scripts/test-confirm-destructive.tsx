@@ -6,7 +6,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { click, find, findAll, mount, settle, until } from "./component-kit.tsx"
+import { click, find, findAll, labelled, missing, mount, settle, until } from "./component-kit.tsx"
 
 const question = (over: Partial<Parameters<typeof ConfirmDestructive>[0]> = {}) => (
   <ConfirmDestructive
@@ -53,6 +53,22 @@ test("a write the host refuses keeps the question open, in the host's words", as
       )
       assert.deepEqual(closed, [], "and nothing closed")
       assert.equal(await remove()?.hasAttribute("disabled"), false, "the action is pressable again")
+    },
+  )
+})
+
+test("a refused delete says so in the dialog", async () => {
+  await mount(
+    question({
+      onConfirm: () => Promise.reject(new Error("That bot is running a turn.")),
+    }),
+    async () => {
+      await click(findAll("button").find((one) => one.textContent?.trim() === "Remove") ?? null)
+      await until(async () => Boolean(find('[role="alert"]')), "the host's reason", 2_000)
+      const dismiss = labelled("button", "Dismiss")
+      assert.ok(dismiss, "the refusal wears the notice every other surface draws")
+      await click(dismiss)
+      assert.ok(missing('[role="alert"]'), "and its Dismiss takes the words away")
     },
   )
 })
