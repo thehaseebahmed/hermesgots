@@ -1,20 +1,26 @@
 /**
- * A closed ```mermaid fence draws its frame, wherever the app draws markdown: the slot that frame is
- * named by, the tone it sits on, and its source copyable from its chrome — while every fence the rule
- * leaves as code still draws a block of code. Nothing is drawn yet: the frame's body is the source
- * itself until a step of its own asks mermaid for it, so nothing here needs a browser.
+ * A closed ```mermaid fence, wherever the app draws markdown: the frame that stands where the fence
+ * stood, the tone it sits on, its source copyable from its chrome — and, where the drawing cannot be
+ * made, its source settled on as the code it is with one quiet line saying why.
+ *
+ * The drawing itself is not this tier's. mermaid measures a diagram with `getBBox`, and a DOM without
+ * layout has none, so a fence mounted here always ends on that fallback — which is exactly the half
+ * this tier can prove, and the half that must never become a stack trace on screen. That an `<svg>`
+ * lands in the frame, at the page's own colours, is `pnpm e2e mermaid`'s to prove.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { MessageItem } from "@/components/chat/message-item"
 import { ask, reply } from "./openui-kit.tsx"
-import { absent, click, find, mountMarkdown } from "./component-kit.tsx"
+import { absent, click, find, mountMarkdown, until } from "./component-kit.tsx"
 
 const frame = () => find("[data-slot=diagram]")
 /** The row the message draws: a reply's text can arrive as more than one markdown root. */
 const row = () => find("[data-slot=message]")
 const bubble = () => find("[data-slot=bubble-content]")
+/** The one line a fence says when its source could not be drawn. */
+const line = () => find("[data-slot=diagram-line]")
 
 const DIAGRAM = ["graph TD", "  A --> B"].join("\n")
 const REPLY = ["Here it is:", "", "```mermaid", DIAGRAM, "```", "", "And after."].join("\n")
@@ -31,7 +37,6 @@ Object.defineProperty(globalThis.navigator, "clipboard", {
 
 test("a closed fence draws its frame, not a block of code", async () => {
   await mountMarkdown(<MessageItem message={reply("r-1", REPLY)} showStats />, () => {
-    absent("div[data-md-code]", "a closed mermaid fence is not a block of code")
     const drawn = frame()
     assert.ok(drawn, "the fence drew a frame")
     assert.equal(
@@ -51,12 +56,14 @@ test("a closed fence draws its frame, not a block of code", async () => {
 
 test("a frame in a user's bubble sits on the bubble's own colour", async () => {
   await mountMarkdown(<MessageItem message={ask(REPLY)} showStats />, () => {
-    const drawn = frame()
-    assert.ok(drawn, "a message's closed fence draws its frame too")
+    // The fence's chrome, in whichever state it has reached: its frame, or — where the drawing could
+    // not be made here — the block its source settled on. Both are the fence, and both carry the tone.
+    const chrome = frame() ?? find("div[data-md-code]")
+    assert.ok(chrome, "a message's closed fence draws the frame's chrome too")
     assert.ok(bubble(), "the words are on a bubble")
-    assert.ok(drawn?.className.includes("bg-current/15"), "a wash of the words' own colour")
+    assert.ok(chrome?.className.includes("bg-current/15"), "a wash of the words' own colour")
     assert.ok(
-      !drawn?.className.includes("bg-muted"),
+      !chrome?.className.includes("bg-muted"),
       "not the page's grey, which the fill would swallow",
     )
   })
@@ -65,10 +72,30 @@ test("a frame in a user's bubble sits on the bubble's own colour", async () => {
 test("the frame's copy control copies the fence's source and nothing else", async () => {
   copied = []
   await mountMarkdown(<MessageItem message={reply("r-1", REPLY)} showStats />, async () => {
-    const drawn = frame()
-    assert.equal(drawn?.querySelectorAll("button").length, 1, "one copy control, and no second")
-    await click(drawn?.querySelector("button") ?? null)
+    const control = row()?.querySelector("button")
+    assert.ok(control, "the fence carries the copy control a code block does")
+    await click(control)
     assert.deepEqual(copied, [DIAGRAM], "the source alone, with no fences around it")
+  })
+})
+
+test("a fence that cannot be drawn here settles on its source and one quiet line", async () => {
+  await mountMarkdown(<MessageItem message={reply("r-1", REPLY)} showStats />, async () => {
+    await until(
+      async () => find("div[data-md-code]") !== null,
+      "the fence to settle on its source",
+    )
+    const block = find("div[data-md-code]")
+    assert.ok(block, "the source is drawn as the code it is")
+    assert.equal(block?.querySelector("pre")?.textContent, DIAGRAM, "the source, whole")
+    absent("[data-slot=diagram]", "and no frame pretending to be a drawing")
+    const said = line()?.textContent ?? ""
+    assert.equal(line()?.textContent?.split("\n").length, 1, `one line, not a paragraph (${said})`)
+    assert.ok(
+      !/\bat \S+:\d+:\d+|\b(?:Type|Reference|Syntax|Range)Error\b|undefined|\[object/.test(said),
+      `and never a stack trace (${said})`,
+    )
+    assert.ok(said.length > 0 && said.length < 80, `one quiet line (${said})`)
   })
 })
 
@@ -85,5 +112,6 @@ for (const one of STAYS_CODE)
     await mountMarkdown(<MessageItem message={reply("r-1", one.text)} showStats />, () => {
       assert.ok(row()?.querySelector("div[data-md-code]"), "the fence drew as code")
       absent("[data-slot=diagram]", "and no frame")
+      absent("[data-slot=diagram-line]", "and nothing said about a drawing")
     })
   })
