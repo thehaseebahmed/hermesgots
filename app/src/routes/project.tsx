@@ -56,7 +56,7 @@ import { useNav } from "@/lib/nav"
 import { useProjectsPane, useRememberOpened } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
 import { deleteProject, retryProject, updateProject, type HermesProject } from "@/lib/hermes"
-import { readProjects, useProjects } from "@/lib/projects"
+import { readProjects, useProjects, cloneLine, CLONE_FAILED, makingProject } from "@/lib/projects"
 import { projectRepos } from "@/lib/workspace"
 import { BackButton } from "@/components/back-button"
 
@@ -95,13 +95,7 @@ export function ProjectPage() {
   // AFK's own row exists only where the Bot's plugin can read a project's tasks.
   const afk = usePluginFeatureOn(server, AFK_FEATURE)
   const projectChanges = useChanges("projects", profile)
-  // A project that isn't whole is still being worked on: the poll keeps its page current where the
-  // bot's stream isn't open, as the list's own poll does.
-  const changing = Boolean(
-    project &&
-    (project.status !== "ready" ||
-      project.folders.some((f) => f.status === "cloning" || f.status === "removing")),
-  )
+  const changing = Boolean(project && makingProject(project))
 
   useEffect(() => {
     if (!server) return
@@ -166,10 +160,9 @@ export function ProjectPage() {
     }
   }
 
-  const retry = () =>
-    profile
-      ? act(() => retryProject(profile, projectId), "Couldn't retry the project.")
-      : Promise.resolve()
+  const retry = () => {
+    if (profile) void act(() => retryProject(profile, projectId), "Couldn't retry the project.")
+  }
 
   const ready = profile && project?.status === "ready"
 
@@ -259,10 +252,10 @@ export function ProjectPage() {
         </div>
       )}
       {project && project.status !== "ready" ? (
-        <PendingProject
+        <ProjectClone
           project={project}
           busy={busy}
-          onRetry={() => void retry()}
+          onRetry={retry}
           onDelete={() => setDeleting(true)}
         />
       ) : (
@@ -357,12 +350,7 @@ export function ProjectPage() {
   )
 }
 
-/**
- * A project the plugin is still making. It draws where the tabs would be, because a project that
- * isn't whole has no library, pull requests or usage yet — and a clone that failed says why, whole,
- * with the two answers a failure earns: start it again, or drop it.
- */
-function PendingProject({
+function ProjectClone({
   project,
   busy,
   onRetry,
@@ -374,8 +362,6 @@ function PendingProject({
   onDelete: () => void
 }) {
   const failed = project.status === "failed"
-  const total = project.folders.length
-  const done = project.folders.filter((folder) => folder.status === "done").length
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center">
       <span
@@ -392,15 +378,11 @@ function PendingProject({
         )}
       </span>
       <h2 className="text-lg font-semibold tracking-tight">
-        {failed
-          ? "Couldn't create this project"
-          : total > 0
-            ? `Cloning ${Math.min(done + 1, total)} of ${total}`
-            : "Creating…"}
+        {failed ? "Couldn't create this project" : cloneLine(project)}
       </h2>
       {failed && (
         <p className="max-w-prose text-sm break-words whitespace-pre-wrap text-muted-foreground">
-          {project.error ?? "Couldn't clone the project's repositories."}
+          {project.error ?? CLONE_FAILED}
         </p>
       )}
       {failed && (

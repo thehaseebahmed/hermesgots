@@ -23,7 +23,7 @@ import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useAllLive, useAnyChange } from "@/lib/live"
 import { itemToOpen, useProjectsPane, type FeaturePane } from "@/lib/pane"
-import { readProjects } from "@/lib/projects"
+import { readProjects, makingProject, cloneLine, CLONE_FAILED } from "@/lib/projects"
 import { usePoll } from "@/lib/poll"
 import { createSignal, createStore } from "@/lib/store"
 import { HermesError, deleteProject, type HermesConfig, type HermesProject } from "@/lib/hermes"
@@ -133,13 +133,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
   usePoll(refresh, streaming ? SAFETY_MS : LIST_MS, [], { immediate: false })
 
   const cloning = results?.some(
-    (result) =>
-      "projects" in result &&
-      result.projects.some(
-        (p) =>
-          p.status === "cloning" ||
-          p.folders.some((f) => f.status === "cloning" || f.status === "removing"),
-      ),
+    (result) => "projects" in result && result.projects.some(makingProject),
   )
   usePoll(() => setTick((n) => n + 1), HOST_WORK_MS, [], {
     active: Boolean(cloning && !streaming),
@@ -351,11 +345,7 @@ function formatWhen(at: number, now: number) {
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
 }
 
-/**
- * A project the plugin is still cloning. A clone that failed is a project of its own: the row says
- * why in one line and opens it, where the whole error and the two actions its failure earns are.
- */
-function PendingItem({
+function CloneItem({
   row,
   pane,
   onChanged,
@@ -367,8 +357,6 @@ function PendingItem({
   const { profile, project } = row
   const [busy, setBusy] = useState(false)
   const failed = project.status === "failed"
-  const total = project.folders.length
-  const done = project.folders.filter((folder) => folder.status === "done").length
   const cancel = async () => {
     setBusy(true)
     try {
@@ -388,7 +376,7 @@ function PendingItem({
         botId={profile.botId}
         title={project.name}
         warn
-        line={<span className="truncate">{project.error ?? "Couldn't clone."}</span>}
+        line={<span className="truncate">{project.error ?? CLONE_FAILED}</span>}
         selected={pane?.selected === key}
         link={{
           to: `/projects/${key}`,
@@ -406,11 +394,7 @@ function PendingItem({
           tone="success"
           botId={profile.botId}
           title={project.name}
-          line={
-            <span className="truncate">
-              {total > 0 ? `Cloning ${Math.min(done + 1, total)} of ${total}` : "Creating…"}
-            </span>
-          }
+          line={<span className="truncate">{cloneLine(project)}</span>}
         />
       </div>
       <Button
@@ -439,7 +423,7 @@ function ProjectItem({
   onChanged: () => void
 }) {
   const { profile, project, at } = row
-  if (project.status !== "ready") return <PendingItem row={row} pane={pane} onChanged={onChanged} />
+  if (project.status !== "ready") return <CloneItem row={row} pane={pane} onChanged={onChanged} />
   const repos = repoLine(project)
   const key = `${profile.id}/${project.id}`
   return (

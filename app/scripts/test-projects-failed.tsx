@@ -1,8 +1,8 @@
 /**
- * A project whose clone failed: the list row says the first line of why and opens it, and the page
- * says the whole of it where its tabs would be — Delete beside Retry, and no tabs to open on a
- * project that has nothing in them. Retry leaves the same block cloning, so the page never falls
- * back to a screen with no sessions behind it.
+ * A project whose clone failed: the list row shows the error cut to its one line and opens it, and
+ * the page shows the whole of it where its tabs would be — Delete beside Retry, and no tabs to open
+ * on a project that has nothing in them. Retry leaves the same block cloning, so the page never
+ * falls back to a screen with no sessions behind it.
  *
  * The boundary is the plugin's own: `/projects` answers the row, `/retry` starts the clone again,
  * and `/remove` drops it, so the screen is driven through the reads it really makes.
