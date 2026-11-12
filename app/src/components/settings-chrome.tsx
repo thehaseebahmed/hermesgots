@@ -672,7 +672,7 @@ export function EditForm({
   placeholder?: string
   /** `url` asks for a keyboard's URL key; `secret` masks the value behind a show toggle. */
   kind?: "text" | "url" | "secret" | "number"
-  // A line under the field about the write itself: when the host reads the key, say. */
+  /** A line under the field about the write itself: when the host reads the key, say. */
   note?: string
   /** The one write Save makes: it lands by returning, and is refused by throwing. */
   onSave: (value: string) => unknown
