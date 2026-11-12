@@ -88,6 +88,17 @@ test("a token the page doesn't answer falls back to a shade of the two it did", 
   assert.notEqual(theme.nodeBorder, theme.background, "and an outline still reads against its box")
 })
 
+test("a token the page writes translucent is mixed into the surface it sits on", () => {
+  // Dark mode's border is `oklch(1 0 0 / 10%)` in `src/index.css`: white at a tenth, which the page
+  // draws as a grey a hair above its plate. `toHex` hands the alpha over with the colour, and mermaid
+  // takes one opaque colour per slot — so the slot is the colour a reader sees, not the token's raw
+  // white.
+  const theme = mermaidTheme({ surface: "#262626", ink: "#fafafa", tokens: { border: "#ffffff1a" } })
+
+  assert.notEqual(theme.nodeBorder, "#ffffff", "a border at a tenth is not drawn as solid white")
+  assert.equal(theme.nodeBorder, "#3c3c3c", "it is the white mixed into the plate by its own alpha")
+})
+
 test("a page that answered nothing is drawn as a light page, never as nothing", () => {
   const theme = mermaidTheme({ surface: "", ink: "", tokens: {} })
 

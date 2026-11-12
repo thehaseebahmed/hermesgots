@@ -41,15 +41,24 @@ const PAPER = "#ffffff"
 const INK = "#0a0a0a"
 const LIGHT_INK = "#fafafa"
 
-const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
+const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 
-/** A token as `#rrggbb`, or nothing at all when it is no colour mermaid could parse. */
+/**
+ * A colour as `#rrggbb`, with the opacity it carried still after it (`/aa`) where it had one: `toHex`
+ * hands a translucent token over whole rather than quietly making it solid.
+ */
 function read(value: string | undefined) {
   const colour = value?.trim() ?? ""
   if (!HEX.test(colour)) return undefined
   const full = colour.length === 4 ? `#${[...colour.slice(1)].map((c) => c + c).join("")}` : colour
   return full.toLowerCase()
 }
+
+/** The opaque part of what `read` answered: the only shape mermaid is given. */
+const opaque = (colour: string) => colour.slice(0, 7)
+
+/** How opaque a colour is, 0 to 1 — a token the page writes translucent says so in its alpha. */
+const opacity = (colour: string) => (colour.length === 9 ? parseInt(colour.slice(7), 16) / 255 : 1)
 
 /** `ink` mixed into `surface`, `share` percent of the way: mermaid takes one colour per slot. */
 function mix(surface: string, ink: string, share: number) {
@@ -74,9 +83,17 @@ function light(colour: string) {
  * words, connectors, labels, notes and sections are drawn in.
  */
 export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<string, string> {
-  const on = read(surface) ?? PAPER
-  const words = read(ink) ?? (light(on) > 0.5 ? INK : LIGHT_INK)
-  const token = (name: keyof DiagramTokens) => read(tokens[name])
+  const on = opaque(read(surface) ?? PAPER)
+  const words = opaque(read(ink) ?? (light(on) > 0.5 ? INK : LIGHT_INK))
+  // A token as mermaid can be handed it: the page's own colour where it answered one, solid — a
+  // translucent token is, on the page, the surface showing through it, so it is mixed into the
+  // diagram's surface by its own alpha rather than arriving as raw white over a dark plate.
+  const token = (name: keyof DiagramTokens) => {
+    const colour = read(tokens[name])
+    if (!colour) return undefined
+    const alpha = opacity(colour)
+    return alpha < 1 ? mix(on, opaque(colour), alpha * 100) : colour
+  }
 
   // Each slot: the app's own token where the page answered one, else a shade of the two colours the
   // diagram is drawn in — an outline and a connector are the words mixed into the surface.

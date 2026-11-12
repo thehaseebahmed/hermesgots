@@ -9,13 +9,12 @@
  *   node scripts/check-mermaid-chunks.mjs
  */
 import assert from "node:assert/strict"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { dirname, join, normalize, relative } from "node:path"
 
-const DIST = "dist"
-const ASSETS = join(DIST, "assets")
-/** The path the build puts mermaid's chunks under, and the only one the service worker's route answers. */
-const MERMAID = "assets/mermaid/"
+import { chunks, DIST, entry as entryChunk, read, size } from "./dist.mjs"
+import { MERMAID } from "../src/lib/mermaid-chunks.ts"
+
 /**
  * mermaid's own bundle names its API, and nothing the app builds does: the one chunk this matches is
  * the door the diagram opens mermaid through, so everything reachable from it is mermaid's.
@@ -29,26 +28,24 @@ function check(ok, message) {
   return false
 }
 
-const files = []
-;(function walk(directory) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) walk(path)
-    else if (entry.name.endsWith(".js")) files.push(relative(DIST, path).split("\\").join("/"))
-  }
-})(ASSETS)
+const files = chunks()
 
 const known = new Set(files)
 /** What each built chunk names: `from "./x.js"` rides with it, `import("./x.js")` only on a request. */
-const name = new Map(files.map((file) => [file, named(join(DIST, file))]))
+const name = new Map(files.map((file) => [file, named(file)]))
 const imports = new Map(files.map((file) => [file, [...name.get(file).static, ...name.get(file).lazy]]))
 const statics = new Map(files.map((file) => [file, name.get(file).static]))
 
-function named(path) {
-  const source = readFileSync(path, "utf8")
+function named(file) {
+  const source = read(file)
+  const path = join(DIST, file)
   const of = (pattern) =>
     [...source.matchAll(pattern)]
-      .map(([, specifier]) => relative(DIST, normalize(join(dirname(path), specifier))).split("\\").join("/"))
+      .map(([, specifier]) =>
+        relative(DIST, normalize(join(dirname(path), specifier)))
+          .split("\\")
+          .join("/"),
+      )
       .filter((chunk) => known.has(chunk))
   return {
     static: of(/(?:from|import)\s*["'](\.{1,2}\/[^"']+\.js)["']/g),
@@ -69,12 +66,12 @@ function reachable(roots, graph, drop = new Set()) {
   return seen
 }
 
-const entry = readFileSync(join(DIST, "index.html"), "utf8").match(/src="\/assets\/([^"]+\.js)"/)?.[1]
+const entry = entryChunk()
 assert.ok(entry, "dist/index.html names the script the app starts on")
-const starts = `assets/${entry}`
+const starts = entry
 
 // --- mermaid's chunks, off its own bundle -------------------------------------------------------
-const roots = files.filter((file) => readFileSync(join(DIST, file), "utf8").includes(ROOT))
+const roots = files.filter((file) => read(file).includes(ROOT))
 // Nothing below means anything without the door: a mermaid that stopped naming itself must fail the
 // gate, not pass it with no chunks to check.
 assert.equal(
@@ -84,16 +81,14 @@ assert.equal(
 )
 const appOnly = reachable([starts], imports, new Set(roots))
 const mermaid = new Set([...reachable(roots, imports)].filter((file) => !appOnly.has(file)))
-const bytes = files
-  .filter((file) => mermaid.has(file))
-  .reduce((total, file) => total + statSync(join(DIST, file)).size, 0)
+const bytes = files.filter((file) => mermaid.has(file)).reduce((total, file) => total + size(file), 0)
 
 // --- every chunk carrying mermaid is under the path, and nothing else is there -------------------
 const loose = [...mermaid].filter((file) => !file.startsWith(MERMAID))
 check(
   loose.length === 0,
   `${loose.length} of mermaid's ${mermaid.size} chunks sit outside ${MERMAID} (${(
-    loose.reduce((total, file) => total + statSync(join(DIST, file)).size, 0) / 1024
+    loose.reduce((total, file) => total + size(file), 0) / 1024
   ).toFixed(0)} KiB), so the install would precache them: ${loose.slice(0, 6).join(", ")}${
     loose.length > 6 ? ", …" : ""
   }`,

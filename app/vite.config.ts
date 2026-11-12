@@ -8,9 +8,7 @@ import { defineConfig, type Plugin } from "vite"
 import { VitePWA } from "vite-plugin-pwa"
 
 import pkg from "./package.json" with { type: "json" }
-
-/** Where the build puts mermaid's chunks, and the only path the service worker's route answers. */
-const MERMAID = "assets/mermaid/"
+import { MERMAID } from "./src/lib/mermaid-chunks.ts"
 
 /** mermaid's own packages: the door the app opens it through, and everything behind that door. */
 const MERMAID_PACKAGE = /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(?:mermaid|@mermaid-js)\//
@@ -169,7 +167,9 @@ export default defineConfig(({ mode }) => {
           // origin, so a third party's copy of the path is never answered from this cache.
           runtimeCaching: [
             {
-              urlPattern: /\/assets\/mermaid\/[^/]+\.js$/,
+              // The path the build names these chunks by, read out of the one module that says it:
+              // every slash escaped, so workbox writes the same expression it did by hand.
+              urlPattern: new RegExp(`\\/${MERMAID.replaceAll("/", "\\/")}[^/]+\\.js$`),
               handler: "CacheFirst",
               options: {
                 cacheName: "gots-mermaid",

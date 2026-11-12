@@ -71,10 +71,15 @@ diagram type is a lazy import of its own.
 - **Drawing from the `code` hook.** It is the shortest path and it cannot answer the question: the hook
   sees a body, not a position, so an arriving fence would draw as soon as its first line landed, and a
   list item's example would draw as a diagram.
-- **A second splitter beside `openuiParts`.** `openuiParts` already cuts a reply into its text and its
-  `openui-lang` blocks, and a reply may hold both kinds. One rule grown to answer two features would make
-  every change to either a change to both, and a reply holding both would need the fold's order decided
-  inside it. `Markdown` asks each rule for its own parts over the text it was given instead.
+- **A second splitter beside `openuiParts`.** What the branch does instead is one scanner and two
+  rules: `src/lib/fences.ts` holds what both rules read off a line — the fence it opens, the character
+  and length a closer has to match, whether a line closes one, where a text's lines start and the CR a
+  CRLF text leaves at their ends — and `openui-block.ts` and `mermaid-fences.ts` each keep their own
+  policy over it, since the policy is what they disagree about: `openui-lang` may be indented three
+  spaces and its unclosed fence is still a block, while a mermaid fence opens at the margin alone and
+  leaves an unclosed one as the text it is. One rule grown to answer two features would have had to take
+  a policy object to say either of those plainly, and a reply holding both would need the fold's order
+  decided inside it. `Markdown` still asks each rule for its own parts over the text it was given.
 - **`mmd`, `diagram`, or the info string matched case-insensitively.** The info string is the one thing a
   model writes, and `mermaid` is the name the whole diagrams ecosystem writes. An alias is a second name
   nobody asked for, and it would make the rule's own promise — exactly `mermaid` — untrue. An alias that
@@ -113,5 +118,7 @@ diagram type is a lazy import of its own.
 - `securityLevel: "strict"` sanitises labels, so a source that writes HTML in one draws plainer here than
   where it was copied from. `htmlLabels` on means a label is page HTML in a `foreignObject`, so the
   drawing is not a self-contained image — export is a non-goal, so nothing depends on that today.
-- A theme flip redraws each visible diagram once, and a streaming reply's fence changes height the moment
-  it closes, so what is below it moves: once, at the close.
+- A theme flip redraws every diagram this device has mounted once — there is no visibility gate, so one
+  scrolled out of the thread is redrawn too — and the drawing it already has stays painted until the
+  next one lands, so the source never flashes where the picture was. A streaming reply's fence changes
+  height the moment it closes, so what is below it moves: once, at the close.

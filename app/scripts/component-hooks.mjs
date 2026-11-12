@@ -167,6 +167,8 @@ const canvas2d = {
   fillStyle: "",
   measureText: (text) => ({ width: Math.ceil(String(text).length * 8) }),
   fillRect() {},
+  // `toHex` clears its one pixel before each read, so a translucent colour cannot blend into it.
+  clearRect() {},
   // What App.tsx's ThemeColor reads back to keep the browser chrome in step with the theme.
   getImageData: () => ({ data: [0, 0, 0, 255] }),
 }

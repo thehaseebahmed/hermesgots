@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react"
+import type { HTMLAttributes, ReactNode } from "react"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
 import { useMonoFace } from "@/components/chat/code-face"
 import { Button } from "@/components/ui/button"
+import { copyText, useCopied } from "@/lib/copied"
 import { cn } from "@/lib/utils"
 
 /**
@@ -21,55 +22,40 @@ export const PAINT: Record<Tone, { fill: string; chrome: string }> = {
 }
 
 /**
- * A block of code anywhere the app draws one: a reply's fence, and the command an approval asks
- * about. One piece, so a command reads the same in a card as in the words it came from, and can be
- * taken away with the same press (ADR 0087). `language` names what the block is written in; it is
- * the fence's own label in a reply, and the call's tool in an approval.
+ * The measure a source is read at, wherever it is drawn: the code block's `<pre>`, and the body a
+ * frame shows in place of a drawing that has yet to land. One constant, so the two cannot drift.
  */
-export function CodeBlock({
+export const SOURCE_TEXT =
+  "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap"
+
+/**
+ * The chrome around a body: the tone's fill, what the body is written in, and the control that takes
+ * the source away. A block of code is this frame around its `<pre>`; a diagram is the same frame
+ * around its drawing, since a fence's picture stands where the fence's code would have (ADR 0146).
+ * What the root is called is the caller's to say — the code block's `data-md-code`, a frame's own
+ * slot — and whatever the body draws, the control copies the same source.
+ */
+export function CodeFrame({
   language,
   code,
   tone = "page",
-  scrolling = false,
   className,
-  body,
-  slot,
+  children,
+  ...root
 }: {
+  /** What the body is written in: the fence's own label in a reply, the call's tool in an approval. */
   language?: string
+  /** The source the control copies, which is what the body draws. */
   code: string
   tone?: Tone
-  /** A block that would push what follows it off the screen scrolls inside its own box. */
-  scrolling?: boolean
-  /** The block's own spacing, where it stands in something that already spaces its children. */
+  /** The frame's own spacing, where it stands in something that already spaces its children. */
   className?: string
-  /**
-   * What the block draws instead of its source as code — a diagram's drawing. A block given a body
-   * is a frame around something that is not code: its root names `slot` and carries no
-   * `data-md-code`, since that marker is what every reader counts as a block of code. It keeps this
-   * block's one fill, one label and one copy control, and copies the same source.
-   */
-  body?: ReactNode
-  /** The slot a frame's root names itself by — what the block draws instead of code is not code. */
-  slot?: string
-}) {
-  const [copied, setCopied] = useState(false)
-  const mono = useMonoFace()
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard can be unavailable (insecure context); nothing useful to do.
-    }
-  }
+  children: ReactNode
+} & Omit<HTMLAttributes<HTMLDivElement>, "className" | "children">) {
+  const { copied, noteCopied } = useCopied()
 
   return (
-    <div
-      data-md-code={body ? undefined : true}
-      data-slot={slot}
-      className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}
-    >
+    <div {...root} className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}>
       <div
         className={cn(
           "flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs",
@@ -80,23 +66,50 @@ export function CodeBlock({
         <Button
           variant="ghost"
           size="icon-sm"
-          onClick={copy}
+          onClick={() => void copyText(code, noteCopied)}
           aria-label={copied ? "Copied" : "Copy code"}
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </div>
-      {body ?? (
-        <pre
-          className={cn(
-            mono,
-            "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap",
-            scrolling && "max-h-[30dvh] overflow-y-auto overscroll-contain",
-          )}
-        >
-          <code>{code}</code>
-        </pre>
-      )}
+      {children}
     </div>
+  )
+}
+
+/**
+ * A block of code anywhere the app draws one: a reply's fence, and the command an approval asks
+ * about. One piece, so a command reads the same in a card as in the words it came from, and can be
+ * taken away with the same press (ADR 0087).
+ */
+export function CodeBlock({
+  language,
+  code,
+  tone = "page",
+  scrolling = false,
+  className,
+}: {
+  language?: string
+  code: string
+  tone?: Tone
+  /** A block that would push what follows it off the screen scrolls inside its own box. */
+  scrolling?: boolean
+  /** The block's own spacing, where it stands in something that already spaces its children. */
+  className?: string
+}) {
+  const mono = useMonoFace()
+
+  return (
+    <CodeFrame data-md-code language={language} code={code} tone={tone} className={className}>
+      <pre
+        className={cn(
+          mono,
+          SOURCE_TEXT,
+          scrolling && "max-h-[30dvh] overflow-y-auto overscroll-contain",
+        )}
+      >
+        <code>{code}</code>
+      </pre>
+    </CodeFrame>
   )
 }

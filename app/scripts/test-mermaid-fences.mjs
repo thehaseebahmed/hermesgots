@@ -192,10 +192,22 @@ test("a CRLF text splits where its LF twin does", () => {
   tiles(crlf, parts)
 })
 
+test("a text with no marker at all is answered as one part, without a line split", () => {
+  // The fast path: a reply is mostly words, and the marker is the word a fence opens with, so a text
+  // without it has no fence to look for.
+  const prose = ["A paragraph.", "", "```python", "print(1)", "```", "", "And more."].join("\n")
+  assert.ok(!prose.includes("mermaid"), "the text holds no marker, though it holds a fence")
+  assert.deepEqual(mermaidParts(prose), asText(prose), "so the whole text comes back as one part")
+  assert.deepEqual(mermaidParts(""), [], "and an empty text is still no parts at all")
+})
+
 test("the rule touches nothing but the string", () => {
   const raw = readFileSync(new URL("../src/lib/mermaid-fences.ts", import.meta.url), "utf8")
   const source = raw.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")
-  assert.doesNotMatch(source, /^[ \t]*(?:import|export)\b.*\bfrom\b/m, "no module is reached")
+  // The scanner it shares with the block splitter is the one module it may reach: a pure reading of
+  // a line, held to reaching nothing itself by `scripts/test-fences.mjs`.
+  const imports = [...source.matchAll(/^[ \t]*import\b[^\n]*$/gm)].map(([line]) => line.trim())
+  assert.equal(imports.length, 1, "one import, and no other: a rule reached from the startup path")
+  assert.match(imports[0], /from "\.\/fences\.ts"$/, "and it is the scanner beside it")
   assert.doesNotMatch(source, /\bimport\s*\(/, "and nothing is loaded on demand")
-  assert.doesNotMatch(source, /^[ \t]*import\b/m, "not even for its side effect")
 })

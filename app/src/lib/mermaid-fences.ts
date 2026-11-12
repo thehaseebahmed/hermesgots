@@ -1,10 +1,10 @@
 // `at` indexes into the string given to `mermaidParts`, and the parts tile that string in order,
 // with no gaps or overlaps.
+import { closes, fenceOf, linesOf, unixLength, unixLines, type Fence } from "./fences.ts"
+
 export type MermaidPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "mermaid"; at: number; source: string }
-
-type Fence = { char: string; length: number }
 
 // No leading spaces are allowed here, unlike the block splitter's fence: a fence set into a line is
 // that line's content — a list item's example, a quote's — and markdown draws it as code, so only
@@ -12,20 +12,11 @@ type Fence = { char: string; length: number }
 const FENCE = /^(`{3,}|~{3,})(.*)$/
 const INFO = "mermaid"
 
-function fenceOf(line: string) {
-  const match = FENCE.exec(line.replace(/\r$/, ""))
-  if (!match) return null
-  return { char: match[1][0], length: match[1].length, rest: match[2] }
-}
-
-function closes(line: string, char: string, length: number) {
-  const fence = fenceOf(line)
-  return !!fence && fence.char === char && fence.length >= length && /^[ \t]*$/.test(fence.rest)
-}
-
-function unixLines(text: string) {
-  return text.replace(/\r\n?/g, "\n")
-}
+/**
+ * Whether a text could hold a diagram at all. The marker is the word a fence opens with, so a text
+ * without it — most of what a reply says — is answered as one part without a line being split.
+ */
+const mayDrawDiagram = (content: string) => content.includes(INFO)
 
 /**
  * Splits a markdown text into the stretches it shows as they are and the closed ```mermaid fences
@@ -36,13 +27,9 @@ function unixLines(text: string) {
  * as the code it is until it finishes.
  */
 export function mermaidParts(content: string): MermaidPart[] {
-  const lines = content.split("\n")
-  const starts: number[] = []
-  let offset = 0
-  for (const line of lines) {
-    starts.push(offset)
-    offset += line.length + 1
-  }
+  if (!mayDrawDiagram(content)) return content ? [{ kind: "text", at: 0, text: content }] : []
+
+  const { lines, starts } = linesOf(content)
 
   const parts: MermaidPart[] = []
   let textFrom = 0
@@ -51,11 +38,11 @@ export function mermaidParts(content: string): MermaidPart[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (plain) {
-      if (closes(line, plain.char, plain.length)) plain = null
+      if (closes(line, plain, FENCE)) plain = null
       continue
     }
 
-    const fence = fenceOf(line)
+    const fence = fenceOf(line, FENCE)
     if (!fence) continue
     if (fence.rest !== INFO) {
       plain = { char: fence.char, length: fence.length }
@@ -64,7 +51,7 @@ export function mermaidParts(content: string): MermaidPart[] {
 
     let close = -1
     for (let j = i + 1; j < lines.length; j++) {
-      if (closes(lines[j], fence.char, fence.length)) {
+      if (closes(lines[j], fence, FENCE)) {
         close = j
         break
       }
@@ -79,7 +66,7 @@ export function mermaidParts(content: string): MermaidPart[] {
     if (starts[i] > textFrom)
       parts.push({ kind: "text", at: textFrom, text: content.slice(textFrom, starts[i]) })
     parts.push({ kind: "mermaid", at: starts[i], source })
-    textFrom = starts[close] + lines[close].replace(/\r$/, "").length
+    textFrom = starts[close] + unixLength(lines[close])
     i = close
   }
 

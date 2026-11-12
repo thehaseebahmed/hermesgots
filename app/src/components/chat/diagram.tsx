@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react"
+import { memo, useEffect, useId, useRef, useState } from "react"
 
-import { CodeBlock, PAINT, type Tone } from "@/components/chat/code-block"
+import { CodeBlock, CodeFrame, PAINT, SOURCE_TEXT, type Tone } from "@/components/chat/code-block"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { DIAGRAM_TOKENS, mermaidTheme, type DiagramPalette } from "@/lib/mermaid-theme"
+import { quietly } from "@/lib/report"
 import { toHex, useDark } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -24,11 +25,17 @@ import { cn } from "@/lib/utils"
  * of mermaid again: the sheet holds the string the frame already has, and closing it leaves the
  * thread exactly where the reader left it.
  */
-export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone }) {
+export const Diagram = memo(function Diagram({
+  source,
+  tone = "page",
+}: {
+  source: string
+  tone?: Tone
+}) {
   const frame = useRef<HTMLDivElement>(null)
   // A theme flip is a redraw: the colours are read off the page when the drawing is made.
   const dark = useDark()
-  const [drawing, setDrawing] = useState<Drawing>({ kind: "waiting" })
+  const [drawing, setDrawing] = useState<Drawing>(WAITING)
   const [open, setOpen] = useState(false)
   // `useId`'s colons (and React 19's guillemets) are no DOM id, and mermaid selects the svg it draws
   // by the id it is handed.
@@ -38,15 +45,16 @@ export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone
     const element = frame.current
     if (!element) return
     let live = true
-    setDrawing({ kind: "waiting" })
-    draw(element, id, source).then(
+    // Nothing is put back to waiting here: a redraw keeps the drawing it has until the next one
+    // lands, so a theme flip never flashes the diagram's source at the reader on its way.
+    draw(element, id, source, () => live).then(
       (svg) => live && setDrawing({ kind: "drawn", svg }),
       (error) => live && setDrawing({ kind: "failed", line: lineOf(error) }),
     )
     return () => {
       live = false
     }
-  }, [dark, id, source, tone])
+  }, [dark, id, source])
 
   if (drawing.kind === "failed")
     return (
@@ -60,40 +68,33 @@ export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone
 
   return (
     <div ref={frame} className="my-3">
-      <CodeBlock
-        language="mermaid"
-        code={source}
-        tone={tone}
-        slot="diagram"
-        className="my-0"
-        body={
-          drawing.kind === "drawn" ? (
-            // The drawing is the frame's control: a tap or a keyboard's Enter opens it larger. It
-            // paints nothing of its own, so the frame's fill is still what it is a picture on.
-            <button
-              type="button"
-              data-slot="diagram-drawing"
-              aria-label="Open the diagram larger"
-              aria-haspopup="dialog"
-              aria-expanded={open}
-              onClick={() => setOpen(true)}
-              className="block w-full cursor-zoom-in appearance-none p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            >
-              <span
-                // mermaid's svg at its own width: it fills the column it stands in and stops at the
-                // size it was drawn at, so a narrow diagram is never stretched and a wide one never
-                // widens the thread. The sheet is where the full width is read.
-                className="block px-4 pt-1 pb-4 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
-                dangerouslySetInnerHTML={{ __html: drawing.svg }}
-              />
-            </button>
-          ) : (
-            <div className="px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap">
-              {source}
-            </div>
-          )
-        }
-      />
+      <CodeFrame data-slot="diagram" language="mermaid" code={source} tone={tone} className="my-0">
+        {drawing.kind === "drawn" ? (
+          // The drawing is the frame's control: a tap or a keyboard's Enter opens it larger. It
+          // paints nothing of its own, so the frame's fill is still what it is a picture on.
+          <button
+            type="button"
+            data-slot="diagram-drawing"
+            aria-label="Open the diagram larger"
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => setOpen(true)}
+            className="block w-full cursor-zoom-in appearance-none p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <span
+              // mermaid's svg at its own width: it fills the column it stands in and stops at the
+              // size it was drawn at, so a narrow diagram is never stretched and a wide one never
+              // widens the thread. The sheet is where the full width is read.
+              className="block px-4 pt-1 pb-4 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+              dangerouslySetInnerHTML={{ __html: drawing.svg }}
+            />
+          </button>
+        ) : (
+          // The source, at the measure the code block reads it at, until the drawing replaces it
+          // where it stands: a frame is never empty, so a reader sees the fence and not a hole.
+          <div className={SOURCE_TEXT}>{source}</div>
+        )}
+      </CodeFrame>
       {drawing.kind === "drawn" ? (
         <Popup open={open} onOpenChange={setOpen}>
           <PopupContent dataSlot="diagram-sheet" bothWays>
@@ -115,7 +116,7 @@ export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone
       ) : null}
     </div>
   )
-}
+})
 
 /**
  * The width a drawing was made at, off its own viewBox — the size the sheet opens it at. mermaid
@@ -141,11 +142,26 @@ type Drawing =
   | { kind: "drawn"; svg: string }
   | { kind: "failed"; line: string }
 
+/** A frame before its first drawing lands, as one object: every frame starts on the same state. */
+const WAITING: Drawing = { kind: "waiting" }
+
 type Mermaid = typeof import("mermaid").default
 
 /** mermaid, asked for once per page: the first drawing fetches the chunk, the rest are handed it. */
 let loading: Promise<Mermaid> | undefined
-const load = () => (loading ??= import("mermaid").then((module) => module.default))
+function load() {
+  loading ??= import("mermaid").then(
+    (module) => module.default,
+    (error) => {
+      // A chunk that could not be fetched is asked for again by the next diagram: a cached rejection
+      // would fail every diagram drawn after the first, on a connection that may have come back.
+      loading = undefined
+      quietly("mermaid's chunk")(error)
+      throw error
+    },
+  )
+  return loading
+}
 
 /**
  * One drawing at a time. `initialize` writes mermaid's one global config, so two diagrams drawing at
@@ -159,9 +175,13 @@ function serially<T>(work: () => Promise<T>): Promise<T> {
   return next
 }
 
-async function draw(element: HTMLElement, id: string, source: string) {
+async function draw(element: HTMLElement, id: string, source: string, live: () => boolean) {
   const mermaid = await load()
   return serially(async () => {
+    // A diagram the reader scrolled away from while it waited its turn has nothing to draw, and
+    // mermaid would parse and lay out the whole source to paint an element that is no longer on the
+    // page.
+    if (!live()) return ""
     mermaid.initialize({
       startOnLoad: false,
       theme: "base",

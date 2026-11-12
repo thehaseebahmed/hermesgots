@@ -10,10 +10,11 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { ThemeProvider, useTheme } from "next-themes"
 
 import { MessageItem } from "@/components/chat/message-item"
 import { ask, reply } from "./openui-kit.tsx"
-import { absent, click, find, mountMarkdown, until } from "./component-kit.tsx"
+import { absent, click, find, mount, mountMarkdown, settle, until } from "./component-kit.tsx"
 
 const frame = () => find("[data-slot=diagram]")
 /** The row the message draws: a reply's text can arrive as more than one markdown root. */
@@ -97,6 +98,66 @@ test("a fence that cannot be drawn here settles on its source and one quiet line
     )
     assert.ok(said.length > 0 && said.length < 80, `one quiet line (${said})`)
   })
+})
+
+/** The app's theme, on a switch a test can throw: what a reader does when they flip the mode. */
+function Themed({ children }: { children: React.ReactNode }) {
+  return (
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+      {children}
+    </ThemeProvider>
+  )
+}
+
+function Flip({ children }: { children: React.ReactNode }) {
+  const { resolvedTheme, setTheme } = useTheme()
+  return (
+    <>
+      <i data-slot="mode">{resolvedTheme ?? "none"}</i>
+      <button type="button" aria-label="Flip the mode" onClick={() => setTheme("dark")}>
+        flip
+      </button>
+      {children}
+    </>
+  )
+}
+
+test("a theme flip redraws the fence without putting its source back", async () => {
+  await mount(
+    <Themed>
+      <Flip>
+        <MessageItem message={reply("r-1", REPLY)} showStats />
+      </Flip>
+    </Themed>,
+    async () => {
+      // What this tier can reach of a drawing is its fallback, so that is the state a redraw has to
+      // keep: a fence put back to waiting would mount its frame over the settled source on its way.
+      await until(
+        async () => find("div[data-md-code]") !== null,
+        "the fence to settle on its source",
+      )
+      const settledSource = find("div[data-md-code]")
+      const states: boolean[] = []
+      const observer = new MutationObserver(() =>
+        states.push(Boolean(find("[data-slot=diagram]"))),
+      )
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      await click(find('button[aria-label="Flip the mode"]'))
+      await settle()
+      observer.disconnect()
+
+      assert.equal(find("[data-slot=mode]")?.textContent, "dark", "the mode really flipped")
+      assert.ok(states.length > 0, "and the flip was drawn")
+      assert.ok(
+        states.every((framed) => !framed),
+        `the fence was never put back to its source frame (${states.join(",")})`,
+      )
+      assert.ok(
+        find("div[data-md-code]") === settledSource,
+        "the settled source is the one still there",
+      )
+    },
+  )
 })
 
 /** The fences the rule leaves as text, each of which markdown draws as a block of code. */

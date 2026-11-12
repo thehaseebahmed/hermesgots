@@ -1,30 +1,15 @@
 // `at` indexes into the string given to `openuiParts`, and the parts tile that string in order,
 // with no gaps or overlaps.
+import { closes, fenceOf, linesOf, unixLength, unixLines, type Fence } from "./fences.ts"
+
 export type OpenuiPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "openui"; at: number; source: string; id?: string; open: boolean }
-
-type Fence = { char: string; length: number }
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const LIST_ITEM = /^( *)([*+-]|[0-9]{1,9}[.)])( +|$)/
 const ID = /^# id: ([a-z0-9-]{1,40})$/
 export const INFO = "openui-lang"
-
-function fenceOf(line: string) {
-  const match = FENCE.exec(line.replace(/\r$/, ""))
-  if (!match) return null
-  return { char: match[1][0], length: match[1].length, rest: match[2] }
-}
-
-function closes(line: string, char: string, length: number) {
-  const fence = fenceOf(line)
-  return !!fence && fence.char === char && fence.length >= length && /^[ \t]*$/.test(fence.rest)
-}
-
-function unixLines(text: string) {
-  return text.replace(/\r\n?/g, "\n")
-}
 
 // A marker's content starts 1 to 4 spaces after it; five or more leaves one space.
 function contentColumn(item: RegExpExecArray) {
@@ -59,13 +44,7 @@ export function mayCarryBlock(content: string): boolean {
 export function openuiParts(content: string): OpenuiPart[] {
   if (!mayCarryBlock(content)) return content ? [{ kind: "text", at: 0, text: content }] : []
 
-  const lines = content.split("\n")
-  const starts: number[] = []
-  let offset = 0
-  for (const line of lines) {
-    starts.push(offset)
-    offset += line.length + 1
-  }
+  const { lines, starts } = linesOf(content)
 
   const parts: OpenuiPart[] = []
   const items: number[] = []
@@ -79,7 +58,7 @@ export function openuiParts(content: string): OpenuiPart[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (plain) {
-      if (closes(line, plain.char, plain.length)) plain = null
+      if (closes(line, plain, FENCE)) plain = null
       continue
     }
     const listItem = LIST_ITEM.exec(line)
@@ -92,7 +71,7 @@ export function openuiParts(content: string): OpenuiPart[] {
     const indent = line.length - line.trimStart().length
     const inItem = insideItem(indent)
 
-    const fence = fenceOf(line)
+    const fence = fenceOf(line, FENCE)
     if (!fence) continue
     if (fence.rest !== INFO || inItem) {
       plain = { char: fence.char, length: fence.length }
@@ -101,7 +80,7 @@ export function openuiParts(content: string): OpenuiPart[] {
 
     let close = -1
     for (let j = i + 1; j < lines.length; j++) {
-      if (closes(lines[j], fence.char, fence.length)) {
+      if (closes(lines[j], fence, FENCE)) {
         close = j
         break
       }
@@ -121,7 +100,7 @@ export function openuiParts(content: string): OpenuiPart[] {
       textFrom = content.length
       break
     }
-    textFrom = starts[close] + lines[close].replace(/\r$/, "").length
+    textFrom = starts[close] + unixLength(lines[close])
     i = close
   }
 

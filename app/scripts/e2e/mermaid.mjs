@@ -172,6 +172,43 @@ const sheetFacts = (page) =>
     { frame: FRAME, drawing: DRAWING, sheet: SHEET, thread: THREAD },
   )
 
+/**
+ * Every state the frame passes through while the mode changes, read off its own mutations: whether
+ * the drawing control is on it, and whether an svg is inside it. A redraw must never put the frame
+ * back to its source — the last drawing it has stays there until the next one lands, so no reader
+ * sees a diagram's code flash where the picture was. mermaid does remove the svg it drew by id for
+ * the length of a render, which is mermaid's own gap; what is watched here is the frame's body.
+ */
+const watchDrawing = (page) =>
+  page.evaluate(() => {
+    const frame = [...document.querySelectorAll("[data-slot=diagram]")].at(-1)
+    window.__drawn = []
+    const read = () => {
+      window.__drawn.push({
+        drawing: Boolean(frame.querySelector("[data-slot=diagram-drawing]")),
+        svg: frame.querySelectorAll("svg[id]").length,
+      })
+    }
+    read()
+    const observer = new MutationObserver(read)
+    observer.observe(frame, { childList: true, subtree: true })
+    window.__drawnRead = () => {
+      observer.disconnect()
+      return window.__drawn
+    }
+  })
+
+const flipping = (page) =>
+  page.evaluate(
+    () =>
+      [...document.querySelectorAll("[data-slot=diagram]")]
+        .at(-1)
+        ?.querySelectorAll("svg[id]").length === 1,
+  )
+
+/** Whether the page is drawing dark, as the provider has put it on the document. */
+const dark = (page) => page.evaluate(() => document.documentElement.classList.contains("dark"))
+
 await flow(
   "mermaid",
   async ({ page, send, lastReply, newChat, until, shot, centreOf }) => {
@@ -279,6 +316,10 @@ await flow(
       await page.setViewportSize({ width, height: width < 768 ? 844 : 768 })
       for (const theme of ["light", "dark"]) {
         const at = `${width}px in ${theme}`
+        // A drawing already on the page is the one a flip has to keep until the next lands, so its
+        // states are watched across a change of mode — and only across a change of mode.
+        const watched = (await flipping(page)) && (await dark(page)) !== (theme === "dark")
+        if (watched) await watchDrawing(page)
         await page.emulateMedia({ colorScheme: theme })
         // A theme flip redraws the drawing: wait for the svg drawn in this mode's foreground, rather
         // than reading the one drawn for the mode before.
@@ -317,6 +358,23 @@ await flow(
           facts.expected,
           `its words are drawn in the page's own foreground at ${at}, not a colour of mermaid's`,
         )
+        if (watched) {
+          const states = await page.evaluate(() => window.__drawnRead())
+          const shape = states.map((state) => `${state.drawing ? "drawn" : "source"}/${state.svg}`)
+          assert.ok(
+            states.length > 1,
+            `the flip redrew the drawing at ${at} (${states.length} states)`,
+          )
+          assert.ok(
+            states.every((state) => state.drawing),
+            `and never put the source back on the frame on its way: ${shape.join(",")}`,
+          )
+          assert.ok(
+            states.some((state) => state.svg > 0),
+            `with a drawing on the frame before and after: ${shape.join(",")}`,
+          )
+          pass(`the mode change redrew the drawing through ${shape.join(" → ")} at ${at}`)
+        }
         seen.set(`${width}-${theme}`, `${drawn}, ${facts.ink}`)
         const path = await shot(`drawn-${width}-${theme}`)
         pass(
