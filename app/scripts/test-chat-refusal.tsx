@@ -67,11 +67,13 @@ test("a refused approval says so in its card, and no toast", async () => {
 
 test("a card's refusal goes when the same answer lands", async () => {
   let refuses = true
+  let landed = false
   await mount(
     <ApprovalCard
       message={awaiting}
       onAnswer={async () => {
         if (refuses) throw new Error(SAID)
+        landed = true
       }}
     />,
     async () => {
@@ -79,6 +81,9 @@ test("a card's refusal goes when the same answer lands", async () => {
       await until(async () => Boolean(notice()), "the card's refusal")
       refuses = false
       await click(allowOnce())
+      // The words are about the attempt that caused them, so they go on the answer that lands —
+      // not as the next one starts, which is the moment this case used to be satisfied by.
+      await until(async () => landed, "the answer to land")
       await until(async () => missing('[role="alert"]'), "the refusal to go")
     },
   )

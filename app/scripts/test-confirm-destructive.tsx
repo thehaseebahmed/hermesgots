@@ -53,18 +53,6 @@ test("a write the host refuses keeps the question open, in the host's words", as
       )
       assert.deepEqual(closed, [], "and nothing closed")
       assert.equal(await remove()?.hasAttribute("disabled"), false, "the action is pressable again")
-    },
-  )
-})
-
-test("a refused delete says so in the dialog", async () => {
-  await mount(
-    question({
-      onConfirm: () => Promise.reject(new Error("That bot is running a turn.")),
-    }),
-    async () => {
-      await click(findAll("button").find((one) => one.textContent?.trim() === "Remove") ?? null)
-      await until(async () => Boolean(find('[role="alert"]')), "the host's reason", 2_000)
       const dismiss = labelled("button", "Dismiss")
       assert.ok(dismiss, "the refusal wears the notice every other surface draws")
       await click(dismiss)

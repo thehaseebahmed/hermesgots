@@ -100,6 +100,8 @@ const page = (entry = "/settings/bots/bot-1/general", to = "/settings/bots/bot-2
 
 /** The row that writes as it flips, and the notice the page draws over its column. */
 const row = () => find('[data-setting="updates.check"]')
+/** What the row holds: the value only a landed write changes. */
+const held = () => row()?.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 const notice = () => find('[role="alert"]')
 const dismiss = () => labelled("button", "Dismiss")
 
@@ -133,11 +135,14 @@ test(
       await until(async () => Boolean(row()), "the host's rows")
       await click(row())
       await until(async () => Boolean(notice()), "the host's refusal")
-      // The host takes the write the second time: the notice goes as the same control writes again.
+      // The host takes the write the second time: the notice goes as the same control writes again,
+      // and the row's own value is what says the answer landed rather than the write starting.
+      assert.equal(held(), "false", "the refused write left the row as it was")
       first.allow()
       first.calls.length = 0
       await click(row())
       await until(async () => first.calls.some((one) => one.method === "POST"), "the second write")
+      await until(async () => held() === "true", "the row's new value")
       await until(async () => missing('[role="alert"]'), "the notice to go")
     })
   }),
