@@ -24,6 +24,7 @@ import {
   Nav,
   atDepth,
   atWidth,
+  labelled,
   botProfile,
   click,
   composerField,
@@ -37,6 +38,7 @@ import {
   settle,
   text,
   until,
+  withToasts,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -121,6 +123,8 @@ interface Host {
   created?: string
   /** The page the one-canvas read answers with, where a case needs one this file's own is not. */
   page?: string
+  /** What a refused undo says, in the host's own words. */
+  failUndo?: string
 }
 
 /**
@@ -144,7 +148,11 @@ function serveCanvases(host: Host) {
       }
       host.calls!.push(body)
       if (body.shape === "data.put") {
-        const { collection, id, doc } = body.args as { collection: string; id: string; doc: unknown }
+        const { collection, id, doc } = body.args as {
+          collection: string
+          id: string
+          doc: unknown
+        }
         const result = { collection, id, doc, at: 100 }
         host.docs = [
           ...host.docs.filter((row) => row.collection !== collection || row.id !== id),
@@ -163,6 +171,7 @@ function serveCanvases(host: Host) {
     const undo = /\/canvases\/([^/]+)\/undo$/.exec(url.pathname)
     if (undo) {
       assert.equal(init?.method, "POST", "an undo is asked for with a POST")
+      if (host.failUndo) return json({ error: { message: host.failUndo } }, 409)
       host.undos += 1
       host.version -= 1
       return json({ object: "gots.canvas", canvas: canvasAt(host.version, undo[1], host.docs) })
@@ -475,7 +484,10 @@ test(
         })
         host.version = 4
         await act(async () => noteChange(connectionKey(bot), "canvas"))
-        await until(() => drawn().includes("<h1>Tip, newest</h1>"), "the change to redraw the canvas")
+        await until(
+          () => drawn().includes("<h1>Tip, newest</h1>"),
+          "the change to redraw the canvas",
+        )
         assert.match(drawn(), /var at=450/, "the redrawn page opens where the reader was")
         await click(find('button[aria-label="Undo"]'))
         await until(() => host.undos === 1, "the host to be asked for the undo")
@@ -486,84 +498,109 @@ test(
 )
 
 test(
-  "a phone's canvas opens on Preview and Edit is an address with a way back",
-  async () => {
-    // The phone holds one screen at a time: the page, with Edit in the header, or the chat at its own
-    // address with Preview. A wide screen has room for both, so the edit address folds into the
-    // canvas's own and no flip is drawn there (ADR 0130).
-    const phone = async () => {
-      serveCanvases({ version: 3, undos: 0 })
-      await seedCanvasChat(CANVAS.id)
-      const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
-      await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
-        await until(() => drawn().includes("<h1>Tip</h1>"), "the canvas's page")
-        // The page says where the reader is. Edit unmounts it, and the address that comes back
-        // draws the page where they left it.
-        const frame = find("iframe[data-canvas-frame]")!
-        await act(async () => {
-          window.dispatchEvent(
-            new window.MessageEvent("message", {
-              data: { type: SCROLL_MESSAGE, scroll: 450 },
-              source: frame.contentWindow,
-            }),
-          )
-        })
-        const edit = find('[data-canvas-flip="edit"]')
-        assert.ok(edit, "a canvas with a version opens on the page, with Edit in the header")
-        assert.equal(
-          edit.getAttribute("aria-label"),
-          "Edit",
-          "the control names the screen it goes to",
-        )
-        assert.ok(missing("[data-canvas-edit-pill]"), "the pill is gone")
-
-        await click(edit)
-        assert.equal(nav(), `PUSH:/canvas/${CANVAS.id}/edit`, "Edit is a step, pushed")
-        await until(() => Boolean(composerField()), "the chat to draw")
-        assert.ok(missing("iframe[data-canvas-frame]"), "the edit screen draws no page")
-        assert.ok(find('[data-canvas-flip="preview"]'), "its header offers Preview")
-        assert.ok(missing('[data-canvas-flip="edit"]'), "and no Edit, which is the screen it is")
-
-        // Back is the edit screen's own: it draws the canvas's own address, the screen its Preview
-        // names, rather than stepping back to whatever happens to sit behind this one.
-        const history = atDepth(1)
-        try {
-          let pressed = ""
-          await act(async () => {
-            pressed = pressBack()
-          })
-          assert.equal(pressed, "screen", "the edit screen takes the press")
+  "an undo the host refuses says so in the page, and no toast",
+  atWidth(390, async () => {
+    const host: Host = { version: 3, undos: 0, failUndo: "That canvas is at its first version." }
+    serveCanvases(host)
+    await seedCanvasChat("c1")
+    const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
+    await withToasts(async (said) => {
+      await mount(
+        <MemoryRouter initialEntries={["/canvas/c1"]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(() => drawn().includes("<h1>Tip</h1>"), "the version on screen")
+          await click(find('button[aria-label="Undo"]'))
+          await until(() => Boolean(find('[role="alert"]')), "the host's refusal")
           assert.equal(
-            nav(),
-            `REPLACE:/canvas/${CANVAS.id}`,
-            "and draws the canvas's own screen",
+            find('[role="alert"]')?.textContent,
+            "That canvas is at its first version.",
+            "the host's sentence, over the page it refused",
           )
-          assert.deepEqual(history.backs, [], "without stepping back to the list behind it")
-        } finally {
-          history.restore()
-        }
-
-        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page drawn by the press")
-        assert.match(drawn(), /var at=450/, "the page comes back where the reader left it")
-      })
-    }
-    const wide = async () => {
-      serveCanvases({ version: 3, undos: 0 })
-      await seedCanvasChat(CANVAS.id)
-      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
-        await until(
-          () => nav() === `REPLACE:/canvas/${CANVAS.id}`,
-          "the edit address to fold into the canvas's own",
-        )
-        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
-        assert.ok(composerField(), "the lane draws the chat beside it")
-        assert.ok(missing("[data-canvas-flip]"), "a wide screen draws no flip")
-      })
-    }
-    await atWidth(390, phone)()
-    await atWidth(1440, wide)()
-  },
+          assert.deepEqual(said, [], "and nothing said in passing")
+          await click(labelled("button", "Dismiss"))
+          assert.ok(missing('[role="alert"]'), "Dismiss takes it away")
+        },
+      )
+    })
+  }),
 )
+
+test("a phone's canvas opens on Preview and Edit is an address with a way back", async () => {
+  // The phone holds one screen at a time: the page, with Edit in the header, or the chat at its own
+  // address with Preview. A wide screen has room for both, so the edit address folds into the
+  // canvas's own and no flip is drawn there (ADR 0130).
+  const phone = async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
+    await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      await until(() => drawn().includes("<h1>Tip</h1>"), "the canvas's page")
+      // The page says where the reader is. Edit unmounts it, and the address that comes back
+      // draws the page where they left it.
+      const frame = find("iframe[data-canvas-frame]")!
+      await act(async () => {
+        window.dispatchEvent(
+          new window.MessageEvent("message", {
+            data: { type: SCROLL_MESSAGE, scroll: 450 },
+            source: frame.contentWindow,
+          }),
+        )
+      })
+      const edit = find('[data-canvas-flip="edit"]')
+      assert.ok(edit, "a canvas with a version opens on the page, with Edit in the header")
+      assert.equal(
+        edit.getAttribute("aria-label"),
+        "Edit",
+        "the control names the screen it goes to",
+      )
+      assert.ok(missing("[data-canvas-edit-pill]"), "the pill is gone")
+
+      await click(edit)
+      assert.equal(nav(), `PUSH:/canvas/${CANVAS.id}/edit`, "Edit is a step, pushed")
+      await until(() => Boolean(composerField()), "the chat to draw")
+      assert.ok(missing("iframe[data-canvas-frame]"), "the edit screen draws no page")
+      assert.ok(find('[data-canvas-flip="preview"]'), "its header offers Preview")
+      assert.ok(missing('[data-canvas-flip="edit"]'), "and no Edit, which is the screen it is")
+
+      // Back is the edit screen's own: it draws the canvas's own address, the screen its Preview
+      // names, rather than stepping back to whatever happens to sit behind this one.
+      const history = atDepth(1)
+      try {
+        let pressed = ""
+        await act(async () => {
+          pressed = pressBack()
+        })
+        assert.equal(pressed, "screen", "the edit screen takes the press")
+        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "and draws the canvas's own screen")
+        assert.deepEqual(history.backs, [], "without stepping back to the list behind it")
+      } finally {
+        history.restore()
+      }
+
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page drawn by the press")
+      assert.match(drawn(), /var at=450/, "the page comes back where the reader left it")
+    })
+  }
+  const wide = async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(
+        () => nav() === `REPLACE:/canvas/${CANVAS.id}`,
+        "the edit address to fold into the canvas's own",
+      )
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+      assert.ok(composerField(), "the lane draws the chat beside it")
+      assert.ok(missing("[data-canvas-flip]"), "a wide screen draws no flip")
+    })
+  }
+  await atWidth(390, phone)()
+  await atWidth(1440, wide)()
+})
 
 test(
   "the flip draws the page even when the list is the screen behind it",
@@ -674,64 +711,61 @@ test(
   }),
 )
 
-test(
-  "a canvas with no version opens on Edit and gains Preview when the first version lands",
-  async () => {
-    // Nothing to preview is said honestly (ADR 0130): a phone replaces the canvas's own address with
-    // the edit one — a replace, never a push — and the header's Preview is drawn only once a version
-    // is, from the same live record the frame is drawn from. A canvas of its own, which this device
-    // has drawn no copy of: the one earlier cases read at a version is not a canvas with none.
-    const BUILT = "c4"
-    const phone = async () => {
-      const host: Host = { version: 0, undos: 0, listed: [BUILT] }
-      serveCanvases(host)
-      await seedCanvasChat(BUILT)
-      const bot = (await db.profiles.get("bot-1"))!
-      await drawCanvas([`/canvas/${BUILT}`], async () => {
-        await until(
-          () => nav() === `REPLACE:/canvas/${BUILT}/edit`,
-          "the canvas to open on its edit address",
-        )
-        assert.ok(composerField(), "the chat is what that address draws")
-        assert.match(text(), /Your bot is building it…/, "and it says the bot is building it")
-        assert.ok(missing("[data-canvas-flip]"), "with nothing to flip to")
-        const back = find('[aria-label="All canvases"]')
-        assert.ok(back, "the way back to the list is drawn")
-        assert.ok(
-          back.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
-          "and it leads the header",
-        )
+test("a canvas with no version opens on Edit and gains Preview when the first version lands", async () => {
+  // Nothing to preview is said honestly (ADR 0130): a phone replaces the canvas's own address with
+  // the edit one — a replace, never a push — and the header's Preview is drawn only once a version
+  // is, from the same live record the frame is drawn from. A canvas of its own, which this device
+  // has drawn no copy of: the one earlier cases read at a version is not a canvas with none.
+  const BUILT = "c4"
+  const phone = async () => {
+    const host: Host = { version: 0, undos: 0, listed: [BUILT] }
+    serveCanvases(host)
+    await seedCanvasChat(BUILT)
+    const bot = (await db.profiles.get("bot-1"))!
+    await drawCanvas([`/canvas/${BUILT}`], async () => {
+      await until(
+        () => nav() === `REPLACE:/canvas/${BUILT}/edit`,
+        "the canvas to open on its edit address",
+      )
+      assert.ok(composerField(), "the chat is what that address draws")
+      assert.match(text(), /Your bot is building it…/, "and it says the bot is building it")
+      assert.ok(missing("[data-canvas-flip]"), "with nothing to flip to")
+      const back = find('[aria-label="All canvases"]')
+      assert.ok(back, "the way back to the list is drawn")
+      assert.ok(
+        back.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and it leads the header",
+      )
 
-        // The first version lands through the live record: Preview appears where it was absent and
-        // the words go, with nothing reloaded.
-        host.version = 1
-        await act(async () => noteChange(connectionKey(bot), "canvas"))
-        await until(() => Boolean(find('[data-canvas-flip="preview"]')), "Preview to appear")
-        assert.doesNotMatch(text(), /Your bot is building it…/)
-      })
-    }
-    const wide = async () => {
-      // A wide screen already has the chat beside the page, so the lane is where a canvas is built:
-      // no address is replaced, and no flip is drawn.
-      serveCanvases({ version: 0, undos: 0, listed: [BUILT] })
-      await seedCanvasChat(BUILT)
-      await drawCanvas([`/canvas/${BUILT}`], async () => {
-        await until(() => Boolean(composerField()), "the lane's chat")
-        assert.equal(nav(), `POP:/canvas/${BUILT}`, "a wide screen keeps the canvas's address")
-        assert.ok(missing("[data-canvas-flip]"), "and the lane draws no flip")
-      })
-    }
-    try {
-      await atWidth(390, phone)()
-      await atWidth(1440, wide)()
-    } finally {
-      // The canvas store outlives a test, and the rest of this file opens c1 on a versioned page:
-      // leave the version the host really holds behind.
-      serveCanvases({ version: 3, undos: 0 })
-      await refreshCanvas(CANVAS.id)
-    }
-  },
-)
+      // The first version lands through the live record: Preview appears where it was absent and
+      // the words go, with nothing reloaded.
+      host.version = 1
+      await act(async () => noteChange(connectionKey(bot), "canvas"))
+      await until(() => Boolean(find('[data-canvas-flip="preview"]')), "Preview to appear")
+      assert.doesNotMatch(text(), /Your bot is building it…/)
+    })
+  }
+  const wide = async () => {
+    // A wide screen already has the chat beside the page, so the lane is where a canvas is built:
+    // no address is replaced, and no flip is drawn.
+    serveCanvases({ version: 0, undos: 0, listed: [BUILT] })
+    await seedCanvasChat(BUILT)
+    await drawCanvas([`/canvas/${BUILT}`], async () => {
+      await until(() => Boolean(composerField()), "the lane's chat")
+      assert.equal(nav(), `POP:/canvas/${BUILT}`, "a wide screen keeps the canvas's address")
+      assert.ok(missing("[data-canvas-flip]"), "and the lane draws no flip")
+    })
+  }
+  try {
+    await atWidth(390, phone)()
+    await atWidth(1440, wide)()
+  } finally {
+    // The canvas store outlives a test, and the rest of this file opens c1 on a versioned page:
+    // leave the version the host really holds behind.
+    serveCanvases({ version: 3, undos: 0 })
+    await refreshCanvas(CANVAS.id)
+  }
+})
 
 test(
   "a page that leaves twice is told so, not drawn again for ever",
@@ -1027,10 +1061,12 @@ test(
         // The page reads its document back: what the write stored, not what the slow read carried.
         await say({ type: BRIDGE_MESSAGE, call: 2, method: "get", collection: "items", id: "one" })
         await until(() => posted.some((reply) => reply.reply === 2), "the read answered")
-        assert.deepEqual(
-          posted.find((reply) => reply.reply === 2)?.value,
-          { collection: "items", id: "one", doc: { n: 7 }, at: 100 },
-        )
+        assert.deepEqual(posted.find((reply) => reply.reply === 2)?.value, {
+          collection: "items",
+          id: "one",
+          doc: { n: 7 },
+          at: 100,
+        })
       },
     )
   }),
@@ -1392,7 +1428,10 @@ test(
         "the page to be told a point is armed",
       )
       await click(find("[data-point-banner] button")!)
-      await until(() => nav() === `REPLACE:/canvas/${CANVAS.id}/edit`, "Cancel to leave for the chat")
+      await until(
+        () => nav() === `REPLACE:/canvas/${CANVAS.id}/edit`,
+        "Cancel to leave for the chat",
+      )
       assert.equal(takePoint(CANVAS.id), undefined, "and to keep nothing")
       assert.ok(missing("[data-point-banner]"), "with no banner left on the chat")
     })
@@ -1409,7 +1448,10 @@ test(
     // put back to the canvas's own, and an old link leaves no banner over the lane's page.
     await atWidth(1440, async () => {
       await drawCanvas([`/canvas/${CANVAS.id}?point=1`], async () => {
-        await until(() => nav() === `REPLACE:/canvas/${CANVAS.id}`, "the ask dropped where it is moot")
+        await until(
+          () => nav() === `REPLACE:/canvas/${CANVAS.id}`,
+          "the ask dropped where it is moot",
+        )
         assert.ok(missing("[data-point-banner]"), "with no banner over the page")
         assert.ok(composerField(), "and the chat beside it still the place to point from")
       })
@@ -1591,4 +1633,3 @@ test(
     }
   }),
 )
-

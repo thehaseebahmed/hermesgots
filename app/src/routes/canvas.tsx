@@ -1,21 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  CrosshairIcon,
-  EllipsisIcon,
-  FrameIcon,
-  PencilIcon,
-  Undo2Icon,
-} from "lucide-react"
+import { CrosshairIcon, EllipsisIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
-import {
-  CanvasConsentDialog,
-  CanvasOptions,
-  useCanvasConsent,
-} from "@/components/canvas-consent"
+import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
@@ -26,9 +16,10 @@ import { UsageSheet } from "@/components/chat/usage-sheet"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
+import { useRefusal } from "@/lib/use-refusal"
 import { useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
-import { attempt } from "@/lib/attempt"
+import { Refusal } from "@/components/banner"
 import { awayLine } from "@/lib/away"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
@@ -223,9 +214,7 @@ export function CanvasPage() {
 
         <section className="flex flex-col gap-4">
           {loaded && visible.length === 0 && archived.length === 0 && !blocked && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No canvases yet.
-            </p>
+            <p className="py-8 text-center text-sm text-muted-foreground">No canvases yet.</p>
           )}
           {visible.length > 0 && (
             <ul className={TILES} aria-label="Canvases">
@@ -557,6 +546,8 @@ export function CanvasView() {
     setRedrawn(null)
     setEscapedFor("")
   }, [drawnDocument])
+  // A write this screen makes — the header's own Undo — is refused here, over the page it is about.
+  const refusal = useRefusal(id)
   const escaped = escapedFor === frameKey
   const frameLoaded = () => {
     if (loads.current.document !== shownDocument) {
@@ -596,7 +587,7 @@ export function CanvasView() {
   const undoVersion = async () => {
     if (!canvas || undoing) return
     setUndoing(true)
-    await attempt("undo the canvas", () => undoCanvas(canvas.id))
+    await refusal.write("undo the canvas", () => undoCanvas(canvas.id))
     setUndoing(false)
   }
 
@@ -679,7 +670,8 @@ export function CanvasView() {
 
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          {/* What the address asked for, said where the reader is looking: the page is armed, and one
+          <Refusal hold={refusal} className="mx-auto mb-2 w-full max-w-2xl" />
+          {/* What the address asked for, said where the reader is: the page is armed, and one
               tap on an element is the answer. The row is the page's own line, so the frame below it
               keeps the whole of the rest of the screen. */}
           {picking && versioned && !large && !missing ? (
@@ -695,7 +687,9 @@ export function CanvasView() {
             </div>
           ) : null}
           {missing ? (
-            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">{GONE}</p>
+            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
+              {GONE}
+            </p>
           ) : drawn?.error ? (
             <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
           ) : escaped ? (
@@ -926,7 +920,6 @@ const FLIP = {
   edit: { label: "Edit", Icon: PencilIcon },
   preview: { label: "Preview", Icon: FrameIcon },
 } as const
-
 
 /**
  * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's

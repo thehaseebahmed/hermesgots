@@ -9,8 +9,22 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { CompareBriefForm, MemoCanvas } from "@/components/compare"
+import { db } from "@/lib/db"
 import type { Cell, Mission } from "@/lib/research"
-import { click, find, findAll, findText, missing, mount, text } from "./component-kit.tsx"
+import {
+  botProfile,
+  click,
+  find,
+  findAll,
+  findText,
+  json,
+  missing,
+  mount,
+  seedSettings,
+  text,
+  until,
+  withToasts,
+} from "./component-kit.tsx"
 
 const cell = (score: number | null, reason: string, claims: string[]): Cell => ({
   score,
@@ -182,5 +196,28 @@ test("the brief keeps at least two options and two criteria", async () => {
       false,
       "an empty extra option is left out, not counted",
     )
+  })
+})
+
+test("a refused brief says the host's words at the form, and no toast", async () => {
+  // The host refuses the write in its own words: the form is where the reader is, so that is where
+  // the sentence stands — the toast it used to be is gone before a reader looking at Save sees it.
+  await seedSettings()
+  await db.profiles.clear()
+  await db.profiles.put(botProfile("research"))
+  globalThis.fetch = (async () =>
+    json({ error: { message: "That mission has already moved on." } }, 409)) as typeof fetch
+  const brief = mission({ stage: "brief", outputs: undefined })
+  await withToasts(async (said) => {
+    await mount(<CompareBriefForm mission={brief} />, async () => {
+      await click(findText("button", "Continue"))
+      await until(() => Boolean(find('[role="alert"]')), "the host's refusal")
+      assert.equal(
+        find('[role="alert"]')?.textContent,
+        "That mission has already moved on.",
+        "the host's sentence, at the form that wrote it",
+      )
+      assert.deepEqual(said, [], "and nothing said in passing")
+    })
   })
 })
