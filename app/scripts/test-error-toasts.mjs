@@ -1,19 +1,23 @@
 /**
  * The guard ADR 0148 asks for: a toast says the app's own words, never a failure's.
  *
- * It reads syntax, the way `test-toast-seam.mjs` reads what a file may import, and it is default-deny:
- * a `tell.error`, `tell.success` or `tell.note` argument may only be a string literal, a template or
- * a `+` built from plain data, a read from one of the app's own tables (`REFUSED.microphone`), or a
- * conditional whose every branch is one of those. Anything else — a call, an element read, a read of
- * `.message` — is a shape nobody has shown to be the app's words.
+ * It reads a file as syntax and resolves the names that file gives the two seams: `tell` under any
+ * local name it is imported as, aliased (`const say = tell`), or taken apart by destructuring
+ * (`const { error: announce } = tell`); and `attempt` imported, aliased, or read through a namespace
+ * import. A call to any of them is a toast, and a call to `attempt` whose answer goes nowhere — bare,
+ * `void`ed, awaited as a statement, or wrapped in parentheses — is a failure lost.
  *
- * It also fails a write whose answer is dropped: `void attempt(...)` and a bare `attempt(...)` (or a
- * bare `await attempt(...)`) still compile, and lose the failure they were given. `attempt` is
- * recognised by the import, so a file's own helper of that name is none of its business.
+ * What it objects to is shape, default-deny: an argument may be a string literal, a template, a
+ * `+`, `??`, `||` or `&&` built from those, a conditional whose branches are, a read from one of the
+ * app's own tables (`REFUSED.microphone`), or a property named `message`, `say` or `said`. Anything
+ * else — a call, any other read, an element — is a shape nobody has shown to be the app's words.
  *
- * What it reads is shape, not flow: a local that holds the host's words and is renamed to something
- * plain is beyond it. That is why it is default-deny over shapes rather than a list of the spellings
- * that are refused today — the next spelling has to be taught to it, in review.
+ * What that leaves out of its reach, and what review still has to catch: a local that holds the
+ * words under a plain name (`const why = failure.say; tell.error(why)`), the words carried by
+ * anything but those three properties, a helper of the app's that says them itself (`toastIt(f)` —
+ * it knows only these two seams), a tone chosen at runtime (`tell[tone](...)`), and a module that
+ * re-exports `tell` under another name. It is a guard over the spellings a failure is spoken by
+ * today, not a proof that none ever is.
  *
  * `error-toast-allowlist.json` names each place that keeps a failure's words: the file, the function
  * inside it, why it keeps them, and how many such calls it holds. An entry that no longer holds its
@@ -61,24 +65,127 @@ const TABLE = /^[A-Z][A-Z0-9_]*$/
 
 const isFailureName = (name) => FAILURE_NAMES.test(name) || /Error$/.test(name)
 
-/** The local name a file imported `attempt` under, or `null` where it imported none. */
-function attemptName(file) {
-  let name = null
-  const visit = (node) => {
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      /\/(lib\/)?attempt$/.test(node.moduleSpecifier.text)
-    ) {
+/** A node with the parentheses the writer wrapped it in taken off. */
+function unwrap(node) {
+  let it = node
+  while (it && ts.isParenthesizedExpression(it)) it = it.expression
+  return it
+}
+
+/** The text a node names where it is a string: `w["attempt"]`. */
+function stringOf(node) {
+  const it = unwrap(node)
+  return it && (ts.isStringLiteral(it) || ts.isNoSubstitutionTemplateLiteral(it)) ? it.text : undefined
+}
+
+/** Whether a node reads `name` off one of the namespace imports in `space`. */
+function memberOf(node, space, name) {
+  const it = unwrap(node)
+  if (!it) return false
+  if (ts.isPropertyAccessExpression(it) && ts.isIdentifier(it.expression))
+    return space.has(it.expression.text) && it.name.text === name
+  if (ts.isElementAccessExpression(it) && ts.isIdentifier(it.expression))
+    return space.has(it.expression.text) && stringOf(it.argumentExpression) === name
+  return false
+}
+
+/**
+ * The names one file gives the seams: the toast seam under every local that holds it, the tones
+ * taken off it, and the write seam under every local it is imported as, aliased to, or read through
+ * a namespace as.
+ */
+function seams(file) {
+  const found = { tell: new Set(), tone: new Map(), attempt: new Set(), space: new Set() }
+  const visitImports = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const from = node.moduleSpecifier.text
       const bindings = node.importClause?.namedBindings
-      if (bindings && ts.isNamedImports(bindings))
+      if (/(^|\/)tell$/.test(from) && bindings && ts.isNamedImports(bindings)) {
         for (const element of bindings.elements)
-          if ((element.propertyName ?? element.name).text === "attempt") name = element.name.text
+          if ((element.propertyName ?? element.name).text === "tell") found.tell.add(element.name.text)
+      }
+      if (/(^|\/)attempt$/.test(from) && bindings) {
+        if (ts.isNamespaceImport(bindings)) found.space.add(bindings.name.text)
+        else if (ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements)
+            if ((element.propertyName ?? element.name).text === "attempt")
+              found.attempt.add(element.name.text)
+        }
+      }
     }
-    ts.forEachChild(node, visit)
+    ts.forEachChild(node, visitImports)
   }
-  visit(file)
-  return name
+  visitImports(file)
+  const visitAliases = (node) => {
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const init = unwrap(node.initializer)
+      // `const { error: announce } = tell` names a tone the file can call on its own.
+      if (ts.isObjectBindingPattern(node.name) && ts.isIdentifier(init) && found.tell.has(init.text)) {
+        for (const element of node.name.elements) {
+          const tone = element.propertyName ?? element.name
+          if (ts.isIdentifier(element.name) && ts.isIdentifier(tone) && TONES.has(tone.text))
+            found.tone.set(element.name.text, tone.text)
+        }
+      }
+      if (ts.isIdentifier(node.name)) {
+        if (ts.isIdentifier(init) && found.tell.has(init.text)) found.tell.add(node.name.text)
+        if (ts.isIdentifier(init) && found.attempt.has(init.text)) found.attempt.add(node.name.text)
+        if (memberOf(init, found.space, "attempt")) found.attempt.add(node.name.text)
+      }
+    }
+    ts.forEachChild(node, visitAliases)
+  }
+  // An alias of an alias settles in a pass or two; the loop stops as soon as a pass names nothing.
+  let size = -1
+  while (size !== found.tell.size + found.tone.size + found.attempt.size) {
+    size = found.tell.size + found.tone.size + found.attempt.size
+    visitAliases(file)
+  }
+  return found
+}
+
+/** The tone a call's callee names, where the callee is one of the seam's own. */
+function toneOf(callee, found) {
+  const it = unwrap(callee)
+  if (!it) return null
+  if (ts.isIdentifier(it)) return found.tone.get(it.text) ?? null
+  if (ts.isPropertyAccessExpression(it) && ts.isIdentifier(it.expression))
+    return found.tell.has(it.expression.text) && TONES.has(it.name.text) ? it.name.text : null
+  if (ts.isElementAccessExpression(it) && ts.isIdentifier(it.expression)) {
+    const name = stringOf(it.argumentExpression)
+    return found.tell.has(it.expression.text) && name && TONES.has(name) ? name : null
+  }
+  return null
+}
+
+/** Whether a call's callee is the write seam under whatever name this file gives it. */
+function isAttempt(callee, found) {
+  const it = unwrap(callee)
+  if (!it) return false
+  if (ts.isIdentifier(it)) return found.attempt.has(it.text)
+  return memberOf(it, found.space, "attempt")
+}
+
+/**
+ * Whether a call's answer goes nowhere: the call is the statement it stands in, `void`ed, or awaited
+ * as one — with the parentheses the writer may have wrapped it in taken off on the way up.
+ */
+function dropped(node) {
+  let it = node
+  let parent = it.parent
+  while (parent && ts.isParenthesizedExpression(parent)) {
+    it = parent
+    parent = it.parent
+  }
+  if (parent && ts.isAwaitExpression(parent)) {
+    it = parent
+    parent = it.parent
+    while (parent && ts.isParenthesizedExpression(parent)) {
+      it = parent
+      parent = it.parent
+    }
+  }
+  return Boolean(parent && (ts.isVoidExpression(parent) || ts.isExpressionStatement(parent)))
 }
 
 /** The name of the function a node is, where it declares one. */
@@ -135,8 +242,7 @@ function because(node) {
     ].includes(node.operatorToken.kind)
   )
     return because(node.left) ?? because(node.right)
-  if (ts.isConditionalExpression(node))
-    return because(node.whenTrue) ?? because(node.whenFalse)
+  if (ts.isConditionalExpression(node)) return because(node.whenTrue) ?? because(node.whenFalse)
   if (ts.isPropertyAccessExpression(node)) {
     if (FAILURE_READS.has(node.name.text)) return `a \`${node.getText()}\` read`
     if (TABLE.test(node.expression.getText())) return undefined
@@ -157,28 +263,16 @@ function scan(sources) {
   const told = []
   const droppedCall = []
   for (const { path, file } of sources) {
-    const seam = attemptName(file)
+    const found = seams(file)
     const visit = (node, scope) => {
       const inner = (isFunction(node) && nameOf(node)) || scope
       if (ts.isCallExpression(node)) {
-        const callee = node.expression
         const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
-        if (
-          ts.isPropertyAccessExpression(callee) &&
-          ts.isIdentifier(callee.expression) &&
-          callee.expression.text === "tell" &&
-          TONES.has(callee.name.text)
-        ) {
+        if (toneOf(node.expression, found)) {
           const why = because(node.arguments[0])
           if (why) told.push({ file: path, line, function: inner, why })
-        }
-        if (seam && ts.isIdentifier(callee) && callee.text === seam) {
-          const parent = node.parent
-          const statement =
-            (ts.isVoidExpression(parent) && parent) ||
-            (ts.isAwaitExpression(parent) && ts.isExpressionStatement(parent.parent) && parent.parent) ||
-            (ts.isExpressionStatement(parent) && parent)
-          if (statement) droppedCall.push({ file: path, line, function: inner })
+        } else if (isAttempt(node.expression, found) && dropped(node)) {
+          droppedCall.push({ file: path, line, function: inner })
         }
       }
       ts.forEachChild(node, (child) => visit(child, inner))
@@ -192,6 +286,9 @@ function scan(sources) {
 let everything
 const findings = () =>
   (everything ??= scan(sourceFiles(SRC, "", SOURCE).map((path) => ({ path, file: parsed(path, SRC) }))))
+
+/** One planted file, scanned as though it were the app's. */
+const planted = (text, path = "planted.tsx") => scan([{ path, file: parseSource(text, path) }])
 
 const place = (site) => `${site.file}:${site.line} in ${site.function || "the module"}`
 
@@ -251,5 +348,72 @@ test("a write's answer is drawn, not dropped", () => {
     findings().dropped.map((site) => place(site)),
     [],
     "these call `attempt` and throw its answer away: await it, and hand it to `refuse`",
+  )
+})
+
+test("the write seam reaches no toast at all", () => {
+  const file = parsed("lib/attempt.ts", SRC)
+  const imports = []
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier))
+      imports.push(node.moduleSpecifier.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  assert.deepEqual(
+    imports.filter((name) => name === "sonner" || /(^|\/)tell$/.test(name)),
+    [],
+    "the seam names a toast: a failure a surface can draw is not one the app says in passing",
+  )
+  assert.deepEqual(
+    scan([{ path: "lib/attempt.ts", file }]).told,
+    [],
+    "and it says nothing through the seam it is not allowed to name",
+  )
+})
+
+test("the guard sees the seam under another name", () => {
+  assert.equal(planted(`import { tell } from "@/lib/tell"\nconst say = tell\nexport const go = (error: Error) => say.error(error.message)`).told.length, 1)
+})
+
+test("the guard sees a tone taken off the seam", () => {
+  assert.equal(planted(`import { tell } from "@/lib/tell"\nconst { error: announce } = tell\nexport const go = (error: Error) => announce(error.message)`).told.length, 1)
+})
+
+test("the guard sees a tone read off the seam by name", () => {
+  assert.equal(planted(`import { tell } from "@/lib/tell"\nexport const go = (error: Error) => tell["error"](error.message)`).told.length, 1)
+})
+
+test("the guard sees the write seam read through a namespace", () => {
+  assert.equal(
+    planted(`import * as w from "@/lib/attempt"\nexport const go = () => { void w.attempt("save that", async () => {}) }`).dropped.length,
+    1,
+  )
+})
+
+test("the guard sees the write seam under another name", () => {
+  assert.equal(
+    planted(`import { attempt } from "@/lib/attempt"\nconst go = attempt\nexport const run = () => void go("save that", async () => {})`).dropped.length,
+    1,
+  )
+})
+
+test("the guard sees an answer dropped through parentheses", () => {
+  assert.equal(
+    planted(`import { attempt } from "@/lib/attempt"\nexport const run = async () => { void (await attempt("save that", async () => {})) }`).dropped.length,
+    1,
+  )
+})
+
+test("the guard reads the app's own words as its own", () => {
+  assert.deepEqual(planted(`import { tell } from "@/lib/tell"\nexport const go = () => tell.success("Copied")`).told, [])
+  assert.deepEqual(planted(`import { tell } from "@/lib/tell"\nexport const go = () => tell.error(REFUSED.microphone)`).told, [])
+  assert.deepEqual(planted(`import { tell } from "@/lib/tell"\nexport const go = () => tell.error("Couldn't copy.")`).told, [])
+})
+
+test("a function of the file's own called attempt is none of the seam", () => {
+  assert.deepEqual(
+    planted(`const attempt = (what: string) => what\nexport const run = () => void attempt("x")`).dropped,
+    [],
   )
 })
