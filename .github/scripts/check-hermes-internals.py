@@ -133,6 +133,11 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         ("gateway/session_hosted_members.py",),
         "if not target.is_absolute() or target != target.resolve():",
     ),
+    # What a question answered on the run route becomes (`app/src/lib/clarify.ts`): the value the
+    # route records as skipped, which the app sends for a blank answer since the route stores the
+    # word "skip" as an answer, and the JSON list the only multi-select shape split back into picks.
+    (("tools/clarify_gateway.py",), 'SKIPPED = "\\x00skipped"'),
+    (("tools/clarify_tool.py",), "raw = parsed if isinstance(parsed, list) else [raw]"),
     (("hermes_cli/gateway_client.py",), "async def connect_gateway"),
     (("hermes_cli/gateway_runtime.py",), "def discover_gateway_endpoint"),
     (("hermes_cli/gateway_runtime.py",), "def attachable"),

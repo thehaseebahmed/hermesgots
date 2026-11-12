@@ -115,8 +115,41 @@ export function clarifyAnswered(
   return JSON.stringify({ responses: [...held, written], outcome })
 }
 
-/** What Hermes's `clarify` route reads as a question skipped (`SKIP_WORD` in `tools/clarify_gateway.py`). */
+/**
+ * The word Hermes's chat surfaces turn into a skip (`SKIP_WORD` in `tools/clarify_gateway.py`). Its
+ * run route stores it as the answer, so a call this app skipped through that word reads it back.
+ */
 export const SKIP_WORD = "skip"
+
+/**
+ * What Hermes's run route records as a question skipped (`SKIPPED` in `tools/clarify_gateway.py`):
+ * the call goes on to its next question, and the result says `skipped` rather than an answer.
+ */
+export const SKIPPED = "\u0000skipped"
+
+/**
+ * An answer in the one string Hermes's run route takes: a multi-select answer is a JSON list, the
+ * only shape it splits back into choices, and a skipped question — none picked — is the empty
+ * string, which the route's caller sends as Hermes's own skip.
+ */
+export function clarifyWire(answer: string | string[] | null): string {
+  if (Array.isArray(answer)) return answer.length ? JSON.stringify(answer) : ""
+  return answer ?? ""
+}
+
+/**
+ * An answer as `clarifyWire` sent it, read back as what was picked — what the thread draws until
+ * the host's own result lands, and what the host itself records (`_clean_answer`).
+ */
+export function clarifyUnwire(sent: string, multiSelect: boolean): string | string[] | null {
+  if (!sent.trim()) return null
+  if (!multiSelect) return sent
+  try {
+    const picks: unknown = JSON.parse(sent)
+    if (Array.isArray(picks)) return picks.map(String)
+  } catch {}
+  return [sent]
+}
 
 /**
  * A question Hermes's run route records as answered with the word it was skipped by: the route

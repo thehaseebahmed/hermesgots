@@ -62,7 +62,7 @@ import {
   type Connection,
   type Queued,
 } from "./api"
-import { clarifyRead, questionAt } from "@/lib/clarify"
+import { clarifyRead, clarifyUnwire, clarifyWire, questionAt } from "@/lib/clarify"
 import { WAITING_ON_ANSWER } from "@/lib/format"
 import { PROMPT_RETRY_MS } from "@/lib/freshness"
 import { heldParts, messageParts } from "./messages"
@@ -350,7 +350,7 @@ function QuestionCard({
           type="button"
           data-submit
           className="rounded-md bg-primary px-3 py-1 text-primary-foreground"
-          onClick={() => onAnswer(waiting.choices.length ? picked.join(", ") : typed)}
+          onClick={() => onAnswer(waiting.choices.length ? clarifyWire(picked) : typed)}
         >
           Answer
         </button>
@@ -1621,7 +1621,7 @@ export function ChatNextThread({
   // `*.settled` event follows. A question's answer is written onto its call here, since the
   // served turn's `tool.completed` carries no result: the thread reads the answer straight away
   // rather than "No answer" until the transcript's row lands.
-  async function answer(waiting: Waiting, value: string) {
+  async function answer(waiting: Waiting, value: string, { rethrow = false } = {}) {
     if (!server || !key) return
     try {
       await respond({ server, key }, waiting, value)
@@ -1633,13 +1633,15 @@ export function ChatNextThread({
               answer: {
                 question: waiting.question,
                 choicesOffered: waiting.choices.length ? waiting.choices : null,
-                value,
+                value: clarifyUnwire(value, waiting.multiSelect),
               },
             }
           : {}),
       })
     } catch (error) {
       if (error instanceof RunGone) void catchUp(true)
+      // The app's own cards say a refusal where the reader is, and take their form back on it.
+      else if (rethrow) throw error
       else dispatch(failure(error))
     }
   }
@@ -1683,7 +1685,7 @@ export function ChatNextThread({
         held={!doing.waiting}
         answer={async (value) => {
           if (!doing.waiting) return
-          await answer(doing.waiting, value)
+          await answer(doing.waiting, value, { rethrow: true })
         }}
       />
     ) : doing.waiting?.kind === "question" ? (

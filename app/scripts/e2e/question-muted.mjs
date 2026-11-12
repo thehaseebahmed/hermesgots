@@ -1,7 +1,7 @@
 // A call that asks five questions, on a host that raises every one after the first while nothing is
 // listening: those requests go out on nobody's stream, and the run's status is the only place they
-// can be read. The chat stays open — no reload — so each form has to come back from the page's own
-// status read.
+// can be read. The chat stays open — no reload — so each question has to come back from the page's
+// own status read, and the answer the reader filled in for it ahead goes the moment it does.
 import { answerWith, assert, flow, openChatNext, pass, questionPage, settled } from "./lib.mjs"
 
 const SERIES = [
@@ -21,8 +21,7 @@ await flow(
 
     await send("ask five")
     for (const [at, question] of SERIES.entries()) {
-      // The first question's request reached the page; the rest were published to nobody, so each
-      // of these waits is the page finding the prompt on the run's own status.
+      // The reader fills the form in, a page at a time, while the host asks only the first.
       await slot
         .getByText(`${at + 1} of ${SERIES.length}`, { exact: true })
         .waitFor({ timeout: 30_000 })
@@ -32,9 +31,11 @@ await flow(
         .waitFor({ timeout: 30_000 })
       await settled(page)
       if (at === 1) await shot("second")
-      await answerWith(slot, question)
+      await answerWith(slot, question, at === SERIES.length - 1 ? "Send" : "Next")
     }
 
+    // One Send: the first question's request reached the page and the rest were published to
+    // nobody, so each answer after the first goes once the page finds its prompt on the run's status.
     await slot
       .getByRole("button", { name: "Send", exact: true })
       .waitFor({ state: "detached", timeout: 30_000 })
