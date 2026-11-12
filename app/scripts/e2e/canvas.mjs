@@ -181,6 +181,41 @@ await flow(
     await shot("undone")
     pass("the preview screen: Undo draws the first version with the box still ticked")
 
+    // A sheet's heading has room over it. The canvas's header is the door to its options (`step 3`),
+    // and the heading's box starts 16px below the drag handle's bottom edge instead of at it — the
+    // room every sheet in the app gives its heading, and a gap only a browser can measure.
+    await page.locator("[data-canvas-options-open]").click()
+    const optionsTitle = page.locator('[data-slot="sheet-title"]')
+    await optionsTitle.waitFor({ timeout: 10_000 })
+    await settled(page)
+    const gap = await page.evaluate(() => {
+      const popup = document.querySelector('[data-popup-form="sheet"]')
+      const handle = popup?.querySelector('[aria-label="Close"]')
+      const heading = document.querySelector('[data-slot="sheet-title"]')
+      const bottom = handle?.getBoundingClientRect().bottom ?? null
+      const top = heading?.getBoundingClientRect().top ?? null
+      return {
+        handle: bottom === null ? null : Math.round(bottom),
+        heading: top === null ? null : Math.round(top),
+        gap: bottom === null || top === null ? null : Math.round(top - bottom),
+      }
+    })
+    console.log(
+      `options sheet 390 — handle bottom ${gap.handle}, heading top ${gap.heading} ` +
+        `(gap ${gap.gap}px)`,
+    )
+    assert.equal(
+      gap.gap,
+      16,
+      `the sheet's heading clears the drag handle by 16px, not ${gap.gap} ` +
+        `(handle bottom ${gap.handle}, heading top ${gap.heading})`,
+    )
+    await shot("options-sheet")
+    // Shut again, so the legs after this one read the page and not a sheet laid over it.
+    await page.keyboard.press("Escape")
+    await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
+    pass("the preview screen: the options sheet's heading starts 16px below its drag handle")
+
     // Pointing is the phone's round trip: the edit screen draws no page, so its Point row sends the
     // reader to the page with pointing armed, and the tap that answers happens inside the sandboxed
     // document — the outline under the finger and the element's words are the page's own script

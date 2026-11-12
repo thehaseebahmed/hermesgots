@@ -115,10 +115,12 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
         // sheet has no close button (nor does a menu, dismissed by a press outside it).
         form === "drawer" && "pr-14",
         form === "menu" && "px-5 pt-4 pb-3",
-        // A sheet centres its whole header, as a Material bottom sheet does, and has the drag
-        // handle above the heading, so it takes no top padding. The heading centres itself in every
-        // form (PopupTitle), leaving a drawer's or menu's other header rows as they were.
-        sheet && "items-center pt-0 text-center",
+        // A sheet centres its whole header, as a Material bottom sheet does, and keeps 16px above
+        // the heading: without it the heading's box begins at the drag handle's bottom edge, which is
+        // the content-against-the-header `AGENTS.md` forbids for every pop-up. The heading centres
+        // itself in every form (PopupTitle), leaving a drawer's or menu's other header rows as they
+        // were.
+        sheet && "items-center pt-4 text-center",
         className,
       )}
       {...props}
