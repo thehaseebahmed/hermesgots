@@ -32,7 +32,7 @@ import {
   type PendingRow,
 } from "@/lib/pending"
 import type { RefusalHold } from "@/lib/refusal"
-import { useRefusal } from "@/lib/use-refusal"
+import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 /**
@@ -306,16 +306,16 @@ export const AskAgainContext = createContext<((text: string) => Promise<void>) |
  * The one refusal the thread above a row holds. A card or a row drawn inside a chat's scrolled thread
  * hands its write to the chat that owns it, the way a settings row hands one to its `Screen`: the
  * words stand where the thread says them rather than a scroll away from the control that caused
- * them. Nothing above a row leaves it holding its own, so a row drawn on its own still refuses where
- * it stands.
+ * them. A row drawn outside the chat — a routine's message, which renders on its own — has no notice
+ * above it, so it says the words in passing instead of holding what nothing draws.
  */
 export const ThreadRefusal = createContext<RefusalHold | null>(null)
 
-/** The refusal the thread above this row holds, or one of its own. */
+/** The refusal the thread above this row holds, or one that says the words where there is none. */
 export function useThreadRefusal(): RefusalHold {
   const slot = useContext(ThreadRefusal)
-  const own = useRefusal()
-  return slot ?? own
+  const said = useSaidRefusal()
+  return slot ?? said
 }
 
 /** What a question left without an answer reads as, drawn like any answer. */

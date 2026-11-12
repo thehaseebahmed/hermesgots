@@ -33,7 +33,7 @@ import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
 import type { RefusalHold } from "@/lib/refusal"
 import { useModelInfo } from "@/lib/model-info"
-import { useRefusal } from "@/lib/use-refusal"
+import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
 
@@ -53,16 +53,16 @@ const TitleSlot = createContext<(title: string | undefined) => void>(() => {})
 /**
  * The one refusal the page holds, handed down rather than passed: a bot's page draws its rows
  * several components below the `Screen` that holds them, and the write a row makes is the page's to
- * answer. Nothing above a row leaves it holding its own, so a row drawn on its own still refuses
- * where it stands.
+ * answer. A row drawn with no `Screen` above it has no notice to draw the words in, so it says them
+ * in passing instead — a refusal is never kept where nothing renders it.
  */
 const RefusalSlot = createContext<RefusalHold | null>(null)
 
-/** The refusal the `Screen` above holds. */
+/** The refusal the `Screen` above holds, or one that says the words where there is no `Screen`. */
 export function useScreenRefusal(): RefusalHold {
   const slot = useContext(RefusalSlot)
-  const own = useRefusal()
-  return slot ?? own
+  const said = useSaidRefusal()
+  return slot ?? said
 }
 
 /** The chrome every Settings screen wears: a sticky header over one centred column of groups. */
