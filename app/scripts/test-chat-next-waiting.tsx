@@ -390,7 +390,7 @@ test("an answer the host refuses leaves the app's question card answerable again
   })
 })
 
-test("a refusal that is not a waiting bot keeps the host's own words", async () => {
+test("a refusal that is not a waiting bot draws the host's own words", async () => {
   const host = setUp("q-blocked")
   await withDevice(openDevice(host, SLOW), async (phone) => {
     const answer = globalThis.fetch
@@ -411,11 +411,11 @@ test("a refusal that is not a waiting bot keeps the host's own words", async () 
     try {
       await phone.send("never mind")
       await eventually(
-        () => assert.deepEqual(said, ["This workspace is blocked."]),
+        () => assert.equal(phone.alert(), "This workspace is blocked."),
         "the host's reason is what the screen says",
         200,
       )
-      assert.equal(phone.alert(), undefined, "said where the reader is, not above the thread")
+      assert.deepEqual(said, [], "and nothing said in passing")
       assert.equal(phone.waiting().clarify, undefined, "and no form was put up for it")
     } finally {
       globalThis.fetch = answer

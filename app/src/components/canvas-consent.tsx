@@ -274,9 +274,6 @@ export function CanvasOptions({
     setSaving("delete")
     try {
       await onDelete()
-    } catch {
-      // Still there, so the question stays up and a retry is one tap.
-      return
     } finally {
       setSaving(null)
     }
@@ -385,7 +382,9 @@ export function CanvasOptions({
         cancelLabel="Keep it"
         busy={deleting}
         onOpenChange={setAsking}
-        onConfirm={() => void remove()}
+        // The promise is the write's own: a refusal then keeps the question up with the host's
+        // words in it, rather than closing over a canvas that is still there.
+        onConfirm={remove}
       />
     </>
   )

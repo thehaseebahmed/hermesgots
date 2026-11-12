@@ -11,7 +11,8 @@ import {
   updateProfile,
   type Profile,
 } from "@/lib/db"
-import { isNative, SITE_URL } from "@/lib/native"
+import { SITE_URL } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { localFields } from "@/lib/registry-fields"
 import { installAndLink, linkProfileAt } from "@/lib/repo"
 import { inboxKey, inboxPublic } from "@/lib/sync"
@@ -62,7 +63,7 @@ export function presence(profile: Profile, now = Date.now()): boolean | undefine
 
 /** Where the plugin reaches the registry: this site, or the one the Android app was built for. */
 export function siteUrl() {
-  return isNative ? SITE_URL : window.location.origin
+  return isNative() ? SITE_URL : window.location.origin
 }
 
 function registryUrl(route: string, id?: string) {

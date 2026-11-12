@@ -21,7 +21,6 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronRightIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { PromptEditor } from "@/components/afk-prompt"
 import { RowText } from "@/components/settings-chrome"
@@ -54,6 +53,7 @@ import { promptLine } from "@/lib/prompt-library"
 import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
 import { promptSourceState } from "@/lib/prompt-source"
 import { noteFailure } from "@/lib/report"
+import { tell } from "@/lib/tell"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
@@ -215,7 +215,7 @@ export function AfkPopup({
     try {
       setAfk(await write())
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that.")
     } finally {
       setSaving(false)
     }
@@ -229,7 +229,7 @@ export function AfkPopup({
     try {
       setAfk(await setProjectAfkPickCount(config, projectId, count))
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick count.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that pick count.")
     } finally {
       setPickDraft(null)
       setSavingPicks(false)
@@ -243,7 +243,7 @@ export function AfkPopup({
       setAfk(await setProjectAfkPrompt(config, projectId, draft))
       return "saved"
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
       return "refused"
     }
   }

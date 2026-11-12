@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from "react"
-import { toast } from "sonner"
 
 import {
   carriesPart,
@@ -20,9 +19,11 @@ import { attachmentParts } from "@/lib/attachment-text"
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
 import { askNote, askThreadMediaUrl } from "@/lib/media-url"
-import { isNative, openMediaViewer } from "@/lib/native"
+import { openMediaViewer } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
+import { tell } from "@/lib/tell"
 import { randomId } from "@/lib/utils"
 
 /** Long edge models are given; bigger images are scaled down before they go, to keep the body small. */
@@ -223,7 +224,7 @@ export async function openAttachment(conversationId: string | null, file: Handov
     if (!file.src && !file.path && file.blob) {
       const url = URL.createObjectURL(file.blob)
       try {
-        if (!isNative) window.open(url, "_blank", "noopener")
+        if (!isNative()) window.open(url, "_blank", "noopener")
         else await openMediaViewer(url, { type: file.type, name: file.name })
       } finally {
         // The browser reads the bytes after the click returns, so the URL outlives it.
@@ -254,7 +255,7 @@ export async function openAttachment(conversationId: string | null, file: Handov
  */
 export function openFailed(name: string, error: unknown) {
   noteFailure(`opening ${name}`, error)
-  toast.error(error instanceof Error ? error.message : `Couldn't open ${name}.`)
+  tell.error(error instanceof Error ? error.message : `Couldn't open ${name}.`)
 }
 
 // Attachments being saved on the Hermes host right now, so their tiles can say so.

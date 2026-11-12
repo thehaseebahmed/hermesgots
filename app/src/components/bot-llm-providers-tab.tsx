@@ -312,11 +312,11 @@ export function LlmProviderKeyScreen({
       .finally(() => setSaving(false))
   }
 
-  const remove = () => {
+  const remove = async () => {
     if (removing) return
     setRemoving(true)
     setRefusal(undefined)
-    void removeLlmProviderKey(profile, target)
+    await removeLlmProviderKey(profile, target)
       .then((next) => {
         if (!next) {
           // An answer with no block can't say the key went, so the question stays up with the
@@ -531,11 +531,11 @@ function EndpointForm({
       .finally(() => setSaving(false))
   }
 
-  const remove = () => {
+  const remove = async () => {
     if (removing) return
     setRemoving(true)
     setRefusal(undefined)
-    void removeLlmEndpoint(profile, endpoint.id)
+    await removeLlmEndpoint(profile, endpoint.id)
       .then((next) => {
         if (!next) {
           // An answer with no block can't say the endpoint went, and leaving the screen would read

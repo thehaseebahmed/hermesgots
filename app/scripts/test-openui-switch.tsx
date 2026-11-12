@@ -11,6 +11,7 @@ import test from "node:test"
 import { toast } from "sonner"
 
 import { AppearanceSettings } from "@/components/settings/appearance"
+import { Screen } from "@/components/settings-chrome"
 import { db } from "@/lib/db"
 import {
   type Call,
@@ -25,6 +26,7 @@ import {
   settle,
   text,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 import { SALES, ask, block, cardOf, codeOf, drawn, reply, replyRow, warm } from "./openui-kit.tsx"
 
@@ -79,7 +81,13 @@ const unavailable = (element: Element | null) =>
 async function appearance(profileName: string, body: () => Promise<void>) {
   await seedSettings({ activeProfileId: "bot-1" })
   await db.profiles.put(botProfile(profileName))
-  await mount(<AppearanceSettings />, body)
+  // The chrome a Settings section is drawn in: its one refusal is the Screen's to hold.
+  await mount(
+    <Screen title="Appearance">
+      <AppearanceSettings />
+    </Screen>,
+    body,
+  )
 }
 
 test("Appearance reads the switch from the host when it opens", async () => {
@@ -125,8 +133,13 @@ test("a write the host refuses is a failure, not a quiet off", async () => {
     await appearance("switch-refused", async () => {
       await until(async () => checked(switchOf()) === true, "the host's value")
       await click(switchOf())
-      await until(async () => errors.length === 1, "the toast")
-      assert.deepEqual(errors, ["The host couldn't keep that."], "the host's words")
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        "The host couldn't keep that.",
+        "the host's words, over the switch that was refused",
+      )
+      assert.deepEqual(errors, [], "and nothing said in passing")
       await settle()
       assert.equal(checked(switchOf()), true, "and the switch keeps the host's truth")
     })

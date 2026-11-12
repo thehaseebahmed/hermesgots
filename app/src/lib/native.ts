@@ -1,17 +1,14 @@
 import { App } from "@capacitor/app"
 import { Browser } from "@capacitor/browser"
 import { Capacitor, registerPlugin } from "@capacitor/core"
-import { toast } from "sonner"
 
 import { depth } from "@/lib/nav"
-import { placeToasts } from "@/lib/toast"
-
-/** True inside the Android app, where the page is served from `https://localhost`. */
-export const isNative = Capacitor.isNativePlatform()
+import { isNative } from "@/lib/platform"
+import { TELL_LONG_MS, tell } from "@/lib/tell"
 
 /** Sends the native Android app to the background while leaving its current screen intact. */
 export async function minimizeAndroidApp() {
-  if (!isNative || Capacitor.getPlatform() !== "android") return
+  if (!isNative() || Capacitor.getPlatform() !== "android") return
   await App.minimizeApp()
 }
 
@@ -33,7 +30,7 @@ const NotificationSettings = registerPlugin<NotificationSettingsPlugin>(
  * open, and the message to show when the screen was asked for and refused.
  */
 export async function openNotificationSettings(): Promise<string | undefined> {
-  if (!isNative) return
+  if (!isNative()) return
   // An APK built before the plugin has no screen to open and no method to call: one would throw.
   if (!Capacitor.isPluginAvailable(NOTIFICATION_SETTINGS_PLUGIN)) {
     console.debug("[gots] no notification settings plugin in this build")
@@ -77,7 +74,7 @@ export async function openMediaViewer(
   url: string,
   { type, name }: { type: string; name?: string },
 ) {
-  if (isNative) {
+  if (isNative()) {
     try {
       const bytes = await blobBytes(url)
       const opened = bytes.type || type
@@ -105,7 +102,7 @@ export async function openMediaViewer(
  * is told where it came from.
  */
 export function openExternal(url: string) {
-  if (isNative) {
+  if (isNative()) {
     void Browser.open({ url })
     return
   }
@@ -122,7 +119,7 @@ const NATIVE_AUTH = "gots-native-auth"
  * root instead, send the tokens on to that page so they reach the app, not this browser.
  */
 export function handBackNativeSignIn() {
-  if (isNative || !location.hash.includes("access_token=")) return false
+  if (isNative() || !location.hash.includes("access_token=")) return false
   let started: number
   try {
     started = Number(localStorage.getItem(NATIVE_AUTH))
@@ -159,9 +156,7 @@ export function setBackGuard(guard: () => boolean) {
   }
 }
 
-/** How long a second back press has to leave the app after the first. */
-const EXIT_WINDOW = 2000
-export const EXIT_TOASTER = "exit"
+const EXIT_WINDOW = TELL_LONG_MS
 
 /** What one back press came to: a pop-up closed, a screen handled it, or nothing did. */
 type BackPress = "popup" | "screen" | "app"
@@ -212,7 +207,7 @@ export function answerBackPress(): BackAnswer {
     Date.now() - armed.at < EXIT_WINDOW
   ) {
     armed = undefined
-    toast.dismiss(EXIT_TOASTER)
+    tell.dismiss()
     void minimizeAndroidApp()
     return "leave"
   }
@@ -222,14 +217,13 @@ export function answerBackPress(): BackAnswer {
     return taken
   }
   armed = { href: location.href, idx: depth(), at: Date.now() }
-  placeToasts()
-  toast("Press back again to exit", { id: EXIT_TOASTER, duration: EXIT_WINDOW })
+  tell.note("Press back again to exit", { long: true })
   menuOpener?.()
   return "armed"
 }
 
 export function handleBackButton() {
-  if (!isNative) return
+  if (!isNative()) return
   void App.addListener("backButton", () => {
     answerBackPress()
   })

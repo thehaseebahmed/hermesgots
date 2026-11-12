@@ -90,7 +90,7 @@ made them one `PickRow` in a `PickGroup`, and what is left above is that compone
 | `ui/skeleton` | 5 | A shape about to fill |
 | `crash-screen` | 2 | The app failed to start |
 | `device-state` | 1 | The device has no database |
-| `ui/sonner` | 1 | The toast host; `toast()` is the API |
+| `ui/sonner` | 1 | The toast host the web draws through; `lib/tell` is what a screen asks |
 
 ## Chat thread parts
 

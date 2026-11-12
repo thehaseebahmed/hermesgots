@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+
+import { tell } from "@/lib/tell"
 
 /** Copies text, saying so when the browser refuses: one wording, and one place a refusal is handled. */
 export async function copyText(text: string, done?: () => void) {
@@ -7,7 +8,7 @@ export async function copyText(text: string, done?: () => void) {
     await navigator.clipboard.writeText(text)
     done?.()
   } catch {
-    toast.error("Couldn't copy that.")
+    tell.error("Couldn't copy that.")
   }
 }
 

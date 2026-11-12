@@ -19,7 +19,6 @@
  * exactly what the host does, so it can never take words the user is part-way through writing.
  */
 import { useState } from "react"
-import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { PromptEntrySheet, PromptLibrarySheet } from "@/components/prompt-library-sheet"
@@ -29,6 +28,7 @@ import type { PromptWrite } from "@/lib/hermes"
 import type { PromptDraft, PromptEntry } from "@/lib/prompt-library"
 import { addPrompt, removePrompt, savePrompt, usePromptEntries } from "@/lib/prompt-library-store"
 import { promptSourceState } from "@/lib/prompt-source"
+import { tell } from "@/lib/tell"
 
 export function PromptEditor({
   open,
@@ -86,7 +86,7 @@ export function PromptEditor({
     try {
       await work()
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : fallback)
+      tell.error(failure instanceof Error ? failure.message : fallback)
     } finally {
       setSaving(false)
     }
@@ -137,11 +137,13 @@ export function PromptEditor({
     await attempt(async () => {
       if (!editing) {
         await addPrompt(draft)
-      } else if (!(await savePrompt(editing.id, draft))) {
-        // The entry was deleted on another device: nothing was written, so the sheet keeps the typed
-        // draft and says the entry is gone rather than closing as if it had saved.
-        toast.error("That Prompt is gone from the library.")
-        return
+      } else {
+        const result = await savePrompt(editing.id, draft)
+        if ("gone" in result) {
+          // The sheet keeps the typed draft rather than closing as if it had saved.
+          tell.error("That Prompt is gone from the library.")
+          return
+        }
       }
       setWriting(null)
     }, "Couldn't save that Prompt.")

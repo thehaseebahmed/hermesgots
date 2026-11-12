@@ -1,13 +1,13 @@
 import { useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams } from "react-router"
-import { toast } from "sonner"
 
 import { Spinner } from "@/components/ui/spinner"
 import { chatIdForSession, listReachableProfiles } from "@/lib/db"
 import { onOpenPush } from "@/lib/push"
 import { quietly } from "@/lib/report"
 import { syncChatsOf } from "@/lib/sync"
+import { tell } from "@/lib/tell"
 
 /** Passes at the chat lists before the screen gives up on the chat arriving. */
 const PASSES = 2
@@ -53,7 +53,7 @@ export function OpenSessionPage() {
         return
       }
       if (cancelled) return
-      toast.error("Couldn't find that chat on this device.")
+      tell.error("Couldn't find that chat on this device.")
       navigate("/", { replace: true })
     })()
     return () => {

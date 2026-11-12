@@ -13,6 +13,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsPage } from "@/components/bot-settings"
+import { Screen } from "@/components/settings-chrome"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
@@ -42,9 +43,17 @@ function LivePage() {
   if (!profile) return null
   const shown = botTabOf(tab) ?? "general"
   return (
-    <div data-general-page>
-      <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={botSubOf(shown, sub)} />
-    </div>
+    // The chrome a bot's page is drawn in: the page's one refusal is the Screen's to hold.
+    <Screen title={shown}>
+      <div data-general-page>
+        <BotSettingsPage
+          key={profile.id}
+          profile={profile}
+          tab={shown}
+          sub={botSubOf(shown, sub)}
+        />
+      </div>
+    </Screen>
   )
 }
 
@@ -293,8 +302,13 @@ test("a refused write says the host's sentence and leaves the row as it was", as
     await mount(page(), async () => {
       await until(async () => Boolean(find('[data-setting="updates.check"]')), "the row")
       await click(find('[data-setting="updates.check"]'))
-      await until(async () => said.length > 0, "the refusal")
-      assert.deepEqual(said, ["updates.check is managed by the host."])
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        "updates.check is managed by the host.",
+        "the host's own sentence, over the page it refused",
+      )
+      assert.deepEqual(said, [], "and nothing said in passing")
       assert.equal(
         (server.block().values as Record<string, unknown>)["updates.check"],
         false,
