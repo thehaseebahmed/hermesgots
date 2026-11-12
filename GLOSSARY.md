@@ -716,6 +716,10 @@ _Avoid_: update, diff, override
 The page that shows every component the library offers — a live drawing, its source and its props. A reader's document, not the model's.
 _Avoid_: gallery, component gallery, library page, showcase
 
+**Diagram**:
+A closed `mermaid` fence in a reply's text, drawn as the picture it describes where the fence stood. It is drawn from a fence that already arrived: one still streaming, one set into a list and one mermaid cannot parse each stay the code they are. A tap opens it larger.
+_Avoid_: chart, graph, mermaid block, visual
+
 ## Canvases
 
 **Canvas**:
