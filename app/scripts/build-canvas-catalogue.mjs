@@ -1,13 +1,14 @@
 /**
  * Renders the two artifacts a canvas's libraries are told by, from the app's one catalogue:
- * `plugin/canvas/prompt.in.txt` → `plugin/canvas/prompt.txt` (its `{{libraries}}` block composed
+ * `scripts/canvas-guide.in.txt` → `plugin/canvas/prompt.txt` (its `{{libraries}}` block composed
  * from `canvas-catalogue.ts`), and that catalogue → `plugin/canvas/libraries.json`, the names the
  * host refuses a write by. Run it with `pnpm build:canvas-catalogue`; a test fails the gates on
  * drift or an oversize guide.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath, pathToFileURL } from "node:url"
+
+import { writePromptArtifact } from "./prompt-artifact.mjs"
 
 import { CATALOGUE } from "../src/lib/canvas-catalogue.ts"
 
@@ -15,7 +16,7 @@ import { CATALOGUE } from "../src/lib/canvas-catalogue.ts"
  * The prose a hand writes, which no plugin ships: `plugin/canvas/prompt.txt` is what a plugin is
  * installed with, so the template stays in the repository and the render travels.
  */
-export const TEMPLATE = fileURLToPath(new URL("../../plugin/canvas/prompt.in.txt", import.meta.url))
+export const TEMPLATE = fileURLToPath(new URL("./canvas-guide.in.txt", import.meta.url))
 
 /** The section `plugin/openui.py` registers as a canvas's (`CANVAS_ARTIFACT`), read at import. */
 export const ARTIFACT = fileURLToPath(new URL("../../plugin/canvas/prompt.txt", import.meta.url))
@@ -120,30 +121,8 @@ export function render() {
 
 function write() {
   const text = render()
-  if (text.length > MAX_CHARS) {
-    console.error(
-      `canvas guide: ${text.length} characters, over the host's ${MAX_CHARS}-character ` +
-        `section limit by ${text.length - MAX_CHARS}. A section that size is dropped whole, so trim ` +
-        `a rule rather than truncating.`,
-    )
-    process.exit(1)
-  }
-  const libraries = librariesJson()
-  let previous = null
-  try {
-    previous = readFileSync(ARTIFACT, "utf8").length
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error
-  }
-  const grown = previous === null ? null : text.length - previous
-  const delta = grown === null ? "first write" : `${grown >= 0 ? "+" : ""}${grown} characters`
-  mkdirSync(dirname(ARTIFACT), { recursive: true })
-  writeFileSync(ARTIFACT, text, "utf8")
-  writeFileSync(LIBRARIES, libraries, "utf8")
-  console.log(
-    `canvas guide: wrote ${ARTIFACT} — ${text.length} characters, ` +
-      `${MAX_CHARS - text.length} headroom of ${MAX_CHARS}, ${delta} against the checked-in artifact`,
-  )
+  writePromptArtifact({ artifact: ARTIFACT, text, max: MAX_CHARS, label: "canvas guide" })
+  writeFileSync(LIBRARIES, librariesJson(), "utf8")
   console.log(
     `canvas libraries: wrote ${LIBRARIES} — ${CATALOGUE.length} names: ` +
       `${CATALOGUE.map((one) => one.name).join(", ")}`,

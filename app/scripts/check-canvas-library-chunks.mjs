@@ -10,8 +10,9 @@
  * of them a visit asks for is the other half — `pnpm e2e canvas` counts those requests.
  */
 import assert from "node:assert/strict"
-import { readdirSync, readFileSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { readFileSync } from "node:fs"
+
+import { buildOf } from "./chunks.mjs"
 
 const ASSETS = "dist/assets"
 /** The host's own copy of the catalogue (`build-canvas-catalogue.mjs` writes it from the app's). */
@@ -50,28 +51,26 @@ assert.deepEqual(
     `unmarked, ${stale.join(", ") || "none"} stale`,
 )
 
-const files = readdirSync(ASSETS).filter((file) => file.endsWith(".js"))
-const text = new Map(files.map((file) => [file, readFileSync(join(ASSETS, file), "utf8")]))
+const { chunks, read, carriersOf, importersOf, canvasRoute, size } = buildOf(ASSETS)
 
 /** The canvas route's own chunk: the one asset that draws its frame, since the route is lazy. */
-const route = files.filter((file) => text.get(file).includes("data-canvas-frame"))
-assert.equal(route.length, 1, `one asset draws the canvas route, found ${route.join(", ") || "none"}`)
-const [routeChunk] = route
+const routeChunk = canvasRoute()
+assert.ok(routeChunk, "one asset draws the canvas route")
 
 const found = names.map((name) => {
   const marker = MARKERS[name]
   assert.ok(
-    !text.get(routeChunk).includes(marker),
+    !read(routeChunk).includes(marker),
     `${routeChunk} is the canvas route's own chunk and carries none of ${name}`,
   )
-  const carriers = files.filter((file) => text.get(file).includes(marker))
+  const carriers = carriersOf(marker)
   assert.equal(
     carriers.length,
     1,
     `${name} is carried by exactly one asset, found ${carriers.join(", ") || "none"}`,
   )
   const [chunk] = carriers
-  const importers = files.filter((file) => file !== chunk && text.get(file).includes(chunk))
+  const importers = importersOf(chunk)
   assert.equal(
     importers.length,
     1,
@@ -79,12 +78,12 @@ const found = names.map((name) => {
   )
   assert.equal(importers[0], routeChunk, `${chunk} is reached from the canvas route's chunk`)
   assert.ok(
-    text.get(routeChunk).includes(`import(\`./${chunk}\`)`),
+    read(routeChunk).includes(`import(\`./${chunk}\`)`),
     `${routeChunk} reaches ${chunk} with a dynamic import, not a static one`,
   )
   // A marker says the library is mentioned; this says the chunk holds all of it, so a chunk built
   // from the wrong entry — a shim, or a stale `generated/` — is caught rather than passed.
-  const bytes = statSync(join(ASSETS, chunk)).size
+  const bytes = size(chunk)
   assert.ok(
     bytes >= carried[name].bytes,
     `${chunk} holds ${name} whole: ${bytes} bytes against the ${carried[name].bytes} its source is`,
