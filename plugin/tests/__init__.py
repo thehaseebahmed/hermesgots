@@ -43,5 +43,7 @@ def _guarded_urlopen(request, *args, **kwargs):  # type: ignore[no-untyped-def]
 
 for _name in github.TOKEN_ENV_VARS:
     os.environ.pop(_name, None)
-github._gh_cli_token = lambda: None
+# `gh` is taken out of reach, because a developer's machine has a login and CI's runner doesn't.
+GH_CLI_TOKEN = github._gh_cli_token
+github._gh_cli_token = lambda home=None: None
 urllib.request.urlopen = _guarded_urlopen

@@ -728,6 +728,10 @@ _Avoid_: update, diff, override
 The page that shows every component the library offers — a live drawing, its source and its props. A reader's document, not the model's.
 _Avoid_: gallery, component gallery, library page, showcase
 
+**Diagram**:
+A closed `mermaid` fence in a reply's text, drawn as the picture it describes where the fence stood. It is drawn from a fence that already arrived: one still streaming, one set into a list and one mermaid cannot parse each stay the code they are. A tap opens it larger.
+_Avoid_: chart, graph, mermaid block, visual
+
 ## Canvases
 
 **Canvas**:
@@ -753,6 +757,18 @@ _Avoid_: revision, snapshot, draft
 **Canvas data**:
 What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Ask**:
+The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app
+replaces with that library's source. A name the app doesn't carry leaves nothing, and a name the
+canvas's host doesn't carry refuses the write.
+_Avoid_: library tag, import, include, library request
+
+**Catalogue**:
+The libraries a canvas may ask for by name: the app's one list of them, holding each one's source,
+global, size and any stylesheet or setup, which the host's refusal list and the guide's library block
+are both generated from.
+_Avoid_: library list, manifest, registry, SDK list
 
 **Point**:
 Tapping an element of a canvas while editing it, so the message you send names that element.

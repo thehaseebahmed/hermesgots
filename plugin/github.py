@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .profile_scope import profile_scope
+from .profile_scope import profile_scope, same_home
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +72,48 @@ class GitHubBusy(GitHubError):
         super().__init__("GitHub is busy on this host; try again in a moment.", 503)
 
 
-def _gh_cli_token() -> Optional[str]:
+def _process_home() -> Optional[Path]:
+    """The home this Hermes process was launched for, where the host can say."""
+    try:
+        import hermes_constants
+    except ImportError:
+        return None
+    for name in ("get_routing_process_hermes_home", "get_process_hermes_home"):
+        read = getattr(hermes_constants, name, None)
+        if callable(read):
+            try:
+                return Path(read())
+            except (OSError, TypeError, ValueError):
+                return None
+    return None
+
+
+def _gh_cli_token(hermes_home: Path) -> Optional[str]:
+    """``gh``'s own login, and never another profile's token this process exported to it.
+
+    ``gh auth token`` answers from its config's login, but ``GITHUB_TOKEN``/``GH_TOKEN`` in its
+    environment shadow that login outright. For a background thread the process's copy is the launch
+    profile's value, which the profile being read was never given — so it is taken out of the child's
+    for every home but the launch profile's own, whose exported token is the fallback it always was.
+
+    ``gh`` keeps one login for the whole machine, so a profile that keeps its own — ``.config/gh``
+    under its home holding a ``hosts.yml``, made by ``GH_CONFIG_DIR=<home>/.config/gh gh auth login``
+    — is asked as itself, and every other profile keeps the login ``hermes`` itself would use.
+    """
     if not shutil.which("gh"):
         return None
+    env = dict(os.environ)
+    launch = _process_home()
+    if launch is None or not same_home(launch, hermes_home):
+        for name in TOKEN_ENV_VARS:
+            env.pop(name, None)
+    own = Path(hermes_home) / ".config" / "gh"
+    if (own / "hosts.yml").is_file():
+        env["GH_CONFIG_DIR"] = str(own)
     try:
         result = subprocess.run(
-            ["gh", "auth", "token"], capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL
+            ["gh", "auth", "token"], capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -103,7 +139,7 @@ def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
             if value:
                 return value, "env"
 
-    value = _gh_cli_token()
+    value = _gh_cli_token(hermes_home)
     return (value, "gh") if value else (None, None)
 
 def _request(path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Any:

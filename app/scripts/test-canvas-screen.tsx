@@ -119,6 +119,8 @@ interface Host {
   at?: number
   /** The canvas a start answers, which is the record alone: a bot writes no page with it. */
   created?: string
+  /** The page the one-canvas read answers with, where a case needs one this file's own is not. */
+  page?: string
 }
 
 /**
@@ -168,15 +170,22 @@ function serveCanvases(host: Host) {
     const one = /\/canvases\/([^/]+)$/.exec(url.pathname)
     if (one) {
       host.reads!.push(url.pathname)
-      // A held read answers the documents the host had when it was asked, as a slow read would.
-      const asked = host.docs
+      // A case may hand the screen a page of its own — one that asks for a library this file's page
+      // does not — and the version it draws is that page: the host answers the record it holds.
+      const answer = (docs: CanvasDoc[] | undefined) => {
+        const canvas = canvasAt(host.version, one[1], docs)
+        if (host.page) canvas.html = host.page
+        return json({ object: "gots.canvas", canvas })
+      }
       if (host.hold) {
         const held = host.hold
         host.hold = undefined
+        // A held read answers the documents the host had when it was asked, as a slow read would.
+        const asked = host.docs
         await held()
-        return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], asked) })
+        return answer(asked)
       }
-      return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], host.docs) })
+      return answer(host.docs)
     }
     if (/\/canvases$/.test(url.pathname) && init?.method === "POST") {
       // A start: the record alone, which is a canvas the bot has written no version of yet — its
@@ -1506,3 +1515,80 @@ test(
     )
   }),
 )
+
+test(
+  "a page asking for leaflet draws its script, its stylesheet and its markers",
+  atWidth(390, async () => {
+    // Leaflet is the one library a page is handed more than a source: its stylesheet names its
+    // images relative to itself, which a srcdoc page resolves nowhere, and its default marker's
+    // images are named by its JavaScript rather than by its CSS. So the page draws leaflet's
+    // stylesheet in its head, the setup right after the source, and every marker image as a `data:`
+    // URI — which is what `img-src data:` already allows.
+    const page = PAGE.replace(
+      "<title>Tip</title>",
+      '<title>Tip</title>\n    <script data-canvas-lib="leaflet"></script>',
+    ).replace("<h1>Tip</h1>", '<h1>Tip</h1>\n    <div id="map" style="height: 240px"></div>')
+    serveCanvases({ version: 3, undos: 0, page })
+    await seedCanvasChat(CANVAS.id)
+    try {
+      await mount(
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(
+            () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
+            "the frame to draw",
+          )
+          const srcdoc =
+            document.querySelector("iframe[data-canvas-frame]")!.getAttribute("srcdoc") ?? ""
+          // The ask is answered where the page put it, with leaflet's own source…
+          assert.match(srcdoc, /window\.L=/, "leaflet's source takes the ask's place")
+          assert.equal(srcdoc.includes("data-canvas-lib"), false, "and no ask is left behind")
+          // …its stylesheet hoisted into the head, with every image a data: URI…
+          const head = srcdoc.slice(srcdoc.indexOf("<head"), srcdoc.indexOf("</head>"))
+          assert.match(head, /\.leaflet-container\b/, "leaflet's stylesheet is in the head")
+          assert.equal(
+            (head.match(/url\("data:image\/png;base64,/g) ?? []).length,
+            3,
+            "the stylesheet's three images are data: URIs",
+          )
+          assert.equal(/url\(images\//.test(srcdoc), false, "no relative image URL survives")
+          assert.ok(
+            head.indexOf(".leaflet-container") > head.indexOf("color-scheme"),
+            "after the theme and the compiled classes",
+          )
+          assert.ok(
+            head.indexOf(".leaflet-container") < head.indexOf("<title>Tip</title>"),
+            "and before anything the page wrote, so the page's own style still wins",
+          )
+          // …and the default marker pointed at data: URIs of the same kind, right after the source.
+          const setup = srcdoc.indexOf("L.Icon.Default.mergeOptions")
+          assert.ok(setup > 0, "the setup prelude is in the document")
+          assert.match(
+            srcdoc.slice(setup),
+            /^L\.Icon\.Default\.mergeOptions\(\{iconUrl:"data:image\/png;base64,[^"]+",iconRetinaUrl:"data:image\/png;base64,[^"]+",shadowUrl:"data:image\/png;base64,[^"]+"\}\)/,
+            "the default marker's icon, retina image and shadow are data: URIs",
+          )
+          const opens = srcdoc.lastIndexOf("</script><script>", setup)
+          assert.ok(
+            opens > srcdoc.indexOf("window.L="),
+            "the setup's script opens where the source's ends",
+          )
+          assert.match(
+            srcdoc.slice(opens + "</script><script>".length, setup),
+            /^\/\*[^<]*$/,
+            "and nothing but the setup's own words sits between the source and the call",
+          )
+        },
+      )
+    } finally {
+      // The store outlives a test: the rest of the file draws c1 at the version the host holds.
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
+

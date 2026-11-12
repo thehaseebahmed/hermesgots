@@ -1,0 +1,30 @@
+{
+  "chart": {
+    "global": "Chart",
+    "bytes": 210082
+  },
+  "date": {
+    "global": "dayjs",
+    "bytes": 7161
+  },
+  "icons": {
+    "global": "lucide",
+    "bytes": 481206
+  },
+  "d3": {
+    "global": "d3",
+    "bytes": 280622
+  },
+  "alpine": {
+    "global": "Alpine",
+    "bytes": 72242
+  },
+  "three": {
+    "global": "THREE",
+    "bytes": 749736
+  },
+  "leaflet": {
+    "global": "L",
+    "bytes": 147552
+  }
+}

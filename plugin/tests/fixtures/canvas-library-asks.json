@@ -1,0 +1,80 @@
+{
+  "about": "One table, two parsers. A page asks for a library with an empty `<script data-canvas-lib=\"NAME\"></script>`, and the host (plugin/canvases.py, `_library_asks`) and the app (app/src/lib/canvas-document.ts, `canvasLibraryPlan`) have to read the same tags as asks and name them the same, or the host refuses a tag the app would have answered. `asks` is what both must answer for `html`. `stored` marks a document a version may already hold from before the host refused a name: it still opens and draws.",
+  "cases": [
+    {
+      "case": "an empty ask",
+      "html": "<script data-canvas-lib=\"d3\"></script>",
+      "asks": [
+        "d3"
+      ]
+    },
+    {
+      "case": "an ask with other attributes, a quoted `>`, and either quote style",
+      "html": "<script class=\"x\" data-note=\"a > b\" data-canvas-lib='chart' data-after=\"1\"></script>",
+      "asks": [
+        "chart"
+      ]
+    },
+    {
+      "case": "an ask with content in it is the page's own script, not an ask",
+      "html": "<script data-canvas-lib=\"d3\">d3.select(\"body\")</script>",
+      "asks": []
+    },
+    {
+      "case": "an ask inside a comment is no ask",
+      "html": "<!-- <script data-canvas-lib=\"d3\"></script> -->",
+      "asks": []
+    },
+    {
+      "case": "either quote style, in document order",
+      "html": "<script data-canvas-lib='icons'></script> <script data-canvas-lib=\"date\"></script>",
+      "asks": [
+        "icons",
+        "date"
+      ]
+    },
+    {
+      "case": "extra whitespace around the name and inside the tag",
+      "html": "<script\n  data-canvas-lib = \"alpine\"\n></script>",
+      "asks": [
+        "alpine"
+      ]
+    },
+    {
+      "case": "a name this host does not carry",
+      "html": "<script data-canvas-lib=\"plotly\"></script>",
+      "asks": [
+        "plotly"
+      ]
+    },
+    {
+      "case": "a version stored before this rule, naming a library the host no longer carries",
+      "html": "<p>Tip</p>\n<script data-canvas-lib=\"highlight\"></script>",
+      "asks": [
+        "highlight"
+      ],
+      "stored": true
+    },
+    {
+      "case": "an empty `<!-->` before an ask is a complete comment, and the ask stands",
+      "html": "<!--> <script data-canvas-lib=\"d3\"></script>",
+      "asks": [
+        "d3"
+      ]
+    },
+    {
+      "case": "a page's own script whose text holds a comment opener",
+      "html": "<script>var note = \"<!--\";</script><script data-canvas-lib=\"d3\"></script>",
+      "asks": [
+        "d3"
+      ]
+    },
+    {
+      "case": "a style's text holding a comment opener",
+      "html": "<style>.a::before{content:\"<!--\"}</style><script data-canvas-lib=\"date\"></script>",
+      "asks": [
+        "date"
+      ]
+    }
+  ]
+}

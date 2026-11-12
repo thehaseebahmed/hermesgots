@@ -744,6 +744,142 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(len(written["tools"]), canvases.TOOLS_MAX)
 
 
+def library_cases() -> list:
+    """The one table of asks both parsers are held to: this suite, and the app's, read the same file."""
+    found = Path(__file__).parent / "fixtures" / "canvas-library-asks.json"
+    return json.loads(found.read_text(encoding="utf-8"))["cases"]
+
+
+class LibraryTest(unittest.TestCase):
+    """A page asks for a library by name, and a name this host doesn't carry is refused whole.
+
+    The ask grammar is the app's, in two languages: `tests/fixtures/canvas-library-asks.json` is the
+    table both suites read, so the host can never refuse a tag the app would have answered. The table
+    itself is read once and cached, a read that fails is tried again on the next write, and a file this install can't read leaves the rule unenforced —
+    a build that lost an artifact must not lose its canvas routes with it.
+    """
+
+    def setUp(self) -> None:
+        self.path = store_of(self)
+        self.canvas = make_canvas(self.path)
+        canvases._LIBRARIES = None
+
+    def tearDown(self) -> None:
+        canvases._LIBRARIES = None
+
+    def test_a_page_of_unterminated_openers_asks_for_nothing(self) -> None:
+        # The same page the app is held to (`test-canvas-document.mjs`): the tag grammar is
+        # ambiguous enough that a backtracking pattern held a plugin thread for minutes over it, and
+        # a write is a thread. The walk reads it once and finds no ask, since no opener closes.
+        page = "<script data-x=1 " * 5000
+        started = time.monotonic()
+        self.assertEqual(canvases._library_asks(page), [])
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_the_host_reads_the_asks_the_app_reads(self) -> None:
+        # One grammar, both sides: every case in the table — an empty ask, other attributes, a quoted
+        # `>`, either quote style, whitespace, content and a comment — answers the same names here as
+        # `canvasLibraryPlan` answers in `scripts/test-canvas-document.mjs`.
+        for case in library_cases():
+            with self.subTest(case["case"]):
+                self.assertEqual(
+                    canvases._library_asks(canvases._markup(case["html"])), case["asks"]
+                )
+
+    def test_a_write_asking_for_a_library_it_does_not_carry_is_refused_naming_it(self) -> None:
+        page = DOCUMENT.replace("<body>", '<body><script data-canvas-lib="plotly"></script>')
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, self.canvas["id"], page)
+        self.assertEqual(
+            str(refused.exception),
+            'The canvas asks for the library "plotly", which this host doesn\'t carry: it carries '
+            "chart, date, icons, d3, alpine, three and leaflet. Ask for one of those instead.",
+        )
+        # Refused whole: the canvas keeps the version it had and nothing was stored.
+        self.assertEqual(canvases.page(self.path, self.canvas["id"])["version"], 0)
+
+    def test_an_edit_asking_for_a_library_it_does_not_carry_is_refused_too(self) -> None:
+        # Both document tools reach the scan through `_commit`, so a name is refused wherever it is
+        # written — an edit can't slip one into a page that was fine.
+        canvases.write(self.path, self.canvas["id"], DOCUMENT)
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.edit(
+                self.path,
+                self.canvas["id"],
+                [
+                    {
+                        "find": "<h1>Tip</h1>",
+                        "replace": '<h1>Tip</h1><script data-canvas-lib="plotly"></script>',
+                    }
+                ],
+            )
+        self.assertIn('"plotly"', str(refused.exception))
+        self.assertEqual(canvases.page(self.path, self.canvas["id"])["version"], 1)
+
+    def test_every_name_the_host_carries_is_stored(self) -> None:
+        for number, name in enumerate(canvases._libraries(), start=1):
+            with self.subTest(name=name):
+                page = DOCUMENT.replace(
+                    "<body>", f'<body><script data-canvas-lib="{name}"></script>'
+                )
+                self.assertEqual(canvases.write(self.path, self.canvas["id"], page)["version"], number)
+
+    def test_an_ask_in_a_comment_refuses_nothing(self) -> None:
+        # The rule is read off the markup, where a commented tag is no tag: a page that writes the
+        # ask out to explain itself is not a page asking for it, on either side.
+        page = DOCUMENT.replace(
+            "<body>", '<body><!-- <script data-canvas-lib="plotly"></script> -->'
+        )
+        self.assertEqual(canvases.write(self.path, self.canvas["id"], page)["version"], 1)
+
+    def test_a_stored_version_naming_a_library_no_longer_carried_still_reads_back(self) -> None:
+        # A version written before this rule — or by a host that carried a name this one doesn't —
+        # is still the document the canvas holds. The refusal is at the write, and nothing that reads
+        # a version consults the table, so the page the user was looking at opens and draws.
+        stored = next(case for case in library_cases() if case.get("stored"))
+        page = DOCUMENT.replace("<body>", f'<body>{stored["html"]}')
+        conn = connect(self.path)
+        try:
+            conn.execute(
+                "INSERT INTO canvas_versions (canvas_id, version, html, tools, at) "
+                "VALUES (?, 1, ?, '[]', 1)",
+                (self.canvas["id"], page),
+            )
+            conn.execute("UPDATE canvases SET version = 1 WHERE id = ?", (self.canvas["id"],))
+        finally:
+            conn.close()
+        read = canvases.page(self.path, self.canvas["id"])
+        self.assertEqual((read["version"], read["html"]), (1, page))
+        # And the tool a bot would call answers it whole, refusing nothing.
+        with mock.patch.object(canvases, "_session_canvas", return_value=self.canvas["id"]):
+            answered = json.loads(canvases.handle_read({}, session_id=self.canvas["session_id"]))
+        self.assertEqual(answered["html"], page)
+
+    def test_a_libraries_file_that_cannot_be_read_leaves_the_rule_unenforced(self) -> None:
+        # The table is a committed artifact beside the guide. An install that lost it, or one whose
+        # copy is no JSON, is a host that can't say what it carries: it keeps answering and storing
+        # rather than refusing a write for a rule it can't read.
+        page = DOCUMENT.replace("<body>", '<body><script data-canvas-lib="plotly"></script>')
+        folder = self.path.parent
+        broken = folder / "broken-libraries.json"
+        broken.write_text("{not json", encoding="utf-8")
+        for number, unusable in enumerate((folder / "absent-libraries.json", broken), start=1):
+            with self.subTest(file=unusable.name):
+                with mock.patch.object(canvases, "LIBRARIES_FILE", unusable):
+                    canvases._LIBRARIES = None
+                    self.assertEqual(canvases._libraries(), {})
+                    self.assertEqual(
+                        canvases.write(self.path, self.canvas["id"], page)["version"], number
+                    )
+        # A read that failed is tried again rather than remembered: the next write, with the table
+        # back in place, is refused as it should be — one bad read must not leave the rule off for
+        # the life of the process.
+        canvases._LIBRARIES = None
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, self.canvas["id"], page)
+        self.assertIn("plotly", str(refused.exception))
+
+
 class SessionTest(unittest.TestCase):
     """A canvas's page tools reach only its session, while the list and the two data tools reach
     every one — a compacted session included."""

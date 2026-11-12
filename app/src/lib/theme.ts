@@ -18,6 +18,26 @@ export function themeLabel(value: string | undefined) {
   return THEMES.find((theme) => theme.value === (value ?? "system"))?.label ?? THEMES[0].label
 }
 
+let reader: CanvasRenderingContext2D | null | undefined
+
+/**
+ * Computed colours come back as oklch(), which browser chrome may not parse; hex always works. An
+ * alpha the colour carries rides along as its fourth pair — dark mode's `--border` is white at a
+ * tenth — so a reader can tell a solid colour from a translucent one. The one context is made for
+ * the page's life, and cleared before each read so a translucent colour never blends into the last.
+ */
+export function toHex(color: string) {
+  if (reader === undefined)
+    reader = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+  if (!reader) return color
+  reader.clearRect(0, 0, 1, 1)
+  reader.fillStyle = color
+  reader.fillRect(0, 0, 1, 1)
+  const [r, g, b, a] = reader.getImageData(0, 0, 1, 1).data
+  const pairs = a === 255 ? [r, g, b] : [r, g, b, a]
+  return `#${pairs.map((n) => n.toString(16).padStart(2, "0")).join("")}`
+}
+
 /**
  * Whether the app is drawing dark, as next-themes resolved the stored choice: `system` follows the
  * OS, and a page that isn't mounted yet reads as light.

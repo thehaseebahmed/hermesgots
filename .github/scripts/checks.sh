@@ -160,6 +160,11 @@ app() {
   # start until it is done.
   gate pnpm install --frozen-lockfile
 
+  # Then the canvas libraries every later gate can need: the route imports their sources as text, and
+  # a clean checkout has none of them (ADR 0146). It writes source, so it runs alone, before the
+  # gates that read the tree.
+  gate pnpm build:canvas-libraries
+
   # Then the gates that share nothing run together. They are independent by construction — lint reads
   # the source, `tsc -b` writes only its own build info, neither test tier writes anything, and the
   # build writes `dist/` — and one after another they were the job's whole wall clock. The two test
@@ -184,6 +189,15 @@ app() {
   # assertion runs over the build above — unwired it could not have failed. It waits for the build,
   # because it reads what the build wrote.
   gate node scripts/check-openui-chunks.mjs
+
+  # Mermaid's own tier: every chunk carrying it under its own path, none of them precached, one
+  # route answering that path, and the entry carrying none of it. Reads the build above.
+  gate node scripts/check-mermaid-chunks.mjs
+
+  # The same tier for the canvas's libraries: each one a chunk of its own, reached only by a
+  # dynamic import from the canvas route's chunk, which carries none of them. This is the build's
+  # half of the claim `pnpm e2e canvas` counts on the other side — what a visit actually fetches.
+  gate node scripts/check-canvas-library-chunks.mjs
 }
 
 plugin() {

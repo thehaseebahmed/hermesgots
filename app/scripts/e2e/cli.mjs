@@ -506,6 +506,11 @@ export const FLOWS = {
     script: "regression-submission.mjs",
     about: "Concurrent sends start one run and get one reply",
   },
+  mermaid: {
+    script: "e2e/mermaid.mjs",
+    about:
+      "A reply's closed ```mermaid fence draws its frame where the fence stood — labelled mermaid, the copy control in it, no code block left — and the same fence, watched state by state as the reply arrives, draws as code with no frame until the closing fence lands, after which the frame is the only thing drawn",
+  },
 }
 
 const HELP = `Usage: pnpm e2e <command> [options]      (or .agents/skills/e2e-testing/e2e from the repo root)
@@ -594,11 +599,16 @@ async function serve(name, port, command, args, env = {}) {
   }
   throw new Error(`${name} didn't start on ${port}; see ${join(logs, `${name}.log`)}`)
 }
-const serveApp = () =>
-  appUrl ??
+const serveApp = () => {
+  if (appUrl) return appUrl
+  // The canvas route imports the libraries' generated sources as text, so a clean checkout has none
+  // of them until the build script makes them (ADR 0147): run it before Vite, which fails a literal
+  // `?raw` import it cannot resolve.
+  const built = spawnSync("pnpm", ["build:canvas-libraries"], { cwd: appDir, stdio: "inherit" })
+  if (built.status !== 0) throw new Error("the canvas libraries didn't build; see app/src/lib/generated")
   // Bound to 127.0.0.1 so the URL every probe and flow uses reaches it whatever `localhost` means
   // here (the e2e-testing skill's gotcha).
-  serve("app", APP_PORT, "pnpm", [
+  return serve("app", APP_PORT, "pnpm", [
     "exec",
     "vite",
     "--port",
@@ -607,6 +617,7 @@ const serveApp = () =>
     "--host",
     "127.0.0.1",
   ])
+}
 const serveMock = (name) =>
   serve(`mock-${name}`, MOCKS[name].port, "node", ["scripts/mock-hermes.mjs"], MOCKS[name].env)
 function stopStarted() {

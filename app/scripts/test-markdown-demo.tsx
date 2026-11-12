@@ -42,6 +42,7 @@ test("the article draws one of every element the renderer can", async () => {
       drawn("div[data-md-code]").length >= 3,
       "a fenced block, a bare one and an indented one",
     )
+    assert.equal(drawn("[data-slot=diagram]").length, 1, "a diagram, where its fence stood")
 
     assert.ok(drawn("ul").length >= 3, "bullets, a nested list and a task list")
     assert.ok(drawn("ol").length, "a numbered list")

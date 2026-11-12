@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **93 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 93 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **94 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 94 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 38 |
+| stay | 39 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **93** |
+| **total** | **94** |
 
-Of those 93, 87 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 86 distinct files) and 6 point at the older
+Of those 94, 88 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 87 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -186,23 +186,33 @@ only place the app is asked, and it fails at the base commit on the button alone
 A twenty-ninth stay has arrived with a bot's own screen (G1): `bot-chats`, because what it walks is the
 browser's session history — the entry a page stands on, the address a press walks to, and the stack a
 reload leaves behind — which no DOM without a session history, and no harness that stubs
-`history.back`, has. So the registry holds 93 + 1 = **94** keys, the component verdicts unchanged at
+`history.back`, has. So the registry holds 92 + 1 = **93** keys, the component verdicts unchanged at
+**51**, the plugin verdicts **2**, the deletes **2**, and the stays are 37 + 1: **38**.
+
+A thirtieth stay has arrived with the diagrams branch: `mermaid`, because the half of the claim a
+lower tier cannot hold is the clock a fence arrives on — a reply's text is written to the device in
+batches as the host's pieces land, so a fence whose body has landed and whose closer has not is a
+state of the page, and a `Markdown` handed the finished string passes whether or not the streaming
+path draws that fence as the code it is before the frame takes its place. The frame's place, between
+the reply's own words, is layout, which a DOM without a layout engine cannot put. What the same flow
+grows into is mermaid's own `getBBox` measurement and the sheet a tap opens, neither of them a
+component tier's. So the registry holds 93 + 1 = **94** keys, the component verdicts unchanged at
 **51**, the plugin verdicts **2**, the deletes **2**, and the stays are 38 + 1: **39**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the thirty-seven fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the thirty-nine fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 92 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 37
+grep -c '^| `' docs/e2e-flow-audit.md                           # 94 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 39
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 92 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 94 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -481,7 +491,17 @@ component test but the sheet's own box.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | ----------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `canvas` | stay | A canvas on a phone at 390px, against the mock: made from a prompt on `/canvas`, landing on the canvas's own **edit** screen at version 0 with "Your bot is building it…" and no frame; the header's `Preview` appearing with the first version and drawing the page; a box ticked on the page with the host keeping the tick as the canvas's own data; a page whose Leave button sets `location` to an outside URL leaving the app on the canvas's address with no request to that URL and the canvas's own document drawn again in the frame; an edit sent from the edit screen landing as version 2 with the box still ticked; `Preview` drawing version 2 with it; and Undo drawing version 1 with it still ticked; then the edit screen's `Point at the page` row sending the reader to the canvas's own address with `?point=1`, the line `Tap an element on the page` over the page, a pointer over the page's own `h1` outlining it and a tap on that `h1` landing back on the edit screen with the element's own words — `Deck checklist` — as the field's chip, which the chip's own cross then takes off. | A sandboxed `srcdoc` frame whose opaque origin the component tier stands in for with a fake, a real navigation being refused, and the mock host's own clock landing a version while the reader sits on the other screen. The outside-navigation leg is the browser's: ADR 0114 records the parent's `frame-src 'self'` blocking it in Chromium, checked by hand, and this is the only place it is measured — the refusal leaves the browser's error page, so the flow is also what holds the screen drawing its version again there. Pointing is the browser's for the same reason: the outline that follows the pointer and the tap that answers it are the page's own script running inside that document, posted back through the bridge — a component test can post the message a page would have sent, but no DOM without a frame can put a pointer over the page or take the tap that sends it. | Nothing: a stay is replaced by itself. The two screens' addresses, the flip, Undo's request, the frame's attributes and policy, and the chip's arrival, words, selector and cross are `test-canvas-screen.tsx`'s; the page's own outline and answer at the lane's width are `test-canvas-point.tsx`'s. What neither holds is the document that actually paints the outline and takes the tap, which is the leg this flow walks. |
+| `canvas` | stay | A canvas on a phone at 390px, against the mock: made from a prompt on `/canvas`, landing on the canvas's own **edit** screen at version 0 with "Your bot is building it…" and no frame; the header's `Preview` appearing with the first version and drawing the page, the page asking for `chart` and `d3` by name and drawing with `window.Chart` and `d3.select` inside the frame; a box ticked on the page with the host keeping the tick as the canvas's own data; a page whose Leave button sets `location` to an outside URL leaving the app on the canvas's address with no request to that URL and the canvas's own document drawn again in the frame; an edit sent from the edit screen landing as version 2 with the box still ticked; `Preview` drawing version 2 with it; and Undo drawing version 1 with it still ticked; then the edit screen's `Point at the page` row sending the reader to the canvas's own address with `?point=1`, the line `Tap an element on the page` over the page, a pointer over the page's own `h1` outlining it and a tap on that `h1` landing back on the edit screen with the element's own words — `Deck checklist` — as the field's chip, which the chip's own cross then takes off; and what a visit fetches: a canvas whose page asks for no library fetches no library chunk at all and draws from the platform alone, and one whose page asks for three by name fetches each of those three chunks once and draws with all three inside the frame. | A sandboxed `srcdoc` frame whose opaque origin the component tier stands in for with a fake, a real navigation being refused, and the mock host's own clock landing a version while the reader sits on the other screen. The outside-navigation leg is the browser's: ADR 0114 records the parent's `frame-src 'self'` blocking it in Chromium, checked by hand, and this is the only place it is measured — the refusal leaves the browser's error page, so the flow is also what holds the screen drawing its version again there. Pointing is the browser's for the same reason: the outline that follows the pointer and the tap that answers it are the page's own script running inside that document, posted back through the bridge — a component test can post the message a page would have sent, but no DOM without a frame can put a pointer over the page or take the tap that sends it. The libraries are the browser's for the same reason: each ask is answered with a chunk of its own that the app fetches and inlines where the ask stood, and the component tier's loader loads no `?raw` chunk at all — so only a visit shows that a page drawn from those chunks, one per name, is the page the bundle used to draw. What a visit fetches is the browser's to say and no build check's: `scripts/check-canvas-library-chunks.mjs` reads the emitted output — that each library is one asset, imported dynamically by the canvas route's chunk and carried by no other — and an emitted output that is right is still visited by a page whose asks were read wrong, or fetched twice by a draw that ran again. Only a visit records the requests a phone makes, and the frame mounting is what ends that window rather than a fixed wait: it is drawn only once the sources the page asked for are in hand. | Nothing: a stay is replaced by itself. The two screens' addresses, the flip, Undo's request, the frame's attributes and policy, and the chip's arrival, words, selector and cross are `test-canvas-screen.tsx`'s; the page's own outline and answer at the lane's width are `test-canvas-point.tsx`'s. What neither holds is the document that actually paints the outline and takes the tap, which is the leg this flow walks. |
+
+### A reply's diagram — the mermaid branch
+
+One key, a stay. A closed mermaid fence is drawn as a frame wherever the app draws a reply, and what
+no component test can see is the fence arriving: the app writes a reply in batches as the host's
+pieces land, so its body and its closer are two states of one page.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mermaid` | stay | A reply carrying a closed `mermaid` fence draws a `[data-slot=diagram]` frame where the fence stood — between the reply's paragraph above it and the one below — with no `[data-md-code]` left for that fence, the frame labelled `mermaid` and carrying the copy control a code block does; the reply then being held by the mock with that fence still open, so the held screen is read rather than raced: the fence stands as a code block, no frame is drawn, and not one of mermaid's chunks has been asked for; released to its closer the frame draws where the fence stood while the mock holds the words after it, and only then does the reply end, with every state recorded from the send on showing the fence as a code block first, the frame from the closing fence on, and no code block drawn again after it. | Both halves are the page's own writing and the app's own batching. A fence's body and its closer reach the device as separate writes, so the code-before-frame arrangement exists only while a reply is really arriving: a component test handed the finished string has one state, and it would pass whether or not the streaming path draws the fence as the code it is first. The mock's own gate (`POST /__mock/diagram`) is what makes the held state a state the flow can read rather than a window it has to be quick enough to see. The frame's place between the reply's own words is layout, which a DOM without a layout engine cannot put. What the same flow grows into — mermaid's own `getBBox` measurement of a drawing, and the sheet a tap opens — is a browser's as well. | Nothing yet: `scripts/test-mermaid.tsx` holds the frame, the tone a bubble's frame takes, the copy control's source, and the fences that stay code (`mermaid extra`, an indented one, a list's, an unterminated one). The streaming window and the frame's place in the reply are only here. |
 
 ## The coverage a demotion leaves with no home
 

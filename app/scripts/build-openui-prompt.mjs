@@ -2,9 +2,10 @@
  * Writes the chat's system-prompt section from the library: `plugin/openui/prompt.txt`. Run it with
  * `pnpm build:openui-prompt`; a test fails the gates on drift or an oversize section.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { readFileSync } from "node:fs"
 import { fileURLToPath, pathToFileURL } from "node:url"
+
+import { writePromptArtifact } from "./prompt-artifact.mjs"
 
 import { library } from "../src/components/openui/library.tsx"
 import { listedRules } from "../src/components/openui/prose.ts"
@@ -164,29 +165,13 @@ export function render() {
 }
 
 function write() {
-  const text = render()
-  if (text.length > MAX_CHARS) {
-    console.error(
-      `openui prompt: ${text.length} characters, over the host's ${MAX_CHARS}-character ` +
-        `section limit by ${text.length - MAX_CHARS}. A section that size is dropped whole, so trim ` +
-        `a rule, the preamble, a component description or a chart's summary rather than truncating.`,
-    )
-    process.exit(1)
-  }
-  let previous = null
-  try {
-    previous = readFileSync(ARTIFACT, "utf8").length
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error
-  }
-  const grown = previous === null ? null : text.length - previous
-  const delta = grown === null ? "first write" : `${grown >= 0 ? "+" : ""}${grown} characters`
-  mkdirSync(dirname(ARTIFACT), { recursive: true })
-  writeFileSync(ARTIFACT, text, "utf8")
-  console.log(
-    `openui prompt: wrote ${ARTIFACT} — ${text.length} characters, ` +
-      `${MAX_CHARS - text.length} headroom of ${MAX_CHARS}, ${delta} against the checked-in artifact`,
-  )
+  writePromptArtifact({
+    artifact: ARTIFACT,
+    text: render(),
+    max: MAX_CHARS,
+    label: "openui prompt",
+    advice: "trim a rule, the preamble, a component description or a chart's summary",
+  })
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
