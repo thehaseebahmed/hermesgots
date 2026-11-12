@@ -197,9 +197,9 @@ for (const [width, collapsed, panes] of CASES) {
           "the list's own rows",
         )
         assert.equal(
-          await page.locator(`main ul a[href="${botChat}"][aria-current="page"]`).count(),
-          1,
-          "with the chat it covers marked as the open row",
+          await page.locator(`main ul a[href="${botChat}"][aria-current]`).count(),
+          0,
+          "and no row of it marked, the chat it covers not being open beside it",
         )
         await shot("bot-chats-list")
         await page.getByRole("button", { name: "Back to chat" }).click()

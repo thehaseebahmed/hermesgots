@@ -48,7 +48,6 @@ import {
 } from "@/lib/db"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
-import { OPENED_CHAT } from "@/lib/nav"
 import {
   effectiveProvider,
   limitNotice,
@@ -276,7 +275,6 @@ export function ChatActions({
         {listPath && (
           <Link
             to={listPath}
-            state={OPENED_CHAT(chat.id)}
             aria-label={`Chats with ${profile?.name ?? "the bot"}${unread ? ", unread chats" : ""}`}
             className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
           >

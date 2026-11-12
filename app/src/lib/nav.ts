@@ -2,22 +2,22 @@ import { useCallback, type MouseEvent } from "react"
 import { useNavigate } from "react-router"
 
 /**
- * The `onClick` for a link to the thread the address already is: it stays an anchor — the sentence
- * reads the same and `aria-current` marks it here — but goes nowhere, since reopening would only
- * redraw the pane the thread is already in.
- */
-export const stayHere = (current: boolean) =>
-  current ? (event: MouseEvent<HTMLAnchorElement>) => event.preventDefault() : undefined
-
-/**
  * The state a room's screen and a routine's run give the entry they leave a bot's list in: the reader
  * stepped back onto the list, so it draws itself rather than landing in the chat behind it.
  */
 export const BACK_ON_LIST = { listed: true }
 
-export const OPENED_CHAT = (id: string) => ({ open: id })
-
-export const openedChat = (state: unknown) => (state as { open?: string } | null)?.open
+/**
+ * The `onClick` for a link that opens a top-level screen: the plain press opens it as the app's only
+ * entry, and a press meant for a new tab or window — a modifier held, or a button other than the
+ * left — is left to the link the browser already has.
+ */
+export const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
+  if (event.defaultPrevented || event.button !== 0) return
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  open()
+}
 
 /**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
@@ -29,12 +29,17 @@ export const depth = () => (window.history.state as { idx?: number } | null)?.id
 export function useNav() {
   const navigate = useNavigate()
 
-  /** Opens a top-level screen as the only entry, dropping whatever was opened before it. */
+  /**
+   * Opens a top-level screen as the only entry, dropping whatever was opened before it. `state` rides
+   * the entry the screen takes, so a screen that names what it belongs to still can.
+   */
   const root = useCallback(
-    (to: string) => {
+    (to: string, state?: Record<string, unknown>) => {
       const steps = depth()
-      if (!steps) return void navigate(to, { replace: true })
-      window.addEventListener("popstate", () => navigate(to, { replace: true }), { once: true })
+      if (!steps) return void navigate(to, { replace: true, state })
+      window.addEventListener("popstate", () => navigate(to, { replace: true, state }), {
+        once: true,
+      })
       window.history.go(-steps)
     },
     [navigate],

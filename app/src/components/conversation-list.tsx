@@ -39,7 +39,7 @@ import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { useNav } from "@/lib/nav"
+import { opensAsRoot, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -72,9 +72,7 @@ function RootLink({
       replace
       onClick={(event) => {
         onClick?.(event)
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-        event.preventDefault()
-        root(to)
+        opensAsRoot(() => root(to))(event)
       }}
       {...props}
     />

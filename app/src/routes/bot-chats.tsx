@@ -48,7 +48,7 @@ import { landingChat } from "@/lib/last-chat"
 import { useXLarge } from "@/lib/media"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
-import { BACK_ON_LIST, depth, openedChat, useNav } from "@/lib/nav"
+import { BACK_ON_LIST, depth, opensAsRoot, useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { quietly } from "@/lib/report"
@@ -75,7 +75,7 @@ export function BotChatsPage() {
   // drawn for a frame.
   if (landing) return null
   if (pane) return <NoChatOpen />
-  return <BotChatsList profileId={profileId} selected={place.open} pushed={!place.root} />
+  return <BotChatsList profileId={profileId} place={place.root ? "root" : "pushed"} />
 }
 
 function useListPlace() {
@@ -86,7 +86,7 @@ function useListPlace() {
   // The landing fires at the app's entry, arrived at forwards, with nobody having asked for the
   // list: a step back onto it arrives as a `POP`, and a list a chat pushed or a screen stepped back
   // onto is either not the entry or carries the marker. Each draws the list rather than a chat.
-  return { root, open: openedChat(state), landed: root && type !== "POP" && !listed }
+  return { root, landed: root && type !== "POP" && !listed }
 }
 
 function useLanding(profileId: string | undefined, enabled: boolean | undefined, landed: boolean) {
@@ -111,7 +111,7 @@ function useLanding(profileId: string | undefined, enabled: boolean | undefined,
 }
 
 export function BotChatsPane({ pane }: { pane: BotPane }) {
-  return <BotChatsList profileId={pane.profileId} selected={pane.selected} />
+  return <BotChatsList profileId={pane.profileId} selected={pane.selected} place="pane" />
 }
 
 function NoChatOpen() {
@@ -132,13 +132,12 @@ function NoChatOpen() {
 function BotChatsList({
   profileId,
   selected,
-  pushed,
+  place,
 }: {
   profileId: string
-  /** The chat this list stands over: beside it in the pane, or under it where it was pushed. */
+  /** The chat drawn open beside this list, which is the pane's to name and no screen's. */
   selected?: string
-  /** Whether this list is a screen pushed over the chat it covers rather than the app's own entry. */
-  pushed?: boolean
+  place: ListPlace
 }) {
 
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
@@ -180,25 +179,36 @@ function BotChatsList({
   const seated = (rooms ?? [])
     .filter((room) => room.seated.includes(profileId))
     .map((room) => roomRowOf(room.chat, room.faces, room.said))
-  return <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} pushed={pushed} />
+  return (
+    <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} place={place} />
+  )
 }
+
+/**
+ * Where a bot's list stands: the pane beside a chat (`pane`), the app's own entry (`root`), or the
+ * screen a chat's own control pushed over it (`pushed`). Which one it is settles two things and
+ * nothing else: whether its rows open beside it or as the app's root, and what its back leads to.
+ */
+type ListPlace = "pane" | "root" | "pushed"
 
 function ChatList({
   bot,
   rows,
   selected,
-  pushed,
+  place,
 }: {
   bot: Profile
   rows: ChatListRow[]
   selected?: string
-  pushed?: boolean
+  place: ListPlace
 }) {
   const navigate = useNavigate()
-  const { back } = useNav()
+  const { root, back } = useNav()
+  const pane = place === "pane"
   // What stands behind this screen, as far as the entry that opened it says: a chat's own control is
-  // the only thing that pushes a list, but a typed or restored address can land it on any entry.
-  const backToChat = Boolean(selected)
+  // the only thing that pushes a list, so a list pushed over one leads back to a chat; a typed or
+  // restored address can land this list on any entry, and then nothing of this screen says which.
+  const backToChat = place === "pushed"
   const marks = useReadMarks()
   // The press is the app's at its first entry — where this list stands when nothing opened it — and a
   // step back wherever something did, which `back()` answers itself.
@@ -227,12 +237,16 @@ function ChatList({
   const shown = useMemo(() => chatList(kept, query), [kept, query])
   const empty = kept.length === 0 ? emptyOf(filter) : shown.length === 0 ? "No chats match." : null
 
-  // A chat is made first and the address moved after it: onto the list's own entry where the list
-  // was pushed, so a switch costs no rung, and above it where the list is the root. The entry says
-  // which bot it is for, so the list keeps its lane while the new row loads.
+  // A chat is made first and the address moved after it, so the screen that draws it is the one this
+  // list opens. The entry says which bot it is for, so the shell keeps the list's lane while the new
+  // row loads.
+  const openChat = (to: string) => {
+    if (pane) navigate(to, { state: { bot: bot.id } })
+    else root(to, { bot: bot.id })
+  }
   const start = async () => {
     const chat = await beginChat(bot.id)
-    navigate(`/c/${chat.id}`, { state: { bot: bot.id }, replace: pushed })
+    openChat(`/c/${chat.id}`)
   }
 
   return (
@@ -241,7 +255,7 @@ function ChatList({
         pinned
         showBot={false}
         leading={
-          pushed ? (
+          place === "pushed" ? (
             <BackButton
               label={backToChat ? "Back to chat" : "Back"}
               onClick={back()}
@@ -308,9 +322,13 @@ function ChatList({
                 mark={marks[row.id]}
                 selected={row.id === selected}
                 profileId={bot.id}
-                // Only a chat of the bot's takes the list's place: a room and a routine's run are
-                // screens of their own whose way back is this list, so they stay above it.
-                replace={pushed && !row.room && !row.routine}
+                // A chat of the bot's opens as the app's root, taking this list's place along with
+                // whatever stood behind it: the chat picked is the chat its bot opens from then on. A
+                // room and a routine's run are screens of their own whose way back is this list, so
+                // they stay above it, and a pane's rows open beside the list rather than over it.
+                pick={
+                  pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)
+                }
                 live={row.session ? runs[row.session] : undefined}
               />
             </li>
@@ -358,7 +376,7 @@ export function BotChatItem({
   mark,
   selected,
   profileId,
-  replace,
+  pick,
   live,
 }: {
   row: ChatListRow
@@ -366,8 +384,8 @@ export function BotChatItem({
   mark?: number
   selected?: boolean
   profileId: string
-  /** Whether the pick takes the entry the list itself stands on, which a list over a chat does. */
-  replace?: boolean
+  /** Where a plain press opens this row's chat as the app's only entry: set on a screen, never a pane. */
+  pick?: () => void
   /** What the host says of this chat's run: `running` beats a reply still streaming here. */
   live?: LiveRunStatus
 }) {
@@ -397,7 +415,11 @@ export function BotChatItem({
       when={chatAge(row.at, now)}
       line={pinnedLine(row.pinned, row.needs ?? row.line)}
       warn={Boolean(row.needs)}
-      link={{ to: `/c/${row.id}`, state: { bot: profileId }, replace }}
+      link={{
+        to: `/c/${row.id}`,
+        state: { bot: profileId },
+        onClick: pick ? opensAsRoot(pick) : undefined,
+      }}
     />
   )
 }
