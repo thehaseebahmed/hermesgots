@@ -181,32 +181,50 @@ ${head}
 }
 
 /**
+ * A canvas's record, as the host keeps one: the same fields filled the same way whether a flow
+ * seeded the canvas or a chat asked for it, so a field added here reaches both.
+ */
+function newCanvas({ title, prompt, version, versions, tools }) {
+  const chatId = randomUUID()
+  const now = Date.now()
+  return {
+    id: `c_${randomUUID().slice(0, 8)}`,
+    title,
+    session_id: `gots-${chatId}`,
+    chat_id: chatId,
+    version,
+    pinned: false,
+    archived: false,
+    // Nothing until a version is written: a canvas still being built draws its own mark.
+    image: null,
+    at: now,
+    created_at: now,
+    versions,
+    docs: [],
+    tools,
+    grants: [],
+    prompt,
+  }
+}
+
+/**
  * Seeds one fixture as a canvas at its first version, so a flow can open a page whose asks it
  * knows without waiting for a bot to write one: the page is the fixture's and nothing else is.
  */
 export function seedCanvas(store, name) {
   const fixture = FIXTURES[name]
   if (!fixture) return null
-  const chatId = randomUUID()
-  const now = Date.now()
-  const canvas = {
-    id: `c_${randomUUID().slice(0, 8)}`,
+  const canvas = newCanvas({
     title: fixture.title,
-    session_id: `gots-${chatId}`,
-    chat_id: chatId,
-    version: 1,
-    pinned: false,
-    archived: false,
-    image: null,
-    at: now,
-    created_at: now,
-    versions: [{ version: 1, html: fixturePage(fixture), tools: [] }],
-    docs: [],
-    tools: [],
-    grants: [],
     prompt: fixture.title,
-  }
+    version: 1,
+    versions: [{ version: 1, html: fixturePage(fixture), tools: [] }],
+    tools: [],
+  })
   store.canvases.set(canvas.id, canvas)
+  // By its session too, as the host indexes one: a flow that opens a seeded canvas's chat and sends
+  // an edit has to find the canvas it belongs to.
+  store.bySession?.set(canvas.session_id, canvas)
   return canvas
 }
 
@@ -519,32 +537,20 @@ export async function handleCanvas(
     {
       const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
       if (!prompt) return fail(400, "A canvas needs a prompt to build it from."), true
-      const now = Date.now()
       const title = titleOf(prompt)
       // The chat the canvas is edited in is the one `new_chats.open_thread` makes: an app-kind id, a
       // session named for it, the canvas's own name marked `titleEdited`, and `canvasId` so no list
       // or card ever draws it (canvases.py's `create`).
-      const chatId = randomUUID()
-      const canvas = {
-        id: `c_${randomUUID().slice(0, 8)}`,
+      const canvas = newCanvas({
         title,
-        session_id: `gots-${chatId}`,
-        chat_id: chatId,
+        prompt,
         version: 0,
-        pinned: false,
-        archived: false,
-        // Nothing until a version is written: a canvas still being built draws its own mark.
-        image: null,
-        at: now,
-        created_at: now,
         versions: [],
-        docs: [],
         // One declared tool, so the canvas's options have a row and a page that calls it (from a
         // devtools console, or a canvas someone edits) meets the consent dialog.
         tools: ["files.search"],
-        grants: [],
-        prompt,
-      }
+      })
+      const { chat_id: chatId } = canvas
       canvases.set(canvas.id, canvas)
       bySession.set(canvas.session_id, canvas)
       openChat?.({
@@ -554,7 +560,7 @@ export async function handleCanvas(
         title,
         canvasId: canvas.id,
         opener: prompt,
-        at: now,
+        at: canvas.at,
       })
       // The gap is what lets the screen draw version 0 — "your bot is building it" — before the
       // page lands, with room for a phone to raise its sheet in the meantime.
