@@ -59,6 +59,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from . import (
+    canvas_docs,
     chats,
     cleanup,
     events,
@@ -1134,36 +1135,19 @@ def delete(
 
 # --- the data ------------------------------------------------------------------------------------
 
-# One order for every read, so a page's list of a collection is the same however its writes landed.
-_DOCUMENTS = "SELECT collection, id, value, at FROM canvas_docs WHERE canvas_id = ?"
-
-
-def _document(collection: str, doc_id: str, value: str, at: int) -> Dict[str, Any]:
-    """One row of ``canvas_docs`` as the document it holds: a collection, an id, the document and
-    the host's clock for it."""
-    return {"collection": collection, "id": doc_id, "doc": json.loads(value), "at": at}
-
-
 def _documents(
     conn: sqlite3.Connection,
     canvas_id: str,
     collection: Optional[str] = None,
     doc_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """A canvas's documents, ordered by collection then id, narrowed by whichever name is given.
+    """A canvas's documents as one array — the whole of its data, one collection's or one
+    document — which is what ``current``, ``undo`` and a read of the data hand over.
 
-    The narrowing is the read's own: a page or a bot asking for one document costs one point lookup
-    on the table's primary key rather than a parse of everything the canvas keeps.
+    The rule that reads them is ``canvas_docs``'s, so a document's shape and the order they come in
+    are decided in one place rather than here.
     """
-    query, args = _DOCUMENTS, [canvas_id]
-    if collection is not None:
-        query += " AND collection = ?"
-        args.append(collection)
-    if doc_id is not None:
-        query += " AND id = ?"
-        args.append(doc_id)
-    rows = conn.execute(query + " ORDER BY collection, id", args).fetchall()
-    return [_document(*row) for row in rows]
+    return list(canvas_docs.each(conn, canvas_id, collection, doc_id=doc_id))
 
 
 def data(
@@ -1291,7 +1275,7 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         )
     # The answer is the stored document read back, not the caller's object: what a page reads next
     # is exactly this, whatever it sent.
-    return _document(collection, doc_id, value, now)
+    return canvas_docs.stored(collection, doc_id, value, now)
 
 
 def remove_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any) -> Dict[str, Any]:
