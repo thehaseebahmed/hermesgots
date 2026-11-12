@@ -13,12 +13,15 @@ import {
   click,
   find,
   findAll,
+  findText,
   json,
   missing,
   mount,
   seedSettings,
   settle,
+  type,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 type Row = {
@@ -977,5 +980,101 @@ test("a Host with no view: the category and its rows toggle without opening anyt
     await until(async () => /Off/.test(row("ops-one")?.textContent ?? ""), "the row to say Off")
     assert.ok(missing("[data-skill-sheet]"), "and nothing opened")
     assert.equal(here(), "/settings/bots/bot-1/skills", "the tab keeps its address")
+  })
+})
+
+/**
+ * The pills above the sections. Named by the group's own label rather than a bare button, because the
+ * search field is a group too once it holds words, with a clear button inside it.
+ */
+const filterSkills = () => findAll('[role="group"][aria-label="Filter skills"] button')
+const pillWord = (label: string) => filterSkills().find((one) => wordsOf(one) === label) ?? null
+const searchSkills = () => find('input[aria-label="Search skills"]')
+/** Every skill row the tab draws, in the order it draws them, whatever section holds them. */
+const drawnRows = () => findAll("[data-skill]").map((one) => one.getAttribute("data-skill"))
+
+test("the search and the pills narrow the tab, and the words narrow what the pill kept", async () => {
+  await seed("skills-filter", ["skills"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.ok(searchSkills(), "the tab has a field for its words")
+    assert.deepEqual(
+      filterSkills().map(wordsOf),
+      ["All", "ops", "plugin", "quality", "review"],
+      "All, then every category the tab holds, alphabetically",
+    )
+    assert.equal(
+      pillWord("All")?.getAttribute("aria-pressed"),
+      "true",
+      "All is what the tab opens on",
+    )
+    assert.deepEqual(
+      drawnRows(),
+      [
+        "browse",
+        "deploy",
+        "lint",
+        "pr-land",
+        "pr-review",
+        "journal",
+        "plan",
+        "stray",
+        "gots:notes",
+      ],
+      "and All keeps every row, in the tab's own order",
+    )
+
+    await click(pillWord("review"))
+    assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows, and only them")
+    assert.deepEqual(captions(), [], "no caption stands over a section the pill emptied")
+    assert.equal(pillWord("review")?.getAttribute("aria-pressed"), "true", "the pill reads pressed")
+
+    await click(pillWord("All"))
+    assert.equal(drawnRows().length, 9, "All restores every row")
+
+    await click(pillWord("review"))
+    await type(searchSkills(), "land")
+    assert.deepEqual(drawnRows(), ["pr-land"], "the words narrow what the pill kept")
+    await type(searchSkills(), "linters")
+    assert.deepEqual(drawnRows(), [], "a word the pill's skills don't answer keeps nothing")
+    assert.equal(
+      wordsOf(findText("p", "No skills match.")),
+      "No skills match.",
+      "and the search says so",
+    )
+    await type(searchSkills(), "")
+    assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "emptying the words leaves the pill's rows")
+
+    // A skill with no category is kept by All alone: a pill exists only for a category the tab holds.
+    await click(pillWord("All"))
+    assert.ok(row("plan"), "All keeps the skill with no category")
+    for (const category of ["ops", "plugin", "quality", "review"]) {
+      await click(pillWord(category))
+      assert.ok(missing('[data-skill="plan"]'), `${category} keeps no skill without a category`)
+    }
+    assert.equal(
+      filterSkills().some((one) => wordsOf(one) === "No category"),
+      false,
+      "and no pill stands for the group that has none",
+    )
+  })
+})
+
+/** A bot whose skills name no category at all, so there is nothing for a pill to keep. */
+const UNCATEGORISED: Row[] = [
+  { name: "plan", description: "Write a plan first.", category: null, origin: "yours" },
+  { name: "journal", description: "Keep a note.", category: "", origin: "yours" },
+]
+
+test("a bot whose skills hold no category draws no pill row", async () => {
+  await seed("skills-filter-nocategory", ["skills"], UNCATEGORISED)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.ok(
+      missing('[role="group"][aria-label="Filter skills"]'),
+      "a row of All alone is decoration, so it isn't drawn",
+    )
+    assert.ok(searchSkills(), "the words are still worth a field")
+    assert.deepEqual(drawnRows(), ["journal", "plan"], "and every row is there")
   })
 })

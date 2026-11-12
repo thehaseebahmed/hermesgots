@@ -2,6 +2,8 @@ import { useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
+import { Chip, ChipRow } from "@/components/chip"
+import { SearchField } from "@/components/search-field"
 import { SkillDetail } from "@/components/skill-detail-sheet"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
@@ -15,23 +17,30 @@ import {
   SwitchRow,
 } from "@/components/settings-chrome"
 import type { Profile } from "@/lib/db"
+import { filterByFuzzy } from "@/lib/fuzzy"
 import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
 import {
   canRemove,
   categoryHeader,
   categoryWrites,
+  pillKeeps,
   skillHealth,
+  skillPills,
   skillSections,
   switchableControls,
   type CategoryHeader,
   type RowControls,
   type SkillGroup,
+  type SkillPill,
   type SkillSection,
 } from "@/lib/skills-tab"
 import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
+
+/** What a pill is picked by: the category it keeps, and null for All. */
+const pickedBy = (pill: SkillPill) => (pill.id === "all" ? null : pill.category)
 
 export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const answers = useSkillFeatureAnswers(profile)
@@ -42,6 +51,10 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [flipping, setFlipping] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  // The category the reader pressed, or null for All. The tab's own state, never remembered beyond
+  // it: a remount (a different bot, another visit) opens on the whole list and an empty field.
+  const [chosen, setChosen] = useState<string | null>(null)
   if (answer !== "yes") return null
   if (state.status === "loading") return null
 
@@ -127,18 +140,53 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
     )
   }
 
+  // The pill and the words narrow the list before it is grouped: the sections, their captions and a
+  // category's own count all describe what is drawn, so a caption can never stand over rows the
+  // filter dropped. A pill's category can leave with the last skill in it, so the press falls back to
+  // All rather than to a pill the row no longer offers.
+  const pills = skillPills(state.skills)
+  const picked = pills.find((pill) => pickedBy(pill) === chosen) ?? pills[0]
+  const kept = filterByFuzzy(pillKeeps(state.skills, picked), query, (skill) => [
+    skill.name,
+    skill.description ?? undefined,
+  ])
+  const sections = skillSections(kept)
+
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
-      {skillSections(state.skills).map((section) => (
-        <Section
-          key={section.id}
-          section={section}
-          controls={controls}
-          onOpen={open}
-          onFlip={flip}
-          flipping={flipping}
-        />
-      ))}
+      {state.skills.length > 0 && (
+        <>
+          <div className="flex flex-col gap-2">
+            <SearchField value={query} onChange={setQuery} label="Search skills" />
+            {pills.length > 1 && (
+              <ChipRow label="Filter skills">
+                {pills.map((pill) => (
+                  <Chip
+                    key={pickedBy(pill) ?? "all"}
+                    active={pill === picked}
+                    onClick={() => setChosen(pickedBy(pill))}
+                  >
+                    {pill.label}
+                  </Chip>
+                ))}
+              </ChipRow>
+            )}
+          </div>
+          {kept.length === 0 && (
+            <p className="py-8 text-center text-sm text-muted-foreground">No skills match.</p>
+          )}
+          {sections.map((section) => (
+            <Section
+              key={section.id}
+              section={section}
+              controls={controls}
+              onOpen={open}
+              onFlip={flip}
+              flipping={flipping}
+            />
+          ))}
+        </>
+      )}
       {confirmation}
     </div>
   )
