@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import {
   ArrowLeftIcon,
@@ -1348,6 +1348,13 @@ function ServerAccessSheet({
   // Bumped by Try again: each start (and each retry) is one attempt at the flow.
   const [attempt, setAttempt] = useState(0)
 
+  // The parent's close, read through a ref: the one call site builds a new arrow each render, and
+  // the two effects below must not restart a flow because of it.
+  const close = useRef(onOpenChange)
+  useEffect(() => {
+    close.current = onOpenChange
+  })
+
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -1367,7 +1374,7 @@ function ServerAccessSheet({
         // closes, since a failed row's own read is not the one the screen's poll is following.
         if (!answer.url) {
           await reload()
-          onOpenChange(false)
+          close.current(false)
           return
         }
         setFlow(answer)
@@ -1382,8 +1389,6 @@ function ServerAccessSheet({
       cancelled = true
       stopped.abort()
     }
-    // `onOpenChange` is the parent's close, stable for the life of one open sheet.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, attempt, server.name, grant, reload])
 
   // The Host stops waiting at its own timeout; the sheet stops with it rather than waiting forever.
@@ -1396,9 +1401,8 @@ function ServerAccessSheet({
   // The row's own read is the answer: once it says on, the access landed and the sheet is done.
   useEffect(() => {
     if (!open || !flow || server.state !== "on") return
-    onOpenChange(false)
+    close.current(false)
     tell.success("Access granted.")
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, flow, server.state])
 
   function copy() {
