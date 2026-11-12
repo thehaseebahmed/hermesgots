@@ -1,11 +1,13 @@
 /**
- * What the Skills tab draws from the one skills list: how a row says it is doing, and the sections
- * and category groups it sits in. Kept import-free but for types and the one rule it shares with
- * `skills-cache.ts` (what "doesn't load" means), so `scripts/test-skills-tab.mjs` can drive it
- * without a browser (as `mcp-server.ts` is for the MCP rows).
+ * What the Skills tab draws from the one skills list: how a row says it is doing, the sections and
+ * category groups it sits in, and the pills and the words that narrow it. Kept browserless — its
+ * imports are types and three import-free rules, `compare.ts`'s name order, `fuzzy.ts`'s matcher and
+ * `skills-cache.ts`'s answer for what "doesn't load" means — so `scripts/test-skills-tab.mjs` drives
+ * it under `node --test` (as `mcp-server.ts` is for the MCP rows).
  */
 import type { Skill, SkillView } from "@/lib/hermes"
 import { byName } from "./compare.ts"
+import { filterByFuzzy } from "./fuzzy.ts"
 import { loadFailure } from "./skills-cache.ts"
 
 export interface SkillHealth {
@@ -60,6 +62,15 @@ function categoryOf(skill: Skill): string | null {
   return category ? category : null
 }
 
+/**
+ * The one order categories run in: alphabetically, and the group with no category of its own last. The
+ * pills and the groups both read it, so the two cannot name the categories in a different order.
+ */
+export function compareCategories(left: string | null, right: string | null): number {
+  if (left === null) return right === null ? 0 : 1
+  return right === null ? -1 : byName(left, right)
+}
+
 function groupsOf(skills: Skill[]): SkillGroup[] {
   const held = new Map<string | null, Skill[]>()
   for (const skill of skills) {
@@ -69,10 +80,7 @@ function groupsOf(skills: Skill[]): SkillGroup[] {
     else held.set(category, [skill])
   }
   return [...held]
-    .sort(([left], [right]) => {
-      if (left === null) return 1
-      return right === null ? -1 : byName(left, right)
-    })
+    .sort(([left], [right]) => compareCategories(left, right))
     .map(([category, rows]) => ({
       category,
       skills: rows.sort((left, right) => byName(left.name, right.name)),
@@ -93,6 +101,58 @@ export function skillSections(skills: Skill[]): SkillSection[] {
     heading: bothKinds ? title : null,
     groups,
   }))
+}
+
+export const ALL_SKILLS = "All"
+
+/**
+ * The key All's pill is pressed by. No category can be it: a category that is empty or only
+ * whitespace is no category at all (`categoryOf`), so the pill called All and a category that happens
+ * to be named `all` are two keys rather than one — and a React key and a press both go by this.
+ */
+export const ALL_SKILLS_KEY = ""
+
+/** One pill of the tab's row: the key it is pressed and keyed by, and the word it wears. */
+export interface SkillPill {
+  key: string
+  label: string
+}
+
+/** The categories the tab's skills name, in the one order categories run in. */
+function categoriesOf(skills: Skill[]): string[] {
+  const named = new Set(skills.map(categoryOf))
+  return [...named]
+    .filter((category): category is string => category !== null)
+    .sort(compareCategories)
+}
+
+/**
+ * The pills the tab offers, in the order it draws them: All first, then every category its skills
+ * name, alphabetically. One pill per category name however many sections hold a skill of it — the
+ * reader picks a category, not a category in a section — and a skill with none is kept by All alone,
+ * since a pill exists only for a category the tab holds.
+ */
+export function skillPills(skills: Skill[]): SkillPill[] {
+  return [
+    { key: ALL_SKILLS_KEY, label: ALL_SKILLS },
+    ...categoriesOf(skills).map((category) => ({ key: category, label: category })),
+  ]
+}
+
+/**
+ * What the tab draws, as one rule: the pill narrows the list first, then the words narrow what the
+ * pill kept — so the empty sentence can only ever be the search's, and a category's caption can never
+ * stand over rows the words dropped. A skill answers to its name and its description, the way the chat
+ * list's rows answer to their title and their line.
+ *
+ * The pill keeps its skills in the order they were handed in, and no words leaves that order as it is.
+ * Given words it returns them best match first, as `filterByFuzzy` ranks them — not in the order the
+ * tab draws: `skillSections` sorts each category's rows by name, which is what puts a search's matches
+ * back in the tab's own order.
+ */
+export function skillsKept(skills: Skill[], key: string, query = ""): Skill[] {
+  const kept = key === ALL_SKILLS_KEY ? skills : skills.filter((skill) => categoryOf(skill) === key)
+  return filterByFuzzy(kept, query, (skill) => [skill.name, skill.description ?? undefined])
 }
 
 /** What a group with no category of its own is called. */
