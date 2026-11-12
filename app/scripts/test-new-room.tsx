@@ -360,6 +360,30 @@ test("the blank room's composer stands in the foot every chat screen gives it", 
   })
 })
 
+/** One bot at each of two Hosts, both sealed with the default name the app has for it. */
+async function freshHosts() {
+  const bots = [
+    botProfile("domain", { id: "host-domain", name: "Hermes", hermesProfile: "default" }),
+    botProfile("example", { id: "host-example", name: "Hermes", hermesProfile: "default" }),
+  ]
+  await resetRoom(bots)
+  for (const bot of bots) offers.set(connectionAt(bot), WRITABLE)
+  return bots
+}
+
+test("a seat says which Host it is where two bots share a name", async () => {
+  await freshHosts()
+  await mount(screen(), async () => {
+    await openSeats()
+    const rows = seats().map((row) => row.textContent?.trim() ?? "")
+    assert.deepEqual(
+      rows.map((words) => /^Hermes \((domain|example)\)/.exec(words)?.[0]),
+      ["Hermes (domain)", "Hermes (example)"],
+      "both hosts sealed one name, so each seat names its own host beside it (ADR 0149)",
+    )
+  })
+})
+
 test("every bot the device holds is listed, whatever Host it is on", async () => {
   await freshAcross()
   await mount(screen(), async () => {

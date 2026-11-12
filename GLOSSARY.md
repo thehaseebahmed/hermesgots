@@ -205,6 +205,14 @@ _Avoid_: alert, limit banner, usage warning
 One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
 _Avoid_: profile, agent, assistant
 
+**Bot's label**:
+What a list calls a bot: the name its host gave it, and the host it answers at only where another bot of that
+name answers somewhere else — `Hermes (domain)` and `Hermes (example)` for two hosts' sealed defaults, `Studio`
+for a name nobody shares, and two bots of one name on one host drawn bare, since no host tells those two apart.
+Read at render, never stored, and never written by the app: the name is the one the link took from the host
+(ADR 0149).
+_Avoid_: display name, nickname, handle
+
 **Chat**:
 A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
 not a list of them, is the screen the app opens on and the one a reload keeps the reader in. A bot's
@@ -380,7 +388,7 @@ _Avoid_: backlog, queue, ready list, board
 
 **Claim**:
 Taking a task so nothing else picks it up. A claimed task is out of the frontier.
-_Avoid_: assign, lock, pickup
+_Avoid_: assign, lock, pickup; and claim for what research checks or records, which is a **checked claim** or an **evidence claim**
 
 **Hold**:
 One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back.
@@ -844,3 +852,41 @@ _Avoid_: notification types, notification preferences, alert settings
 **Gots plugin**:
 The plugin Gots installs into a bot's Hermes host, enabled under the name `gots`. It was called `memento`; the old name survives only where older sessions still carry it.
 _Avoid_: Memento, memento plugin, the Hermes plugin
+
+## Research
+
+**Checked claim**:
+The one assertion the user pasted into a verify mission, and the neutral restatement of it they confirmed, which is what the lanes and the judge are given.
+_Avoid_: claim (alone), statement, assertion, rumour
+
+**Evidence claim**:
+One fact a researcher recorded in a mission's ledger, in its own words, with the source it came from and the passage on that page that says it; it is verified where the passage was found on the page and uncertain where it couldn't be checked.
+_Avoid_: claim (alone), finding, fact, citation
+
+**Verify mission**:
+A research mission that takes one checked claim the user pasted and answers whether the evidence supports it, with a verdict the user can audit back to its sources. It is checked as a neutral restatement split into parts, never in the user's own wording.
+_Avoid_: fact check, verification task, claim check
+
+**Part**:
+One separate assertion a checked claim makes, short enough that evidence can bear on it alone; a checked claim has one to four, and the user confirms them before anything is read.
+_Avoid_: sub-claim, aspect, criterion, outline point
+
+**Lane**:
+One researcher's reading of a mission, in a session of its own. A verify mission has two, For and Against, each blind to the other and to the user's wording; Learn and Compare missions have one.
+_Avoid_: track, branch, side, researcher
+
+**Stance**:
+Which way a piece of evidence bears on a part: it supports it, refutes it, or is only context. The researcher records one and the judge gives one independently, and the evidence counts only where they agree.
+_Avoid_: position, polarity, sentiment, side
+
+**Search trail**:
+The web searches each lane of a verify mission made, in the order it made them, kept so a reader can see where the evidence was looked for, and where it wasn't.
+_Avoid_: query log, search history, searches
+
+**Independent source**:
+One site, as its registrable domain names it: two pages of the same site are one source, so a verdict never counts one publisher twice.
+_Avoid_: unique source, distinct URL, citation
+
+**Verdict**:
+A verify mission's answer, worked out by a fixed rule from the parts' evidence when the mission is delivered, and kept as it was then. Its label is one of seven: Supported (every part backed by two or more independent sources, none against), Partly supported (some parts backed so, not the rest), Disputed (independent sources disagree on a part), Not supported (no evidence either way), Refuted (two or more independent sources against a part, none for), Thin evidence (only one source bears on a part, with the way it leans) and Can't tell (evidence was found, but none of it takes a side, or none of it could be checked).
+_Avoid_: rating, score, conclusion, fact-check result

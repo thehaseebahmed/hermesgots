@@ -43,7 +43,7 @@ import { attachmentsText } from "@/lib/attachment-text"
 import { chatFlow } from "@/lib/chat-flow"
 import { pointText } from "@/lib/point-marker"
 import { compactionMarks } from "@/lib/compactions"
-import { questionAt, questionsIn } from "@/lib/clarify"
+import { clarifyWire, questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { describeActivity } from "@/lib/format"
@@ -500,10 +500,7 @@ export function AppPrompt({ waiting, questions: read, answer, asker, held }: Pro
       message={message}
       askedId={askedId}
       held={held}
-      onAnswer={(answers) => {
-        const given = answers[askedId]
-        return answer(Array.isArray(given) ? given.join(", ") : (given ?? ""))
-      }}
+      onAnswer={(answers) => answer(clarifyWire(answers[askedId] ?? null))}
     />
   )
 }

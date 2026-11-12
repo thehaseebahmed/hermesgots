@@ -11,6 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { RoomFaces } from "@/components/room/room-faces"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { connectionKey, hostKey, serverConfig } from "@/lib/connection"
 import {
   DEFAULT_SETTINGS,
@@ -27,6 +28,7 @@ import { FACES, roomSeats } from "@/lib/rooms"
 import { makerOf, seatedByAny } from "@/lib/room-seats"
 import { startRoom } from "@/lib/room-writes"
 import { tell } from "@/lib/tell"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn, randomId } from "@/lib/utils"
 
 /**
@@ -61,15 +63,19 @@ const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Hos
 export function NewRoomScreen({ slot }: { slot?: string }) {
   const navigate = useNavigate()
   const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
+  const labels = useBotLabels()
   const sendOnEnter = useLiveQuery(
     async () => (await getSettings()).sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter,
     [],
   )
   const { features, seats: rosters } = usePluginAnswersByServer(bots)
   const writes = features("rooms_write")
-  const writers = bots
-    .filter((bot) => bot.hermesProfile && !bot.disabled && writes[connectionKey(bot)] === "yes")
-    .sort((one, two) => one.name.localeCompare(two.name))
+  const writers = botsByLabel(
+    bots.filter(
+      (bot) => bot.hermesProfile && !bot.disabled && writes[connectionKey(bot)] === "yes",
+    ),
+    labels,
+  )
   const [picked, setPicked] = useState<string[]>([])
   const [picking, setPicking] = useState(false)
   const [roomId] = useState(() => randomId())
@@ -97,8 +103,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
   // A bot no picked connection seats is one the create will add to the making profile's roster, and
   // its row says so before it is pressed. Nothing is marked until there is a pick, since until then
   // no connection is named (ADR 0129).
-  const needsHost = (bot: Profile) =>
-    picked.length > 0 && !seatedByAny(picks, bot.hermesProfile)
+  const needsHost = (bot: Profile) => picked.length > 0 && !seatedByAny(picks, bot.hermesProfile)
 
   const refusalFor = (bot: Profile): Refusal | null => {
     if (picked.includes(bot.id)) return null
@@ -122,9 +127,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       return
     }
     // The guards inside the updater too: a press that lands twice in one batch seats one bot once.
-    setPicked((held) =>
-      held.includes(id) || held.length >= MOST ? held : [...held, id],
-    )
+    setPicked((held) => (held.includes(id) || held.length >= MOST ? held : [...held, id]))
   }
 
   /** One seat per picked bot, minted when it is picked, so a retried create seats the same members. */
@@ -146,8 +149,8 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       const seats = chosen.map(seatOf)
       const seated = await startRoom(maker, {
         roomId,
-        // Its name until the Host says otherwise: its seats' own names.
-        name: chosen.map((bot) => bot.name).join(", "),
+        // Its name until the Host says otherwise: its seats' labels.
+        name: chosen.map((bot) => labelOf(labels, bot)).join(", "),
         members: seats,
       })
       // A create that added a profile changed the roster this app remembers, so that connection is
@@ -180,7 +183,11 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
     <div data-slot="chat-pane" data-pane={slot} className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title="New room"
-        subtitle={chosen.length ? chosen.map((bot) => bot.name).join(", ") : "No bots picked yet"}
+        subtitle={
+          chosen.length
+            ? chosen.map((bot) => labelOf(labels, bot)).join(", ")
+            : "No bots picked yet"
+        }
         showBot={false}
         centered
       />
@@ -208,17 +215,12 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
             onClick={() => setPicking(true)}
           >
             {faces.length ? (
-              <RoomFaces
-                shown={faces.slice(0, FACES)}
-                more={Math.max(0, faces.length - FACES)}
-              />
+              <RoomFaces shown={faces.slice(0, FACES)} more={Math.max(0, faces.length - FACES)} />
             ) : (
               <UsersIcon className="size-4" />
             )}
             <span className="text-sm">
-              {chosen.length
-                ? `${chosen.length} of ${MOST} bots`
-                : `${LEAST} to ${MOST} bots`}
+              {chosen.length ? `${chosen.length} of ${MOST} bots` : `${LEAST} to ${MOST} bots`}
             </span>
           </Button>
         </div>
@@ -247,6 +249,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         open={picking}
         onOpenChange={setPicking}
         writers={writers}
+        labels={labels}
         refusalFor={refusalFor}
         needsHost={needsHost}
         picked={picked}
@@ -261,6 +264,7 @@ function SeatsPicker({
   open,
   onOpenChange,
   writers,
+  labels,
   refusalFor,
   needsHost,
   picked,
@@ -269,6 +273,8 @@ function SeatsPicker({
   open: boolean
   onOpenChange: (open: boolean) => void
   writers: Profile[]
+  /** What each bot of the device is called, so a seat reads as its host does everywhere else. */
+  labels: Map<string, string>
   refusalFor: (bot: Profile) => Refusal | null
   needsHost: (bot: Profile) => boolean
   picked: string[]
@@ -292,6 +298,7 @@ function SeatsPicker({
               <SeatRow
                 key={bot.id}
                 bot={bot}
+                label={labelOf(labels, bot)}
                 checked={picked.includes(bot.id)}
                 refusal={refusalFor(bot)}
                 needsHost={needsHost(bot)}
@@ -299,7 +306,11 @@ function SeatsPicker({
               />
             ))}
           </Group>
-          <Button size="lg" className="h-11 w-full rounded-full" onClick={() => onOpenChange(false)}>
+          <Button
+            size="lg"
+            className="h-11 w-full rounded-full"
+            onClick={() => onOpenChange(false)}
+          >
             Done
           </Button>
         </div>
@@ -317,12 +328,14 @@ function SeatsPicker({
  */
 function SeatRow({
   bot,
+  label,
   checked,
   refusal,
   needsHost,
   onToggle,
 }: {
   bot: Profile
+  label: string
   checked: boolean
   refusal: Refusal | null
   needsHost: boolean
@@ -354,7 +367,7 @@ function SeatRow({
     >
       <Bot id={bot.botId} className={cn("size-8 shrink-0", bot.disabled && "opacity-40")} />
       <RowText
-        title={bot.name}
+        title={label}
         // A bot no picked connection seats is one the create will add to the making profile's roster,
         // said here rather than as a refusal after the press (ADR 0129).
         subtitle={needsHost ? `${read} · Needs the Host configured` : read}

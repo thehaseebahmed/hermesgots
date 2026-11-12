@@ -1,7 +1,7 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
 import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "../lib/net-watch.ts"
-import { SKIP_WORD } from "../lib/clarify.ts"
+import { SKIPPED } from "../lib/clarify.ts"
 import { promptOf } from "../lib/run-prompt.ts"
 
 import type { Agent } from "./agents"
@@ -397,9 +397,9 @@ export async function actOnQueued(
  */
 export async function respond(connection: Connection, waiting: Waiting, value: string) {
   const kind = waiting.kind === "approval" ? "approval" : "clarify"
-  // Hermes takes an empty answer as no answer at all and ends the whole call on it; the word it
-  // reads as a skipped question is `skip`, after which it asks the call's next one.
-  const sent = kind === "clarify" && !value.trim() ? SKIP_WORD : value
+  // Hermes takes an empty answer as no answer at all and ends the whole call on it; its own skip
+  // value is recorded as the question skipped, after which it asks the call's next one.
+  const sent = kind === "clarify" && !value.trim() ? SKIPPED : value
   const response = await ask(
     `${root(connection)}/v1/runs/${encodeURIComponent(waiting.run)}/${kind}`,
     {

@@ -25,8 +25,8 @@ export type BotSub = {
   /** The item this address names, where it names one of that list's. */
   item?: string
   /**
-   * The field's own name, where the screen's title says what the screen does instead ("Edit Name"
-   * over a field labelled *Name*). Left off, the field is labelled with the title.
+   * The field's own name, where the screen's title says what the screen does instead ("Edit API base
+   * URL" over a field labelled *API base URL*). Left off, the field is labelled with the title.
    */
   label?: string
 }
@@ -49,11 +49,11 @@ type SubEntry =
 
 /** The sub-screens whose ids the pages themselves name. */
 const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
-  // The bot's own page: its profile, and how it connects to its Hermes.
+  // The bot's own page: how it connects to its Hermes. A bot's name is its host's and is drawn
+  // without a row that would open an edit for it (ADR 0149).
   bot: [
     // The screen is named for what it does and the field for the setting it holds, so a form's
     // title and its label are never the same two words.
-    { id: "name", kind: "edit", title: "Edit Name", label: "Name" },
     { id: "base-url", kind: "edit", title: "Edit API base URL", label: "API base URL" },
     { id: "server-key", kind: "edit", title: "Edit Server key", label: "Server key" },
   ],

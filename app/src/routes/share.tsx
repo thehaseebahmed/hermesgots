@@ -14,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ROOM_MAX_ATTACHMENTS, carriedFiles, isPhoto, roomRefusal } from "@/lib/attachment-caps"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
+import { botsByLabel } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { serverConfig } from "@/lib/connection"
 import {
   conversationsOf,
@@ -132,12 +134,10 @@ export function SharePage() {
   }
 
   const answering = useLiveQuery(listEnabledProfiles, [])
-  // The bots by name, as the picker lists them, and the first of them the sheet starts on: a share
-  // has no bot of its own, and the one it arrived at is whichever bot was last talked to.
-  const bots = useMemo(
-    () => [...(answering ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [answering],
-  )
+  const labels = useBotLabels()
+  // The bots in the order the picker draws them, and the first of them the sheet starts on: a share
+  // has no bot of its own, so it must not open on a bot the picker draws second.
+  const bots = useMemo(() => botsByLabel(answering ?? [], labels), [answering, labels])
   const [picked, setPicked] = useState<string>()
   const profile = bots.find((bot) => bot.id === picked) ?? bots[0]
   const [showAll, setShowAll] = useState(false)

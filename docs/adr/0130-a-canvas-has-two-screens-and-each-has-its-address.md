@@ -7,10 +7,11 @@ and a message being typed had half a screen to be typed in. **A canvas now has t
 preview, at `/canvas/:id`, and the edit screen, at `/canvas/:id/edit` — each with an address, one
 header row drawn by both, and one 44px control named for the screen it goes to.**
 
-The edit screen is a phone's. A wide screen already has room for the session beside the page, so the
-edit address folds into the canvas's own address there, in place, and no flip is drawn: the lane is
-the desktop's, and a second layout for it would be two ways to do one thing. A canvas that has no
-version has nothing to preview, so the preview replaces its own address with the edit one on a
+The edit screen is a phone's. A wide screen already has room for the session in a lane on the left of
+the page — the canvas's header above it in the same column, the page filling the pane to its right —
+so the edit address folds into the canvas's own address there, in place, and no flip is drawn: the
+lane is the desktop's, and a second layout for it would be two ways to do one thing. A canvas that
+has no version has nothing to preview, so the preview replaces its own address with the edit one on a
 phone — a replacement, never a push. A pushed default would leave the page behind it, and back
 would land on the page and be sent to Edit again.
 

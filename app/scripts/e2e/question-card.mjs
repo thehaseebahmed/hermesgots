@@ -124,8 +124,9 @@ for (const [width, dark] of [
       await thread
         .getByText("No answer came, so I'll count anything older than 90 days.", { exact: false })
         .waitFor({ timeout: 30_000 })
-      // The phone is where the walk was reported broken: a call's five questions, answered in turn,
-      // at the width that has the card's arrows on the screen the reader already holds.
+      // The phone is where the walk was reported broken: a call's five questions, filled in as one
+      // form — Next on each page, Send on the last — while the host asks them one at a time, so one
+      // Send has to carry every answer to it, in turn, with no further tap.
       {
         await send("ask five")
         for (const [at, question] of SERIES.entries()) {
@@ -137,7 +138,7 @@ for (const [width, dark] of [
             .getByText(question.ask, { exact: false })
             .waitFor({ timeout: 30_000 })
           await settled(page)
-          await answerWith(slot, question)
+          await answerWith(slot, question, at === SERIES.length - 1 ? "Send" : "Next")
         }
         // The last answer closes the card: the thread keeps the record, the composer keeps nothing.
         await slot

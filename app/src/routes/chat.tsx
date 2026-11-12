@@ -30,8 +30,10 @@ import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
+import { labelOf } from "@/lib/bot-name"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { Refusal } from "@/components/banner"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
@@ -368,6 +370,7 @@ export function ChatPage(props: ChatPageProps) {
 
 /** A chat drawn by chat-next, under the chat's own header: a bot's chat is a chat, Main among them. */
 function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
+  const labels = useBotLabels()
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
   const bot = useLiveQuery(
     async () => (chat ? db.profiles.get(chat.profileId) : undefined),
@@ -471,7 +474,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               awayLine(away, online) ??
               (session && !unstarted
                 ? sessionSubtitle({
-                    botName: bot.name,
+                    botName: labelOf(labels, bot),
                     names: sessionRepos.map((repo) => repo.name),
                     cap: repoCap({ wide, xlarge: xl }),
                   })
@@ -507,6 +510,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
  * and a chat this device holds nothing of draws none of it.
  */
 function CurrentChatPage({ slot }: ChatPageProps) {
+  const labels = useBotLabels()
   const params = useParams()
   const { state: address } = useLocation()
   const id = params.id
@@ -1054,7 +1058,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     subtitle = session
       ? sessionSubtitle({
           activity,
-          botName: profile?.name,
+          botName: profile ? labelOf(labels, profile) : undefined,
           names: sessionRepos.map((repo) => repo.name),
           cap: repoCap({ wide, xlarge: xl }),
         })

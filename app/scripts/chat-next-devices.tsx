@@ -11,11 +11,11 @@
  */
 import Dexie from "dexie"
 import assert from "node:assert/strict"
-import { act } from "react"
+import { act, type ComponentType } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { ChatNextPage } from "@/chat-next/page"
+import { ChatNextPage, type PromptProps } from "@/chat-next/page"
 import { SESSION_STORES, type SessionDb } from "@/lib/db"
 import { click, settle, type } from "./component-kit.tsx"
 import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
@@ -70,7 +70,14 @@ export async function openDevice(
     pollMs = 20,
     idleMs = 20,
     database = deviceDatabase(),
-  }: { pollMs?: number; idleMs?: number; database?: SessionDb } = {},
+    Prompt,
+  }: {
+    pollMs?: number
+    idleMs?: number
+    database?: SessionDb
+    /** The app's own prompt cards, in place of the plain view's. */
+    Prompt?: ComponentType<PromptProps>
+  } = {},
 ) {
   const container = document.createElement("div")
   document.body.append(container)
@@ -82,7 +89,9 @@ export async function openDevice(
         <Routes>
           <Route
             path="/next"
-            element={<ChatNextPage pollMs={pollMs} idleMs={idleMs} database={database} />}
+            element={
+              <ChatNextPage pollMs={pollMs} idleMs={idleMs} database={database} Prompt={Prompt} />
+            }
           />
         </Routes>
       </MemoryRouter>,
@@ -201,6 +210,18 @@ export async function openDevice(
         (one) => one.textContent === choice,
       )
       await click(button ?? null)
+    },
+    /** A card's button by the words it starts with: a question's choice, Next, Skip or Send. */
+    button: (label: string) =>
+      ([...container.querySelectorAll("[data-slot=card] button")].find((one) =>
+        one.textContent?.trim().startsWith(label),
+      ) ?? null) as HTMLButtonElement | null,
+    async press(label: string) {
+      await click(
+        [...container.querySelectorAll("[data-slot=card] button")].find((one) =>
+          one.textContent?.trim().startsWith(label),
+        ) ?? null,
+      )
     },
     async approve(choice: string) {
       await click(one(`[data-approve="${choice}"]`))

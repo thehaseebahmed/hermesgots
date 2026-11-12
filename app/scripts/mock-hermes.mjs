@@ -3164,6 +3164,16 @@ const LIVE_CLARIFY = process.env.MOCK_LIVE_CLARIFY === "1"
 // question on the run's stream before the answer's own response is written. Both are this mode's.
 const SKIP_HINT = '\nReply "skip" to skip this question.'
 const CLARIFY_REPLY_MS = 100
+
+/** A multi-select answer as Hermes reads one: a JSON list, else the one typed answer. */
+function listOf(said) {
+  try {
+    const parsed = JSON.parse(said)
+    if (Array.isArray(parsed)) return parsed.filter((one) => String(one).trim())
+  } catch {}
+  return [said]
+}
+
 const runs = new Map()
 // Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
 // reports between a turn ending and its wake turn starting, so no screen reads the session at rest
@@ -3967,9 +3977,16 @@ function startRun(req, body, options = {}) {
           outcome = settled.outcome
           break
         }
-        // Hermes reads the word "skip" as a question skipped, as it does an answer with no words.
-        const said = (settled.answer ?? "").trim()
-        answers[question.id] = !said || said.toLowerCase() === "skip" ? null : settled.answer
+        // Hermes's run route records its own skip value as a question skipped, and stores any other
+        // reply as sent — the word "skip" included; a multi-select answer is split only from a JSON
+        // list (`_clean_answer` in `tools/clarify_tool.py`).
+        const said = settled.answer ?? ""
+        answers[question.id] =
+          !said.trim() || said === "\u0000skipped"
+            ? null
+            : question.multi_select
+              ? listOf(said)
+              : said
         push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
       }
       pendingClarifies.delete(id)
@@ -4244,7 +4261,13 @@ http
           "afk_prompt",
           "afk_picks",
           ...(RESEARCH
-            ? ["research", "research_followup", "research_rewrite", "research_compare"]
+            ? [
+                "research",
+                "research_followup",
+                "research_rewrite",
+                "research_compare",
+                "research_verify",
+              ]
             : []),
           ...(CANVAS ? ["canvas"] : []),
           ...(MEETINGS ? ["meetings", "meetings_ask"] : []),

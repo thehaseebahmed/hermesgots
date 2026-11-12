@@ -8,6 +8,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
@@ -59,6 +60,7 @@ import { formatDuration } from "@/lib/format"
 import { botModelLine, levelName, namedLevel, type SpeechSettings } from "@/lib/speech"
 import { READ_FAILED, getSpeech, useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { tell } from "@/lib/tell"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 import { onReturn } from "@/lib/wake"
 
@@ -353,12 +355,13 @@ function EntrySheet({
 
 /** One row per bot: the Settings menu's own row, into that bot's speech settings. */
 function BotsTab({ profiles }: { profiles: Profile[] }) {
+  const labels = useBotLabels()
   if (!profiles.length)
     return <p className="px-5 py-6 text-sm text-muted-foreground">No bots yet.</p>
   return (
     <Group>
-      {profiles.map((profile) => (
-        <BotRow key={profile.id} profile={profile} />
+      {botsByLabel(profiles, labels).map((profile) => (
+        <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
       ))}
     </Group>
   )
@@ -385,7 +388,7 @@ function speechLine({
   return "Off"
 }
 
-function BotRow({ profile }: { profile: Profile }) {
+function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const answer = useDictationInfo(profile)
   const reason = answer && answer.status === "off" ? answer.reason : undefined
   const { model, check } = useSpeech(profile)
@@ -399,7 +402,7 @@ function BotRow({ profile }: { profile: Profile }) {
           className={cn("size-8 shrink-0", profile.disabled && "opacity-40")}
         />
       }
-      title={profile.name}
+      title={label}
       subtitle={speechLine({ model, check, reason })}
     />
   )
@@ -487,6 +490,7 @@ function heardLine(settings?: SpeechSettings) {
 /** The Bubble and the bot it hears with. The two grants are the phone's, so the app asks for them. */
 function BubbleCards() {
   const bots = useLiveQuery(listEnabledProfiles, [])
+  const labels = useBotLabels()
   const heard = useHeardBy(bots ?? [])
   const bubbleBot = useLiveQuery(getBubbleProfile, [])
   const [state, setState] = useState<BubbleState>()
@@ -606,7 +610,7 @@ function BubbleCards() {
         <ValueRow
           title="Bot"
           purpose="Who hears the Bubble's takes"
-          value={bubbleBot?.name}
+          value={bubbleBot && labelOf(labels, bubbleBot)}
           onClick={() => setPicking(true)}
           data-setting="bubble-bot"
         />
@@ -620,9 +624,9 @@ function BubbleCards() {
           // read, so offering it would move the row and the phone to a bot nobody picked.
           // The same order the Bots tab draws, and each row the bot's own picture with the model it
           // answers with: a name alone said nothing about which bot a take would be heard by.
-          options={(bots ?? []).map((profile) => ({
+          options={botsByLabel(bots ?? [], labels).map((profile) => ({
             id: profile.id,
-            label: profile.name,
+            label: labelOf(labels, profile),
             // What hears the take, not what answers a chat: this list decides the bot the Bubble
             // dictates with, and its speech model is the one that matters here.
             detail: heardLine(heard?.get(connectionKey(profile))),

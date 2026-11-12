@@ -386,6 +386,50 @@ const VERDICT = para(
 )
 const FLIP = para({ text: "Packages Bun fully supports would close the gap.", cites: ["c5"] })
 
+const VERIFY_SOURCES = [
+  { id: "s1", title: "Coffee consumption and cardiovascular disease: a meta-analysis", url: "https://www.bmj.com/content/359/bmj.j5024", kind: "papers" },
+  { id: "s2", title: "Coffee and heart health", url: "https://www.heart.org/en/news/coffee-and-heart-health", kind: "articles" },
+  { id: "s3", title: "Coffee drinking and acute myocardial infarction", url: "https://jamanetwork.com/journals/jama/fullarticle/202478", kind: "papers" },
+  { id: "s4", title: "Is coffee bad for your heart?", url: "https://www.health.harvard.edu/heart-health/coffee-and-your-heart", kind: "articles" },
+]
+
+/** Each lane's claims, in the order the mock records them: the for lane, then the against lane. */
+const VERIFY_CLAIMS = [
+  { id: "c1", lane: "for", stance: "supports", part: "p1", source: "s3", confidence: "supported", text: "Heavy coffee drinkers had a higher rate of heart attacks in one case-control study.", snippet: "Drinking more than six cups a day was associated with a higher risk of acute myocardial infarction." },
+  { id: "c2", lane: "against", stance: "supports", part: "p1", source: "s1", confidence: "supported", text: "Studies of daily coffee drinkers report heart attacks among them at every intake level.", snippet: "Cardiovascular events were recorded across all categories of coffee intake." },
+  { id: "c3", lane: "for", stance: "context", part: "p2", source: "s4", confidence: "supported", text: "Caffeine briefly raises blood pressure.", snippet: "Caffeine can cause a short but dramatic increase in blood pressure." },
+  { id: "c4", lane: "against", stance: "refutes", part: "p2", source: "s1", confidence: "supported", text: "Moderate coffee drinking was linked to a lower risk of cardiovascular disease.", snippet: "Coffee consumption was associated with a lower risk of cardiovascular mortality, with the largest reduction at three to four cups a day." },
+  { id: "c5", lane: "for", stance: "supports", part: "p2", source: "s2", confidence: "uncertain", text: "Unfiltered coffee raises LDL cholesterol.", snippet: "Unfiltered coffee contains cafestol, which raises LDL cholesterol." },
+]
+
+const VERIFY_SEARCHES = {
+  for: ["coffee causes heart attacks study", "daily coffee myocardial infarction risk", "unfiltered coffee cholesterol heart"],
+  against: ["coffee lowers cardiovascular risk meta-analysis", "moderate coffee heart attack cohort"],
+}
+
+/** A fixed judgement of the fixed claims; the mock never works a verdict out (research.py does). */
+const VERIFY_TAGS = [
+  { claim: "c1", part: "p1", stance: "supports" },
+  { claim: "c2", part: "p1", stance: "supports" },
+  { claim: "c3", part: "p2", stance: "context" },
+  { claim: "c4", part: "p2", stance: "refutes" },
+  { claim: "c5", part: "p2", stance: "supports" },
+]
+const VERIFY_VERDICT = {
+  label: "partly_supported",
+  why: "Two or more independent sources back 1 of 2 parts, but not the rest.",
+  sources: 3,
+  leads: 1,
+  parts: [
+    { part: "p1", stance: "supported", direction: null, supporting: 2, refuting: 0, for: ["c1", "c2"], against: [] },
+    { part: "p2", stance: "thin", direction: "refutes", supporting: 0, refuting: 1, for: [], against: ["c4"] },
+  ],
+}
+const VERIFY_CHANGE = para(
+  { text: "A randomised trial showing daily coffee raises heart attack risk would move the second part.", cites: ["c4"] },
+  { text: " So would cohort studies that separate filtered from unfiltered coffee.", cites: ["c5"] },
+)
+
 /** The ranking as research.py's `decide` works it out: weighted scores out of 100. */
 function decide(m) {
   const memo = m.outputs.memo
@@ -552,7 +596,9 @@ function summary(m) {
 
 function full(m) {
   const found = { ...summary(m), ledger: m.ledger, outputs: m.outputs, revisions: m.revisions }
-  return m.type === "compare" ? { ...found, decision: decide(m) } : found
+  if (m.type === "compare") return { ...found, decision: decide(m) }
+  if (m.type === "verify") return { ...found, verdict: m.outputs.verdict?.verdict ?? null }
+  return found
 }
 
 function change(m, fields, note) {
@@ -600,6 +646,38 @@ function readComparison(m, note) {
   })
 }
 
+/** A claim read back as neutral parts; an opinion is read back as not checkable. */
+function readClaim(m, note) {
+  later(1500, () => {
+    if (!missions.has(m.id)) return
+    const opinion = /\b(best|worst|better|worse|ugly|beautiful)\b/i.test(m.input)
+    change(
+      m,
+      opinion
+        ? {
+            busy: null,
+            title: "A matter of taste",
+            restatement: m.input.trim().replace(/[!]+$/, "."),
+            parts: [{ id: "p1", text: m.input.trim().replace(/[.!?]+$/, "") }],
+            terms: [],
+            uncheckable: "It is a matter of taste, which evidence can't settle.",
+          }
+        : {
+            busy: null,
+            title: "Coffee and heart attacks",
+            restatement: "Drinking coffee every day raises the risk of a heart attack.",
+            parts: [
+              { id: "p1", text: "Daily coffee drinking is associated with heart attacks" },
+              { id: "p2", text: "The association is causal" },
+            ],
+            terms: ["every day", "heart attack"],
+            uncheckable: null,
+          },
+      note,
+    )
+  })
+}
+
 /** A comparison's reading: its claims one at a time, then the memo built step by step. */
 function compare(m, note) {
   const step = () => {
@@ -617,6 +695,47 @@ function compare(m, note) {
     later(800, () => memo(m, note))
   }
   later(400, step)
+}
+
+/** A verification's two lanes, reading side by side: each search kept, then each claim recorded. */
+function verifyRead(m, note) {
+  const steps = []
+  const longest = Math.max(VERIFY_SEARCHES.for.length, VERIFY_SEARCHES.against.length)
+  for (let i = 0; i < longest; i++)
+    for (const lane of ["for", "against"])
+      if (VERIFY_SEARCHES[lane][i]) steps.push(() => m.searches[lane].push(VERIFY_SEARCHES[lane][i]))
+  for (const claim of VERIFY_CLAIMS)
+    steps.push(() => {
+      if (!m.ledger.sources.some((s) => s.id === claim.source))
+        m.ledger.sources.push(VERIFY_SOURCES.find((s) => s.id === claim.source))
+      m.ledger.claims.push({ ...claim })
+    })
+  const step = () => {
+    if (!missions.has(m.id) || m.stage !== "reading") return
+    const run = steps.shift()
+    if (run) return run(), change(m, {}, note), later(500, step)
+    change(m, { stage: "drafting", written: 0 }, note)
+    later(1200, () => judgeClaim(m, note))
+  }
+  later(400, step)
+}
+
+/** The judge's fixed tags and the verdict as research.py stores it at delivery. */
+function judgeClaim(m, note) {
+  if (!missions.has(m.id) || m.stage !== "drafting") return
+  m.outputs.verdict = {
+    tags: VERIFY_TAGS,
+    verdict: VERIFY_VERDICT,
+    change: VERIFY_CHANGE,
+    checked_at: Date.now(),
+  }
+  change(m, { written: 1, stage: "reviewing" }, note)
+  later(600, () => {
+    if (!missions.has(m.id)) return
+    m.formats = ["verdict"]
+    revise(m, "first")
+    change(m, { stage: "delivered", formats: ["verdict"], pending: null }, note)
+  })
 }
 
 function memo(m, note) {
@@ -758,18 +877,20 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     }
     const { input, type } = await readBody(req)
     if (typeof input !== "string" || !input.trim()) return fail(400, "The question is required."), true
-    if (type && !["learn", "compare"].includes(type))
-      return fail(400, "Only Learn & understand and Compare & decide missions can be started so far."), true
+    if (type && !["learn", "compare", "verify"].includes(type))
+      return fail(400, "Only Learn & understand, Compare & decide and Verify a claim missions can be started so far."), true
     const m = mission({
       id: `r_${Math.random().toString(16).slice(2, 18)}`,
       input,
       title: input,
       busy: "brief",
       ...(type === "compare" ? { type, format: "memo" } : {}),
+      ...(type === "verify" ? { type, format: "verdict", restatement: null, parts: [], terms: [], uncheckable: null, strictness: null } : {}),
     })
     missions.set(m.id, m)
     note(m.id)
     if (type === "compare") readComparison(m, note)
+    else if (type === "verify") readClaim(m, note)
     else readBrief(m, note)
     json(res, 202, { object: "gots.research.mission", mission: full(m) })
     return true
@@ -784,6 +905,29 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
   switch (action) {
     case "brief":
       if (moved(["brief"])) return fail(409, "The mission has moved on; reload it."), true
+      if (m.type === "verify") {
+        if (m.uncheckable) return fail(409, "This claim can't be checked; start another."), true
+        if (typeof body.restatement !== "string" || !body.restatement.trim()) return fail(400, "The restatement is required."), true
+        const parts = (body.parts ?? []).map((p) => (typeof p === "string" ? p : p?.text)).filter((p) => typeof p === "string" && p.trim())
+        if (parts.length < 1 || parts.length > 4) return fail(400, "Check 1 to 4 parts."), true
+        const terms = []
+        for (const t of body.terms ?? [])
+          if (typeof t === "string" && t.trim() && !terms.some((o) => o.toLowerCase() === t.trim().toLowerCase())) terms.push(t.trim())
+        if (terms.length > 8) return fail(400, "Take 8 terms at most literally."), true
+        change(
+          m,
+          {
+            restatement: body.restatement.trim(),
+            parts: parts.map((text, i) => ({ id: `p${i + 1}`, text })),
+            terms,
+            stage: "scope",
+            outline: parts,
+            error: null,
+          },
+          note,
+        )
+        break
+      }
       if (m.type === "compare") {
         const names = [...new Set((body.options ?? []).map((o) => (typeof o === "string" ? o : o?.name)).filter((o) => typeof o === "string" && o.trim()))]
         const criteria = (body.criteria ?? []).filter((k) => typeof k?.name === "string" && k.name.trim())
@@ -828,6 +972,18 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
         compare(m, note)
         break
       }
+      if (m.type === "verify") {
+        const kinds = body.source_kinds ?? []
+        if (!kinds.length || kinds.some((k) => !SOURCE_KINDS.includes(k))) return fail(400, "Pick the kinds of source."), true
+        if (!["any", "reputable"].includes(body.strictness))
+          return fail(400, "strictness must be one of: any, reputable."), true
+        m.ledger = { sources: [], claims: [] }
+        m.outputs = {}
+        m.searches = { for: [], against: [] }
+        change(m, { source_kinds: kinds, strictness: body.strictness, stage: "reading", written: 0, formats: [], error: null }, note)
+        verifyRead(m, note)
+        break
+      }
       const outline = (body.outline ?? []).filter((p) => typeof p === "string" && p.trim())
       const kinds = body.source_kinds ?? []
       if (!outline.length) return fail(400, "The outline needs a point."), true
@@ -840,13 +996,14 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     }
     case "formats":
       if (m.type === "compare") return fail(400, "A comparison has one format, the memo."), true
+      if (m.type === "verify") return fail(400, "A verification has one format, the verdict."), true
       if (moved(["delivered"]) || m.making || m.formats.includes(body.format))
         return fail(409, "That format is already made or on its way."), true
       change(m, { making: body.format, error: null }, note)
       makeFormat(m, note)
       break
     case "followup": {
-      if (m.type === "compare") return fail(400, "Questions can only be added to a Learn & understand mission so far."), true
+      if (m.type !== "learn") return fail(400, "Questions can only be added to a Learn & understand mission so far."), true
       if (moved(["delivered"]) || m.making) return fail(409, "The mission has moved on; reload it."), true
       const covered = new Set(m.outline.map((p) => p.toLowerCase()))
       const questions = [...new Set((body.questions ?? []).filter((q) => typeof q === "string" && q.trim()).map((q) => q.trim()))]
@@ -861,7 +1018,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       break
     }
     case "rewrite": {
-      if (m.type === "compare") return fail(400, "Only a Learn & understand mission can be rewritten with another model."), true
+      if (m.type !== "learn") return fail(400, "Only a Learn & understand mission can be rewritten with another model."), true
       const failedRewrite = m.error && m.pending?.reason === "rewrite"
       if ((moved(["delivered"]) && !failedRewrite) || m.making) return fail(409, "The mission isn't delivered yet."), true
       const model = typeof body.model === "string" && body.model ? { provider: body.provider ?? "", model: body.model } : null
@@ -875,8 +1032,9 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     case "retry":
       if (!m.error) return fail(409, "Nothing failed."), true
       change(m, { error: null }, note)
-      if (m.stage === "reading") (m.type === "compare" ? compare : research)(m, note)
-      else if (m.stage === "drafting") write(m, note)
+      if (m.stage === "reading")
+        (m.type === "compare" ? compare : m.type === "verify" ? verifyRead : research)(m, note)
+      else if (m.stage === "drafting") (m.type === "verify" ? judgeClaim : write)(m, note)
       break
     case "remove":
       missions.delete(m.id)

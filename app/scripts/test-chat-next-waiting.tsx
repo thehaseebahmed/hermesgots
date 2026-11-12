@@ -22,6 +22,7 @@ import {
   withDevice,
 } from "./chat-next-devices.tsx"
 import { WAITING_ON_ANSWER } from "@/lib/format"
+import { AppPrompt } from "@/chat-next/app-view"
 import { storeFor } from "@/chat-next/store"
 
 const TEA: Ask = {
@@ -351,6 +352,41 @@ test.describe("a run already waiting when the chat opens", () => {
       )
       assert.deepEqual(questionOf(phone), asking, "the form is still there to answer")
     })
+  })
+})
+
+test("an answer the host refuses leaves the app's question card answerable again", async () => {
+  const host = setUp("q-refused")
+  await withDevice(openDevice(host, { Prompt: AppPrompt }), async (phone) => {
+    const real = globalThis.fetch
+    let refusals = 1
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname.endsWith("/clarify") && refusals-- > 0
+        ? new Response(JSON.stringify({ error: { message: "Try again." } }), { status: 500 })
+        : real(input, init)) as typeof fetch
+    try {
+      const run = await sendFrom(phone, host, "go")
+      const prompt_id = run.ask(TEA)
+      await eventually(() => assert.ok(phone.button("tea")), "the app's card asks")
+      await phone.press("tea")
+      await phone.press("Send")
+      await eventually(
+        () => assert.equal(phone.button("Send")?.disabled, false),
+        "a refused answer can be sent again",
+        200,
+      )
+      assert.deepEqual(host.answers, [], "the host took nothing")
+      await phone.press("Send")
+      await eventually(
+        () =>
+          assert.deepEqual(host.answers, [
+            { run: host.latest.id, prompt_id, generation: 1, answer: "tea" },
+          ]),
+        "and the second press lands",
+      )
+    } finally {
+      globalThis.fetch = real
+    }
   })
 })
 

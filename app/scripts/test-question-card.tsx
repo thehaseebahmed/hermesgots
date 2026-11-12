@@ -10,7 +10,17 @@ import { act, useEffect, useState } from "react"
 
 import { QuestionCard } from "@/components/chat/question-card"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
-import { click, find, findAll, findText, mount, settle, text, type } from "./component-kit.tsx"
+import {
+  click,
+  find,
+  findAll,
+  findText,
+  mount,
+  settle,
+  text,
+  type,
+  withToasts,
+} from "./component-kit.tsx"
 
 const message = (questions: ClarifyQuestion[]): Message => ({
   id: "m-1",
@@ -174,15 +184,47 @@ test("an open-ended question is its own answer, with no choices to pick", async 
   )
 })
 
-test("a host that asks one question at a time draws the whole ask, and only the page it asks is sent", async () => {
+const threeAsked: ClarifyQuestion[] = [
+  { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+  { id: "q1", question: "What should the change be called?" },
+  { id: "q2", question: "Who reviews it?", choices: ["Platform", "Product"] },
+]
+
+/**
+ * A host that asks a call's questions one prompt at a time, as Hermes's run route does: it names the
+ * question it waits on, holds the card between one answer and its next prompt, and moves on when the
+ * test says it has asked again. The card is kept mounted across the prompts, as chat-next keeps it.
+ */
+function askingHost(ask: ClarifyQuestion[], onAnswer: (given: ClarifyAnswers) => Promise<void>) {
+  const host = {
+    /** The host asks the next question: the one it waits on moves, and the hold lifts. */
+    ask: (_id: string) => {},
+    /** The asked question is answered and the next has yet to be asked. */
+    hold: () => {},
+  }
+  function Host() {
+    const [asked, setAsked] = useState(ask[0].id)
+    const [held, setHeld] = useState(false)
+    useEffect(() => {
+      host.ask = (id) => {
+        setAsked(id)
+        setHeld(false)
+      }
+      host.hold = () => setHeld(true)
+    }, [])
+    return <QuestionCard message={message(ask)} askedId={asked} held={held} onAnswer={onAnswer} />
+  }
+  return { host, element: <Host /> }
+}
+
+const button = (label: string) => findText("[data-slot=button]", label) as HTMLButtonElement | null
+const pressed = (label: string) => button(label)?.getAttribute("aria-pressed")
+
+test("a host that asks one question at a time draws the whole ask, and the asked question goes first when the form is sent", async () => {
   answered()
   await mount(
     <QuestionCard
-      message={message([
-        { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
-        { id: "q1", question: "What should the change be called?" },
-        { id: "q2", question: "Who reviews it?", choices: ["Platform", "Product"] },
-      ])}
+      message={message(threeAsked)}
       askedId="q1"
       onAnswer={async (given) => {
         answers.push(given)
@@ -193,79 +235,195 @@ test("a host that asks one question at a time draws the whole ask, and only the 
       assert.match(text(), /Questions2 of 3/, "the card opens on the question the host asks")
       assert.equal(inert(1), false, "that is the page showing")
       assert.equal(
-        (findText("[data-slot=button]", "staging") as HTMLButtonElement).disabled,
+        button("staging")?.disabled,
         true,
         "a question the host has already taken is answered and stays so",
       )
-      assert.equal(
-        (findText("[data-slot=button]", "Platform") as HTMLButtonElement).disabled,
-        false,
-        "one the host has yet to ask can be chosen ahead",
-      )
+      assert.equal(button("Platform")?.disabled, false, "one the host has yet to ask can be chosen")
       assert.equal(arrow("Next question")?.disabled, false, "the arrows still read the whole ask")
 
       await type(find("textarea") as HTMLTextAreaElement, "rename it")
-      await click(findText("[data-slot=button]", "Send"))
+      assert.ok(!button("Send"), "a page before the last moves on rather than sending")
+      await click(button("Next"))
+      assert.match(text(), /3 of 3/)
+      assert.deepEqual(answers, [], "and moving on sends nothing")
+
+      await click(button("Platform"))
+      await click(button("Send"))
       await settle()
-      assert.deepEqual(answers, [{ q1: "rename it" }], "only the question asked is answered")
+      assert.deepEqual(answers, [{ q1: "rename it" }], "the host's own question goes first, alone")
     },
   )
 })
 
-test("a question chosen ahead is held until the host asks it, and nothing is sent or skipped from its page", async () => {
+test("a question chosen ahead is held until the host asks it, then sent with no tap", async () => {
   answered()
   const ask = [
     { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
     { id: "q1", question: "Who reviews it?", choices: ["Platform", "Product"] },
   ]
-  let ask1: (id: string) => void = () => {}
-  function Host() {
-    const [asked, setAsked] = useState("q0")
-    useEffect(() => {
-      ask1 = setAsked
-    }, [])
-    return (
-      <QuestionCard
-        message={message(ask)}
-        askedId={asked}
-        onAnswer={async (given) => {
-          answers.push(given)
-        }}
-      />
-    )
-  }
-  await mount(<Host />, async () => {
-    const row = pagesRow()
+  const { host, element } = askingHost(ask, async (given) => {
+    answers.push(given)
+  })
+  await mount(element, async () => {
+    pagesRow()
     await settle()
     await click(arrow("Next question"))
-    row.scrollLeft = 320
-    row.dispatchEvent(new Event("scroll"))
-    await settle()
     assert.match(text(), /2 of 2/)
-    await click(findText("[data-slot=button]", "Product"))
-    assert.equal(
-      (findText("[data-slot=button]", "Send") as HTMLButtonElement).disabled,
-      true,
-      "Send is for the question the host asked, not this one",
-    )
-    assert.equal(
-      (findText("[data-slot=button]", "Skip") as HTMLButtonElement).disabled,
-      true,
-      "and Skip would skip that question, not this one",
-    )
-    assert.deepEqual(answers, [], "nothing went")
+    await click(button("Product"))
+    assert.deepEqual(answers, [], "a choice made ahead sends nothing")
 
-    await act(async () => ask1("q1"))
-    await settle()
+    await click(arrow("Previous question"))
+    assert.match(text(), /1 of 2/)
+    await click(button("staging"))
+    await click(button("Next"))
     assert.match(text(), /2 of 2/)
-    assert.equal(
-      (findText("[data-slot=button]", "Send") as HTMLButtonElement).disabled,
-      false,
-      "asked now, the choice made ahead is ready to send",
-    )
-    await click(findText("[data-slot=button]", "Send"))
+    assert.equal(pressed("Product"), "true", "the choice made ahead is still there")
+    await click(button("Send"))
     await settle()
-    assert.deepEqual(answers, [{ q1: "Product" }])
+    assert.deepEqual(answers, [{ q0: "staging" }], "only the asked question goes at first")
+
+    await act(async () => host.ask("q1"))
+    await settle()
+    assert.deepEqual(
+      answers,
+      [{ q0: "staging" }, { q1: "Product" }],
+      "asked now, the choice made ahead goes without another tap",
+    )
+  })
+})
+
+test("a host that asks one question at a time is answered through the whole form, with Next until the last page", async () => {
+  answered()
+  await mount(
+    <QuestionCard
+      message={message(threeAsked)}
+      askedId="q0"
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      pagesRow()
+      await settle()
+      assert.match(text(), /1 of 3/)
+      await click(button("staging"))
+      assert.ok(!button("Send"), "the first page has no Send")
+      assert.ok(button("Next"), "its main button is Next")
+      await click(button("Next"))
+      assert.match(text(), /2 of 3/, "Next moves to the second question")
+      assert.deepEqual(answers, [], "and sends nothing")
+
+      await type(find("textarea") as HTMLTextAreaElement, "rename it")
+      assert.ok(!button("Send"), "the second page has no Send either")
+      await click(button("Next"))
+      assert.match(text(), /3 of 3/, "Next moves to the last question")
+      assert.ok(button("Send"), "where the form is sent")
+      assert.deepEqual(answers, [], "and nothing has gone yet")
+    },
+  )
+})
+
+test("a page ahead of the asked one can be answered and the form sent from it", async () => {
+  answered()
+  await mount(
+    <QuestionCard
+      message={message(threeAsked)}
+      askedId="q0"
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      pagesRow()
+      await settle()
+      await click(arrow("Next question"))
+      await click(arrow("Next question"))
+      assert.match(text(), /3 of 3/, "the arrows reach the last page while the host asks the first")
+      assert.equal(button("Skip")?.disabled, false, "Skip is live there")
+      await click(button("Product"))
+      assert.equal(button("Send")?.disabled, false, "and so is Send, once it is answered")
+    },
+  )
+})
+
+test("a host that asks one question at a time takes the whole form, sending each answer as it is asked", async () => {
+  answered()
+  const { host, element } = askingHost(threeAsked, async (given) => {
+    answers.push(given)
+  })
+  await mount(element, async () => {
+    pagesRow()
+    await settle()
+    await click(button("staging"))
+    await click(button("Next"))
+    await type(find("textarea") as HTMLTextAreaElement, "rename it")
+    await click(button("Next"))
+    await click(button("Product"))
+    await click(button("Send"))
+    await settle()
+    assert.deepEqual(answers, [{ q0: "staging" }], "Send answers the question the host asks")
+
+    await act(async () => host.hold())
+    await settle()
+    assert.deepEqual(answers, [{ q0: "staging" }], "nothing goes while the host is held")
+
+    await act(async () => host.ask("q1"))
+    await settle()
+    assert.deepEqual(
+      answers,
+      [{ q0: "staging" }, { q1: "rename it" }],
+      "the next question is answered as soon as it is asked, with no tap",
+    )
+    assert.equal(button("Next")?.disabled, true, "and the form can't be paged while it goes")
+
+    await act(async () => host.hold())
+    await settle()
+    assert.equal(answers.length, 2, "and nothing more while held again")
+
+    await act(async () => host.ask("q2"))
+    await settle()
+    assert.deepEqual(
+      answers,
+      [{ q0: "staging" }, { q1: "rename it" }, { q2: "Product" }],
+      "and the last as soon as it is asked",
+    )
+  })
+})
+
+test("an answer the host refuses stops the drain on the asked page, with the rest still filled", async () => {
+  answered()
+  const { host, element } = askingHost(threeAsked, async (given) => {
+    answers.push(given)
+    throw new Error("The host refused the answer.")
+  })
+  await withToasts(async (said) => {
+    await mount(element, async () => {
+      pagesRow()
+      await settle()
+      await click(button("staging"))
+      await click(button("Next"))
+      await type(find("textarea") as HTMLTextAreaElement, "rename it")
+      await click(button("Next"))
+      await click(button("Product"))
+      await click(button("Send"))
+      await settle()
+      assert.deepEqual(answers, [{ q0: "staging" }], "the asked question was tried")
+      assert.deepEqual(said, [], "and nothing said in passing")
+      assert.match(text(), /The host refused the answer\./, "the refusal drawn in the card")
+      assert.match(text(), /1 of 3/, "the card is back on the asked page")
+      assert.equal(pressed("staging"), "true", "with its answer still picked")
+      assert.equal(
+        (find("textarea") as HTMLTextAreaElement).value,
+        "rename it",
+        "and the other pages still filled",
+      )
+      assert.equal(pressed("Product"), "true")
+
+      await act(async () => host.ask("q1"))
+      await settle()
+      assert.equal(answers.length, 1, "a refused form is not sent on when the host moves")
+    })
   })
 })
 
@@ -296,8 +454,14 @@ test("a card opened on a later page lands on it, rather than scrolling up from t
   const scrolls: ScrollBehavior[] = []
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
   const scrollTo = HTMLElement.prototype.scrollTo
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 320 })
-  HTMLElement.prototype.scrollTo = function (this: HTMLElement, options?: ScrollToOptions | number) {
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => 320,
+  })
+  HTMLElement.prototype.scrollTo = function (
+    this: HTMLElement,
+    options?: ScrollToOptions | number,
+  ) {
     const given = typeof options === "object" ? options : {}
     scrolls.push(given.behavior ?? "auto")
     this.scrollLeft = Number(given.left ?? 0)

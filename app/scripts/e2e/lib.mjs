@@ -222,6 +222,12 @@ export async function flow(
       ...(touch ? { hasTouch: true } : {}),
     }),
   )
+  // The bot's named host answers as the mock does: the request goes to `mock` with its path, and the
+  // browser keeps the address it asked for — the same protocol, so the address can be swapped.
+  await page.route(TEST_HOST, async (route) => {
+    const url = new URL(route.request().url())
+    await route.continue({ url: `${mock}${url.pathname}${url.search}` })
+  })
   // The component library mounts a devtools bunny of its own in a development build, in a root of
   // its own over the bottom-right of every page — where a screen's Send sits. Its own opt-out is
   // the flag it checks before mounting, so no flow has to click around a widget no user has.
@@ -268,6 +274,15 @@ export async function flow(
   }
 }
 
+/**
+ * The address a flow's bot answers at: a `.test` host, which `flow` answers with the mock. A row
+ * names a bot by its own name (ADR 0149), so this address stands in for a host and never a name.
+ */
+export const botHost = "http://test-bot.test"
+
+/** Any name under `.test` is a bot's host in a flow, and every one of them answers as the mock. */
+const TEST_HOST = /^http:\/\/[a-z0-9.-]+\.test\//
+
 const botPatch = (baseUrl) => ({
   baseUrl: `${baseUrl}/v1`,
   apiKey: "mock-key",
@@ -285,7 +300,7 @@ export async function setUpBot(page) {
     await db.profiles.update(profile.id, { ...patch, name: "Test bot" })
     await db.settings.put({ id: "settings", activeProfileId: profile.id, onboarded: true })
     return profile.id
-  }, botPatch(mock))
+  }, botPatch(botHost))
 }
 
 const hostAuth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
@@ -393,17 +408,18 @@ export const choiceButton = (scope, choice) =>
 export const questionPage = (scope) => scope.locator("[data-question-page]:not([inert])")
 
 /**
- * Answers the question in `scope` — by picking one of its choices, or by typing into it — and sends
- * it, waiting on nothing further. A card holding a call's questions shows one page of them, and an
- * answer belongs to that page: the others are questions the host is not asking yet.
+ * Answers the question in `scope` — by picking one of its choices, or by typing into it — and
+ * presses `press`, waiting on nothing further. A card holding a call's questions is one form shown a
+ * page at a time: the answer goes on the page showing, and a page before the last presses Next.
  */
-export async function answerWith(scope, { pick, type }) {
+export async function answerWith(scope, { pick, type }, press = "Send") {
   const page = (await questionPage(scope).count()) ? questionPage(scope) : scope
   if (pick) await choiceButton(page, pick).first().click()
   else await page.getByPlaceholder("Type your answer").fill(type)
-  // Send is the card's, not the page's: the footer sits outside the pages — and never a composer's
-  // own Send, which a bot's Main beside the chat draws too.
-  await scope.locator("[data-slot=card]").getByRole("button", { name: "Send", exact: true }).click()
+  // The press is the card's, not the page's: the footer sits outside the pages — and never a
+  // composer's own Send, which a bot's Main beside the chat draws too. A page before a form's last
+  // moves on with Next; only the last sends.
+  await scope.locator("[data-slot=card]").getByRole("button", { name: press, exact: true }).click()
 }
 
 /** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */

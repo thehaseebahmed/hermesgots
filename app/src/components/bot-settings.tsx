@@ -19,6 +19,8 @@ import { Link, useNavigate } from "react-router"
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { CodingTab } from "@/components/bot-coding-tab"
 import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
@@ -264,12 +266,15 @@ function DeleteBotDialog({
         : [],
     [open, profile.hostId, profile.id],
   )
-  const others = siblings?.map((p) => p.name).join(", ")
+  const labels = useBotLabels()
+  const others = botsByLabel(siblings ?? [], labels)
+    .map((p) => labelOf(labels, p))
+    .join(", ")
 
   return (
     <ConfirmDestructive
       open={open}
-      title={`Delete ${profile.name}?`}
+      title={`Delete ${labelOf(labels, profile)}?`}
       description={
         linked
           ? `Its host is unlinked${others ? `, and so is every bot it linked: ${others}` : ""}. Its chats stay on your Hermes server, and linking it again brings them back.`
@@ -537,12 +542,6 @@ type BotEdit = {
 }
 
 const BOT_EDITS = {
-  name: {
-    read: (profile) => profile.name,
-    placeholder: "Hermes profile name",
-    kind: "text",
-    patch: (value) => ({ name: value.trim() || "Hermes" }),
-  },
   "base-url": {
     read: (profile) => profile.baseUrl,
     placeholder: "http://localhost:8642/v1",
@@ -1049,12 +1048,6 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
 
       <Caption>Bot Profile</Caption>
       <Group>
-        <ValueRow
-          title="Name"
-          value={profile.name}
-          onClick={() => onOpen("name")}
-          data-setting="name"
-        />
         <ValueRow
           title="Image"
           value={character?.name ?? ""}

@@ -43,6 +43,7 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
+const LABEL = "Mainly"
 
 /**
  * A filter pill, by the word it wears. Named by its group rather than by `header [role="group"] button`,
@@ -202,7 +203,7 @@ test("Home is the active bot's screen: `/` sends the reader to its list", async 
     </MemoryRouter>,
     async () => {
       await until(async () => path() === `/b/${bot.id}`, "the active bot's address")
-      await until(async () => Boolean(findText('[data-slot="header-title"]', bot.name)), "its list")
+      await until(async () => Boolean(findText('[data-slot="header-title"]', LABEL)), "its list")
       assert.equal(rowIds().length, 0, "the list a bot with no chats draws")
       assert.equal(
         nav(),
@@ -494,7 +495,7 @@ test("a row deleted here is not resurrected by a record written ahead of this de
   )
 })
 
-test("the header's title is the bot's name, and it is the way to its settings", async () => {
+test("the header's title is the bot's own name, and it is the way to its settings", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
     await until(
@@ -503,8 +504,8 @@ test("the header's title is the bot's name, and it is the way to its settings", 
     )
     const title = find('a[href="/settings/bots/bot-1"]')
     assert.ok(title, "the title leads to Bot settings")
-    assert.equal(wordsOf(title), "Mainly", "and it is the bot's own name")
-    assert.equal(find("h1")?.textContent, "Mainly", "the heading the screen is known by")
+    assert.equal(wordsOf(title), LABEL, "and it is the name the bot has")
+    assert.equal(find("h1")?.textContent, LABEL, "the heading the screen is known by")
     assert.equal(
       findAll('[data-slot="header-row"] button').length,
       1,

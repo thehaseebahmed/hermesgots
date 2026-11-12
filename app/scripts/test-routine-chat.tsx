@@ -39,6 +39,7 @@ const ANSWER = "Checked the feeds: three things worth reading."
 const AT = 1_767_225_600_000
 
 const bot = botProfile("routine-chat", { name: "Mainly" })
+const LABEL = "Mainly"
 
 /** The run's transcript, as the host serves a session's rows. */
 const RUN_ROWS: SessionMessage[] = [
@@ -180,7 +181,7 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
   await mount(screen(), async () => {
     await until(async () => drew(ANSWER), "the run's own transcript")
     assert.ok(find("[data-slot=routine-note]"), "the run's own screen is what is on")
-    const back = find(`[aria-label="Back to ${bot.name}"]`)
+    const back = find(`[aria-label="Back to ${LABEL}"]`)
     assert.ok(back, "a control leads back")
     await click(back)
     await until(async () => path() === `/b/${bot.id}`, "the bot's list")
