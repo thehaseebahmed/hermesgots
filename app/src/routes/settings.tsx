@@ -143,7 +143,7 @@ export function SettingsPage() {
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
   const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
-  // The bot's own screens are titled as the menu's row and the sidebar name it (ADR 0148).
+  // The bot's own screens are titled as the menu's row and the sidebar name it (ADR 0149).
   const labels = useBotLabels()
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)

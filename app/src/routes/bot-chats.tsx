@@ -205,7 +205,7 @@ function ChatList({
 }) {
   const navigate = useNavigate()
   const { root, back } = useNav()
-  // The bar names the bot as the sidebar's row does (ADR 0148).
+  // The bar names the bot as the sidebar's row does (ADR 0149).
   const label = labelOf(useBotLabels(), bot)
   const pane = place === "pane"
   // What stands behind this screen, as far as the entry that opened it says: a chat's own control is

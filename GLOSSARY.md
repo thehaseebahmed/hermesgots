@@ -206,11 +206,12 @@ One Hermes profile the user has linked to Gots: its own agent, skills and settin
 _Avoid_: profile, agent, assistant
 
 **Bot's label**:
-What a list calls a bot, read off the host it answers at: `hermes.domain.com` is `hermes`, the domain part
-where two hosts share that short name (`domain` and `example`), the Hermes profile appended where one host
-holds several bots (`hermes/work`), and a bare host's port where it has one. Never stored, and never the name
-a host sealed for its default profile — every host calls that one "Hermes" (ADR 0148).
-_Avoid_: display name, nickname, bot name
+What a list calls a bot: the name its host gave it, and the host it answers at only where another bot of that
+name answers somewhere else — `Hermes (domain)` and `Hermes (example)` for two hosts' sealed defaults, `Studio`
+for a name nobody shares, and two bots of one name on one host drawn bare, since no host tells those two apart.
+Read at render, never stored, and never written by the app: the name is the one the link took from the host
+(ADR 0149).
+_Avoid_: display name, nickname, handle
 
 **Chat**:
 A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
