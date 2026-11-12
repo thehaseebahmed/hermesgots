@@ -4,9 +4,9 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { BRIDGE_METHODS } from "../src/lib/canvas-bridge.ts"
+import { LIBRARIES } from "../src/lib/canvas-catalogue.ts"
 import {
   CANVAS_CSP,
-  LIBRARIES,
   SCROLL_MESSAGE,
   SUBMIT_IN_PLACE,
   TOKENS,

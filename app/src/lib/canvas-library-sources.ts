@@ -1,6 +1,7 @@
 /**
  * The libraries a canvas may ask for by name, as the source the app inlines into the page
- * (`canvas-document.ts` answers an ask with one of these).
+ * (`canvas-catalogue.ts` holds the names these answer, and `canvas-document.ts` answers an ask with
+ * one of them).
  *
  * The page is drawn with no network and a policy that allows no connection, so a library is only
  * ever the one the app already ships: these three are read out of the bundle the app is built from,
@@ -9,7 +10,7 @@
  * globals a CDN would have handed the page.
  */
 
-import type { CanvasLibrary } from "@/lib/canvas-document"
+import type { CanvasLibrary } from "@/lib/canvas-catalogue"
 
 // chart.js's exports map does not publish dist/, so the file is reached by path.
 import chart from "../../node_modules/chart.js/dist/chart.umd.min.js?raw"

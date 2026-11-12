@@ -24,14 +24,6 @@ export { SUBMIT_IN_PLACE }
 
 export type CanvasMode = "light" | "dark"
 
-/**
- * The libraries a page may ask for by name: the ones the app carries a source for, so a page reads
- * them with the app's own copy rather than a CDN the policy wouldn't allow anyway. A name outside
- * this list is dropped, which is how a page asking for something the app doesn't have still draws.
- */
-export const LIBRARIES = ["chart", "date", "icons"] as const
-export type CanvasLibrary = (typeof LIBRARIES)[number]
-
 export const CANVAS_CSP = SANDBOX_CSP
 
 /**
@@ -113,16 +105,29 @@ const LIBRARY_TAG =
   /<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/script>/gi
 
 /**
- * Every ask taken out, the ones the app can answer replaced by the library's own source where the
- * page put it. A name it doesn't know, a known one the caller gave no source for, and a second ask
- * for one already inlined, leave nothing behind: the page draws without the library rather than
- * carrying a tag for one it never got, or the same source twice.
+ * The names a page asks for, in the order it asks: what a caller fetches sources for before it can
+ * draw anything, so a page that names no library costs no fetch and one that names three is read
+ * once. A name is repeated where the page asks twice — the ask is what the page said, and the
+ * sources decide what to do about a repeat (`inlineLibraries` below inlines one once).
  */
-function inlineLibraries(html: string, libraries: Partial<Record<CanvasLibrary, string>>): string {
+export function canvasLibraryPlan(html: string): string[] {
+  const names: string[] = []
+  for (const ask of html.matchAll(LIBRARY_TAG)) names.push(ask[1])
+  return names
+}
+
+/**
+ * Every ask taken out, the ones the caller handed a source for replaced by that source where the
+ * page put it. Which names exist is the caller's to know — this rule answers with what it was given,
+ * so a name it has no source for, and a second ask for one already inlined, leave nothing behind:
+ * the page draws without the library rather than carrying a tag for one it never got, or the same
+ * source twice.
+ */
+function inlineLibraries(html: string, libraries: Readonly<Record<string, string>>): string {
   const placed = new Set<string>()
   return html.replace(LIBRARY_TAG, (_tag, name: string) => {
-    const known = (LIBRARIES as readonly string[]).includes(name)
-    const source = known ? libraries[name as CanvasLibrary] : undefined
+    // A handed record is a plain object, so a name it merely inherits (`constructor`) is no source.
+    const source = Object.hasOwn(libraries, name) ? libraries[name] : undefined
     if (!source || placed.has(name)) return ""
     placed.add(name)
     // `</script` inside the source would end the element it is in; the escape spells the same string.
@@ -165,9 +170,11 @@ function escapeStyle(css: string): string {
  * policy, the theme, the compiled classes and the scripts a page is handed, the data bridge last
  * since the page's own scripts are what call it. `scroll` is the position the bridge last reported,
  * so a page rebuilt at a new version opens where the reader left the one before it; `libraries` are
- * the sources an ask for one is answered with, and `css` the Tailwind the page's own classes
- * compiled to. A page with no head can't be drawn — the plugin's scan refuses one, so this is a bug
- * rather than a page, and it throws instead of drawing something unstyled.
+ * the sources an ask for one is answered with, by name, and an ask it holds no source for is
+ * dropped — `canvasLibraryPlan` is what says which names to fetch before drawing; `css` is the
+ * Tailwind the page's own classes compiled to. A page with no head can't be drawn — the plugin's
+ * scan refuses one, so this is a bug rather than a page, and it throws instead of drawing something
+ * unstyled.
  */
 export function canvasDocument(
   html: string,
@@ -181,7 +188,7 @@ export function canvasDocument(
     mode: CanvasMode
     tokens: Record<string, string>
     scroll?: number
-    libraries?: Partial<Record<CanvasLibrary, string>>
+    libraries?: Readonly<Record<string, string>>
     css?: string
   },
 ): string {

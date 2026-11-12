@@ -33,7 +33,7 @@ import { awayLine } from "@/lib/away"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
-import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
+import { CANVAS_LIBRARIES } from "@/lib/canvas-library-sources"
 import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
   callCanvasCall,
