@@ -1,17 +1,3 @@
-/**
- * A diagram's colours, as mermaid's `base` theme reads them.
- *
- * mermaid is handed hex and nothing else. Its directive sanitiser drops any value that is not a plain
- * colour, so `var(--border)` never arrives, and its colour arithmetic parses hex where the app's own
- * tokens compute to `oklch()` — `toHex` (`lib/theme.ts`) converts each one at the point it is read.
- * The map is written out rather than spread, so a token gaining a name mermaid also uses can never
- * change a diagram's colours by accident.
- *
- * Import-free, so `scripts/test-mermaid-theme.mjs` holds it as a pure rule. A token the page doesn't
- * answer — empty, still a `var(--x)`, or an oklch nothing converted — is met with a shade derived
- * from the two colours the diagram is already drawn in, so no slot is ever `undefined` or blank.
- */
-
 /** The app's tokens a diagram reads, by their name without the leading `--`. */
 export const DIAGRAM_TOKENS = [
   "background",
@@ -36,17 +22,12 @@ export interface DiagramPalette {
   tokens: DiagramTokens
 }
 
-/** The light page, for a surface nobody could read. */
 const PAPER = "#ffffff"
 const INK = "#0a0a0a"
 const LIGHT_INK = "#fafafa"
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 
-/**
- * A colour as `#rrggbb`, with the opacity it carried still after it (`/aa`) where it had one: `toHex`
- * hands a translucent token over whole rather than quietly making it solid.
- */
 function read(value: string | undefined) {
   const colour = value?.trim() ?? ""
   if (!HEX.test(colour)) return undefined
@@ -54,13 +35,10 @@ function read(value: string | undefined) {
   return full.toLowerCase()
 }
 
-/** The opaque part of what `read` answered: the only shape mermaid is given. */
 const opaque = (colour: string) => colour.slice(0, 7)
 
-/** How opaque a colour is, 0 to 1 — a token the page writes translucent says so in its alpha. */
 const opacity = (colour: string) => (colour.length === 9 ? parseInt(colour.slice(7), 16) / 255 : 1)
 
-/** `ink` mixed into `surface`, `share` percent of the way: mermaid takes one colour per slot. */
 function mix(surface: string, ink: string, share: number) {
   const channel = (at: number) => {
     const from = parseInt(surface.slice(at, at + 2), 16)
@@ -72,7 +50,6 @@ function mix(surface: string, ink: string, share: number) {
   return `#${channel(1)}${channel(3)}${channel(5)}`
 }
 
-/** How light a `#rrggbb` reads, 0 to 1 — roughly, since it only picks words that read on it. */
 function light(colour: string) {
   const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255)
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -85,9 +62,6 @@ function light(colour: string) {
 export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<string, string> {
   const on = opaque(read(surface) ?? PAPER)
   const words = opaque(read(ink) ?? (light(on) > 0.5 ? INK : LIGHT_INK))
-  // A token as mermaid can be handed it: the page's own colour where it answered one, solid — a
-  // translucent token is, on the page, the surface showing through it, so it is mixed into the
-  // diagram's surface by its own alpha rather than arriving as raw white over a dark plate.
   const token = (name: keyof DiagramTokens) => {
     const colour = read(tokens[name])
     if (!colour) return undefined
@@ -95,15 +69,11 @@ export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<s
     return alpha < 1 ? mix(on, opaque(colour), alpha * 100) : colour
   }
 
-  // Each slot: the app's own token where the page answered one, else a shade of the two colours the
-  // diagram is drawn in — an outline and a connector are the words mixed into the surface.
   const card = token("card") ?? mix(on, words, 6)
   const plate = token("muted") ?? mix(on, words, 10)
   const edge = token("border") ?? mix(on, words, 22)
   const connector = token("muted-foreground") ?? mix(on, words, 55)
   const accent = token("accent") ?? mix(on, words, 14)
-  // A note and an error are tints of the app's own tone rather than the tone itself, so the words on
-  // them can be the diagram's ink in either mode.
   const warning = token("warning")
   const note = warning ? mix(on, warning, 22) : mix(on, words, 18)
   const destructive = token("destructive")
@@ -111,7 +81,6 @@ export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<s
 
   return {
     background: on,
-    // Flowchart: a box, its words and its outline, and the plate a cluster and a label sit on.
     mainBkg: card,
     primaryColor: card,
     primaryTextColor: words,
@@ -131,7 +100,6 @@ export function mermaidTheme({ surface, ink, tokens }: DiagramPalette): Record<s
     lineColor: connector,
     defaultLinkColor: connector,
     edgeLabelBackground: on,
-    // Sequence: the actors, the signals between them, and the boxes a step's label sits in.
     actorBkg: card,
     actorBorder: edge,
     actorTextColor: words,

@@ -18,23 +18,18 @@ export function themeLabel(value: string | undefined) {
   return THEMES.find((theme) => theme.value === (value ?? "system"))?.label ?? THEMES[0].label
 }
 
-/**
- * The context every read goes through, made once for the page's life: a canvas per call allocated a
- * bitmap and a context nothing kept, and a diagram reads a dozen tokens each time it draws.
- */
 let reader: CanvasRenderingContext2D | null | undefined
 
 /**
  * Computed colours come back as oklch(), which browser chrome may not parse; hex always works. An
  * alpha the colour carries rides along as its fourth pair — dark mode's `--border` is white at a
- * tenth — so whoever reads this can tell a solid colour from a translucent one and mix the second
- * where it draws it.
+ * tenth — so a reader can tell a solid colour from a translucent one. The one context is made for
+ * the page's life, and cleared before each read so a translucent colour never blends into the last.
  */
 export function toHex(color: string) {
   if (reader === undefined)
     reader = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
   if (!reader) return color
-  // Cleared first: a translucent colour otherwise blends into the pixel the last read left behind.
   reader.clearRect(0, 0, 1, 1)
   reader.fillStyle = color
   reader.fillRect(0, 0, 1, 1)

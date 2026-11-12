@@ -1,33 +1,13 @@
-// A reply's closed ```mermaid fence is a picture where the fence stood, drawn in the app's own
-// colours at a phone's width and a tablet's, in both themes — and the same fence, still arriving, is
-// drawn as the code it is until its closer lands. Only a reply that is really streaming can show
-// the second half: the app writes a reply as its pieces land, so a fence's body and its closer are
-// two states of the page, and a component test handed the finished string has only one. The drawing
-// itself is this flow's, because mermaid measures a diagram with `getBBox` and no DOM without layout
-// has one.
 import { app, assert, flow, long, pass, settled } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const FRAME = "[data-slot=diagram]"
-// The drawing, as the frame's body draws it once mermaid has made it: a control, and the sheet a
-// tap on it opens the same drawing in.
 const DRAWING = "[data-slot=diagram-drawing]"
 const SHEET = "[data-slot=diagram-sheet]"
-/** A thread's own scroller: where a reader was when they opened a sheet over it. */
 const THREAD = "[data-slot=message-scroller-viewport]"
-// The source a fence mermaid refused is drawn as the code it is, and one quiet line says why.
 const LINE = "[data-slot=diagram-line]"
-// A fence's code block lives in the reply's markdown, not merely somewhere in its row: a turn's tool
-// rows are drawn in that same row and a tool's command is a code block of its own. And it is a
-// *block* — a phrase of inline code carries the marker too, which is how a reply's prose is drawn.
 const FENCE_CODE = "[data-slot=markdown] div[data-md-code]"
 
-/**
- * Records every state of the last reply the page commits, from the send on: its code blocks, its
- * frames, and how much of its words have arrived. A state lives for as long as one batched write
- * does, which is shorter than any poll a flow could run, so the record is the reading and a poll is
- * never the thing that finds it.
- */
 const watchFence = (page) =>
   page.evaluate(() => {
     window.__fence = []
@@ -42,7 +22,6 @@ const watchFence = (page) =>
       })
     }
     const observer = new MutationObserver(() => {
-      // One state per commit: a write lands as a burst of mutations, and they are one arrangement.
       if (waiting) return
       waiting = true
       requestAnimationFrame(() => {
@@ -57,19 +36,11 @@ const watchFence = (page) =>
     }
   })
 
-/**
- * The drawing as the page holds it: the svg inside the last frame, how wide it is beside its column,
- * its own natural width, and the colour mermaid was told to draw its words in — read off the rule
- * mermaid writes for its own root, which is the app's foreground or a colour of mermaid's own. The
- * page's foreground is read beside it, as hex, so the two can be held against each other in either
- * mode: a diagram's colours are the app's own, which is what the theme map is for.
- */
 const drawnFacts = (page) =>
   page.evaluate(() => {
     const frame = [...document.querySelectorAll("[data-slot=diagram]")].at(-1)
     if (!frame) return { frame: false }
-    // The drawing names itself: mermaid's svg carries the id it was rendered under, and the frame's
-    // chrome carries lucide icons, which carry none.
+    // mermaid's svg carries the id it was rendered under; the frame's lucide icons carry none.
     const svg = frame.querySelector("svg[id]")
     if (!svg) return { frame: true, svg: false }
     const column = frame.closest("[data-slot=markdown]") ?? frame.parentElement
@@ -95,7 +66,6 @@ const drawnFacts = (page) =>
       height: box.height,
       natural: svg.viewBox.baseVal.width,
       column: column.getBoundingClientRect().width,
-      // The body's content width, its padding taken out: what the drawing is given to fill.
       inner: (() => {
         const body = svg.parentElement
         const style = getComputedStyle(body)
@@ -114,12 +84,6 @@ const drawnFacts = (page) =>
     }
   })
 
-/**
- * The drawing as a reader can reach it, and the sheet a tap opens it in, measured in the browser:
- * the control the frame's body is, the one svg the frame holds and the width it was made at, the
- * thread's own scroll, and — while one is open — the sheet's scrolling body, the drawing inside it
- * and whether that drawing is wider than the room the body is given.
- */
 const sheetFacts = (page) =>
   page.evaluate(
     ({ frame: frameSel, drawing: drawingSel, sheet: sheetSel, thread: threadSel }) => {
@@ -144,7 +108,6 @@ const sheetFacts = (page) =>
           name: control.getAttribute("aria-label"),
           expands: control.getAttribute("aria-expanded"),
         },
-        // The drawing is a picture, not a pair of them: one svg in the frame, whatever is open.
         drawings: drawn ? drawn.querySelectorAll("svg[id]").length : -1,
         id: own?.id ?? "",
         natural: own?.viewBox.baseVal.width ?? 0,
@@ -158,7 +121,6 @@ const sheetFacts = (page) =>
         screen: window.innerWidth,
         sheet: sheet && {
           frame: boxOf(sheet),
-          // The room the body gives its content, and what it really holds — the gap is what pans.
           room: sheet.clientWidth,
           total: sheet.scrollWidth,
           drawings: sheet.querySelectorAll("svg[id]").length,
@@ -172,13 +134,7 @@ const sheetFacts = (page) =>
     { frame: FRAME, drawing: DRAWING, sheet: SHEET, thread: THREAD },
   )
 
-/**
- * Every state the frame passes through while the mode changes, read off its own mutations: whether
- * the drawing control is on it, and whether an svg is inside it. A redraw must never put the frame
- * back to its source — the last drawing it has stays there until the next one lands, so no reader
- * sees a diagram's code flash where the picture was. mermaid does remove the svg it drew by id for
- * the length of a render, which is mermaid's own gap; what is watched here is the frame's body.
- */
+// mermaid removes the svg it drew, by id, for the length of a render: that gap is mermaid's own.
 const watchDrawing = (page) =>
   page.evaluate(() => {
     const frame = [...document.querySelectorAll("[data-slot=diagram]")].at(-1)
@@ -206,14 +162,11 @@ const flipping = (page) =>
         ?.querySelectorAll("svg[id]").length === 1,
   )
 
-/** Whether the page is drawing dark, as the provider has put it on the document. */
 const dark = (page) => page.evaluate(() => document.documentElement.classList.contains("dark"))
 
 await flow(
   "mermaid",
   async ({ page, send, lastReply, newChat, until, shot, centreOf }) => {
-    // Every chunk the page asks for that carries mermaid: a drawing made once is never fetched
-    // again, whatever a reader opens over it.
     const chunks = []
     page.on("request", (request) => {
       const url = request.url()
@@ -221,13 +174,11 @@ await flow(
     })
     await page.goto(app)
     const chatId = await newChat()
-    // Watched from here, so the record is the diagram's own reply and no other.
     await watchFence(page)
     await send("draw a diagram")
     const reply = page.locator(REPLY).last()
     const frame = reply.locator(FRAME)
 
-    // The frame lands with the closing fence; the reply's last words are still to come.
     await until(
       () => frame.count().then((count) => count === 1),
       30_000,
@@ -241,7 +192,6 @@ await flow(
     const said = await lastReply(chatId)
     assert.match(said.content, /from the fence to the picture\./, "the reply reached its last words")
 
-    // The finished reply: the fence's frame where the fence stood, and the code block it is not.
     assert.equal(
       await reply.locator(FENCE_CODE).count(),
       0,
@@ -276,7 +226,6 @@ await flow(
       `a closed fence drew its frame${path ? ` (${path})` : ""}: named ${label}, its copy control there, and no code block left`,
     )
 
-    // The fence while it was still arriving, as the page committed it.
     const states = await page.evaluate(() => window.__fenceRead())
     assert.ok(states.length > 0, "the page committed the reply as it arrived")
     const words = Math.max(...states.map((state) => state.words))
@@ -308,21 +257,14 @@ await flow(
       `the fence was code for ${asCode.length} of ${states.length} states while the reply arrived, then a frame for the ${states.length - framed} after its closer landed`,
     )
 
-    // The drawing: an svg in the frame, in the app's own colours, at a phone's width and a tablet's,
-    // in both themes. It is never wider than the column it stands in, and a diagram too wide for that
-    // column is scaled into it while a narrower one is left at its own size.
     const seen = new Map()
     for (const width of [390, 768]) {
       await page.setViewportSize({ width, height: width < 768 ? 844 : 768 })
       for (const theme of ["light", "dark"]) {
         const at = `${width}px in ${theme}`
-        // A drawing already on the page is the one a flip has to keep until the next lands, so its
-        // states are watched across a change of mode — and only across a change of mode.
         const watched = (await flipping(page)) && (await dark(page)) !== (theme === "dark")
         if (watched) await watchDrawing(page)
         await page.emulateMedia({ colorScheme: theme })
-        // A theme flip redraws the drawing: wait for the svg drawn in this mode's foreground, rather
-        // than reading the one drawn for the mode before.
         await until(
           async () => {
             const facts = await drawnFacts(page)
@@ -391,16 +333,8 @@ await flow(
       `the drawing followed the page: ${[...seen.entries()].map(([at, what]) => `${at} ${what}`).join("; ")}`,
     )
 
-    // A reader opens the drawing larger (F4). A phone is where it matters: the diagram is wider than
-    // the column it is drawn in, so a sheet that held it at the column's width would be a smaller
-    // copy of what the thread already shows. It opens the same drawing at the width it was made, in
-    // a body that pans both ways, and closing it leaves the thread where the reader left it — the
-    // same svg, never a second one, and no second ask for mermaid's chunk.
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme: "light" })
-    // An answer below the diagram first, so the thread is longer than the phone's pane: "the thread
-    // is where it was" is then a measurement, not a zero against a zero. The fence's own record is
-    // read by now, so a turn under it cannot disturb it.
     await send(long("After the diagram", 8))
     await until(
       async () => (await lastReply(chatId))?.status === "done",
@@ -415,13 +349,7 @@ await flow(
       20_000,
       "the light drawing at a phone's width",
     )
-    // The diagram is the last frame on the page, whatever reply the thread ends on: the `frame`
-    // locator above follows the thread's last reply, which is now the answer below it.
     const drawing = page.locator(FRAME).last()
-    // The answer types itself out once its turn has ended, and the thread follows it down as it
-    // grows: an answer still typing is a thread still moving, and a position read inside that is no
-    // place a reader was. It is finished when its stats land, and the thread has come to rest a
-    // moment after.
     await page
       .locator(REPLY)
       .last()
@@ -463,8 +391,6 @@ await flow(
       `and the diagram is wider than the column it is drawn in (${Math.round(shut.natural)}px made, ${Math.round(shut.column)}px given)`,
     )
 
-    // The ring is the keyboard's: the copy control is the step before the drawing in the frame, so
-    // one Tab from it lands on the drawing — which is what draws the ring.
     await page.evaluate(
       ({ frame: frameSel }) =>
         [...document.querySelectorAll(frameSel)]
@@ -537,8 +463,6 @@ await flow(
       `the thread behind it did not move (${shown.thread?.top}px of ${shut.thread?.top}px)`,
     )
 
-    // The pan is the reader's own: a sideways scroll over the body carries the drawing across, which
-    // is what makes a diagram wider than the phone readable at all.
     const at = await centreOf(SHEET)
     await page.mouse.move(at.x, at.y)
     await page.mouse.wheel(160, 0)
@@ -553,8 +477,6 @@ await flow(
     assert.ok(panned > 8, `a sideways scroll carries the drawing across (${Math.round(panned)}px)`)
     const panningPath = await shot("sheet")
 
-    // Closing returns to the thread exactly where it was, on the very node that was drawn: marked
-    // here, and read back after the sheet has gone.
     await page.evaluate(
       ({ frame: frameSel }) => {
         const svg = [...document.querySelectorAll(frameSel)].at(-1)?.querySelector("svg[id]")
@@ -599,10 +521,6 @@ await flow(
       `a tap opened the drawing at its own ${Math.round(shown.natural)}px in a ${Math.round(shown.sheet?.room ?? 0)}px body that pans (${Math.round(shown.sheet?.total ?? 0)}px wide), and closing it left the thread at ${shut.thread?.top}px${panningPath ? ` (${panningPath})` : ""}`,
     )
 
-    // A fence mermaid refuses: its source, drawn as the code it is, and one quiet line saying why —
-    // never a stack trace, and never a frame pretending to be a drawing. The reply is read once it has
-    // finished: while it arrives its fence is drawn as code anyway, so the fallback is the block that
-    // is still there when the words are.
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme: "light" })
     await send("draw a diagram that won't parse")

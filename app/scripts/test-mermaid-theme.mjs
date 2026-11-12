@@ -1,22 +1,10 @@
-/**
- * A diagram's colours, as mermaid's `base` theme reads them: the app's own tokens, as hex, on the
- * plate the diagram stands on, in light and in dark. The map is a pure rule over hex, so this tier
- * can hold it; whether the drawing that wears the colours looks right is the sweep's, since mermaid
- * measures a diagram with `getBBox` and this tier has no layout.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { mermaidTheme } from "../src/lib/mermaid-theme.ts"
 
-/** A colour mermaid's own maths can parse, and the only shape this module answers. */
 const HEX = /^#[0-9a-f]{6}$/
 
-/**
- * The app's tokens as a browser hands them over: `src/index.css` writes them as `oklch()`, and
- * `toHex` has read them into these before the map ever sees one. Light first, dark second — the
- * frame's plate is `--muted` in either mode, and the words are `--foreground`.
- */
 const LIGHT = {
   background: "#ffffff",
   foreground: "#0a0a0a",
@@ -89,10 +77,6 @@ test("a token the page doesn't answer falls back to a shade of the two it did", 
 })
 
 test("a token the page writes translucent is mixed into the surface it sits on", () => {
-  // Dark mode's border is `oklch(1 0 0 / 10%)` in `src/index.css`: white at a tenth, which the page
-  // draws as a grey a hair above its plate. `toHex` hands the alpha over with the colour, and mermaid
-  // takes one opaque colour per slot — so the slot is the colour a reader sees, not the token's raw
-  // white.
   const theme = mermaidTheme({ surface: "#262626", ink: "#fafafa", tokens: { border: "#ffffff1a" } })
 
   assert.notEqual(theme.nodeBorder, "#ffffff", "a border at a tenth is not drawn as solid white")

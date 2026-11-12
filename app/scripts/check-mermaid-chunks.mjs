@@ -1,13 +1,4 @@
-/**
- * mermaid is off the install and on the gate. A reader who never opens a diagram downloads none of
- * it, and a diagram they have drawn once draws again with no connection: the build names every chunk
- * only mermaid reaches under `assets/mermaid/`, the service worker leaves that path out of the
- * precache and holds it in one cache-first route with a bounded lifetime.
- *
- * This reads the build, so run it after `pnpm build`:
- *
- *   node scripts/check-mermaid-chunks.mjs
- */
+// Reads the build: run it after `pnpm build`.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { dirname, join, normalize, relative } from "node:path"
@@ -15,10 +6,7 @@ import { dirname, join, normalize, relative } from "node:path"
 import { chunks, DIST, entry as entryChunk, read, size } from "./dist.mjs"
 import { MERMAID } from "../src/lib/mermaid-chunks.ts"
 
-/**
- * mermaid's own bundle names its API, and nothing the app builds does: the one chunk this matches is
- * the door the diagram opens mermaid through, so everything reachable from it is mermaid's.
- */
+// mermaid's bundle names its API and nothing the app builds does; the chunk matching it is its door.
 const ROOT = "mermaidAPI"
 
 const failures = []
@@ -31,7 +19,6 @@ function check(ok, message) {
 const files = chunks()
 
 const known = new Set(files)
-/** What each built chunk names: `from "./x.js"` rides with it, `import("./x.js")` only on a request. */
 const name = new Map(files.map((file) => [file, named(file)]))
 const imports = new Map(files.map((file) => [file, [...name.get(file).static, ...name.get(file).lazy]]))
 const statics = new Map(files.map((file) => [file, name.get(file).static]))
@@ -70,10 +57,7 @@ const entry = entryChunk()
 assert.ok(entry, "dist/index.html names the script the app starts on")
 const starts = entry
 
-// --- mermaid's chunks, off its own bundle -------------------------------------------------------
 const roots = files.filter((file) => read(file).includes(ROOT))
-// Nothing below means anything without the door: a mermaid that stopped naming itself must fail the
-// gate, not pass it with no chunks to check.
 assert.equal(
   roots.length,
   1,
@@ -83,7 +67,6 @@ const appOnly = reachable([starts], imports, new Set(roots))
 const mermaid = new Set([...reachable(roots, imports)].filter((file) => !appOnly.has(file)))
 const bytes = files.filter((file) => mermaid.has(file)).reduce((total, file) => total + size(file), 0)
 
-// --- every chunk carrying mermaid is under the path, and nothing else is there -------------------
 const loose = [...mermaid].filter((file) => !file.startsWith(MERMAID))
 check(
   loose.length === 0,
@@ -96,15 +79,12 @@ check(
 const strangers = files.filter((file) => file.startsWith(MERMAID) && !mermaid.has(file))
 check(strangers.length === 0, `${MERMAID} holds chunks nothing of mermaid reaches: ${strangers.join(", ")}`)
 
-// --- none of it on the startup path -------------------------------------------------------------
-// Everything the app loads *with* the entry, never on a request of its own: mermaid must be none of it.
 const onStartup = [...reachable([starts], statics)].filter((file) => mermaid.has(file))
 check(!mermaid.has(starts), `the entry chunk ${starts} is mermaid's own`)
 check(
   onStartup.length === 0,
   `${onStartup.length} of mermaid's chunks load with the app, before any diagram asks: ${onStartup.join(", ")}`,
 )
-// And no other chunk carries one of them along either: a diagram is the only thing that asks.
 const pulled = [...statics]
   .filter(([file]) => !mermaid.has(file))
   .flatMap(([file, edges]) => edges.filter((to) => mermaid.has(to)).map((to) => `${file} loads ${to}`))
@@ -113,7 +93,6 @@ check(
   `${pulled.length} chunks load mermaid with them rather than asking for it: ${pulled.slice(0, 4).join(", ")}`,
 )
 
-// --- left out of the install, held in one bounded cache-first route ------------------------------
 const sw = readFileSync(join(DIST, "sw.js"), "utf8")
 const precached = [...sw.matchAll(/precacheAndRoute\(\[(.*?)\](?:,\{\})?\)/gs)].flatMap(([, list]) =>
   [...list.matchAll(/url:"([^"]+)"/g)].map(([, url]) => `/${url}`),

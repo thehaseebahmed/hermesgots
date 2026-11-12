@@ -18,11 +18,6 @@ const Block = memo(function Block({ text, tone }: { text: string; tone: Tone }) 
   return <MarkdownRenderer tone={tone}>{text}</MarkdownRenderer>
 })
 
-/**
- * The text as it is drawn: each closed ```mermaid fence becomes a frame where the fence stood, and
- * every stretch between them is split into blocks as it always was, so a reply still streaming draws
- * its words block by block and its fences keep the code they are until they close.
- */
 function drawnParts(text: string, tone: Tone) {
   return mermaidParts(text).map((part) =>
     part.kind === "mermaid" ? (

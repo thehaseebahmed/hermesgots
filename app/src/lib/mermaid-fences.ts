@@ -1,21 +1,12 @@
-// `at` indexes into the string given to `mermaidParts`, and the parts tile that string in order,
-// with no gaps or overlaps.
 import { closes, fenceOf, linesOf, unixLength, unixLines, type Fence } from "./fences.ts"
 
 export type MermaidPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "mermaid"; at: number; source: string }
 
-// No leading spaces are allowed here, unlike the block splitter's fence: a fence set into a line is
-// that line's content — a list item's example, a quote's — and markdown draws it as code, so only
-// the fence standing at the margin is the text's own.
 const FENCE = /^(`{3,}|~{3,})(.*)$/
 const INFO = "mermaid"
 
-/**
- * Whether a text could hold a diagram at all. The marker is the word a fence opens with, so a text
- * without it — most of what a reply says — is answered as one part without a line being split.
- */
 const mayDrawDiagram = (content: string) => content.includes(INFO)
 
 /**

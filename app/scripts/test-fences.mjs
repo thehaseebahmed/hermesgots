@@ -1,21 +1,10 @@
-/**
- * The scanner two fence rules share (`src/lib/fences.ts`): where a text's lines start, what a line
- * opens, and whether a line closes what was opened. It has no opinion about which fence belongs to
- * which feature — that is each rule's own — so what is held here is only the reading of a line.
- *
- * A unit rule over strings, so it is the cheapest tier that would fail if a fence's own line were
- * read wrongly: `scripts/test-openui-block.mjs` and `scripts/test-mermaid-fences.mjs` are what hold
- * the two policies built on it.
- */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { closes, fenceOf, linesOf, unixLength, unixLine, unixLines } from "../src/lib/fences.ts"
 
-/** A fence as `openui-lang` opens one: up to three spaces in front of it. */
 const INDENTED = /^ {0,3}(`{3,}|~{3,})(.*)$/
-/** And as `mermaid` does: the first column only. */
 const MARGIN = /^(`{3,}|~{3,})(.*)$/
 
 test("a text's lines come back with the offset each starts at, and the offsets tile it", () => {

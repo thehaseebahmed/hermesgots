@@ -129,12 +129,7 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
   )
 }
 
-/**
- * The scrolling part, so the header above stays pinned. A body holding something wider than the
- * sheet — a drawing opened at the width it was made — is given both ways, so it can be moved across
- * as well as down; every other body keeps one, which is what stops a long line widening a sheet that
- * holds only words.
- */
+/** The scrolling part, so the header above stays pinned. */
 function Scroll({
   children,
   dataSlot,

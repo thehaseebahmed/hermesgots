@@ -184,9 +184,6 @@ app() {
   # assertion runs over the build above — unwired it could not have failed. It waits for the build,
   # because it reads what the build wrote.
   gate node scripts/check-openui-chunks.mjs
-  # mermaid is off the install: its chunks sit under `assets/mermaid/`, the service worker leaves that
-  # path out of the precache and holds it in one bounded cache-first route. Same reason as above — it
-  # reads the build, so it runs after it.
   gate node scripts/check-mermaid-chunks.mjs
 }
 

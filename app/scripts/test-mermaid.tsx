@@ -1,13 +1,3 @@
-/**
- * A closed ```mermaid fence, wherever the app draws markdown: the frame that stands where the fence
- * stood, the tone it sits on, its source copyable from its chrome — and, where the drawing cannot be
- * made, its source settled on as the code it is with one quiet line saying why.
- *
- * The drawing itself is not this tier's. mermaid measures a diagram with `getBBox`, and a DOM without
- * layout has none, so a fence mounted here always ends on that fallback — which is exactly the half
- * this tier can prove, and the half that must never become a stack trace on screen. That an `<svg>`
- * lands in the frame, at the page's own colours, is `pnpm e2e mermaid`'s to prove.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { ThemeProvider, useTheme } from "next-themes"
@@ -17,10 +7,8 @@ import { ask, reply } from "./openui-kit.tsx"
 import { absent, click, find, mount, mountMarkdown, settle, until } from "./component-kit.tsx"
 
 const frame = () => find("[data-slot=diagram]")
-/** The row the message draws: a reply's text can arrive as more than one markdown root. */
 const row = () => find("[data-slot=message]")
 const bubble = () => find("[data-slot=bubble-content]")
-/** The one line a fence says when its source could not be drawn. */
 const line = () => find("[data-slot=diagram-line]")
 
 const DIAGRAM = ["graph TD", "  A --> B"].join("\n")
@@ -57,8 +45,6 @@ test("a closed fence draws its frame, not a block of code", async () => {
 
 test("a frame in a user's bubble sits on the bubble's own colour", async () => {
   await mountMarkdown(<MessageItem message={ask(REPLY)} showStats />, () => {
-    // The fence's chrome, in whichever state it has reached: its frame, or — where the drawing could
-    // not be made here — the block its source settled on. Both are the fence, and both carry the tone.
     const chrome = frame() ?? find("div[data-md-code]")
     assert.ok(chrome, "a message's closed fence draws the frame's chrome too")
     assert.ok(bubble(), "the words are on a bubble")
@@ -100,7 +86,6 @@ test("a fence that cannot be drawn here settles on its source and one quiet line
   })
 })
 
-/** The app's theme, on a switch a test can throw: what a reader does when they flip the mode. */
 function Themed({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
@@ -130,8 +115,6 @@ test("a theme flip redraws the fence without putting its source back", async () 
       </Flip>
     </Themed>,
     async () => {
-      // What this tier can reach of a drawing is its fallback, so that is the state a redraw has to
-      // keep: a fence put back to waiting would mount its frame over the settled source on its way.
       await until(
         async () => find("div[data-md-code]") !== null,
         "the fence to settle on its source",
@@ -160,7 +143,6 @@ test("a theme flip redraws the fence without putting its source back", async () 
   )
 })
 
-/** The fences the rule leaves as text, each of which markdown draws as a block of code. */
 const STAYS_CODE = [
   { what: "an info string that is not exactly mermaid", text: "```mermaid extra\ngraph TD\n```" },
   { what: "an indented fence", text: "  ```mermaid\n  graph TD\n  ```" },

@@ -326,8 +326,6 @@ test("a text that cannot hold a block says so, and comes back whole", () => {
 test("the splitter touches nothing but the string", () => {
   const raw = readFileSync(new URL("../src/lib/openui-block.ts", import.meta.url), "utf8")
   const source = raw.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")
-  // The scanner it shares with the diagram's fence rule is the one module it may reach: a pure
-  // reading of a line, held to reaching nothing itself by `scripts/test-fences.mjs`.
   const imports = [...source.matchAll(/^[ \t]*import\b[^\n]*$/gm)].map(([line]) => line.trim())
   assert.equal(imports.length, 1, "one import, and no other: this rule is asked on every reply")
   assert.match(imports[0], /from "\.\/fences\.ts"$/, "and it is the scanner beside it")

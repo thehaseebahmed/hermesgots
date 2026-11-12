@@ -28,13 +28,6 @@ export const PAINT: Record<Tone, { fill: string; chrome: string }> = {
 export const SOURCE_TEXT =
   "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap"
 
-/**
- * The chrome around a body: the tone's fill, what the body is written in, and the control that takes
- * the source away. A block of code is this frame around its `<pre>`; a diagram is the same frame
- * around its drawing, since a fence's picture stands where the fence's code would have (ADR 0146).
- * What the root is called is the caller's to say — the code block's `data-md-code`, a frame's own
- * slot — and whatever the body draws, the control copies the same source.
- */
 export function CodeFrame({
   language,
   code,

@@ -6,8 +6,6 @@ import { mermaidParts } from "../src/lib/mermaid-fences.ts"
 
 const asText = (text) => [{ kind: "text", at: 0, text }]
 
-// Every part starts where the one before it ended, holds exactly what it claims, and the last one
-// ends at the text's end: no gap, no overlap, no offset that drifts.
 const tiles = (text, parts) => {
   let at = 0
   for (const [i, part] of parts.entries()) {
@@ -193,8 +191,6 @@ test("a CRLF text splits where its LF twin does", () => {
 })
 
 test("a text with no marker at all is answered as one part, without a line split", () => {
-  // The fast path: a reply is mostly words, and the marker is the word a fence opens with, so a text
-  // without it has no fence to look for.
   const prose = ["A paragraph.", "", "```python", "print(1)", "```", "", "And more."].join("\n")
   assert.ok(!prose.includes("mermaid"), "the text holds no marker, though it holds a fence")
   assert.deepEqual(mermaidParts(prose), asText(prose), "so the whole text comes back as one part")
@@ -204,8 +200,6 @@ test("a text with no marker at all is answered as one part, without a line split
 test("the rule touches nothing but the string", () => {
   const raw = readFileSync(new URL("../src/lib/mermaid-fences.ts", import.meta.url), "utf8")
   const source = raw.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")
-  // The scanner it shares with the block splitter is the one module it may reach: a pure reading of
-  // a line, held to reaching nothing itself by `scripts/test-fences.mjs`.
   const imports = [...source.matchAll(/^[ \t]*import\b[^\n]*$/gm)].map(([line]) => line.trim())
   assert.equal(imports.length, 1, "one import, and no other: a rule reached from the startup path")
   assert.match(imports[0], /from "\.\/fences\.ts"$/, "and it is the scanner beside it")

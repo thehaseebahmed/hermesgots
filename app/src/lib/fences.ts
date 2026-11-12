@@ -1,31 +1,12 @@
 /**
- * What two fence rules read off a text, shared: the fence a line opens, whether a line closes one, a
- * text's lines with the offset each starts at, and the CR a CRLF text leaves at their ends.
- *
- * What is not shared is the policy, because it is what the two features disagree about. `openui-lang`
- * opens with up to three spaces in front of it, keeps track of the list items it is inside, and an
- * opener whose closer has yet to arrive is still a block — the block is what the reply is about.
- * `mermaid` opens in the first column only, and an opener that never closes leaves its tail as the
- * text it is, so a reply still streaming draws no half diagram. A scanner given both rules as a
- * policy object would say neither of them plainly, so each rule keeps its own loop over these.
- *
- * Import-free, since `scripts/test-mermaid-fences.mjs` runs one of the rules as a pure function and
- * both are reached from a route that is on the startup path.
- */
-
-/**
  * A fence as a closer has to match it: the character it is made of, and how many of them. A closer
  * is the same character, no fewer, and nothing else on its line.
  */
 export type Fence = { char: string; length: number }
 
-/** A fence as a line writes it: the two above, and whatever follows them on the line. */
 export type Opener = Fence & { rest: string }
 
-/**
- * The fence a line opens, read with the caller's own pattern — a fence's own indentation is the
- * policy's, so the pattern that says what may stand in front of it belongs to the caller.
- */
+/** The fence a line opens, read with the caller's own pattern: the indentation is the policy's. */
 export function fenceOf(line: string, pattern: RegExp): Opener | null {
   const match = pattern.exec(unixLine(line))
   if (!match) return null
@@ -56,17 +37,14 @@ export function linesOf(content: string) {
   return { lines, starts }
 }
 
-/** A line without the CR a CRLF text leaves at its end: a slice, so no pattern runs per line. */
 export function unixLine(line: string) {
   return line.endsWith("\r") ? line.slice(0, -1) : line
 }
 
-/** That line's length, counted without building the slice — what a closer's offset is added to. */
 export function unixLength(line: string) {
   return line.endsWith("\r") ? line.length - 1 : line.length
 }
 
-/** A text with one kind of line ending, for a body read as source rather than as offsets. */
 export function unixLines(text: string) {
   return text.replace(/\r\n?/g, "\n")
 }

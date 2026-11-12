@@ -10,22 +10,11 @@ import { VitePWA } from "vite-plugin-pwa"
 import pkg from "./package.json" with { type: "json" }
 import { MERMAID } from "./src/lib/mermaid-chunks.ts"
 
-/** mermaid's own packages: the door the app opens it through, and everything behind that door. */
 const MERMAID_PACKAGE = /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(?:mermaid|@mermaid-js)\//
 
 /**
- * mermaid's chunks are emitted under `assets/mermaid/`, each keeping its own file, so the service
- * worker can leave that path out of the install and hold it in one cache-first route instead: both
- * need a path, and a hashed file name changes with every mermaid release. They cannot be forced into
- * one chunk, because each diagram type is a lazy import of its own and one file would preload them all.
- *
- * A chunk is mermaid's for either of two reasons. It carries a module of mermaid's own packages — the
- * door the diagram opens — which is also the chunk that may hold a helper mermaid shares with the
- * app. Or nothing in it can be reached from the app's entry without passing through those packages:
- * mermaid's layout libraries, its parser's dist, katex and cytoscape live in chunks of their own and
- * nowhere else in the app. That second question is answered here, where the module graph is finished,
- * because `chunkFileNames` is asked about one chunk at a time with no sight of it; every module the
- * entry reaches is marked, no edge out of mermaid's packages is followed, and the rest is mermaid's.
+ * A chunk is mermaid's if it carries one of its packages, or if nothing in the entry reaches it
+ * without passing through one — the question `chunkFileNames` cannot ask, one chunk at a time.
  */
 function mermaidChunks() {
   const only = new Set<string>()
@@ -57,7 +46,6 @@ function mermaidChunks() {
 
   return {
     plugin,
-    // Every other chunk keeps exactly the name Vite gives it today.
     fileNames: (chunk: { moduleIds: string[] }) =>
       chunk.moduleIds.some((id) => MERMAID_PACKAGE.test(id)) ||
       (chunk.moduleIds.length > 0 && chunk.moduleIds.every((id) => only.has(id)))
@@ -153,30 +141,20 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-          // mermaid is fetched the first time a diagram is drawn and kept by the route below, so
-          // precaching it would land ~5 MB on every reader at install — including one who never opens
-          // a diagram. The gate reads this out of the built worker (`check-mermaid-chunks.mjs`).
           globIgnores: [`${MERMAID}**`],
           navigateFallback: "/index.html",
           // Netlify Identity, the sync function and the app's sign-in page must always reach the network.
           navigateFallbackDenylist: [/^\/\.netlify\//, /^\/auth\//],
-          // Never let the service worker touch calls to the Hermes server. mermaid's chunks are the
-          // one thing cached from this origin: same-origin `.js` under the build's own path for it,
-          // held from the first diagram on so a diagram drawn once draws again with no connection.
-          // Workbox tests a RegExp against the whole URL and takes a partial match only from this
-          // origin, so a third party's copy of the path is never answered from this cache.
+          // Never let the service worker touch calls to the Hermes server. The one route below is
+          // mermaid's, and workbox takes a partial RegExp match only from this origin, so a third
+          // party's copy of the path is never answered from this cache.
           runtimeCaching: [
             {
-              // The path the build names these chunks by, read out of the one module that says it:
-              // every slash escaped, so workbox writes the same expression it did by hand.
+              // A RegExp's source escapes its slashes, so the path is escaped as it goes in.
               urlPattern: new RegExp(`\\/${MERMAID.replaceAll("/", "\\/")}[^/]+\\.js$`),
               handler: "CacheFirst",
               options: {
                 cacheName: "gots-mermaid",
-                // The whole of mermaid is 89 files this release: 120 holds a build's closure with
-                // room for one that grows, and still caps what a device spends on diagrams. Thirty
-                // days keeps a diagram offline through a holiday, and lets go of a build this device
-                // never comes back to — the same thirty days `canvas-css.ts` keeps a version's CSS.
                 expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 * 30 },
                 cacheableResponse: { statuses: [200] },
               },
