@@ -31,15 +31,28 @@ const chunk = readdirSync(assets).filter((file) => file.endsWith(".js"))
 const entry = readFileSync("dist/index.html", "utf8").match(/src="\/assets\/([^"]+\.js)"/)?.[1]
 assert.ok(entry, "dist/index.html names the chunk the chat route loads")
 
+/**
+ * The canvas route's own chunk, which inlines a library's text for a page that asked for it
+ * (ADR 0146): that text carries the same words as the drawing code, so a chunk holding it is no
+ * drawing chunk — it is data the canvas route alone reaches, and nothing draws it.
+ */
+const canvasRoute = chunk.find((file) => read(file).includes("data-canvas-frame"))
+assert.ok(canvasRoute, "dist names the canvas route's chunk")
+
 function carried({ name, marker, chunk: named, entryPattern }) {
   const carriers = chunk.filter((file) => read(file).includes(marker))
-  assert.equal(
-    carriers.length,
-    1,
-    `${name} draws in exactly one chunk, found ${carriers.join(", ") || "none"}`,
-  )
-  const [lazy] = carriers
+  const own = carriers.filter((file) => named.test(file))
+  assert.equal(own.length, 1, `${name} draws in exactly one chunk, found ${own.join(", ") || "none"}`)
+  const [lazy] = own
   assert.match(lazy, named, `and that chunk is ${name}'s own`)
+  for (const file of carriers.filter((carrier) => carrier !== lazy)) {
+    const reachedBy = chunk.filter((other) => other !== file && read(other).includes(`./${file}`))
+    assert.deepEqual(
+      reachedBy,
+      [canvasRoute],
+      `${file} carries ${name}'s words as a canvas's own text, so only ${canvasRoute} may reach it`,
+    )
+  }
   const loaded = read(entry)
   assert.ok(!loaded.includes(marker), `the entry chunk carries none of ${name}`)
   assert.doesNotMatch(
