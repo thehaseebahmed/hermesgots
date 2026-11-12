@@ -47,6 +47,19 @@ test("a domain part long enough to still collide falls back to the whole host", 
   )
 })
 
+test("a host is only made to say its whole address by a rival of its own name", () => {
+  const three = [
+    bot("a", "https://hermes.domain.com/v1"),
+    bot("b", "https://hermes.example.com/v1"),
+    bot("c", "https://api.example.com/v1"),
+  ]
+  assert.deepEqual(
+    three.map((one) => botLabel(one, three)),
+    ["domain", "example", "api"],
+    "a host another domain happens to share says nothing about the two that share a name",
+  )
+})
+
 test("one host's several bots append the profile they are reached at", () => {
   const host = [
     bot("a", "https://hermes.domain.com/v1"),

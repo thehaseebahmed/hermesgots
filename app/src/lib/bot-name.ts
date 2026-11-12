@@ -86,14 +86,13 @@ export function botLabel(bot: NamedBot, peers: NamedBot[]): string {
     (other) => other.host && other.host !== host && shortOf(other.host) === short,
   )
   if (clash) {
-    // Two hosts' domain parts can be one name too, and then only the whole host tells them apart.
+    // Two hosts' domain parts can be one name too, and then only the whole host tells them apart —
+    // measured against the hosts that wear the same short name, since no other host is this one's
+    // rival.
     const part = domainOf(host)
     base = part ?? host
-    if (
-      part &&
-      others.some((other) => other.host !== host && (domainOf(other.host) ?? other.host) === part)
-    )
-      base = host
+    const rivals = others.filter((other) => other.host !== host && shortOf(other.host) === short)
+    if (part && rivals.some((other) => (domainOf(other.host) ?? other.host) === part)) base = host
   }
   const sameHost = others.filter((other) => other.host === host)
   // Two bots linked at one host and one profile are the same link twice: their own name is all
