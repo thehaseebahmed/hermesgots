@@ -121,6 +121,10 @@ test(
           "the host's own sentence, at the top of the page the row sits on",
         )
         assert.deepEqual(said, [], "and nothing said in passing")
+        assert.ok(
+          find("header")?.contains(notice()!),
+          "pinned in the page's header, which stays under the top edge while the column scrolls",
+        )
       })
     })
   }),
