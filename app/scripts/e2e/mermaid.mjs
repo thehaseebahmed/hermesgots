@@ -5,10 +5,16 @@
 // two states of the page, and a component test handed the finished string has only one. The drawing
 // itself is this flow's, because mermaid measures a diagram with `getBBox` and no DOM without layout
 // has one.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { app, assert, flow, long, pass, settled } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const FRAME = "[data-slot=diagram]"
+// The drawing, as the frame's body draws it once mermaid has made it: a control, and the sheet a
+// tap on it opens the same drawing in.
+const DRAWING = "[data-slot=diagram-drawing]"
+const SHEET = "[data-slot=diagram-sheet]"
+/** A thread's own scroller: where a reader was when they opened a sheet over it. */
+const THREAD = "[data-slot=message-scroller-viewport]"
 // The source a fence mermaid refused is drawn as the code it is, and one quiet line says why.
 const LINE = "[data-slot=diagram-line]"
 // A fence's code block lives in the reply's markdown, not merely somewhere in its row: a turn's tool
@@ -108,11 +114,77 @@ const drawnFacts = (page) =>
     }
   })
 
+/**
+ * The drawing as a reader can reach it, and the sheet a tap opens it in, measured in the browser:
+ * the control the frame's body is, the one svg the frame holds and the width it was made at, the
+ * thread's own scroll, and — while one is open — the sheet's scrolling body, the drawing inside it
+ * and whether that drawing is wider than the room the body is given.
+ */
+const sheetFacts = (page) =>
+  page.evaluate(
+    ({ frame: frameSel, drawing: drawingSel, sheet: sheetSel, thread: threadSel }) => {
+      const boxOf = (node) => {
+        const box = node.getBoundingClientRect()
+        return {
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          top: Math.round(box.top),
+        }
+      }
+      const drawn = [...document.querySelectorAll(frameSel)].at(-1)
+      const control = drawn?.querySelector(drawingSel)
+      const own = drawn?.querySelector("svg[id]")
+      const view = document.querySelector(threadSel)
+      const sheet = document.querySelector(sheetSel)
+      const inside = sheet?.querySelector("svg[id]")
+      return {
+        control: control && {
+          tag: control.tagName,
+          type: control.getAttribute("type"),
+          name: control.getAttribute("aria-label"),
+          expands: control.getAttribute("aria-expanded"),
+        },
+        // The drawing is a picture, not a pair of them: one svg in the frame, whatever is open.
+        drawings: drawn ? drawn.querySelectorAll("svg[id]").length : -1,
+        id: own?.id ?? "",
+        natural: own?.viewBox.baseVal.width ?? 0,
+        box: own ? boxOf(own) : null,
+        column: drawn?.closest("[data-slot=markdown]")?.getBoundingClientRect().width ?? 0,
+        thread: view && {
+          top: view.scrollTop,
+          height: view.clientHeight,
+          total: view.scrollHeight,
+        },
+        screen: window.innerWidth,
+        sheet: sheet && {
+          frame: boxOf(sheet),
+          // The room the body gives its content, and what it really holds — the gap is what pans.
+          room: sheet.clientWidth,
+          total: sheet.scrollWidth,
+          drawings: sheet.querySelectorAll("svg[id]").length,
+          id: inside?.id ?? "",
+          natural: inside?.viewBox.baseVal.width ?? 0,
+          box: inside ? boxOf(inside) : null,
+          left: sheet.scrollLeft,
+        },
+      }
+    },
+    { frame: FRAME, drawing: DRAWING, sheet: SHEET, thread: THREAD },
+  )
+
 await flow(
   "mermaid",
-  async ({ page, send, lastReply, newChat, until, shot }) => {
+  async ({ page, send, lastReply, newChat, until, shot, centreOf }) => {
+    // Every chunk the page asks for that carries mermaid: a drawing made once is never fetched
+    // again, whatever a reader opens over it.
+    const chunks = []
+    page.on("request", (request) => {
+      const url = request.url()
+      if (/mermaid/i.test(url) && /\.m?js(?:[?#]|$)/.test(url)) chunks.push(url)
+    })
     await page.goto(app)
     const chatId = await newChat()
+    // Watched from here, so the record is the diagram's own reply and no other.
     await watchFence(page)
     await send("draw a diagram")
     const reply = page.locator(REPLY).last()
@@ -259,6 +331,214 @@ await flow(
     )
     pass(
       `the drawing followed the page: ${[...seen.entries()].map(([at, what]) => `${at} ${what}`).join("; ")}`,
+    )
+
+    // A reader opens the drawing larger (F4). A phone is where it matters: the diagram is wider than
+    // the column it is drawn in, so a sheet that held it at the column's width would be a smaller
+    // copy of what the thread already shows. It opens the same drawing at the width it was made, in
+    // a body that pans both ways, and closing it leaves the thread where the reader left it — the
+    // same svg, never a second one, and no second ask for mermaid's chunk.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ colorScheme: "light" })
+    // An answer below the diagram first, so the thread is longer than the phone's pane: "the thread
+    // is where it was" is then a measurement, not a zero against a zero. The fence's own record is
+    // read by now, so a turn under it cannot disturb it.
+    await send(long("After the diagram", 8))
+    await until(
+      async () => (await lastReply(chatId))?.status === "done",
+      60_000,
+      "the answer below the diagram to reach its end",
+    )
+    await until(
+      async () => {
+        const facts = await drawnFacts(page)
+        return facts.svg && facts.ink === facts.expected
+      },
+      20_000,
+      "the light drawing at a phone's width",
+    )
+    // The diagram is the last frame on the page, whatever reply the thread ends on: the `frame`
+    // locator above follows the thread's last reply, which is now the answer below it.
+    const drawing = page.locator(FRAME).last()
+    // The answer types itself out once its turn has ended, and the thread follows it down as it
+    // grows: an answer still typing is a thread still moving, and a position read inside that is no
+    // place a reader was. It is finished when its stats land, and the thread has come to rest a
+    // moment after.
+    await page
+      .locator(REPLY)
+      .last()
+      .getByText(/\d+ tokens/)
+      .first()
+      .waitFor({ timeout: 20_000 })
+    await drawing.scrollIntoViewIfNeeded()
+    const rest = async (what) => {
+      let was = ""
+      return until(
+        async () => {
+          const facts = await sheetFacts(page)
+          const now = `${facts.thread?.top}/${facts.thread?.total}`
+          const still = now === was
+          was = now
+          return still ? facts : null
+        },
+        15_000,
+        what,
+      )
+    }
+    const shut = await rest("the thread to come to rest")
+    assert.equal(shut.sheet, null, "no sheet stands over the thread to begin with")
+    assert.ok(shut.thread && shut.thread.total > shut.thread.height, "the thread is longer than its pane")
+    assert.ok(
+      (shut.thread?.top ?? 0) > 0,
+      `and the reader is partway down it (${shut.thread?.top}px)`,
+    )
+    assert.ok(shut.control, "the drawing is a control, not only a picture")
+    assert.equal(shut.control?.tag, "BUTTON", `it is a real button (${shut.control?.tag})`)
+    assert.equal(shut.control?.type, "button", "that submits no form")
+    assert.ok(
+      /diagram/i.test(shut.control?.name ?? ""),
+      `named for what it opens ("${shut.control?.name}")`,
+    )
+    assert.equal(shut.drawings, 1, "the frame holds one svg, never two")
+    assert.ok(
+      shut.natural > shut.column,
+      `and the diagram is wider than the column it is drawn in (${Math.round(shut.natural)}px made, ${Math.round(shut.column)}px given)`,
+    )
+
+    // The ring is the keyboard's: the copy control is the step before the drawing in the frame, so
+    // one Tab from it lands on the drawing — which is what draws the ring.
+    await page.evaluate(
+      ({ frame: frameSel }) =>
+        [...document.querySelectorAll(frameSel)]
+          .at(-1)
+          ?.querySelector('button[aria-label="Copy code"]')
+          ?.focus(),
+      { frame: FRAME },
+    )
+    await page.keyboard.press("Tab")
+    const reached = await page.evaluate(
+      ({ frame: frameSel, drawing: drawingSel }) => {
+        const control = [...document.querySelectorAll(frameSel)]
+          .at(-1)
+          ?.querySelector(drawingSel)
+        const style = control && getComputedStyle(control)
+        return {
+          focused: document.activeElement === control,
+          which:
+            document.activeElement?.getAttribute("aria-label") ??
+            document.activeElement?.tagName ??
+            "",
+          visible: control?.matches(":focus-visible") ?? false,
+          ring: style?.boxShadow ?? "none",
+        }
+      },
+      { frame: FRAME, drawing: DRAWING },
+    )
+    assert.equal(reached.focused, true, `a keyboard reaches the drawing (${reached.which})`)
+    assert.equal(reached.visible, true, "as a keyboard reader's focus, which is what wears the ring")
+    assert.notEqual(reached.ring, "none", `and the ring is really drawn there (${reached.ring})`)
+
+    const chunksBefore = chunks.length
+    assert.ok(
+      chunksBefore > 0,
+      `mermaid's chunk was fetched to make the drawing (${chunksBefore} requests)`,
+    )
+    await drawing.locator(DRAWING).click()
+    await until(
+      async () => {
+        const facts = await sheetFacts(page)
+        return facts.sheet ? facts : null
+      },
+      10_000,
+      "the sheet to open on the drawing",
+    )
+    await settled(page)
+    const shown = await rest("the thread under the sheet to stay put")
+    assert.equal(shown.drawings, 1, "the frame keeps its one drawing behind the sheet")
+    assert.equal(shown.sheet?.drawings, 1, "and the sheet holds one")
+    assert.ok(
+      Math.abs((shown.sheet?.natural ?? 0) - shown.natural) < 1,
+      `the sheet holds the drawing that was made (${shown.sheet?.natural}px against ${shown.natural}px)`,
+    )
+    assert.ok(
+      (shown.sheet?.box?.width ?? 0) >= shown.natural - 2,
+      `at its own width, not scaled to the phone (${shown.sheet?.box?.width}px of ${Math.round(shown.natural)}px)`,
+    )
+    assert.ok(
+      (shown.sheet?.frame.width ?? 0) <= shown.screen,
+      `the sheet itself fits the phone it is opened on (${shown.sheet?.frame.width}px of ${shown.screen}px)`,
+    )
+    assert.ok(
+      (shown.sheet?.total ?? 0) > (shown.sheet?.room ?? 0) + 8,
+      `its body holds more than it shows, so it pans (${shown.sheet?.total}px of ${shown.sheet?.room}px)`,
+    )
+    assert.equal(shown.control?.expands, "true", "the control says the drawing stands open")
+    assert.equal(
+      shown.thread?.top,
+      shut.thread?.top,
+      `the thread behind it did not move (${shown.thread?.top}px of ${shut.thread?.top}px)`,
+    )
+
+    // The pan is the reader's own: a sideways scroll over the body carries the drawing across, which
+    // is what makes a diagram wider than the phone readable at all.
+    const at = await centreOf(SHEET)
+    await page.mouse.move(at.x, at.y)
+    await page.mouse.wheel(160, 0)
+    const panned = await until(
+      async () => {
+        const left = (await sheetFacts(page)).sheet?.left ?? 0
+        return left > 8 ? left : null
+      },
+      5_000,
+      "the sheet to pan sideways",
+    )
+    assert.ok(panned > 8, `a sideways scroll carries the drawing across (${Math.round(panned)}px)`)
+    const panningPath = await shot("sheet")
+
+    // Closing returns to the thread exactly where it was, on the very node that was drawn: marked
+    // here, and read back after the sheet has gone.
+    await page.evaluate(
+      ({ frame: frameSel }) => {
+        const svg = [...document.querySelectorAll(frameSel)].at(-1)?.querySelector("svg[id]")
+        if (svg) svg.dataset.kept = "1"
+      },
+      { frame: FRAME },
+    )
+    await page.keyboard.press("Escape")
+    await until(
+      async () => {
+        const facts = await sheetFacts(page)
+        return facts.sheet ? null : true
+      },
+      5_000,
+      "the sheet to close",
+    )
+    await settled(page)
+    const after = await rest("the thread to come to rest again")
+    assert.equal(after.sheet, null, "the sheet is gone")
+    assert.equal(after.drawings, 1, "the frame still holds one drawing, never two")
+    assert.equal(after.id, shut.id, "drawn as it was: the same svg, under the same id")
+    assert.equal(
+      await page.evaluate(
+        ({ frame: frameSel }) =>
+          [...document.querySelectorAll(frameSel)]
+            .at(-1)
+            ?.querySelector("svg[id]")
+            ?.getAttribute("data-kept") ?? "",
+        { frame: FRAME },
+      ),
+      "1",
+      "the very node the thread drew, not one made again to replace it",
+    )
+    assert.ok(
+      Math.abs((after.box?.width ?? 0) - (shut.box?.width ?? 0)) <= 1,
+      `at the size it was drawn (${after.box?.width}px against ${shut.box?.width}px)`,
+    )
+    assert.equal(after.box?.top, shut.box?.top, "where the reader left it in the thread")
+    assert.equal(after.thread?.top, shut.thread?.top, `and the thread at ${shut.thread?.top}px, as it was`)
+    assert.equal(chunks.length, chunksBefore, "mermaid was asked for nothing while the sheet was open")
+    pass(
+      `a tap opened the drawing at its own ${Math.round(shown.natural)}px in a ${Math.round(shown.sheet?.room ?? 0)}px body that pans (${Math.round(shown.sheet?.total ?? 0)}px wide), and closing it left the thread at ${shut.thread?.top}px${panningPath ? ` (${panningPath})` : ""}`,
     )
 
     // A fence mermaid refuses: its source, drawn as the code it is, and one quiet line saying why —

@@ -129,21 +129,31 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
   )
 }
 
-/** The scrolling part, so the header above stays pinned. */
+/**
+ * The scrolling part, so the header above stays pinned. A body holding something wider than the
+ * sheet — a drawing opened at the width it was made — is given both ways, so it can be moved across
+ * as well as down; every other body keeps one, which is what stops a long line widening a sheet that
+ * holds only words.
+ */
 function Scroll({
   children,
   dataSlot,
   scrollRef,
+  bothWays,
 }: {
   children: ReactNode
   dataSlot?: string
   scrollRef?: (node: HTMLDivElement | null) => void
+  bothWays?: boolean
 }) {
   return (
     <div
       ref={scrollRef}
       data-slot={dataSlot}
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+      className={cn(
+        "flex min-h-0 flex-1 flex-col overscroll-contain",
+        bothWays ? "overflow-auto" : "overflow-y-auto",
+      )}
     >
       {children}
     </div>
@@ -213,6 +223,7 @@ export function PopupContent({
   initialFocus,
   dataSlot,
   scrollRef,
+  bothWays,
 }: {
   className?: string
   /** A sheet's height that holds between views of its content (a picker's list, then a provider's
@@ -231,6 +242,9 @@ export function PopupContent({
   dataSlot?: string
   /** The pop-up's scroll box, handed to the one consumer that follows it — the thinking sheet. */
   scrollRef?: (node: HTMLDivElement | null) => void
+  /** A body holding more than a column of words — a drawing at the width it was made — pans both
+   * ways rather than down alone. */
+  bothWays?: boolean
 }) {
   const popup = useRef<HTMLDivElement>(null)
   const headerSeen = useRef(false)
@@ -281,7 +295,7 @@ export function PopupContent({
                 "max-h-[min(36rem,var(--available-height))]",
               )}
             >
-              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+              <Scroll dataSlot={dataSlot} scrollRef={scrollRef} bothWays={bothWays}>
                 {children}
               </Scroll>
             </Popover.Popup>
@@ -313,7 +327,7 @@ export function PopupContent({
               )}
             >
               <Drawer.Content className="flex min-h-0 flex-1 flex-col">
-                <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                <Scroll dataSlot={dataSlot} scrollRef={scrollRef} bothWays={bothWays}>
                   {children}
                 </Scroll>
               </Drawer.Content>
@@ -357,7 +371,7 @@ export function PopupContent({
               <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
             </Drawer.Close>
             <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
-              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+              <Scroll dataSlot={dataSlot} scrollRef={scrollRef} bothWays={bothWays}>
                 {children}
               </Scroll>
             </Drawer.Content>

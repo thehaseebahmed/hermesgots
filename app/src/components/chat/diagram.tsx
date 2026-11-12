@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react"
 
 import { CodeBlock, PAINT, type Tone } from "@/components/chat/code-block"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { DIAGRAM_TOKENS, mermaidTheme, type DiagramPalette } from "@/lib/mermaid-theme"
 import { toHex, useDark } from "@/lib/theme"
 import { cn } from "@/lib/utils"
@@ -16,12 +17,19 @@ import { cn } from "@/lib/utils"
  * Until the chunk lands the source is already on the frame, so a reader never sees it empty and never
  * sees it flash back. A fence that never closes never reaches this at all: the rule leaves it as the
  * code it is, so a reply still streaming fetches nothing.
+ *
+ * The drawing is a control: a tap — or a keyboard's Enter — opens the app's `Popup` on the same svg at
+ * the width it was made, in a body that pans both ways, since a diagram wider than a phone's column
+ * is otherwise only ever read scaled down (G6). Nothing is drawn a second time and nothing is asked
+ * of mermaid again: the sheet holds the string the frame already has, and closing it leaves the
+ * thread exactly where the reader left it.
  */
 export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone }) {
   const frame = useRef<HTMLDivElement>(null)
   // A theme flip is a redraw: the colours are read off the page when the drawing is made.
   const dark = useDark()
   const [drawing, setDrawing] = useState<Drawing>({ kind: "waiting" })
+  const [open, setOpen] = useState(false)
   // `useId`'s colons (and React 19's guillemets) are no DOM id, and mermaid selects the svg it draws
   // by the id it is handed.
   const id = `mermaid-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
@@ -60,13 +68,25 @@ export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone
         className="my-0"
         body={
           drawing.kind === "drawn" ? (
-            // mermaid's svg at its own width: it fills the column it stands in and stops at the size
-            // it was drawn at, so a narrow diagram is never stretched and a wide one never widens the
-            // thread.
-            <div
-              className="px-4 pt-1 pb-4 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
-              dangerouslySetInnerHTML={{ __html: drawing.svg }}
-            />
+            // The drawing is the frame's control: a tap or a keyboard's Enter opens it larger. It
+            // paints nothing of its own, so the frame's fill is still what it is a picture on.
+            <button
+              type="button"
+              data-slot="diagram-drawing"
+              aria-label="Open the diagram larger"
+              aria-haspopup="dialog"
+              aria-expanded={open}
+              onClick={() => setOpen(true)}
+              className="block w-full cursor-zoom-in appearance-none p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            >
+              <span
+                // mermaid's svg at its own width: it fills the column it stands in and stops at the
+                // size it was drawn at, so a narrow diagram is never stretched and a wide one never
+                // widens the thread. The sheet is where the full width is read.
+                className="block px-4 pt-1 pb-4 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: drawing.svg }}
+              />
+            </button>
           ) : (
             <div className="px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap">
               {source}
@@ -74,9 +94,47 @@ export function Diagram({ source, tone = "page" }: { source: string; tone?: Tone
           )
         }
       />
+      {drawing.kind === "drawn" ? (
+        <Popup open={open} onOpenChange={setOpen}>
+          <PopupContent dataSlot="diagram-sheet" bothWays>
+            <PopupHeader>
+              <PopupTitle>Diagram</PopupTitle>
+            </PopupHeader>
+            {/* The drawing at the width it was made, in a body that pans both ways: on a phone that
+                is the only way a diagram wider than the column is read at its own size rather than
+                scaled into the column the thread already shows. */}
+            <div className="p-6">
+              <div
+                style={{ width: widthOf(drawing.svg) || undefined }}
+                className="[&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: sheetCopy(drawing.svg, id) }}
+              />
+            </div>
+          </PopupContent>
+        </Popup>
+      ) : null}
     </div>
   )
 }
+
+/**
+ * The width a drawing was made at, off its own viewBox — the size the sheet opens it at. mermaid
+ * always writes one; a string without it is left to fill the sheet's box, which is the frame's own
+ * rule, rather than given a width guessed from nothing.
+ */
+function widthOf(svg: string) {
+  const box = /\sviewBox="\s*-?[\d.]+[\s,]+-?[\d.]+[\s,]+([\d.]+)/.exec(svg)
+  return box ? Math.round(Number(box[1])) : 0
+}
+
+/**
+ * The drawing as the sheet holds it: the very string the frame drew, its one id given the sheet's
+ * own name. mermaid removes an element by the id it was handed whenever it draws again, so a page
+ * holding two nodes of one id would have it remove whichever came first — the thread's own drawing.
+ * The id is a whole word in that string (its `#id` rules and the ids of its markers all begin with
+ * it), so every use of it moves together and the copy is styled by the rules it carries.
+ */
+const sheetCopy = (svg: string, id: string) => svg.split(id).join(`${id}-sheet`)
 
 type Drawing =
   | { kind: "waiting" }
