@@ -150,6 +150,15 @@ export function botSubPath(botId: string, tab: BotTab, id: string, item?: string
   return item ? `${base}/${encodeURIComponent(item)}` : base
 }
 
+/**
+ * What one page of a bot's settings is about — the key a refusal is held under, since a refusal is
+ * about the thing that was written and the next bot or the next page carries none of it. A sub is
+ * the empty string where the page holds none, so a page and its first sub never share a key.
+ */
+export function botSubject(botId: string, tab: BotTab, sub?: string): string {
+  return `${botId}/${tab}/${sub ?? ""}`
+}
+
 function decode(segment: string) {
   try {
     return decodeURIComponent(segment)
