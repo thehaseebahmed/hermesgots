@@ -1135,6 +1135,8 @@ export interface CanvasDocRow {
   doc: unknown
   at: number
   generation: number
+  /** This device's own write, which no host answer has come back for (ADR 0149). */
+  pending?: boolean
 }
 
 /**
@@ -1159,6 +1161,40 @@ export const canvasDocKey = (
   collection: string,
   id: string,
 ) => `${connection}\n${canvasId}\n${collection}\n${id}`
+
+/**
+ * A page's write its host never heard, kept until it does (`canvas-outbox.ts`, ADR 0149): the call
+ * as the page made it, and where that call stands in this canvas's queue.
+ *
+ * `seq` is the queue's own counter rather than a clock, so two writes in one millisecond still have
+ * an order and a device whose clock moved backwards cannot send them the wrong way round. One row a
+ * document, so a second write to the same one replaces the first, and a remove replaces the put it
+ * follows.
+ */
+export interface CanvasOutboxRow {
+  /** `<connection>\n<canvasId>\n<collection>\n<docId>` — the document, so a row is one document. */
+  id: string
+  connection: string
+  canvasId: string
+  /** Where the write stands in its canvas's queue: the smallest is sent first. */
+  seq: number
+  collection: string
+  /** The document the write names. */
+  docId: string
+  method: "put" | "remove"
+  /** What a put carries; a remove carries none. */
+  doc?: unknown
+  /** When this device made the write. */
+  at: number
+}
+
+/** The key one queued write is filed under, which is also what makes it one row a document. */
+export const canvasOutboxKey = (
+  connection: string,
+  canvasId: string,
+  collection: string,
+  docId: string,
+) => `${connection}\n${canvasId}\n${collection}\n${docId}`
 
 export const db = new Dexie("gots") as Dexie & {
   settings: EntityTable<Settings, "id">
@@ -1188,6 +1224,7 @@ export const db = new Dexie("gots") as Dexie & {
   canvasCache: EntityTable<CanvasCacheRow, "key">
   canvasDocs: EntityTable<CanvasDocRow, "key">
   canvasSweeps: EntityTable<CanvasSweepRow, "key">
+  canvasOutbox: EntityTable<CanvasOutboxRow, "id">
 }
 
 /** The messages store as this device declares it, so a test can stand a database up at an old version. */
@@ -1632,6 +1669,13 @@ db.version(42)
   })
 
 /**
+ * v43: a page's write, kept when its bot is away and sent when it returns (ADR 0149). A new table:
+ * nothing older has to be moved into it, and a queue row is this device's own — a device that never
+ * had one has nothing waiting.
+ */
+db.version(43).stores({ canvasOutbox: "id, canvasId, [canvasId+seq], connection" })
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
@@ -1773,6 +1817,9 @@ async function forgetCanvases(key: string, except: string) {
   // The documents are rows of their own, filed under the same connection: they go with the copies
   // that pointed at them, and a canvas read again fills them from the host.
   await db.canvasDocs.where("connection").equals(key).delete()
+  // A write still waiting to be sent goes with them: there is no bot left to send it to, and the
+  // connection it was filed under is the one nothing reaches any more.
+  await db.canvasOutbox.where("connection").equals(key).delete()
   // A sweep's mark is keyed by the connection first, so it is a range rather than an index — one
   // fewer index to keep, since nothing else reads a mark by its bot.
   await db.canvasSweeps.where("key").startsWith(`${key}\n`).delete()
@@ -1816,6 +1863,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.canvasCache,
     db.canvasDocs,
     db.canvasSweeps,
+    db.canvasOutbox,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -2060,6 +2108,7 @@ export async function clearAllData() {
     db.canvasCache,
     db.canvasDocs,
     db.canvasSweeps,
+    db.canvasOutbox,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

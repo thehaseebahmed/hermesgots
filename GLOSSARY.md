@@ -762,8 +762,28 @@ One saved state of a canvas's HTML, made by every write its bot does. Undo steps
 _Avoid_: revision, snapshot, draft
 
 **Canvas data**:
-What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
+What a canvas keeps for itself — the ticked boxes, the logged runs — held as documents in named collections and stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Document**:
+One row of a canvas's data: a collection's name, an id, and a value of any JSON, stamped with its host's clock.
+_Avoid_: record, row, item, entry
+
+**Collection**:
+A canvas's named bucket of documents — the unit a page lists whole and a query reads a page of.
+_Avoid_: table, folder, namespace, group
+
+**Sweep**:
+A device reading a canvas's documents a page at a time to fill its own copy. It is a *completed* sweep only once the last page of the last collection has landed, and only a completed sweep may treat a document it did not see as gone, so only a completed sweep prunes.
+_Avoid_: sync, pull, refresh, download
+
+**Pending write**:
+A page's write the device kept because its bot was away: read back at once and sent in order when the bot answers, and never outranking an answer the host has given.
+_Avoid_: queued write, outbox entry, draft, retry
+
+**Vault**:
+The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the bot's home, written by its host and never read back.
+_Avoid_: wiki, backup folder, export, mirror
 
 **Ask**:
 The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app

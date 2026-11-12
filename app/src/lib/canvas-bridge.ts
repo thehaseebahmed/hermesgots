@@ -92,6 +92,11 @@ export interface CanvasDoc {
   id: string
   doc: unknown
   at: number
+  /**
+   * This device's own write, kept because its host has not answered it (ADR 0149): read back at once
+   * as this device holds it, sent in order when the host returns, and never outranking its answer.
+   */
+  pending?: boolean
 }
 
 /** What every call carries: the number its reply names it by, and the page that asked. */
@@ -116,6 +121,15 @@ export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "put
 
 /** A call the host answers: the canvas's own data, written through the host's one route. */
 export type BridgeWriteCall = Extract<BridgeCall, { method: "put" | "remove" }>
+
+/**
+ * A write without the number a page's reply names it by: what the host's one route takes, and what a
+ * write kept on this device (`canvas-outbox.ts`) holds — a Pending write answers no page, since the
+ * page's promise was kept when it was made.
+ */
+export type CanvasWrite =
+  | { method: "put"; collection: string; id: string; doc: unknown }
+  | { method: "remove"; collection: string; id: string }
 
 /** A call that reaches the host: one of its free reads, or a declared tool the page calls. */
 export type BridgeHostCall = Extract<BridgeCall, { method: "read" | "tool" }>
@@ -265,7 +279,7 @@ export function inOrder(copy: CanvasDoc[]): CanvasDoc[] {
  */
 export function applyWrite(
   copy: CanvasDoc[],
-  call: BridgeWriteCall,
+  call: CanvasWrite,
   value: unknown,
 ): CanvasDoc[] | null {
   if (!value || typeof value !== "object") return null

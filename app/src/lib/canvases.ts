@@ -25,7 +25,14 @@ import {
   recordOf,
   upsert,
 } from "@/lib/canvas-cache"
-import { cachedDocs, forgetDoc, keepDocs, sweepMarks } from "@/lib/canvas-docs"
+import { cachedDocs, forgetDoc, keepWrite, settleDoc, sweepMarks } from "@/lib/canvas-docs"
+import {
+  drainCanvas,
+  drainOutbox,
+  dropQueued,
+  enqueueWrite,
+  sendWrite,
+} from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { hostTargets, serverConfig } from "@/lib/connection"
 import { db, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
@@ -188,10 +195,10 @@ async function dropCanvas(profile: Profile, id: string) {
 const AWAY_BOT = "This bot didn't answer."
 
 /**
- * What a page's write is told with the host away, and what the reader's toast says. The copy the page
- * reads back is the one the host last kept: nothing is queued for it.
+ * What a page's write is told with the host away, and what the reader's toast says: the write is kept
+ * on this device as a Pending write and sent when the bot returns, so it is no refusal (ADR 0149).
  */
-export const CANVAS_AWAY = "This canvas can't save while its bot is away."
+export const CANVAS_AWAY = "Saved on this phone. It will be sent when the bot is back."
 
 /**
  * What a page's host read or tool call is told with its bot away, and what the reader's toast
@@ -411,9 +418,15 @@ function sweep() {
   return listing
 }
 
-/** Reads every bot's canvases, and answers whether every one of them answered. */
+/**
+ * Reads every bot's canvases, and answers whether every one of them answered. The list's poll is also
+ * the queue's: a bot that has just answered is the one the writes kept for it are waiting on, so the
+ * kept writes go once the list has been read (`canvas-outbox.ts`).
+ */
 export async function refreshCanvases() {
-  return (await sweep()).complete
+  const complete = (await sweep()).complete
+  await drainOutbox().catch(quietly("Sending a canvas's saved writes"))
+  return complete
 }
 
 async function configOf(profileId: string): Promise<Profile> {
@@ -570,54 +583,85 @@ export async function deleteCanvas(id: string) {
 }
 
 /**
- * The write's network half, and only that: one round-trip through the host's `call` route, which
- * stores or removes the document and answers what it kept. A refusal or a request that never landed
- * is thrown and nothing is folded into this device's copy, so a caller says what a failure means —
- * the page's own write is refused in the away words, and a write kept for when the host returns is
- * sent by this same route when it does.
- */
-async function sendWrite(profile: Profile, id: string, call: BridgeWriteCall): Promise<unknown> {
-  const args =
-    call.method === "put"
-      ? { collection: call.collection, id: call.id, doc: call.doc }
-      : { collection: call.collection, id: call.id }
-  return callCanvas(profile, id, `data.${call.method}`, args)
-}
-
-/**
- * A page's write, through the host's one route: the host stores (or removes) the document and the
- * answer is folded into this device's rows, so the page reads back what the host kept rather than what
- * it sent — including the host's own clock. A refusal is thrown, which is the sentence the page's
- * promise gets.
+ * A page's write: one at a time per canvas, through the host's one route. The host stores (or
+ * removes) the document and its answer is folded into this device's rows, so the page reads back what
+ * the host kept rather than what it sent — including the host's own clock.
  *
- * The fold is `applyWrite`'s one rule for what an answer means (a document, or a removal, in the shape
- * the host documents), applied to no copy at all: the rows are the copy, and a put lands as a row while
- * a remove drops one. `keepDocs` keeps the host's clock moving forward only, so a page read before
- * this answer cannot walk the row back.
+ * A host that can't be reached is no refusal: the write is applied to the rows at once, marked
+ * pending, and queued for the bot's return (`canvas-outbox.ts`), so a page's tick taken on a train is
+ * read back now and delivered later (ADR 0149). A host that answered and refused is still the page's
+ * own refusal, in the host's words, and is never queued — it said no, not "not now".
+ *
+ * One write at a time per canvas matters more now than it did: the host handles them in the order it
+ * is asked, and two in flight could queue a remove before a put the host handled first.
  */
 const writing = new Map<string, Promise<unknown>>()
 
 export async function writeCanvasData(id: string, call: BridgeWriteCall) {
-  // One write at a time per canvas. The host handles them in the order it is asked, so the answers
-  // come back in that order; two in flight could apply a remove before a put the host handled first,
-  // and the rows would hold a document the host doesn't — or lose one it does.
   const previous = writing.get(id) ?? Promise.resolve()
-  const asked = previous
-    .catch(() => undefined)
-    .then(() => withHost(id, (profile) => sendWrite(profile, id, call), CANVAS_AWAY))
+  const asked = previous.catch(() => undefined).then(() => takeWrite(id, call))
   writing.set(id, asked)
-  const answer = await asked.finally(() => {
+  try {
+    return await asked
+  } finally {
     if (writing.get(id) === asked) writing.delete(id)
-  })
-  const kept = applyWrite([], call, answer.value)
-  // An answer the bridge can't read applied nothing: the page's promise is refused rather than told
-  // a write landed that this device holds no evidence of.
+  }
+}
+
+/** The write itself: the host's answer where it can be reached, and a Pending write where it can't. */
+async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
+  const profile = await hosting(id)
+  if (!onlineNow()) {
+    // No network at all: the host is not asked, and the write is kept where the page reads it back.
+    markAway(id)
+    return keepOnDevice(profile, id, call)
+  }
+  let value: unknown
+  try {
+    value = await sendWrite(profile, id, call)
+  } catch (failure) {
+    // A host that answered and refused said what it thinks of this write: that is the page's own
+    // answer, in its words. Only a request that never landed is a write kept for later.
+    if (hostAnswered(failure)) throw failure
+    markAway(id)
+    return keepOnDevice(profile, id, call)
+  }
+  const kept = applyWrite([], call, value)
+  // An answer the bridge can't read applied nothing: the page's promise is refused rather than told a
+  // write landed that this device holds no evidence of.
   if (!kept) throw new Error("The host answered a write the app couldn't read.")
-  if (call.method === "remove") await forgetDoc(answer.profile, id, call.collection, call.id)
-  else await keepDocs(answer.profile, id, kept)
+  if (call.method === "remove") await forgetDoc(profile, id, call.collection, call.id)
+  else await settleDoc(profile, id, kept[0])
+  // The host has answered this document, so anything still queued for it is older and has nothing left
+  // to say.
+  await dropQueued(profile, id, call.collection, call.id)
   // A write the host answered is an answer: the words saying its bot is away go, as a read's would.
   clearAway(id)
-  return answer.value
+  return value
+}
+
+/**
+ * The write kept on this device, which is what the page's promise is answered with: the document as
+ * this device now holds it — the page's own value, the clock this device stamped it with, and the
+ * `pending` that says the host has not answered it. The queue row holds the call as the page made it,
+ * so the bot is sent exactly what was written once it is back.
+ */
+async function keepOnDevice(profile: Profile, id: string, call: BridgeWriteCall) {
+  const at = Date.now()
+  if (call.method === "remove") await forgetDoc(profile, id, call.collection, call.id)
+  else
+    await keepWrite(profile, id, {
+      collection: call.collection,
+      id: call.id,
+      doc: call.doc,
+      at,
+      pending: true,
+    })
+  await enqueueWrite(profile, id, call)
+  tell.info(CANVAS_AWAY)
+  return call.method === "put"
+    ? { collection: call.collection, id: call.id, doc: call.doc, at, pending: true }
+    : { collection: call.collection, id: call.id, removed: true, pending: true }
 }
 
 /**
@@ -698,10 +742,13 @@ export function useCanvas(id: string) {
   }, [profile, id])
   // Opening a canvas sweeps its documents: the page's list reads from the rows whatever the host says
   // later, so the read that fills them is the one its open asks for. A sweep that fails leaves the rows
-  // the device already holds and nothing pruned (`canvas-sweep.ts`).
+  // the device already holds and nothing pruned (`canvas-sweep.ts`). The open is also one of the three
+  // moments the queue is sent at: a bot answering this canvas is a bot that can take what was kept for
+  // it while it was away.
   useEffect(() => {
     if (!profile) return
     void sweepCanvas(profile, id).catch(() => undefined)
+    void drainCanvas(profile, id).catch(quietly("Sending a canvas's saved writes"))
   }, [profile, id])
   const live = useLive(profile)
   const changes = useChanges("canvas", profile)

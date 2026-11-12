@@ -19,7 +19,7 @@ import { canvasCacheKey } from "@/lib/canvas-cache"
 import { cachedDocs, completeSweep, keepDocs, sweepMark } from "@/lib/canvas-docs"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { refreshCanvases } from "@/lib/canvases"
-import { db } from "@/lib/db"
+import { db, canvasDocKey } from "@/lib/db"
 import { connectionKey } from "@/lib/connection"
 import { CanvasView } from "@/routes/canvas"
 
@@ -148,6 +148,7 @@ async function seed(name: string) {
   await db.canvasCache.clear()
   await db.canvasDocs.clear()
   await db.canvasSweeps.clear()
+  await db.canvasOutbox.clear()
   await db.conversations.put({
     id: CANVAS.chatId,
     profileId: "bot-1",
@@ -272,6 +273,37 @@ test("a host with no paged route fills the rows from one whole read", async () =
     "the whole read filled the rows",
   )
   assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "written as a completed sweep")
+})
+
+test("a sweep that completes over a pending row does not prune it", async () => {
+  // This device wrote a document its host has not answered: a completed sweep that does not name it
+  // is no evidence it is gone, because the host never saw the write (ADR 0149).
+  const bot = await seed("sweep-pending")
+  await keepDocs(bot, CANVAS.id, [doc(0), doc(1)])
+  const pending = doc(2)
+  await db.canvasDocs.put({
+    key: canvasDocKey(connectionKey(bot), CANVAS.id, pending.collection, pending.id),
+    connection: connectionKey(bot),
+    canvasId: CANVAS.id,
+    collection: pending.collection,
+    id: pending.id,
+    doc: pending.doc,
+    at: Date.now(),
+    // A row the sweep before this one wrote, so this sweep's prune is what would delete it.
+    generation: 0,
+    pending: true,
+  })
+  const host: PagedHost = { docs: [doc(0), doc(1)], rows: 200, asked: [] }
+  servePaged(host)
+  await sweepCanvas(bot, CANVAS.id)
+  const rows = await cachedDocs(bot, CANVAS.id)
+  assert.deepEqual(
+    rows.map((row) => row.id),
+    ["d0000", "d0001", "d0002"],
+    "the pending write is not a document a sweep may call gone",
+  )
+  assert.equal(rows[2].pending, true, "and it is still waiting for the host")
+  assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "the sweep did complete")
 })
 
 test("a v41 database opens its canvas's documents as rows", async () => {

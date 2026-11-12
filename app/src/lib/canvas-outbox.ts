@@ -1,0 +1,201 @@
+/**
+ * A page's write made while its bot is away: kept on this device and sent when the bot returns
+ * (ADR 0149, GLOSSARY "Pending write").
+ *
+ * There is one row a document (`db.canvasOutbox`), because a document's data is last-write-wins by the
+ * host's own clock: a second write to the same one replaces the row already waiting, and a remove
+ * replaces the put it follows, so the queue never says the same document twice.
+ *
+ * The drain sends one canvas's queue in `seq` order — the queue's own counter, taken when the write is
+ * kept — one canvas at a time, through the one round-trip a write makes (`sendWrite`). The host's
+ * answer replaces the row it names and beats the pending row whatever the two clocks say, so a device
+ * whose clock runs ahead cannot keep its own write on the page. A refusal the host gives is dropped and
+ * said in the host's own words — it has spoken about that document, and sending it again would only be
+ * refused again — while a request that never landed stops that canvas's drain and leaves the rest
+ * queued for the next time the bot answers.
+ *
+ * It runs where the host is found again: the app's return or the network's (`onReturn`), the canvas
+ * list's poll, and the opening of a canvas, which are the three moments a bot that was away has just
+ * answered or is about to be asked.
+ */
+
+import Dexie from "dexie"
+
+import { applyWrite, type CanvasWrite } from "@/lib/canvas-bridge"
+import { forgetDoc, settleDoc } from "@/lib/canvas-docs"
+import { connectionKey, hostTargets } from "@/lib/connection"
+import {
+  canvasOutboxKey,
+  db,
+  listEnabledProfiles,
+  type CanvasOutboxRow,
+  type Profile,
+} from "@/lib/db"
+import { callCanvas, hostAnswered } from "@/lib/hermes"
+import { onlineNow } from "@/lib/online"
+import { quietly } from "@/lib/report"
+import { tell } from "@/lib/tell"
+import { onReturn } from "@/lib/wake"
+
+/**
+ * The write's network half, and only that: one round-trip through the host's `call` route, which
+ * stores or removes the document and answers what it kept. A refusal or a request that never landed is
+ * thrown and nothing is folded into this device's copy, so its caller decides: the page's own write is
+ * refused in the host's words or kept for later, and a queued one is sent by this same route.
+ */
+export async function sendWrite(
+  profile: Profile,
+  id: string,
+  call: CanvasWrite,
+): Promise<unknown> {
+  const args =
+    call.method === "put"
+      ? { collection: call.collection, id: call.id, doc: call.doc }
+      : { collection: call.collection, id: call.id }
+  return callCanvas(profile, id, `data.${call.method}`, args)
+}
+
+/**
+ * Keeps a write this device could not deliver, under the next place in its canvas's queue. A write to
+ * a document already waiting replaces that row — and takes the newer place, since it is the later
+ * write — so the queue holds one row a document however many writes it took.
+ */
+export async function enqueueWrite(profile: Profile, canvasId: string, call: CanvasWrite) {
+  const connection = connectionKey(profile)
+  await db.transaction("rw", db.canvasOutbox, async () => {
+    const waiting = await db.canvasOutbox.where("canvasId").equals(canvasId).toArray()
+    const seq = waiting.reduce((last, row) => Math.max(last, row.seq), 0) + 1
+    await db.canvasOutbox.put({
+      id: canvasOutboxKey(connection, canvasId, call.collection, call.id),
+      connection,
+      canvasId,
+      seq,
+      collection: call.collection,
+      docId: call.id,
+      method: call.method,
+      ...(call.method === "put" ? { doc: call.doc } : {}),
+      at: Date.now(),
+    })
+  })
+}
+
+/**
+ * Forgets a queued write for one document. A write the host just answered is the latest word on that
+ * document, so anything still waiting to be sent for it is older and has nothing left to say.
+ */
+export async function dropQueued(
+  profile: Profile,
+  canvasId: string,
+  collection: string,
+  docId: string,
+) {
+  await db.canvasOutbox.delete(canvasOutboxKey(connectionKey(profile), canvasId, collection, docId))
+}
+
+// One drain of one canvas at a time: the list's poll, a canvas's open and the app's return all ask,
+// and the second joins the one already out rather than sending the same write twice.
+const draining = new Map<string, Promise<boolean>>()
+
+/** Sends what this device kept for one canvas; answers false when the host didn't answer. */
+export function drainCanvas(profile: Profile, canvasId: string): Promise<boolean> {
+  const key = `${connectionKey(profile)}\n${canvasId}`
+  const running = draining.get(key)
+  if (running) return running
+  const drain = send(profile, canvasId).finally(() => {
+    if (draining.get(key) === drain) draining.delete(key)
+  })
+  draining.set(key, drain)
+  return drain
+}
+
+/** The queue of one canvas, smallest `seq` first, until it is empty or the host stops answering. */
+async function send(profile: Profile, canvasId: string): Promise<boolean> {
+  if (!onlineNow()) return false
+  const connection = connectionKey(profile)
+  for (;;) {
+    const row = await nextQueued(connection, canvasId)
+    if (!row) return true
+    const call = callOf(row)
+    let value: unknown
+    try {
+      value = await sendWrite(profile, canvasId, call)
+    } catch (failure) {
+      // A host that answered and refused has spoken about this document: the row goes and the reader
+      // is told which document and why, in the host's own words. A request that never landed leaves
+      // the queue where it is, for the next time the bot answers.
+      if (!hostAnswered(failure)) return false
+      await dropRow(row)
+      tell.error(`${refusedWords(row)} ${failure.message}`)
+      continue
+    }
+    const kept = applyWrite([], call, value)
+    if (!kept) {
+      // An answer this device can't read says nothing about the document, so the row stays waiting
+      // rather than being thrown away on a guess.
+      return true
+    }
+    if (call.method === "remove") await forgetDoc(profile, canvasId, row.collection, row.docId)
+    else await settleDoc(profile, canvasId, kept[0])
+    await dropRow(row)
+  }
+}
+
+/** The next write of one canvas, by the place in the queue it was given. */
+async function nextQueued(
+  connection: string,
+  canvasId: string,
+): Promise<CanvasOutboxRow | undefined> {
+  const rows = await db.canvasOutbox
+    .where("[canvasId+seq]")
+    .between([canvasId, Dexie.minKey], [canvasId, Dexie.maxKey])
+    .toArray()
+  return rows.filter((row) => row.connection === connection).sort((a, b) => a.seq - b.seq)[0]
+}
+
+/** The call a queued row holds, as the page made it. */
+function callOf(row: CanvasOutboxRow): CanvasWrite {
+  return row.method === "put"
+    ? { method: "put", collection: row.collection, id: row.docId, doc: row.doc }
+    : { method: "remove", collection: row.collection, id: row.docId }
+}
+
+/** Which document a refusal was about, for the toast the reader is given. */
+function refusedWords(row: CanvasOutboxRow) {
+  return `Couldn't save ${row.collection} / ${row.docId}.`
+}
+
+/** Drops the row this drain sent — unless a write to the same document replaced it meanwhile, since
+ * that one has not been sent yet. */
+async function dropRow(row: CanvasOutboxRow) {
+  const held = await db.canvasOutbox.get(row.id)
+  if (held && held.seq === row.seq) await db.canvasOutbox.delete(row.id)
+}
+
+/**
+ * Drains what this device kept, one canvas at a time: every canvas the bot named, or one bot's. A
+ * canvas whose host didn't answer ends the pass — nothing after it would be heard either — and the
+ * rows stay queued for the next trigger.
+ */
+export async function drainOutbox(one?: Profile) {
+  if (!onlineNow()) return
+  const rows = one
+    ? await db.canvasOutbox.where("connection").equals(connectionKey(one)).toArray()
+    : await db.canvasOutbox.toArray()
+  if (!rows.length) return
+  const profiles = one
+    ? [one]
+    : await hostTargets(await listEnabledProfiles())
+  const byConnection = new Map(profiles.map((profile) => [connectionKey(profile), profile]))
+  const canvases = new Map<string, Profile>()
+  for (const row of rows) {
+    const profile = byConnection.get(row.connection)
+    if (profile) canvases.set(row.canvasId, profile)
+  }
+  for (const [canvasId, profile] of canvases) {
+    if (!(await drainCanvas(profile, canvasId))) return
+  }
+}
+
+// The host's return is the queue's own trigger: a network that comes back is the moment the writes
+// kept for it can go, and a phone that slept is one whose drain never ran.
+onReturn(() => void drainOutbox().catch(quietly("Sending a canvas's saved writes")))

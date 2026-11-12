@@ -40,6 +40,7 @@ const docOf = (row: CanvasDocRow): CanvasDoc => ({
   id: row.id,
   doc: row.doc,
   at: row.at,
+  ...(row.pending ? { pending: true } : {}),
 })
 
 function rowOf(
@@ -47,6 +48,7 @@ function rowOf(
   canvasId: string,
   one: CanvasDoc,
   generation: number,
+  pending: boolean,
 ): CanvasDocRow {
   const connection = connectionKey(profile)
   return {
@@ -58,7 +60,14 @@ function rowOf(
     doc: one.doc,
     at: one.at,
     generation,
+    ...(pending ? { pending: true } : {}),
   }
+}
+
+/** The generation a canvas is under: what a row written now is filed under, so a running sweep's
+ * completion does not treat it as a document that sweep did not see. */
+async function generationOf(profile: Profile, canvasId: string) {
+  return (await db.canvasSweeps.get(canvasSweepKey(profile, canvasId)))?.generation ?? 0
 }
 
 /**
@@ -68,6 +77,10 @@ function rowOf(
  * A row only ever moves forward on the host's clock: a page the host answered before a write's answer
  * landed must not put the row back on the document that write replaced, so the held row wins where it
  * is newer. That is the same rule `applyWrite` keeps for a copy, now kept for the rows.
+ *
+ * A Pending write is not something a page can answer (`keepWrite`/`settleDoc`): the host has never
+ * seen it, so a page that does not carry it is no evidence about it, and the row stays as this device
+ * wrote it.
  */
 export async function keepDocs(
   profile: Profile,
@@ -78,16 +91,45 @@ export async function keepDocs(
   if (!docs.length) return
   const connection = connectionKey(profile)
   await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
-    const under =
-      generation ?? (await db.canvasSweeps.get(canvasSweepKey(profile, canvasId)))?.generation ?? 0
+    const under = generation ?? (await generationOf(profile, canvasId))
     const keys = docs.map((one) => canvasDocKey(connection, canvasId, one.collection, one.id))
     const held = await db.canvasDocs.bulkGet(keys)
     const rows: CanvasDocRow[] = []
     docs.forEach((one, at) => {
       const kept = held[at]
-      if (!kept || kept.at <= one.at) rows.push(rowOf(profile, canvasId, one, under))
+      if (kept?.pending) return
+      if (!kept || kept.at <= one.at) rows.push(rowOf(profile, canvasId, one, under, false))
     })
     if (rows.length) await db.canvasDocs.bulkPut(rows)
+  })
+}
+
+/**
+ * A page's write its host never heard, kept as this device's row at once and marked pending, so the
+ * page reads back what it wrote (`writeCanvasData`). It replaces whatever the row held: the page's own
+ * write is the newest thing this device knows about that document, and an earlier host answer is no
+ * argument against it — the host's answer returns when the write lands (`settleDoc`).
+ */
+export async function keepWrite(profile: Profile, canvasId: string, one: CanvasDoc) {
+  await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
+    const under = await generationOf(profile, canvasId)
+    await db.canvasDocs.put(rowOf(profile, canvasId, one, under, true))
+  })
+}
+
+/**
+ * The host's answer to a write, kept as the row it names. It beats a Pending row whatever the clock
+ * says — a device whose clock runs ahead of its host's would otherwise keep its own write forever —
+ * and between two answers it moves forward only, as `keepDocs` does.
+ */
+export async function settleDoc(profile: Profile, canvasId: string, one: CanvasDoc) {
+  await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
+    const held = await db.canvasDocs.get(
+      canvasDocKey(connectionKey(profile), canvasId, one.collection, one.id),
+    )
+    if (held && !held.pending && held.at > one.at) return
+    const under = await generationOf(profile, canvasId)
+    await db.canvasDocs.put(rowOf(profile, canvasId, one, under, false))
   })
 }
 
@@ -127,13 +169,15 @@ export async function forgetDoc(
 
 /**
  * Every row of a canvas a completed sweep did not write. The one prune there is: a sweep is the only
- * read that has seen the canvas whole, so it is the only one that may say a document is gone.
+ * read that has seen the canvas whole, so it is the only one that may say a document is gone — and a
+ * Pending write is exempt, because the host never saw it, so no sweep it answers can say it is gone
+ * (ADR 0149).
  */
 export async function pruneDocs(profile: Profile, canvasId: string, generation: number) {
   const stale = await db.canvasDocs
     .where("key")
     .startsWith(`${canvasSweepKey(profile, canvasId)}\n`)
-    .filter((row) => row.generation !== generation)
+    .filter((row) => row.generation !== generation && !row.pending)
     .primaryKeys()
   if (stale.length) await db.canvasDocs.bulkDelete(stale)
 }

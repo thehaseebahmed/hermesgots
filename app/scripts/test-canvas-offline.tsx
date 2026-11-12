@@ -7,7 +7,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { toast } from "sonner"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { awayLine } from "@/lib/away"
@@ -20,7 +19,7 @@ import {
   recordOf,
 } from "@/lib/canvas-cache"
 import { cachedDocs, keepDocs } from "@/lib/canvas-docs"
-import { CANVAS_AWAY, canvasData, refreshCanvas, undoCanvas, writeCanvasData } from "@/lib/canvases"
+import { canvasData, refreshCanvas, refreshCanvases, undoCanvas, writeCanvasData } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
 import { db, deleteProfile, updateProfile } from "@/lib/db"
 import { CanvasPage, CanvasView } from "@/routes/canvas"
@@ -64,6 +63,9 @@ async function seedCanvasChat(name: string) {
   await db.messages.clear()
   await db.conversations.clear()
   await db.canvasCache.clear()
+  await db.canvasDocs.clear()
+  await db.canvasSweeps.clear()
+  await db.canvasOutbox.clear()
   await db.conversations.put({
     id: "chat-1",
     profileId: "bot-1",
@@ -178,12 +180,13 @@ const screen = (
 const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
 
 /** The page's own half, stood in for: what the app posts back is what the page would have settled on. */
-function speak(collect: { reply: number; ok: boolean; error?: string }[]) {
+function speak(collect: { reply: number; ok: boolean; error?: string; value?: unknown }[]) {
   const page = (find("iframe[data-canvas-frame]") as HTMLIFrameElement).contentWindow
   assert.ok(page, "the frame has a window of its own")
   Object.defineProperty(page, "postMessage", {
     configurable: true,
-    value: (data: { reply: number; ok: boolean; error?: string }) => collect.push(data),
+    value: (data: { reply: number; ok: boolean; error?: string; value?: unknown }) =>
+      collect.push(data),
   })
   return (data: unknown) =>
     act(async () => {
@@ -192,7 +195,7 @@ function speak(collect: { reply: number; ok: boolean; error?: string }[]) {
 }
 
 test(
-  "test_canvas_opens_offline_and_refuses_writes",
+  "a write with the bot away is read back at once and lands when it comes back, in order",
   atWidth(390, async () => {
     const bot = await seedCanvasChat("canvas-away")
     await db.canvasCache.put({
@@ -212,59 +215,144 @@ test(
       await until(() => Boolean(find("[data-canvas-offline]")), "the header to say the bot is away")
       assert.equal(find("[data-canvas-offline]")!.textContent, awayLine(true, true))
 
-      // A write the page makes is refused: it is asked of the host, which answers nothing, so the
-      // page's own promise is rejected with the reason, the reader is told, and nothing is kept for a
-      // later retry — a copy is not a write waiting for the host to come back.
-      const posted: { reply: number; ok: boolean; error?: string }[] = []
+      // A write with the bot away is kept on this device at once, marked pending: the page's promise
+      // is kept and it reads back the document it wrote rather than the one the host last answered.
+      // A host that isn't there to hear a write is no refusal of it (ADR 0149).
+      const posted: { reply: number; ok: boolean; error?: string; value?: unknown }[] = []
       const say = speak(posted)
-      const said: string[] = []
-      const real = toast.error
-      toast.error = ((message: unknown) => {
-        said.push(String(message))
-      }) as typeof toast.error
-      try {
-        await say({
-          type: BRIDGE_MESSAGE,
-          call: 1,
-          method: "put",
-          collection: "items",
-          id: "one",
-          doc: { n: 7 },
-        })
-        await until(() => posted.length > 0, "the write to be refused")
-        await settle()
-      } finally {
-        toast.error = real
-      }
-      assert.equal(posted[0].ok, false, "the page's promise is refused")
-      assert.equal(posted[0].error, CANVAS_AWAY, "with the reason it was refused")
-      assert.deepEqual(said, [CANVAS_AWAY], "the reader is told once")
-      assert.equal(
-        asked.filter((url) => new URL(url).pathname.endsWith("/call")).length,
-        1,
-        "the write was asked of the host once, and never queued for a second try",
-      )
-      assert.deepEqual(
-        await cachedDocs(bot, KEPT.id),
-        [DOC],
-        "the copy still holds what the host last answered",
-      )
-
-      // The host comes back: the next write is asked of it and saved, and the words go with it — an
-      // answer from the host is what takes them back, a write's as much as a read's.
-      const host = { docs: [DOC], calls: [] as Record<string, unknown>[] }
-      serveCanvases(host)
       await say({
         type: BRIDGE_MESSAGE,
-        call: 2,
+        call: 1,
         method: "put",
         collection: "items",
         id: "one",
         doc: { n: 7 },
       })
-      await until(() => posted.length > 1, "the write the host answers")
-      assert.equal(posted[1].ok, true, "the host took the write")
-      await until(() => !find("[data-canvas-offline]"), "the away words to go")
+      await until(() => posted.length > 0, "the first write to be kept")
+      assert.equal(posted[0].ok, true, "the page's promise is kept")
+      const first = posted[0].value as CanvasDoc
+      assert.deepEqual(first.doc, { n: 7 }, "with the document it wrote")
+      assert.equal(first.pending, true, "marked pending, since the bot has not answered it")
+
+      // A second document, so the queue is two writes and the order they are sent in can be read.
+      await say({
+        type: BRIDGE_MESSAGE,
+        call: 2,
+        method: "put",
+        collection: "items",
+        id: "two",
+        doc: { n: 8 },
+      })
+      await until(() => posted.length > 1, "the second write to be kept")
+
+      // Both are readable at once, from the page's own read, with the host still silent.
+      await say({ type: BRIDGE_MESSAGE, call: 3, method: "list", collection: "items" })
+      await until(() => posted.length > 2, "the page's list to be answered")
+      const listed = posted[2].value as CanvasDoc[]
+      assert.deepEqual(listed.map((row) => row.id), ["one", "two"], "both writes are readable at once")
+      assert.deepEqual(listed.map((row) => row.pending), [true, true], "as pending writes")
+
+      // The bot comes back, and the list's poll is what sends what this device kept: the write the
+      // page made first goes first, so the host ends on the document the page last wrote.
+      const host: Host = { docs: [], calls: [] }
+      serveCanvases(host)
+      await refreshCanvases()
+      assert.deepEqual(
+        host.calls.map((one) => one.shape),
+        ["data.put", "data.put"],
+        "both writes were sent",
+      )
+      assert.deepEqual(
+        host.calls.map((one) => one.args.id),
+        ["one", "two"],
+        "in the order the page made them",
+      )
+
+      // The host's answer is what the row holds now: its clock, and no pending flag.
+      assert.deepEqual(
+        await cachedDocs(bot, KEPT.id),
+        [
+          { collection: "items", id: "one", doc: { n: 7 }, at: 100 },
+          { collection: "items", id: "two", doc: { n: 8 }, at: 100 },
+        ],
+        "the row carries the host's clock and no pending flag",
+      )
+      assert.deepEqual(await db.canvasOutbox.toArray(), [], "and nothing is left to send")
+    })
+  }),
+)
+
+test(
+  "a second write to one document while away is one queued row",
+  atWidth(390, async () => {
+    // The host's data is last-write-wins by its own clock, so a queue that sent both writes to one
+    // document would say the same document twice — and end on the older one if sent last.
+    const bot = await seedCanvasChat("canvas-coalesce")
+    await db.canvasCache.put({
+      key: canvasCacheKey(bot, KEPT.id),
+      connection: connectionKey(bot),
+      canvasId: KEPT.id,
+      canvas: KEPT,
+    })
+    const asked: string[] = []
+    serveNothing(asked)
+    await writeCanvasData(KEPT.id, { method: "put", collection: "items", id: "one", doc: { n: 1 } })
+    await writeCanvasData(KEPT.id, { method: "put", collection: "items", id: "one", doc: { n: 2 } })
+    const queued = await db.canvasOutbox.toArray()
+    assert.equal(queued.length, 1, "one row for the document, however many writes it took")
+    assert.deepEqual(queued[0].doc, { n: 2 }, "holding the write the page made last")
+    assert.equal(queued[0].seq, 2, "at the later write's place in the queue")
+
+    // A remove collapses the put it follows: the document is gone from this device at once, and the
+    // host is sent the removal rather than the value it would have been sent.
+    await writeCanvasData(KEPT.id, { method: "remove", collection: "items", id: "one" })
+    assert.deepEqual(await cachedDocs(bot, KEPT.id), [], "the document is gone from this device")
+    const host: Host = { docs: [], calls: [] }
+    serveCanvases(host)
+    await refreshCanvases()
+    assert.deepEqual(host.calls.map((one) => one.shape), ["data.remove"], "one removal, and no put")
+    assert.deepEqual(await db.canvasOutbox.toArray(), [], "and the queue is empty")
+  }),
+)
+
+test(
+  "a refusal the host gives while the app is online is still thrown, never queued",
+  atWidth(390, async () => {
+    // A host that answered and refused said what it thinks of this write: that is the page's own
+    // answer, said in the host's words, and nothing waits behind it for a later try.
+    const bot = await seedCanvasChat("canvas-refused-write")
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith("/info")) return json({ version: "0.113.0", features: ["canvas"] })
+      if (/\/canvases\/[^/]+\/call$/.test(url.pathname))
+        return json({ error: { message: "A document can hold 256 KB." } }, 409)
+      if (/\/canvases\/[^/]+$/.test(url.pathname))
+        return json({ object: "gots.canvas", canvas: hostAnswer() })
+      if (/\/canvases$/.test(url.pathname))
+        return json({ object: "gots.canvases", canvases: [hostAnswer()] })
+      return json({ error: { message: "no route" } }, 404)
+    }) as unknown as typeof fetch
+    await mount(screen, async () => {
+      await until(() => drawn().includes("<h1>Tip</h1>"), "the canvas to draw")
+      const posted: { reply: number; ok: boolean; error?: string; value?: unknown }[] = []
+      const say = speak(posted)
+      await say({
+        type: BRIDGE_MESSAGE,
+        call: 1,
+        method: "put",
+        collection: "items",
+        id: "one",
+        doc: { n: 7 },
+      })
+      await until(() => posted.length > 0, "the write to be refused")
+      assert.equal(posted[0].ok, false, "the page's promise is refused")
+      assert.equal(posted[0].error, "A document can hold 256 KB.", "in the host's own words")
+      assert.deepEqual(await db.canvasOutbox.toArray(), [], "and nothing is kept for a later try")
+      assert.deepEqual(
+        await cachedDocs(bot, KEPT.id),
+        [DOC],
+        "the copy still holds what the host last answered",
+      )
     })
   }),
 )
