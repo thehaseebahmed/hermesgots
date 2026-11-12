@@ -13,11 +13,13 @@ import { clearNetLog, trimNetLog } from "@/lib/net-recorder"
 import { DeveloperSettings } from "@/routes/settings"
 import { botProfile, click, find, findAll, missing, mount, seedSettings, text } from "./component-kit.tsx"
 
-const ada = botProfile("network-ada", { id: "bot-1", name: "Ada" })
-const grace = botProfile("network-grace", { id: "bot-2", name: "Grace" })
+// Two bots whose names run against the order the store hands them back in, so a pill's order is
+// the rule's and not the query's (ADR 0149).
+const zed = botProfile("network-ada", { id: "bot-1", name: "Zed" })
+const ada = botProfile("network-grace", { id: "bot-2", name: "Ada" })
 
 const request = (patch: Partial<NetRequest> & { id: string; at: number }): NetRequest => ({
-  bots: [ada.id],
+  bots: [zed.id],
   route: "GET models",
   ms: 120,
   ending: "answered",
@@ -35,7 +37,7 @@ const checkedOf = (element: Element | null) => {
 async function seedLog() {
   await seedSettings({ developer: true })
   await db.profiles.clear()
-  await db.profiles.bulkPut([ada, grace])
+  await db.profiles.bulkPut([zed, ada])
   await db.netLog.clear()
   await db.netLog.bulkPut([
     request({ id: "r1", at: 1_000, route: "GET models", ms: 100 }),
@@ -51,7 +53,7 @@ async function seedLog() {
     request({
       id: "r3",
       at: 3_000,
-      bots: [grace.id],
+      bots: [ada.id],
       route: "GET sessions/:id/messages",
       ms: 50_000,
       ending: "timeout",
@@ -64,7 +66,7 @@ test("off, the Developer switch records nothing and offers no log to read", asyn
   await seedSettings({ developer: true })
   await db.netLog.clear()
   await db.profiles.clear()
-  await db.profiles.put(ada)
+  await db.profiles.put(zed)
   await mount(
     <MemoryRouter>
       <DeveloperSettings />
@@ -103,16 +105,16 @@ test("All draws every bot and a bot's pill shows only its own", async () => {
     assert.deepEqual(
       findAll("button")
         .map((button) => button.textContent)
-        .filter((words) => words === "Ada" || words === "Grace"),
-      ["Ada", "Grace"],
-      "the pills run A to Z",
+        .filter((words) => words === "Ada" || words === "Zed"),
+      ["Ada", "Zed"],
+      "the pills run A to Z, though the store hands Zed back first",
     )
-    const pill = findAll("button").find((button) => button.textContent === "Grace")
+    const pill = findAll("button").find((button) => button.textContent === "Ada")
     assert.ok(pill, "each bot the log heard from has a pill")
     await click(pill)
-    assert.equal(findAll("tbody tr").length, 1, "Grace's own request")
+    assert.equal(findAll("tbody tr").length, 1, "Ada's own request")
     assert.match(text(), /0 of 1|1 of 1/, "the strip counts the selection")
-    assert.doesNotMatch(text(), /POST chat\/completions/, "Ada's send is not in Grace's log")
+    assert.doesNotMatch(text(), /POST chat\/completions/, "Zed's send is not in Ada's log")
     await click(findAll("button").find((button) => button.textContent === "All"))
     assert.equal(findAll("tbody tr").length, 3, "All again is every bot")
   })

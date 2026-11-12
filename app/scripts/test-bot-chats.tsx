@@ -495,7 +495,7 @@ test("a row deleted here is not resurrected by a record written ahead of this de
   )
 })
 
-test("the header's title is the host the bot answers at, and it is the way to its settings", async () => {
+test("the header's title is the bot's own name, and it is the way to its settings", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
     await until(

@@ -437,20 +437,6 @@ test("a disabled bot still reads as hidden in Gots", async () => {
   })
 })
 
-test("the address that named the Name edit now draws the page, with no field to write a name", async () => {
-  await seed("general-name-edit")
-  await mount(general("/settings/bots/bot-1/bot/name"), async () => {
-    assert.ok(missing("#edit-name"), "no field: the app does not name a bot (ADR 0149)")
-    assert.ok(page(), "the page the address opened under is what is drawn")
-    assert.equal(path(), "/settings/bots/bot-1/bot/name", "at the address it was asked for")
-    assert.equal(
-      (await db.profiles.get("bot-1"))?.name,
-      "A bot",
-      "and the name the link wrote is untouched",
-    )
-  })
-})
-
 test("Cancel writes nothing at all, and returns to the page", async () => {
   await seed("general-name-cancel")
   await mount(general(), async () => {

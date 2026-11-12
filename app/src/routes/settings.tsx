@@ -380,7 +380,7 @@ function MenuScreen({
   )
 }
 
-/** A bot in the menu: its connectivity dot, then the bot itself, then the host it answers at. */
+/** A bot in the menu: its connectivity dot, then the bot itself, then when its host last checked in. */
 function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
   const online = presence(profile, now)

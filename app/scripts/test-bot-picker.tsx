@@ -34,13 +34,14 @@ async function seed(bots: ReturnType<typeof bot>[]) {
 const picker = (one: ReturnType<typeof bot>) => <BotPicker profile={one} />
 
 test("two hosts' sealed defaults say which host each is, and a name nobody shares stands alone", async () => {
+  // Linked in an order no list draws: the rows prove the order comes from the labels.
   const bots = [
+    bot("c", "notes.third.dev", "/v1", "Notes"),
     bot("a", "hermes.domain.com"),
     bot("b", "hermes.example.com"),
-    bot("c", "notes.third.dev", "/v1", "Notes"),
   ]
   await seed(bots)
-  await mount(picker(bots[0]), async () => {
+  await mount(picker(bots[1]), async () => {
     const pill = () => document.querySelector('button[aria-label^="Bot: "]')
     await until(async () => Boolean(pill()), "the picker's pill")
     assert.equal(

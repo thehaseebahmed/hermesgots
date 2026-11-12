@@ -369,6 +369,38 @@ test("a page's own edit is a screen the list's page pushes, with the list under 
   })
 })
 
+test("the menu's bots run by name, and a name two hosts share says which host", async () => {
+  await seedSettings()
+  await db.profiles.clear()
+  await db.profiles.bulkPut([
+    botProfile("hermes.zeta", { id: "bot-z", name: "Hermes" }),
+    botProfile("hermes.alpha", { id: "bot-a", name: "Hermes" }),
+    botProfile("studio.acme", { id: "bot-s", name: "Studio" }),
+  ])
+  await mount(settings("/settings"), async () => {
+    const bots = () => findAll('a[href^="/settings/bots/"]')
+    assert.deepEqual(
+      bots().map((one) => one.getAttribute("href")),
+      ["/settings/bots/bot-a", "/settings/bots/bot-z", "/settings/bots/bot-s"],
+      "A to Z by label, against the order the store hands them back in",
+    )
+    assert.deepEqual(
+      bots().map((one) => wordsOf(one)),
+      ["Hermes (alpha)", "Hermes (zeta)", "Studio"],
+      "the two bots of one name name their hosts, and the name nobody shares reads bare",
+    )
+  })
+})
+
+test("the address that named the Name edit is the bot's page now", async () => {
+  await seed("name-edit-gone", ALL)
+  await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
+    assert.equal(path(), "/settings/bots/bot-1", "the bot's own page, in place")
+    assert.ok(missing("#edit-name"), "with no field for a name (ADR 0149)")
+    assert.ok(find("[data-bot-card]"), "and the card the row opened from")
+  })
+})
+
 test("a back that would throw away typing asks first", async () => {
   await seed("pages-discard", ALL)
   await mount(settings("/settings/bots/bot-1/general/timezone"), async () => {

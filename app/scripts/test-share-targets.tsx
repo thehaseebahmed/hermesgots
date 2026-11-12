@@ -315,6 +315,53 @@ test("the bot picker lists the bots by name and starts on the first, whatever wa
   }
 })
 
+test("the sheet starts on the bot its picker draws first, where two bots share a name", async () => {
+  const now = Date.now()
+  // One name on two hosts: the label says which is which, and the order by label is not the order
+  // the bots were linked in — the mistake a comparator read off the raw name makes (ADR 0149).
+  const zeta = botProfile("hermes.zeta", {
+    id: "bot-z",
+    name: "Hermes",
+    hermesProfile: "zeta",
+    botId: "zeta",
+  })
+  const alpha = botProfile("hermes.alpha", {
+    id: "bot-a",
+    name: "Hermes",
+    hermesProfile: "alpha",
+    botId: "alpha",
+  })
+  const mango = botProfile("share-other", {
+    id: "bot-m",
+    name: "Mango",
+    hermesProfile: "mango",
+    botId: "mango",
+  })
+  await seedChats(
+    [
+      { id: "c-alpha", title: "Alpha's own chat", at: now - HOUR, profileId: "bot-a" },
+      { id: "c-zeta", title: "Zeta's own chat", at: now - 2 * HOUR, profileId: "bot-z" },
+    ],
+    { bots: [zeta, alpha, mango], active: "bot-z" },
+  )
+  try {
+    shares()
+    await mount(screen(), async () => {
+      const pill = () => find('button[aria-label^="Bot: "]')
+      await until(async () => Boolean(pill()), "the sheet's bot picker")
+      assert.equal(
+        pill()!.getAttribute("aria-label"),
+        "Bot: Hermes (alpha)",
+        "the row the picker draws first, not the one linked first and not the active bot",
+      )
+      await until(async () => row("Alpha's own chat") !== null, "that bot's rows")
+      assert.equal(row("Zeta's own chat"), null, "and no row of the other bot of that name")
+    })
+  } finally {
+    clearShare()
+  }
+})
+
 test("a room the picked bot's roster seats is a row among the chats, and switching bots changes them", async () => {
   const now = Date.now()
   await seedChats(

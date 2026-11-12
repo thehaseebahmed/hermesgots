@@ -54,11 +54,11 @@ async function seed() {
   await db.dictationStats.clear()
   await db.speechCache.clear()
   // A row is named by the bot's own name (ADR 0149): two names, so no host.
-  await db.profiles.put(botProfile("alpha", { id: "bot-1", name: "A bot" }))
+  await db.profiles.put(botProfile("alpha", { id: "bot-1", name: "Z bot" }))
   await db.profiles.put(
     botProfile("beta", {
       id: "bot-2",
-      name: "B bot",
+      name: "A bot",
       apiKey: "key-2",
       baseUrl: "http://beta.test/v1",
     }),
@@ -90,7 +90,7 @@ test("the Overview draws the Bubble and its bot, and no rows for the phone's gra
     assert.match(text(), /Stats/, "and the totals have their own heading")
     assert.match(said("bubble"), /Bubble/)
     assert.equal(bubbleOn(), false, "a service that is not running reads off")
-    assert.match(said("bubble-bot"), /A bot/, "the bot is this device's selection")
+    assert.match(said("bubble-bot"), /Z bot/, "the bot is this device's selection")
     assert.ok(
       missing('[data-setting="bubble-overlay"]'),
       "the draw-over grant is not a setting of this app's",
@@ -223,7 +223,8 @@ test("the bot list draws each bot's picture and speech model, in the order the B
   await seed()
   // The answer this bot's host gave about its speech: the list names who hears a take, which is not
   // the model that answers a chat.
-  const first = await db.profiles.get("bot-1")
+  // The bot the list draws first: the rows run by name, and this one's is first.
+  const first = await db.profiles.get("bot-2")
   assert.ok(first)
   await db.speechCache.put({
     key: connectionKey(first),
@@ -232,7 +233,7 @@ test("the bot list draws each bot's picture and speech model, in the order the B
     ),
   })
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("Z bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const drawn = () =>
@@ -244,8 +245,8 @@ test("the bot list draws each bot's picture and speech model, in the order the B
     assert.equal(drawn().length, 2, "one row per bot")
     assert.ok(drawn()[0].querySelector("img"), "the picture is the bot's own")
     assert.deepEqual(
-      drawn().map((one) => one.textContent?.match(/A bot|B bot/)?.[0]),
-      ["A bot", "B bot"],
+      drawn().map((one) => one.textContent?.match(/A bot|Z bot/)?.[0]),
+      ["A bot", "Z bot"],
       "the order the Bots tab draws its rows in, which is their names'",
     )
   })
@@ -253,7 +254,8 @@ test("the bot list draws each bot's picture and speech model, in the order the B
 
 test("the bot list names the model the provider hears with, not the host's local one", async () => {
   await seed()
-  const first = await db.profiles.get("bot-1")
+  // The bot the list draws first: the rows run by name, and this one's is first.
+  const first = await db.profiles.get("bot-2")
   assert.ok(first)
   // A bot whose host sends every take to a vendor: the host's `model` is still the local model it
   // would fall back to, and the vendor's own pick lives under its own key.
@@ -278,7 +280,7 @@ test("the bot list names the model the provider hears with, not the host's local
     ),
   })
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("Z bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const drawn = () =>
@@ -296,7 +298,8 @@ test("the bot list names the model the provider hears with, not the host's local
 
 test("a local bot's line says local, whatever the resolver names it", async () => {
   await seed()
-  const first = await db.profiles.get("bot-1")
+  // The bot the list draws first: the rows run by name, and this one's is first.
+  const first = await db.profiles.get("bot-2")
   assert.ok(first)
   // Hermes answers `none` when it can name no provider; the local model is what hears the take.
   await db.speechCache.put({
@@ -306,7 +309,7 @@ test("a local bot's line says local, whatever the resolver names it", async () =
     ),
   })
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("Z bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const drawn = () =>
@@ -322,14 +325,14 @@ test("a local bot's line says local, whatever the resolver names it", async () =
 test("picking a bot moves the Bubble's bot, not the chat selection, and mirrors it to the phone", async () => {
   await seed()
   await mount(screen(), async () => {
-    await until(async () => said("bubble-bot").includes("A bot"), "the selected bot")
+    await until(async () => said("bubble-bot").includes("Z bot"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
     const picked = Array.from(
       find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [],
-    ).find((one) => one.textContent?.includes("B bot"))
+    ).find((one) => one.textContent?.includes("A bot"))
     await click(picked ?? null)
-    await until(async () => said("bubble-bot").includes("B bot"), "the new selection")
+    await until(async () => said("bubble-bot").includes("A bot"), "the new selection")
   })
   const settings = await db.settings.get("settings")
   assert.equal(settings?.bubbleProfileId, "bot-2", "the Bubble's own bot moved")
