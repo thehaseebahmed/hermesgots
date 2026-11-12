@@ -81,10 +81,13 @@ export async function addPrompt(draft: PromptDraft): Promise<PromptEntry> {
   return entry
 }
 
-/** Edits one entry, keeping its id; undefined where the entry is gone (deleted on another device). */
-export async function savePrompt(id: string, draft: PromptDraft): Promise<PromptEntry | undefined> {
+/** What came of a write: the entry as stored, or that the library no longer holds it. */
+export type SavePromptResult = { saved: PromptEntry } | { gone: true }
+
+/** Edits one entry, keeping its id; a `gone` where the entry was deleted on another device. */
+export async function savePrompt(id: string, draft: PromptDraft): Promise<SavePromptResult> {
   const existing = await db.prompts.get(id)
-  if (!existing) return undefined
+  if (!existing) return { gone: true }
   const entry: PromptEntry = {
     ...existing,
     name: promptTitle(draft.name),
@@ -94,7 +97,7 @@ export async function savePrompt(id: string, draft: PromptDraft): Promise<Prompt
   }
   await db.prompts.put(entry)
   await stampPrompts(entry.updatedAt)
-  return entry
+  return { saved: entry }
 }
 
 /**

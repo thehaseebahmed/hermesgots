@@ -137,11 +137,13 @@ export function PromptEditor({
     await attempt(async () => {
       if (!editing) {
         await addPrompt(draft)
-      } else if (!(await savePrompt(editing.id, draft))) {
-        // The entry was deleted on another device: nothing was written, so the sheet keeps the typed
-        // draft and says the entry is gone rather than closing as if it had saved.
-        tell.error("That Prompt is gone from the library.")
-        return
+      } else {
+        const result = await savePrompt(editing.id, draft)
+        if ("gone" in result) {
+          // The sheet keeps the typed draft rather than closing as if it had saved.
+          tell.error("That Prompt is gone from the library.")
+          return
+        }
       }
       setWriting(null)
     }, "Couldn't save that Prompt.")
