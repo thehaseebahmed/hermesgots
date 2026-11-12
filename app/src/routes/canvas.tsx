@@ -83,19 +83,12 @@ import { useNow } from "@/lib/threads"
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
 /**
- * The lane a canvas reads in beside its page: the house's list lane, 412px — the width the app already
- * asks its text to read in (`w-103`, `LIST_LANE` in `components/app-shell.tsx`) — and never so wide
- * that the page beside it is narrower than that. The chat used to carry these classes, but the lane is
- * what holds the canvas's head too, so the width and the hairline between the panes are the lane's.
- * From `lg` only: below 1024px the screen is one pane, with the head over the page and no lane at all.
+ * The lane a canvas reads in beside its page: the house's 412px list lane — the width the app already
+ * asks its text to read in — and never so wide that the page beside it is narrower than that.
  */
 const LANE = "flex min-h-0 flex-col lg:w-103 lg:max-w-[calc(100%_-_412px)] lg:shrink-0 lg:border-r"
 
-/**
- * What a chat needs wherever a screen hands it a column: the body fills it and scrolls inside it. The
- * width is the column's — here the lane the canvas draws for its chat, and on the edit screen the whole
- * screen.
- */
+/** `min-h-0` lets the column shrink, so the chat's body scrolls and the column does not. */
 const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
 
 /** What a page that asks for no library is drawn with: nothing, and no state to wait for. */
@@ -283,6 +276,9 @@ const GONE = "This canvas is gone. Its bot doesn't hold one by that name."
 /** What both screens say of a canvas whose page isn't here and whose bot can't be asked for it. */
 const APART = "This canvas isn't on this device, and its bot isn't answering."
 
+/** The line both screens draw while the record they read has not landed. */
+const READING = "Reading the canvas…"
+
 /**
  * What both a canvas's screens say of a host this device can't reach, read one way for both: a device
  * with no network can't reach the host either, and is told so in its own words (ADR 0071) rather than
@@ -355,15 +351,8 @@ function useCanvasManagement(id: string) {
 }
 
 /**
- * The head both canvas screens wear (ADR 0130): the control a screen leads with, the canvas's title,
- * the line under it — its bot, its version, and the words a host that isn't answering is said in —
- * and the screen's own actions on the right. A title the record hasn't answered for yet is still
+ * The head both canvas screens wear (ADR 0130). A title the record hasn't answered for yet is still
  * "Canvas", since the address may name one this device hasn't read.
- *
- * What the two screens differ in is theirs to pass: the leading control (the list, where either screen
- * goes back to) and the actions (Edit and Undo on the page, Preview on the chat). Everything else is
- * stated once here — the title, the line, no bot's picture, the screen's heading — since a rule two
- * screens keep in step by hand is a rule they would eventually disagree about.
  */
 function CanvasHead({
   canvas,
@@ -434,23 +423,13 @@ function CanvasHead({
   )
 }
 
-/** The page as its screen built it at the reader's position (`documentAt`): its document, or the
- * words saying why it can't be drawn. */
 type DrawnPage = { document?: string; error?: string } | null
 
-/**
- * The page part of a canvas's preview: the row saying what the address asked for — a point to be
- * picked on the page — the four states the body can be in (gone, an error, a page that keeps leaving,
- * or the page itself), and the frame they are drawn in the place of. The banner is the page's own
- * line, so the frame below it keeps the whole of the rest of the screen.
- */
 function CanvasPagePane({
   canvas,
   drawn,
   escaped,
-  picking,
-  versioned,
-  large,
+  banner,
   missing,
   awayNow,
   loaded,
@@ -464,20 +443,14 @@ function CanvasPagePane({
 }: {
   canvas: Canvas | undefined
   drawn: DrawnPage
-  /** The frame left the document it was drawn from, and was already drawn again once. */
   escaped: boolean
-  /** The address asked for an element of the page to be picked, and this screen is what shows it. */
-  picking: boolean
-  versioned: boolean
-  /** The chat is beside the page from 1024px, so nothing needs pointing here (ADR 0130). */
-  large: boolean
+  /** The address asked for a point to be picked, and this is the page it can be picked on. */
+  banner: boolean
   missing: boolean
   awayNow: boolean
   loaded: boolean
   html: string | undefined
-  /** What the frame is keyed by: this canvas, this version, this mode. */
   frameKey: string
-  /** What the frame on screen is the redraw of this version, and not the first draw of it. */
   frameAgain: boolean
   shownDocument: string
   frame: RefObject<HTMLIFrameElement | null>
@@ -489,7 +462,7 @@ function CanvasPagePane({
       data-canvas-page
       className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pt-2"
     >
-      {picking && versioned && !large && !missing ? (
+      {banner ? (
         <div
           data-point-banner
           className="mb-2 flex items-center gap-2 rounded-xl border bg-muted/60 py-1.5 pr-1.5 pl-3 text-sm"
@@ -522,7 +495,7 @@ function CanvasPagePane({
         />
       ) : (
         <p className="p-4 text-center text-sm text-muted-foreground">
-          {awayNow && !html ? APART : loaded && !html ? BUILDING_ACTIVITY : "Reading the canvas…"}
+          {awayNow && !html ? APART : loaded && !html ? BUILDING_ACTIVITY : READING}
         </p>
       )}
     </div>
@@ -659,6 +632,9 @@ export function CanvasView() {
   // one place: the options sheet, the page's own consent, and the delete.
   const { grant, update, remove } = useCanvasManagement(id)
   const consent = useCanvasConsent(grant)
+  // The banner is the phone's: a wide screen draws the chat beside the page, so nothing needs
+  // pointing here (ADR 0130) — and a canvas with no page has nothing to point at.
+  const banner = picking && versioned && !large && !missing
   // The bridge is registered once per canvas, so the ask is read through a ref: a new ask must not
   // re-register the listener under a running page. The device's copy is read at call time from the
   // store, so a read landing never re-registers it either.
@@ -816,7 +792,7 @@ export function CanvasView() {
                   size="icon-lg"
                   className={HEADER_BUTTON}
                   data-canvas-flip="edit"
-                  aria-label={FLIP.edit.label}
+                  aria-label={FLIP.edit}
                   onClick={() => navigate(`/canvas/${id}/edit`)}
                 >
                   <PencilIcon />
@@ -838,7 +814,6 @@ export function CanvasView() {
             </>
           }
         />
-        {/* The chat reads in the lane the head opened, and the page fills the pane beside it. */}
         {large && (
           <CanvasChat canvas={canvas} bot={profile} points={points} className={CHAT_LANE} />
         )}
@@ -848,9 +823,7 @@ export function CanvasView() {
         canvas={canvas}
         drawn={drawn}
         escaped={escaped}
-        picking={picking}
-        versioned={versioned}
-        large={large}
+        banner={banner}
         missing={missing}
         awayNow={awayNow}
         loaded={loaded}
@@ -973,7 +946,7 @@ export function CanvasEdit() {
                 size="icon-lg"
                 className={HEADER_BUTTON}
                 data-canvas-flip="preview"
-                aria-label={FLIP.preview.label}
+                aria-label={FLIP.preview}
                 // A replace, never a push: the page is this screen's own other half, so flipping to
                 // it must not leave the chat behind for the next back press to land on.
                 onClick={() => navigate(`/canvas/${id}`, { replace: true })}
@@ -987,8 +960,7 @@ export function CanvasEdit() {
       {missing ? (
         <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
       ) : reading ? (
-        /* Nothing of the record has landed: the preview's own reading line, in its own place. */
-        <p className="p-4 text-center text-sm text-muted-foreground">Reading the canvas…</p>
+        <p className="p-4 text-center text-sm text-muted-foreground">{READING}</p>
       ) : loaded && !versioned ? (
         /* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
            preview's empty frame uses — and a host that isn't answering is not a bot that is
@@ -1002,7 +974,7 @@ export function CanvasEdit() {
         bot={profile}
         points={versioned ? points : undefined}
         reread={refreshCanvases}
-        className="flex min-h-0 flex-1 flex-col"
+        className={CHAT_LANE}
       />
       <CanvasOptions
         open={optionsOpen}
@@ -1017,13 +989,10 @@ export function CanvasEdit() {
 }
 
 /**
- * The screen each flip goes to, as its control is labelled and drawn: one table rather than a pair
- * of ternaries, so a label and its icon cannot be read from two different answers.
+ * What each flip says, by the screen it goes to: `FLIP.edit` labels the page's door to the chat, and
+ * `FLIP.preview` the chat's door back to the page.
  */
-const FLIP = {
-  edit: { label: "Edit", Icon: PencilIcon },
-  preview: { label: "Preview", Icon: FrameIcon },
-} as const
+const FLIP = { edit: "Edit", preview: "Preview" } as const
 
 /**
  * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's

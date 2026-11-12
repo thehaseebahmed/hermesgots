@@ -691,11 +691,6 @@ test(
 test(
   "the options' Delete is the app's destructive pill",
   atWidth(390, async () => {
-    // Deleting a canvas is the one act on this sheet that takes something away, so it wears the
-    // shape every page that destroys wears (`settings-chrome`'s `DestructiveButton`): the
-    // destructive ink over its 10% tint, in the app's pill, with the trash at its lead — and it
-    // stands under the last group rather than inside a card of its own, the place a bot's page and
-    // a server's sheet give theirs.
     const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], changes: [] }
     serve(host, "c10")
     await seedCanvas()
@@ -729,7 +724,6 @@ test(
       assert.ok(icon, "with the trash at its lead")
       assert.equal(control.firstElementChild, icon, "and nothing in front of it")
 
-      // And it still asks first: nothing has gone from the host while the question is up.
       await click(control)
       await until(() => find('[role="alertdialog"]') !== null, "the question before the delete")
       await settle()
@@ -746,7 +740,6 @@ test(
   atWidth(390, async () => {
     // A version that declares no tools holds no answer about one, so the sheet has nothing to say
     // about them: the sentence that said so and the card that would have held the rows both go.
-    // An empty card's fill shows as a gap, which is the same noise as the copy.
     const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [] }
     serve(host, "c11")
     await seedCanvas()

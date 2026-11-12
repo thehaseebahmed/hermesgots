@@ -1,8 +1,8 @@
 /**
  * A pop-up's heading, in the sheet form every phone gets: the header gives the heading room above it
- * rather than letting its box begin at the drag handle's bottom edge (`AGENTS.md`'s "keeps content
- * from ever sitting against it"). Read as the class the shared header carries, since a DOM without
- * layout cannot measure the 16px — the browser pass in `e2e canvas` measures the gap itself.
+ * rather than letting its box begin at the drag handle's bottom edge. Read as the class the shared
+ * header carries, since a DOM without layout cannot measure the 16px — the browser pass in `e2e
+ * canvas` measures the gap itself.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

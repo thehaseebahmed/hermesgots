@@ -116,10 +116,9 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
         form === "drawer" && "pr-14",
         form === "menu" && "px-5 pt-4 pb-3",
         // A sheet centres its whole header, as a Material bottom sheet does, and keeps 16px above
-        // the heading: without it the heading's box begins at the drag handle's bottom edge, which is
-        // the content-against-the-header `AGENTS.md` forbids for every pop-up. The heading centres
-        // itself in every form (PopupTitle), leaving a drawer's or menu's other header rows as they
-        // were.
+        // the heading: at zero the heading's box begins at the drag handle's bottom edge, so it
+        // would sit against the handle it is dragged by. The heading centres itself in every form
+        // (PopupTitle), leaving a drawer's or menu's other header rows as they were.
         sheet && "items-center pt-4 text-center",
         className,
       )}
