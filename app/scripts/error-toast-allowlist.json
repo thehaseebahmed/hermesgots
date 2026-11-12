@@ -4,230 +4,192 @@
     {
       "file": "chat-next/blank.tsx",
       "function": "send",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "chat-next/chat-body.tsx",
       "function": "onMode",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "chat-next/chat-body.tsx",
       "function": "said",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "chat-next/page.tsx",
       "function": "ChatNextThread",
-      "reason": "read-at-a-control",
-      "calls": 1
+      "reason": "read-at-a-control"
     },
     {
       "file": "components/afk-prompt.tsx",
       "function": "attempt",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/afk.tsx",
       "function": "choosePicks",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/afk.tsx",
       "function": "save",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/afk.tsx",
       "function": "writePrompt",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/chat/composer.tsx",
       "function": "addFiles",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "components/chat/composer.tsx",
       "function": "retryDictation",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "components/chat/composer.tsx",
       "function": "startDictation",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "components/chat/model-picker.tsx",
       "function": "reportWrite",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/community-settings.tsx",
       "function": "change",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/project-settings.tsx",
       "function": "act",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/project-settings.tsx",
       "function": "save",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/room/new-room-screen.tsx",
       "function": "toggle",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "components/room/room-chat.tsx",
       "function": "write",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/settings/dictation.tsx",
       "function": "BubbleCards",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "components/skill-detail-sheet.tsx",
       "function": "SkillDetail",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "components/skill-detail-sheet.tsx",
       "function": "openFile",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "lib/attachments.ts",
       "function": "openFailed",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "lib/canvases.ts",
       "function": "refuse",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "lib/chat.ts",
       "function": "removeQueued",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "lib/meetings.ts",
       "function": "send",
-      "reason": "screen-cannot-hold-it",
-      "calls": 1
+      "reason": "screen-cannot-hold-it"
     },
     {
       "file": "lib/workspace.ts",
       "function": "closeSessionWork",
-      "reason": "ends-elsewhere",
-      "calls": 1
+      "reason": "ends-elsewhere"
     },
     {
       "file": "routes/canvas.tsx",
       "function": "create",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/canvas.tsx",
       "function": "grant",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/canvas.tsx",
       "function": "remove",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/canvas.tsx",
       "function": "update",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/chat.tsx",
       "function": "CurrentChatPage",
-      "reason": "read-at-a-control",
-      "calls": 1
+      "reason": "read-at-a-control"
     },
     {
       "file": "routes/project.tsx",
       "function": "act",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/project.tsx",
       "function": "remove",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/projects.tsx",
       "function": "cancel",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/routines.tsx",
       "function": "act",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/setup.tsx",
       "function": "next",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/share.tsx",
       "function": "SharePage",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/share.tsx",
       "function": "couldNot",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     },
     {
       "file": "routes/share.tsx",
       "function": "sendIntoRoom",
-      "reason": "not-yet-converted",
-      "calls": 1
+      "reason": "not-yet-converted"
     }
   ]
 }

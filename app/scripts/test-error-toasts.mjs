@@ -20,9 +20,8 @@
  * today, not a proof that none ever is.
  *
  * `error-toast-allowlist.json` names each place that keeps a failure's words: the file, the function
- * inside it, why it keeps them, and how many such calls it holds. An entry that no longer holds its
- * calls fails, so the list cannot rot, and the file states its own ceiling so allowing one more is a
- * visible edit.
+ * inside it, and why. An entry that no longer holds its call fails, so the list cannot rot, and the
+ * file states its own ceiling so allowing one more is a visible edit.
  */
 import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
@@ -327,9 +326,9 @@ test("the allowlist holds only what is still there, and no more than its ceiling
     ).length
     assert.equal(
       here,
-      entry.calls ?? 1,
-      `${entry.file} in ${entry.function} is allowed to keep ${entry.calls ?? 1} such call(s); ` +
-        "an entry that no longer holds them is stale, and one that holds more was widened silently",
+      1,
+      `${entry.file} in ${entry.function} is allowed to keep one such call; an entry that no longer ` +
+        "holds it is stale, and one that holds two was widened silently",
     )
   }
   assert.ok(
