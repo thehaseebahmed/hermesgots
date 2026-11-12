@@ -234,6 +234,15 @@ class LibraryAddTest(unittest.TestCase):
         )
 
 
+class SchemaTest(unittest.TestCase):
+    def test_the_description_hands_every_filed_file_over(self) -> None:
+        # The tool is the one way a run hands a file over, so its own words are where "a MEDIA: tag is
+        # for an image" was said: a report filed through it reaches the user the same way as a photo.
+        description = library.SCHEMA["description"]
+        self.assertIn("return its new path in a MEDIA:<path> tag", description)
+        self.assertNotIn("an image's new path", description)
+
+
 class TreeTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -387,7 +396,15 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("never a path relative to the folder you are in", media)
         self.assertIn("Never a scratch, worktree or other temporary path", media)
         self.assertIn("caches what it fetches", media, "the reason: a temp path draws a stale copy")
-        self.assertIn("is a row the user saves", media, "a file that is not drawn is still handed over")
+        self.assertIn("is a row the user taps", media, "a file that is not drawn is still handed over")
+        # The file this rule is most often about is the one the run just wrote — a report, a set of
+        # notes — and the wording that read as a download is what made runs paste their markdown
+        # into the reply instead of naming it. Scoped to a file on disk: a plan-mode run's plan is
+        # the reply itself, so a rule about "the reply" would refuse the one thing that must be in it.
+        self.assertIn("a markdown note, a text file or a PDF opens to read", media)
+        self.assertIn("A report you saved as markdown is handed over", media)
+        self.assertIn("never pasted into the reply", media)
+        self.assertNotIn("is a row the user saves", media, "the clause that made a report read as a download")
 
     def test_a_record_without_worktrees_has_no_block(self) -> None:
         # The same gate as the ship instructions: a record with no repos gets neither.
