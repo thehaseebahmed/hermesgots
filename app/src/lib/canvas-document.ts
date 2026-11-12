@@ -105,6 +105,29 @@ const LIBRARY_TAG =
   /<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/script>/gi
 
 /**
+ * The document as its markup, with every comment cut out: a tag named in a comment is not a tag. The
+ * host's scan reads a document the same way (`_markup` in `plugin/canvases.py`), and `findHead`
+ * already reads the page's head this way, so an ask a bot wrote out in a comment is no ask on
+ * either side — which is what `plugin/tests/fixtures/canvas-library-asks.json` holds both to.
+ */
+function withoutComments(html: string): string {
+  const pieces: string[] = []
+  let at = 0
+  for (;;) {
+    const opened = html.indexOf("<!--", at)
+    if (opened === -1) {
+      pieces.push(html.slice(at))
+      return pieces.join(" ")
+    }
+    pieces.push(html.slice(at, opened))
+    const closed = html.indexOf("-->", opened + 4)
+    // An unterminated comment: nothing after it is markup, as the host reads it.
+    if (closed === -1) return pieces.join(" ")
+    at = closed + 3
+  }
+}
+
+/**
  * The names a page asks for, in the order it asks: what a caller fetches sources for before it can
  * draw anything, so a page that names no library costs no fetch and one that names three is read
  * once. A name is repeated where the page asks twice — the ask is what the page said, and the
@@ -112,7 +135,7 @@ const LIBRARY_TAG =
  */
 export function canvasLibraryPlan(html: string): string[] {
   const names: string[] = []
-  for (const ask of html.matchAll(LIBRARY_TAG)) names.push(ask[1])
+  for (const ask of withoutComments(html).matchAll(LIBRARY_TAG)) names.push(ask[1])
   return names
 }
 

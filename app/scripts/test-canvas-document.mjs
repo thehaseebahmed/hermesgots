@@ -10,6 +10,7 @@ import {
   SUBMIT_IN_PLACE,
   TOKENS,
   canvasDocument,
+  canvasLibraryPlan,
   readScroll,
   themeTokens,
   themeVariables,
@@ -273,6 +274,40 @@ test("a named library is inlined and an unknown one dropped", () => {
     { mode: "light", tokens: LIGHT, libraries: { date: { script: "window.dayjs=function(){}" } } },
   )
   assert.match(quoted, /<script>window\.dayjs=function\(\)\{\}<\/script>/, "a quoted `>` doesn't hide the ask")
+})
+
+// The one table of asks both parsers are held to: this suite and `plugin/tests/test_canvases.py` read
+// the same file, so the host can never refuse a tag the app would have answered.
+const LIBRARY_ASKS = JSON.parse(
+  readFileSync(new URL("../../plugin/tests/fixtures/canvas-library-asks.json", import.meta.url), "utf8"),
+)
+
+test("the app plans the same asks the host reads", () => {
+  // A page asks for a library with an empty `<script data-canvas-lib>`, and what counts as an ask is
+  // one grammar in two languages: an empty script, other attributes — a quoted `>` included — either
+  // quote style and extra whitespace are all asks; content in the script and a tag written in a
+  // comment are not. A name the app has no source for is still an ask: it is the host that refuses
+  // it, by that name.
+  assert.ok(LIBRARY_ASKS.cases.length > 0, "the table is a table")
+  for (const one of LIBRARY_ASKS.cases) {
+    assert.deepEqual(canvasLibraryPlan(one.html), one.asks, one.case)
+  }
+})
+
+test("a version stored before the host refused a name still draws", () => {
+  // Draw time is unchanged: an ask the app has no source for is dropped rather than left as a tag
+  // the page would parse as an empty script of its own, so a page a host no longer answers still
+  // opens and draws.
+  const stored = LIBRARY_ASKS.cases.filter((one) => one.stored)
+  assert.ok(stored.length > 0, "the table carries a stored version")
+  for (const one of stored) {
+    const html = canvasDocument(PAGE.replace("<h1>Tip</h1>", `<h1>Tip</h1>${one.html}`), {
+      mode: "light",
+      tokens: LIGHT,
+    })
+    assert.equal(html.includes("data-canvas-lib"), false, "the ask is dropped, not left to parse")
+    assert.ok(html.includes("<h1>Tip</h1>"), "the page still draws")
+  }
 })
 
 test("a library's stylesheet rides the head and its setup follows its source", () => {
