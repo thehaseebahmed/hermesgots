@@ -9,7 +9,9 @@ import {
   PencilIcon,
   PinIcon,
   PinOffIcon,
+  RotateCcwIcon,
   Trash2Icon,
+  TriangleAlertIcon,
 } from "lucide-react"
 import { useLocation, useParams } from "react-router"
 import { toast } from "sonner"
@@ -26,6 +28,7 @@ import { ProjectSettings } from "@/components/project-settings"
 import { ProjectUsageView } from "@/components/project-usage"
 import { RepoChips } from "@/components/repos"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
@@ -52,7 +55,7 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { useProjectsPane, useRememberOpened } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
-import { deleteProject, updateProject, type HermesProject } from "@/lib/hermes"
+import { deleteProject, retryProject, updateProject, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { projectRepos } from "@/lib/workspace"
 import { BackButton } from "@/components/back-button"
@@ -92,7 +95,13 @@ export function ProjectPage() {
   // AFK's own row exists only where the Bot's plugin can read a project's tasks.
   const afk = usePluginFeatureOn(server, AFK_FEATURE)
   const projectChanges = useChanges("projects", profile)
-  const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
+  // A project that isn't whole is still being worked on: the poll keeps its page current where the
+  // bot's stream isn't open, as the list's own poll does.
+  const changing = Boolean(
+    project &&
+    (project.status !== "ready" ||
+      project.folders.some((f) => f.status === "cloning" || f.status === "removing")),
+  )
 
   useEffect(() => {
     if (!server) return
@@ -128,11 +137,14 @@ export function ProjectPage() {
     .join(" · ")
 
   const act = async (action: () => Promise<void>, fallback: string) => {
+    setBusy(true)
     try {
       await action()
       reload()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : fallback)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -153,6 +165,11 @@ export function ProjectPage() {
       setBusy(false)
     }
   }
+
+  const retry = () =>
+    profile
+      ? act(() => retryProject(profile, projectId), "Couldn't retry the project.")
+      : Promise.resolve()
 
   const ready = profile && project?.status === "ready"
 
@@ -241,56 +258,65 @@ export function ProjectPage() {
           <RepoChips repos={repos} />
         </div>
       )}
-      <Tabs value={tab} onValueChange={setTab} className="flex-1">
-        <TabsList>
-          <TabsTrigger value="library">Library</TabsTrigger>
-          <TabsTrigger value="prs">Pull requests</TabsTrigger>
-          <TabsTrigger value="usage">Usage</TabsTrigger>
-        </TabsList>
-        <TabsContent value="library" className="flex-1 overflow-y-auto">
-          {server && (
-            <div className="mx-auto w-full max-w-2xl">
-              <LibraryTab
-                config={server}
-                projectId={projectId}
-                titles={titles}
-                active={tab === "library"}
-              />
-            </div>
-          )}
-        </TabsContent>
-        <TabsContent value="prs" className="overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl px-4 py-6">
-            {sessions && prs.length === 0 ? (
-              <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
-            ) : (
-              <div className="flex flex-col gap-6">
-                {PR_GROUPS.map((group) => {
-                  const list = prs.filter((pr) => group.states.includes(pr.state))
-                  if (!list.length) return null
-                  return (
-                    <Group
-                      key={group.label}
-                      label={group.label}
-                      count={list.length}
-                      fold={group.fold}
-                    >
-                      {list.map((pr) => (
-                        <PrRow key={prKey(pr)} pr={pr} />
-                      ))}
-                    </Group>
-                  )
-                })}
+      {project && project.status !== "ready" ? (
+        <PendingProject
+          project={project}
+          busy={busy}
+          onRetry={() => void retry()}
+          onDelete={() => setDeleting(true)}
+        />
+      ) : (
+        <Tabs value={tab} onValueChange={setTab} className="flex-1">
+          <TabsList>
+            <TabsTrigger value="library">Library</TabsTrigger>
+            <TabsTrigger value="prs">Pull requests</TabsTrigger>
+            <TabsTrigger value="usage">Usage</TabsTrigger>
+          </TabsList>
+          <TabsContent value="library" className="flex-1 overflow-y-auto">
+            {server && (
+              <div className="mx-auto w-full max-w-2xl">
+                <LibraryTab
+                  config={server}
+                  projectId={projectId}
+                  titles={titles}
+                  active={tab === "library"}
+                />
               </div>
             )}
-          </div>
-        </TabsContent>
-        <TabsContent value="usage" className="overflow-y-auto pt-4">
-          {server && project && tab === "usage" && (
-            <ProjectUsageView config={server} project={project} />
-          )}
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+          <TabsContent value="prs" className="overflow-y-auto">
+            <div className="mx-auto w-full max-w-2xl px-4 py-6">
+              {sessions && prs.length === 0 ? (
+                <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
+              ) : (
+                <div className="flex flex-col gap-6">
+                  {PR_GROUPS.map((group) => {
+                    const list = prs.filter((pr) => group.states.includes(pr.state))
+                    if (!list.length) return null
+                    return (
+                      <Group
+                        key={group.label}
+                        label={group.label}
+                        count={list.length}
+                        fold={group.fold}
+                      >
+                        {list.map((pr) => (
+                          <PrRow key={prKey(pr)} pr={pr} />
+                        ))}
+                      </Group>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+          <TabsContent value="usage" className="overflow-y-auto pt-4">
+            {server && project && tab === "usage" && (
+              <ProjectUsageView config={server} project={project} />
+            )}
+          </TabsContent>
+        </Tabs>
+      )}
 
       {ready && (
         <ProjectSettings
@@ -318,11 +344,81 @@ export function ProjectPage() {
         open={deleting}
         onOpenChange={setDeleting}
         title="Delete this project?"
-        description="The project and its sessions are removed from this device. Its folders on the server stay where they are, and Hermes keeps its own copy of the sessions."
+        description={
+          ready
+            ? "The project and its sessions are removed from this device. Its folders on the server stay where they are, and Hermes keeps its own copy of the sessions."
+            : "The project and the folders its clone made are removed from the server."
+        }
         confirmLabel="Delete"
         busy={busy}
         onConfirm={remove}
       />
+    </div>
+  )
+}
+
+/**
+ * A project the plugin is still making. It draws where the tabs would be, because a project that
+ * isn't whole has no library, pull requests or usage yet — and a clone that failed says why, whole,
+ * with the two answers a failure earns: start it again, or drop it.
+ */
+function PendingProject({
+  project,
+  busy,
+  onRetry,
+  onDelete,
+}: {
+  project: HermesProject
+  busy: boolean
+  onRetry: () => void
+  onDelete: () => void
+}) {
+  const failed = project.status === "failed"
+  const total = project.folders.length
+  const done = project.folders.filter((folder) => folder.status === "done").length
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center">
+      <span
+        className={
+          failed
+            ? "flex size-16 items-center justify-center rounded-full bg-warning/15 text-warning"
+            : "flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary"
+        }
+      >
+        {failed ? (
+          <TriangleAlertIcon className="size-8" aria-hidden />
+        ) : (
+          <Spinner className="size-8" />
+        )}
+      </span>
+      <h2 className="text-lg font-semibold tracking-tight">
+        {failed
+          ? "Couldn't create this project"
+          : total > 0
+            ? `Cloning ${Math.min(done + 1, total)} of ${total}`
+            : "Creating…"}
+      </h2>
+      {failed && (
+        <p className="max-w-prose text-sm break-words whitespace-pre-wrap text-muted-foreground">
+          {project.error ?? "Couldn't clone the project's repositories."}
+        </p>
+      )}
+      {failed && (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button size="lg" className="h-12 rounded-full px-5" disabled={busy} onClick={onRetry}>
+            <RotateCcwIcon /> Retry
+          </Button>
+          <Button
+            variant="destructive"
+            size="lg"
+            className="h-12 rounded-full px-5"
+            disabled={busy}
+            onClick={onDelete}
+          >
+            <Trash2Icon /> Delete
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

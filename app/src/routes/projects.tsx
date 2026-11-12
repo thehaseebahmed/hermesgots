@@ -26,12 +26,7 @@ import { itemToOpen, useProjectsPane, type FeaturePane } from "@/lib/pane"
 import { readProjects } from "@/lib/projects"
 import { usePoll } from "@/lib/poll"
 import { createSignal, createStore } from "@/lib/store"
-import {
-  HermesError,
-  deleteProject,
-  type HermesConfig,
-  type HermesProject,
-} from "@/lib/hermes"
+import { HermesError, deleteProject, type HermesConfig, type HermesProject } from "@/lib/hermes"
 import { folderName } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
