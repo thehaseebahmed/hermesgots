@@ -370,14 +370,14 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, latest, preview, waiting, unread }) => {
+        {bots?.map(({ bot, label, latest, preview, waiting, unread }) => {
           const age = latest?.updatedAt
           return (
             <li key={bot.id}>
               <RootLink
                 to={botChatsPath(bot.id)}
                 onClick={onNavigate}
-                aria-label={collapsed ? bot.name : undefined}
+                aria-label={collapsed ? label : undefined}
                 className={({ isActive }) =>
                   collapsed
                     ? railClass({ isActive: isActive || owner === bot.id })
@@ -401,7 +401,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                 {!collapsed && (
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline gap-2">
-                      <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
+                      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                       {bot.muted && (
                         <BellOffIcon
                           className="size-3.5 shrink-0 text-muted-foreground"

@@ -69,6 +69,15 @@ test("two hosts' profiles read with the domain part and the profile", () => {
   ])
 })
 
+test("two bots linked at one host and one profile are told apart by their own names", () => {
+  const twins = [bot("a", "https://hermes.domain.com/v1", "Work"), bot("b", "https://hermes.domain.com/v1", "Home")]
+  assert.deepEqual(
+    twins.map((one) => botLabel(one, twins)),
+    ["Work", "Home"],
+    "the host tells them apart from nothing at all, so the name is the whole of the difference",
+  )
+})
+
 test("the app's own name is never a label", () => {
   const hermes = bot("a", "https://hermes.domain.com/v1", "Hermes")
   assert.equal(botLabel(hermes, [hermes]), "hermes")

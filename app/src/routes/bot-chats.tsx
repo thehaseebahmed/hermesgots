@@ -33,11 +33,13 @@ import {
   type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
+import { botLabels, labelOf } from "@/lib/bot-name"
 import {
   conversationsOf,
   db,
   getSettings,
   isReply,
+  listEnabledProfiles,
   newestMessage,
   saveSettings,
   type Profile,
@@ -169,7 +171,10 @@ function BotChatsList({
         return chatRowOf(chat, newest, reply)
       }),
     )
-    return { profileId, bot, rows }
+    // The bar names the bot by the host it answers at: the sidebar's row and this title must read
+    // the same, and a host's default profile is called "Hermes" on every host (ADR 0148).
+    const label = bot ? labelOf(botLabels(await listEnabledProfiles()), bot) : ""
+    return { profileId, bot, label, rows }
   }, [profileId])
   const fresh = answer && answer.profileId === profileId ? answer : undefined
   if (!fresh) return null
@@ -180,7 +185,13 @@ function BotChatsList({
     .filter((room) => room.seated.includes(profileId))
     .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return (
-    <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} place={place} />
+    <ChatList
+      bot={fresh.bot}
+      label={fresh.label}
+      rows={[...fresh.rows, ...seated]}
+      selected={selected}
+      place={place}
+    />
   )
 }
 
@@ -193,11 +204,14 @@ type ListPlace = "pane" | "root" | "pushed"
 
 function ChatList({
   bot,
+  label,
   rows,
   selected,
   place,
 }: {
   bot: Profile
+  /** What the bar calls the bot: the host it answers at. */
+  label: string
   rows: ChatListRow[]
   selected?: string
   place: ListPlace
@@ -271,7 +285,7 @@ function ChatList({
             <span aria-hidden className="shrink-0">
               <Bot id={bot.botId} className="size-9" />
             </span>
-            <span className="truncate">{bot.name}</span>
+            <span className="truncate">{label}</span>
           </Link>
         }
         actions={

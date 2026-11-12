@@ -94,11 +94,14 @@ export function botLabel(bot: NamedBot, peers: NamedBot[]): string {
       base = host
   }
   // One host holding several bots: the profile says which of them this is. The default profile is
-  // the host itself, so it keeps the bare name.
-  if (others.includes(host)) {
-    const place = placeOf(bot.baseUrl)
-    if (place) base = `${base}/${place}`
-  }
+  // the host itself, so it keeps the bare name — and two bots linked at one host *and* one profile
+  // are told apart by their own name, the only thing left that holds them apart.
+  const sameHost = peers.filter(
+    (peer) => peer.id !== bot.id && hostOf(peer.baseUrl) === host,
+  )
+  const place = placeOf(bot.baseUrl)
+  if (sameHost.some((peer) => placeOf(peer.baseUrl) === place)) base = ownName(bot)
+  else if (sameHost.length && place) base = `${base}/${place}`
   return base
 }
 

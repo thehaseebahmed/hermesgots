@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { botLabels, labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import {
   createProject,
@@ -89,6 +90,9 @@ function ProjectForm({
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The bots by the host each answers at: a project is made on one of them, and two hosts' default
+  // profiles are both called "Hermes".
+  const labels = botLabels(profiles)
 
   useEffect(() => {
     let cancelled = false
@@ -160,7 +164,7 @@ function ProjectForm({
             <FieldLabel htmlFor="project-bot">Bot</FieldLabel>
             <Select
               value={profile.id}
-              items={profiles.map((p) => ({ value: p.id, label: p.name }))}
+              items={profiles.map((p) => ({ value: p.id, label: labelOf(labels, p) }))}
               onValueChange={(value) => value && onPickBot(value)}
             >
               <SelectTrigger id="project-bot" className="h-11 w-full">
@@ -170,7 +174,7 @@ function ProjectForm({
                 {profiles.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     <Bot id={p.botId} className="size-5" />
-                    {p.name}
+                    {labelOf(labels, p)}
                   </SelectItem>
                 ))}
               </SelectContent>

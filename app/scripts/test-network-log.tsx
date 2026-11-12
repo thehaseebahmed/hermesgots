@@ -100,7 +100,8 @@ test("All draws every bot and a bot's pill shows only its own", async () => {
   await seedLog()
   await mount(<NetworkLogScreen />, async () => {
     assert.equal(findAll("tbody tr").length, 3, "All is every bot")
-    const pill = findAll("button").find((button) => button.textContent === "Grace")
+    // A pill names the host its bot answers at (ADR 0148), so it reads the fixture's host.
+    const pill = findAll("button").find((button) => button.textContent === "network-grace")
     assert.ok(pill, "each bot the log heard from has a pill")
     await click(pill)
     assert.equal(findAll("tbody tr").length, 1, "Grace's own request")

@@ -43,6 +43,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { botLabels, labelOf } from "@/lib/bot-name"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubOf, botSubPath } from "@/lib/bot-subs"
@@ -141,6 +142,9 @@ export function SettingsPage() {
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
   const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
+  // The bot's own screens are titled by the host it answers at, as the menu's row and the sidebar's
+  // name it (ADR 0148).
+  const labels = botLabels(profiles ?? [])
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)
   const page = botTab ? botPageOf(botTab) : undefined
@@ -195,7 +199,11 @@ export function SettingsPage() {
       return page ? (
         <BotPageScreen profile={bot} page={page} sub={botSub} />
       ) : (
-        <BotListScreen profile={bot} onDeleted={() => root("/settings")} />
+        <BotListScreen
+          profile={bot}
+          label={labelOf(labels, bot)}
+          onDeleted={() => root("/settings")}
+        />
       )
     }
     return screen ? <SectionScreen section={screen} /> : <MenuScreen profiles={profiles} />
@@ -207,7 +215,7 @@ export function SettingsPage() {
     return (
       <div className="flex min-h-0 flex-1">
         <Screen
-          title={bot.name}
+          title={labelOf(labels, bot)}
           className="w-90 flex-none border-r min-[1200px]:w-103"
           leading={<BackButton label="Back" onClick={() => up("/settings")} />}
         >
@@ -251,11 +259,19 @@ export function SettingsPage() {
 }
 
 /** A bot's settings as pushed screens: the list, and a page over it. */
-function BotListScreen({ profile, onDeleted }: { profile: Profile; onDeleted: () => void }) {
+function BotListScreen({
+  profile,
+  label,
+  onDeleted,
+}: {
+  profile: Profile
+  label: string
+  onDeleted: () => void
+}) {
   const { up } = useNav()
   return (
     <Screen
-      title={profile.name}
+      title={label}
       leading={<BackButton label="Back" onClick={() => up("/settings")} />}
     >
       <BotSettingsList profile={profile} onDeleted={onDeleted} />
@@ -315,6 +331,9 @@ function MenuScreen({
   const { registryError } = useSyncState()
   const { theme } = useTheme()
   const [params, setParams] = useSearchParams()
+  // The bots by the host each answers at: this menu and the sidebar must name one bot one way, and
+  // every host calls its default profile "Hermes" (ADR 0148).
+  const labels = botLabels(profiles ?? [])
   const linking = params.get("link") === "1"
   const setLinking = (open: boolean) =>
     setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
@@ -339,7 +358,7 @@ function MenuScreen({
       {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
       <Group>
         {profiles?.map((profile) => (
-          <BotRow key={profile.id} profile={profile} />
+          <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
         ))}
         <LinkBotRow onLink={() => setLinking(true)} />
       </Group>
@@ -363,8 +382,8 @@ function MenuScreen({
   )
 }
 
-/** A bot in the menu: its connectivity dot, then the bot itself, then its name. */
-function BotRow({ profile }: { profile: Profile }) {
+/** A bot in the menu: its connectivity dot, then the bot itself, then the host it answers at. */
+function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
   const online = presence(profile, now)
   return (
@@ -381,7 +400,7 @@ function BotRow({ profile }: { profile: Profile }) {
           />
         </>
       }
-      title={profile.name}
+      title={label}
       subtitle={botStatus(profile, now)}
     />
   )
@@ -607,6 +626,7 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
 
 export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
+  const labels = botLabels(bots ?? [])
   const settings = useLiveQuery(getSettings, [])
   // Two counts off the store's own indexes, never the whole table read to filter it in JS.
   const log = useLiveQuery(async () => {
@@ -671,7 +691,7 @@ export function DeveloperSettings() {
           />
         )}
         {bots?.map((bot) => (
-          <LiveRow key={bot.id} bot={bot} />
+          <LiveRow key={bot.id} bot={bot} label={labelOf(labels, bot)} />
         ))}
       </Group>
       <Group>
@@ -733,16 +753,16 @@ function SyncServerRow() {
   )
 }
 
-function LiveRow({ bot }: { bot: Profile }) {
+function LiveRow({ bot, label }: { bot: Profile; label: string }) {
   const status = useLiveStatus(bot)
-  const { label, detail } = LIVE_LABELS[status]
+  const { label: reading, detail } = LIVE_LABELS[status]
   return (
     <div className={rowClass}>
-      <RowText title={bot.name} subtitle={detail} />
+      <RowText title={label} subtitle={detail} />
       <span
         className={cn("text-sm", status === "push" ? "text-foreground" : "text-muted-foreground")}
       >
-        {label}
+        {reading}
       </span>
     </div>
   )

@@ -4,6 +4,7 @@ import { CheckIcon, FolderGit2Icon, PlusIcon } from "lucide-react"
 import { Bot } from "@/components/bot"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import { botLabels, labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import type { HermesProject } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
@@ -66,6 +67,9 @@ function SessionForm({
   onStart: (target: SessionTarget) => void | Promise<void>
   onNewProject: () => void
 }) {
+  // The bot a project lives on, by the host it answers at: a host's default profile is called
+  // "Hermes", so its own name said nothing about which host a session would run on.
+  const labels = botLabels([...new Map(targets.map((t) => [t.profile.id, t.profile])).values()])
   const startable = targets.filter((t) => !t.blocked)
   const [picked, setPicked] = useState(
     () => startable.find((t) => t.key === initial)?.key ?? startable[0]?.key,
@@ -128,7 +132,7 @@ function SessionForm({
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate font-medium">{t.project.name}</span>
                 <span className="truncate text-sm text-muted-foreground">
-                  {t.blocked ?? t.profile.name}
+                  {t.blocked ?? labelOf(labels, t.profile)}
                 </span>
               </span>
               {selected && <CheckIcon className="size-5 shrink-0" />}

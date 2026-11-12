@@ -11,6 +11,7 @@ import {
   type ModelChoice,
   type Profile,
 } from "@/lib/db"
+import { botLabels, labelOf } from "@/lib/bot-name"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { byName } from "@/lib/compare"
 import { plainLine } from "@/lib/words"
@@ -44,6 +45,8 @@ export function useNow() {
 
 export interface BotSummary {
   bot: Profile
+  /** What the row calls it: the host it answers at, since every host calls its default bot "Hermes". */
+  label: string
   latest?: Conversation
   /** The newest chat's latest message, cut to a line. */
   preview?: string
@@ -68,7 +71,7 @@ export function useBotSort(): [Sort<BotSort>, (sort: Sort<BotSort>) => void] {
 const active = (summary: BotSummary) => summary.latest?.updatedAt ?? -Infinity
 const byRecent = (a: BotSummary, b: BotSummary) => active(a) - active(b)
 const byAdded = (a: BotSummary, b: BotSummary) => a.bot.createdAt - b.bot.createdAt
-const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.name)
+const byBotName = (a: BotSummary, b: BotSummary) => byName(a.label, b.label)
 
 /**
  * `recent`: the newest chat first, bots without one last. `waiting`: the most chats waiting on the
@@ -123,8 +126,10 @@ export function useBotSummaries(): BotSummary[] | undefined {
       }),
     )
   }, [])
+  const labels = botLabels(rows?.map(({ bot }) => bot) ?? [])
   return rows?.map(({ bot, chats, local, preview }) => ({
     bot,
+    label: labelOf(labels, bot),
     latest: chats[0],
     preview,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,

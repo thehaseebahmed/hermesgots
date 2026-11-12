@@ -9,6 +9,7 @@ import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
+import { botLabels, labelOf } from "@/lib/bot-name"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
@@ -352,10 +353,12 @@ function EntrySheet({
 function BotsTab({ profiles }: { profiles: Profile[] }) {
   if (!profiles.length)
     return <p className="px-5 py-6 text-sm text-muted-foreground">No bots yet.</p>
+  // Rows by the host each bot answers at, as every other list of them reads (ADR 0148).
+  const labels = botLabels(profiles)
   return (
     <Group>
       {profiles.map((profile) => (
-        <BotRow key={profile.id} profile={profile} />
+        <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
       ))}
     </Group>
   )
@@ -382,7 +385,7 @@ function speechLine({
   return "Off"
 }
 
-function BotRow({ profile }: { profile: Profile }) {
+function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const answer = useDictationInfo(profile)
   const reason = answer && answer.status === "off" ? answer.reason : undefined
   const { model, check } = useSpeech(profile)
@@ -396,7 +399,7 @@ function BotRow({ profile }: { profile: Profile }) {
           className={cn("size-8 shrink-0", profile.disabled && "opacity-40")}
         />
       }
-      title={profile.name}
+      title={label}
       subtitle={speechLine({ model, check, reason })}
     />
   )
@@ -488,6 +491,7 @@ function heardLine(settings?: SpeechSettings) {
 /** The Bubble and the bot it hears with. The two grants are the phone's, so the app asks for them. */
 function BubbleCards() {
   const bots = useLiveQuery(listEnabledProfiles, [])
+  const labels = botLabels(bots ?? [])
   const heard = useHeardBy(bots ?? [])
   const bubbleBot = useLiveQuery(getBubbleProfile, [])
   const [state, setState] = useState<BubbleState>()
@@ -599,7 +603,7 @@ function BubbleCards() {
         <ValueRow
           title="Bot"
           purpose="Who hears the Bubble's takes"
-          value={bubbleBot?.name}
+          value={bubbleBot && labelOf(labels, bubbleBot)}
           onClick={() => setPicking(true)}
           data-setting="bubble-bot"
         />
@@ -615,7 +619,7 @@ function BubbleCards() {
           // answers with: a name alone said nothing about which bot a take would be heard by.
           options={(bots ?? []).map((profile) => ({
             id: profile.id,
-            label: profile.name,
+            label: labelOf(labels, profile),
             // What hears the take, not what answers a chat: this list decides the bot the Bubble
             // dictates with, and its speech model is the one that matters here.
             detail: heardLine(heard?.get(connectionKey(profile))),
