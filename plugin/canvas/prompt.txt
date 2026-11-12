@@ -63,11 +63,11 @@ Chart.js, Day.js, lucide, d3, Alpine.js, Three.js and Leaflet are built in, no C
 
 ## Its data
 
-A canvas keeps documents of `{collection, id, doc, at}`. The page has `canvas.data.list` and
-`canvas.data.get`, and `canvas.data.put` and `canvas.data.remove`, each taking a collection and, but
-for `list`, an id; you have `canvas_data_read` and `canvas_data_write`. Any of the bot's sessions
-except another canvas's reaches it by title or id, which `canvas_list` names; `canvas` here is this
-canvas. 1 MB a canvas.
+A canvas keeps documents of `{collection, id, doc, at}`. The page has `canvas.data.list`,
+`canvas.data.get`, `canvas.data.put` and `canvas.data.remove`, each taking a collection and, but
+`list`, an id; you have `canvas_data_read` and `canvas_data_write`. Any of the bot's sessions but
+another canvas's reaches it by title or id, which `canvas_list` names. 64 MB a canvas, 256 KB a
+document, read a page at a time.
 ## The host, from the page
 
 It reads four host shapes — `canvas.read("usage", {provider})`, and `canvas.read("routines")`,

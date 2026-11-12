@@ -229,6 +229,17 @@ def _request_profile():
         return None
 
 
+def _asked(request: "web.Request", name: str, absent: str = "") -> str:
+    """One of a request's query parameters, or ``absent`` where it named none.
+
+    A request from the API server always carries its query, and one built field by field — a
+    harness driving a handler — may not; a request with no query is a caller who asked for nothing,
+    which is the answer ``absent`` already is, so it is read that way rather than raising.
+    """
+    query = getattr(request, "query", None)
+    return query.get(name, absent) if query is not None else absent
+
+
 def _plugin_route(
     web: Any,
     call: Any,
@@ -699,7 +710,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # A canvas is a page its bot writes and the app draws (canvases.py, ADR 0113),
                     # advertised only where its tools reach a canvas's session and that session is
                     # told the design guide (openui.py) — a canvas with neither can't be worked.
-                    *(["canvas"] if canvases.ready() and openui.canvas_ready() else []),
+                    # `canvas_data` rides with it: the paged read of a canvas's own data, which a
+                    # device sweeps a collection at a time rather than in one answer.
+                    *(
+                        ["canvas", "canvas_data"]
+                        if canvases.ready() and openui.canvas_ready()
+                        else []
+                    ),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -3284,8 +3301,56 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.canvas", "canvas": found})
 
     async def get_canvas(request: "web.Request") -> "web.Response":
-        """One canvas: the version its record points at, which is what the app draws."""
-        return await canvas_view(request, canvases.current)
+        """One canvas: the version its record points at, which is what the app draws.
+
+        Its documents ride it unless the caller asks ``?docs=none``: an app from before the paged
+        read needs them with the page, while the app this bot ships asks for the record alone and
+        then sweeps each collection a page at a time — a canvas of five thousand documents is never
+        one answer. Either way the whole-array read is bounded to what that older app could hold.
+        """
+        return await canvas_view(request, canvases.current, _asked(request, "docs") != "none")
+
+    async def canvas_data(request: "web.Request") -> "web.Response":
+        """A canvas's data as a catalogue: one row a collection, and what the whole of it weighs.
+
+        The first read of a sweep (``canvases.data_catalogue``, canvas_docs.py). No document rides
+        it, so it costs the same for five thousand documents as for five — the documents themselves
+        are asked for a page at a time, one collection at a time, from the route below.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                canvases.data_catalogue, store_path(), request.match_info["canvas_id"]
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas.data", **found})
+
+    async def canvas_documents(request: "web.Request") -> "web.Response":
+        """One page of one collection, the key the next page starts after, and the collection's size.
+
+        ``after`` is the last id the caller holds — the keyset every page here is cut on — and
+        ``limit`` the page's size: ``PAGE_ROWS`` documents when the caller names none, clamped to
+        ``PAGE_MAX`` past it, and refused where it is not a whole number of documents (``_limit``,
+        canvases.py). A page past the collection's end is an empty one with ``next`` null.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                canvases.data_page,
+                store_path(),
+                request.match_info["canvas_id"],
+                request.match_info["collection"],
+                _asked(request, "after") or None,
+                _asked(request, "limit") or None,
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas.documents", **found})
 
     async def undo_canvas(request: "web.Request") -> "web.Response":
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
@@ -3782,6 +3847,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/canvases", list_canvases)
     app.router.add_post(f"{PREFIX}/canvases", create_canvas)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
+    app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/data", canvas_data)
+    app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/data/{{collection}}", canvas_documents)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}", update_canvas)
     app.router.add_delete(f"{PREFIX}/canvases/{{canvas_id}}", delete_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)
