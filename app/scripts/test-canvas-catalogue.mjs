@@ -56,9 +56,10 @@ test("the catalogue, the sources it writes and the guide it renders are one list
     1,
     "the block lands once, where the slot was",
   )
+  const block = librariesBlock()
   for (const library of CATALOGUE) {
     assert.ok(
-      librariesBlock().includes(`\`${library.name}\` (${library.label},`),
+      block.includes(`\`${library.name}\` (${library.label},`),
       `the block names ${library.name} as ${library.label}`,
     )
   }

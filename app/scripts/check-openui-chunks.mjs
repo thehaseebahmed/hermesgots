@@ -25,7 +25,13 @@ const LIBRARIES = [
 ]
 
 const assets = "dist/assets"
-const read = (file) => readFileSync(join(assets, file), "utf8")
+// Each asset read once: the checks below ask the same corpus several times over, and every pass used
+// to be a fresh 5 MB walk of the build.
+const text = new Map()
+const read = (file) => {
+  if (!text.has(file)) text.set(file, readFileSync(join(assets, file), "utf8"))
+  return text.get(file)
+}
 const chunk = readdirSync(assets).filter((file) => file.endsWith(".js"))
 
 const entry = readFileSync("dist/index.html", "utf8").match(/src="\/assets\/([^"]+\.js)"/)?.[1]

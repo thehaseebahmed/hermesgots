@@ -84,6 +84,9 @@ import { useNow } from "@/lib/threads"
 /** How the tiles are laid out: a phone holds two, a tablet three, a desktop four. */
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
+/** What a page that asks for no library is drawn with: nothing, and no state to wait for. */
+const NO_LIBRARIES: Record<string, CanvasLibrarySource> = {}
+
 /**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
  * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
@@ -398,22 +401,29 @@ export function CanvasView() {
   // page drawn from another page's sources would be a page naming a library it never got. The asks
   // are read off the markup, so a page asking for nothing fetches nothing at all, and no library is
   // fetched for a page that never named it.
+  const plan = useMemo(() => (html ? canvasLibraryPlan(html) : []), [html])
   const [sources, setSources] = useState<{
     html: string
     libraries: Record<string, CanvasLibrarySource>
   } | null>(null)
-  const libraries = sources && sources.html === html ? sources.libraries : null
+  // A page that asks for nothing has its sources already: drawing it must not wait on a fetch that
+  // has nothing to fetch, which is the common case and would otherwise paint the placeholder first.
+  const libraries =
+    sources && sources.html === html
+      ? sources.libraries
+      : html && plan.length === 0
+        ? NO_LIBRARIES
+        : null
   useEffect(() => {
-    if (!html) return
-    const page = html
+    if (!html || plan.length === 0) return
     let live = true
-    void loadLibraries(canvasLibraryPlan(page), librarySource).then((loaded) => {
-      if (live) setSources({ html: page, libraries: loaded })
+    void loadLibraries(plan, librarySource).then((loaded) => {
+      if (live) setSources({ html, libraries: loaded })
     })
     return () => {
       live = false
     }
-  }, [html])
+  }, [html, plan])
 
   // The document at a position, built once for every draw: the reader's page, and the page drawn
   // again where they left it.
