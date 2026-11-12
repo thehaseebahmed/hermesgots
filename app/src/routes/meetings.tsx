@@ -26,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { Banner } from "@/components/banner"
+import { Banner, Refusal } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
@@ -115,6 +115,7 @@ import { useAllProjects } from "@/lib/projects"
 import { useNav } from "@/lib/nav"
 import { useDismissPushes } from "@/lib/push"
 import { prefersReducedMotion } from "@/lib/media"
+import type { Attempted } from "@/lib/refusal"
 import {
   itemToOpen,
   useMeetingsPane,
@@ -123,13 +124,22 @@ import {
 } from "@/lib/pane"
 import { createSignal } from "@/lib/store"
 import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
 import { BackButton } from "@/components/back-button"
 
-const message = (error: unknown, fallback: string) =>
-  error instanceof Error && error.message ? error.message : fallback
+/**
+ * A failed write as `refuse` reads it: the host's own sentence where it sent one, and the words this
+ * call would have said by itself otherwise. One shape for the seven writes here, so none of them
+ * puts the host's sentence back in passing.
+ */
+const wordsOf = (error: unknown, alone: string): Attempted => ({
+  ok: false,
+  said: error instanceof Error ? error.message : undefined,
+  alone,
+})
 
 /** Meetings is behind a Developer switch; with it off, its screens send you home. */
 function Gate({ children }: { children: ReactNode }) {
@@ -242,6 +252,9 @@ function Unfinished() {
   )
   const [sending, setSending] = useState(false)
   const recording = saved?.find((r) => !isRecording(r.id) && r.chunks.length)
+  // The Send in this banner waits on the host, so a refusal is drawn with it rather than said in
+  // passing, where it would not say which recording it was about.
+  const refusal = useRefusal(recording?.id)
   if (!recording) return null
   const profile = bots.find((b) => b.id === recording.profileId)
   const send = async () => {
@@ -257,33 +270,36 @@ function Unfinished() {
       void forgetRecording(recording.id)
       go(`/meetings/${meeting.id}`)
     } catch (error) {
-      tell.error(message(error, "Couldn't add the meeting."))
+      refusal.refuse(wordsOf(error, "Couldn't add the meeting."))
     } finally {
       setSending(false)
     }
   }
   return (
-    <Banner
-      action={
-        <span className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 rounded-full"
-            onClick={() => void forgetRecording(recording.id)}
-          >
-            Discard
-          </Button>
-          {profile && (
-            <Button size="sm" className="h-9 rounded-full" disabled={sending} onClick={send}>
-              Send
+    <>
+      <Banner
+        action={
+          <span className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 rounded-full"
+              onClick={() => void forgetRecording(recording.id)}
+            >
+              Discard
             </Button>
-          )}
-        </span>
-      }
-    >
-      Unfinished recording, {length(Math.floor(recording.ms / 1000))} long
-    </Banner>
+            {profile && (
+              <Button size="sm" className="h-9 rounded-full" disabled={sending} onClick={send}>
+                Send
+              </Button>
+            )}
+          </span>
+        }
+      >
+        Unfinished recording, {length(Math.floor(recording.ms / 1000))} long
+      </Banner>
+      <Refusal hold={refusal} />
+    </>
   )
 }
 
@@ -665,6 +681,8 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
   const { profile, noAudio, project } = target
   const [busy, setBusy] = useState(false)
   const [picked, setPicked] = useState<{ file: File; text?: string }>()
+  // The Add below waits on the host, so its refusal belongs in this sheet, under the file it refused.
+  const refusal = useRefusal(profile?.id)
   const parsed = picked?.text !== undefined ? parseTranscript(picked.text) : undefined
   const refused = Boolean(picked && !parsed && noAudio)
 
@@ -693,7 +711,7 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
       onAdded()
       go(`/meetings/${meeting.id}`)
     } catch (error) {
-      tell.error(message(error, "Couldn't add the meeting."))
+      refusal.refuse(wordsOf(error, "Couldn't add the meeting."))
     } finally {
       setBusy(false)
     }
@@ -728,6 +746,7 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
       />
       {refused && <Banner>{noAudio}</Banner>}
 
+      <Refusal hold={refusal} />
       <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready || busy}>
         Add
       </Button>
@@ -744,6 +763,10 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
+  // The write that follows End meeting waits on the host, and the sheet is still on screen: its
+  // refusal is drawn above the control that starts the next recording.
+  const refusal = useRefusal(profile?.id)
+  const { refuse } = refusal
   const save = useCallback(
     async ({ id, file }: Recorded) => {
       if (!profile) return
@@ -759,14 +782,12 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
         onAdded()
         go(`/meetings/${meeting.id}`)
       } catch (error) {
-        tell.error(
-          message(error, "Couldn't add the meeting. The recording is kept on this device."),
-        )
+        refuse(wordsOf(error, "Couldn't add the meeting. The recording is kept on this device."))
       } finally {
         setSaving(false)
       }
     },
-    [profile, project, onAdded, go],
+    [profile, project, onAdded, go, refuse],
   )
   const recorder = useMeetingRecorder(save)
   const running = recorder.state !== "idle"
@@ -781,6 +802,7 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
     <div className="flex flex-col gap-5">
       {unavailable && <Banner>{unavailable}</Banner>}
       {recorder.error && !running && <Banner>{recorder.error}</Banner>}
+      <Refusal hold={refusal} />
       <Button
         type="button"
         size="lg"
@@ -1131,13 +1153,12 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
         title="Delete this meeting?"
         description="Its transcript and everything written from it go too."
         confirmLabel="Delete"
-        onConfirm={() =>
-          removeMeeting(meeting)
-            .then(onRemoved)
-            .catch((error) => {
-              tell.error(message(error, "Couldn't delete the meeting."))
-            })
-        }
+        // The dialog holds its own failure, so the promise has to reach it: awaiting the removal
+        // here is what keeps the host's refusal in the question that asked.
+        onConfirm={async () => {
+          await removeMeeting(meeting)
+          onRemoved()
+        }}
       />
     </>
   )
@@ -1147,6 +1168,8 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
 function Working({ meeting }: { meeting: Meeting }) {
   const { progress } = meeting
   const failed = isFailed(meeting)
+  // Try again is the write this screen holds, so its refusal is drawn above the banner holding it.
+  const refusal = useRefusal(meeting.id)
   return (
     <>
       <div className="flex flex-col items-center gap-5 rounded-[2rem] bg-radial-[at_50%_30%] from-primary/12 to-transparent to-70% px-4 pt-8 pb-6">
@@ -1174,27 +1197,26 @@ function Working({ meeting }: { meeting: Meeting }) {
         )}
       </div>
       {failed && (
-        <Banner
-          action={
-            meeting.error ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 rounded-full"
-                onClick={() =>
-                  retryMeeting(meeting).catch((error) =>
-                    tell.error(message(error, "Couldn't try again.")),
-                  )
-                }
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                Try again
-              </Button>
-            ) : undefined
-          }
-        >
-          {meeting.error ?? "The upload didn't finish, so the host never got the whole recording."}
-        </Banner>
+        <>
+          <Refusal hold={refusal} />
+          <Banner
+            action={
+              meeting.error ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-full"
+                  onClick={() => void refusal.write("try again", () => retryMeeting(meeting))}
+                >
+                  <RotateCcwIcon data-icon="inline-start" />
+                  Try again
+                </Button>
+              ) : undefined
+            }
+          >
+            {meeting.error ?? "The upload didn't finish, so the host never got the whole recording."}
+          </Banner>
+        </>
       )}
     </>
   )
@@ -1560,6 +1582,8 @@ function ActionRow({
   const project = projects.get(meeting.connection)?.find((p) => p.id === meeting.projectId)
   const blocked = !profile?.apiKey || !project || Boolean(startBlocked(project))
   const [starting, setStarting] = useState(false)
+  // Start waits on the host, so its refusal is drawn in the row whose button asked.
+  const refusal = useRefusal(meeting.id)
   const start = async () => {
     if (!profile || !project) return
     setStarting(true)
@@ -1572,31 +1596,34 @@ function ActionRow({
       await flushDrafts()
       navigate(`/c/${session.id}`, { state: { project, code: true } })
     } catch (error) {
-      tell.error(message(error, "Couldn't start a session."))
+      refusal.refuse(wordsOf(error, "Couldn't start a session."))
       setStarting(false)
     }
   }
   return (
-    <li className="flex items-center gap-3 rounded-2xl bg-muted/70 py-2.5 pr-2.5 pl-3.5">
-      <span className="min-w-0 flex-1">
-        <span className="block leading-snug font-medium">{moment.text}</span>
-        <span className="mt-0.5 flex flex-wrap items-center text-xs text-muted-foreground">
-          {moment.owner}
-          {moment.at !== undefined ? <Stamp at={moment.at} onSeek={onSeek} /> : <Unsourced />}
+    <li className="rounded-2xl bg-muted/70 py-2.5 pr-2.5 pl-3.5">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block leading-snug font-medium">{moment.text}</span>
+          <span className="mt-0.5 flex flex-wrap items-center text-xs text-muted-foreground">
+            {moment.owner}
+            {moment.at !== undefined ? <Stamp at={moment.at} onSeek={onSeek} /> : <Unsourced />}
+          </span>
         </span>
-      </span>
-      {meeting.projectId && (
-        <Button
-          size="sm"
-          className="h-9 shrink-0 rounded-full"
-          aria-label={`Start a session: ${moment.text}`}
-          disabled={blocked || starting}
-          onClick={() => void start()}
-        >
-          <GitBranchIcon data-icon="inline-start" />
-          Start
-        </Button>
-      )}
+        {meeting.projectId && (
+          <Button
+            size="sm"
+            className="h-9 shrink-0 rounded-full"
+            aria-label={`Start a session: ${moment.text}`}
+            disabled={blocked || starting}
+            onClick={() => void start()}
+          >
+            <GitBranchIcon data-icon="inline-start" />
+            Start
+          </Button>
+        )}
+      </div>
+      <Refusal hold={refusal} className="mt-2" />
     </li>
   )
 }
@@ -1805,12 +1832,15 @@ const PROMPTS = [
 function AskBar({ meeting }: { meeting: Meeting }) {
   const [text, setText] = useState("")
   const busy = isAsking(meeting)
+  // The question is asked from this bar, so the host's refusal is drawn here, over the field the
+  // question was typed in.
+  const refusal = useRefusal(meeting.id)
   const ask = (question: string) => {
     if (!question.trim() || busy) return
     setText("")
     askMeeting(meeting, question.trim()).catch((error) => {
       setText(question)
-      tell.error(message(error, "Couldn't ask."))
+      refusal.refuse(wordsOf(error, "Couldn't ask."))
     })
   }
   return (
@@ -1819,6 +1849,7 @@ function AskBar({ meeting }: { meeting: Meeting }) {
       className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
     >
       <div className="mx-auto flex max-w-2xl flex-col gap-2.5 px-4">
+        <Refusal hold={refusal} />
         {!meeting.chat?.length && (
           <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">
             {PROMPTS.map(({ icon: Icon, text: prompt }) => (

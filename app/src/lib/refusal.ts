@@ -20,16 +20,18 @@ export type Attempted = { ok: true } | { ok: false; said?: string; alone?: strin
 
 /**
  * The two ways a failure can be worded: `hold` is the host's own sentence, for the surface to draw,
- * and `say` is the app's, for a toast. Never both, and neither for a write that landed.
+ * and `alone` is the sentence the call would have said by itself — the app's own, for a toast. Never
+ * both, and neither for a write that landed. `alone` keeps the name `attempt` gives it, so the one
+ * toast this decision reaches reads as what it is, and the guard over toasts can see that it is.
  */
-export type RefusalWords = { hold?: string; say?: string }
+export type RefusalWords = { hold?: string; alone?: string }
 
 /** The one decision: whose words a failure shows. */
 export function refuse(result: Attempted): RefusalWords {
   if (result.ok) return {}
   const said = result.said?.trim()
   if (said) return { hold: said }
-  return result.alone ? { say: result.alone } : {}
+  return result.alone ? { alone: result.alone } : {}
 }
 
 /**

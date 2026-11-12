@@ -16,11 +16,11 @@ test("the host's words are held for the surface, and nothing is said in passing"
 })
 
 test("the app's own sentence is toasted when the host said nothing", () => {
-  assert.deepEqual(refuse(failure()), { say: "Couldn't save that." })
+  assert.deepEqual(refuse(failure()), { alone: "Couldn't save that." })
 })
 
 test("a host that sent only blanks said nothing", () => {
-  assert.deepEqual(refuse(failure({ said: "   " })), { say: "Couldn't save that." })
+  assert.deepEqual(refuse(failure({ said: "   " })), { alone: "Couldn't save that." })
 })
 
 test("a write that landed holds nothing and says nothing", () => {

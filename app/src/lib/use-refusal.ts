@@ -27,7 +27,9 @@ export function useRefusal(subject?: string): RefusalHold {
   /** What `attempt` answered, drawn or said: the one place the decision reaches the screen. */
   const take = useCallback((result: Attempted) => {
     const decided = refuse(result)
-    if (decided.say) tell.error(decided.say)
+    // `alone` is the app's own sentence by `refuse`'s decision — the one toast this change keeps,
+    // said where the host left nothing of its own to hold.
+    if (decided.alone) tell.error(decided.alone)
     setWords(decided.hold)
   }, [])
 
