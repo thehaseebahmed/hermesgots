@@ -8,10 +8,11 @@ the literal string ``***`` or any truncated form.
 import base64
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from plugin import github
@@ -86,21 +87,24 @@ class CloneAuthTests(unittest.TestCase):
 class GhFallbackTests(unittest.TestCase):
     """Which login `gh` is asked for when the home's own `.env` holds no token.
 
-    `gh auth token` answers with its config's login or, failing that, with ``GITHUB_TOKEN`` from its
-    environment — the launch process's own value, which a second profile was never given. So the
-    fallback asks gh for its own login: the home's config where it keeps one, and never the
-    process's exported token.
+    `gh auth token` answers from its config's login, but ``GITHUB_TOKEN``/``GH_TOKEN`` in its
+    environment shadow that login outright — and for a background thread the process's copy is the
+    launch profile's value, a token the profile being read was never given.
     """
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="gots-gh-"))
         self.addCleanup(shutil.rmtree, self.root, True)
+        self.launch = self.root / "default"
         self.home = self.root / "lobsterink"
-        self.home.mkdir()
+        for home in (self.launch, self.home):
+            home.mkdir()
 
-    def _ask(self):
+    def _ask(self, home=None):
         """Run _gh_cli_token over a faked `gh`, and hand back the environment it was given."""
         calls = []
+        constants = ModuleType("hermes_constants")
+        constants.get_routing_process_hermes_home = lambda: str(self.launch)
 
         def run(command, **kwargs):
             calls.append((command, kwargs))
@@ -108,18 +112,27 @@ class GhFallbackTests(unittest.TestCase):
 
         with patch.object(github.shutil, "which", return_value="/usr/bin/gh"), patch.object(
             github.subprocess, "run", run
-        ), patch.object(github, "_gh_cli_token", GH_CLI_TOKEN):
-            value = github._gh_cli_token(self.home)
+        ), patch.object(github, "_gh_cli_token", GH_CLI_TOKEN), patch.dict(
+            "sys.modules", {"hermes_constants": constants}
+        ):
+            value = github._gh_cli_token(home or self.home)
         self.assertEqual(value, "ghp_gh_login")
         self.assertEqual(len(calls), 1)
         return calls[0][1]["env"]
 
-    def test_gh_is_never_handed_the_processes_token(self):
+    def test_another_homes_gh_is_not_handed_the_processes_token(self):
         with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_launch", "GH_TOKEN": "ghp_launch"}):
             env = self._ask()
 
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertNotIn("GH_TOKEN", env)
+
+    def test_the_launch_homes_gh_keeps_the_token_it_exported(self):
+        """A host that exports its token and keeps no `.env` copy leans on gh's own fallback."""
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_launch"}):
+            env = self._ask(self.launch)
+
+        self.assertEqual(env["GITHUB_TOKEN"], "ghp_launch")
 
     def test_gh_reads_the_homes_own_login_when_it_keeps_one(self):
         config = self.home / ".config" / "gh"

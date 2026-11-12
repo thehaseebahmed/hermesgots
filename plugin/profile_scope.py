@@ -17,10 +17,10 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 
-def _same_home(first: Any, second: Path) -> bool:
-    """Do both name the same directory? True where a host writes one path two ways."""
+def same_home(first: Any, second: Any) -> bool:
+    """Do both name the same directory? A host can hand one path written two ways."""
     try:
-        return Path(first).resolve() == second.resolve()
+        return Path(first).resolve() == Path(second).resolve()
     except (OSError, TypeError, ValueError):
         return False
 
@@ -37,37 +37,39 @@ def profile_scope(hermes_home: Path) -> Iterator[None]:
 
     A scope already bound to another home is replaced and put back afterwards: work that arrived
     carrying the launch profile's context (a resume on the gateway's thread) must not read that
-    profile's credentials for this one. A Hermes too old to offer either half reads as it always
-    did: no scope, no failure.
+    profile's credentials for this one. A host with no ``agent.secret_scope`` reads unscoped, as it
+    always did; one without the override still gets the secret scope, which is what it used to do.
     """
     try:
         import agent.secret_scope as secrets
     except ImportError:
         yield
         return
+    constants: Optional[Any]
     try:
         import hermes_constants as constants
     except ImportError:  # a Hermes old enough to have no home override at all
-        constants = None  # type: ignore[assignment]
+        constants = None
 
     home = Path(hermes_home)
     scope_token: Optional[Any] = None
     bound = getattr(secrets, "current_secret_scope_home", lambda: None)()
-    if secrets.current_secret_scope() is None or (bound and not _same_home(bound, home)):
+    if secrets.current_secret_scope() is None or (bound and not same_home(bound, home)):
         scope_token = secrets.set_secret_scope(
             secrets.build_profile_secret_scope(home), profile_home=str(home)
         )
     override_token: Optional[Any] = None
     set_override = getattr(constants, "set_hermes_home_override", None)
-    if callable(set_override):
+    reset_override = getattr(constants, "reset_hermes_home_override", None)
+    if callable(set_override) and callable(reset_override):
         current = getattr(constants, "get_hermes_home_override", lambda: None)()
-        if current is None or not _same_home(current, home):
+        if current is None or not same_home(current, home):
             override_token = set_override(str(home))
     try:
         yield
     finally:
         if override_token is not None:
-            constants.reset_hermes_home_override(override_token)
+            reset_override(override_token)
         if scope_token is not None:
             secrets.reset_secret_scope(scope_token)
 

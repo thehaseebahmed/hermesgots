@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .profile_scope import profile_scope
+from .profile_scope import profile_scope, same_home
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +72,29 @@ class GitHubBusy(GitHubError):
         super().__init__("GitHub is busy on this host; try again in a moment.", 503)
 
 
-def _gh_cli_token(hermes_home: Path) -> Optional[str]:
-    """``gh``'s own login, and never the process's exported token.
+def _process_home() -> Optional[Path]:
+    """The home this Hermes process was launched for, where the host can say."""
+    try:
+        import hermes_constants
+    except ImportError:
+        return None
+    for name in ("get_routing_process_hermes_home", "get_process_hermes_home"):
+        read = getattr(hermes_constants, name, None)
+        if callable(read):
+            try:
+                return Path(read())
+            except (OSError, TypeError, ValueError):
+                return None
+    return None
 
-    ``gh auth token`` answers with its config's login or, failing that, with ``GITHUB_TOKEN`` from
-    its environment — which for a background thread is the launch process's value, a token the
-    profile being read was never given. The credential pool has already consulted that (a single
-    profile's ``get_secret`` reads ``os.environ`` itself), so it is taken out of the child's.
+
+def _gh_cli_token(hermes_home: Path) -> Optional[str]:
+    """``gh``'s own login, and never another profile's token this process exported to it.
+
+    ``gh auth token`` answers from its config's login, but ``GITHUB_TOKEN``/``GH_TOKEN`` in its
+    environment shadow that login outright. For a background thread the process's copy is the launch
+    profile's value, which the profile being read was never given — so it is taken out of the child's
+    for every home but the launch profile's own, whose exported token is the fallback it always was.
 
     ``gh`` keeps one login for the whole machine, so a profile that keeps its own — ``.config/gh``
     under its home, made by ``GH_CONFIG_DIR=<home>/.config/gh gh auth login`` — is asked as itself,
@@ -86,7 +102,11 @@ def _gh_cli_token(hermes_home: Path) -> Optional[str]:
     """
     if not shutil.which("gh"):
         return None
-    env = {name: value for name, value in os.environ.items() if name not in TOKEN_ENV_VARS}
+    env = dict(os.environ)
+    launch = _process_home()
+    if launch is None or not same_home(launch, hermes_home):
+        for name in TOKEN_ENV_VARS:
+            env.pop(name, None)
     own = Path(hermes_home) / ".config" / "gh"
     if own.is_dir():
         env["GH_CONFIG_DIR"] = str(own)

@@ -18,26 +18,12 @@ import unittest
 from contextvars import ContextVar
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, Optional
+from typing import Any, Optional
 from unittest.mock import patch
 
 from plugin import github
+from plugin.link import read_env
 from plugin.tests._helpers import make_fake_agent
-
-
-def _env_of(home: Path) -> Dict[str, str]:
-    """One home's `.env`, as the host's own tokenizer reads it."""
-    values: Dict[str, str] = {}
-    path = Path(home) / ".env"
-    if not path.exists():
-        return values
-    for line in path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        values[key.strip()] = value.strip()
-    return values
 
 
 class HomeScopeTests(unittest.TestCase):
@@ -53,37 +39,36 @@ class HomeScopeTests(unittest.TestCase):
         (self.launch / ".env").write_text("GITHUB_TOKEN=ghp_launch_profile\n")
         (self.second / ".env").write_text("GITHUB_TOKEN=ghp_lobsterink_profile\n")
 
-        # The host's two seams: which profile's .env a read sees, and whose secrets it holds.
         self.override: ContextVar[Optional[str]] = ContextVar("test-home-override", default=None)
         self.scope: ContextVar[Optional[tuple]] = ContextVar("test-secret-scope", default=None)
 
-        constants = ModuleType("hermes_constants")
-        constants.get_hermes_home = lambda: str(self.launch)  # type: ignore[attr-defined]
-        constants.get_hermes_home_override = self.override.get  # type: ignore[attr-defined]
-        constants.set_hermes_home_override = lambda path: self.override.set(str(path))  # type: ignore[attr-defined]
-        constants.reset_hermes_home_override = self.override.reset  # type: ignore[attr-defined]
+        constants: Any = ModuleType("hermes_constants")
+        constants.get_hermes_home = lambda: str(self.launch)
+        constants.get_hermes_home_override = self.override.get
+        constants.set_hermes_home_override = lambda path: self.override.set(str(path))
+        constants.reset_hermes_home_override = self.override.reset
 
-        agent = ModuleType("agent")
-        pool = ModuleType("agent.credential_pool")
-        secrets = ModuleType("agent.secret_scope")
+        agent: Any = ModuleType("agent")
+        pool: Any = ModuleType("agent.credential_pool")
+        secrets: Any = ModuleType("agent.secret_scope")
 
         def prefer_dotenv(key: str) -> str:
             """The host's own order: the override's `.env` first, then the installed scope."""
             home = Path(self.override.get() or self.launch)
             held = self.scope.get()
-            return _env_of(home).get(key, "") or (held[1].get(key, "") if held else "")
+            return read_env(home).get(key, "") or (held[1].get(key, "") if held else "")
 
-        def set_secret_scope(mapping, *, profile_home=None):  # type: ignore[no-untyped-def]
+        def set_secret_scope(mapping: Any, *, profile_home: Any = None) -> Any:
             return self.scope.set((str(profile_home or ""), dict(mapping)))
 
-        pool.get_env_prefer_dotenv = prefer_dotenv  # type: ignore[attr-defined]
-        secrets.build_profile_secret_scope = _env_of  # type: ignore[attr-defined]
-        secrets.current_secret_scope = lambda: (self.scope.get() or (None, None))[1]  # type: ignore[attr-defined]
-        secrets.current_secret_scope_home = lambda: (self.scope.get() or (None, None))[0]  # type: ignore[attr-defined]
-        secrets.set_secret_scope = set_secret_scope  # type: ignore[attr-defined]
-        secrets.reset_secret_scope = self.scope.reset  # type: ignore[attr-defined]
-        agent.credential_pool = pool  # type: ignore[attr-defined]
-        agent.secret_scope = secrets  # type: ignore[attr-defined]
+        pool.get_env_prefer_dotenv = prefer_dotenv
+        secrets.build_profile_secret_scope = read_env
+        secrets.current_secret_scope = lambda: (self.scope.get() or (None, None))[1]
+        secrets.current_secret_scope_home = lambda: (self.scope.get() or (None, None))[0]
+        secrets.set_secret_scope = set_secret_scope
+        secrets.reset_secret_scope = self.scope.reset
+        agent.credential_pool = pool
+        agent.secret_scope = secrets
 
         patcher = patch.dict(
             "sys.modules",
