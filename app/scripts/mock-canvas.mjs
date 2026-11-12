@@ -129,6 +129,86 @@ function page(prompt, title, version, edited) {
 </html>`
 }
 
+/**
+ * The pages a flow seeds by name (`POST /__mock/canvas`), differing in nothing but the libraries
+ * their head asks for: what a visit fetches is the asks' own, so two of these compared are the
+ * page's cost and not the app's.
+ */
+const FIXTURES = {
+  // A page that asks for no library at all, drawn from the platform alone.
+  plain: { title: "No libraries", asks: [] },
+  // Three asks by name, each one used below, so what arrived is proved by what the page drew.
+  three: { title: "Three libraries", asks: ["chart", "d3", "date"] },
+}
+
+/**
+ * A fixture's page: a heading, a line saying what it drew with, and one script tag per name it
+ * asks for. Every check is `typeof`, so a page drawn without a library it asked for still draws —
+ * it names the hole rather than throwing, which is what a request count has to be read beside.
+ */
+function fixturePage({ title, asks }) {
+  const head = asks.map((name) => `    <script data-canvas-lib="${name}"></script>`).join("\n")
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>${title}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; }
+      h1 { margin: 0 0 8px; font-size: 20px; }
+    </style>
+${head}
+  </head>
+  <body>
+    <h1>${title}</h1>
+    <p id="drawn">nothing</p>
+    <script>
+      (function () {
+        var words = [];
+        if (typeof Chart === "function") words.push("chart");
+        if (typeof d3 === "object" && typeof d3.select === "function") {
+          d3.select("#drawn").attr("data-drawn-by", "d3");
+          words.push("d3");
+        }
+        if (typeof dayjs === "function") words.push("date");
+        document.getElementById("drawn").textContent = words.join(" ") || "nothing";
+      })();
+    </script>
+  </body>
+</html>`
+}
+
+/**
+ * Seeds one fixture as a canvas at its first version, so a flow can open a page whose asks it
+ * knows without waiting for a bot to write one: the page is the fixture's and nothing else is.
+ */
+export function seedCanvas(store, name) {
+  const fixture = FIXTURES[name]
+  if (!fixture) return null
+  const chatId = randomUUID()
+  const now = Date.now()
+  const canvas = {
+    id: `c_${randomUUID().slice(0, 8)}`,
+    title: fixture.title,
+    session_id: `gots-${chatId}`,
+    chat_id: chatId,
+    version: 1,
+    pinned: false,
+    archived: false,
+    image: null,
+    at: now,
+    created_at: now,
+    versions: [{ version: 1, html: fixturePage(fixture), tools: [] }],
+    docs: [],
+    tools: [],
+    grants: [],
+    prompt: fixture.title,
+  }
+  store.canvases.set(canvas.id, canvas)
+  return canvas
+}
+
 export function createCanvasStore() {
   const canvases = new Map()
   // The canvas a run's session edits, so a turn in a chat finds its canvas without walking them all.

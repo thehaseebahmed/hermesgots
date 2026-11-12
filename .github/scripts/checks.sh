@@ -184,6 +184,11 @@ app() {
   # assertion runs over the build above — unwired it could not have failed. It waits for the build,
   # because it reads what the build wrote.
   gate node scripts/check-openui-chunks.mjs
+
+  # The same tier for the canvas's libraries: each one a chunk of its own, reached only by a
+  # dynamic import from the canvas route's chunk, which carries none of them. This is the build's
+  # half of the claim `pnpm e2e canvas` counts on the other side — what a visit actually fetches.
+  gate node scripts/check-canvas-library-chunks.mjs
 }
 
 plugin() {
