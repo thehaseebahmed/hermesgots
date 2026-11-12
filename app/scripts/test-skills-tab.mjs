@@ -8,7 +8,6 @@ import {
   categoryHeader,
   categoryWrites,
   NO_CATEGORY,
-  pillKeeps,
   skillHealth,
   skillOrigin,
   skillPills,
@@ -304,12 +303,12 @@ test("a category named all is a pill of its own, never All's", () => {
     "so two pills never answer to one key, which is what a React key and a press both go by",
   )
   assert.deepEqual(
-    pillKeeps(skills, ALL_SKILLS_KEY).map((one) => one.name),
+    skillsKept(skills, ALL_SKILLS_KEY).map((one) => one.name),
     ["one", "two"],
     "All keeps everything, the category named all included",
   )
   assert.deepEqual(
-    pillKeeps(skills, "all").map((one) => one.name),
+    skillsKept(skills, "all").map((one) => one.name),
     ["one"],
     "and the category keeps its own",
   )
@@ -327,7 +326,7 @@ test("a category held by both a profile skill and a plugin's is one pill", () =>
     "the reader picks a category, not a section",
   )
   assert.deepEqual(
-    pillKeeps(skills, pills[1].key).map((one) => one.name),
+    skillsKept(skills, pills[1].key).map((one) => one.name),
     ["gots:deploy", "deploy"],
     "and the one pill keeps both kinds",
   )
@@ -341,7 +340,7 @@ test("a category of nothing but whitespace is no category at all, and gets no pi
   ]
   assert.deepEqual(labelsOf(skills), [ALL_SKILLS, "ops"])
   assert.deepEqual(
-    pillKeeps(skills, ALL_SKILLS_KEY).map((one) => one.name),
+    skillsKept(skills, ALL_SKILLS_KEY).map((one) => one.name),
     ["nomad", "nameless", "ops"],
     "they are still kept under All, as the tab's own group keeps them",
   )
@@ -361,7 +360,7 @@ test("All keeps every skill, in the order it was handed", () => {
     skill({ name: "nameless" }),
   ]
   assert.deepEqual(
-    pillKeeps(handed, ALL_SKILLS_KEY).map((one) => one.name),
+    skillsKept(handed, ALL_SKILLS_KEY).map((one) => one.name),
     ["zeta", "alpha", "nameless"],
     "a filter narrows, it never re-orders",
   )
@@ -375,9 +374,9 @@ test("a category's pill keeps exactly its skills, in the order they were handed"
     skill({ name: "nameless" }),
   ]
   const [, ops, review] = skillPills(handed)
-  assert.deepEqual(pillKeeps(handed, ops.key).map((one) => one.name), ["two", "one"])
-  assert.deepEqual(pillKeeps(handed, review.key).map((one) => one.name), ["other"])
-  assert.deepEqual(pillKeeps(handed, "nowhere"), [], "a key no skill answers keeps nothing")
+  assert.deepEqual(skillsKept(handed, ops.key).map((one) => one.name), ["two", "one"])
+  assert.deepEqual(skillsKept(handed, review.key).map((one) => one.name), ["other"])
+  assert.deepEqual(skillsKept(handed, "nowhere"), [], "a key no skill answers keeps nothing")
 })
 
 test("the pills partition the tab, and their union is what All keeps", () => {
@@ -390,10 +389,10 @@ test("the pills partition the tab, and their union is what All keeps", () => {
     skill({ name: "review", category: "review" }),
   ]
   const [all, ...categories] = skillPills(handed)
-  const kept = categories.flatMap((pill) => pillKeeps(handed, pill.key))
+  const kept = categories.flatMap((pill) => skillsKept(handed, pill.key))
   assert.equal(kept.length, new Set(kept).size, "no skill is kept by two category pills")
   for (const one of handed) {
-    const pills = categories.filter((pill) => pillKeeps(handed, pill.key).includes(one))
+    const pills = categories.filter((pill) => skillsKept(handed, pill.key).includes(one))
     assert.ok(pills.length <= 1, `${one.name} is kept by ${pills.length} category pills`)
   }
   assert.deepEqual(
@@ -402,7 +401,7 @@ test("the pills partition the tab, and their union is what All keeps", () => {
     "the category pills' union is every skill that has a category",
   )
   assert.deepEqual(
-    pillKeeps(handed, all.key).map((one) => one.name).sort(),
+    skillsKept(handed, all.key).map((one) => one.name).sort(),
     ["deploy", "lint", "nameless", "nomad", "quality", "review"],
   )
 })

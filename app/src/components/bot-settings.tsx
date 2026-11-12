@@ -447,7 +447,9 @@ const PAGE_BODIES: Record<BotTab, (page: PageBody) => ReactNode> = {
   coding: ({ profile }) => <CodingTab profile={profile} />,
   "speech-to-text": ({ profile, sub }) => <DictationTab profile={profile} sub={sub} />,
   mcps: ({ profile, sub }) => <McpsTab profile={profile} sub={sub} />,
-  skills: ({ profile, sub }) => <SkillsTab profile={profile} sub={sub} />,
+  skills: ({ profile, sub }) => (
+    <SkillsTab key={`${profile.id}:skills`} profile={profile} sub={sub} />
+  ),
   delegation: ({ profile, sub, close }) => (
     <GeneralPage
       key={`${profile.id}:delegation`}

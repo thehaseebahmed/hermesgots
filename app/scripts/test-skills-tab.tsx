@@ -1,13 +1,16 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useState } from "react"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { BotSettingsPage } from "@/components/bot-settings"
 import { botSubOf } from "@/lib/bot-subs"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
-import { db } from "@/lib/db"
+import { connectionKey } from "@/lib/connection"
+import { db, type Profile } from "@/lib/db"
+import { usePluginFeature } from "@/lib/features"
 import {
   absentText,
   botProfile,
@@ -150,7 +153,7 @@ function host(
       return json({ object: "list", data: held.map((row) => ({ ...row })) })
     return json({}, 404)
   }
-  return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
+  return { fetch: fetch as unknown as typeof globalThis.fetch, calls, held }
 }
 
 function LiveEditor() {
@@ -812,6 +815,48 @@ test("a category that reads on is cleared whole by a tap, and nothing beside it"
   })
 })
 
+/** A category of three, every one of them on, so a tap on its header has three rows to clear. */
+const ALL_ON: Row[] = [
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours" },
+  { name: "ops-two", description: "Two.", category: "ops", origin: "yours" },
+  { name: "ops-three", description: "Three.", category: "ops", origin: "yours" },
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+]
+
+test("a category's header speaks for the whole category, even under typed words", async () => {
+  const calls = await seed("skills-category-whole", ["skills", "skills_write"], ALL_ON)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.match(categoryOf("ops")?.textContent ?? "", /3 of 3 on/, "the whole category is on")
+    await type(searchSkills(), "one")
+    assert.deepEqual(drawnRows(), ["ops-one"], "the words leave one of its rows drawn")
+    assert.match(
+      categoryOf("ops")?.textContent ?? "",
+      /3 of 3 on/,
+      "the header still counts the whole category, not the row the words kept",
+    )
+    await click(categorySwitch("ops"))
+    await until(async () => posts(calls).length === 3, "the category's three writes")
+    assert.deepEqual(
+      posts(calls)
+        .map((call) => call.path)
+        .sort(),
+      [
+        "/api/plugins/gots/skills/ops-one/enabled",
+        "/api/plugins/gots/skills/ops-three/enabled",
+        "/api/plugins/gots/skills/ops-two/enabled",
+      ],
+      "every switchable skill of the category, not just the row the words kept",
+    )
+    await until(
+      async () => /0 of 3 on/.test(categoryOf("ops")?.textContent ?? ""),
+      "the count to follow the whole category",
+    )
+    assert.equal(on(categorySwitch("ops")), false, "the category ends off, as the switch shows")
+    assert.deepEqual(drawnRows(), ["ops-one"], "and the rows under it are still the words' own")
+  })
+})
+
 test("a category that reads off is filled whole by a tap, and one that reads on is cleared", async () => {
   const calls = await seed("skills-category-fill", ["skills", "skills_write"], OFF)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
@@ -1033,6 +1078,12 @@ test("the search and the pills narrow the tab, and the words narrow what the pil
     assert.deepEqual(drawnRows(), EVERY_ROW, "All restores every row")
 
     await click(pillWord("review"))
+    await type(searchSkills(), "re")
+    assert.deepEqual(
+      drawnRows(),
+      ["pr-land", "pr-review"],
+      "the matcher's best match first is not the tab's order: the category sorts its rows by name",
+    )
     await type(searchSkills(), "land")
     assert.deepEqual(drawnRows(), ["pr-land"], "the words narrow what the pill kept")
     await type(searchSkills(), "linters")
@@ -1065,6 +1116,12 @@ const UNCATEGORISED: Row[] = [
   { name: "journal", description: "Keep a note.", category: "", origin: "yours" },
 ]
 
+/** A second bot's own list: no review category, and no row the first bot's words kept. */
+const SECOND_BOT: Row[] = [
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours" },
+]
+
 test("a bot whose skills hold no category draws no pill row", async () => {
   await seed("skills-filter-nocategory", ["skills"], UNCATEGORISED)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
@@ -1094,6 +1151,129 @@ test("a pressed category that leaves the tab hands the press back to All", async
     assert.equal(pillWord("All")?.getAttribute("aria-pressed"), "true", "so the press is All's again")
     assert.deepEqual(drawnRows(), ["lint", "gots:notes"], "and the tab draws what All keeps")
   })
+})
+
+test("a category that comes back is not pressed again without a tap", async () => {
+  await seedSettings()
+  await db.profiles.clear()
+  await db.skills.clear()
+  const profile = botProfile("skills-filter-back")
+  await db.profiles.put(profile)
+  // The device's copy draws the tab while the host's own read is still out, so a slow read can land
+  // after the removals the way a real host's does.
+  await db.skills.put({
+    id: connectionKey({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }),
+    skills: ORIGINS,
+  })
+  const server = host(["skills", "skills_view", "skills_remove"], ORIGINS)
+  let release: () => void = () => {}
+  const answered = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let reads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    if (url.pathname.endsWith("/api/plugins/gots/skills") && method === "GET" && reads++ === 0)
+      await answered
+    return server.fetch(input, init)
+  }) as unknown as typeof globalThis.fetch
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await click(pillWord("review"))
+    assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows")
+    for (const name of ["pr-review", "pr-land"]) {
+      await openNote(name)
+      await click(removeButton())
+      await click(alertButton("Remove"))
+      await until(async () => row(name) === null, `${name} to leave the tab`)
+    }
+    assert.equal(pillWord("review"), null, "the category has no pill left to press")
+    assert.equal(pillWord("All")?.getAttribute("aria-pressed"), "true", "so the press is All's")
+
+    // The host's read comes back with a review skill on the bot again.
+    server.held.push({ ...ORIGINS[0] })
+    release()
+    await until(async () => pillWord("review") !== null, "the category's pill to come back")
+    assert.equal(pillWord("All")?.getAttribute("aria-pressed"), "true", "All keeps the press")
+    assert.equal(
+      pillWord("review")?.getAttribute("aria-pressed"),
+      "false",
+      "and the category that came back is not pressed by itself",
+    )
+    assert.deepEqual(
+      drawnRows(),
+      ["lint", "pr-review", "gots:notes"],
+      "every row the list holds is drawn",
+    )
+  })
+})
+
+test("a press and its words do not cross to another bot", async () => {
+  await seedSettings()
+  await db.profiles.clear()
+  await db.skills.clear()
+  const first = botProfile("first-bot", { id: "bot-1" })
+  const second = botProfile("second-bot", { id: "bot-2", name: "B bot" })
+  await db.profiles.bulkPut([first, second])
+  const one = host(["skills"])
+  const two = host(["skills"], SECOND_BOT)
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    /second-bot\.test/.test(String(input))
+      ? two.fetch(input, init)
+      : one.fetch(input, init)) as unknown as typeof globalThis.fetch
+
+  /** The second bot's answer, read before its page opens, as the settings list reads every bot's. */
+  function Warm() {
+    const answer = usePluginFeature(second, "skills")
+    return <span data-warm={answer} />
+  }
+
+  /** The page, with the bot beneath it swapped the way the route's own param swaps it. */
+  function Switched() {
+    const [profile, setProfile] = useState<Profile>(first)
+    return (
+      <>
+        <button type="button" onClick={() => setProfile(second)}>
+          To the other bot
+        </button>
+        <BotSettingsPage profile={profile} tab="skills" />
+      </>
+    )
+  }
+
+  await mount(
+    <MemoryRouter>
+      <Warm />
+      <Switched />
+    </MemoryRouter>,
+    async () => {
+      await until(
+        async () => find("[data-warm]")?.getAttribute("data-warm") === "yes",
+        "the other bot's features",
+      )
+      await drawn()
+      await click(pillWord("review"))
+      await type(searchSkills(), "land")
+      assert.deepEqual(drawnRows(), ["pr-land"], "one row kept on the first bot")
+      await click(
+        findAll("button").find((control) => wordsOf(control) === "To the other bot") ?? null,
+      )
+      // The second bot's list is on screen once its field is drawn and the first bot's pill is gone.
+      await until(
+        async () => searchSkills() !== null && pillWord("review") === null,
+        "the second bot's skills",
+      )
+      assert.equal(
+        pillWord("All")?.getAttribute("aria-pressed"),
+        "true",
+        "the other bot opens on All",
+      )
+      assert.equal(searchSkills()?.value, "", "with a field the first bot's words never reached")
+      assert.deepEqual(drawnRows(), ["ops-one", "lint"], "and every row it holds")
+      absentText("p", "No skills match.")
+    },
+  )
 })
 
 test("a bot with no skill at all is still given the field, and told nothing of a search", async () => {

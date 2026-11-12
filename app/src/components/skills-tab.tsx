@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
@@ -41,6 +41,9 @@ import { botTabPath } from "@/lib/bot-tabs"
 /** What a read that hasn't answered holds: one array, so the derivation below isn't rebuilt. */
 const NO_SKILLS: Skill[] = []
 
+/** The key a section's category is known by: the one a header is busy under, and its full group's. */
+const groupKey = (section: string, category: string | null) => `${section}:${category ?? ""}`
+
 export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const answers = useSkillFeatureAnswers(profile)
   const answer = answers.list
@@ -54,16 +57,24 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   // The pill the reader pressed, by its key: the tab's own, gone when it remounts.
   const [chosen, setChosen] = useState(ALL_SKILLS_KEY)
   const skills = state.status === "ok" ? state.skills : NO_SKILLS
-  // Narrowed before it is grouped, so the sections, their captions and a category's own count all
-  // describe what is drawn; memorised so a switch's own state changing does not rebuild it.
-  const { pills, pressed, kept, sections } = useMemo(() => {
+  // Narrowed before it is grouped, so the sections and their captions describe what is drawn, and
+  // memorised so a switch's own state changing does not rebuild them. Each drawn group is matched to
+  // the whole category it came from, which is what its header counts and what its tap writes.
+  const { pills, kept, sections, whole } = useMemo(() => {
     const pills = skillPills(skills)
-    // A category leaves with the last skill in it, so the press falls back to All rather than to a
-    // key the row no longer offers.
-    const pressed = pills.some((pill) => pill.key === chosen) ? chosen : ALL_SKILLS_KEY
-    const kept = skillsKept(skills, pressed, query)
-    return { pills, pressed, kept, sections: skillSections(kept) }
+    const kept = skillsKept(skills, chosen, query)
+    const whole = new Map(
+      skillSections(skills).flatMap((section) =>
+        section.groups.map((group) => [groupKey(section.id, group.category), group] as const),
+      ),
+    )
+    return { pills, kept, sections: skillSections(kept), whole }
   }, [skills, chosen, query])
+  // A category leaves with the last skill in it, and a category that comes back must not be pressed
+  // again without a tap: the press is handed back to All as soon as no pill offers it.
+  useEffect(() => {
+    if (!pills.some((pill) => pill.key === chosen)) setChosen(ALL_SKILLS_KEY)
+  }, [pills, chosen])
   if (answer !== "yes") return null
   if (state.status === "loading") return null
 
@@ -162,7 +173,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
             {pills.map((pill) => (
               <Chip
                 key={pill.key}
-                active={pill.key === pressed}
+                active={pill.key === chosen}
                 onClick={() => setChosen(pill.key)}
               >
                 {pill.label}
@@ -176,6 +187,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
         <Section
           key={section.id}
           section={section}
+          whole={whole}
           controls={controls}
           onOpen={open}
           onFlip={flip}
@@ -189,12 +201,15 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
 
 function Section({
   section,
+  whole,
   controls,
   onOpen,
   onFlip,
   flipping,
 }: {
   section: SkillSection
+  /** The whole category each drawn group came from, by the key its header is busy under. */
+  whole: Map<string, SkillGroup>
   controls?: RowControls
   onOpen?: (name: string) => void
   onFlip?: (key: string, group: SkillGroup) => void
@@ -207,7 +222,10 @@ function Section({
       {section.heading && <Caption>{section.heading}</Caption>}
       <div className="flex flex-col gap-3">
         {section.groups.map((group, index) => {
-          const key = `${section.id}:${group.category ?? ""}`
+          const key = groupKey(section.id, group.category)
+          // The rows are the ones the words kept; the header over them, and the tap that header takes,
+          // speak for the category they belong to.
+          const full = whole.get(key) ?? group
           return (
             <div
               key={group.category ?? ""}
@@ -217,10 +235,10 @@ function Section({
               <Group>
                 <CategoryRow
                   id={`skill-category-${section.id}-${index}`}
-                  header={categoryHeader(group)}
+                  header={categoryHeader(full)}
                   writable={controls !== undefined}
                   busy={flipping === key}
-                  onFlip={() => onFlip?.(key, group)}
+                  onFlip={() => onFlip?.(key, full)}
                 />
                 {group.skills.map((skill) => (
                   <SkillItem

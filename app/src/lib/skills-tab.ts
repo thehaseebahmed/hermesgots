@@ -103,7 +103,6 @@ export function skillSections(skills: Skill[]): SkillSection[] {
   }))
 }
 
-/** What the pill that keeps every skill is called. */
 export const ALL_SKILLS = "All"
 
 /**
@@ -141,24 +140,19 @@ export function skillPills(skills: Skill[]): SkillPill[] {
 }
 
 /**
- * The skills a pill keeps, in the order they were handed in: a filter narrows the list, it never
- * re-orders it, and the tab groups what it kept the way it grouped the whole.
- */
-export function pillKeeps(skills: Skill[], key: string): Skill[] {
-  return key === ALL_SKILLS_KEY ? skills : skills.filter((skill) => categoryOf(skill) === key)
-}
-
-/**
  * What the tab draws, as one rule: the pill narrows the list first, then the words narrow what the
  * pill kept — so the empty sentence can only ever be the search's, and a category's caption can never
  * stand over rows the words dropped. A skill answers to its name and its description, the way the chat
  * list's rows answer to their title and their line.
+ *
+ * The pill keeps its skills in the order they were handed in, and no words leaves that order as it is.
+ * Given words it returns them best match first, as `filterByFuzzy` ranks them — not in the order the
+ * tab draws: `skillSections` sorts each category's rows by name, which is what puts a search's matches
+ * back in the tab's own order.
  */
-export function skillsKept(skills: Skill[], key: string, query: string): Skill[] {
-  return filterByFuzzy(pillKeeps(skills, key), query, (skill) => [
-    skill.name,
-    skill.description ?? undefined,
-  ])
+export function skillsKept(skills: Skill[], key: string, query = ""): Skill[] {
+  const kept = key === ALL_SKILLS_KEY ? skills : skills.filter((skill) => categoryOf(skill) === key)
+  return filterByFuzzy(kept, query, (skill) => [skill.name, skill.description ?? undefined])
 }
 
 /** What a group with no category of its own is called. */
