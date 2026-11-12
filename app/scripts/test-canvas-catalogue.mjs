@@ -41,7 +41,7 @@ test("it fits the host's section limit instead of being dropped whole", () => {
 test("the guide keeps the length it shipped with", () => {
   // The number is the guide's own. If it moves, a canvas session is told different words — a
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
-  assert.equal(rendered.length, 3_896, "the canvas's guide is 3,896 characters and stays that way")
+  assert.equal(rendered.length, 3_970, "the canvas's guide is 3,970 characters and stays that way")
 })
 
 test("the catalogue, the sources it writes and the guide it renders are one list", () => {

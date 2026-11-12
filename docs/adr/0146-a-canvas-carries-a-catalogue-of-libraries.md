@@ -23,6 +23,6 @@ and hands a stored version's behaviour to a vendor who can change it); `blob:` m
 same policy widening for the same gain); a hand-kept list per consumer (the fourth copy is where it
 breaks); a host route serving sources (needs `connect-src` by design).
 
-The guide is the binding constraint: seven names and every rule it already taught measure 3,935 of
+The guide is the binding constraint: seven names and every rule it already taught measure 3,970 of
 the host's 4,000 characters, so an eighth library needs a section moved out of the guide before it
 can be named there.

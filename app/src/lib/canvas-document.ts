@@ -117,22 +117,63 @@ export function canvasLibraryPlan(html: string): string[] {
 }
 
 /**
- * Every ask taken out, the ones the caller handed a source for replaced by that source where the
- * page put it. Which names exist is the caller's to know — this rule answers with what it was given,
- * so a name it has no source for, and a second ask for one already inlined, leave nothing behind:
- * the page draws without the library rather than carrying a tag for one it never got, or the same
- * source twice.
+ * A library as the page is given it (`canvas-library-sources.ts` is what hands one over): the source
+ * that takes the ask's place, and what only that library needs — a stylesheet whose URLs are the
+ * page's, and a prelude that runs once its source has.
  */
-function inlineLibraries(html: string, libraries: Readonly<Record<string, string>>): string {
+export interface CanvasLibrarySource {
+  /** The library's source: a global by the time the page's own scripts run. */
+  script: string
+  /** A stylesheet it ships with, hoisted into the page's head rather than put where the ask was. */
+  css?: string
+  /** What its own JavaScript expects and no stylesheet can say, run right after the source. */
+  setup?: string
+}
+
+/** A source, as the `<script>` that carries it can hold it: `</script` would end the element. */
+function scripted(source: string): string {
+  return `<script>${source.replace(/<\/script/gi, "<\\/script")}</script>`
+}
+
+/**
+ * Every ask taken out, the ones the caller handed a source for replaced by that source where the
+ * page put it, with the library's setup right after it. Which names exist is the caller's to know —
+ * this rule answers with what it was given, so a name it has no source for, and a second ask for one
+ * already inlined, leave nothing behind: the page draws without the library rather than carrying a
+ * tag for one it never got, or the same source twice.
+ */
+function inlineLibraries(
+  html: string,
+  libraries: Readonly<Record<string, CanvasLibrarySource>>,
+): string {
   const placed = new Set<string>()
   return html.replace(LIBRARY_TAG, (_tag, name: string) => {
     // A handed record is a plain object, so a name it merely inherits (`constructor`) is no source.
-    const source = Object.hasOwn(libraries, name) ? libraries[name] : undefined
-    if (!source || placed.has(name)) return ""
+    const library = Object.hasOwn(libraries, name) ? libraries[name] : undefined
+    if (!library || placed.has(name)) return ""
     placed.add(name)
-    // `</script` inside the source would end the element it is in; the escape spells the same string.
-    return `<script>${source.replace(/<\/script/gi, "<\\/script")}</script>`
+    return scripted(library.script) + (library.setup ? scripted(library.setup) : "")
   })
+}
+
+/**
+ * The stylesheets the page's asks need, each once and in the order the page asked for them: a
+ * library's CSS is a floor under the page's own look, so it is hoisted into the head ahead of
+ * anything the page wrote, and the page's own `<style>` still comes last and wins.
+ */
+function libraryStyles(
+  html: string,
+  libraries: Readonly<Record<string, CanvasLibrarySource>>,
+): string {
+  const seen = new Set<string>()
+  let styles = ""
+  for (const name of canvasLibraryPlan(html)) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    const css = Object.hasOwn(libraries, name) ? libraries[name].css : undefined
+    if (css) styles += `<style>${escapeStyle(css)}</style>`
+  }
+  return styles
 }
 
 /**
@@ -167,14 +208,16 @@ function escapeStyle(css: string): string {
 
 /**
  * The document a frame is given: the page, with the app's own head ahead of anything it wrote — the
- * policy, the theme, the compiled classes and the scripts a page is handed, the data bridge last
- * since the page's own scripts are what call it. `scroll` is the position the bridge last reported,
- * so a page rebuilt at a new version opens where the reader left the one before it; `libraries` are
- * the sources an ask for one is answered with, by name, and an ask it holds no source for is
- * dropped — `canvasLibraryPlan` is what says which names to fetch before drawing; `css` is the
- * Tailwind the page's own classes compiled to. A page with no head can't be drawn — the plugin's
- * scan refuses one, so this is a bug rather than a page, and it throws instead of drawing something
- * unstyled.
+ * policy, the theme, the compiled classes, each library's stylesheet and the scripts a page is
+ * handed, the data bridge last since the page's own scripts are what call it. `scroll` is the
+ * position the bridge last reported, so a page rebuilt at a new version opens where the reader left
+ * the one before it; `libraries` are the sources an ask for one is answered with, by name, and an
+ * ask it holds no source for is dropped — `canvasLibraryPlan` is what says which names to fetch
+ * before drawing; `css` is the Tailwind the page's own classes compiled to. A library's stylesheet
+ * is hoisted rather than put where the ask was, and lands before the page's own `<style>`, so the
+ * page's look still wins; its setup runs right after its source, where the ask was. A page with no
+ * head can't be drawn — the plugin's scan refuses one, so this is a bug rather than a page, and it
+ * throws instead of drawing something unstyled.
  */
 export function canvasDocument(
   html: string,
@@ -188,7 +231,7 @@ export function canvasDocument(
     mode: CanvasMode
     tokens: Record<string, string>
     scroll?: number
-    libraries?: Readonly<Record<string, string>>
+    libraries?: Readonly<Record<string, CanvasLibrarySource>>
     css?: string
   },
 ): string {
@@ -197,7 +240,10 @@ export function canvasDocument(
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
   return sandboxedDocument(page, {
     policy: CANVAS_CSP,
-    afterPolicy: `<style>${themeVariables(tokens, mode)}</style>` + (css ? `<style>${escapeStyle(css)}</style>` : ""),
+    afterPolicy:
+      `<style>${themeVariables(tokens, mode)}</style>` +
+      (css ? `<style>${escapeStyle(css)}</style>` : "") +
+      libraryStyles(html, libraries),
     afterSafety: `<script>${scrollBridge(scroll)}</script>` + `<script>${BRIDGE_SCRIPT}</script>`,
   })
 }

@@ -18,5 +18,13 @@
   "alpine": {
     "global": "Alpine",
     "bytes": 55935
+  },
+  "three": {
+    "global": "THREE",
+    "bytes": 749736
+  },
+  "leaflet": {
+    "global": "L",
+    "bytes": 147552
   }
 }

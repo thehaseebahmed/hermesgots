@@ -1,7 +1,7 @@
 /**
- * The libraries a canvas may ask for by name, as a rule: a source is fetched for the name a page
- * named and for nothing else, once, and one that fails to arrive is that library absent rather than
- * a page that draws nothing.
+ * The libraries a canvas may ask for by name, as a rule: what a page asked for is fetched and
+ * nothing else, once, and one that fails to arrive is that library absent rather than a page that
+ * draws nothing.
  *
  * Two things are held here. The invariant is structural — every `?raw` in `canvas-library-sources.ts`
  * sits inside an `import(`, so Vite emits one chunk per library and a page asking for none fetches
@@ -12,7 +12,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { LIBRARIES } from "../src/lib/canvas-catalogue.ts"
+import { CATALOGUE, LIBRARIES } from "../src/lib/canvas-catalogue.ts"
 import { LIBRARY_SOURCES, loadLibraries } from "../src/lib/canvas-library-sources.ts"
 
 const source = readFileSync(
@@ -25,7 +25,12 @@ const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""
 
 test("no source is imported ahead of its ask", () => {
   const raws = [...code.matchAll(/\?raw/g)]
-  assert.equal(raws.length, LIBRARIES.length, "one `?raw` per library the catalogue names")
+  // Every file a library is made of: its source, and the stylesheet and setup an entry may carry.
+  const files = CATALOGUE.reduce(
+    (count, one) => count + 1 + (one.css ? 1 : 0) + (one.setup ? 1 : 0),
+    0,
+  )
+  assert.equal(raws.length, files, "one `?raw` per file the catalogue's libraries are made of")
   for (const raw of raws) {
     // The specifier has to be the argument of a dynamic import: a static one would be in the route's
     // own chunk, and a page opening no canvas would have paid for every library.
@@ -50,7 +55,7 @@ function fake(sources) {
     load: async (name) => {
       asked.push(name)
       if (!Object.hasOwn(sources, name)) throw new Error(`this build carries no ${name}`)
-      return sources[name]
+      return { script: sources[name] }
     },
   }
 }
@@ -59,7 +64,7 @@ test("only the names a page asked for are fetched, and each one once", async () 
   const { asked, load } = fake({ chart: "CHART", date: "DATE" })
   const loaded = await loadLibraries(["chart", "date", "chart"], load)
   assert.deepEqual(asked, ["chart", "date"], "one fetch per name, in the order the page asked")
-  assert.deepEqual(loaded, { chart: "CHART", date: "DATE" })
+  assert.deepEqual(loaded, { chart: { script: "CHART" }, date: { script: "DATE" } })
 })
 
 test("a page that asks for no library fetches none of one", async () => {
@@ -70,13 +75,15 @@ test("a page that asks for no library fetches none of one", async () => {
 
 test("a name the build does not carry is absent, and the page draws with the rest", async () => {
   const { load } = fake({ chart: "CHART" })
-  assert.deepEqual(await loadLibraries(["chart", "plotly"], load), { chart: "CHART" })
+  assert.deepEqual(await loadLibraries(["chart", "plotly"], load), { chart: { script: "CHART" } })
 })
 
 test("a chunk that fails to load is that one library absent, not a blank page", async () => {
   const load = async (name) => {
     if (name === "icons") throw new Error("a chunk that never arrived")
-    return `${name}'s source`
+    return { script: `${name}'s source` }
   }
-  assert.deepEqual(await loadLibraries(["icons", "date"], load), { date: "date's source" })
+  assert.deepEqual(await loadLibraries(["icons", "date"], load), {
+    date: { script: "date's source" },
+  })
 })

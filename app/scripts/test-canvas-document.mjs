@@ -229,7 +229,7 @@ test("a named library is inlined and an unknown one dropped", () => {
   const html = canvasDocument(page, {
     mode: "light",
     tokens: LIGHT,
-    libraries: { chart: "window.Chart=function(){}" },
+    libraries: { chart: { script: "window.Chart=function(){}" } },
   })
   assert.match(html, /<script>window\.Chart=function\(\)\{\}<\/script>/, "the source is inlined")
   // The ask is a placeholder, not a hoist: the library lands where the page put it, which is what
@@ -241,7 +241,7 @@ test("a named library is inlined and an unknown one dropped", () => {
   const after = canvasDocument(late, {
     mode: "light",
     tokens: LIGHT,
-    libraries: { chart: "window.Chart=function(){}" },
+    libraries: { chart: { script: "window.Chart=function(){}" } },
   })
   assert.ok(
     after.indexOf("<h1>Tip</h1>") < after.indexOf("window.Chart"),
@@ -261,7 +261,7 @@ test("a named library is inlined and an unknown one dropped", () => {
       '<title>Tip</title>\n    <script data-canvas-lib="chart"></script>' +
         '<script data-canvas-lib="chart"></script>',
     ),
-    { mode: "light", tokens: LIGHT, libraries: { chart: "window.Chart=function(){}" } },
+    { mode: "light", tokens: LIGHT, libraries: { chart: { script: "window.Chart=function(){}" } } },
   )
   assert.equal(twice.split("window.Chart=function").length - 1, 1, "the source is inlined once")
   // An ask whose other attributes carry a `>` is still an ask: the tag is read, not its bytes.
@@ -270,9 +270,54 @@ test("a named library is inlined and an unknown one dropped", () => {
       "<title>Tip</title>",
       '<title>Tip</title>\n    <script data-x="a>b" data-canvas-lib="date"></script>',
     ),
-    { mode: "light", tokens: LIGHT, libraries: { date: "window.dayjs=function(){}" } },
+    { mode: "light", tokens: LIGHT, libraries: { date: { script: "window.dayjs=function(){}" } } },
   )
   assert.match(quoted, /<script>window\.dayjs=function\(\)\{\}<\/script>/, "a quoted `>` doesn't hide the ask")
+})
+
+test("a library's stylesheet rides the head and its setup follows its source", () => {
+  // Leaflet's stylesheet names its images relative to itself, which a srcdoc page resolves nowhere,
+  // and its default marker is named by its JavaScript rather than its CSS. So a library may hand the
+  // page a stylesheet and a setup, and each has one place: the stylesheet in the head, after the
+  // theme and the compiled classes, and the setup right after the source it belongs to.
+  const page = PAGE.replace(
+    "<title>Tip</title>",
+    '<title>Tip</title>\n    <script data-canvas-lib="leaflet"></script>',
+  ).replace("<h1>Tip</h1>", '<h1>Tip</h1>\n    <style>.mine{margin:0}</style>')
+  const leaflet = {
+    script: "window.L=function(){}",
+    css: '.leaflet-container{background:url("data:image/png;base64,AA")}',
+    setup: 'L.Icon.Default.mergeOptions({iconUrl:"data:image/png;base64,AA"})',
+  }
+  const html = canvasDocument(page, {
+    mode: "light",
+    tokens: LIGHT,
+    css: ".p-4{padding:1rem}",
+    libraries: { leaflet },
+  })
+  const head = headOf(html)
+  assert.ok(head.includes(leaflet.css), "the stylesheet is in the page's head")
+  // After the theme and the compiled classes…
+  assert.ok(head.indexOf("--background") < head.indexOf(leaflet.css))
+  assert.ok(head.indexOf(".p-4{padding:1rem}") < head.indexOf(leaflet.css))
+  // …and before anything the page wrote, so a stylesheet of the page's own still wins.
+  assert.ok(head.indexOf(leaflet.css) < head.indexOf("<title>Tip</title>"))
+  assert.ok(html.indexOf(leaflet.css) < html.indexOf('<style>.mine{margin:0}</style>'))
+  // The setup runs right after the source, where the page put the ask.
+  assert.ok(
+    html.includes(`<script>${leaflet.script}</script><script>${leaflet.setup}</script>`),
+    "the setup rides right after the source",
+  )
+  // A page that asks twice is given one copy of the library's stylesheet: CSS twice is bytes for
+  // nothing, and the second copy would only say what the first already does.
+  const twice = canvasDocument(
+    page.replace(
+      '<script data-canvas-lib="leaflet"></script>',
+      '<script data-canvas-lib="leaflet"></script><script data-canvas-lib="leaflet"></script>',
+    ),
+    { mode: "light", tokens: LIGHT, libraries: { leaflet } },
+  )
+  assert.equal((twice.split(leaflet.css).length - 1), 1, "the stylesheet is hoisted once")
 })
 
 test("bg-primary compiles to the token's variable", async () => {

@@ -55,10 +55,10 @@ meta, styles in `<style>`, script in `<script>`. Under 256 KB. No secrets: it is
 
 ## Libraries
 
-Chart.js, Day.js, lucide, d3 and Alpine.js are built in, no CDN: an empty
+Chart.js, Day.js, lucide, d3, Alpine.js, Three.js and Leaflet are built in, no CDN: an empty
 `<script data-canvas-lib="NAME"></script>` becomes the library where it stands — `chart` (Chart.js,
 `Chart`), `date` (Day.js, `dayjs`), `icons` (lucide, `lucide.createIcons()`), `d3` (d3, `d3`),
-`alpine` (Alpine.js, `Alpine`).
+`alpine` (Alpine.js, `Alpine`), `three` (Three.js, `THREE`), `leaflet` (Leaflet, `L`).
 
 ## Its data
 

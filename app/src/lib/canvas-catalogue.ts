@@ -38,9 +38,15 @@ interface CanvasLibraryEntry {
   call?: string
   /** The source's size in bytes, measured from the file the app inlines. */
   bytes: number
-  /** A stylesheet the source needs, where it ships one the page has to be given. */
+  /**
+   * A stylesheet the source needs, where it ships one the page has to be given: the path
+   * `canvas-library-sources.ts` reads it from, which the document puts in the page's head.
+   */
   css?: string
-  /** A prelude that runs after the source and before the page's own scripts. */
+  /**
+   * A prelude that runs after the source and before the page's own scripts — what a library's own
+   * JavaScript expects and no stylesheet can say — as the path it is read from.
+   */
   setup?: string
 }
 
@@ -94,6 +100,29 @@ export const CATALOGUE = [
     source: "alpinejs/dist/cdn.min.js",
     global: "Alpine",
     bytes: 55_935,
+  },
+  {
+    // No build of three names a global any more, so the app bundles its ESM entry into one IIFE
+    // under `THREE` — the file inlined here, whose first line says the version it came from.
+    name: "three",
+    label: "Three.js",
+    package: "three",
+    source: "src/lib/generated/three.js",
+    global: "THREE",
+    bytes: 749_736,
+  },
+  {
+    // A srcdoc page resolves a relative URL nowhere, so the stylesheet's three images are `data:`
+    // URIs and the two more its JavaScript draws are the same URIs in the setup prelude — the
+    // default marker's icon, its retina image and its shadow are named by JS, not by CSS.
+    name: "leaflet",
+    label: "Leaflet",
+    package: "leaflet",
+    source: "node_modules/leaflet/dist/leaflet.js",
+    global: "L",
+    bytes: 147_552,
+    css: "src/lib/generated/leaflet.css",
+    setup: "src/lib/generated/leaflet-setup.js",
   },
 ] as const satisfies readonly CanvasLibraryEntry[]
 

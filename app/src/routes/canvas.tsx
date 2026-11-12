@@ -37,6 +37,7 @@ import {
   canvasLibraryPlan,
   readScroll,
   themeTokens,
+  type CanvasLibrarySource,
   type CanvasMode,
 } from "@/lib/canvas-document"
 import { librarySource, loadLibraries } from "@/lib/canvas-library-sources"
@@ -399,7 +400,7 @@ export function CanvasView() {
   // fetched for a page that never named it.
   const [sources, setSources] = useState<{
     html: string
-    libraries: Record<string, string>
+    libraries: Record<string, CanvasLibrarySource>
   } | null>(null)
   const libraries = sources && sources.html === html ? sources.libraries : null
   useEffect(() => {
