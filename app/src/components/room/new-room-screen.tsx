@@ -11,7 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { RoomFaces } from "@/components/room/room-faces"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import { connectionKey, hostKey, serverConfig } from "@/lib/connection"
 import {
   DEFAULT_SETTINGS,
@@ -28,6 +28,7 @@ import { FACES, roomSeats } from "@/lib/rooms"
 import { makerOf, seatedByAny } from "@/lib/room-seats"
 import { startRoom } from "@/lib/room-writes"
 import { tell } from "@/lib/tell"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn, randomId } from "@/lib/utils"
 
 /**
@@ -62,9 +63,8 @@ const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Hos
 export function NewRoomScreen({ slot }: { slot?: string }) {
   const navigate = useNavigate()
   const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
-  // The bots by the host each answers at: two Hosts call their default profile "Hermes", and this is
-  // the one list where the Host is the thing being picked.
-  const labels = botLabels(bots)
+  // This is the one list where the host is the thing being picked, so its rows read by host.
+  const labels = useBotLabels()
   const sendOnEnter = useLiveQuery(
     async () => (await getSettings()).sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter,
     [],
@@ -145,7 +145,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       const seats = chosen.map(seatOf)
       const seated = await startRoom(maker, {
         roomId,
-        // Its name until the Host says otherwise: its seats' own names.
+        // Its name until the Host says otherwise: its seats' labels.
         name: chosen.map((bot) => labelOf(labels, bot)).join(", "),
         members: seats,
       })

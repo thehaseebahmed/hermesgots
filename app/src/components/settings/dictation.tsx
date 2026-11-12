@@ -9,7 +9,7 @@ import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
@@ -60,6 +60,7 @@ import {
 import { formatDuration } from "@/lib/format"
 import { botModelLine, levelName, namedLevel, type SpeechSettings } from "@/lib/speech"
 import { READ_FAILED, getSpeech, useSpeech, type SpeechCheck } from "@/lib/host-speech"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 import { onReturn } from "@/lib/wake"
 
@@ -353,10 +354,10 @@ function EntrySheet({
 
 /** One row per bot: the Settings menu's own row, into that bot's speech settings. */
 function BotsTab({ profiles }: { profiles: Profile[] }) {
+  // Rows by the host each bot answers at, as every other list of them reads (ADR 0148).
+  const labels = useBotLabels()
   if (!profiles.length)
     return <p className="px-5 py-6 text-sm text-muted-foreground">No bots yet.</p>
-  // Rows by the host each bot answers at, as every other list of them reads (ADR 0148).
-  const labels = botLabels(profiles)
   return (
     <Group>
       {profiles.map((profile) => (
@@ -493,7 +494,7 @@ function heardLine(settings?: SpeechSettings) {
 /** The Bubble and the bot it hears with. The two grants are the phone's, so the app asks for them. */
 function BubbleCards() {
   const bots = useLiveQuery(listEnabledProfiles, [])
-  const labels = botLabels(bots ?? [])
+  const labels = useBotLabels()
   const heard = useHeardBy(bots ?? [])
   const bubbleBot = useLiveQuery(getBubbleProfile, [])
   const [state, setState] = useState<BubbleState>()

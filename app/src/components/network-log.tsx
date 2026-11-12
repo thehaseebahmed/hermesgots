@@ -7,8 +7,9 @@ import { Chip, ChipRow } from "@/components/chip"
 import { Group, useHeaderAction } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/copied"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import { db, listProfiles, type NetRequest } from "@/lib/db"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { clockText, DRAWN, endingLabel, figuresOf, formatNetLog, waitText } from "@/lib/net-log"
 import { clearNetLog } from "@/lib/net-recorder"
 
@@ -24,10 +25,9 @@ export function NetworkLogScreen() {
   const bots = useLiveQuery(listProfiles, [])
   const [chosen, setChosen] = useState<string>()
 
-  // A pill and a table row name the bot by the host it answers at: two hosts' default profiles are
-  // both called "Hermes", and this screen is exactly where a slow host is told apart from a fast one.
-  const labels = botLabels(bots ?? [])
-  const names = new Map((bots ?? []).map((bot) => [bot.id, labelOf(labels, bot)]))
+  // This screen is exactly where a slow host is told apart from a fast one, so a pill and a row
+  // name the bot by its host (ADR 0148).
+  const labels = useBotLabels()
   const all = rows ?? []
   const heard = (bots ?? []).filter((bot) => all.some((row) => row.bots.includes(bot.id)))
   // A pick only holds while its bot is still in the log: a cleared log leaves no filter to get stuck in.
@@ -119,7 +119,7 @@ export function NetworkLogScreen() {
         )}
       </Group>
 
-      <NetTable rows={drawn} names={names} />
+      <NetTable rows={drawn} names={labels} />
 
       {shown.length > drawn.length && (
         <p className="text-center text-xs text-muted-foreground">

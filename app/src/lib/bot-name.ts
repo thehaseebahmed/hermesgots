@@ -3,7 +3,7 @@
  * host names its default profile "Hermes" (`plugin/link.py`), so two linked hosts drew two identical
  * rows in every picker.
  *
- * The label is read, never stored (`docs/adr/0148-a-bot-is-named-by-the-host-it-lives-on.md`):
+ * The label is read, never stored (ADR 0148):
  * - a host's short name is its first DNS label, `hermes.domain.com` → `hermes`;
  * - where two hosts wear one short name, they read as the domain part instead, `domain` and `example`;
  * - a host holding more than one bot appends the Hermes profile it is reached at, `hermes/work`.
@@ -19,10 +19,7 @@ export interface NamedBot {
   baseUrl: string
 }
 
-/**
- * The app's own name for a host's default profile. A bot with no host at all — one added by hand and
- * never linked — keeps its own name, and a name that is only this reads as a bot.
- */
+/** The app's own name for a host's default profile, which is no bot's label. */
 const APP_NAME = "Hermes"
 
 /** A host as a bot's address names it: its name and, where one is given, its port. */
@@ -72,33 +69,36 @@ function ownName(bot: NamedBot) {
   return name && name !== APP_NAME ? name : "Bot"
 }
 
+/** Where a bot answers, read once: its label is built from this and its peers'. */
+const seatOf = (bot: NamedBot) => ({ host: hostOf(bot.baseUrl), place: placeOf(bot.baseUrl) })
+
 /**
- * The label a list gives `bot`, among the bots that list holds. The peers are what tell a name from
- * another host's: a bot read alone is named by its host's short name alone.
+ * The label a list gives `bot`, among the bots that list holds: read alone, a bot is named by its
+ * host's short name and nothing else.
  */
 export function botLabel(bot: NamedBot, peers: NamedBot[]): string {
-  const host = hostOf(bot.baseUrl)
+  const { host, place } = seatOf(bot)
   if (!host) return ownName(bot)
-  const others = peers.filter((peer) => peer.id !== bot.id).map((peer) => hostOf(peer.baseUrl))
+  const others = peers.filter((peer) => peer.id !== bot.id).map(seatOf)
   const short = shortOf(host)
-  // Another host wears this name too: the domain part tells them apart, and the whole host where
-  // even that is shared.
   let base = short
-  if (others.some((other) => other && other !== host && shortOf(other) === short)) {
+  const clash = others.some(
+    (other) => other.host && other.host !== host && shortOf(other.host) === short,
+  )
+  if (clash) {
+    // Two hosts' domain parts can be one name too, and then only the whole host tells them apart.
     const part = domainOf(host)
     base = part ?? host
     if (
       part &&
-      others.some((other) => other && other !== host && (domainOf(other) ?? other) === part)
+      others.some((other) => other.host !== host && (domainOf(other.host) ?? other.host) === part)
     )
       base = host
   }
-  // One host holding several bots: the profile says which of them this is. The default profile is
-  // the host itself, so it keeps the bare name — and two bots linked at one host *and* one profile
-  // are told apart by their own name, the only thing left that holds them apart.
-  const sameHost = peers.filter((peer) => peer.id !== bot.id && hostOf(peer.baseUrl) === host)
-  const place = placeOf(bot.baseUrl)
-  if (sameHost.some((peer) => placeOf(peer.baseUrl) === place)) base = ownName(bot)
+  const sameHost = others.filter((other) => other.host === host)
+  // Two bots linked at one host and one profile are the same link twice: their own name is all
+  // there is to tell them apart.
+  if (sameHost.some((other) => other.place === place)) base = ownName(bot)
   else if (sameHost.length && place) base = `${base}/${place}`
   return base
 }
@@ -108,7 +108,10 @@ export function botLabels(bots: NamedBot[]) {
   return new Map(bots.map((bot) => [bot.id, botLabel(bot, bots)]))
 }
 
-/** A list's label for `bot`, or its own name where the list drew no label for it. */
+/**
+ * A list's label for `bot`, or its host read alone where the list drew no label for it — never the
+ * name its host sealed, which is what this rule exists to keep out of a list.
+ */
 export function labelOf(labels: Map<string, string> | undefined, bot: NamedBot) {
-  return labels?.get(bot.id) ?? bot.name
+  return labels?.get(bot.id) ?? botLabel(bot, [])
 }

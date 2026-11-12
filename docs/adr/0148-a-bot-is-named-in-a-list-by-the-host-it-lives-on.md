@@ -37,3 +37,9 @@ every screen that lists bots reads it, so no two lists can name one bot two ways
   "Hermes" twice.
 - Settings' Name field still edits the name the host sealed — it is that bot's own name on its host, and
   what push notifications say. A list no longer reads it.
+- Every list labels against every bot the device holds, not only the bots it draws: a host whose
+  collision partner is turned off would otherwise read its short name on one screen and its domain
+  part on another. `lib/use-bot-labels.ts` is that one peer set.
+- Two links of one host *and* one profile are the same bot twice, and if both were sealed with the
+  default name they read alike — `Bot` twice. Nothing in the app's data tells them apart, and nothing
+  should: they are one bot, and the second link is a duplicate.

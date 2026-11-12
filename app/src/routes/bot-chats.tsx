@@ -33,19 +33,19 @@ import {
   type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import {
   conversationsOf,
   db,
   getSettings,
   isReply,
-  listEnabledProfiles,
   newestMessage,
   saveSettings,
   type Profile,
 } from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { landingChat } from "@/lib/last-chat"
 import { useXLarge } from "@/lib/media"
 import { listsAsChat } from "@/lib/lists-as-chat"
@@ -170,10 +170,7 @@ function BotChatsList({
         return chatRowOf(chat, newest, reply)
       }),
     )
-    // The bar names the bot by the host it answers at: the sidebar's row and this title must read
-    // the same, and a host's default profile is called "Hermes" on every host (ADR 0148).
-    const label = bot ? labelOf(botLabels(await listEnabledProfiles()), bot) : ""
-    return { profileId, bot, label, rows }
+    return { profileId, bot, rows }
   }, [profileId])
   const fresh = answer && answer.profileId === profileId ? answer : undefined
   if (!fresh) return null
@@ -184,13 +181,7 @@ function BotChatsList({
     .filter((room) => room.seated.includes(profileId))
     .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return (
-    <ChatList
-      bot={fresh.bot}
-      label={fresh.label}
-      rows={[...fresh.rows, ...seated]}
-      selected={selected}
-      place={place}
-    />
+    <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} place={place} />
   )
 }
 
@@ -203,20 +194,19 @@ type ListPlace = "pane" | "root" | "pushed"
 
 function ChatList({
   bot,
-  label,
   rows,
   selected,
   place,
 }: {
   bot: Profile
-  /** What the bar calls the bot: the host it answers at. */
-  label: string
   rows: ChatListRow[]
   selected?: string
   place: ListPlace
 }) {
   const navigate = useNavigate()
   const { root, back } = useNav()
+  // The bar names the bot as the sidebar's row does (ADR 0148).
+  const label = labelOf(useBotLabels(), bot)
   const pane = place === "pane"
   // What stands behind this screen, as far as the entry that opened it says: a chat's own control is
   // the only thing that pushes a list, so a list pushed over one leads back to a chat; a typed or

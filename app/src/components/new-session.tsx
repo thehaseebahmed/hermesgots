@@ -4,9 +4,10 @@ import { CheckIcon, FolderGit2Icon, PlusIcon } from "lucide-react"
 import { Bot } from "@/components/bot"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import type { HermesProject } from "@/lib/hermes"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /** A project a session can be started in, on the first bot of its server. */
@@ -67,9 +68,7 @@ function SessionForm({
   onStart: (target: SessionTarget) => void | Promise<void>
   onNewProject: () => void
 }) {
-  // The bot a project lives on, by the host it answers at: a host's default profile is called
-  // "Hermes", so its own name said nothing about which host a session would run on.
-  const labels = botLabels([...new Map(targets.map((t) => [t.profile.id, t.profile])).values()])
+  const labels = useBotLabels()
   const startable = targets.filter((t) => !t.blocked)
   const [picked, setPicked] = useState(
     () => startable.find((t) => t.key === initial)?.key ?? startable[0]?.key,

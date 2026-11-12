@@ -11,7 +11,7 @@ import {
   type ModelChoice,
   type Profile,
 } from "@/lib/db"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { byName } from "@/lib/compare"
 import { plainLine } from "@/lib/words"
@@ -19,6 +19,7 @@ import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 import { isUnread } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { useWaiting } from "@/lib/waiting"
 import { BOT_CHATS, waitsOnUser } from "@/lib/chat-list"
 
@@ -45,7 +46,7 @@ export function useNow() {
 
 export interface BotSummary {
   bot: Profile
-  /** What the row calls it: the host it answers at, since every host calls its default bot "Hermes". */
+  /** What the row calls it: the host it answers at (ADR 0148). */
   label: string
   latest?: Conversation
   /** The newest chat's latest message, cut to a line. */
@@ -126,7 +127,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
       }),
     )
   }, [])
-  const labels = botLabels(rows?.map(({ bot }) => bot) ?? [])
+  const labels = useBotLabels()
   return rows?.map(({ bot, chats, local, preview }) => ({
     bot,
     label: labelOf(labels, bot),

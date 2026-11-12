@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import {
   createProject,
@@ -26,6 +26,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
 } from "@/lib/hermes"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 const REPO_RE = /^[\w-]+\/[\w.-]+$/
@@ -90,9 +91,7 @@ function ProjectForm({
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // The bots by the host each answers at: a project is made on one of them, and two hosts' default
-  // profiles are both called "Hermes".
-  const labels = botLabels(profiles)
+  const labels = useBotLabels()
 
   useEffect(() => {
     let cancelled = false

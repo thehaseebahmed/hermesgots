@@ -113,11 +113,19 @@ test("a base URL that does not parse is its own host", () => {
   assert.equal(botLabel(odd, [odd]), "hermes")
 })
 
-test("a list's labels are read once, and a bot the list doesn't hold keeps its name", () => {
+test("a list's labels are read once, and a bot outside the list is named by its own host", () => {
   const bots = [bot("a", "https://hermes.domain.com/v1"), bot("b", "https://hermes.example.com/v1")]
   const labels = botLabels(bots)
   assert.equal(labels.get("a"), "domain")
   assert.equal(labels.get("b"), "example")
-  assert.equal(labelOf(labels, bot("c", "https://third.example.com/v1", "Away")), "Away")
-  assert.equal(labelOf(undefined, bots[0]), "Hermes")
+  assert.equal(
+    labelOf(labels, bot("c", "https://third.example.com/v1")),
+    "third",
+    "a bot the list never saw is read alone, by its host",
+  )
+  assert.equal(
+    labelOf(undefined, bots[0]),
+    "hermes",
+    "and never by the name its host sealed, which is what this rule keeps out of a list",
+  )
 })

@@ -43,7 +43,8 @@ import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
-import { botLabels, labelOf } from "@/lib/bot-name"
+import { labelOf } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubOf, botSubPath } from "@/lib/bot-subs"
@@ -142,9 +143,8 @@ export function SettingsPage() {
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
   const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
-  // The bot's own screens are titled by the host it answers at, as the menu's row and the sidebar's
-  // name it (ADR 0148).
-  const labels = botLabels(profiles ?? [])
+  // The bot's own screens are titled as the menu's row and the sidebar name it (ADR 0148).
+  const labels = useBotLabels()
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)
   const page = botTab ? botPageOf(botTab) : undefined
@@ -331,9 +331,7 @@ function MenuScreen({
   const { registryError } = useSyncState()
   const { theme } = useTheme()
   const [params, setParams] = useSearchParams()
-  // The bots by the host each answers at: this menu and the sidebar must name one bot one way, and
-  // every host calls its default profile "Hermes" (ADR 0148).
-  const labels = botLabels(profiles ?? [])
+  const labels = useBotLabels()
   const linking = params.get("link") === "1"
   const setLinking = (open: boolean) =>
     setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
@@ -626,7 +624,7 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
 
 export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
-  const labels = botLabels(bots ?? [])
+  const labels = useBotLabels()
   const settings = useLiveQuery(getSettings, [])
   // Two counts off the store's own indexes, never the whole table read to filter it in JS.
   const log = useLiveQuery(async () => {
@@ -691,7 +689,7 @@ export function DeveloperSettings() {
           />
         )}
         {bots?.map((bot) => (
-          <LiveRow key={bot.id} bot={bot} label={labelOf(labels, bot)} />
+          <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
         ))}
       </Group>
       <Group>
@@ -753,16 +751,16 @@ function SyncServerRow() {
   )
 }
 
-function LiveRow({ bot, label }: { bot: Profile; label: string }) {
+function LiveRow({ bot, title }: { bot: Profile; title: string }) {
   const status = useLiveStatus(bot)
-  const { label: reading, detail } = LIVE_LABELS[status]
+  const { label, detail } = LIVE_LABELS[status]
   return (
     <div className={rowClass}>
-      <RowText title={label} subtitle={detail} />
+      <RowText title={title} subtitle={detail} />
       <span
         className={cn("text-sm", status === "push" ? "text-foreground" : "text-muted-foreground")}
       >
-        {reading}
+        {label}
       </span>
     </div>
   )

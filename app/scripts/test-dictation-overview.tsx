@@ -18,9 +18,8 @@ const { DictationSettings } = await import("@/components/settings/dictation")
 const { Screen } = await import("@/components/settings-chrome")
 const { connectionKey } = await import("@/lib/connection")
 const { db } = await import("@/lib/db")
-const { botProfile, click, find, missing, mount, seedSettings, text, until } = await import(
-  "./component-kit.tsx"
-)
+const { botProfile, click, find, missing, mount, seedSettings, text, until } =
+  await import("./component-kit.tsx")
 const { speech } = await import("./dictation-page-kit.tsx")
 const { readSpeech } = await import("@/lib/speech")
 
@@ -54,11 +53,8 @@ async function seed() {
   await db.dictationLog.clear()
   await db.dictationStats.clear()
   await db.speechCache.clear()
-  // A row is named by the host its bot answers at (ADR 0148), so the two hosts say what the names
-  // these fixtures kept used to say.
-  await db.profiles.put(
-    botProfile("alpha", { id: "bot-1", name: "A bot" }),
-  )
+  // A row is named by the host its bot answers at (ADR 0148), which is what the old names said.
+  await db.profiles.put(botProfile("alpha", { id: "bot-1", name: "A bot" }))
   await db.profiles.put(
     botProfile("beta", {
       id: "bot-2",
@@ -239,7 +235,8 @@ test("the bot list draws each bot's picture and speech model, in the order the B
     await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
-    const drawn = () => Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
+    const drawn = () =>
+      Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
     await until(
       async () => drawn()[0]?.textContent?.includes("local/whisper-1") === true,
       "the speech line under the bot",
@@ -284,7 +281,8 @@ test("the bot list names the model the provider hears with, not the host's local
     await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
-    const drawn = () => Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
+    const drawn = () =>
+      Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
     await until(
       async () => drawn()[0]?.textContent?.includes("groq/whisper-large-v3") === true,
       "the provider's own model beside its name",
@@ -311,7 +309,8 @@ test("a local bot's line says local, whatever the resolver names it", async () =
     await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
-    const drawn = () => Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
+    const drawn = () =>
+      Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [])
     await until(
       async () => drawn()[0]?.textContent?.includes("local/base") === true,
       "local, with the model that hears it",
@@ -326,9 +325,9 @@ test("picking a bot moves the Bubble's bot, not the chat selection, and mirrors 
     await until(async () => said("bubble-bot").includes("alpha"), "the selected bot")
     await click(row("bubble-bot"))
     await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the picker")
-    const picked = Array.from(find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? []).find(
-      (one) => one.textContent?.includes("beta"),
-    )
+    const picked = Array.from(
+      find('[data-pick-list="Bots"]')?.querySelectorAll("button") ?? [],
+    ).find((one) => one.textContent?.includes("beta"))
     await click(picked ?? null)
     await until(async () => said("bubble-bot").includes("beta"), "the new selection")
   })
