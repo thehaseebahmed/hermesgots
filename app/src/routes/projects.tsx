@@ -6,8 +6,6 @@ import {
   FolderKanbanIcon,
   PlusIcon,
   RefreshCwIcon,
-  RotateCcwIcon,
-  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { Navigate } from "react-router"
@@ -31,7 +29,6 @@ import { createSignal, createStore } from "@/lib/store"
 import {
   HermesError,
   deleteProject,
-  retryProject,
   type HermesConfig,
   type HermesProject,
 } from "@/lib/hermes"
@@ -359,64 +356,77 @@ function formatWhen(at: number, now: number) {
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
 }
 
-/** A project the plugin is still cloning, or one whose clone failed. It has no page until it's ready. */
-function PendingItem({ row, onChanged }: { row: ProjectRow; onChanged: () => void }) {
+/**
+ * A project the plugin is still cloning. A clone that failed is a project of its own: the row says
+ * why in one line and opens it, where the whole error and the two actions its failure earns are.
+ */
+function PendingItem({
+  row,
+  pane,
+  onChanged,
+}: {
+  row: ProjectRow
+  pane?: FeaturePane
+  onChanged: () => void
+}) {
   const { profile, project } = row
   const [busy, setBusy] = useState(false)
   const failed = project.status === "failed"
   const total = project.folders.length
   const done = project.folders.filter((folder) => folder.status === "done").length
-  const act = async (action: typeof retryProject) => {
+  const cancel = async () => {
     setBusy(true)
     try {
-      await action(profile, project.id)
+      await deleteProject(profile, project.id)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "Couldn't update the project.")
     }
     setBusy(false)
     onChanged()
   }
+  if (failed) {
+    const key = `${profile.id}/${project.id}`
+    return (
+      <ItemRow
+        icon={<FolderGit2Icon />}
+        tone="warning"
+        botId={profile.botId}
+        title={project.name}
+        warn
+        line={<span className="truncate">{project.error ?? "Couldn't clone."}</span>}
+        selected={pane?.selected === key}
+        link={{
+          to: `/projects/${key}`,
+          replace: Boolean(pane?.open),
+          state: { project },
+        }}
+      />
+    )
+  }
   return (
     <div className="flex items-center gap-1">
       <div className="min-w-0 flex-1">
         <ItemRow
-          icon={failed ? <FolderGit2Icon /> : <Spinner />}
-          tone={failed ? "warning" : "success"}
+          icon={<Spinner />}
+          tone="success"
           botId={profile.botId}
           title={project.name}
-          warn={failed}
           line={
             <span className="truncate">
-              {failed
-                ? (project.error ?? "Couldn't clone.")
-                : total > 0
-                  ? `Cloning ${Math.min(done + 1, total)} of ${total}`
-                  : "Creating…"}
+              {total > 0 ? `Cloning ${Math.min(done + 1, total)} of ${total}` : "Creating…"}
             </span>
           }
         />
       </div>
-      {failed && (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          disabled={busy}
-          onClick={() => void act(retryProject)}
-          aria-label={`Retry ${project.name}`}
-        >
-          <RotateCcwIcon />
-        </Button>
-      )}
       <Button
         variant="ghost"
         size="icon-lg"
         className="size-11 rounded-full"
         disabled={busy}
-        onClick={() => void act(deleteProject)}
-        aria-label={failed ? `Remove ${project.name}` : `Cancel ${project.name}`}
+        onClick={() => void cancel()}
+        aria-label={`Cancel ${project.name}`}
       >
-        {failed ? <Trash2Icon /> : <XIcon />}
+        <XIcon />
       </Button>
     </div>
   )
@@ -434,7 +444,7 @@ function ProjectItem({
   onChanged: () => void
 }) {
   const { profile, project, at } = row
-  if (project.status !== "ready") return <PendingItem row={row} onChanged={onChanged} />
+  if (project.status !== "ready") return <PendingItem row={row} pane={pane} onChanged={onChanged} />
   const repos = repoLine(project)
   const key = `${profile.id}/${project.id}`
   return (
