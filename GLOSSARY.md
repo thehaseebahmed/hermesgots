@@ -508,7 +508,7 @@ An attachment whose bytes ride in the message itself, which only a model that re
 _Avoid_: embedded, attached copy, base64 upload
 
 **Media**:
-An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a download.
+An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a row: a note or a PDF opens to read, an archive saves under its own name.
 _Avoid_: image, file, rich media
 
 **Gallery**:

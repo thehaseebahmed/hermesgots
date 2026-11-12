@@ -222,7 +222,7 @@ SCHEMA = {
         "creates the folder under the session's library if it needs to, moves the file there and "
         "answers with its new path. Use it for every file you generate for the user — "
         "screenshots, images, charts, reports, markdown — instead of leaving them in the "
-        "worktree, and return an image's new path in a MEDIA:<path> tag so the user sees it. "
+        "worktree, and return its new path in a MEDIA:<path> tag so the user sees it. "
         "Source edits stay in the worktree."
     ),
     "parameters": {
