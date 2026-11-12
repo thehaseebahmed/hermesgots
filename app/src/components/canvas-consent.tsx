@@ -1,9 +1,10 @@
 /**
- * A canvas's own record and its tools (ADR 0114, issue #933): the options the header's ellipsis
- * opens — the canvas's name, whether it is pinned to the sidebar, whether it is archived out of the list,
- * and the one way to delete it — and, under them, the reader's answers about the tools this version
- * declared. Every change but a tool's is the canvas's record on the host, so the same page is named,
- * pinned and archived the same way on every device; nothing here is kept on this one alone.
+ * A canvas's own record and its tools (ADR 0114, issue #933): the options the canvas's header opens —
+ * its own title is the door — the canvas's name, whether it is pinned to the sidebar, whether it is
+ * archived out of the list, and the one way to delete it; and, under them, the reader's answers about
+ * the tools this version declared. Every change but a tool's is the canvas's record on the host, so
+ * the same page is named, pinned and archived the same way on every device; nothing here is kept on
+ * this one alone.
  */
 import { useCallback, useState } from "react"
 import { Trash2Icon } from "lucide-react"

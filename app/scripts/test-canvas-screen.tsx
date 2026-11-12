@@ -399,20 +399,63 @@ test(
         await until(() => Boolean(find('button[aria-label="Undo"]')), "the Undo the version offers")
         const actions = find('[data-slot="header-actions"]')
         assert.ok(actions, "the row's actions")
-        for (const label of ["Undo", "Canvas options"]) {
-          const button = actions.querySelector(`button[aria-label="${label}"]`)
-          assert.ok(button, `${label} is one of the row's actions`)
-          for (const look of [
-            "border-border",
-            "bg-background/80",
-            "backdrop-blur",
-            "rounded-full",
-          ]) {
-            assert.ok(button.className.includes(look), `${label} wears the Project's ${look}`)
-          }
+        const button = actions.querySelector('button[aria-label="Undo"]')
+        assert.ok(button, "Undo is one of the row's actions")
+        for (const look of ["border-border", "bg-background/80", "backdrop-blur", "rounded-full"]) {
+          assert.ok(button.className.includes(look), `Undo wears the Project's ${look}`)
         }
+        // The options left the actions with the ellipsis: the header's title is their only door.
+        assert.ok(
+          missing('button[aria-label="Canvas options"]'),
+          "no ellipsis offers the canvas's options",
+        )
       },
     )
+  }),
+)
+
+test(
+  "a tap on the canvas's header opens its options, and no header offers an ellipsis",
+  atWidth(390, async () => {
+    // The header's title is the only door to a canvas's options (ADR 0130), on the page's screen and
+    // on the chat's alike: the heading's own control, a real button a keyboard can reach, as tall as
+    // the heading band and as wide as the middle slot gives it — and the title still the heading.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const press = async (where: string) => {
+      await until(
+        () => find('[data-slot="header-title"]')?.textContent === CANVAS.title,
+        "the canvas's title in the shared header",
+      )
+      const heading = find('[data-slot="header-title"]')
+      assert.equal(heading?.tagName, "H1", "the canvas's title is the screen's heading")
+      const control = heading!.querySelector("button")
+      assert.ok(control, "the heading carries the control that opens the options")
+      assert.equal(control!.getAttribute("type"), "button", "a button, whose role is button")
+      assert.ok(control!.hasAttribute("data-canvas-options-open"), "and the screen's own hook")
+      assert.equal(control!.getAttribute("aria-haspopup"), "dialog", "it opens a dialog")
+      assert.equal(control!.getAttribute("aria-expanded"), "false", "closed, and it says so")
+      assert.ok(
+        control!.className.includes("min-h-11"),
+        "tall enough for a thumb, where the ellipsis was (min-h-11)",
+      )
+      assert.ok(missing('button[aria-label="Canvas options"]'), "the header offers no ellipsis")
+      await click(control)
+      await until(() => Boolean(find("[data-canvas-options]")), `${where} options to open`)
+      assert.equal(
+        find("[data-canvas-options-open]")?.getAttribute("aria-expanded"),
+        "true",
+        "and it says they are open",
+      )
+    }
+    await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+      await press("the page screen's")
+    })
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(composerField()), "the edit screen to draw")
+      await press("the edit screen's")
+    })
   }),
 )
 
@@ -1140,8 +1183,8 @@ test(
     try {
       await drawCanvas(["/canvas/c9/edit"], async () => {
         await until(() => Boolean(composerField()), "the chat to draw")
-        const menu = find('[aria-label="Canvas options"]')
-        assert.ok(menu, "the edit screen offers the options menu")
+        const menu = find("[data-canvas-options-open]")
+        assert.ok(menu, "the edit screen's header opens the options")
         await click(menu)
         await until(() => Boolean(findText("button", "Delete canvas")), "the options to open")
         await click(findText("button", "Delete canvas"))
@@ -1173,7 +1216,7 @@ test(
     try {
       await drawCanvas(["/canvas/c7", "/canvas/c7/edit"], async () => {
         await until(() => Boolean(composerField()), "the edit screen to draw")
-        await click(find('[aria-label="Canvas options"]'))
+        await click(find("[data-canvas-options-open]"))
         await until(() => Boolean(findText("button", "Delete canvas")), "the options to open")
         await click(findText("button", "Delete canvas"))
         await until(() => Boolean(document.querySelector('[role="alertdialog"]')), "the question")
@@ -1287,9 +1330,16 @@ test(
     await drawCanvas(["/canvas/c5/edit"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing('[data-canvas-flip="preview"]'), "with nothing to flip to")
+      // No record means no options to open: the heading is a heading, with no control to press.
+      assert.equal(find('[data-slot="header-title"]')?.tagName, "H1", "the title is still the heading")
       assert.ok(
-        missing('[aria-label="Canvas options"]'),
-        "and no options for a canvas that isn't there",
+        missing("[data-canvas-options-open]"),
+        "and no control for a canvas that isn't there",
+      )
+      assert.equal(
+        find('[data-slot="header-title"]')?.querySelector("button"),
+        null,
+        "the heading carries no button",
       )
     })
     assert.deepEqual(pageReads(host), [], "said from the list alone")

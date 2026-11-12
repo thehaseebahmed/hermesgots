@@ -479,7 +479,7 @@ test(
       await until(() => consentDialog() !== null, "the consent dialog")
       await answer("allow")
       await until(() => host.answers.length === 1, "the grant to be posted")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(
         () => wordsOf(find("[data-canvas-options]")).includes("Allowed"),
         "the row to say the tool is allowed",
@@ -505,7 +505,7 @@ test(
     await seedCanvas()
     await mount(screen("c4"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
       const words = wordsOf(find("[data-canvas-options]"))
       assert.match(words, /files\.search/, "the version's declared tool is listed")
@@ -590,7 +590,7 @@ test(
     await seedCanvas()
     await mount(screen("c6"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
       const words = wordsOf(find("[data-canvas-options]"))
       assert.match(words, /files\.search/, "the version's declared tool is listed")
@@ -632,7 +632,7 @@ test(
     await seedCanvas()
     await mount(screen("c8"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
       await click(toolSwitches()[0])
       await until(() => host.answers.length === 1, "the answer to be posted")
@@ -653,7 +653,7 @@ test(
     await mount(screen("c9"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
 
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await click(findText('[data-canvas-options] button', "Name"))
       await until(async () => find("#canvas-name") !== null, "the name field")
       await type(find("#canvas-name"), "Split the bill")

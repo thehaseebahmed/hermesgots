@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CrosshairIcon, EllipsisIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
+import { CrosshairIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
@@ -369,6 +369,9 @@ function CanvasHead({
   canvas,
   profile,
   awayWords,
+  missing,
+  optionsOpen,
+  onOpenOptions,
   leading,
   actions,
 }: {
@@ -376,13 +379,42 @@ function CanvasHead({
   profile: Profile | undefined
   /** What a host this device can't reach is said in, from `useAway`. */
   awayWords: string | undefined
+  /** The canvas no bot holds: there is nothing to offer, so the title is a plain heading. */
+  missing: boolean
+  /** Whether the canvas's options are on screen, which the title's control says it opens. */
+  optionsOpen: boolean
+  /** The title's press: the options' only door, on either screen (ADR 0130). */
+  onOpenOptions: () => void
   leading: ReactNode
   actions: ReactNode
 }) {
   return (
     <ChatHeader
       className="relative pb-2"
-      title={canvas?.title ?? "Canvas"}
+      // The heading is the way to the canvas's options: `ChatHeader` keeps the screen's `<h1>` and
+      // draws the node it is given inside it, which is what a screen whose title goes somewhere is
+      // for — the same shape a bot's own chats give their name, so the app teaches one rule for a
+      // heading that is also a way somewhere. A button, so a keyboard and a screen reader reach it;
+      // as tall as the heading band and as wide as the title line it is drawn in, so a press anywhere
+      // on that line lands. Its pill is pulled 8px left and padded back, so the tint has room around
+      // the word without the word moving. The subtitle is no part of it: it carries the away sentence
+      // as a live region, and a live region inside a button becomes part of that button's name.
+      title={
+        canvas && !missing ? (
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={optionsOpen}
+            data-canvas-options-open
+            onClick={onOpenOptions}
+            className="-ml-2 flex min-h-11 max-w-full min-w-0 items-center rounded-full px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="min-w-0 truncate">{canvas.title}</span>
+          </button>
+        ) : (
+          (canvas?.title ?? "Canvas")
+        )
+      }
       subtitle={
         <>
           {profile && <span className="truncate">{profile.name}</span>}
@@ -782,6 +814,9 @@ export function CanvasView() {
           canvas={canvas}
           profile={profile}
           awayWords={awayWords}
+          missing={missing}
+          optionsOpen={optionsOpen}
+          onOpenOptions={() => setOptionsOpen(true)}
           leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
           actions={
             <>
@@ -808,17 +843,6 @@ export function CanvasView() {
                   onClick={() => void undoVersion()}
                 >
                   <Undo2Icon />
-                </Button>
-              ) : null}
-              {canvas ? (
-                <Button
-                  variant="outline"
-                  size="icon-lg"
-                  className={HEADER_BUTTON}
-                  aria-label="Canvas options"
-                  onClick={() => setOptionsOpen(true)}
-                >
-                  <EllipsisIcon />
                 </Button>
               ) : null}
             </>
@@ -939,6 +963,9 @@ export function CanvasEdit() {
         canvas={canvas}
         profile={profile}
         awayWords={awayWords}
+        missing={missing}
+        optionsOpen={optionsOpen}
+        onOpenOptions={() => setOptionsOpen(true)}
         leading={
           // The list is where this screen's way back goes whether the record has landed or not:
           // while it is reading, that is the only screen there is to go to.
@@ -963,17 +990,6 @@ export function CanvasEdit() {
                 onClick={() => navigate(`/canvas/${id}`, { replace: true })}
               >
                 <FrameIcon />
-              </Button>
-            ) : null}
-            {canvas ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Canvas options"
-                onClick={() => setOptionsOpen(true)}
-              >
-                <EllipsisIcon />
               </Button>
             ) : null}
           </>
