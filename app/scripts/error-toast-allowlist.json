@@ -1,5 +1,5 @@
 {
-  "ceiling": 38,
+  "ceiling": 39,
   "entries": [
     {
       "file": "chat-next/blank.tsx",
@@ -190,6 +190,11 @@
       "file": "routes/share.tsx",
       "function": "sendIntoRoom",
       "reason": "not-yet-converted"
+    },
+    {
+      "file": "lib/use-refusal.ts",
+      "function": "say",
+      "reason": "screen-cannot-hold-it"
     }
   ]
 }

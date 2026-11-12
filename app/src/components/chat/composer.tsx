@@ -233,8 +233,9 @@ export function Composer({
    */
   const [refused, setRefused] = useState<Record<string, string>>({})
   // The send waits on the host, so a refusal is drawn here — above the field it was typed in — rather
-  // than in passing, where it says nothing about which message it was about.
-  const refusal = useRefusal()
+  // than in passing, where it says nothing about which message it was about. Keyed by the draft, so
+  // a refusal about one chat's send is not left standing over the next chat's composer.
+  const refusal = useRefusal(draftKey)
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
   // Files taken moments ago, so a paste and the drop it can also fire add one copy.
@@ -473,8 +474,11 @@ export function Composer({
           const message =
             error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
           if (error.attachmentId)
-            setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
-          return
+            return setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
+          // A sentence about no one file — a host with no route to store them, said by the send
+          // itself — has no tile to land on, so it is drawn above the field like any other refusal of
+          // the send rather than dropped.
+          return refusal.refuse({ ok: false, said: message })
         }
         // Anything else is about the send itself, and is drawn above the field it was typed in.
         refusal.refuse(failed(error, "Couldn't send your message."))

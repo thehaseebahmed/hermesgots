@@ -49,12 +49,12 @@ import { supportsPasskeys } from "@/lib/vault"
 const PASSKEY_CANCELLED = "Passkey cancelled."
 
 /**
- * A write that threw: a cancelled passkey is the screen's own sentence and stays held in the card,
- * and anything else is the host's where it sent one and the app's where it didn't.
+ * A write that threw: a cancelled passkey is the screen's own sentence, said in passing because the
+ * app wrote it, and anything else is the host's where it sent one and the app's where it didn't.
  */
 function threw(error: unknown): AttemptFailure {
   if (error instanceof DOMException && error.name === "NotAllowedError")
-    return { ok: false, caught: error, said: PASSKEY_CANCELLED }
+    return { ok: false, caught: error, alone: PASSKEY_CANCELLED }
   return failed(error, "Something went wrong.")
 }
 
@@ -65,13 +65,10 @@ export function AccountSettings() {
   const [pending, setPending] = useState<PendingSetup>()
   const [rotation, setRotation] = useState<{ code: string; confirm: () => Promise<void> }>()
   const [asking, setAsking] = useState(false)
-  // The section's own writes are answered in the card they were made in.
   const refusal = useRefusal("account")
 
   const { account } = sync
   if (account.status === "loading" || account.status === "unavailable") return null
-
-  /** A write that threw, in the words this screen already gives each way one can. */
 
   const run = async (action: () => Promise<void>) => {
     // A button is disabled while it's busy, but Enter in a dialog's field still submits its form:
@@ -80,6 +77,9 @@ export function AccountSettings() {
     setBusy(true)
     try {
       await action()
+      // The write landed, so the words of the last refusal go with it: a surface that only ever
+      // hands failures would keep them standing over a card that has answered since.
+      refusal.refuse({ ok: true })
     } catch (error) {
       refusal.refuse(threw(error))
     } finally {
@@ -211,7 +211,9 @@ export function AccountSettings() {
         onDone={() => {
           const confirm = rotation?.confirm
           setRotation(undefined)
-          if (confirm) void confirm().catch(threw)
+          // A rotation the host refused is the card's to say: `.catch` would answer with the failure
+          // and then throw it away, leaving a refused new code with nothing said at all.
+          if (confirm) void confirm().catch((error) => refusal.refuse(threw(error)))
         }}
       />
     </Card>

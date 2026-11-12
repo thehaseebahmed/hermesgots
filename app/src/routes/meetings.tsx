@@ -670,7 +670,6 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
   const { profile, noAudio, project } = target
   const [busy, setBusy] = useState(false)
   const [picked, setPicked] = useState<{ file: File; text?: string }>()
-  // The Add below waits on the host, so its refusal belongs in this sheet, under the file it refused.
   const refusal = useRefusal(profile?.id)
   const parsed = picked?.text !== undefined ? parseTranscript(picked.text) : undefined
   const refused = Boolean(picked && !parsed && noAudio)
@@ -697,6 +696,9 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
       const meeting = parsed
         ? await addTranscript(profile, { title, projectId: project, lines: parsed.lines })
         : await addRecording(profile, { title, projectId: project, file: picked.file })
+      // The meeting landed, so the words of an earlier refusal go with it: a hold that is only ever
+      // handed failures would keep them standing over a sheet that has answered since.
+      refusal.refuse({ ok: true })
       onAdded()
       go(`/meetings/${meeting.id}`)
     } catch (error) {
@@ -752,8 +754,6 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
-  // The write that follows End meeting waits on the host, and the sheet is still on screen: its
-  // refusal is drawn above the control that starts the next recording.
   const refusal = useRefusal(profile?.id)
   const { refuse } = refusal
   const save = useCallback(
@@ -768,6 +768,7 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
           file,
         })
         void forgetRecording(id)
+        refusal.refuse({ ok: true })
         onAdded()
         go(`/meetings/${meeting.id}`)
       } catch (error) {
@@ -1157,7 +1158,6 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
 function Working({ meeting }: { meeting: Meeting }) {
   const { progress } = meeting
   const failed = isFailed(meeting)
-  // Try again is the write this screen holds, so its refusal is drawn above the banner holding it.
   const refusal = useRefusal(meeting.id)
   return (
     <>
@@ -1571,7 +1571,6 @@ function ActionRow({
   const project = projects.get(meeting.connection)?.find((p) => p.id === meeting.projectId)
   const blocked = !profile?.apiKey || !project || Boolean(startBlocked(project))
   const [starting, setStarting] = useState(false)
-  // Start waits on the host, so its refusal is drawn in the row whose button asked.
   const refusal = useRefusal(meeting.id)
   const start = async () => {
     if (!profile || !project) return
@@ -1821,8 +1820,6 @@ const PROMPTS = [
 function AskBar({ meeting }: { meeting: Meeting }) {
   const [text, setText] = useState("")
   const busy = isAsking(meeting)
-  // The question is asked from this bar, so the host's refusal is drawn here, over the field the
-  // question was typed in.
   const refusal = useRefusal(meeting.id)
   const ask = (question: string) => {
     if (!question.trim() || busy) return

@@ -22,14 +22,20 @@ export type Attempted = { ok: true } | AttemptFailure
 
 /**
  * A write that did not land, worded one of two ways: `said` is the host's own sentence, for the
- * surface to draw, and `alone` is the app's own, for the app to say in passing. Never both, and
- * never a `said` the host didn't write — a sentence the app made up is not one it may hold as the
- * host's. `caught` is the error the write threw, where it threw one, so a caller that has to tell
- * one failure from another reads it rather than a flag kept beside the call.
+ * surface to draw, and `alone` is the app's own, for the app to say in passing. One of the two, and
+ * never a `said` the host didn't write. `caught` is the error the write threw, where it threw one, so
+ * a caller that has to tell one failure from another reads it rather than a flag kept beside the call.
  */
 export type AttemptFailure =
   | { ok: false; said: string; caught?: unknown }
   | { ok: false; alone: string; caught?: unknown }
+
+/**
+ * A failure the app worded itself: a value it refused before writing, a permission the platform
+ * withheld, a host that answered with nothing it could draw. Its `message` is the app's sentence, so
+ * `failed` words it as the app's own — said in passing — rather than holding it as the host's.
+ */
+export class AppWords extends Error {}
 
 /**
  * The one failure a caught error makes of a write: the host's words where it sent a sentence a
@@ -39,14 +45,14 @@ export type AttemptFailure =
  * error itself, so none of them decides separately whose words it just caught.
  */
 export function failed(error: unknown, alone: string): AttemptFailure {
+  if (error instanceof AppWords) return { ok: false, caught: error, alone: error.message || alone }
   const said = spoken(error, "").trim()
   return said ? { ok: false, caught: error, said } : { ok: false, caught: error, alone }
 }
 
 /**
  * The two ways a failure can be worded: `hold` is the host's own sentence, for the surface to draw,
- * and `alone` is the sentence the call would have said by itself — the app's own, for a toast. Never
- * both, and neither for a write that landed.
+ * and `alone` is the sentence the call would have said by itself — the app's own, for a toast.
  */
 type RefusalWords = { hold?: string; alone?: string }
 
@@ -61,11 +67,8 @@ export function refuse(result: Attempted): RefusalWords {
  * answered where it was made — and `dismiss` is the reader's control; both leave nothing to draw.
  */
 export type RefusalHold = {
-  /** The host's sentence while one is held, and `undefined` once nothing stands to draw. */
   words: string | undefined
-  /** The answer `attempt` gave, drawn or said, as `refuse` decides. */
   refuse: (result: Attempted) => void
-  /** Runs one write of this surface's, answering whether it landed. */
   write: (what: string, action: () => Promise<unknown>) => Promise<boolean>
   clear: () => void
   dismiss: () => void

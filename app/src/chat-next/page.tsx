@@ -20,6 +20,7 @@ import { ThreadRefusal } from "@/components/chat/session-cards"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
 import { attempt } from "@/lib/attempt"
+import type { Attempted } from "@/lib/refusal"
 import { readPace, sendTimeoutMs } from "@/lib/away"
 import type { SummaryRows } from "@/lib/compaction-seam"
 import { connectionKey } from "@/lib/connection"
@@ -1495,13 +1496,11 @@ export function ChatNextThread({
         return
       }
       // Why it didn't go is said where the reader is: the thread's own notice, which stands until the
-      // next send clears it. Every other request this screen makes that comes back with an error is a
-      // toast, while the thread's own line for one was the first child of a scroller pinned to the
-      // newest row — above the viewport on any chat long enough to scroll, which is the placement ADR
-      // 0071 took away. The row keeps the message and the "Not sent" mark, and the words go with it:
-      // the host's own where it gave them, and what is known where a send got no answer at all (the
-      // reads still land, so this is not "away"). The files go as the host saved them where it already
-      // had them, so sending it again uploads nothing twice.
+      // next send clears it, rather than a line at the foot of a scroller that a long chat has already
+      // scrolled past (ADR 0071). The row keeps the message and the "Not sent" mark, and the words go
+      // with it: the host's own where it gave them, and what is known where a send got no answer at
+      // all (the reads still land, so this is not "away"). The files go as the host saved them where
+      // it already had them, so sending it again uploads nothing twice.
       const said =
         error instanceof HostAway
           ? "This host didn't take the message."
@@ -1592,20 +1591,25 @@ export function ChatNextThread({
   async function stop(): Promise<boolean> {
     if (!server || !key) return false
     const run = currentRun
+    // Each half's answer is kept, and the screen is told once when both have settled: a stop that
+    // landed clears the words a refusal left standing, while a half the host refused keeps them.
+    const answers: Attempted[] = []
     const stops: Promise<boolean>[] = []
     if (run)
       stops.push(
         (async () => {
           const answer = await attempt("stop the run", () => stopRun({ server, key }, run))
-          if (answer.ok) return true
           // A run the host no longer holds has already stopped, so there is nothing to refuse: the
           // failure is read for the error it carries rather than a flag kept beside the call.
-          if (answer.caught instanceof RunGone) return false
+          if (!answer.ok && answer.caught instanceof RunGone) {
+            answers.push({ ok: true })
+            return false
+          }
           // A refused stop leaves the run where it was, so it is not a turn that failed: the run is
           // read again now, and the button says Stop for it rather than waiting for a poll.
-          refusal.refuse(answer)
-          void joinLive()
-          return false
+          if (!answer.ok) void joinLive()
+          answers.push(answer)
+          return answer.ok
         })(),
       )
     // Passed on whether or not this device read a child: `stopSubagents` decides what is worth a
@@ -1623,11 +1627,15 @@ export function ChatNextThread({
             )
             took = stopped.rows.some((row) => row.stopped)
           })
-          if (!answer.ok) refusal.refuse(answer)
+          answers.push(answer)
           return answer.ok && took
         })(),
       )
-    return (await Promise.all(stops)).some(Boolean)
+    const took = (await Promise.all(stops)).some(Boolean)
+    // One answer for the stop the reader pressed: the refusal where either half was refused, and the
+    // landing — which clears — where both were not.
+    refusal.refuse(answers.find((answer) => !answer.ok) ?? { ok: true })
+    return took
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's

@@ -14,15 +14,14 @@ import {
   botProfile,
   chatScreen,
   click,
-  find,
   findAll,
   json,
+  missing,
   mount,
   seedChat,
   text,
   until,
   withToasts,
-  wordsOf,
 } from "./component-kit.tsx"
 
 const CHAT = "chat-attachments"
@@ -58,16 +57,13 @@ const source = (label: string) =>
 /** `disabled` would eat the tap, so a source nothing can carry is marked unavailable and stays live. */
 const shut = (label: string) => source(label)?.getAttribute("aria-disabled") === "true"
 
-/** The sheet's own words for a source that can't be picked: drawn in it, not said in passing. */
-const refusal = () => find('[role="alert"]')
-
 async function openMenu() {
   await until(async () => Boolean(addContext()), "the + button")
   await click(addContext())
   await until(async () => Boolean(source("Files")), "the menu's sources")
 }
 
-test("a host that advertises no attachments refuses Files at the menu, in the sheet's own words", async () => {
+test("a host that advertises no attachments refuses Files at the menu, in passing", async () => {
   await seed("attach-menu-old")
   const asked: string[] = []
   host(["media"], "attach-menu-old", asked)
@@ -78,13 +74,13 @@ test("a host that advertises no attachments refuses Files at the menu, in the sh
       assert.equal(shut("Files"), true, "and reads as unavailable")
       assert.equal(shut("Camera"), false, "Camera is untouched")
       await click(source("Files"))
-      await until(async () => Boolean(refusal()), "the sheet's refusal")
-      assert.equal(
-        wordsOf(refusal()),
-        "File uploads need a newer Gots plugin.",
+      await until(async () => said.length > 0, "the rule's own sentence, said in passing")
+      assert.deepEqual(
+        said,
+        ["File uploads need a newer Gots plugin."],
         "a tap says why, in the rule's own sentence",
       )
-      assert.deepEqual(said, [], "and nothing said in passing")
+      assert.ok(missing('[role="alert"]'), "and nothing is held as though the host had written it")
       assert.ok(source("Files"), "and the sheet is still open")
     })
   })

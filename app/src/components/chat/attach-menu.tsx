@@ -72,8 +72,9 @@ export function AttachMenu({
     refusal.clear()
     const road = roadOf(source)
     // A source nothing can carry stays tappable and says why, so the sheet never leaves a dead
-    // button to guess at; the sheet is left open with its sentence drawn in it.
-    if (road.road === "none") return refusal.refuse({ ok: false, said: road.message })
+    // button to guess at. The rule's sentence is the app's own, so it is said in passing rather than
+    // held in the sheet as though the host had written it.
+    if (road.road === "none") return refusal.refuse({ ok: false, alone: road.message })
     setOpen(false)
     inputs.current[source]?.click()
   }

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { failed, refuse } from "../src/lib/refusal.ts"
+import { AppWords, failed, refuse } from "../src/lib/refusal.ts"
 
 const ALONE = "Couldn't save that."
 
@@ -35,4 +35,13 @@ test("a browser's own sentence is not the host's words", () => {
 
 test("a write that landed holds nothing and says nothing", () => {
   assert.deepEqual(refuse({ ok: true }), {})
+})
+
+test("a sentence the app wrote is said in passing, never held as the host's", () => {
+  assert.deepEqual(
+    refuse(failed(new AppWords("That isn't a number."), ALONE)),
+    { alone: "That isn't a number." },
+    "an app-authored failure is the app's own sentence, so no surface may draw it as the host's",
+  )
+  assert.deepEqual(refuse(failed(new AppWords(""), ALONE)), { alone: ALONE })
 })

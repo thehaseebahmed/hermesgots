@@ -81,6 +81,33 @@ test("the tap made last is the one the surface answers", async () => {
   })
 })
 
+test("an answer a later tap superseded is still said in passing", async () => {
+  const first = deferred()
+  const second = deferred()
+  writes.first = () => first.promise
+  writes.second = () => second.promise
+  await withToasts(async (said) => {
+    await mount(<Harness />, async () => {
+      await click(findText("button", "First write"))
+      await click(findText("button", "Second write"))
+      second.refuse("The second tap was refused.")
+      await until(async () => Boolean(find('[role="alert"]')), "the second tap's words")
+      first.refuse("The first tap was refused.")
+      await until(async () => said.length > 0, "the superseded answer to be said")
+      assert.deepEqual(
+        said,
+        ["The first tap was refused."],
+        "an answer the surface no longer draws is said in passing rather than vanishing",
+      )
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        "The second tap was refused.",
+        "while the notice still holds the tap the reader made last",
+      )
+    })
+  })
+})
+
 /** A surface with nothing standing to draw a refusal: what a row outside the chat's providers gets. */
 function Unheld() {
   const refusal = useSaidRefusal()

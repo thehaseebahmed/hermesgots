@@ -100,6 +100,7 @@ import {
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { isOnline, presence, siteUrl } from "@/lib/registry"
+import { AppWords } from "@/lib/refusal"
 import { tell } from "@/lib/tell"
 import { themeLabel } from "@/lib/theme"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
@@ -422,9 +423,10 @@ function NotificationsRow() {
     setBusy(true)
     await refusal.write("turn on notifications", async () => {
       if (!checked) return await disablePush()
-      // A permission the platform holds back is the row's own answer, said where the row is.
+      // A permission the platform holds back is the row's own answer, in the app's words: said in
+      // passing, since the host wrote none of it.
       if ((await enablePush()) === "denied")
-        throw new Error(
+        throw new AppWords(
           isNative()
             ? "Notifications are blocked in system settings"
             : "Notifications are blocked in your browser",

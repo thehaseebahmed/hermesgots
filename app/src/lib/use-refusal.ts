@@ -17,8 +17,8 @@ import { attempt } from "@/lib/attempt"
 import { refuse, type Attempted, type RefusalHold } from "@/lib/refusal"
 import { tell } from "@/lib/tell"
 
-/** Says one refused write in passing, for a surface that has nothing to draw it. */
-const say = (words: string) => tell.error(words)
+// The one sink a failure's words reach a toast by, named in scripts/error-toast-allowlist.json.
+const say = (said: string) => tell.error(said)
 
 /**
  * `subject` names what the refusal is about — a bot, a chat, a canvas. It changes, and the words go:
@@ -34,40 +34,48 @@ const say = (words: string) => tell.error(words)
 function useKeptRefusal(land: ((words: string) => void) | undefined, subject?: string): RefusalHold {
   const [words, setWords] = useState<string>()
 
-  /** The reader's control, or the surface moving on: the words go until the next refusal. */
   const clear = useCallback(() => setWords(undefined), [])
 
-  /** What `attempt` answered, drawn or said: the one place the decision reaches the screen. */
+  /**
+   * What `attempt` answered, drawn or said: the one place the decision reaches the screen. `latest`
+   * is false for an answer a later write has superseded: the surface draws the tap the reader made
+   * last, but the earlier answer's words are still said in passing rather than vanishing, so a row
+   * that flipped back can say why.
+   */
   const take = useCallback(
-    (result: Attempted) => {
+    (result: Attempted, latest = true) => {
       const decided = refuse(result)
-      // `alone` is the app's own sentence by `refuse`'s decision — the one toast a refused write
-      // reaches, said where the host left nothing of its own to hold.
+      if (!latest) {
+        const superseded = decided.hold ?? decided.alone
+        if (superseded) say(superseded)
+        return
+      }
       if (decided.alone) tell.error(decided.alone)
       if (!land) return setWords(decided.hold)
-      // Nothing draws a hold here, so the host's own words are said rather than kept.
       if (decided.hold) land(decided.hold)
     },
     [land],
   )
 
-  // Every write takes a generation, and an answer is drawn only while it is the latest one's: two
-  // failures in flight settle in whatever order the host answers them, and the surface answers the
-  // tap the reader made last rather than the one that came back last.
+  // Every write takes a generation, and the surface draws only the latest one's answer: two failures
+  // in flight settle in whatever order the host answers them, and the surface answers the tap the
+  // reader made last rather than the one that came back last. The answer it superseded is still said
+  // in passing, so nothing a write was told goes unsaid.
   const generation = useRef(0)
   const write = useCallback(
     async (what: string, action: () => Promise<unknown>) => {
       const mine = ++generation.current
       setWords(undefined)
       const answer = await attempt(what, action)
-      if (mine === generation.current) take(answer)
+      take(answer, mine === generation.current)
       return answer.ok
     },
     [take],
   )
 
-  // Registered before the caller's own effects, so a surface that turns to another subject draws
-  // nothing of the one it left even when that subject's read lands in the same commit.
+  // A surface that turns to another subject carries none of what was said about the one before it.
+  // The reset is this hook's own effect, so it lands with the subject and not a render later; no hook
+  // can promise it runs before the caller's own effects.
   const lastSubject = useRef(subject)
   useEffect(() => {
     if (lastSubject.current === subject) return
@@ -85,16 +93,14 @@ function useKeptRefusal(land: ((words: string) => void) | undefined, subject?: s
   ])
 }
 
-/** The refusal a surface holds, drawn in a `Refusal` where the surface stands. */
 export function useRefusal(subject?: string): RefusalHold {
   return useKeptRefusal(undefined, subject)
 }
 
 /**
- * The refusal a surface with no notice in the tree keeps (the plan's G2): a message row drawn
- * outside the chat's providers, a page mounted without its `Screen`. There is nowhere for the host's
- * words to stand, so they are said in passing — the same passing sentence the app uses for a host
- * that said nothing, and never both at once.
+ * The refusal a surface with no notice in the tree keeps: a message row drawn outside the chat's
+ * providers, a page mounted without its `Screen`. There is nowhere for the host's words to stand, so
+ * they are said in passing.
  */
 export function useSaidRefusal(): RefusalHold {
   return useKeptRefusal(say)
