@@ -740,3 +740,35 @@ test(
     })
   }),
 )
+
+test(
+  "a version with no tools and no grants leaves nothing between the switches and Delete",
+  atWidth(390, async () => {
+    // A version that declares no tools holds no answer about one, so the sheet has nothing to say
+    // about them: the sentence that said so and the card that would have held the rows both go.
+    // An empty card's fill shows as a gap, which is the same noise as the copy.
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [] }
+    serve(host, "c11")
+    await seedCanvas()
+    await mount(screen("c11"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+
+      assert.doesNotMatch(
+        wordsOf(find("[data-popup-form]")),
+        /call any of the bot's tools/,
+        "a version with no tools says nothing at all about them",
+      )
+      const groups = findAll("[data-canvas-options] [data-settings-group]")
+      assert.equal(groups.length, 2, "two groups and no third: the name, and the switches")
+      assert.match(wordsOf(groups[0]), /Name/, "the first holds the canvas's name")
+      assert.match(
+        wordsOf(groups[1]),
+        /Pin to sidebar[\s\S]*Archive/,
+        "the second its place in the sidebar and its archive",
+      )
+      assert.equal(toolSwitches().length, 0, "and no tool row is drawn at all")
+    })
+  }),
+)

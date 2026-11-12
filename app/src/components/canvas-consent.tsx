@@ -329,11 +329,9 @@ export function CanvasOptions({
               />
             </Group>
 
-            {rows.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">
-                This version doesn't call any of the bot's tools.
-              </p>
-            ) : (
+            {/* Nothing where a version declares no tools and holds no grant: an empty card's fill
+                reads as a gap, which is the same noise as a sentence apologising for it. */}
+            {rows.length > 0 && (
               <Group>
                 {rows.map(({ tool, declared: current }) => {
                   const answer = held.find((row) => row.tool === tool)?.allowed
