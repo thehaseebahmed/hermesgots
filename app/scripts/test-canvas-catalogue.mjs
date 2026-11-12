@@ -24,7 +24,7 @@ test("the script owns the checked-in guide: it is its own render, byte for byte"
   assert.equal(
     checkedIn,
     rendered,
-    "plugin/canvas/prompt.txt and prompt.in.txt disagree: run `pnpm build:canvas-catalogue`",
+    "plugin/canvas/prompt.txt and canvas-guide.in.txt disagree: run `pnpm build:canvas-catalogue`",
   )
 })
 
