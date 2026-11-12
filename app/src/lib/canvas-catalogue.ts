@@ -9,20 +9,33 @@
  *
  * Import-free, and holding no source text of its own: a name, a path and a number. The bytes live in
  * `canvas-library-sources.ts`, which is what a page's ask is answered from, so this reads as data to
- * everything that only needs the list — `scripts/test-canvas-document.mjs` today, the guide's block
- * and the host's `libraries.json` next.
+ * everything that only needs the list — `scripts/test-canvas-document.mjs`, and the two artifacts
+ * `scripts/build-canvas-catalogue.mjs` writes from it: the guide's library block and the host's
+ * `libraries.json`.
+ *
+ * An entry carries what the guide has to say about it too — the name it is called by, and the
+ * expression a page writes to use it — because a block hand-written beside this list is the copy
+ * that drifts. Adding a library is one entry here and one run of the build (ADR 0146).
  */
 
 /** One library the app carries: what a page asks for, what the app imports, and what it costs. */
 interface CanvasLibraryEntry {
   /** The name a page asks by, as `data-canvas-lib` carries it. */
   name: string
+  /** The library's own name, as the guide calls it: Chart.js, Day.js, lucide. */
+  label: string
   /** The npm package the source ships in. */
   package: string
   /** Where in that package the browser build is, as the app's own import reaches it. */
   source: string
   /** The global a page reads once the source has run. */
   global: string
+  /**
+   * What the guide tells a page to write once the source has run: the global itself, or the entry
+   * point that takes a call (`lucide.createIcons()`), so a library whose use is more than a name is
+   * still one entry and no special case in the block's composition.
+   */
+  call?: string
   /** The source's size in bytes, measured from the file the app inlines. */
   bytes: number
   /** A stylesheet the source needs, where it ships one the page has to be given. */
@@ -39,6 +52,7 @@ interface CanvasLibraryEntry {
 export const CATALOGUE = [
   {
     name: "chart",
+    label: "Chart.js",
     package: "chart.js",
     source: "node_modules/chart.js/dist/chart.umd.min.js",
     global: "Chart",
@@ -46,6 +60,7 @@ export const CATALOGUE = [
   },
   {
     name: "date",
+    label: "Day.js",
     package: "dayjs",
     source: "dayjs/dayjs.min.js",
     global: "dayjs",
@@ -53,9 +68,11 @@ export const CATALOGUE = [
   },
   {
     name: "icons",
+    label: "lucide",
     package: "lucide",
     source: "lucide/dist/umd/lucide.min.js",
     global: "lucide",
+    call: "lucide.createIcons()",
     bytes: 481_206,
   },
 ] as const satisfies readonly CanvasLibraryEntry[]

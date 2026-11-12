@@ -1,0 +1,14 @@
+{
+  "chart": {
+    "global": "Chart",
+    "bytes": 210082
+  },
+  "date": {
+    "global": "dayjs",
+    "bytes": 7161
+  },
+  "icons": {
+    "global": "lucide",
+    "bytes": 481206
+  }
+}

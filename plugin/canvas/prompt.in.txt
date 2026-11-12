@@ -59,12 +59,7 @@ that one is CSS to paste, not to import.
 One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and viewport
 meta, styles in `<style>`, script in `<script>`. Under 256 KB. No secrets: it is readable by all.
 
-## Libraries
-
-Chart.js, Day.js and lucide are built in: an empty script element becomes the library, asked for
-above it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
-`data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is lucide
-(`lucide.createIcons()`).
+{{libraries}}
 
 ## Its data
 

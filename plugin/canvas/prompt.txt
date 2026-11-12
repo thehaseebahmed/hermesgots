@@ -61,10 +61,9 @@ meta, styles in `<style>`, script in `<script>`. Under 256 KB. No secrets: it is
 
 ## Libraries
 
-Chart.js, Day.js and lucide are built in: an empty script element becomes the library, asked for
-above it. `<script data-canvas-lib="chart">` is Chart.js (`window.Chart`),
-`data-canvas-lib="date"` is Day.js (`window.dayjs`), `data-canvas-lib="icons"` is lucide
-(`lucide.createIcons()`).
+Chart.js, Day.js and lucide are built in, no CDN: an empty
+`<script data-canvas-lib="NAME"></script>` becomes the library where it stands — `chart` (Chart.js,
+`Chart`), `date` (Day.js, `dayjs`), `icons` (lucide, `lucide.createIcons()`).
 
 ## Its data
 

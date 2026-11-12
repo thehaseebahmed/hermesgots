@@ -4,7 +4,6 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { BRIDGE_METHODS } from "../src/lib/canvas-bridge.ts"
-import { LIBRARIES } from "../src/lib/canvas-catalogue.ts"
 import {
   CANVAS_CSP,
   SCROLL_MESSAGE,
@@ -16,6 +15,7 @@ import {
   themeVariables,
 } from "../src/lib/canvas-document.ts"
 import { canvasClasses, CANVAS_THEME, compileCanvasCss } from "../src/lib/canvas-tailwind.ts"
+import { librariesBlock } from "./build-canvas-catalogue.mjs"
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -365,7 +365,12 @@ test("the canvas section names exactly the libraries and bridge methods the app 
   // 4,000-character section cap the section is dropped whole, so the guide's length is part of it.
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
   const named = (pattern) => [...new Set([...guide.matchAll(pattern)].map((match) => match[1]))]
-  assert.deepEqual(named(/data-canvas-lib="([a-z]+)"/g).sort(), [...LIBRARIES].sort())
+  // The Libraries block is composed from the catalogue, so its names cannot drift from the app's
+  // list: the guide carries that block whole, and the block is the only place a name is written.
+  assert.ok(
+    guide.includes(librariesBlock()),
+    "the guide carries the library block the catalogue renders: run `pnpm build:canvas-catalogue`",
+  )
   assert.deepEqual(named(/canvas\.data\.([a-z]+)/g).sort(), [...BRIDGE_METHODS].sort())
   assert.ok(guide.length <= 4_000, `the guide is ${guide.length} characters, under the host's 4,000`)
 })

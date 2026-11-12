@@ -1,16 +1,21 @@
 /**
- * The canvas's guide against the template it is rendered from: a bot is told what the build wrote,
- * and a guide only one half of the repository knows is a page drawing a hole. ADR 0146 makes the
- * generator the one writer, so a drift is a failed gate rather than a bot reading stale words.
+ * The canvas's guide and the host's `libraries.json` against the catalogue they are rendered from: a
+ * bot is told what the build wrote, and a guide or a refusal list only one half of the repository
+ * knows is a page drawing a hole, or a write refused for a library the app carries. ADR 0146 makes
+ * the generator the one writer, so a drift is a failed gate rather than a bot reading stale words.
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { ARTIFACT, MAX_CHARS, render } from "./build-canvas-catalogue.mjs"
+import { CATALOGUE } from "../src/lib/canvas-catalogue.ts"
+import { ARTIFACT, LIBRARIES, MAX_CHARS, librariesBlock, render } from "./build-canvas-catalogue.mjs"
 
 const checkedIn = readFileSync(ARTIFACT, "utf8")
 const rendered = render()
+
+/** The names the host refuses by, as an installed plugin reads them at import. */
+const carried = JSON.parse(readFileSync(LIBRARIES, "utf8"))
 
 /** `DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS` in Hermes; a build may tighten its gate, never loosen it. */
 const HOST_CAP = 4_000
@@ -36,5 +41,37 @@ test("it fits the host's section limit instead of being dropped whole", () => {
 test("the guide keeps the length it shipped with", () => {
   // The number is the guide's own. If it moves, a canvas session is told different words — a
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
-  assert.equal(rendered.length, 3_982, "the canvas's guide is 3,982 characters and stays that way")
+  assert.equal(rendered.length, 3_932, "the canvas's guide is 3,932 characters and stays that way")
+})
+
+test("the catalogue, the sources it writes and the guide it renders are one list", () => {
+  // One catalogue drives both artifacts, so neither can carry a name the app does not answer: the
+  // block is the section the guide holds, and it names every entry the catalogue carries.
+  assert.ok(
+    rendered.includes(librariesBlock()),
+    "the guide carries the block the catalogue renders, not a hand-typed copy of it",
+  )
+  assert.equal(
+    (rendered.match(/^## Libraries$/gm) ?? []).length,
+    1,
+    "the block lands once, where the slot was",
+  )
+  for (const library of CATALOGUE) {
+    assert.ok(
+      librariesBlock().includes(`\`${library.name}\` (${library.label},`),
+      `the block names ${library.name} as ${library.label}`,
+    )
+  }
+  // And the file the host refuses by is the same list, with what each name answers with and costs:
+  // a name the app answers but the host refuses is a bot told to ask for what it cannot write.
+  assert.deepEqual(
+    Object.keys(carried),
+    CATALOGUE.map((one) => one.name),
+    "libraries.json names the catalogue's libraries, in its order",
+  )
+  assert.deepEqual(
+    carried,
+    Object.fromEntries(CATALOGUE.map((one) => [one.name, { global: one.global, bytes: one.bytes }])),
+    "and each one carries its global and its measured size",
+  )
 })
