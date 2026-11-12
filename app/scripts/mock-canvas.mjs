@@ -31,8 +31,10 @@ function page(prompt, title, version, edited) {
     <meta charset="utf-8">
     <title>${title}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- The page asks for one library by name, so the app has to answer that ask where it stands. -->
+    <!-- The page asks for two libraries by name, so the app has to answer each ask where it stands,
+         and each one is a source of its own rather than the same chunk. -->
     <script data-canvas-lib="chart"></script>
+    <script data-canvas-lib="d3"></script>
     <style>
       body { margin: 0; padding: 24px; background: var(--background); color: var(--foreground);
              font-family: system-ui, sans-serif; }
@@ -70,6 +72,9 @@ function page(prompt, title, version, edited) {
       (function () {
         var value = document.getElementById("value");
         var show = function (n) { value.textContent = String(n); };
+        // The page's second ask, used rather than only defined: d3 draws on the element it was
+        // handed, so a page that asked for two libraries is drawn with both of them.
+        d3.select(value).attr("data-drawn-by", "d3");
         var store = window.canvas.data;
         // The count is the canvas's, not the page's: it opens at what the host kept, and each tap
         // is one write the app takes to the host.

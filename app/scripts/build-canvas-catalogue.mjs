@@ -27,10 +27,12 @@ export const ARTIFACT = fileURLToPath(new URL("../../plugin/canvas/prompt.txt", 
 export const LIBRARIES = fileURLToPath(new URL("../../plugin/canvas/libraries.json", import.meta.url))
 
 /**
- * `DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS` in Hermes's `hermes_cli/plugins_dispatch.py`, and `LIMIT`
- * in `plugin/openui.py`. A section past it is dropped whole at render, so the guide is held under it.
+ * The host's `DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS` in `hermes_cli/plugins_dispatch.py` (and
+ * `LIMIT` in `plugin/openui.py`) is 4,000, and a section past it is dropped whole at render. The gate
+ * is 20 under it on purpose: the guide is nearly full, and a render that merely fits the cap leaves
+ * no room for the next name the catalogue grows (ADR 0146).
  */
-export const MAX_CHARS = 4_000
+export const MAX_CHARS = 3_980
 
 /** The one place the template gives the block; the render refuses a template that moved it. */
 const SLOT = "{{libraries}}"

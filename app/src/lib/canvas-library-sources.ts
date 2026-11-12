@@ -25,6 +25,9 @@ export const LIBRARY_SOURCES: Record<CanvasLibrary, () => Promise<string>> = {
     import("../../node_modules/chart.js/dist/chart.umd.min.js?raw").then((one) => one.default),
   date: () => import("dayjs/dayjs.min.js?raw").then((one) => one.default),
   icons: () => import("lucide/dist/umd/lucide.min.js?raw").then((one) => one.default),
+  // d3's exports map names its UMD file `umd` and nothing else, so the file is reached by path.
+  d3: () => import("../../node_modules/d3/dist/d3.min.js?raw").then((one) => one.default),
+  alpine: () => import("alpinejs/dist/cdn.min.js?raw").then((one) => one.default),
 }
 
 /**

@@ -15,7 +15,7 @@ import {
   themeVariables,
 } from "../src/lib/canvas-document.ts"
 import { canvasClasses, CANVAS_THEME, compileCanvasCss } from "../src/lib/canvas-tailwind.ts"
-import { librariesBlock } from "./build-canvas-catalogue.mjs"
+import { MAX_CHARS, librariesBlock } from "./build-canvas-catalogue.mjs"
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -362,7 +362,8 @@ test("the classes compiled are the ones the page's class attributes name", () =>
 test("the canvas section names exactly the libraries and bridge methods the app has", () => {
   // The guide is what a bot is told it may ask for, and the app is what answers: a name in one and
   // not the other is a page that draws a hole where a library or a call should be. Over the host's
-  // 4,000-character section cap the section is dropped whole, so the guide's length is part of it.
+  // section cap the section is dropped whole, so the guide's length is part of it — and the gate is
+  // the generator's, so the prose is held to the number a render refuses at rather than the cap.
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
   const named = (pattern) => [...new Set([...guide.matchAll(pattern)].map((match) => match[1]))]
   // The Libraries block is composed from the catalogue, so its names cannot drift from the app's
@@ -372,7 +373,7 @@ test("the canvas section names exactly the libraries and bridge methods the app 
     "the guide carries the library block the catalogue renders: run `pnpm build:canvas-catalogue`",
   )
   assert.deepEqual(named(/canvas\.data\.([a-z]+)/g).sort(), [...BRIDGE_METHODS].sort())
-  assert.ok(guide.length <= 4_000, `the guide is ${guide.length} characters, under the host's 4,000`)
+  assert.ok(guide.length <= MAX_CHARS, `the guide is ${guide.length} characters, under the gate ${MAX_CHARS}`)
 })
 
 test("the canvas section names the skills it can load", () => {

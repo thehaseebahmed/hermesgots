@@ -1,15 +1,16 @@
 // A canvas on a phone, end to end: the page its bot writes and the chat it is edited in, each on a
 // screen of its own with one flip between them — a canvas made from a prompt opens on its chat
-// while the bot builds, Preview appears with the first version and draws the page, its head's ask
-// for Chart.js answered so the library runs inside the frame (the drawn page a refactor has to leave
-// as it was), a box ticked on the page is kept by the host, an edit sent from the chat lands as a new
-// version, Preview is where Undo is pressed, a page that asks to leave is refused and drawn again,
-// and the chat's Point row sends the reader to the page and takes the element they tap back as the
-// field's chip. A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with
-// an opaque origin of its own, the refusal of an outside navigation is the browser's own policy, the
-// outline and the tap that answer a point are that document's own script, a library's source is a
-// chunk only the browser runs (the component tier's loader loads no `?raw` source at all), and the
-// versions land from the mock's clock rather than a component test's single step.
+// while the bot builds, Preview appears with the first version and draws the page, its head's asks
+// for Chart.js and d3 answered so both libraries run inside the frame (the drawn page a refactor
+// has to leave as it was), a box ticked on the page is kept by the host, an edit sent from the chat
+// lands as a new version, Preview is where Undo is pressed, a page that asks to leave is refused
+// and drawn again, and the chat's Point row sends the reader to the page and takes the element
+// they tap back as the field's chip. A browser is the tier that holds it: the page is a sandboxed
+// `srcdoc` document with an opaque origin of its own, the refusal of an outside navigation is the
+// browser's own policy, the outline and the tap that answer a point are that document's own
+// script, a library's source is a chunk only the browser runs (the component tier's loader loads
+// no `?raw` source at all), and the versions land from the mock's clock rather than a component
+// test's single step.
 import { app, assert, flow, pass, SEND_CHORD } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
@@ -74,9 +75,19 @@ await flow(
       "function",
       "the page's ask for chart drew Chart.js inside the frame",
     )
+    // And a second ask in the same head is a second library, fetched as its own chunk: the page
+    // drew with `d3.select`, so what arrived is the library and not only a name on `window`.
+    assert.equal(
+      await frame()
+        .locator("#value")
+        .evaluate((el) => el.getAttribute("data-drawn-by")),
+      "d3",
+      "the page's ask for d3 drew with d3.select inside the frame",
+    )
     await shot("preview-first")
     pass("the preview screen: Preview appears with the first version and draws the page")
     pass("the preview screen: a page that asks for chart draws with Chart.js in the frame")
+    pass("the preview screen: a page that asks for d3 draws with d3.select in the frame")
 
     // The page's box is the canvas's own data, so the host is what keeps the tick.
     const [kept] = await Promise.all([

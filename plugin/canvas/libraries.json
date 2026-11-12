@@ -10,5 +10,13 @@
   "icons": {
     "global": "lucide",
     "bytes": 481206
+  },
+  "d3": {
+    "global": "d3",
+    "bytes": 280622
+  },
+  "alpine": {
+    "global": "Alpine",
+    "bytes": 55935
   }
 }

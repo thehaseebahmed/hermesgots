@@ -45,9 +45,10 @@ interface CanvasLibraryEntry {
 }
 
 /**
- * The library's own order, which is the order the guide names them in. Chart.js is UMD and needs no
- * preparation; Day.js and lucide are the same globals a CDN would have handed the page. Chart.js's
- * exports map does not publish `dist/`, so its file is reached by path.
+ * The library's own order, which is the order the guide names them in. Chart.js and d3 are UMD and
+ * need no preparation; Day.js and lucide are the same globals a CDN would have handed the page, and
+ * Alpine's CDN build is an IIFE that starts itself, so no call is taught for it either. Chart.js's
+ * and d3's exports maps do not publish a path to `dist/`, so their files are reached by path.
  */
 export const CATALOGUE = [
   {
@@ -74,6 +75,25 @@ export const CATALOGUE = [
     global: "lucide",
     call: "lucide.createIcons()",
     bytes: 481_206,
+  },
+  {
+    name: "d3",
+    label: "d3",
+    package: "d3",
+    source: "node_modules/d3/dist/d3.min.js",
+    global: "d3",
+    bytes: 280_622,
+  },
+  {
+    // The CDN build is an IIFE that names `window.Alpine` and starts itself on a microtask, so a
+    // page writes markup and no call: teaching `Alpine.start()` here would be the second start the
+    // build warns about, not a step the page owes.
+    name: "alpine",
+    label: "Alpine.js",
+    package: "alpinejs",
+    source: "alpinejs/dist/cdn.min.js",
+    global: "Alpine",
+    bytes: 55_935,
   },
 ] as const satisfies readonly CanvasLibraryEntry[]
 
