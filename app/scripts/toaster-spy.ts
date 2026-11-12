@@ -10,7 +10,12 @@ export interface Said {
   data?: { duration?: number }
 }
 
-export function spyToaster() {
+/**
+ * `sink` is given every sentence as it is said, in the order it is said — so a case that has to see
+ * the words arrive (a screen whose answer is awaited) polls an array that is already growing, rather
+ * than one filled when the toaster is put back.
+ */
+export function spyToaster(sink: string[] = []) {
   const heard: Said[] = []
   let dismissed = 0
   const real = {
@@ -24,6 +29,7 @@ export function spyToaster() {
     (tone: Said["tone"]) =>
     (text: string, data?: { duration?: number }) => {
       heard.push({ tone, text, data })
+      sink.push(String(text))
     }
   toast.error = take("error") as typeof toast.error
   toast.info = take("info") as typeof toast.info

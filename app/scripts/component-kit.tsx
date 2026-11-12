@@ -8,7 +8,6 @@ import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router"
-import { toast } from "sonner"
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
@@ -16,6 +15,8 @@ import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from 
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import type { SessionMessage } from "@/lib/hermes"
 import { clearShare } from "@/lib/share"
+
+import { spyToaster } from "./toaster-spy.ts"
 import { THINKING_WORD } from "@/lib/thinking"
 import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import { ChatPage } from "@/routes/chat"
@@ -479,26 +480,14 @@ export async function withReducedMotion(body: () => Promise<void>) {
  */
 export async function withToasts(body: (said: string[]) => Promise<void>) {
   // Every tone, not only the error one: a screen may answer in passing as a note or a success, and a
-  // case asserting "nothing was said" has to be able to hear those as well.
+  // case asserting "nothing was said" has to be able to hear those as well. The toaster fills `said`
+  // as it goes, since a case can be waiting for the first thing said.
   const said: string[] = []
-  const original = {
-    error: toast.error,
-    info: toast.info,
-    success: toast.success,
-    message: toast.message,
-  }
-  const take = () =>
-    ((message: unknown) => {
-      said.push(String(message))
-    }) as typeof toast.error
-  toast.error = take()
-  toast.info = take() as typeof toast.info
-  toast.success = take() as typeof toast.success
-  toast.message = take() as unknown as typeof toast.message
+  const toaster = spyToaster(said)
   try {
     await body(said)
   } finally {
-    Object.assign(toast, original)
+    toaster.restore()
     clearShare()
   }
 }
