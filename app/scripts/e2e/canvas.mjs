@@ -479,3 +479,59 @@ await flow(
   { viewport: { width: 1440, height: 900 } },
 )
 
+
+await flow(
+  "canvas-narrow",
+  async ({ page, shot }) => {
+    await page.goto(`${app}/canvas`)
+    await page.getByRole("textbox", { name: "What the canvas should be" }).fill(PROMPT)
+    await page.getByRole("button", { name: "Make it", exact: true }).click()
+    await page.waitForURL(/\/canvas\/c_[^/]+$/, { timeout: 20_000 })
+    await page.locator(FRAME).waitFor({ timeout: 40_000 })
+    await settled(page)
+    const measured = await page.evaluate((selector) => {
+      const box = (node) => {
+        if (!node) return null
+        const { x, y, width, height, right } = node.getBoundingClientRect()
+        return {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(width),
+          height: Math.round(height),
+          right: Math.round(right),
+        }
+      }
+      const send = [...document.querySelectorAll("button")].find(
+        (one) => one.getAttribute("aria-label") === "Send",
+      )
+      return {
+        lane: box(document.querySelector("[data-canvas-lane]")),
+        page: box(document.querySelector("[data-canvas-page]")),
+        frame: box(document.querySelector(selector)),
+        send: box(send),
+      }
+    }, FRAME)
+    console.log(
+      `narrow 1024 — lane ${at(measured.lane)}, page ${at(measured.page)}, ` +
+        `frame ${at(measured.frame)}, send ${at(measured.send)}`,
+    )
+    assert.ok(measured.lane && measured.page, "1024 draws two columns")
+    assert.ok(
+      Math.abs(measured.lane.width - measured.page.width) <= 1,
+      `a row too narrow for 412 beside 412 splits evenly (lane ${measured.lane.width}, ` +
+        `page ${measured.page.width})`,
+    )
+    assert.ok(
+      measured.lane.width < 412,
+      `and the lane gives up the list lane's width to do it (${measured.lane.width})`,
+    )
+    assert.ok(
+      measured.send && measured.send.right <= measured.lane.right,
+      `the chat's Send stays inside the lane (send right ${measured.send?.right}, ` +
+        `lane right ${measured.lane.right})`,
+    )
+    await shot("narrow-even-split")
+    pass("a narrow screen: the two panes split the row evenly, and the composer fits its lane")
+  },
+  { viewport: { width: 1024, height: 900 } },
+)

@@ -84,9 +84,10 @@ const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
 /**
  * The lane a canvas reads in beside its page: the house's 412px list lane — the width the app already
- * asks its text to read in — and never so wide that the page beside it is narrower than that.
+ * asks its text to read in — and never more than half the row, so a screen too narrow to hold 412
+ * beside 412 splits evenly instead of squeezing the page (or the chat's composer) to fit the lane.
  */
-const LANE = "flex min-h-0 flex-col lg:w-103 lg:max-w-[calc(100%_-_412px)] lg:shrink-0 lg:border-r"
+const LANE = "flex min-h-0 flex-col lg:w-103 lg:max-w-[50%] lg:shrink-0 lg:border-r"
 
 /** `min-h-0` lets the column shrink, so the chat's body scrolls and the column does not. */
 const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
