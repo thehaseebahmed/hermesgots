@@ -7,11 +7,11 @@
  * this one alone.
  */
 import { useCallback, useState } from "react"
-import { Trash2Icon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
+  DestructiveButton,
   FormActions,
   Group,
   RowText,
@@ -20,7 +20,6 @@ import {
   fieldLabelClass,
   linkRowClass,
 } from "@/components/settings-chrome"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   AlertDialog,
@@ -219,8 +218,9 @@ function NameSheet({
  * Placement is a name row that opens its own sheet — a text value is edited with Cancel and Save —
  * then Pin and Hide, which write the moment they are flipped. Under them, one row per tool of the
  * union: every tool this version declares, and every tool the host holds an answer for that this
- * version no longer declares, which is still the reader's to revoke. Last is Delete, which asks
- * first, since it takes the page, its data and its chat with it.
+ * version no longer declares, which is still the reader's to revoke. Last is Delete — the app's one
+ * destructive shape (`DestructiveButton`), under the last group rather than inside a card of its own,
+ * and it asks first, since it takes the page, its data and its chat with it.
  *
  * Every control is disabled while one of the sheet's writes is out, so a second tap can't be lost:
  * two answers for one canvas would land in either order, and a switch that moves under a tap is no
@@ -363,18 +363,12 @@ export function CanvasOptions({
               </Group>
             )}
 
-            <Group>
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-11 w-full justify-start rounded-full text-destructive"
-                disabled={!canvas || busy}
-                onClick={() => setAsking(true)}
-              >
-                <Trash2Icon data-icon="inline-start" />
-                Delete canvas
-              </Button>
-            </Group>
+            <DestructiveButton
+              disabled={!canvas || busy}
+              onClick={() => setAsking(true)}
+            >
+              Delete canvas
+            </DestructiveButton>
           </div>
         </PopupContent>
       </Popup>

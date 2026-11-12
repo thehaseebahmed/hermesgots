@@ -687,3 +687,56 @@ test(
     })
   }),
 )
+
+test(
+  "the options' Delete is the app's destructive pill",
+  atWidth(390, async () => {
+    // Deleting a canvas is the one act on this sheet that takes something away, so it wears the
+    // shape every page that destroys wears (`settings-chrome`'s `DestructiveButton`): the
+    // destructive ink over its 10% tint, in the app's pill, with the trash at its lead — and it
+    // stands under the last group rather than inside a card of its own, the place a bot's page and
+    // a server's sheet give theirs.
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], changes: [] }
+    serve(host, "c10")
+    await seedCanvas()
+    await mount(screen("c10"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+
+      const control = findText("[data-canvas-options] button", "Delete canvas")
+      assert.ok(control, "the options end on the control that deletes the canvas")
+      assert.equal(
+        control.closest("[data-settings-group]") !== null,
+        false,
+        "it stands under the last group, never inside a group of its own",
+      )
+      // Asked as booleans, never as elements: a failed assertion handed an element makes it inspect
+      // React's fiber graph (`test-component-assertions.mjs`'s rule).
+      const column = find("[data-canvas-options]")
+      assert.equal(
+        control.parentElement === column,
+        true,
+        "it is the options column's own child",
+      )
+      assert.equal(column?.lastElementChild === control, true, "and the last of them")
+
+      const classes = control.classList
+      assert.ok(classes.contains("bg-destructive/10"), "over the 10% tint that act carries")
+      assert.ok(classes.contains("text-destructive"), "in the destructive ink")
+      assert.ok(classes.contains("rounded-full"), "as the app's pill, not a red plate")
+      const icon = control.querySelector('svg[data-icon="inline-start"]')
+      assert.ok(icon, "with the trash at its lead")
+      assert.equal(control.firstElementChild, icon, "and nothing in front of it")
+
+      // And it still asks first: nothing has gone from the host while the question is up.
+      await click(control)
+      await until(() => find('[role="alertdialog"]') !== null, "the question before the delete")
+      await settle()
+      assert.equal(host.removed, undefined, "the canvas is still on its host while it asks")
+      await click(findText('[role="alertdialog"] button', "Delete"))
+      await until(() => host.changes?.[0]?.method === "DELETE", "the delete to be posted")
+      assert.equal(host.removed, true, "and the canvas goes once the question is answered")
+    })
+  }),
+)
