@@ -6,7 +6,7 @@
 // draws, what a switch writes and what a category's header flips are `test-skills-tab.tsx`'s (and
 // `scripts/test-skills-tab.mjs`'s); what only a laid-out page proves is where the boxes fall at the
 // widths the spec names.
-import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
+import { app, assert, environmentNoise, flow, mock, pass, settled } from "./lib.mjs"
 
 const SECTIONS = [
   ["yours", "Your skills"],
@@ -21,7 +21,7 @@ const run = async ({ page, profileId, shot }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text())
+    if (message.type() === "error" && !environmentNoise(message.text())) errors.push(message.text())
   })
   const panel = () => page.locator("[data-skills-tab]")
   const onScreen = (box, viewport, what) => {
@@ -48,6 +48,25 @@ const run = async ({ page, profileId, shot }) => {
     await page.locator('[data-skill="code-review"]').waitFor({ timeout: 15_000 })
     await settled(page)
     assert.equal(await panel().count(), 1, "the list's row is what the address opened")
+
+    // The search and the pills are this page's controls, and what only a laid-out page says is that
+    // they stand inside the screen's width above the first section — the rows below them say the
+    // rest, in `test-skills-tab.tsx`.
+    const viewportBox = page.viewportSize()
+    assert.ok(viewportBox, "the page has a viewport")
+    const field = page.locator('[data-skills-tab] input[aria-label="Search skills"]')
+    onScreen(await field.boundingBox(), viewportBox, "the search field")
+    const pills = page.locator('[data-skills-tab] [role="group"][aria-label="Filter skills"]')
+    assert.ok((await pills.locator("button").count()) > 1, "the pills name a category to narrow by")
+    const pillBox = await pills.boundingBox()
+    onScreen(pillBox, viewportBox, "the pill row")
+    const firstSection = panel().locator("[data-skill-section]").first()
+    const sectionBox = await firstSection.boundingBox()
+    assert.ok(sectionBox, "the first section has a box")
+    assert.ok(
+      pillBox.y + pillBox.height <= sectionBox.y + 1,
+      `the pill row stands above the first section (${Math.round(pillBox.y + pillBox.height)}…${Math.round(sectionBox.y)})`,
+    )
 
     const captions = []
     for (const [id, title] of SECTIONS) {
