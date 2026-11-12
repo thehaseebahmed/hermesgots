@@ -165,15 +165,48 @@ function askName(tag: string): string | null {
  */
 function commentSpans(html: string): Array<[number, number]> {
   const spans: Array<[number, number]> = []
+  const lower = html.toLowerCase()
   let at = 0
   for (;;) {
     const opened = html.indexOf("<!--", at)
     if (opened === -1) return spans
+    // `<!-->` and `<!--->` are complete comments, not openers: a parser closes them at once, and
+    // reading them as an unterminated comment would swallow every ask after them.
+    const next = html[opened + 4]
+    if (next === ">") {
+      spans.push([opened, opened + 5])
+      at = opened + 5
+      continue
+    }
+    if (next === "-" && html[opened + 5] === ">") {
+      spans.push([opened, opened + 6])
+      at = opened + 6
+      continue
+    }
+    // A `<!--` inside a script's or a style's own text is that element's text, not a comment the
+    // parser sees, so it opens nothing here either.
+    if (rawTextAt(lower, opened)) {
+      at = opened + 4
+      continue
+    }
     const closed = html.indexOf("-->", opened + 4)
     const end = closed === -1 ? html.length : closed + 3
     spans.push([opened, end])
     at = end
   }
+}
+
+/** Whether `at` falls inside a `<script>` or `<style>` element's own text, where markup is text. */
+function rawTextAt(lower: string, at: number): boolean {
+  for (const [open, close] of [
+    ["<script", "</script"],
+    ["<style", "</style"],
+  ]) {
+    const opened = lower.lastIndexOf(open, at)
+    if (opened === -1) continue
+    if (lower.lastIndexOf(close, at) < opened) return true
+  }
+  return false
 }
 
 /**
@@ -340,10 +373,12 @@ export function canvasDocument(
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
   return sandboxedDocument(page, {
     policy: CANVAS_CSP,
+    // The theme, then each library's own stylesheet, then the page's compiled classes: a floor under
+    // the page's look, so a page that styles a library's element itself still wins.
     afterPolicy:
       `<style>${themeVariables(tokens, mode)}</style>` +
-      (css ? `<style>${escapeStyle(css)}</style>` : "") +
-      libraryStyles(asks, libraries),
+      libraryStyles(asks, libraries) +
+      (css ? `<style>${escapeStyle(css)}</style>` : ""),
     afterSafety: `<script>${scrollBridge(scroll)}</script>` + `<script>${BRIDGE_SCRIPT}</script>`,
   })
 }

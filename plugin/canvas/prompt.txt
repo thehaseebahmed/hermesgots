@@ -13,7 +13,7 @@ One surface, one job, a real hierarchy: a title, a next step, one deliberate acc
 loading and error states, each saying what to do, with no explanatory copy.
 ## Colour and classes
 
-The app draws the page, its theme on `:root` as CSS variables for the reader's mode:
+The app draws the page, its theme on `:root` as CSS variables:
 
 `--background --foreground --card --card-foreground --primary --primary-foreground --secondary
 --secondary-foreground --muted --muted-foreground --accent --accent-foreground --border
@@ -58,7 +58,8 @@ meta, styles in `<style>`, script in `<script>`. Under 256 KB. No secrets: it is
 Chart.js, Day.js, lucide, d3, Alpine.js, Three.js and Leaflet are built in, no CDN: an empty
 `<script data-canvas-lib="NAME"></script>` becomes the library where it stands — `chart` (Chart.js,
 `Chart`), `date` (Day.js, `dayjs`), `icons` (lucide, `lucide.createIcons()`), `d3` (d3, `d3`),
-`alpine` (Alpine.js, `Alpine`), `three` (Three.js, `THREE`), `leaflet` (Leaflet, `L`).
+`alpine` (Alpine.js, `Alpine`; components via `Alpine.data`), `three` (Three.js, `THREE`), `leaflet`
+(Leaflet, `L`).
 
 ## Its data
 

@@ -1,6 +1,6 @@
 /**
  * The libraries a canvas may ask for by name: the one list the app's sources, the guide's block and
- * the host's refusal are all read from (ADR 0146).
+ * the host's refusal are all read from (ADR 0147).
  *
  * A page asks with an empty `<script data-canvas-lib="NAME"></script>`, and an entry here is what
  * the app can answer that ask with — its source read out of the app's own dependencies, since the
@@ -15,7 +15,7 @@
  *
  * An entry carries what the guide has to say about it too — the name it is called by, and the
  * expression a page writes to use it — because a block hand-written beside this list is the copy
- * that drifts. Adding a library is one entry here and one run of the build (ADR 0146).
+ * that drifts. Adding a library is one entry here and one run of the build (ADR 0147).
  */
 
 /** One library the app carries: what a page asks for, what the app imports, and what it costs. */
@@ -48,6 +48,8 @@ interface CanvasLibraryEntry {
    * JavaScript expects and no stylesheet can say — as the path it is read from.
    */
   setup?: string
+  /** One clause the guide adds after the global, where the global alone would mislead. */
+  hint?: string
 }
 
 /**
@@ -96,10 +98,15 @@ export const CATALOGUE = [
     // build warns about, not a step the page owes.
     name: "alpine",
     label: "Alpine.js",
-    package: "alpinejs",
-    source: "alpinejs/dist/cdn.min.js",
+    // The CSP build, not the standard one: Alpine evaluates directive expressions with `new
+    // Function`, and the frame's policy allows no `unsafe-eval`, so the standard build throws on
+    // every directive. This build interprets them instead, which is what a page can run here — at
+    // the cost of expressions being simple names or `Alpine.data` components.
+    package: "@alpinejs/csp",
+    source: "@alpinejs/csp/dist/cdn.min.js",
     global: "Alpine",
-    bytes: 55_935,
+    hint: "components via `Alpine.data`",
+    bytes: 72_242,
   },
   {
     // No build of three names a global any more, so the app bundles its ESM entry into one IIFE

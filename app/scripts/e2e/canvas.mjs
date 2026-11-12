@@ -10,7 +10,7 @@
 // A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque
 // origin of its own, the refusal of an outside navigation is the browser's own policy, the outline
 // and the tap that answer a point are that document's own script, a library's source is a chunk
-// only the browser runs (the component tier's loader loads no `?raw` source at all), what a visit
+// only the browser runs (the component tier loads the sources, but no page makes a request), what a visit
 // fetches is the browser's own request log rather than anything the build's output says, and the
 // versions land from the mock's clock rather than a component test's single step.
 import { app, assert, flow, mockJson, pass, SEND_CHORD } from "./lib.mjs"

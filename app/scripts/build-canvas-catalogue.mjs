@@ -22,7 +22,7 @@ export const TEMPLATE = fileURLToPath(new URL("./canvas-guide.in.txt", import.me
 export const ARTIFACT = fileURLToPath(new URL("../../plugin/canvas/prompt.txt", import.meta.url))
 
 /**
- * The names a canvas write is refused by (ADR 0146), read at import by `plugin/canvases.py`: a page
+ * The names a canvas write is refused by (ADR 0147), read at import by `plugin/canvases.py`: a page
  * asking for anything these do not carry is refused before it is stored.
  */
 export const LIBRARIES = fileURLToPath(new URL("../../plugin/canvas/libraries.json", import.meta.url))
@@ -31,7 +31,7 @@ export const LIBRARIES = fileURLToPath(new URL("../../plugin/canvas/libraries.js
  * The host's `DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS` in `hermes_cli/plugins_dispatch.py` (and
  * `LIMIT` in `plugin/openui.py`) is 4,000, and a section past it is dropped whole at render. The gate
  * is 20 under it on purpose: the guide is nearly full, and a render that merely fits the cap leaves
- * no room for the next name the catalogue grows (ADR 0146).
+ * no room for the next name the catalogue grows (ADR 0147).
  */
 export const MAX_CHARS = 3_980
 
@@ -79,11 +79,13 @@ function wrapped(text) {
 /**
  * The Libraries section — its heading and its one sentence — composed from the catalogue rather than
  * written beside it: the ask a page makes, then each name with what it is called and what it hands
- * the page. Adding a library is one catalogue entry and one run of this script (ADR 0146).
+ * the page. Adding a library is one catalogue entry and one run of this script (ADR 0147).
  */
 export function librariesBlock() {
   const items = CATALOGUE.map(
-    (library) => `\`${library.name}\` (${library.label}, \`${library.call ?? library.global}\`)`,
+    (library) =>
+      `\`${library.name}\` (${library.label}, \`${library.call ?? library.global}\`` +
+      `${library.hint ? `; ${library.hint}` : ""})`,
   )
   const are = CATALOGUE.length === 1 ? "is" : "are"
   return (

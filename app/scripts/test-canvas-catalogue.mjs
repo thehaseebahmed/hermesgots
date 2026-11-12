@@ -1,7 +1,7 @@
 /**
  * The canvas's guide and the host's `libraries.json` against the catalogue they are rendered from: a
  * bot is told what the build wrote, and a guide or a refusal list only one half of the repository
- * knows is a page drawing a hole, or a write refused for a library the app carries. ADR 0146 makes
+ * knows is a page drawing a hole, or a write refused for a library the app carries. ADR 0147 makes
  * the generator the one writer, so a drift is a failed gate rather than a bot reading stale words.
  */
 import assert from "node:assert/strict"
@@ -38,10 +38,19 @@ test("it fits the host's section limit instead of being dropped whole", () => {
   )
 })
 
+test("the guide states the cap the host really enforces", () => {
+  // A same-length edit can move this sentence and no pin or gate notices: the host refuses a page
+  // over 256 KB (`MAX_BYTES` in plugin/canvases.py) and a bot told otherwise writes one it loses.
+  assert.ok(
+    rendered.includes("Under 256 KB"),
+    "the guide names the 256 KB document cap plugin/canvases.py enforces",
+  )
+})
+
 test("the guide keeps the length it shipped with", () => {
   // The number is the guide's own. If it moves, a canvas session is told different words — a
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
-  assert.equal(rendered.length, 3_956, "the canvas's guide is 3,956 characters and stays that way")
+  assert.equal(rendered.length, 3_964, "the canvas's guide is 3,964 characters and stays that way")
 })
 
 test("the catalogue, the sources it writes and the guide it renders are one list", () => {
@@ -56,7 +65,9 @@ test("the catalogue, the sources it writes and the guide it renders are one list
     1,
     "the block lands once, where the slot was",
   )
-  const block = librariesBlock()
+  // The block is wrapped prose, so an entry's words may be split by a line: one space, wherever the
+  // wrap landed.
+  const block = librariesBlock().replace(/\s+/g, " ")
   for (const library of CATALOGUE) {
     assert.ok(
       block.includes(`\`${library.name}\` (${library.label},`),

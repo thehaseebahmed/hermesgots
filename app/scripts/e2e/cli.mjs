@@ -597,7 +597,7 @@ async function serve(name, port, command, args, env = {}) {
 const serveApp = () => {
   if (appUrl) return appUrl
   // The canvas route imports the libraries' generated sources as text, so a clean checkout has none
-  // of them until the build script makes them (ADR 0146): run it before Vite, which fails a literal
+  // of them until the build script makes them (ADR 0147): run it before Vite, which fails a literal
   // `?raw` import it cannot resolve.
   const built = spawnSync("pnpm", ["build:canvas-libraries"], { cwd: appDir, stdio: "inherit" })
   if (built.status !== 0) throw new Error("the canvas libraries didn't build; see app/src/lib/generated")

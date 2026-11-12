@@ -37,7 +37,7 @@ export const LIBRARY_SOURCES: Record<CanvasLibrary, () => Promise<CanvasLibraryS
   // d3's exports map names its UMD file `umd` and nothing else, so the file is reached by path.
   d3: () =>
     import("../../node_modules/d3/dist/d3.min.js?raw").then((one) => ({ script: one.default })),
-  alpine: () => import("alpinejs/dist/cdn.min.js?raw").then((one) => ({ script: one.default })),
+  alpine: () => import("@alpinejs/csp/dist/cdn.min.js?raw").then((one) => ({ script: one.default })),
   // three's package is ESM only, so what is read here is the IIFE the build made of it.
   three: () => import("./generated/three.js?raw").then((one) => ({ script: one.default })),
   // Leaflet's stylesheet names its images relative to itself, which a srcdoc page resolves nowhere,

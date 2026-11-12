@@ -22,6 +22,7 @@
     "e2e": "node scripts/e2e/cli.mjs"
   },
   "dependencies": {
+    "@alpinejs/csp": "^3.17.5",
     "@base-ui/react": "^1.8.0",
     "@capacitor/android": "^8.5.2",
     "@capacitor/app": "^8.1.2",

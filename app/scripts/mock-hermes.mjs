@@ -536,7 +536,7 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // Canvases (mock-canvas.mjs); MOCK_CANVAS=0 serves a plugin from before them, so their routes 404
 // and `canvas` is missing from the features. POST /__mock/canvas { fixture } seeds one of
 // mock-canvas.mjs's pages at its first version, so a flow can visit a page whose asks it knows
-// without a bot writing it: `plain` asks for no library, `three` for chart, d3 and Day.js.
+// without a bot writing it: `plain` asks for no library, `many` for chart, d3 and Day.js.
 const CANVAS = process.env.MOCK_CANVAS !== "0"
 const CANVASES = createCanvasStore()
 // Rooms (mock-rooms.mjs): MOCK_ROOMS=0 is a plugin whose host has no room driver, so its routes 404,

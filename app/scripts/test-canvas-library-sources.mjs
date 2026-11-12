@@ -54,12 +54,19 @@ test("each thunk reads the file the catalogue names", () => {
       : file.startsWith("node_modules/")
         ? `../../${file}`
         : file
-  for (const one of CATALOGUE)
+  for (const one of CATALOGUE) {
+    // Under its own key, not merely somewhere in the module: two entries could swap files and every
+    // other check would still pass, since the size check measures the entry and the chunk check a
+    // marker. The window is the thunk's own body — no thunk here is longer than a few lines.
+    const at = code.indexOf(`${one.name}: `)
+    assert.ok(at > -1, `${one.name} has a thunk of its own`)
+    const thunk = code.slice(at, at + 700)
     for (const file of [one.source, one.css, one.setup].filter(Boolean))
       assert.ok(
-        code.includes(`import("${specifier(file)}?raw")`),
-        `${one.name} says ${file}, and no thunk imports it`,
+        thunk.includes(`"${specifier(file)}?raw"`),
+        `${one.name}'s thunk imports ${file}, and no other`,
       )
+  }
 })
 
 test("every library the catalogue names has a thunk of its own", () => {

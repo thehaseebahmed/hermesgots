@@ -29,7 +29,7 @@ assert.ok(entry, "dist/index.html names the chunk the chat route loads")
 
 /**
  * The canvas route's own chunk, which inlines a library's text for a page that asked for it
- * (ADR 0146): that text carries the same words as the drawing code, so a chunk holding it is no
+ * (ADR 0147): that text carries the same words as the drawing code, so a chunk holding it is no
  * drawing chunk — it is data the canvas route alone reaches, and nothing draws it.
  */
 const canvas = canvasRoute()

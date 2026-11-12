@@ -313,7 +313,8 @@ test("a library's stylesheet rides the head and its setup follows its source", (
   // Leaflet's stylesheet names its images relative to itself, which a srcdoc page resolves nowhere,
   // and its default marker is named by its JavaScript rather than its CSS. So a library may hand the
   // page a stylesheet and a setup, and each has one place: the stylesheet in the head, after the
-  // theme and the compiled classes, and the setup right after the source it belongs to.
+  // theme and before the page's compiled classes — a floor under the page's own look — and the
+  // setup right after the source it belongs to.
   const page = PAGE.replace(
     "<title>Tip</title>",
     '<title>Tip</title>\n    <script data-canvas-lib="leaflet"></script>',
@@ -331,9 +332,9 @@ test("a library's stylesheet rides the head and its setup follows its source", (
   })
   const head = headOf(html)
   assert.ok(head.includes(leaflet.css), "the stylesheet is in the page's head")
-  // After the theme and the compiled classes…
+  // After the theme, and before the page's compiled classes, so the page still wins…
   assert.ok(head.indexOf("--background") < head.indexOf(leaflet.css))
-  assert.ok(head.indexOf(".p-4{padding:1rem}") < head.indexOf(leaflet.css))
+  assert.ok(head.indexOf(leaflet.css) < head.indexOf(".p-4{padding:1rem}"))
   // …and before anything the page wrote, so a stylesheet of the page's own still wins.
   assert.ok(head.indexOf(leaflet.css) < head.indexOf("<title>Tip</title>"))
   assert.ok(html.indexOf(leaflet.css) < html.indexOf('<style>.mine{margin:0}</style>'))
