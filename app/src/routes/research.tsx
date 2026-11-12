@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useLocation, useNavigate, useParams } from "react-router"
 import {
   ArrowUpIcon,
+  BadgeCheckIcon,
   BookAIcon,
   BookMarkedIcon,
   BookOpenTextIcon,
@@ -29,6 +30,7 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
+import { VerdictCanvas, VerifyBriefForm, VerifyScopeForm } from "@/components/verify"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
@@ -89,6 +91,7 @@ import {
   revisionReason,
   rewriteMission,
   toMarkdown,
+  typeOf,
   useMission,
   useMissions,
   type Mission,
@@ -105,14 +108,56 @@ const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   quiz: ListChecksIcon,
   glossary: BookAIcon,
   memo: ScaleIcon,
+  verdict: BadgeCheckIcon,
 }
 
 /** The picture of the bot running the mission. */
 const useMissionBotId = (mission: Mission) =>
   useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])?.botId
 
+type MissionView = {
+  Brief: (props: { mission: Mission }) => ReactNode
+  Scope: (props: { mission: Mission; botId?: string }) => ReactNode
+  /** The one canvas a delivered mission draws; without one it draws its formats'. */
+  Canvas?: (props: { mission: Mission; onCite: (id: string) => void }) => ReactNode
+  /** The confirmed brief's line and the facts under it. */
+  summary: (mission: Mission) => { line: string; facts: (string | undefined)[] }
+}
+
+const guideSummary: MissionView["summary"] = (mission) => ({
+  line: mission.goal,
+  facts: [
+    formatName(mission.format),
+    mission.depth === "deep" ? "In depth" : "Overview",
+    mission.audience,
+  ],
+})
+
+/** The forms and canvas a type draws: a type not listed is briefed and scoped as a guide. */
+const VIEWS: Partial<Record<MissionType, MissionView>> = {
+  compare: {
+    Brief: CompareBriefForm,
+    Scope: CompareScopeForm,
+    Canvas: MemoCanvas,
+    summary: guideSummary,
+  },
+  verify: {
+    Brief: VerifyBriefForm,
+    Scope: VerifyScopeForm,
+    Canvas: VerdictCanvas,
+    summary: (mission) => ({
+      line: mission.verify?.restatement || mission.goal,
+      facts: [formatName(mission.format)],
+    }),
+  },
+}
+const viewOf = (type: MissionType): MissionView =>
+  VIEWS[type] ?? { Brief: BriefForm, Scope: ScopeForm, summary: guideSummary }
+
+/** The one format a comparison or a verification delivers, which isn't among `FORMATS`. */
+const SOLE_FORMATS: Partial<Record<OutputFormat, string>> = { memo: "Memo", verdict: "Verdict" }
 const formatName = (format: OutputFormat) =>
-  format === "memo" ? "Memo" : FORMATS.find((f) => f.id === format)!.name
+  SOLE_FORMATS[format] ?? FORMATS.find((f) => f.id === format)!.name
 
 /**
  * Research: start a mission from a question, and the missions so far by what they need. Where the
@@ -527,15 +572,16 @@ function MissionMenu({
   const [asking, setAsking] = useState(false)
   const [rewriting, setRewriting] = useState(false)
   const made = format && mission.formats.includes(format)
+  const { reworks } = typeOf(mission.type)
   const canAsk =
-    mission.type === "learn" &&
+    reworks &&
     mission.stage === "delivered" &&
     Boolean(mission.followups) &&
     mission.outline.length < MAX_OUTLINE &&
     !mission.making
-  // Learn & understand only; a rewrite that failed can be taken over by another model.
+  // A rewrite that failed can be taken over by another model.
   const canRewrite =
-    mission.type === "learn" &&
+    reworks &&
     Boolean(mission.revisions) &&
     !mission.making &&
     (mission.stage === "delivered" ||
@@ -698,7 +744,7 @@ function MissionHeader({
   onBack?: () => void
   actions?: ReactNode
 }) {
-  const type = MISSION_TYPES.find((t) => t.id === mission.type)!
+  const type = typeOf(mission.type)
   const profile = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])
   const by = [profile?.name, mission.researcher?.model].filter(Boolean).join(" · ")
   return (
@@ -746,6 +792,7 @@ function Thinking({ label }: { label: string }) {
 /** What the bot took from the question, all of it editable, before anything is committed. */
 function ReadBack({ mission }: { mission: Mission }) {
   const botId = useMissionBotId(mission)
+  const { Brief } = viewOf(mission.type)
   return (
     <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
       <h2 className="flex items-center gap-2.5 font-semibold">
@@ -756,12 +803,7 @@ function ReadBack({ mission }: { mission: Mission }) {
       {mission.busy === "brief" ? (
         <Thinking label="Reading your question" />
       ) : (
-        !mission.error &&
-        (mission.type === "compare" ? (
-          <CompareBriefForm key={mission.goal} mission={mission} />
-        ) : (
-          <BriefForm key={mission.goal} mission={mission} />
-        ))
+        !mission.error && <Brief key={mission.goal} mission={mission} />
       )}
     </div>
   )
@@ -832,14 +874,14 @@ function BriefForm({ mission }: { mission: Mission }) {
 /** The confirmed brief, folded to two lines, with a way back into it. */
 function BriefSummary({ mission }: { mission: Mission }) {
   const Icon = FORMAT_ICONS[mission.format]
+  const { line, facts } = viewOf(mission.type).summary(mission)
   return (
     <div className="flex items-start gap-3 rounded-3xl border bg-card px-4 py-3">
       <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="line-clamp-2 text-sm">{mission.goal}</p>
+        <p className="line-clamp-2 text-sm">{line}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {formatName(mission.format)} · {mission.depth === "deep" ? "In depth" : "Overview"} ·{" "}
-          {mission.audience}
+          {facts.filter(Boolean).join(" · ")}
         </p>
       </div>
       <Button
@@ -861,6 +903,7 @@ const MAX_POINTS = 6
 /** The Scope Gate: the outline and the kinds of source, and nothing is researched until approved. */
 function ScopeGate({ mission }: { mission: Mission }) {
   const botId = useMissionBotId(mission)
+  const { Scope } = viewOf(mission.type)
   return (
     <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
       <MissionError mission={mission} />
@@ -873,12 +916,7 @@ function ScopeGate({ mission }: { mission: Mission }) {
           <Thinking label="Proposing an outline" />
         </>
       ) : (
-        !mission.error &&
-        (mission.type === "compare" ? (
-          <CompareScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
-        ) : (
-          <ScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
-        ))
+        !mission.error && <Scope key={mission.outline.join("\n")} mission={mission} botId={botId} />
       )}
     </div>
   )
@@ -985,7 +1023,8 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
   const kept: OutputFormat[] = revision
     ? FORMATS.map((f) => f.id).filter((f) => revision.outputs[f]?.length)
     : []
-  const compared = mission.type === "compare"
+  const { reworks } = typeOf(mission.type)
+  const { Canvas } = viewOf(mission.type)
   const viewed = revision && !kept.includes(format) ? (kept[0] ?? format) : format
   const canvas: OutputFormat | "making" = revision
     ? viewed
@@ -1061,19 +1100,20 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
               </Banner>
             ) : (
               delivered &&
-              !compared && (
+              reworks && (
                 <FormatTabs mission={mission} value={format} onChange={setFormat} onMake={make} />
               )
             )}
             <div className="flex flex-col gap-1">
               <h2 className="text-2xl font-semibold tracking-tight">{mission.title}</h2>
               <p className="text-sm text-muted-foreground">
-                {formatName(viewed)} · {mission.found || "…"} sources · For{" "}
-                {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
+                {formatName(viewed)} · {mission.found || "…"} sources
+                {mission.audience &&
+                  ` · For ${mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}`}
               </p>
             </div>
-            {compared ? (
-              <MemoCanvas mission={shown} onCite={cite} />
+            {Canvas ? (
+              <Canvas mission={shown} onCite={cite} />
             ) : canvas === "making" ? (
               <MakingCanvas found={mission.found} />
             ) : canvas === "quiz" ? (
