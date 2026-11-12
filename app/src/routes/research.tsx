@@ -130,15 +130,39 @@ type MissionView = {
   Scope: (props: { mission: Mission; botId?: string }) => ReactNode
   /** The one canvas a delivered mission draws; without one it draws its formats'. */
   Canvas?: (props: { mission: Mission; onCite: (id: string) => void }) => ReactNode
+  /** The confirmed brief's line and the facts under it. */
+  summary: (mission: Mission) => { line: string; facts: (string | undefined)[] }
 }
+
+const guideSummary: MissionView["summary"] = (mission) => ({
+  line: mission.goal,
+  facts: [
+    formatName(mission.format),
+    mission.depth === "deep" ? "In depth" : "Overview",
+    mission.audience,
+  ],
+})
 
 /** The forms and canvas a type draws: a type not listed is briefed and scoped as a guide. */
 const VIEWS: Partial<Record<MissionType, MissionView>> = {
-  compare: { Brief: CompareBriefForm, Scope: CompareScopeForm, Canvas: MemoCanvas },
-  verify: { Brief: VerifyBriefForm, Scope: VerifyScopeForm, Canvas: VerdictCanvas },
+  compare: {
+    Brief: CompareBriefForm,
+    Scope: CompareScopeForm,
+    Canvas: MemoCanvas,
+    summary: guideSummary,
+  },
+  verify: {
+    Brief: VerifyBriefForm,
+    Scope: VerifyScopeForm,
+    Canvas: VerdictCanvas,
+    summary: (mission) => ({
+      line: mission.verify?.restatement || mission.goal,
+      facts: [formatName(mission.format)],
+    }),
+  },
 }
 const viewOf = (type: MissionType): MissionView =>
-  VIEWS[type] ?? { Brief: BriefForm, Scope: ScopeForm }
+  VIEWS[type] ?? { Brief: BriefForm, Scope: ScopeForm, summary: guideSummary }
 
 /** The one format a comparison or a verification delivers, which isn't among `FORMATS`. */
 const SOLE_FORMATS: Partial<Record<OutputFormat, string>> = { memo: "Memo", verdict: "Verdict" }
@@ -883,22 +907,14 @@ function BriefForm({ mission }: { mission: Mission }) {
 /** The confirmed brief, folded to two lines, with a way back into it. */
 function BriefSummary({ mission }: { mission: Mission }) {
   const Icon = FORMAT_ICONS[mission.format]
+  const { line, facts } = viewOf(mission.type).summary(mission)
   return (
     <div className="flex items-start gap-3 rounded-3xl border bg-card px-4 py-3">
       <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="line-clamp-2 text-sm">{mission.verify?.restatement || mission.goal}</p>
+        <p className="line-clamp-2 text-sm">{line}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {(mission.verify
-            ? [formatName(mission.format)]
-            : [
-                formatName(mission.format),
-                mission.depth === "deep" ? "In depth" : "Overview",
-                mission.audience,
-              ]
-          )
-            .filter(Boolean)
-            .join(" · ")}
+          {facts.filter(Boolean).join(" · ")}
         </p>
       </div>
       <Button

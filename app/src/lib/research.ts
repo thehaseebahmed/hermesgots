@@ -448,23 +448,18 @@ function toOutputs(raw: unknown): Outputs | undefined {
 }
 
 const ids = (value: unknown) => list(value).filter((id): id is string => typeof id === "string")
-const LABELS: readonly VerdictLabel[] = [
-  "supported",
-  "partly_supported",
-  "disputed",
-  "not_supported",
-  "refuted",
-  "cant_tell",
-  "thin",
-]
-const PART_STANCES: readonly PartStance[] = [
-  "supported",
-  "refuted",
-  "disputed",
-  "thin",
-  "not_supported",
-  "cant_tell",
-]
+export const VERDICT_NAMES: Record<VerdictLabel, string> = {
+  supported: "Supported",
+  partly_supported: "Partly supported",
+  disputed: "Disputed",
+  not_supported: "Not supported",
+  refuted: "Refuted",
+  cant_tell: "Can't tell",
+  thin: "Thin evidence",
+}
+
+const LABELS = Object.keys(VERDICT_NAMES) as VerdictLabel[]
+const PART_STANCES = LABELS.filter((label): label is PartStance => label !== "partly_supported")
 
 function toVerdict(raw: unknown): Verdict | undefined {
   const verdict = raw as Record<string, unknown> | null | undefined
@@ -939,16 +934,6 @@ function memoMarkdown(mission: Mission, cite: (ids?: string[]) => string) {
         : []),
     )
   return out
-}
-
-export const VERDICT_NAMES: Record<VerdictLabel, string> = {
-  supported: "Supported",
-  partly_supported: "Partly supported",
-  disputed: "Disputed",
-  not_supported: "Not supported",
-  refuted: "Refuted",
-  cant_tell: "Can't tell",
-  thin: "Thin evidence",
 }
 
 /** A part's stance as a word, a thin one saying which way it leans. */

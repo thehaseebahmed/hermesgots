@@ -95,6 +95,12 @@ class SpansTest(unittest.TestCase):
         self.assertEqual(out[-1], {"text": " Not backed.", "flagged": True})
 
 
+class SessionNameTest(unittest.TestCase):
+    def test_a_one_lane_missions_session_is_research_and_its_id(self):
+        self.assertEqual(research.session_of("m1", research.ONE_LANE), "research-m1")
+        self.assertEqual(research.lane_of_session("research-m1"), ("m1", research.ONE_LANE))
+
+
 class PassageTest(unittest.TestCase):
     def test_finds_a_passage_whatever_the_case_spacing_and_markup(self) -> None:
         page = page_words("")

@@ -78,7 +78,6 @@ SOURCE_NAMES = {
     "forums": "forums",
 }
 SESSION_PREFIX = "research-"
-# The name of a mission's lane when its type has only one: its session is research-<mission>.
 ONE_LANE = ""
 MAX_INPUT = 2000
 MAX_GOAL = 600
@@ -108,10 +107,8 @@ FETCH_MAX_BYTES = 6 * 1024 * 1024
 PAGE_CACHE = 24
 MONITOR_SECONDS = 2.0
 ACTIVE = {"queued", "running", "waiting_for_approval", "stopping"}
-# How a run that didn't complete can end.
-STOPPED = ("failed", "cancelled", "interrupted")
-# How a verification's claim bears on the part it names.
-STANCES = ("supports", "refutes", "context")
+INCOMPLETE_ENDS = ("failed", "cancelled", "interrupted")
+VERIFY_STANCES = ("supports", "refutes", "context")
 TOOL = "claim_add"
 
 # Set by register() and _wire_api_server.
@@ -269,7 +266,7 @@ def mission(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
                 "SELECT format, content FROM research_outputs WHERE mission_id = ?", (mission_id,)
             )
         }
-        found.update(type_of(found).derive(found))
+        found.update(type_of(found).derived_fields(found))
         if type_of(found).keeps_searches:
             found["searches"] = _searches(conn, found)
         found["revisions"] = [
@@ -1360,8 +1357,8 @@ def _verify_bearing(row: Any, args: Dict[str, Any]) -> Dict[str, Optional[str]]:
     parts = [p["id"] for p in _loads(row["parts"], [])]
     stance = args.get("stance")
     part = args.get("part")
-    if stance not in STANCES:
-        raise ResearchError(f"stance must be one of: {', '.join(STANCES)}.")
+    if stance not in VERIFY_STANCES:
+        raise ResearchError(f"stance must be one of: {', '.join(VERIFY_STANCES)}.")
     if part not in parts:
         raise ResearchError(f"part must be one of: {', '.join(parts)}.")
     return {"stance": stance, "part_id": part}
@@ -1462,7 +1459,7 @@ SCHEMA = {
             "part": {"type": "string", "description": "Claim checks only: the id of the part of the claim it bears on (p1, p2, ...)."},
             "stance": {
                 "type": "string",
-                "enum": list(STANCES),
+                "enum": list(VERIFY_STANCES),
                 "description": "Claim checks only: whether the passage supports or refutes that part, or is context that settles neither.",
             },
         },
@@ -2310,7 +2307,7 @@ VERDICT_SCHEMA = {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "properties": {"claim": {"type": "string"}, "stance": {"type": "string", "enum": list(STANCES)}},
+                            "properties": {"claim": {"type": "string"}, "stance": {"type": "string", "enum": list(VERIFY_STANCES)}},
                             "required": ["claim", "stance"],
                         },
                     },
@@ -2356,7 +2353,7 @@ def judge_claim(found: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(item, dict) or item.get("part") not in parts:
             continue
         for tag in item.get("claims") or []:
-            if not isinstance(tag, dict) or tag.get("claim") not in known or tag.get("stance") not in STANCES:
+            if not isinstance(tag, dict) or tag.get("claim") not in known or tag.get("stance") not in VERIFY_STANCES:
                 continue
             kept = {"claim": tag["claim"], "part": item["part"], "stance": tag["stance"]}
             if kept not in tags:
@@ -2417,8 +2414,7 @@ class MissionType:
     bearing: Callable[[Any, Dict[str, Any]], Dict[str, Optional[str]]]
     min_claims: Callable[[Dict[str, Any]], int]
     draft: Callable[[Path, Dict[str, Any]], None]
-    # Fields a read of a mission works out from what it holds.
-    derive: Callable[[Dict[str, Any]], Dict[str, Any]]
+    derived_fields: Callable[[Dict[str, Any]], Dict[str, Any]]
     # Whether a lane that stopped short fails the reading whatever was recorded: a verdict read in
     # one direction is the bias the lanes are there to remove.
     every_lane_completes: bool = False
@@ -2444,7 +2440,7 @@ MISSION_TYPES: Dict[str, MissionType] = {
         bearing=_no_bearing,
         min_claims=lambda found: MIN_CLAIMS,
         draft=_draft_learn,
-        derive=lambda found: {},
+        derived_fields=lambda found: {},
     ),
     "compare": MissionType(
         default_format=COMPARE_FORMAT,
@@ -2457,7 +2453,7 @@ MISSION_TYPES: Dict[str, MissionType] = {
         bearing=_compare_bearing,
         min_claims=lambda found: max(MIN_CLAIMS, 2 * len(found["options"])),
         draft=_draft_compare,
-        derive=lambda found: {
+        derived_fields=lambda found: {
             "decision": decide(found["options"], found["criteria"], found["outputs"].get(COMPARE_FORMAT))
         },
         formats_refused="A comparison has one format, the memo.",
@@ -2481,7 +2477,7 @@ MISSION_TYPES: Dict[str, MissionType] = {
         min_claims=lambda found: 1,
         draft=_draft_verify,
         # The verdict as it was worked out at delivery, never again on a read.
-        derive=lambda found: {"verdict": (found["outputs"].get(VERIFY_FORMAT) or {}).get("verdict")},
+        derived_fields=lambda found: {"verdict": (found["outputs"].get(VERIFY_FORMAT) or {}).get("verdict")},
         every_lane_completes=True,
         keeps_searches=True,
         formats_refused="A verification has one format, the verdict.",
@@ -2672,7 +2668,7 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
         enough = found["claims"] > (rounds[-1].get("claims") or 0)
     else:
         enough = found["claims"] >= type_of(found).min_claims(found)
-    stopped = status in STOPPED
+    stopped = status in INCOMPLETE_ENDS
     if not enough or (stopped and type_of(found).every_lane_completes):
         if stopped:
             reason = "The researcher stopped before recording enough sources."
@@ -2736,7 +2732,7 @@ def _reading_status(statuses: List[Optional[str]]) -> Optional[str]:
         if status in ACTIVE:
             return status
     for status in statuses:
-        if status in STOPPED:
+        if status in INCOMPLETE_ENDS:
             return status
     return statuses[0] if statuses else None
 
