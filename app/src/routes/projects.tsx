@@ -6,8 +6,6 @@ import {
   FolderKanbanIcon,
   PlusIcon,
   RefreshCwIcon,
-  RotateCcwIcon,
-  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { Navigate } from "react-router"
@@ -25,16 +23,10 @@ import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useAllLive, useAnyChange } from "@/lib/live"
 import { itemToOpen, useProjectsPane, type FeaturePane } from "@/lib/pane"
-import { readProjects } from "@/lib/projects"
+import { readProjects, makingProject, cloneLine, CLONE_FAILED } from "@/lib/projects"
 import { usePoll } from "@/lib/poll"
 import { createSignal, createStore } from "@/lib/store"
-import {
-  HermesError,
-  deleteProject,
-  retryProject,
-  type HermesConfig,
-  type HermesProject,
-} from "@/lib/hermes"
+import { HermesError, deleteProject, type HermesConfig, type HermesProject } from "@/lib/hermes"
 import { folderName } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
@@ -141,13 +133,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
   usePoll(refresh, streaming ? SAFETY_MS : LIST_MS, [], { immediate: false })
 
   const cloning = results?.some(
-    (result) =>
-      "projects" in result &&
-      result.projects.some(
-        (p) =>
-          p.status === "cloning" ||
-          p.folders.some((f) => f.status === "cloning" || f.status === "removing"),
-      ),
+    (result) => "projects" in result && result.projects.some(makingProject),
   )
   usePoll(() => setTick((n) => n + 1), HOST_WORK_MS, [], {
     active: Boolean(cloning && !streaming),
@@ -194,9 +180,10 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
   })
 
   // The detail pane opens the one opened last, else the top one; it waits for the first answer.
+  // Everything that opens counts, a failed project's page included: only one still cloning has none.
   const keys = results
     ? rows
-        .filter((row) => row.project.status === "ready")
+        .filter((row) => row.project.status !== "cloning")
         .map((row) => `${row.profile.id}/${row.project.id}`)
     : undefined
   const joined = keys?.join("\n")
@@ -359,64 +346,67 @@ function formatWhen(at: number, now: number) {
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
 }
 
-/** A project the plugin is still cloning, or one whose clone failed. It has no page until it's ready. */
-function PendingItem({ row, onChanged }: { row: ProjectRow; onChanged: () => void }) {
+function CloneItem({
+  row,
+  pane,
+  onChanged,
+}: {
+  row: ProjectRow
+  pane?: FeaturePane
+  onChanged: () => void
+}) {
   const { profile, project } = row
   const [busy, setBusy] = useState(false)
   const failed = project.status === "failed"
-  const total = project.folders.length
-  const done = project.folders.filter((folder) => folder.status === "done").length
-  const act = async (action: typeof retryProject) => {
+  const cancel = async () => {
     setBusy(true)
     try {
-      await action(profile, project.id)
+      await deleteProject(profile, project.id)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "Couldn't update the project.")
     }
     setBusy(false)
     onChanged()
   }
+  if (failed) {
+    const key = `${profile.id}/${project.id}`
+    return (
+      <ItemRow
+        icon={<FolderGit2Icon />}
+        tone="warning"
+        botId={profile.botId}
+        title={project.name}
+        warn
+        line={<span className="truncate">{project.error ?? CLONE_FAILED}</span>}
+        selected={pane?.selected === key}
+        link={{
+          to: `/projects/${key}`,
+          replace: Boolean(pane?.open),
+          state: { project },
+        }}
+      />
+    )
+  }
   return (
     <div className="flex items-center gap-1">
       <div className="min-w-0 flex-1">
         <ItemRow
-          icon={failed ? <FolderGit2Icon /> : <Spinner />}
-          tone={failed ? "warning" : "success"}
+          icon={<Spinner />}
+          tone="success"
           botId={profile.botId}
           title={project.name}
-          warn={failed}
-          line={
-            <span className="truncate">
-              {failed
-                ? (project.error ?? "Couldn't clone.")
-                : total > 0
-                  ? `Cloning ${Math.min(done + 1, total)} of ${total}`
-                  : "Creating…"}
-            </span>
-          }
+          line={<span className="truncate">{cloneLine(project)}</span>}
         />
       </div>
-      {failed && (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          disabled={busy}
-          onClick={() => void act(retryProject)}
-          aria-label={`Retry ${project.name}`}
-        >
-          <RotateCcwIcon />
-        </Button>
-      )}
       <Button
         variant="ghost"
         size="icon-lg"
         className="size-11 rounded-full"
         disabled={busy}
-        onClick={() => void act(deleteProject)}
-        aria-label={failed ? `Remove ${project.name}` : `Cancel ${project.name}`}
+        onClick={() => void cancel()}
+        aria-label={`Cancel ${project.name}`}
       >
-        {failed ? <Trash2Icon /> : <XIcon />}
+        <XIcon />
       </Button>
     </div>
   )
@@ -434,7 +424,7 @@ function ProjectItem({
   onChanged: () => void
 }) {
   const { profile, project, at } = row
-  if (project.status !== "ready") return <PendingItem row={row} onChanged={onChanged} />
+  if (project.status !== "ready") return <CloneItem row={row} pane={pane} onChanged={onChanged} />
   const repos = repoLine(project)
   const key = `${profile.id}/${project.id}`
   return (
