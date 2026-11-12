@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
 
-/** What a read that hasn't answered holds: one object, so a derivation over it isn't rebuilt. */
+/** What a read that hasn't answered holds: one array, so the derivation below isn't rebuilt. */
 const NO_SKILLS: Skill[] = []
 
 export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
@@ -51,29 +51,19 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [query, setQuery] = useState("")
-  // The pill the reader pressed, by its key, and All's to begin with. The tab's own state, never
-  // remembered beyond it: a remount (a different bot, another visit) opens on the whole list and an
-  // empty field.
+  // The pill the reader pressed, by its key: the tab's own, gone when it remounts.
   const [chosen, setChosen] = useState(ALL_SKILLS_KEY)
   const skills = state.status === "ok" ? state.skills : NO_SKILLS
-  // The pill and the words narrow the list before it is grouped: the sections, their captions and a
-  // category's own count all describe what is drawn, so a caption can never stand over rows the
-  // filter dropped. One derivation, memorised the way the chat list memorises its own filter and
-  // search (`bot-chats.tsx`) — for the two screens to read alike, not for what a render costs.
+  // Narrowed before it is grouped, so the sections, their captions and a category's own count all
+  // describe what is drawn; memorised so a switch's own state changing does not rebuild it.
   const { pills, pressed, kept, sections } = useMemo(() => {
     const pills = skillPills(skills)
-    // A pill's category can leave with the last skill in it, so the press falls back to All rather
-    // than to a key the row no longer offers, until the effect below hands the state back.
+    // A category leaves with the last skill in it, so the press falls back to All rather than to a
+    // key the row no longer offers.
     const pressed = pills.some((pill) => pill.key === chosen) ? chosen : ALL_SKILLS_KEY
     const kept = skillsKept(skills, pressed, query)
     return { pills, pressed, kept, sections: skillSections(kept) }
   }, [skills, chosen, query])
-  // The press does not linger on a category that has gone: the tab already draws All, and this hands
-  // the state back too, so a category a later read brings back isn't pressed by a tap nobody made.
-  useEffect(() => {
-    if (chosen !== ALL_SKILLS_KEY && !pills.some((pill) => pill.key === chosen))
-      setChosen(ALL_SKILLS_KEY)
-  }, [chosen, pills])
   if (answer !== "yes") return null
   if (state.status === "loading") return null
 

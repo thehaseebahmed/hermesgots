@@ -1045,7 +1045,6 @@ test("the search and the pills narrow the tab, and the words narrow what the pil
     await type(searchSkills(), "")
     assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "emptying the words leaves the pill's rows")
 
-    // A skill with no category is kept by All alone: a pill exists only for a category the tab holds.
     await click(pillWord("All"))
     assert.ok(row("plan"), "All keeps the skill with no category")
     for (const category of filterSkills().map(wordsOf).slice(1)) {
@@ -1085,7 +1084,6 @@ test("a pressed category that leaves the tab hands the press back to All", async
     await drawn()
     await click(pillWord("review"))
     assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows")
-    // The category goes with the last skill in it: its two skills are taken away, one note at a time.
     for (const name of ["pr-review", "pr-land"]) {
       await openNote(name)
       await click(removeButton())

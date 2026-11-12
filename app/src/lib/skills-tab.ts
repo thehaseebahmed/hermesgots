@@ -1,9 +1,9 @@
 /**
  * What the Skills tab draws from the one skills list: how a row says it is doing, the sections and
- * category groups it sits in, and the pills and the words that narrow it. Kept browserless — its only
- * imports are types and two import-free rules, `skills-cache.ts`'s answer for what "doesn't load"
- * means and `fuzzy.ts`'s matcher — so `scripts/test-skills-tab.mjs` drives it under `node --test` (as
- * `mcp-server.ts` is for the MCP rows).
+ * category groups it sits in, and the pills and the words that narrow it. Kept browserless — its
+ * imports are types and three import-free rules, `compare.ts`'s name order, `fuzzy.ts`'s matcher and
+ * `skills-cache.ts`'s answer for what "doesn't load" means — so `scripts/test-skills-tab.mjs` drives
+ * it under `node --test` (as `mcp-server.ts` is for the MCP rows).
  */
 import type { Skill, SkillView } from "@/lib/hermes"
 import { byName } from "./compare.ts"
