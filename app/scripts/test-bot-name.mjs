@@ -1,177 +1,140 @@
 /**
- * A bot's label: what a list calls a bot, read off the host it answers at rather than the name that
- * host sealed for it. Every default profile is called "Hermes" on its own host, so two linked hosts
- * used to draw two identical rows (`bot-name.ts`).
+ * A bot's label: the name its host gave it, and the host it answers at only where another bot of that
+ * name answers somewhere else (ADR 0149).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { botLabel, botLabels, labelOf } from "../src/lib/bot-name.ts"
+import { botLabel, botLabels, byBotLabel, labelOf } from "../src/lib/bot-name.ts"
 
-/** A bot as a list hands it over: an id, the address it answers at, and the name it was sealed with. */
+/** A bot as a list hands it over: an id, the address it answers at, and the name its host sealed. */
 const bot = (id, baseUrl, name = "Hermes") => ({ id, baseUrl, name })
 
-test("a host reads as its short name", () => {
-  const hermes = bot("a", "https://hermes.domain.com/v1")
-  assert.equal(botLabel(hermes, [hermes]), "hermes")
-  const pair = [hermes, bot("b", "https://api.domain.com/v1")]
+test("a bot alone in a list reads its own name, and no host", () => {
+  const one = bot("a", "https://hermes.domain.com/v1", "Studio")
+  assert.equal(botLabel(one, [one]), "Studio")
+})
+
+test("one name on two hosts says each host, and nothing else is lengthened", () => {
+  const three = [
+    bot("a", "https://alpha.example.com/v1", "Alpha"),
+    bot("b", "https://beta.example.com/v1", "Beta"),
+    bot("c", "https://gamma.example.com/v1", "Alpha"),
+  ]
   assert.deepEqual(
-    pair.map((one) => botLabel(one, pair)),
-    ["hermes", "api"],
-    "two hosts of one domain are told apart by their own names",
+    three.map((one) => botLabel(one, three)),
+    ["Alpha (alpha)", "Beta", "Alpha (gamma)"],
+    "a name nobody shares is drawn as it is, which is the whole of the rule",
   )
 })
 
-test("two hosts sharing a short name read as their domain parts", () => {
-  const pair = [bot("a", "https://hermes.domain.com/v1"), bot("b", "https://hermes.example.com/v1")]
+test("one name twice on one host says no host at all", () => {
+  const twins = [
+    bot("a", "https://hermes.domain.com/v1"),
+    bot("b", "https://hermes.domain.com/p/work/v1"),
+  ]
   assert.deepEqual(
-    pair.map((one) => botLabel(one, pair)),
-    ["domain", "example"],
+    twins.map((one) => botLabel(one, twins)),
+    ["Hermes", "Hermes"],
+    "the host tells the two apart from nothing, so it is not the thing that says which is which",
   )
 })
 
-test("a domain part long enough to still collide falls back to the whole host", () => {
+test("two hosts wearing one short name read as their domain parts", () => {
   const pair = [
     bot("a", "https://hermes.domain.co.uk/v1"),
     bot("b", "https://hermes.domain.com/v1"),
   ]
+  assert.deepEqual(pair.map((one) => botLabel(one, pair)), ["Hermes (domain.co)", "Hermes (domain)"])
+})
+
+test("domain parts long enough to collide still fall back to the whole host", () => {
+  const pair = [bot("a", "https://hermes.domain.com/v1"), bot("b", "https://hermes.domain.co/v1")]
+  assert.deepEqual(pair.map((one) => botLabel(one, pair)), [
+    "Hermes (hermes.domain.com)",
+    "Hermes (hermes.domain.co)",
+  ])
+})
+
+test("names are compared case-blind, so two spellings of one name still say their hosts", () => {
+  const pair = [
+    bot("a", "https://one.example.com/v1", "Studio"),
+    bot("b", "https://two.example.com/v1", "studio"),
+  ]
   assert.deepEqual(
     pair.map((one) => botLabel(one, pair)),
-    ["domain.co", "domain"],
-  )
-  const triple = [...pair, bot("c", "https://hermes.domain.co/v1")]
-  assert.deepEqual(
-    triple.map((one) => botLabel(one, triple)),
-    ["domain.co", "hermes.domain.com", "hermes.domain.co"],
-    "the two that collide say their whole host, and one that stands alone keeps its domain part",
+    ["Studio (one)", "studio (two)"],
+    "each row keeps the spelling its own host sealed",
   )
 })
 
-test("a host is only made to say its whole address by a rival of its own name", () => {
-  const three = [
-    bot("a", "https://hermes.domain.com/v1"),
-    bot("b", "https://hermes.example.com/v1"),
-    bot("c", "https://api.example.com/v1"),
-  ]
-  assert.deepEqual(
-    three.map((one) => botLabel(one, three)),
-    ["domain", "example", "api"],
-    "a host another domain happens to share says nothing about the two that share a name",
-  )
-})
-
-test("one host's several bots append the profile they are reached at", () => {
-  const host = [
-    bot("a", "https://hermes.domain.com/v1"),
-    bot("b", "https://hermes.domain.com/p/work/v1", "work"),
-  ]
-  assert.deepEqual(
-    host.map((one) => botLabel(one, host)),
-    ["hermes", "hermes/work"],
-  )
-  assert.deepEqual(
-    host.map((one) => botLabel(one, [...host, bot("c", "https://other.example.com/p/home/v1")])),
-    ["hermes", "hermes/work"],
-    "another host's profiles change nothing about this one",
-  )
-})
-
-test("two hosts' profiles read with the domain part and the profile", () => {
-  const four = [
-    bot("a", "https://hermes.domain.com/v1"),
-    bot("b", "https://hermes.domain.com/p/work/v1", "work"),
-    bot("c", "https://hermes.example.com/v1"),
-    bot("d", "https://hermes.example.com/p/home/v1", "home"),
-  ]
-  assert.deepEqual(
-    four.map((one) => botLabel(one, four)),
-    ["domain", "domain/work", "example", "example/home"],
-  )
-})
-
-test("two bots linked at one host and one profile are told apart by their own names", () => {
-  const twins = [
-    bot("a", "https://hermes.domain.com/v1", "Work"),
-    bot("b", "https://hermes.domain.com/v1", "Home"),
-  ]
-  assert.deepEqual(
-    twins.map((one) => botLabel(one, twins)),
-    ["Work", "Home"],
-    "the host tells them apart from nothing at all, so the name is the whole of the difference",
-  )
-})
-
-test("the app's own name is never a label", () => {
-  const hermes = bot("a", "https://hermes.domain.com/v1", "Hermes")
-  assert.equal(botLabel(hermes, [hermes]), "hermes")
-})
-
-test("a bot with no server keeps its own name, and one with no name at all is a bot", () => {
-  const unlinked = bot("a", "", "Notes")
-  assert.equal(botLabel(unlinked, [unlinked]), "Notes")
-  const anonymous = bot("b", "   ", "Hermes")
+test("a bot with no name is a bot, and a peer with no server makes no namesake", () => {
+  const anonymous = bot("a", "https://hermes.domain.com/v1", "   ")
   assert.equal(botLabel(anonymous, [anonymous]), "Bot")
+  const unlinked = bot("b", "", "Notes")
+  assert.equal(botLabel(unlinked, [unlinked]), "Notes")
+  assert.equal(
+    botLabel(unlinked, [unlinked, bot("c", "https://hermes.domain.com/v1", "Notes")]),
+    "Notes",
+    "a peer with no server has no host to draw, so it does not lengthen the one that has one",
+  )
 })
 
 test("a bare host keeps its port, the only thing telling two of them apart", () => {
   const pair = [bot("a", "http://localhost:8642/v1"), bot("b", "http://localhost:8643/v1")]
-  assert.deepEqual(
-    pair.map((one) => botLabel(one, pair)),
-    ["localhost:8642", "localhost:8643"],
-  )
+  assert.deepEqual(pair.map((one) => botLabel(one, pair)), [
+    "Hermes (localhost:8642)",
+    "Hermes (localhost:8643)",
+  ])
 })
 
-test("a base URL with no scheme names its host, rather than reading as no host at all", () => {
+test("a base URL with no scheme names its host rather than reading as no host at all", () => {
   const pair = [bot("a", "hermes.domain.com:8642"), bot("b", "hermes.example.com:8642")]
-  assert.deepEqual(
-    pair.map((one) => botLabel(one, pair)),
-    ["domain", "example"],
-    "a hand-typed address is read for its host, not floored to a bot",
-  )
-  const one = bot("c", "localhost:8642")
-  assert.equal(botLabel(one, [one]), "localhost:8642", "and a bare one keeps its port")
+  assert.deepEqual(pair.map((one) => botLabel(one, pair)), ["Hermes (domain)", "Hermes (example)"])
 })
 
 test("an address is read whole, port and all", () => {
   const lan = [bot("a", "http://192.168.1.50:8642/v1"), bot("b", "http://192.168.1.51:8642/v1")]
   assert.deepEqual(lan.map((one) => botLabel(one, lan)), [
-    "192.168.1.50:8642",
-    "192.168.1.51:8642",
+    "Hermes (192.168.1.50:8642)",
+    "Hermes (192.168.1.51:8642)",
   ])
-  const mixed = [bot("c", "http://127.0.0.1:8642/v1"), bot("d", "http://localhost:8642/v1")]
-  assert.deepEqual(
-    mixed.map((one) => botLabel(one, mixed)),
-    ["127.0.0.1:8642", "localhost:8642"],
-    "and two loopback hosts are told apart by the little that differs",
-  )
 })
 
-test("a profile reached at /p/ with a query is still that profile", () => {
-  const pair = [
-    bot("a", "https://h.example.com/v1"),
-    bot("b", "https://h.example.com/p/work/v1?tenant=1"),
+test("a list's labels are read once, and a bot the list never saw is read alone", () => {
+  const bots = [
+    bot("a", "https://alpha.example.com/v1", "Studio"),
+    bot("b", "https://beta.example.com/v1", "Studio"),
   ]
-  assert.deepEqual(pair.map((one) => botLabel(one, pair)), ["h", "h/work"])
-})
-
-test("a base URL that does not parse is its own host", () => {
-  const odd = bot("a", "hermes.local/gateway")
-  assert.equal(botLabel(odd, [odd]), "hermes")
-})
-
-test("a list's labels are read once, and a bot outside the list is named by its own host", () => {
-  const bots = [bot("a", "https://hermes.domain.com/v1"), bot("b", "https://hermes.example.com/v1")]
   const labels = botLabels(bots)
-  assert.equal(labels.get("a"), "domain")
-  assert.equal(labels.get("b"), "example")
+  assert.equal(labels.get("a"), "Studio (alpha)")
+  assert.equal(labels.get("b"), "Studio (beta)")
   assert.equal(
-    labelOf(labels, bot("c", "https://third.example.com/v1")),
-    "third",
-    "a bot the list never saw is read alone, by its host",
+    labelOf(labels, bot("c", "https://gamma.example.com/v1", "Studio")),
+    "Studio",
+    "no namesake in the list, so nothing to say a host against",
   )
-  assert.equal(
-    labelOf(undefined, bots[0]),
-    "hermes",
-    "and never by the name its host sealed, which is what this rule keeps out of a list",
+  assert.equal(labelOf(undefined, bots[0]), "Studio", "and a list with no labels at all reads alone")
+})
+
+test("a list of bots runs by its labels, case-blind and numeric, ties by id", () => {
+  const bots = [
+    bot("c", "https://three.example.com/v1", "zulu"),
+    bot("d", "https://four.example.com/v1", "session 10"),
+    bot("a", "https://one.example.com/v1", "Alpha"),
+    bot("b", "https://two.example.com/v1", "session 9"),
+  ]
+  const labels = botLabels(bots)
+  assert.deepEqual(
+    [...bots].sort(byBotLabel(labels)).map((one) => one.id),
+    ["a", "b", "d", "c"],
+    "a number reads as a number, and the case of a name changes nothing",
+  )
+  const twins = [bot("z", "https://host.example.com/v1"), bot("a", "https://host.example.com/v1")]
+  const twinLabels = botLabels(twins)
+  assert.deepEqual(
+    [...twins].sort(byBotLabel(twinLabels)).map((one) => one.id),
+    ["a", "z"],
+    "rows that read alike keep one order between them, so no list flickers",
   )
 })
