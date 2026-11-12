@@ -26,6 +26,7 @@ import { join, resolve } from "node:path"
 import test from "node:test"
 import ts from "typescript"
 
+import { TELL_TONES } from "../src/lib/tell-tones.ts"
 import { sourceFiles } from "./source-files.mjs"
 
 const SRC = resolve(import.meta.dirname, "../src")
@@ -35,8 +36,8 @@ const allowlist = JSON.parse(
   readFileSync(join(import.meta.dirname, "error-toast-allowlist.json"), "utf8"),
 )
 
-/** The tones that say a failure: a success and a note are covered because they carry one too. */
-const TONES = new Set(["error", "success", "note"])
+/** Every tone the seam can say, read off the seam's own list so a fifth tone cannot be forgotten. */
+const TONES = new Set(TELL_TONES)
 
 /** Why a place is allowed to keep a failure's words. */
 const REASONS = new Set([

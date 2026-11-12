@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core"
 import { toast } from "sonner"
 
 import { isNative } from "@/lib/platform"
+import { TELL_TONES } from "@/lib/tell-tones"
 
 /** The plugin's registration name, as `MainActivity` registers it: the phone's own toast. */
 const TOAST_PLUGIN = "Toast"
@@ -15,8 +16,12 @@ interface ToastPlugin {
 
 const Toast = registerPlugin<ToastPlugin>(TOAST_PLUGIN)
 
-/** The four things the app says in passing, named for what they draw in the page. */
-export type TellTone = "error" | "info" | "success" | "note"
+/**
+ * The four things the app says in passing, named for what they draw in the page: the type is
+ * `TELL_TONES`' own, so the tone list the guard over toasts reads and the set this seam draws are
+ * one list rather than two that agree today.
+ */
+export type TellTone = (typeof TELL_TONES)[number]
 
 /** Each tone as the page's toaster draws it: a note is its message, which carries no icon. */
 const page: Record<TellTone, (text: string, duration?: number) => void> = {
