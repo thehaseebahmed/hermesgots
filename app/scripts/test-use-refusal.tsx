@@ -8,9 +8,9 @@ import test from "node:test"
 import { useState } from "react"
 
 import { Refusal } from "@/components/banner"
-import { useRefusal } from "@/lib/use-refusal"
+import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 
-import { click, find, findText, mount, settle, until, wordsOf } from "./component-kit.tsx"
+import { click, find, findText, missing, mount, settle, until, wordsOf, withToasts } from "./component-kit.tsx"
 
 /** A write the test settles when it chooses: no host answers until it does. */
 function deferred() {
@@ -78,5 +78,26 @@ test("the tap made last is the one the surface answers", async () => {
       "The second tap was refused.",
       "an answer to an earlier tap does not replace the words of the last one",
     )
+  })
+})
+
+/** A surface with nothing standing to draw a refusal: what a row outside the chat's providers gets. */
+function Unheld() {
+  const refusal = useSaidRefusal()
+  return (
+    <button onClick={() => void refusal.write("the write", () => Promise.reject(new Error("The host said no.")))}>
+      Write
+    </button>
+  )
+}
+
+test("a hold with no notice draws nothing and says the host's words in passing", async () => {
+  await withToasts(async (said) => {
+    await mount(<Unheld />, async () => {
+      await click(findText("button", "Write"))
+      await until(async () => said.length > 0, "the host's words said in passing")
+      assert.deepEqual(said, ["The host said no."], "the host's own sentence, out loud")
+      assert.ok(missing('[role="alert"]'), "and nothing held where no notice could draw it")
+    })
   })
 })

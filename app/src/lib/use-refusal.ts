@@ -41,8 +41,8 @@ function useKeptRefusal(land: ((words: string) => void) | undefined, subject?: s
   const take = useCallback(
     (result: Attempted) => {
       const decided = refuse(result)
-      // `alone` is the app's own sentence by `refuse`'s decision — the one toast this change keeps,
-      // said where the host left nothing of its own to hold.
+      // `alone` is the app's own sentence by `refuse`'s decision — the one toast a refused write
+      // reaches, said where the host left nothing of its own to hold.
       if (decided.alone) tell.error(decided.alone)
       if (!land) return setWords(decided.hold)
       // Nothing draws a hold here, so the host's own words are said rather than kept.
@@ -96,6 +96,6 @@ export function useRefusal(subject?: string): RefusalHold {
  * words to stand, so they are said in passing — the same passing sentence the app uses for a host
  * that said nothing, and never both at once.
  */
-export function useSaidRefusal(subject?: string): RefusalHold {
-  return useKeptRefusal(say, subject)
+export function useSaidRefusal(): RefusalHold {
+  return useKeptRefusal(say)
 }
