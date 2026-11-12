@@ -2,6 +2,14 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { buildBoard, cleanDays, cleanProviders, handleCommunity, modelName } from "../netlify/lib/community.ts"
+import {
+  CATALOG_TTL_MS,
+  MODELS_DEV_URL,
+  fetchModelsDev,
+  knownModelIds,
+  knownModels,
+  modelKey,
+} from "../netlify/lib/models-dev.ts"
 
 const NOW = Date.UTC(2026, 9, 15, 12)
 const counts = (n) => ({ input: n, output: n, cacheWrite: 0, cacheRead: 0, calls: 1 })
@@ -203,4 +211,80 @@ test("providers are split by their own top five models; bad input is dropped, no
     cleanProviders({ "2026-10-15": { "Bad Name!": { m: 5 }, ok: { m: -1, n: 3 } }, "2020-01-01": { ok: { m: 1 } } }, NOW),
     { "2026-10-15": { ok: { n: 3 } } },
   )
+})
+
+test("a model id is looked up by its bare, lower-case spelling", () => {
+  assert.equal(modelKey("deepseek-v4-pro"), "deepseek-v4-pro")
+  assert.equal(modelKey("deepseek/deepseek-v4-pro"), "deepseek-v4-pro")
+  assert.equal(modelKey("deepseek/deepseek-v4.1-flash"), "deepseek-v4-1-flash")
+  assert.equal(modelKey("DeepSeek-V4.1-Flash"), "deepseek-v4-1-flash")
+})
+
+test("the catalogue's model ids are read off its providers", () => {
+  const payload = {
+    anthropic: { models: { "claude-opus-5-5": {}, "claude-sonnet-4.5": {} } },
+    deepseek: { models: { "deepseek/deepseek-v4-pro": {}, "deepseek-v4.1-flash": {} } },
+  }
+  assert.deepEqual([...knownModels(payload)].sort(), [
+    "claude-opus-5-5",
+    "claude-sonnet-4-5",
+    "deepseek-v4-1-flash",
+    "deepseek-v4-pro",
+  ])
+  // Anything that isn't the registry, or holds no id, is no answer at all.
+  for (const junk of ["nope", [], {}, { a: {} }, { a: { models: {} } }, { a: "nope" }]) {
+    assert.equal(knownModels(junk), null)
+  }
+})
+
+test("a fresh catalogue row answers without fetching", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: ["claude-opus-5-5", "gpt-5"], at: NOW })
+  const load = async () => {
+    throw new Error("a fresh row is not fetched")
+  }
+  assert.deepEqual(await knownModelIds(store, NOW, load), new Set(["claude-opus-5-5", "gpt-5"]))
+})
+
+test("a stale catalogue row is refreshed and written back", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: ["gone-model"], at: NOW - CATALOG_TTL_MS - 1 })
+  const load = async () => ({
+    anthropic: { models: { "claude-opus-5-5": {}, "claude-sonnet-4.5": {} } },
+  })
+  assert.deepEqual(
+    await knownModelIds(store, NOW, load),
+    new Set(["claude-opus-5-5", "claude-sonnet-4-5"]),
+  )
+  assert.deepEqual(store.data.get("models-dev"), {
+    models: ["claude-opus-5-5", "claude-sonnet-4-5"],
+    at: NOW,
+  })
+})
+
+test("a failed refresh keeps the stale set; with no row, the answer is nothing", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: ["claude-opus-5-5"], at: NOW - CATALOG_TTL_MS - 1 })
+  const down = async () => {
+    throw new Error("models.dev is down")
+  }
+  assert.deepEqual(await knownModelIds(store, NOW, down), new Set(["claude-opus-5-5"]))
+  // A payload that isn't the registry is no better an answer than an error.
+  assert.deepEqual(await knownModelIds(store, NOW, async () => "nope"), new Set(["claude-opus-5-5"]))
+  assert.equal(await knownModelIds(memoryStore(), NOW, down), null)
+})
+
+test("fetchModelsDev reads the registry and refuses an error", async () => {
+  const real = globalThis.fetch
+  try {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, MODELS_DEV_URL)
+      return Response.json({ anthropic: { models: { m: {} } } })
+    }
+    assert.deepEqual(await fetchModelsDev(), { anthropic: { models: { m: {} } } })
+    globalThis.fetch = async () => new Response("down", { status: 503 })
+    await assert.rejects(fetchModelsDev, /503/)
+  } finally {
+    globalThis.fetch = real
+  }
 })
