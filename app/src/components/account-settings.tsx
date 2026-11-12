@@ -9,6 +9,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { useCopiedCode } from "@/components/copied-code"
 import {
   AlertDialog,
@@ -40,7 +41,7 @@ import {
   unlockSyncWithRecoveryCode,
   useSyncState,
 } from "@/lib/sync"
-import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { supportsPasskeys } from "@/lib/vault"
 
 function message(error: unknown) {
@@ -55,9 +56,14 @@ export function AccountSettings() {
   const [pending, setPending] = useState<PendingSetup>()
   const [rotation, setRotation] = useState<{ code: string; confirm: () => Promise<void> }>()
   const [asking, setAsking] = useState(false)
+  // The section's own writes are answered in the card they were made in.
+  const refusal = useRefusal("account")
 
   const { account } = sync
   if (account.status === "loading" || account.status === "unavailable") return null
+
+  /** A write that threw, in the words this screen already gives each way one can. */
+  const failed = (error: unknown) => refusal.refuse({ ok: false, said: message(error) })
 
   const run = async (action: () => Promise<void>) => {
     // A button is disabled while it's busy, but Enter in a dialog's field still submits its form:
@@ -67,7 +73,7 @@ export function AccountSettings() {
     try {
       await action()
     } catch (error) {
-      tell.error(message(error))
+      failed(error)
     } finally {
       setBusy(false)
     }
@@ -157,16 +163,7 @@ export function AccountSettings() {
                     Sync now
                   </Button>
                   {supportsPasskeys() && canAddPasskey() && (
-                    <Button
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() =>
-                        run(async () => {
-                          await addPasskey()
-                          tell.success("Passkey added")
-                        })
-                      }
-                    >
+                    <Button variant="outline" disabled={busy} onClick={() => run(addPasskey)}>
                       <FingerprintIcon data-icon="inline-start" />
                       Add passkey
                     </Button>
@@ -181,6 +178,8 @@ export function AccountSettings() {
           </FieldGroup>
         )}
       </CardContent>
+
+      <Refusal hold={refusal} className="mx-6 mt-4 mb-0" />
 
       <RecoveryCodeDialog
         code={pending?.recoveryCode}
@@ -204,7 +203,7 @@ export function AccountSettings() {
         onDone={() => {
           const confirm = rotation?.confirm
           setRotation(undefined)
-          if (confirm) void confirm().catch((error) => tell.error(message(error)))
+          if (confirm) void confirm().catch(failed)
         }}
       />
     </Card>
@@ -216,13 +215,14 @@ export function UnlockSync() {
   const sync = useSyncState()
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState("")
+  const refusal = useRefusal("unlock")
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true)
     try {
       await action()
     } catch (error) {
-      tell.error(message(error))
+      refusal.refuse({ ok: false, said: message(error) })
     } finally {
       setBusy(false)
     }
@@ -230,6 +230,7 @@ export function UnlockSync() {
 
   return (
     <>
+      <Refusal hold={refusal} />
       {sync.passkeys && supportsPasskeys() && (
         <Button className="self-start" disabled={busy} onClick={() => run(unlockSyncWithPasskey)}>
           <FingerprintIcon data-icon="inline-start" />

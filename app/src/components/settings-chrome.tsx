@@ -9,16 +9,11 @@ import {
   type ReactNode,
 } from "react"
 
-import {
-  ChevronRightIcon,
-  EyeIcon,
-  EyeOffIcon,
-  Trash2Icon,
-  type LucideIcon,
-} from "lucide-react"
+import { ChevronRightIcon, EyeIcon, EyeOffIcon, Trash2Icon, type LucideIcon } from "lucide-react"
 
 import { Link } from "react-router"
 
+import { Refusal } from "@/components/banner"
 import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
@@ -36,8 +31,9 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
+import type { RefusalHold } from "@/lib/refusal"
 import { useModelInfo } from "@/lib/model-info"
-import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
 
@@ -54,15 +50,36 @@ const HeaderSlot = createContext<(key: string, draw: (() => ReactNode) | null) =
  */
 const TitleSlot = createContext<(title: string | undefined) => void>(() => {})
 
+/**
+ * The one refusal the page holds, handed down rather than passed: a bot's page draws its rows
+ * several components below the `Screen` that holds them, and the write a row makes is the page's to
+ * answer. Nothing above a row leaves it holding its own, so a row drawn on its own still refuses
+ * where it stands.
+ */
+const RefusalSlot = createContext<RefusalHold | null>(null)
+
+/** The refusal the `Screen` above holds. */
+export function useScreenRefusal(): RefusalHold {
+  const slot = useContext(RefusalSlot)
+  const own = useRefusal()
+  return slot ?? own
+}
+
 /** The chrome every Settings screen wears: a sticky header over one centred column of groups. */
 export function Screen({
   title,
+  subject,
   leading,
   action,
   className,
   children,
 }: {
   title: string
+  /**
+   * What this page is about, where its title doesn't say: the bot and page it holds. A refusal is
+   * about the thing that was written, so a page about something else carries none of it.
+   */
+  subject?: string
   leading?: ReactNode
   /** A control at the header's right edge, after the title: the screen's own action. */
   action?: ReactNode
@@ -71,6 +88,7 @@ export function Screen({
 }) {
   const [page, setPage] = useState<{ key: string; draw: () => ReactNode } | null>(null)
   const [named, setNamed] = useState<string>()
+  const refusal = useRefusal(subject ?? title)
   const publish = useCallback((key: string, draw: (() => ReactNode) | null) => {
     setPage(draw ? { key, draw } : null)
   }, [])
@@ -86,9 +104,12 @@ export function Screen({
       </header>
       <HeaderSlot.Provider value={publish}>
         <TitleSlot.Provider value={setNamed}>
-          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-            {children}
-          </div>
+          <RefusalSlot.Provider value={refusal}>
+            <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+              <Refusal hold={refusal} />
+              {children}
+            </div>
+          </RefusalSlot.Provider>
         </TitleSlot.Provider>
       </HeaderSlot.Provider>
     </div>
@@ -542,7 +563,7 @@ export function FormFoot({ children }: { children: ReactNode }) {
   return (
     <div
       data-form-foot
-      className="sticky bottom-0 z-10 -mb-[max(2rem,env(safe-area-inset-bottom))] mt-auto flex flex-col bg-gradient-to-t from-background from-40% via-background/95 to-transparent px-1 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      className="sticky bottom-0 z-10 mt-auto -mb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col bg-gradient-to-t from-background from-40% via-background/95 to-transparent px-1 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       {children}
     </div>
@@ -651,9 +672,10 @@ export function EditForm({
   placeholder?: string
   /** `url` asks for a keyboard's URL key; `secret` masks the value behind a show toggle. */
   kind?: "text" | "url" | "secret" | "number"
-  /** A line under the field about the write itself: when the host reads the key, say. */
+  // A line under the field about the write itself: when the host reads the key, say. */
   note?: string
-  onSave: (value: string) => void
+  /** The one write Save makes: it lands by returning, and is refused by throwing. */
+  onSave: (value: string) => unknown
   /** The form's nothing value, where the host holds one: the key leaving the file. */
   onReset?: () => void
   /** What the reset is called where its own word says what goes: *Delete key*. */
@@ -677,6 +699,9 @@ export function EditForm({
 }) {
   const [draft, setDraft] = useState(value)
   const [shown, setShown] = useState(false)
+  // The form's own write is answered here, above its actions: on a phone an edit *is* the screen, and
+  // a notice a screen-height above Save is a toast with better manners.
+  const refusal = useRefusal(label)
   const id = `edit-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   const next = kind === "text" ? draft.trim() : draft
   const offers = saveable ?? ((held: string) => held !== value)
@@ -699,7 +724,7 @@ export function EditForm({
       className={cn(surface === "screen" ? formColumnClass : "flex flex-col gap-6")}
       onSubmit={(event) => {
         event.preventDefault()
-        onSave(next)
+        void refusal.write("save that", async () => onSave(next))
       }}
     >
       <div className="flex flex-col gap-2">
@@ -735,6 +760,7 @@ export function EditForm({
         </InputGroup>
         {note && <p className="mt-3 px-1 text-center text-sm text-muted-foreground">{note}</p>}
       </div>
+      <Refusal hold={refusal} />
       {surface === "screen" ? <FormFoot>{actions}</FormFoot> : actions}
     </form>
   )
@@ -765,6 +791,8 @@ export function ModelPick({
 }) {
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
+  // The pick closes as it writes, so the words land on the page the pick was opened from.
+  const refusal = useScreenRefusal()
   return (
     <PickSurface open={open} onOpenChange={(next) => !next && onClose()} title={title}>
       {providers.length ? (
@@ -775,9 +803,7 @@ export function ModelPick({
           recent={profile.recentModels}
           choice={choice}
           onChoose={(next) => {
-            void Promise.resolve(onPick(next)).catch((error: unknown) => {
-              tell.error(error instanceof Error ? error.message : String(error))
-            })
+            void refusal.write("save that", async () => onPick(next))
             onClose()
           }}
         />
@@ -826,11 +852,7 @@ export function PickList({
   return (
     <div className="flex min-h-0 flex-col gap-3">
       {search && (
-        <SearchField
-            value={query}
-            onChange={setQuery}
-            label={`Search ${label.toLowerCase()}`}
-          />
+        <SearchField value={query} onChange={setQuery} label={`Search ${label.toLowerCase()}`} />
       )}
       <div data-pick-list={label} className="flex min-h-0 flex-col overflow-y-auto">
         <PickGroup mode="choose" label={label}>

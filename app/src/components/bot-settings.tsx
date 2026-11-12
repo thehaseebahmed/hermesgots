@@ -41,6 +41,7 @@ import {
   linkRowClass,
   rowClass,
   useHeaderAction,
+  useScreenRefusal,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -96,7 +97,6 @@ import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
-import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
@@ -151,6 +151,7 @@ const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 function EnabledSetting({ profile }: { profile: Profile }) {
   const now = useNow()
   const [saving, setSaving] = useState(false)
+  const refusal = useScreenRefusal()
   const seen = profile.seenAt
     ? isOnline(profile, now)
       ? "Online"
@@ -166,17 +167,14 @@ function EnabledSetting({ profile }: { profile: Profile }) {
       disabled={saving}
       onCheckedChange={async (checked) => {
         setSaving(true)
-        try {
+        await refusal.write("save that", async () => {
           await setBotEnabled(profile, checked)
           if (!checked && (await getSettings()).activeProfileId === profile.id) {
             const next = await getActiveProfile()
             if (next) await setActiveProfile(next.id)
           }
-        } catch (error) {
-          tell.error(error instanceof Error ? error.message : "Couldn't save that.")
-        } finally {
-          setSaving(false)
-        }
+        })
+        setSaving(false)
       }}
     />
   )
@@ -211,6 +209,7 @@ const REMINDER_LABELS: Record<ReminderLevel, string> = {
  */
 function RemindersSetting({ profile }: { profile: Profile }) {
   const { value, supported, settled, saving, save } = useReminders(profile)
+  const refusal = useScreenRefusal()
   if (!supported) return null
 
   return (
@@ -230,13 +229,7 @@ function RemindersSetting({ profile }: { profile: Profile }) {
         label="Progress updates"
         options={REMINDER_LEVELS.map((id) => ({ id, label: REMINDER_LABELS[id] }))}
         value={value}
-        onChange={(next) => {
-          void save(next).catch((error: unknown) =>
-            tell.error(
-              error instanceof Error ? error.message : "Couldn't save that reminder level.",
-            ),
-          )
-        }}
+        onChange={(next) => void refusal.write("save that reminder level", () => save(next))}
         disabled={!settled || saving}
       />
     </div>
@@ -284,16 +277,8 @@ function DeleteBotDialog({
       confirmLabel="Delete"
       onOpenChange={onOpenChange}
       onConfirm={async () => {
-        if (linked) {
-          try {
-            await removeHost(profile.hostId!)
-          } catch (error) {
-            tell.error(error instanceof Error ? error.message : "Couldn't remove it.")
-            return
-          }
-        } else {
-          await deleteProfile(profile.id)
-        }
+        if (linked) await removeHost(profile.hostId!)
+        else await deleteProfile(profile.id)
         const next = await getActiveProfile()
         if (next) await setActiveProfile(next.id)
         onDeleted?.()
@@ -534,12 +519,8 @@ function BotEditScreen({
       // the surface and its close is the cancel.
       surface={large ? "card" : "screen"}
       onSave={async (value) => {
-        try {
-          await updateProfile(profile.id, edit.patch(value))
-          close()
-        } catch (error) {
-          tell.error(error instanceof Error ? error.message : "Couldn't save that.")
-        }
+        await updateProfile(profile.id, edit.patch(value))
+        close()
       }}
       onCancel={close}
     />
@@ -706,11 +687,13 @@ function GeneralPage({
   const [pick, setPick] = useState<string>()
 
   // Every write answers the host's fresh block, so the row a person just changed is the row the
-  // host now holds — and a refused write leaves the page as it was, with the host's sentence.
+  // host now holds — and a refused write leaves the page as it was, with the host's sentence drawn
+  // at the top of the page the row sits on.
+  const refusal = useScreenRefusal()
   const write = useCallback(
     async (key: string, value: unknown) => {
       setSaving(key)
-      try {
+      const landed = await refusal.write("save that", async () => {
         const next = await setGeneralSetting(
           profile,
           tab,
@@ -722,15 +705,11 @@ function GeneralPage({
         // rather than closing the form over the value it held before.
         if (!next) throw new Error("The host answered without its settings.")
         keep(next)
-        return true
-      } catch (error) {
-        tell.error(error instanceof Error ? error.message : "Couldn't save that.")
-        return false
-      } finally {
-        setSaving(undefined)
-      }
+      })
+      setSaving(undefined)
+      return landed
     },
-    [profile, tab, keep],
+    [profile, tab, keep, refusal.write],
   )
 
   const groups = block ? generalGroups(block.fields) : []
@@ -1003,13 +982,12 @@ function FieldForm({
       kind={field.kind === "number" ? "number" : "text"}
       placeholder={field.kind === "list" ? "comma, separated" : String(fallback ?? "")}
       note={field.restart ? RESTART_NOTE : undefined}
-      onSave={(text) => {
+      onSave={async (text) => {
         const parsed = draftValue(field, text)
         if (!parsed.ok) {
-          tell.error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
-          return
+          throw new Error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
         }
-        void onWrite(field.key, parsed.value).then((ok) => ok && onClose())
+        if (await onWrite(field.key, parsed.value)) onClose()
       }}
       onReset={
         explicitly(block, field.key)
@@ -1053,12 +1031,7 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
-        <ValueRow
-          title="Plugin"
-          value={reported}
-          muted={!plugin?.version}
-          data-setting="plugin"
-        />
+        <ValueRow title="Plugin" value={reported} muted={!plugin?.version} data-setting="plugin" />
       </Group>
 
       <Caption>Bot Profile</Caption>
@@ -1162,15 +1135,13 @@ function ModelsPage({ profile }: { profile: Profile }) {
 /** The chain a bot's host tries after its main model: what the Fallback providers drill-in holds. */
 function FallbacksPage({ profile }: { profile: Profile }) {
   const { list, saving, save } = useFallbackModels(profile)
+  const refusal = useScreenRefusal()
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
   const [pick, setPick] = useState<number>()
   const cannotEdit = !providers.length || saving
 
-  const write = (next: ModelChoice[]) =>
-    void save(next).catch((error: unknown) => {
-      tell.error(error instanceof Error ? error.message : String(error))
-    })
+  const write = (next: ModelChoice[]) => void refusal.write("save that", () => save(next))
 
   // Adding is the screen's own action, in its header: a row that added was a setting among settings,
   // and this screen holds a chain of picks, not a row to write.

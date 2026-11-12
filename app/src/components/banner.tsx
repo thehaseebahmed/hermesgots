@@ -1,11 +1,5 @@
 import { useState, type ReactNode } from "react"
-import {
-  CircleAlertIcon,
-  InfoIcon,
-  RotateCwIcon,
-  TriangleAlertIcon,
-  XIcon,
-} from "lucide-react"
+import { CircleAlertIcon, InfoIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -85,11 +79,7 @@ export function Refusal({
 }) {
   if (!hold.words) return null
   return (
-    <Banner
-      tone="error"
-      className={className}
-      action={<Dismiss onDismiss={hold.dismiss} />}
-    >
+    <Banner tone="error" className={className} action={<Dismiss onDismiss={hold.dismiss} />}>
       {hold.words}
     </Banner>
   )

@@ -13,13 +13,27 @@ const env = (globalThis as unknown as { __HERMES_ENV__: Record<string, unknown> 
 env.VITE_FIREBASE = "1"
 
 const { NotificationSettingsRow } = await import("@/routes/settings")
-const { click, find, missing, mount, seedSettings, text } = await import("./component-kit.tsx")
+const { click, find, missing, mount, seedSettings, text, until, wordsOf } =
+  await import("./component-kit.tsx")
+const { Screen } = await import("@/components/settings-chrome")
+
+/**
+ * The row as the Settings menu draws it: inside the chrome, which is what holds a refusal about it.
+ */
+const row = () => (
+  <Screen title="Settings">
+    <NotificationSettingsRow />
+  </Screen>
+)
 
 test("with the app's switch off, the row still shows", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
   await mount(<NotificationSettingsRow />, async () => {
     assert.match(text(), /Notification settings/, "the row is there with notifications off")
-    assert.ok(missing('a[href="/settings/notifications"]'), "and the app's own list is linked from nowhere on the phone")
+    assert.ok(
+      missing('a[href="/settings/notifications"]'),
+      "and the app's own list is linked from nowhere on the phone",
+    )
   })
 })
 
@@ -36,7 +50,7 @@ test("tapping it opens the phone's own notification settings", async () => {
   )
 })
 
-test("a screen that refuses to open is a toast", async () => {
+test("a screen that refuses to open says so at the row", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
   const bridge = globalThis.Capacitor as unknown as { nativePromise: () => Promise<void> }
   const real = bridge.nativePromise
@@ -47,17 +61,23 @@ test("a screen that refuses to open is a toast", async () => {
     said.push(message)
   }) as typeof toast.error
   try {
-    await mount(<NotificationSettingsRow />, async () => {
+    await mount(row(), async () => {
       await click(find("button"))
+      await until(() => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        "Couldn't open notification settings: no activity",
+        "the platform's own words, over the row that asked for the screen",
+      )
     })
   } finally {
     bridge.nativePromise = real
     toast.error = shouted
   }
-  assert.deepEqual(said, ["Couldn't open notification settings: no activity"])
+  assert.deepEqual(said, [], "and nothing said in passing")
 })
 
-test("a tap whose call throws is a toast too, not a lost rejection", async () => {
+test("a tap whose call throws is said too, not a lost rejection", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
   // The row asks off the tap, so a throw from the one step before the call's own guard — asking the
   // bridge whether this build has the plugin — would otherwise surface nowhere.
@@ -72,12 +92,18 @@ test("a tap whose call throws is a toast too, not a lost rejection", async () =>
     said.push(message)
   }) as typeof toast.error
   try {
-    await mount(<NotificationSettingsRow />, async () => {
+    await mount(row(), async () => {
       await click(find("button"))
+      await until(() => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        "Couldn't open notification settings. bridge gone",
+        "the bridge's own failure, over the row that tapped it",
+      )
     })
   } finally {
     bridge.isPluginAvailable = real
     toast.error = shouted
   }
-  assert.deepEqual(said, ["Couldn't open notification settings. bridge gone"])
+  assert.deepEqual(said, [], "and nothing said in passing")
 })

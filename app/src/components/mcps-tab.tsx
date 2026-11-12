@@ -9,7 +9,7 @@ import {
   ServerIcon,
 } from "lucide-react"
 
-import { Banner, Retry } from "@/components/banner"
+import { Banner, Refusal, Retry } from "@/components/banner"
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
@@ -21,6 +21,7 @@ import {
   rowClass,
   RowText,
   useHeaderAction,
+  useScreenRefusal,
 } from "@/components/settings-chrome"
 import { copyText, useCopied } from "@/lib/copied"
 import { Button } from "@/components/ui/button"
@@ -63,7 +64,7 @@ import type {
   McpServerEdit,
   McpServerValue,
 } from "@/lib/hermes"
-import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
@@ -153,6 +154,7 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
     ) : null,
   )
 
+  // The question holds its own refusal, so this only has to land or throw.
   async function confirmRemove(name: string) {
     setBusy(true)
     try {
@@ -161,8 +163,6 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
       // Removed from its own page, the address names a server the Host no longer lists: the screen
       // goes back to the page it was opened from rather than reporting it gone.
       if (detail) navigate(botTabPath(profile.id, "mcps"), { replace: true })
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't remove that.")
     } finally {
       setBusy(false)
     }
@@ -191,7 +191,7 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
           name={sheet?.kind === "remove" ? sheet.name : undefined}
           busy={busy}
           onCancel={() => setSheet(null)}
-          onConfirm={(name) => void confirmRemove(name)}
+          onConfirm={confirmRemove}
         />
       </div>
     )
@@ -257,7 +257,7 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
         name={sheet?.kind === "remove" ? sheet.name : undefined}
         busy={busy}
         onCancel={() => setSheet(null)}
-        onConfirm={(name) => void confirmRemove(name)}
+        onConfirm={confirmRemove}
       />
     </div>
   )
@@ -284,7 +284,7 @@ function RemoveDialog({
   name?: string
   busy: boolean
   onCancel: () => void
-  onConfirm: (name: string) => void
+  onConfirm: (name: string) => Promise<unknown>
 }) {
   return (
     <ConfirmDestructive
@@ -294,7 +294,7 @@ function RemoveDialog({
       confirmLabel="Remove"
       busy={busy}
       onOpenChange={onCancel}
-      onConfirm={() => name && onConfirm(name)}
+      onConfirm={() => (name ? onConfirm(name) : undefined)}
     />
   )
 }
@@ -362,6 +362,7 @@ function ServerRow({
   controls?: RowControls
 }) {
   const [saving, setSaving] = useState(false)
+  const refusal = useScreenRefusal()
   // A row offers the flow where the Host can start one and this server is one it can start it for.
   const line = healthLine(server, {
     canAuthenticate: offersAccess(controls?.access === true, server.access),
@@ -414,13 +415,8 @@ function ServerRow({
           disabled={saving}
           onCheckedChange={async (checked) => {
             setSaving(true)
-            try {
-              await controls.onToggle(server.name, checked)
-            } catch (error) {
-              tell.error(error instanceof Error ? error.message : "Couldn't save that.")
-            } finally {
-              setSaving(false)
-            }
+            await refusal.write("save that", () => controls.onToggle(server.name, checked))
+            setSaving(false)
           }}
         />
       )}
@@ -800,21 +796,20 @@ function ConfigFields({
     block.values.map((value) => ({ name: value.name, value: "" })),
   )
   const [saving, setSaving] = useState(false)
+  const refusal = useScreenRefusal()
   const editable = block.editable
   const canSave = editable && configChanged(block, draft, rows) && transportReady(draft)
 
+  // The row the Host answers with is the confirmation: this page draws what it now holds, so the
+  // toast that said "Saved." was saying what the reader could already see.
   async function save() {
     setSaving(true)
-    try {
+    await refusal.write("save that", async () => {
       const saved = await saveConfig(block.name, configEdit(draft, rows))
       if (saved) onSaved(saved)
       else setRows((current) => current.map((row) => ({ ...row, value: "" })))
-      tell.success("Saved.")
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't save that.")
-    } finally {
-      setSaving(false)
-    }
+    })
+    setSaving(false)
   }
 
   return (
@@ -979,6 +974,7 @@ function McpCatalogueSheet({
   // The entry whose form is open, by name: one at a time, stacked above the list it was picked from.
   const [picking, setPicking] = useState<string | undefined>(undefined)
   const [installing, setInstalling] = useState<string | undefined>(undefined)
+  const refusal = useRefusal("catalogue")
   const shown =
     entries === undefined
       ? undefined
@@ -993,15 +989,11 @@ function McpCatalogueSheet({
       return
     }
     setInstalling(entry.name)
-    try {
-      await install(entry.name, {})
+    if (await refusal.write("add that", () => install(entry.name, {}))) {
       setAdded((current) => [...current, entry.name])
       onOpenChange(false)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't add that.")
-    } finally {
-      setInstalling(undefined)
     }
+    setInstalling(undefined)
   }
 
   return (
@@ -1021,6 +1013,7 @@ function McpCatalogueSheet({
           <PopupTitle>Catalogue</PopupTitle>
         </PopupHeader>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pt-2 pb-4">
+          <Refusal hold={refusal} />
           <ItemSearch value={query} onChange={setQuery} label="Search the catalogue" />
           {shown === undefined ? null : shown.length === 0 ? (
             <p className="px-1 text-sm text-muted-foreground">
@@ -1122,6 +1115,7 @@ function McpEntryForm({
   const [entered, setEntered] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
+  const refusal = useRefusal(name)
 
   async function add() {
     if (!entry) return
@@ -1129,14 +1123,13 @@ function McpEntryForm({
     setMissing(gaps)
     if (gaps.length) return
     setAdding(true)
-    try {
-      await install(entry.name, collectedValues(entry.values, entered))
+    if (
+      await refusal.write("add that", () =>
+        install(entry.name, collectedValues(entry.values, entered)),
+      )
+    )
       onAdded()
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't add that.")
-    } finally {
-      setAdding(false)
-    }
+    setAdding(false)
   }
 
   return (
@@ -1207,6 +1200,7 @@ function McpEntryForm({
             </Field>
           ))}
         </FieldGroup>
+        <Refusal hold={refusal} />
         <Button
           size="lg"
           className="h-11 rounded-full"
@@ -1240,6 +1234,7 @@ function CustomServerSheet({
   const [draft, setDraft] = useState<ConfigDraft>(BLANK_DRAFT)
   const [rows, setRows] = useState<ValueDraft[]>([])
   const [adding, setAdding] = useState(false)
+  const refusal = useRefusal("custom server")
 
   // The form is blank the next time it opens, whether it was closed or the add closed it.
   function reset() {
@@ -1250,15 +1245,11 @@ function CustomServerSheet({
 
   async function save() {
     setAdding(true)
-    try {
-      await add(customServer(name, draft, rows))
+    if (await refusal.write("add that", () => add(customServer(name, draft, rows)))) {
       reset()
       onOpenChange(false)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't add that.")
-    } finally {
-      setAdding(false)
     }
+    setAdding(false)
   }
 
   return (
@@ -1296,6 +1287,7 @@ function CustomServerSheet({
             <ValueSection id="mcp-custom" rows={rows} known={[]} onChange={setRows} />
           )}
 
+          <Refusal hold={refusal} />
           <Button
             size="lg"
             className="h-11 rounded-full"
@@ -1344,6 +1336,7 @@ function ServerAccessSheet({
   const [expired, setExpired] = useState(false)
   const [pasted, setPasted] = useState("")
   const [sending, setSending] = useState(false)
+  const refusal = useRefusal(server.name)
   const { copied, noteCopied } = useCopied()
   // Bumped by Try again: each start (and each retry) is one attempt at the flow.
   const [attempt, setAttempt] = useState(0)
@@ -1398,11 +1391,11 @@ function ServerAccessSheet({
     return () => window.clearTimeout(timer)
   }, [open, flow, expired])
 
-  // The row's own read is the answer: once it says on, the access landed and the sheet is done.
+  // The row's own read is the answer: once it says on, the access landed and the sheet is done —
+  // the row it returns to already says so, which is why nothing is said in passing.
   useEffect(() => {
     if (!open || !flow || server.state !== "on") return
     close.current(false)
-    tell.success("Access granted.")
   }, [open, flow, server.state])
 
   function copy() {
@@ -1413,14 +1406,10 @@ function ServerAccessSheet({
     const address = pasted.trim()
     if (!address) return
     setSending(true)
-    try {
-      await deliver(server.name, address)
-      setPasted("")
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "That address couldn't be used.")
-    } finally {
-      setSending(false)
-    }
+    // A delivered address the Host refuses is read in the sheet that asked for it, above the field
+    // it was pasted into.
+    if (await refusal.write("use that address", () => deliver(server.name, address))) setPasted("")
+    setSending(false)
   }
 
   return (
@@ -1430,6 +1419,7 @@ function ServerAccessSheet({
           <PopupTitle>Server access</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-4 px-4 pb-6">
+          <Refusal hold={refusal} />
           {starting ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner />

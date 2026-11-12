@@ -16,6 +16,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 import { toast } from "sonner"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { Screen } from "@/components/settings-chrome"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
@@ -41,7 +42,10 @@ function LiveEditor() {
   return (
     <>
       {botTabOf(tab) !== undefined && <BotSettingsList profile={profile} replace />}
-      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "bot"} />
+      {/* The chrome a bot's page is drawn in: the page's one refusal is the Screen's to hold. */}
+      <Screen title="Coding">
+        <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "bot"} />
+      </Screen>
     </>
   )
 }
@@ -215,7 +219,13 @@ test("a write the host refuses leaves the budget it had, and says why", async ()
       await click(step("Increase pick budget"))
       assert.equal(botWrites(calls).length, 1, "the write was made")
       assert.equal(shown(), "5 tasks", "and the budget the host still holds is what shows")
-      assert.deepEqual(said, [refusal], "the host's own refusal reaches the user as a toast")
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        refusal,
+        "the host's own refusal stands over the page it refused",
+      )
+      assert.deepEqual(said, [], "and nothing is said in passing")
     })
   } finally {
     toast.error = real
@@ -365,7 +375,13 @@ test("a threshold write the host refuses leaves the value it had, and says why",
       await click(segment("90"))
       assert.equal(botWrites(calls).length, 1, "the write was made")
       assert.equal(thresholdShown(), "60% used", "and the value the host still holds is what shows")
-      assert.deepEqual(said, [refusal], "the host's own refusal reaches the user as a toast")
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        refusal,
+        "the host's own refusal stands over the page it refused",
+      )
+      assert.deepEqual(said, [], "and nothing is said in passing")
     })
   } finally {
     toast.error = real

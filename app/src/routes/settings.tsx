@@ -63,6 +63,7 @@ import {
   rowClass,
   Screen,
   useLeaveGuard,
+  useScreenRefusal,
 } from "@/components/settings-chrome"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { DeviceStateSheet } from "@/components/device-state"
@@ -216,6 +217,9 @@ export function SettingsPage() {
         </Screen>
         <Screen
           key={botTab ?? "bot"}
+          // The pane is about this bot's page, and a refusal is about the thing that was written: the
+          // next bot, or the next page, carries none of the last one's.
+          subject={`${bot.id}/${botTab ?? "bot"}/${botSub?.id ?? ""}`}
           // The pane is titled by the sub only where the sub is the pane: an edit rides over the page
           // as a card and names itself there, so the page's own title still heads the pane.
           title={
@@ -257,6 +261,7 @@ function BotListScreen({ profile, onDeleted }: { profile: Profile; onDeleted: ()
   return (
     <Screen
       title={profile.name}
+      subject={profile.id}
       leading={<BackButton label="Back" onClick={() => up("/settings")} />}
     >
       <BotSettingsList profile={profile} onDeleted={onDeleted} />
@@ -282,7 +287,11 @@ function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage
     [guard.back],
   )
   return (
-    <Screen title={sub?.title ?? page.title} leading={<BackButton label="Back" onClick={guard.back} />}>
+    <Screen
+      title={sub?.title ?? page.title}
+      subject={`${profile.id}/${page.segment}/${sub?.id ?? ""}`}
+      leading={<BackButton label="Back" onClick={guard.back} />}
+    >
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />
       {guard.dialog}
     </Screen>
@@ -406,26 +415,21 @@ function LinkBotRow({ onLink }: { onLink: () => void }) {
 function NotificationsRow() {
   const { permission, on } = usePush()
   const [busy, setBusy] = useState(false)
+  const refusal = useScreenRefusal()
   if (!pushAvailable()) return null
   const toggle = async (checked: boolean) => {
     setBusy(true)
-    try {
+    await refusal.write("turn on notifications", async () => {
       if (!checked) return await disablePush()
+      // A permission the platform holds back is the row's own answer, said where the row is.
       if ((await enablePush()) === "denied")
-        tell.error(
+        throw new Error(
           isNative()
             ? "Notifications are blocked in system settings"
             : "Notifications are blocked in your browser",
         )
-    } catch (error) {
-      tell.error(
-        error instanceof Error && error.message
-          ? `Couldn't turn on notifications. ${error.message}`
-          : "Couldn't turn on notifications",
-      )
-    } finally {
-      setBusy(false)
-    }
+    })
+    setBusy(false)
   }
   return (
     <SwitchRow
@@ -465,19 +469,20 @@ export function NotificationSettingsRow() {
 
 /** Android: the phone's screen for this app, which the app can read but not draw. */
 function SystemNotificationSettingsRow() {
+  const refusal = useScreenRefusal()
   const open = async () => {
+    refusal.clear()
+    let words: string | undefined
     try {
       // A build too old to have the screen says nothing; one that refused says why.
-      const refused = await openNotificationSettings()
-      if (refused) tell.error(refused)
+      words = await openNotificationSettings()
     } catch (error) {
-      // The call is made off the tap, so anything it throws must land here or be lost.
-      tell.error(
-        error instanceof Error && error.message
-          ? `Couldn't open notification settings. ${error.message}`
-          : "Couldn't open notification settings",
-      )
+      // The call is made off the tap, so a throw from the step before the call's own guard is
+      // answered here rather than lost — worded with what the row was doing, since a bridge's own
+      // words don't say it.
+      words = `Couldn't open notification settings. ${error instanceof Error ? error.message : String(error)}`
     }
+    if (words) refusal.refuse({ ok: false, said: words })
   }
   return (
     <ActionRow
@@ -530,12 +535,7 @@ const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
  */
 function NotificationTypes() {
   const features = usePushFeatures()
-  const failed = (error: unknown) =>
-    tell.error(
-      error instanceof Error && error.message
-        ? `Couldn't change that. ${error.message}`
-        : "Couldn't change that",
-    )
+  const refusal = useScreenRefusal()
   return (
     <div className="flex flex-col gap-4">
       {features.map((feature) => {
@@ -550,7 +550,9 @@ function NotificationTypes() {
               title={feature.title}
               subtitle={single ? only.title : `${feature.on} of ${feature.categories.length} on`}
               checked={feature.on > 0}
-              onCheckedChange={(checked) => void setPushFeature(feature.id, checked).catch(failed)}
+              onCheckedChange={(checked) =>
+                void refusal.write("change that", () => setPushFeature(feature.id, checked))
+              }
             />
             {!single &&
               feature.categories.map((category) => (
@@ -562,7 +564,7 @@ function NotificationTypes() {
                   title={category.title}
                   checked={category.checked}
                   onCheckedChange={(checked) =>
-                    void setPushCategory(category.id, checked).catch(failed)
+                    void refusal.write("change that", () => setPushCategory(category.id, checked))
                   }
                 />
               ))}
@@ -584,7 +586,6 @@ function VersionLabel({ developer }: { developer: boolean }) {
     if (developer || taps.current.length < TAPS_TO_UNLOCK) return
     taps.current = []
     void saveSettings({ developer: true })
-    tell.note("Developer settings on")
   }
   return (
     <button
@@ -698,20 +699,14 @@ export function DeveloperSettings() {
 function TestPushRow() {
   const { on } = usePush()
   const [busy, setBusy] = useState(false)
+  const refusal = useScreenRefusal()
   const send = async () => {
     setBusy(true)
-    try {
-      await sendTestPush()
+    // The row redraws nothing when a test push lands, so this one confirmation is the only evidence
+    // it did — and it is the app's own sentence, so it stays a toast.
+    if (await refusal.write("send the test notification", () => sendTestPush()))
       tell.note("Test notification sent")
-    } catch (error) {
-      tell.error(
-        error instanceof Error && error.message
-          ? `Couldn't send. ${error.message}`
-          : "Couldn't send the test notification",
-      )
-    } finally {
-      setBusy(false)
-    }
+    setBusy(false)
   }
   return (
     <Group>

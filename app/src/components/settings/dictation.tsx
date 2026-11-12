@@ -106,16 +106,16 @@ export function DictationSettings() {
     </Button>,
   )
 
+  // The question holds its own refusal, so this only lands or throws: a bot whose host couldn't
+  // clear is named in the words its own code already builds.
   const clear = async () => {
     setClearing(true)
     try {
       const refused = await clearDictationLog(profiles ?? [])
-      if (refused.length) tell.error(`Couldn't clear ${refused.join(", ")}.`)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't clear the history.")
+      if (refused.length) throw new Error(`Couldn't clear ${refused.join(", ")}.`)
+      setConfirmed(false)
     } finally {
       setClearing(false)
-      setConfirmed(false)
     }
   }
 
@@ -144,7 +144,7 @@ export function DictationSettings() {
         confirmLabel="Clear"
         busy={clearing}
         onOpenChange={setConfirmed}
-        onConfirm={() => void clear()}
+        onConfirm={clear}
       />
     </>
   )
@@ -182,16 +182,15 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
   )
   const groups = byMonth(rows ?? [])
 
+  // The question holds the refusal, as the one that clears the whole log does.
   const remove = async (row: DictationRecord) => {
     const profile = byConnection.get(row.connection)
-    if (!profile) return
+    if (!profile) throw new Error("Couldn't delete that dictation.")
     setBusy(true)
     try {
       await removeDictation(profile, row.id)
       setOpen(null)
       setConfirming(false)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't delete that dictation.")
     } finally {
       setBusy(false)
     }
@@ -241,7 +240,7 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
         confirmLabel="Delete"
         busy={busy}
         onOpenChange={(next) => !next && setConfirming(false)}
-        onConfirm={() => open && void remove(open)}
+        onConfirm={() => (open ? remove(open) : undefined)}
       />
     </>
   )
@@ -309,7 +308,9 @@ function EntrySheet({
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
           {heard && <Words label="Transcribed" text={heard} data-dictation-heard />}
-          {tidied && <Words label={heard ? "Cleaned up" : null} text={tidied} data-dictation-text />}
+          {tidied && (
+            <Words label={heard ? "Cleaned up" : null} text={tidied} data-dictation-text />
+          )}
           <p className="text-sm text-muted-foreground">
             {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>
@@ -523,7 +524,11 @@ function BubbleCards() {
    */
   const ask = useCallback(
     async (now: BubbleState | undefined) => {
-      const grant: Grant | null = !now?.overlay ? "overlay" : !now.accessibility ? "accessibility" : null
+      const grant: Grant | null = !now?.overlay
+        ? "overlay"
+        : !now.accessibility
+          ? "accessibility"
+          : null
       if (!grant) {
         await switchOn()
         return

@@ -11,8 +11,12 @@
  * state and a toast — the split `busy-words.ts` and `use-busy-word.ts` already keep.
  */
 
-/** What `attempt` answered: it landed, or it did not and here is what can be said about it. */
-export type Attempted = { ok: true } | { ok: false; said?: string; alone: string }
+/**
+ * What `attempt` answered: it landed, or it did not and here is what can be said about it. `alone` is
+ * left off only by a screen that words a failure itself (`said`), since a sentence it has already
+ * written is not one the seam would have said for it.
+ */
+export type Attempted = { ok: true } | { ok: false; said?: string; alone?: string }
 
 /**
  * The two ways a failure can be worded: `hold` is the host's own sentence, for the surface to draw,
@@ -24,7 +28,8 @@ export type RefusalWords = { hold?: string; say?: string }
 export function refuse(result: Attempted): RefusalWords {
   if (result.ok) return {}
   const said = result.said?.trim()
-  return said ? { hold: said } : { say: result.alone }
+  if (said) return { hold: said }
+  return result.alone ? { say: result.alone } : {}
 }
 
 /**

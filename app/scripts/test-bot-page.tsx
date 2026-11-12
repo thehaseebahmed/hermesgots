@@ -15,6 +15,7 @@ import { useState } from "react"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { Screen } from "@/components/settings-chrome"
 import { useReadAttempt } from "@/lib/read-attempt"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
@@ -101,18 +102,28 @@ function LivePage() {
   const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
+  // The chrome a bot's page is drawn in: the page's one refusal is the Screen's to hold.
   // The bot's page is the entry itself; its edits are addressed under its own segment.
   if (!tab)
     return (
-      <div data-general-page>
-        <BotSettingsList key={profile.id} profile={profile} />
-      </div>
+      <Screen title={profile.name}>
+        <div data-general-page>
+          <BotSettingsList key={profile.id} profile={profile} />
+        </div>
+      </Screen>
     )
   const shown = botTabOf(tab) ?? "bot"
   return (
-    <div data-general-page>
-      <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={botSubOf(shown, sub)} />
-    </div>
+    <Screen title={shown}>
+      <div data-general-page>
+        <BotSettingsPage
+          key={profile.id}
+          profile={profile}
+          tab={shown}
+          sub={botSubOf(shown, sub)}
+        />
+      </div>
+    </Screen>
   )
 }
 
@@ -316,14 +327,7 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
       "and no caption over the switches, which are the bot's own",
     )
 
-    const order = [
-      "Enabled",
-      "Mute notifications",
-      "Plugin",
-      "Bot Profile",
-      "Name",
-      "Image",
-    ]
+    const order = ["Enabled", "Mute notifications", "Plugin", "Bot Profile", "Name", "Image"]
     assert.ok(
       order.every((one) => at(one) >= 0),
       "every one of them is drawn",
@@ -741,12 +745,9 @@ test("the bot's own page names the plugin its host runs, and asks nothing else a
 })
 
 test("a host that answers without a plugin says No plugin, and nothing is written", async () => {
-  await seed(
-    "plugin-absent",
-    { hostId: "host-1", pluginVersion: "0.1.0" },
-    FEATURES,
-    { version: null },
-  )
+  await seed("plugin-absent", { hostId: "host-1", pluginVersion: "0.1.0" }, FEATURES, {
+    version: null,
+  })
   await mount(general(), async () => {
     await until(() => rowText("plugin") === "PluginNo plugin", "the host's answer")
     assert.equal(accent("plugin"), null, "an absence reads muted rather than as a value")
@@ -883,8 +884,13 @@ test("a level the host refuses says so, and the row keeps what the host holds", 
         () => calls.some((one) => one.method === "POST" && one.path.endsWith("/reminders")),
         "the level's write",
       )
-      await until(() => said.length > 0, "the host's refusal")
-      assert.match(String(said[0]), /level must be one of/, "the host's words reach the user")
+      await until(() => Boolean(find('[role="alert"]')), "the host's refusal")
+      assert.match(
+        wordsOf(find('[role="alert"]')),
+        /level must be one of/,
+        "the host's words reach the reader, at the row",
+      )
+      assert.deepEqual(said, [], "and nothing said in passing")
       const chosen = () =>
         findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => wordsOf(one))
       assert.deepEqual(chosen(), ["Normal"], "and the row still draws the level the host holds")
