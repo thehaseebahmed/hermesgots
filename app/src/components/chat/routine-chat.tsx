@@ -30,7 +30,9 @@ import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
 import { markRead } from "@/lib/read-marks"
 import { RUN_GONE, RUN_UNREAD, ranOn, useRoutineTranscript } from "@/lib/routine-transcript"
+import { labelOf } from "@/lib/bot-name"
 import { useWide } from "@/lib/media"
+import { useBotLabels } from "@/lib/use-bot-labels"
 
 /** No rows at all, as the same value on every render. */
 const NO_ROWS: Message[] = []
@@ -57,12 +59,13 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const ready = Boolean(chat && bot && chat.id === id)
   const { root } = useNav()
+  const labels = useBotLabels()
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
   // row is the bot's own, so its screen leads back to where its row stands.
   const lead = useChatLead({
     bot: chat?.profileId,
     press: "list",
-    label: `Back to ${bot?.name || "bot"}`,
+    label: `Back to ${bot ? labelOf(labels, bot) : "bot"}`,
   })
   const wide = useWide()
   useLayoutEffect(() => {

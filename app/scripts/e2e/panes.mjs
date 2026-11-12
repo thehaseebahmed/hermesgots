@@ -182,13 +182,13 @@ for (const [width, collapsed, panes] of CASES) {
           `the bot's list keeps its 412px lane beside the chat (${lane.width})`,
         )
         assert.equal(lane.open, botChat, "and marks the chat on screen as the open one")
-        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
+        assert.equal(await page.getByRole("button", { name: "Back to test-bot" }).count(), 0)
         await shot("bot-chats")
         pass(`${look}: a bot's list beside its chat, the list's row marked open`)
       } else {
-        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
+        assert.equal(await page.getByRole("button", { name: "Back to test-bot" }).count(), 0)
         const chatRung = await rung(page)
-        await page.getByRole("link", { name: "Chats with Test bot" }).click()
+        await page.getByRole("link", { name: "Chats with test-bot" }).click()
         await page.waitForURL(`**/b/${profileId}`, { timeout: 15_000 })
         assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat")
         await until(

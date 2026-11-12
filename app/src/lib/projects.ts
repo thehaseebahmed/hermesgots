@@ -41,3 +41,22 @@ export function useProjects(server: HermesConfig | undefined) {
 export function useAllProjects() {
   return useSyncExternalStore(subscribe, () => lists)
 }
+
+/** A project the host is still making: its first clone, or a repo being added or taken away. */
+export function makingProject(project: HermesProject) {
+  return (
+    project.status === "cloning" ||
+    project.folders.some((folder) => folder.status === "cloning" || folder.status === "removing")
+  )
+}
+
+/** How far a project that isn't whole has got, as its row and its page both say it. */
+export function cloneLine(project: HermesProject) {
+  const total = project.folders.length
+  if (!total) return "Creating…"
+  const done = project.folders.filter((folder) => folder.status === "done").length
+  return `Cloning ${Math.min(done + 1, total)} of ${total}`
+}
+
+/** What a failed clone says where the host gave no reason of its own. */
+export const CLONE_FAILED = "Couldn't clone the project's repositories."

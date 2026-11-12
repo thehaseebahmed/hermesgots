@@ -7,6 +7,7 @@ import { CopyBlock } from "@/components/copy-block"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { labelOf } from "@/lib/bot-name"
 import { db, type Profile } from "@/lib/db"
 import {
   linkCommands,
@@ -16,6 +17,7 @@ import {
   type LinkCode,
 } from "@/lib/registry"
 import { refreshBots, useSyncState } from "@/lib/sync"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /** While linking, the registry is read this often, so a bot shows up moments after it links. */
@@ -46,6 +48,8 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
     () => db.profiles.filter((p) => Boolean(p.hostId)).sortBy("createdAt"),
     [],
   )
+  // This is the list where a host's own bots arrive, so it is where two of them first read alike.
+  const labels = useBotLabels()
   const [reachable, setReachable] = useState<Record<string, boolean>>({})
   const { registryError, vault } = useSyncState()
 
@@ -122,6 +126,7 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
           <LinkedBot
             key={bot.id}
             profile={bot}
+            label={labelOf(labels, bot)}
             onCheck={(ok) =>
               setReachable((state) => (state[bot.id] === ok ? state : { ...state, [bot.id]: ok }))
             }
@@ -143,7 +148,15 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
   )
 }
 
-function LinkedBot({ profile, onCheck }: { profile: Profile; onCheck: (ok: boolean) => void }) {
+function LinkedBot({
+  profile,
+  label,
+  onCheck,
+}: {
+  profile: Profile
+  label: string
+  onCheck: (ok: boolean) => void
+}) {
   const ok = useReachable(profile)
   useEffect(() => {
     if (ok !== undefined) onCheck(ok)
@@ -153,7 +166,7 @@ function LinkedBot({ profile, onCheck }: { profile: Profile; onCheck: (ok: boole
     <li className="flex min-h-14 items-center gap-3 rounded-2xl bg-muted/60 px-3 py-2">
       <Bot id={profile.botId} className="size-9" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{profile.name}</p>
+        <p className="truncate text-sm font-medium">{label}</p>
         <p className={cn("truncate text-xs text-muted-foreground", ok === false && "text-warning")}>
           {profile.disabled
             ? "Turned off"

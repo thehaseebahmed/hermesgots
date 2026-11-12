@@ -73,6 +73,19 @@ Four spaces of indent is the older way to write one, and it draws the same:
     the indented block
     keeps its own lines
 
+## Diagrams
+
+A fence whose language is `mermaid` is drawn as the picture it describes, rather than as the source that describes it:
+
+```mermaid
+flowchart LR
+  reply[a reply] --> fence{a closed fence}
+  fence -->|yes| drawn[a drawing]
+  fence -->|no| code[a code block]
+```
+
+The drawing is a control of its own: a tap opens it larger, and its source is copyable from the frame's chrome. A fence still arriving, one set into a list, and one mermaid cannot parse each stay the code they are.
+
 ## Tables and rules
 
 A table lines up in columns, and a column can ask to be centred or right-aligned — though the app draws every column left, so the request is a thing you can write and cannot yet see:

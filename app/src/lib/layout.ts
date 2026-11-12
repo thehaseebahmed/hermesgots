@@ -14,8 +14,8 @@ export const COLUMN = "mx-auto w-full max-w-[640px]"
 export const COLUMN_BOX = "mx-auto w-full max-w-[672px]"
 
 /**
- * The round outline button a header bar wears — a Project's menu, a chat's options, a canvas's Undo
- * and options — so every top bar reads as the same bar. A caller adds what its own place asks of
+ * The round outline button a header bar wears — a Project's menu, a chat's options, a canvas's Undo,
+ * Edit and Preview — so every top bar reads as the same bar. A caller adds what its own place asks of
  * it (`shrink-0`, `pointer-events-auto`, `md:hidden`, a back control's own surface).
  */
 export const HEADER_BUTTON = "size-11 rounded-full bg-background/80 backdrop-blur"

@@ -3,9 +3,17 @@
  * and the unit tests that drive them read one rule.
  */
 
-/** Root of the server (strips a trailing `/v1`), for non-OpenAI routes like `/health`. */
+/**
+ * Root of the server (strips a trailing `/v1`), for non-OpenAI routes like `/health`. A query or a
+ * fragment is no part of the path a route is built on, so it goes first: an address pasted with one
+ * is still the server it names.
+ */
 export function serverRoot(baseUrl: string) {
-  return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
+  return baseUrl
+    .trim()
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "")
+    .replace(/\/v1$/, "")
 }
 
 /** The profile `name` when the bot is a profile a multiplexing gateway serves at `/p/<name>/`. */

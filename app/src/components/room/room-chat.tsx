@@ -46,6 +46,8 @@ import { seatedLine } from "@/lib/room-seats"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
 import { botsByProfile, roomMembersLine } from "@/lib/rooms"
+import { labelOf } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /**
@@ -76,6 +78,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const location = useLocation()
   const navigate = useNavigate()
   const legacy = useLegacyChat()
+  const labels = useBotLabels()
   // The bot's list this room is a row of: the one the row was opened from, as its link says in the
   // address's state, else the bot that carries the room onto this device. A room is no bot's chat
   // (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width — the list is never
@@ -86,7 +89,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
     bot: carrier,
     beside: Boolean(useBotChatsPane(legacy === false)),
     press: "list",
-    label: `Back to ${listBot?.name ?? "the chats"}`,
+    label: `Back to ${listBot ? labelOf(labels, listBot) : "the chats"}`,
   })
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a

@@ -115,7 +115,7 @@ export function ChatHeader({
             centered && "justify-center",
           )}
         >
-          <div className={cn("flex min-w-0 flex-col", centered && "items-center")}>
+          <div className={cn("flex min-w-0 flex-1 flex-col", centered && "items-center")}>
             {title &&
               (pinned || heading ? (
                 <h1 data-slot="header-title" className={titleClass}>

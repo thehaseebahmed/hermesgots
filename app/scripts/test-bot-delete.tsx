@@ -177,7 +177,7 @@ test("the bot's page ends on Delete bot, and its header carries no control at al
     assert.deepEqual(
       findAll("h1").map((heading) => heading.textContent),
       ["A bot"],
-      "the bot's own page",
+      "the bot's own page: it shares its host and profile with another bot, so its name is what is left",
     )
     const control = removeBot()
     assert.ok(control, "with Delete bot at its foot")

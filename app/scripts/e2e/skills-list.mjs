@@ -1,12 +1,14 @@
 // The Skills page's geometry: the page its bot's list opens, drawn on a screen of its own at a
-// phone's and a tablet's width, light and dark — the list's Skills row, two sections each under its
-// own muted caption (a <p>, never a heading: a card's groups are named, not headed), and a card per
-// category whose first row is the category's title over its "N of M on" line, with a row per skill
-// under it. Which sections, categories and rows a list
+// phone's, a tablet's and a laptop's width, light and dark — the list's Skills row, two sections each
+// under its own muted caption (a <p>, never a heading: a card's groups are named, not headed), and a
+// card per category whose first row is the category's title over its "N of M on" line, with a row per
+// skill under it. The tab's search is measured too, because which of its two places a width draws is
+// geometry: over the pills from a laptop's width up, and in the foot's circle below it (ADR 0145).
+// Which sections, categories and rows a list
 // draws, what a switch writes and what a category's header flips are `test-skills-tab.tsx`'s (and
 // `scripts/test-skills-tab.mjs`'s); what only a laid-out page proves is where the boxes fall at the
 // widths the spec names.
-import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
+import { app, assert, environmentNoise, flow, mock, pass, settled } from "./lib.mjs"
 
 const SECTIONS = [
   ["yours", "Your skills"],
@@ -21,7 +23,7 @@ const run = async ({ page, profileId, shot }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text())
+    if (message.type() === "error" && !environmentNoise(message.text())) errors.push(message.text())
   })
   const panel = () => page.locator("[data-skills-tab]")
   const onScreen = (box, viewport, what) => {
@@ -48,6 +50,92 @@ const run = async ({ page, profileId, shot }) => {
     await page.locator('[data-skill="code-review"]').waitFor({ timeout: 15_000 })
     await settled(page)
     assert.equal(await panel().count(), 1, "the list's row is what the address opened")
+
+    // The pills and the words are this page's controls, and what only a laid-out page says is where
+    // they stand: the pills over the first section at every width, and the field over them only from a
+    // laptop's width up — below that the tab wears the chat list's foot, a circle at the bottom of the
+    // scroll that becomes a field (ADR 0145). The rows below them say the rest, in
+    // `test-skills-tab.tsx`.
+    const viewportBox = page.viewportSize()
+    assert.ok(viewportBox, "the page has a viewport")
+    const laptop = viewportBox.width >= 1280
+    const field = page.locator('[data-skills-tab] input[aria-label="Search skills"]')
+    const footToggle = page.locator("[data-skills-foot] [data-search-toggle]")
+    const pills = page.locator('[data-skills-tab] [role="group"][aria-label="Filter skills"]')
+    assert.ok((await pills.locator("button").count()) > 1, "the pills name a category to narrow by")
+    const pillBox = await pills.boundingBox()
+    onScreen(pillBox, viewportBox, "the pill row")
+    if (laptop) {
+      // The field is the tab's own at this width, and the foot has none: one field, in the one place
+      // the width puts it.
+      assert.equal(await footToggle.count(), 0, "no foot circle at a laptop's width")
+      const fieldBox = await field.boundingBox()
+      onScreen(fieldBox, viewportBox, "the search field")
+      assert.ok(
+        fieldBox.y + fieldBox.height <= pillBox.y + 1,
+        `the field stands above the pills (${Math.round(fieldBox.y + fieldBox.height)}…${Math.round(pillBox.y)})`,
+      )
+    } else {
+      // The words are the foot's below it: no field over the sections, and a circle standing at the
+      // foot of the scroll, where a thumb reaches without crossing the list.
+      assert.equal(await field.count(), 0, "no field over the sections below a laptop's width")
+      const toggleBox = await footToggle.boundingBox()
+      onScreen(toggleBox, viewportBox, "the foot's search circle")
+      assert.ok(
+        toggleBox.y >= pillBox.y + pillBox.height - 1,
+        `the circle stands under the pills (${Math.round(toggleBox.y)} against ${Math.round(pillBox.y + pillBox.height)})`,
+      )
+      assert.ok(
+        viewportBox.height - (toggleBox.y + toggleBox.height) <= 40,
+        `and at the foot of the scroll (${Math.round(viewportBox.height - (toggleBox.y + toggleBox.height))}px above the bottom)`,
+      )
+      // The circle is what becomes the field, in the same row: as tall as the circle and as wide as the
+      // row, so nothing above the foot moves when it opens, and the X that closes it stands after it on
+      // the same centre line — the geometry the chat list's own foot is held to.
+      await footToggle.click()
+      const footField = page.locator('[data-skills-foot] input[aria-label="Search skills"]')
+      await footField.waitFor({ timeout: 10_000 })
+      await settled(page)
+      // The field's own frame, as the chat list's flow measures it: the input is 2px shorter than the
+      // 44px row it sits in.
+      const footFieldBox = await page
+        .locator('[data-skills-foot] [data-slot="input-group"]')
+        .boundingBox()
+      const closeBox = await page.locator("[data-skills-foot] [data-search-close]").boundingBox()
+      assert.ok(footFieldBox && closeBox, "the foot's field and its way out are drawn")
+      assert.equal(
+        Math.round(footFieldBox.height),
+        44,
+        `the field is the circle's own height (${footFieldBox.height})`,
+      )
+      assert.ok(
+        footFieldBox.width > toggleBox.width,
+        "and takes the row, rather than sitting in the circle's box",
+      )
+      assert.ok(
+        closeBox.x >= footFieldBox.x + footFieldBox.width - 1,
+        "with the X after it, in the foot's own slot",
+      )
+      assert.ok(
+        Math.abs(closeBox.y + closeBox.height / 2 - (footFieldBox.y + footFieldBox.height / 2)) <=
+          1,
+        "and the field and the X on one centre line",
+      )
+      onScreen(footFieldBox, viewportBox, "the foot's field")
+      await page.locator("[data-skills-foot] [data-search-close]").click()
+      await footToggle.waitFor({ timeout: 10_000 })
+      assert.equal(await footField.count(), 0, "the field goes with the close")
+    }
+    const firstSection = panel().locator("[data-skill-section]").first()
+    const sectionBox = await firstSection.boundingBox()
+    assert.ok(sectionBox, "the first section has a box")
+    assert.ok(
+      pillBox.y + pillBox.height <= sectionBox.y + 1,
+      `the pill row stands above the first section (${Math.round(pillBox.y + pillBox.height)}…${Math.round(sectionBox.y)})`,
+    )
+    // The frame the controls are in: a reader who lands here sees this row before the flow scrolls
+    // any row into view.
+    await shot("controls")
 
     const captions = []
     for (const [id, title] of SECTIONS) {
@@ -129,15 +217,18 @@ const run = async ({ page, profileId, shot }) => {
   }
 }
 
-for (const width of [390, 1024]) {
+// A phone, a tablet and a laptop, light and dark: the settings screen is a pushed screen at the first
+// two widths and two panes at the last, and the tab's search is the foot's at the first two and the
+// bar's at the last.
+for (const width of [390, 1024, 1440]) {
   for (const dark of [false, true]) {
     const look = `${width}${dark ? "-dark" : ""}`
     await flow(`skills-list-${look}`, run, {
-      viewport: { width, height: width < 768 ? 844 : 768 },
+      viewport: { width, height: width < 768 ? 844 : width < 1280 ? 768 : 900 },
       dark,
     })
   }
 }
 pass(
-  "the Bot's Skills page is reached from its settings list's own Skills row and draws both sections under muted captions of their own, Your skills above From plugins, every category titled by the first row of its own card over its N of M on line with the skill rows under it, and a row per skill whose name is drawn inside the row's box — the list's row, the captions, the categories and the rows on screen at 390 and 1024px, light and dark",
+  "the Bot's Skills page is reached from its settings list's own Skills row and draws both sections under muted captions of their own, Your skills above From plugins, every category titled by the first row of its own card over its N of M on line with the skill rows under it, and a row per skill whose name is drawn inside the row's box — the list's row, the captions, the categories and the rows on screen at 390 and 1024px, where the tab's words are a circle at the foot of its scroll and no field stands over the sections, and at 1440px, where the field stands over the pills and the foot has none — light and dark",
 )

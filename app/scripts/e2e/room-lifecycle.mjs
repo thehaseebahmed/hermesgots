@@ -6,7 +6,7 @@
 // The Host is the mock, and it is the truth the whole way: the create, the rename and the disband are
 // its own calls, and the row each one answers is what this device merges. A faked boundary would pass
 // whether or not the app asked the Host anything, which is the one thing this flow exists to prove.
-import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
+import { app, assert, botHost, flow, pass, settled } from "./lib.mjs"
 
 const RENAMED = "Release plan"
 const SENT = "Plan the next release."
@@ -27,7 +27,7 @@ await flow("room-lifecycle", async ({ page, profileId, until, shot }) => {
       hermesProfile: "coder",
       pluginChats: true,
     })
-  }, mock)
+  }, botHost)
 
   // A room is started from a bot's chat list: the drawer's bot row opens the list, and the one
   // button at the foot's right opens the menu New room is a row of.
