@@ -479,7 +479,7 @@ test(
       await until(() => consentDialog() !== null, "the consent dialog")
       await answer("allow")
       await until(() => host.answers.length === 1, "the grant to be posted")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(
         () => wordsOf(find("[data-canvas-options]")).includes("Allowed"),
         "the row to say the tool is allowed",
@@ -505,7 +505,7 @@ test(
     await seedCanvas()
     await mount(screen("c4"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
       const words = wordsOf(find("[data-canvas-options]"))
       assert.match(words, /files\.search/, "the version's declared tool is listed")
@@ -590,7 +590,7 @@ test(
     await seedCanvas()
     await mount(screen("c6"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
       const words = wordsOf(find("[data-canvas-options]"))
       assert.match(words, /files\.search/, "the version's declared tool is listed")
@@ -632,7 +632,7 @@ test(
     await seedCanvas()
     await mount(screen("c8"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await until(() => find("[data-canvas-options]") !== null, "the options to open")
       await click(toolSwitches()[0])
       await until(() => host.answers.length === 1, "the answer to be posted")
@@ -653,7 +653,7 @@ test(
     await mount(screen("c9"), async () => {
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
 
-      await click(find('button[aria-label="Canvas options"]'))
+      await click(find("[data-canvas-options-open]"))
       await click(findText('[data-canvas-options] button', "Name"))
       await until(async () => find("#canvas-name") !== null, "the name field")
       await type(find("#canvas-name"), "Split the bill")
@@ -684,6 +684,84 @@ test(
       await click(findText('[role="alertdialog"] button', "Delete"))
       await until(async () => host.changes?.[2]?.method === "DELETE", "the delete to be posted")
       assert.strictEqual(host.removed, true, "the canvas is gone from its host")
+    })
+  }),
+)
+
+test(
+  "the options' Delete is the app's destructive pill",
+  atWidth(390, async () => {
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], changes: [] }
+    serve(host, "c10")
+    await seedCanvas()
+    await mount(screen("c10"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+
+      const control = findText("[data-canvas-options] button", "Delete canvas")
+      assert.ok(control, "the options end on the control that deletes the canvas")
+      assert.equal(
+        control.closest("[data-settings-group]") !== null,
+        false,
+        "it stands under the last group, never inside a group of its own",
+      )
+      // Asked as booleans, never as elements: a failed assertion handed an element makes it inspect
+      // React's fiber graph (`test-component-assertions.mjs`'s rule).
+      const column = find("[data-canvas-options]")
+      assert.equal(
+        control.parentElement === column,
+        true,
+        "it is the options column's own child",
+      )
+      assert.equal(column?.lastElementChild === control, true, "and the last of them")
+
+      const classes = control.classList
+      assert.ok(classes.contains("bg-destructive/10"), "over the 10% tint that act carries")
+      assert.ok(classes.contains("text-destructive-ink"), "in the tone's ink, which reads on its tint")
+      assert.ok(classes.contains("rounded-full"), "as the app's pill, not a red plate")
+      const icon = control.querySelector('svg[data-icon="inline-start"]')
+      assert.ok(icon, "with the trash at its lead")
+      assert.equal(control.firstElementChild, icon, "and nothing in front of it")
+
+      await click(control)
+      await until(() => find('[role="alertdialog"]') !== null, "the question before the delete")
+      await settle()
+      assert.equal(host.removed, undefined, "the canvas is still on its host while it asks")
+      await click(findText('[role="alertdialog"] button', "Delete"))
+      await until(() => host.changes?.[0]?.method === "DELETE", "the delete to be posted")
+      assert.equal(host.removed, true, "and the canvas goes once the question is answered")
+    })
+  }),
+)
+
+test(
+  "a version with no tools and no grants leaves nothing between the switches and Delete",
+  atWidth(390, async () => {
+    // A version that declares no tools holds no answer about one, so the sheet has nothing to say
+    // about them: the sentence that said so and the card that would have held the rows both go.
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [] }
+    serve(host, "c11")
+    await seedCanvas()
+    await mount(screen("c11"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+
+      assert.doesNotMatch(
+        wordsOf(find("[data-popup-form]")),
+        /call any of the bot's tools/,
+        "a version with no tools says nothing at all about them",
+      )
+      const groups = findAll("[data-canvas-options] [data-settings-group]")
+      assert.equal(groups.length, 2, "two groups and no third: the name, and the switches")
+      assert.match(wordsOf(groups[0]), /Name/, "the first holds the canvas's name")
+      assert.match(
+        wordsOf(groups[1]),
+        /Pin to sidebar[\s\S]*Archive/,
+        "the second its place in the sidebar and its archive",
+      )
+      assert.equal(toolSwitches().length, 0, "and no tool row is drawn at all")
     })
   }),
 )

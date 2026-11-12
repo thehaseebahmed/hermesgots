@@ -404,7 +404,7 @@ separators are not drawn.
 
 **Actions are pills.** A primary action is `{colors.primary}` with `{colors.primary-foreground}` on
 it, 44px tall, `{rounded.full}`, 16px of padding either side. A secondary action is
-`{colors.secondary}`. A destructive action is `{colors.destructive}` on the surface, over the 10%
+`{colors.secondary}`. A destructive action is `{colors.destructive-ink}` on the surface, over the 10%
 destructive tint it carries, and never a red plate. Where a form has two actions they sit in one
 muted pill, divided by a hairline: Cancel on the left, Save in the same size at weight 500.
 
