@@ -421,7 +421,7 @@ export function useLeaveGuard(leave: () => void) {
         confirmLabel="Discard"
         cancelLabel="Keep editing"
         onOpenChange={setAsking}
-        onConfirm={() => {
+        onConfirm={async () => {
           setAsking(false)
           go()
         }}
@@ -667,6 +667,7 @@ export function EditForm({
   busy,
   surface,
   saveable,
+  subject,
   resetLabel,
   resetDestructive,
   onSave,
@@ -683,7 +684,12 @@ export function EditForm({
   /** The one write Save makes: it lands by returning, and is refused by throwing. */
   onSave: (value: string) => unknown
   /** The form's nothing value, where the host holds one: the key leaving the file. */
-  onReset?: () => void
+  onReset?: () => unknown
+  /**
+   * What this form is about, where the field's label doesn't say: a card retargeted to another bot
+   * keeps its label, so the label alone would hold one bot's refusal over another's field.
+   */
+  subject?: string
   /** What the reset is called where its own word says what goes: *Delete key*. */
   resetLabel?: string
   /** The reset deletes something rather than clearing a value: it wears the destructive ink. */
@@ -707,18 +713,23 @@ export function EditForm({
   const [shown, setShown] = useState(false)
   // The form's own write is answered here, above its actions: on a phone an edit *is* the screen, and
   // a notice a screen-height above Save is a toast with better manners.
-  const refusal = useRefusal(label)
+  const refusal = useRefusal(subject ?? label)
   const id = `edit-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   const next = kind === "text" ? draft.trim() : draft
   const offers = saveable ?? ((held: string) => held !== value)
   // What a back would throw away — only where the form is the screen. A card is a pop-up, and closing
   // a pop-up is the whole of saying no: nothing is asked.
   useUnsavedChanges(surface === "screen" && next !== value)
+  // The reset is the form's write too, so its refusal is drawn in the form's own notice rather than
+  // said from wherever the caller's handler ran.
+  const reset = onReset
+    ? () => void refusal.write("reset that", async () => onReset())
+    : undefined
   const actions = (
     <FormActions
       className={surface === "screen" ? undefined : "mt-auto"}
       onCancel={onCancel}
-      onReset={onReset}
+      onReset={reset}
       resetLabel={resetLabel}
       destructive={resetDestructive}
       disabled={!offers(next)}

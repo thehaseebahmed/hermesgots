@@ -47,7 +47,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
 import { botPath, botTabPath, SETTING_PAGES, type BotPage, type BotTab } from "@/lib/bot-tabs"
-import { botSubPath, type BotSub } from "@/lib/bot-subs"
+import { botSubPath, botSubject, type BotSub } from "@/lib/bot-subs"
 import { connectionKey } from "@/lib/connection"
 import {
   db,
@@ -97,6 +97,7 @@ import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
+import { AppWords } from "@/lib/refusal"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
@@ -690,10 +691,13 @@ function GeneralPage({
   // host now holds — and a refused write leaves the page as it was, with the host's sentence drawn
   // at the top of the page the row sits on.
   const refusal = useScreenRefusal()
-  const write = useCallback(
+  // The write itself, answering by throwing where the host refused. A row draws that answer on the
+  // page it sits on, and a pushed edit's form draws it in its own notice: the form is the surface the
+  // route pushed, so the words belong where the field is, not a screen above it.
+  const send = useCallback(
     async (key: string, value: unknown) => {
       setSaving(key)
-      const landed = await refusal.write("save that", async () => {
+      try {
         const next = await setGeneralSetting(
           profile,
           tab,
@@ -703,13 +707,18 @@ function GeneralPage({
         )
         // A host that answered without its block hasn't saved anything this page can draw: say so
         // rather than closing the form over the value it held before.
-        if (!next) throw new Error("The host answered without its settings.")
+        if (!next) throw new AppWords("The host answered without its settings.")
         keep(next)
-      })
-      setSaving(undefined)
-      return landed
+      } finally {
+        setSaving(undefined)
+      }
     },
-    [profile, tab, keep, refusal.write],
+    [profile, tab, keep],
+  )
+  /** A row that writes where it stands, its refusal drawn at the top of the page the row is on. */
+  const write = useCallback(
+    (key: string, value: unknown) => refusal.write("save that", () => send(key, value)),
+    [refusal.write, send],
   )
 
   const groups = block ? generalGroups(block.fields) : []
@@ -728,7 +737,8 @@ function GeneralPage({
           block={block}
           field={field}
           saving={saving === field.key}
-          onWrite={write}
+          commit={send}
+          subject={botSubject(profile.id, tab, field.key)}
           onClose={close}
         />
       ) : problem ? (
@@ -962,13 +972,16 @@ function FieldForm({
   block,
   field,
   saving,
-  onWrite,
+  commit,
+  subject,
   onClose,
 }: {
   block: GeneralSettings
   field: GeneralField
   saving: boolean
-  onWrite: (key: string, value: unknown) => Promise<boolean>
+  commit: (key: string, value: unknown) => Promise<void>
+  /** What the form is about, so a refusal about another bot's field is not drawn in this one. */
+  subject: string
   onClose: () => void
 }) {
   const large = useLarge()
@@ -976,6 +989,7 @@ function FieldForm({
   return (
     <EditForm
       label={fieldLabel(field.key)}
+      subject={subject}
       busy={saving}
       surface={large ? "card" : "screen"}
       value={draftOf(block, field)}
@@ -985,14 +999,13 @@ function FieldForm({
       onSave={async (text) => {
         const parsed = draftValue(field, text)
         if (!parsed.ok) {
-          throw new Error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
+          throw new AppWords(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
         }
-        if (await onWrite(field.key, parsed.value)) onClose()
+        await commit(field.key, parsed.value)
+        onClose()
       }}
       onReset={
-        explicitly(block, field.key)
-          ? () => void onWrite(field.key, null).then((ok) => ok && onClose())
-          : undefined
+        explicitly(block, field.key) ? () => commit(field.key, null).then(onClose) : undefined
       }
       onCancel={onClose}
     />
