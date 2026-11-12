@@ -21,6 +21,7 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { attempt } from "@/lib/attempt"
+import { failed } from "@/lib/refusal"
 import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
@@ -1022,11 +1023,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
    */
   const suggest = (text: string) =>
     send(text).catch((error: unknown) =>
-      refusal.refuse({
-        ok: false,
-        said: error instanceof Error ? error.message : undefined,
-        alone: "Couldn't send your message.",
-      }),
+      refusal.refuse(failed(error, "Couldn't send your message.")),
     )
 
   const unread = useUnreadElsewhere(conversation?.profileId, conversation?.id)

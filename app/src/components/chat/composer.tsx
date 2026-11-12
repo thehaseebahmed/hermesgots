@@ -42,6 +42,7 @@ import type { PluginFeatureAnswer } from "@/lib/features"
 import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
 import { quietly } from "@/lib/report"
 import { AttachmentError } from "@/lib/send-turn"
+import { failed } from "@/lib/refusal"
 import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import type { HermesConfig } from "@/lib/hermes"
@@ -476,11 +477,7 @@ export function Composer({
           return
         }
         // Anything else is about the send itself, and is drawn above the field it was typed in.
-        refusal.refuse({
-          ok: false,
-          said: error instanceof Error ? error.message : undefined,
-          alone: "Couldn't send your message.",
-        })
+        refusal.refuse(failed(error, "Couldn't send your message."))
       },
     )
   }

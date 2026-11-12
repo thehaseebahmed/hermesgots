@@ -105,6 +105,7 @@ import { themeLabel } from "@/lib/theme"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { spoken } from "@/lib/words"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
 
 /** What both the notification row and the screen it opens are called: one name, two places. */
@@ -480,7 +481,7 @@ function SystemNotificationSettingsRow() {
       // The call is made off the tap, so a throw from the step before the call's own guard is
       // answered here rather than lost — worded with what the row was doing, since a bridge's own
       // words don't say it.
-      words = `Couldn't open notification settings. ${error instanceof Error ? error.message : String(error)}`
+      words = `Couldn't open notification settings. ${spoken(error, "The phone didn't say why.")}`
     }
     if (words) refusal.refuse({ ok: false, said: words })
   }

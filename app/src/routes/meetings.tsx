@@ -115,7 +115,7 @@ import { useAllProjects } from "@/lib/projects"
 import { useNav } from "@/lib/nav"
 import { useDismissPushes } from "@/lib/push"
 import { prefersReducedMotion } from "@/lib/media"
-import type { Attempted } from "@/lib/refusal"
+import { failed } from "@/lib/refusal"
 import {
   itemToOpen,
   useMeetingsPane,
@@ -129,17 +129,6 @@ import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
 import { BackButton } from "@/components/back-button"
-
-/**
- * A failed write as `refuse` reads it: the host's own sentence where it sent one, and the words this
- * call would have said by itself otherwise. One shape for the seven writes here, so none of them
- * puts the host's sentence back in passing.
- */
-const wordsOf = (error: unknown, alone: string): Attempted => ({
-  ok: false,
-  said: error instanceof Error ? error.message : undefined,
-  alone,
-})
 
 /** Meetings is behind a Developer switch; with it off, its screens send you home. */
 function Gate({ children }: { children: ReactNode }) {
@@ -270,7 +259,7 @@ function Unfinished() {
       void forgetRecording(recording.id)
       go(`/meetings/${meeting.id}`)
     } catch (error) {
-      refusal.refuse(wordsOf(error, "Couldn't add the meeting."))
+      refusal.refuse(failed(error, "Couldn't add the meeting."))
     } finally {
       setSending(false)
     }
@@ -711,7 +700,7 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
       onAdded()
       go(`/meetings/${meeting.id}`)
     } catch (error) {
-      refusal.refuse(wordsOf(error, "Couldn't add the meeting."))
+      refusal.refuse(failed(error, "Couldn't add the meeting."))
     } finally {
       setBusy(false)
     }
@@ -782,7 +771,7 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
         onAdded()
         go(`/meetings/${meeting.id}`)
       } catch (error) {
-        refuse(wordsOf(error, "Couldn't add the meeting. The recording is kept on this device."))
+        refuse(failed(error, "Couldn't add the meeting. The recording is kept on this device."))
       } finally {
         setSaving(false)
       }
@@ -1596,7 +1585,7 @@ function ActionRow({
       await flushDrafts()
       navigate(`/c/${session.id}`, { state: { project, code: true } })
     } catch (error) {
-      refusal.refuse(wordsOf(error, "Couldn't start a session."))
+      refusal.refuse(failed(error, "Couldn't start a session."))
       setStarting(false)
     }
   }
@@ -1840,7 +1829,7 @@ function AskBar({ meeting }: { meeting: Meeting }) {
     setText("")
     askMeeting(meeting, question.trim()).catch((error) => {
       setText(question)
-      refusal.refuse(wordsOf(error, "Couldn't ask."))
+      refusal.refuse(failed(error, "Couldn't ask."))
     })
   }
   return (

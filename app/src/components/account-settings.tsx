@@ -41,12 +41,21 @@ import {
   unlockSyncWithRecoveryCode,
   useSyncState,
 } from "@/lib/sync"
+import { failed, type AttemptFailure } from "@/lib/refusal"
 import { useRefusal } from "@/lib/use-refusal"
 import { supportsPasskeys } from "@/lib/vault"
 
-function message(error: unknown) {
-  if (error instanceof DOMException && error.name === "NotAllowedError") return "Passkey cancelled."
-  return error instanceof Error ? error.message : "Something went wrong."
+/** What this screen says for a passkey the reader cancelled: the browser's own words say nothing. */
+const PASSKEY_CANCELLED = "Passkey cancelled."
+
+/**
+ * A write that threw: a cancelled passkey is the screen's own sentence and stays held in the card,
+ * and anything else is the host's where it sent one and the app's where it didn't.
+ */
+function threw(error: unknown): AttemptFailure {
+  if (error instanceof DOMException && error.name === "NotAllowedError")
+    return { ok: false, caught: error, said: PASSKEY_CANCELLED }
+  return failed(error, "Something went wrong.")
 }
 
 /** GitHub sign-in and end-to-end encrypted sync of bots and the chat list. */
@@ -63,7 +72,6 @@ export function AccountSettings() {
   if (account.status === "loading" || account.status === "unavailable") return null
 
   /** A write that threw, in the words this screen already gives each way one can. */
-  const failed = (error: unknown) => refusal.refuse({ ok: false, said: message(error) })
 
   const run = async (action: () => Promise<void>) => {
     // A button is disabled while it's busy, but Enter in a dialog's field still submits its form:
@@ -73,7 +81,7 @@ export function AccountSettings() {
     try {
       await action()
     } catch (error) {
-      failed(error)
+      refusal.refuse(threw(error))
     } finally {
       setBusy(false)
     }
@@ -203,7 +211,7 @@ export function AccountSettings() {
         onDone={() => {
           const confirm = rotation?.confirm
           setRotation(undefined)
-          if (confirm) void confirm().catch(failed)
+          if (confirm) void confirm().catch(threw)
         }}
       />
     </Card>
@@ -222,7 +230,7 @@ export function UnlockSync() {
     try {
       await action()
     } catch (error) {
-      refusal.refuse({ ok: false, said: message(error) })
+      refusal.refuse(threw(error))
     } finally {
       setBusy(false)
     }
