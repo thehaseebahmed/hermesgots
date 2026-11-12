@@ -1,13 +1,15 @@
 // A canvas on a phone, end to end: the page its bot writes and the chat it is edited in, each on a
 // screen of its own with one flip between them — a canvas made from a prompt opens on its chat
-// while the bot builds, Preview appears with the first version and draws the page, a box ticked on
-// the page is kept by the host, an edit sent from the chat lands as a new version, Preview is where
-// Undo is pressed, a page that asks to leave is refused and drawn again, and the chat's Point row
-// sends the reader to the page and takes the element they tap back as the field's chip. A browser is
-// the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque origin of its own,
-// the refusal of an outside navigation is the browser's own policy, the outline and the tap that
-// answer a point are that document's own script, and the versions land from the mock's clock rather
-// than a component test's single step.
+// while the bot builds, Preview appears with the first version and draws the page, its head's ask
+// for Chart.js answered so the library runs inside the frame (the drawn page a refactor has to leave
+// as it was), a box ticked on the page is kept by the host, an edit sent from the chat lands as a new
+// version, Preview is where Undo is pressed, a page that asks to leave is refused and drawn again,
+// and the chat's Point row sends the reader to the page and takes the element they tap back as the
+// field's chip. A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with
+// an opaque origin of its own, the refusal of an outside navigation is the browser's own policy, the
+// outline and the tap that answer a point are that document's own script, a library's source is a
+// chunk only the browser runs (the component tier's loader loads no `?raw` source at all), and the
+// versions land from the mock's clock rather than a component test's single step.
 import { app, assert, flow, pass, SEND_CHORD } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
@@ -62,8 +64,19 @@ await flow(
       false,
       "the page opens with its box unticked",
     )
+    // The page asks for Chart.js by name, and the source it asked for is in the document where the
+    // ask stood: a page drawn from the bundle's copies and one drawn from a source fetched for its
+    // ask are the same page, which is the leg that makes the fetch a refactor rather than a change.
+    assert.equal(
+      await frame()
+        .locator("body")
+        .evaluate(() => typeof window.Chart),
+      "function",
+      "the page's ask for chart drew Chart.js inside the frame",
+    )
     await shot("preview-first")
     pass("the preview screen: Preview appears with the first version and draws the page")
+    pass("the preview screen: a page that asks for chart draws with Chart.js in the frame")
 
     // The page's box is the canvas's own data, so the host is what keeps the tick.
     const [kept] = await Promise.all([

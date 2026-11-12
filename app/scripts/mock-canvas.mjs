@@ -31,6 +31,8 @@ function page(prompt, title, version, edited) {
     <meta charset="utf-8">
     <title>${title}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The page asks for one library by name, so the app has to answer that ask where it stands. -->
+    <script data-canvas-lib="chart"></script>
     <style>
       body { margin: 0; padding: 24px; background: var(--background); color: var(--foreground);
              font-family: system-ui, sans-serif; }

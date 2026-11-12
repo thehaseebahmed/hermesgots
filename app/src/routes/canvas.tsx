@@ -32,8 +32,14 @@ import { attempt } from "@/lib/attempt"
 import { awayLine } from "@/lib/away"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
-import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
-import { CANVAS_LIBRARIES } from "@/lib/canvas-library-sources"
+import {
+  canvasDocument,
+  canvasLibraryPlan,
+  readScroll,
+  themeTokens,
+  type CanvasMode,
+} from "@/lib/canvas-document"
+import { librarySource, loadLibraries } from "@/lib/canvas-library-sources"
 import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
   callCanvasCall,
@@ -387,18 +393,41 @@ export function CanvasView() {
     }
   }, [canvasId, version, html])
 
+  // The sources the page's own asks are answered with, kept with the page they were fetched for: a
+  // page drawn from another page's sources would be a page naming a library it never got. The asks
+  // are read off the markup, so a page asking for nothing fetches nothing at all, and no library is
+  // fetched for a page that never named it.
+  const [sources, setSources] = useState<{
+    html: string
+    libraries: Record<string, string>
+  } | null>(null)
+  const libraries = sources && sources.html === html ? sources.libraries : null
+  useEffect(() => {
+    if (!html) return
+    const page = html
+    let live = true
+    void loadLibraries(canvasLibraryPlan(page), librarySource).then((loaded) => {
+      if (live) setSources({ html: page, libraries: loaded })
+    })
+    return () => {
+      live = false
+    }
+  }, [html])
+
   // The document at a position, built once for every draw: the reader's page, and the page drawn
   // again where they left it.
   const documentAt = useCallback(
     (scroll: number) => {
-      if (!html || css === null) return null
+      // Both halves have to be in hand before the frame is given anything: a page drawn with its
+      // classes missing, or with an ask still waiting on its source, is a page drawn twice.
+      if (!html || css === null || libraries === null) return null
       try {
         return {
           document: canvasDocument(html, {
             mode,
             tokens: themeTokens(readTheme()),
             css,
-            libraries: CANVAS_LIBRARIES,
+            libraries,
             scroll,
           }),
         }
@@ -406,7 +435,7 @@ export function CanvasView() {
         return { error: "This canvas can't be drawn: its document has no head." }
       }
     },
-    [html, mode, css],
+    [html, mode, css, libraries],
   )
   const drawn = useMemo(
     // Where this canvas was left, read when the document is built and never per scroll: a scroll is
