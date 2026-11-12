@@ -1,5 +1,9 @@
 # A canvas carries a catalogue of libraries
 
+**Amends [ADR 0114](0114-a-canvas-runs-in-a-sandbox-that-reaches-only-its-host.md)** (2026-11-12):
+the vetted set of libraries widens to a catalogue the host refuses an unknown name by. Nothing about
+the sandbox, the policy or the bridge moves.
+
 A canvas's page runs with no network, under a policy that allows no connection (ADR 0114), so a
 library can only be one the app already ships: it is inlined as text, by name, where the page asked
 for it. Three shipped that way. Carrying more meant the name list, the sources, the guide's block and
