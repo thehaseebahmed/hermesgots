@@ -33,6 +33,7 @@ import {
   type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
+import { labelOf } from "@/lib/bot-name"
 import {
   conversationsOf,
   db,
@@ -44,6 +45,7 @@ import {
 } from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { landingChat } from "@/lib/last-chat"
 import { useXLarge } from "@/lib/media"
 import { listsAsChat } from "@/lib/lists-as-chat"
@@ -139,7 +141,6 @@ function BotChatsList({
   selected?: string
   place: ListPlace
 }) {
-
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
   const rooms = useRoomNeeds()
@@ -204,6 +205,8 @@ function ChatList({
 }) {
   const navigate = useNavigate()
   const { root, back } = useNav()
+  // The bar names the bot as the sidebar's row does (ADR 0148).
+  const label = labelOf(useBotLabels(), bot)
   const pane = place === "pane"
   // What stands behind this screen, as far as the entry that opened it says: a chat's own control is
   // the only thing that pushes a list, so a list pushed over one leads back to a chat; a typed or
@@ -256,11 +259,7 @@ function ChatList({
         showBot={false}
         leading={
           place === "pushed" ? (
-            <BackButton
-              label={backToChat ? "Back to chat" : "Back"}
-              onClick={back()}
-              floating
-            />
+            <BackButton label={backToChat ? "Back to chat" : "Back"} onClick={back()} floating />
           ) : undefined
         }
         title={
@@ -271,7 +270,7 @@ function ChatList({
             <span aria-hidden className="shrink-0">
               <Bot id={bot.botId} className="size-9" />
             </span>
-            <span className="truncate">{bot.name}</span>
+            <span className="truncate">{label}</span>
           </Link>
         }
         actions={
@@ -326,9 +325,7 @@ function ChatList({
                 // whatever stood behind it: the chat picked is the chat its bot opens from then on. A
                 // room and a routine's run are screens of their own whose way back is this list, so
                 // they stay above it, and a pane's rows open beside the list rather than over it.
-                pick={
-                  pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)
-                }
+                pick={pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)}
                 live={row.session ? runs[row.session] : undefined}
               />
             </li>

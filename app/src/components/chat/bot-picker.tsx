@@ -11,11 +11,14 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { labelOf } from "@/lib/bot-name"
 import { listEnabledProfiles, setActiveProfile, type Profile } from "@/lib/db"
+import { useBotLabels } from "@/lib/use-bot-labels"
 
 /**
- * Which bot a new chat goes to, as a pill above the composer. The bots are listed by name, a picker
- * being read for one someone is looking for rather than for the order they were linked in.
+ * Which bot a new chat goes to, as a pill above the composer. The bots are listed by the host each
+ * answers at, a picker being read for one someone is looking for rather than for the order they were
+ * linked in.
  *
  * `onPick` hands the choice to the caller instead of making it the account's active bot: the share
  * sheet sends into the bot it picked, and switches the active one only when the note goes.
@@ -28,9 +31,11 @@ export function BotPicker({
   onPick?: (bot: Profile) => void
 }) {
   const answering = useLiveQuery(listEnabledProfiles, [])
+  const labels = useBotLabels()
   const profiles = useMemo(
-    () => [...(answering ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [answering],
+    () =>
+      [...(answering ?? [])].sort((a, b) => labelOf(labels, a).localeCompare(labelOf(labels, b))),
+    [answering, labels],
   )
 
   return (
@@ -41,12 +46,12 @@ export function BotPicker({
             type="button"
             variant="secondary"
             className="h-11 gap-2 rounded-full pr-2.5 pl-2"
-            aria-label={`Bot: ${profile.name}`}
+            aria-label={`Bot: ${labelOf(labels, profile)}`}
           />
         }
       >
         <Bot id={profile.botId} className="size-7" />
-        <span className="max-w-48 truncate">{profile.name}</span>
+        <span className="max-w-48 truncate">{labelOf(labels, profile)}</span>
         <ChevronDownIcon className="text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
@@ -67,7 +72,7 @@ export function BotPicker({
               closeOnClick
             >
               <Bot id={option.botId} className="size-6" />
-              <span className="truncate">{option.name}</span>
+              <span className="truncate">{labelOf(labels, option)}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

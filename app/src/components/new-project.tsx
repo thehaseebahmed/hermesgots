@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import {
   createProject,
@@ -25,6 +26,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
 } from "@/lib/hermes"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 const REPO_RE = /^[\w-]+\/[\w.-]+$/
@@ -89,6 +91,7 @@ function ProjectForm({
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const labels = useBotLabels()
 
   useEffect(() => {
     let cancelled = false
@@ -160,7 +163,7 @@ function ProjectForm({
             <FieldLabel htmlFor="project-bot">Bot</FieldLabel>
             <Select
               value={profile.id}
-              items={profiles.map((p) => ({ value: p.id, label: p.name }))}
+              items={profiles.map((p) => ({ value: p.id, label: labelOf(labels, p) }))}
               onValueChange={(value) => value && onPickBot(value)}
             >
               <SelectTrigger id="project-bot" className="h-11 w-full">
@@ -170,7 +173,7 @@ function ProjectForm({
                 {profiles.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     <Bot id={p.botId} className="size-5" />
-                    {p.name}
+                    {labelOf(labels, p)}
                   </SelectItem>
                 ))}
               </SelectContent>

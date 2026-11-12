@@ -120,8 +120,8 @@ const openRow = () => find(OPEN_ROW)
 const laneClass = () => find('[data-slot="list-lane"]')?.getAttribute("class") ?? ""
 const LANE = '[data-slot="list-lane"]'
 const CHAT_BESIDE = '[data-slot="item-lane"] [data-slot="chat-pane"]'
-const BACK_TO_BOT = 'button[aria-label="Back to Mainly"]'
-const LIST_CONTROL = 'a[aria-label="Chats with Mainly"]'
+const BACK_TO_BOT = 'button[aria-label="Back to bot-chats-pane"]'
+const LIST_CONTROL = 'a[aria-label="Chats with bot-chats-pane"]'
 const DRAWER = 'button[aria-label="Open conversations"]'
 const OPEN_ROW = '[data-slot="list-lane"] ul a[aria-current="page"]'
 
@@ -222,7 +222,7 @@ test(
         findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map((one) =>
           one.getAttribute("aria-label"),
         ),
-        ["Chats with Mainly", "Chat options"],
+        ["Chats with bot-chats-pane", "Chat options"],
         "and it stands immediately beside the options menu",
       )
       assert.match(
@@ -248,7 +248,7 @@ test(
       const control = () => find('[data-slot="header-actions"] a[href^="/b/"]')
       assert.equal(
         control()?.getAttribute("aria-label"),
-        "Chats with Mainly, unread chats",
+        "Chats with bot-chats-pane, unread chats",
         "the control names the row of the list that waits",
       )
       assert.equal(
@@ -259,7 +259,7 @@ test(
       markRead("c-b", 13)
       await until(
         async () =>
-          control()?.getAttribute("aria-label") === "Chats with Mainly",
+          control()?.getAttribute("aria-label") === "Chats with bot-chats-pane",
         "the dot to go once that chat has been read",
       )
       // The chat on screen moving is not news to the reader sitting in it, so it never dots the

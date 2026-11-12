@@ -20,6 +20,8 @@ import { toast } from "sonner"
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
+import { labelOf } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { CodingTab } from "@/components/bot-coding-tab"
 import { LlmProvidersTab } from "@/components/bot-llm-providers-tab"
 import { Segmented } from "@/components/segmented"
@@ -270,12 +272,14 @@ function DeleteBotDialog({
         : [],
     [open, profile.hostId, profile.id],
   )
-  const others = siblings?.map((p) => p.name).join(", ")
+  // Bots of one host are the ones this sentence tells apart, so it names them by their hosts.
+  const labels = useBotLabels()
+  const others = siblings?.map((p) => labelOf(labels, p)).join(", ")
 
   return (
     <ConfirmDestructive
       open={open}
-      title={`Delete ${profile.name}?`}
+      title={`Delete ${labelOf(labels, profile)}?`}
       description={
         linked
           ? `Its host is unlinked${others ? `, and so is every bot it linked: ${others}` : ""}. Its chats stay on your Hermes server, and linking it again brings them back.`
@@ -1053,12 +1057,7 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
-        <ValueRow
-          title="Plugin"
-          value={reported}
-          muted={!plugin?.version}
-          data-setting="plugin"
-        />
+        <ValueRow title="Plugin" value={reported} muted={!plugin?.version} data-setting="plugin" />
       </Group>
 
       <Caption>Bot Profile</Caption>

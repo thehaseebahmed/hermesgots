@@ -4,8 +4,10 @@ import { CheckIcon, FolderGit2Icon, PlusIcon } from "lucide-react"
 import { Bot } from "@/components/bot"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import type { HermesProject } from "@/lib/hermes"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /** A project a session can be started in, on the first bot of its server. */
@@ -66,6 +68,7 @@ function SessionForm({
   onStart: (target: SessionTarget) => void | Promise<void>
   onNewProject: () => void
 }) {
+  const labels = useBotLabels()
   const startable = targets.filter((t) => !t.blocked)
   const [picked, setPicked] = useState(
     () => startable.find((t) => t.key === initial)?.key ?? startable[0]?.key,
@@ -128,7 +131,7 @@ function SessionForm({
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate font-medium">{t.project.name}</span>
                 <span className="truncate text-sm text-muted-foreground">
-                  {t.blocked ?? t.profile.name}
+                  {t.blocked ?? labelOf(labels, t.profile)}
                 </span>
               </span>
               {selected && <CheckIcon className="size-5 shrink-0" />}

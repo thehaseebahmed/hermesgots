@@ -144,7 +144,7 @@ for (const dark of [false, true]) {
         await saveSettings({ developer: true, legacyChat: false })
       })
       await page.reload()
-      await page.getByRole("link", { name: "Test bot" }).first().waitFor({ timeout: 15_000 })
+      await page.getByRole("link", { name: "test-bot" }).first().waitFor({ timeout: 15_000 })
       assert.equal(
         await page.getByRole("button", { name: /^Sort bots by / }).count(),
         1,
@@ -163,7 +163,7 @@ for (const dark of [false, true]) {
         "the bots' sort control is hidden with bot threads on",
       )
       assert.equal(
-        await aside.getByRole("link", { name: "Test bot" }).first().isVisible(),
+        await aside.getByRole("link", { name: "test-bot" }).first().isVisible(),
         true,
         "a bot keeps its icon",
       )
