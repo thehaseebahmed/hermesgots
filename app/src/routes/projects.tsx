@@ -180,9 +180,10 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
   })
 
   // The detail pane opens the one opened last, else the top one; it waits for the first answer.
+  // Everything that opens counts, a failed project's page included: only one still cloning has none.
   const keys = results
     ? rows
-        .filter((row) => row.project.status === "ready")
+        .filter((row) => row.project.status !== "cloning")
         .map((row) => `${row.profile.id}/${row.project.id}`)
     : undefined
   const joined = keys?.join("\n")

@@ -33,6 +33,7 @@ import {
 const BOT = botProfile("failed", { id: "bot-1", name: "LobsterInk" })
 const PROJECT_ID = "pending-lobsterink-work"
 const NAME = "LobsterInk work"
+const REPOS = ["lobsterink/private-thing", "lobsterink/second-thing"]
 const FIRST_LINE = "GitHub refused access to lobsterink/private-thing."
 const REST = "fatal: repository 'https://github.com/lobsterink/private-thing.git/' not found"
 
@@ -42,22 +43,16 @@ interface Asked {
 }
 
 /**
- * What the bot's host answers. `failed` is the project the list reports; a retry turns it into one
- * being cloned again, as the plugin does, so the page can be read either side of the press.
+ * What the bot's host answers. `status` is the project the list reports; a retry turns a failed one
+ * into one being cloned again, as the plugin does, unless `refuseRetry` says the write is turned
+ * down — so the page can be read either side of the press.
  */
-function host() {
+function host({
+  status: start = "failed",
+  refuseRetry = false,
+}: { status?: "failed" | "cloning"; refuseRetry?: boolean } = {}) {
   const asked: Asked[] = []
-  let status: "failed" | "cloning" = "failed"
-  const folders = [
-    {
-      path: "/hermes/projects/lobsterink-work/private-thing",
-      label: "private-thing",
-      is_primary: false,
-      git: false,
-      repo: "lobsterink/private-thing",
-      status,
-    },
-  ]
+  let status: "failed" | "cloning" = start
   const project = () => ({
     id: PROJECT_ID,
     name: NAME,
@@ -65,9 +60,13 @@ function host() {
     created_at: 1_790_000_000,
     status,
     error: status === "failed" ? `${FIRST_LINE}\n${REST}` : null,
-    folders: folders.map((folder) => ({
-      ...folder,
-      status: status === "failed" ? "failed" : "queued",
+    folders: REPOS.map((repo, at) => ({
+      path: `/hermes/projects/lobsterink-work/${repo.split("/")[1]}`,
+      label: repo.split("/")[1],
+      is_primary: false,
+      git: false,
+      repo,
+      status: status === "failed" && at === 0 ? "failed" : "queued",
     })),
   })
 
@@ -80,6 +79,7 @@ function host() {
     if (url.pathname.endsWith("/plugins/gots/projects"))
       return json({ object: "gots.projects", projects: [project()] })
     if (url.pathname.endsWith("/retry")) {
+      if (refuseRetry) return json({ error: { message: "GitHub is busy." } }, 503)
       status = "cloning"
       return json({ object: "gots.project", id: PROJECT_ID }, 202)
     }
@@ -124,11 +124,31 @@ test("a failed project's row opens its page and carries no buttons", async () =>
   await mount(listScreen(), async () => {
     await until(() => text().includes(NAME), "the failed project's row")
 
-    assert.ok(missing(`[aria-label="Retry ${NAME}"]`), "the row carries no Retry")
-    assert.ok(missing(`[aria-label="Remove ${NAME}"]`), "the row carries no Delete")
+    const row = findText("a", NAME)
+    assert.ok(row, "the row is a link")
+    assert.equal(row?.querySelectorAll("button").length, 0, "the row carries no control of its own")
 
-    await click(findText("a", NAME))
+    await click(row)
     await until(() => text().includes("the project"), "the project the row opens")
+  })
+})
+
+test("a project still cloning says how far it has got, and cancels from its own button", async () => {
+  await seedBot()
+  const asked = host({ status: "cloning" })
+
+  await mount(listScreen(), async () => {
+    await until(() => text().includes("Cloning 1 of 2"), "the clone's progress")
+
+    assert.ok(missing(`a[href*="${PROJECT_ID}"]`), "a project still cloning has no page to open")
+    const cancel = labelled("button", `Cancel ${NAME}`)
+    assert.ok(cancel, "the clone can be cancelled")
+
+    await click(cancel)
+    await until(
+      () => asked.some((one) => one.path.endsWith(`/projects/${PROJECT_ID}/remove`)),
+      "the remove the cancel posted",
+    )
   })
 })
 
@@ -158,9 +178,28 @@ test("retry starts the clone again, and the page says so", async () => {
       () => asked.some((one) => one.path.endsWith(`/projects/${PROJECT_ID}/retry`)),
       "the retry the page posted",
     )
-    await until(() => text().includes("Cloning 1 of 1"), "the clone the retry started")
+    await until(() => text().includes("Cloning 1 of 2"), "the clone the retry started")
     assert.ok(!text().includes(REST), "the error is gone once it is cloning again")
     absent('[data-slot="tabs-list"]', "a project still cloning has no tabs yet")
+  })
+})
+
+test("a retry the host turns down leaves the error and its actions where they were", async () => {
+  await seedBot()
+  const asked = host({ refuseRetry: true })
+
+  await mount(projectScreen(), async () => {
+    const retry = action("Retry")
+    assert.ok(retry, "the failed project's page")
+
+    await click(retry)
+    await until(
+      () => asked.some((one) => one.path.endsWith(`/projects/${PROJECT_ID}/retry`)),
+      "the retry the page posted",
+    )
+    await until(() => !action("Retry")?.hasAttribute("disabled"), "the button to be usable again")
+    assert.ok(text().includes(FIRST_LINE), "the error is still the page's own")
+    absent('[data-slot="tabs-list"]', "and it is still no project of tabs")
   })
 })
 

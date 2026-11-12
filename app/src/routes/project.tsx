@@ -363,44 +363,48 @@ function ProjectClone({
 }) {
   const failed = project.status === "failed"
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center">
-      <span
-        className={
-          failed
-            ? "flex size-16 items-center justify-center rounded-full bg-warning/15 text-warning"
-            : "flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary"
-        }
-      >
-        {failed ? (
-          <TriangleAlertIcon className="size-8" aria-hidden />
-        ) : (
-          <Spinner className="size-8" />
+    <div className="flex min-h-0 flex-1 overflow-y-auto p-6">
+      {/* `m-auto` rather than the column's own centring: a clone's error can be longer than the
+          screen, and a centred column scrolls its first lines out of reach. */}
+      <div className="m-auto flex w-full max-w-prose flex-col items-center gap-4 text-center">
+        <span
+          className={
+            failed
+              ? "flex size-16 items-center justify-center rounded-full bg-warning/15 text-warning"
+              : "flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary"
+          }
+        >
+          {failed ? (
+            <TriangleAlertIcon className="size-8" aria-hidden />
+          ) : (
+            <Spinner className="size-8" />
+          )}
+        </span>
+        <h2 className="text-lg font-semibold tracking-tight">
+          {failed ? "Couldn't create this project" : cloneLine(project)}
+        </h2>
+        {failed && (
+          <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+            {project.error ?? CLONE_FAILED}
+          </p>
         )}
-      </span>
-      <h2 className="text-lg font-semibold tracking-tight">
-        {failed ? "Couldn't create this project" : cloneLine(project)}
-      </h2>
-      {failed && (
-        <p className="max-w-prose text-sm break-words whitespace-pre-wrap text-muted-foreground">
-          {project.error ?? CLONE_FAILED}
-        </p>
-      )}
-      {failed && (
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button size="lg" className="h-12 rounded-full px-5" disabled={busy} onClick={onRetry}>
-            <RotateCcwIcon /> Retry
-          </Button>
-          <Button
-            variant="destructive"
-            size="lg"
-            className="h-12 rounded-full px-5"
-            disabled={busy}
-            onClick={onDelete}
-          >
-            <Trash2Icon /> Delete
-          </Button>
-        </div>
-      )}
+        {failed && (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button size="lg" className="h-12 rounded-full px-5" disabled={busy} onClick={onRetry}>
+              <RotateCcwIcon /> Retry
+            </Button>
+            <Button
+              variant="destructive"
+              size="lg"
+              className="h-12 rounded-full px-5"
+              disabled={busy}
+              onClick={onDelete}
+            >
+              <Trash2Icon /> Delete
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
