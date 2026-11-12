@@ -6,6 +6,7 @@ import {
   MessageCircleQuestionIcon,
 } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { CARD } from "@/components/chat/session-cards"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { answerClarify } from "@/lib/chat"
 import { prefersReducedMotion } from "@/lib/media"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
-import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 const OTHER = "\u0000other"
@@ -211,6 +212,8 @@ export function QuestionCard({
   const askedPage = askedId ? questions.findIndex((one) => one.id === askedId) : -1
   const oneAtATime = askedPage >= 0
   const [sending, setPending] = useState(false)
+  // The answers wait on the host, so a refusal is drawn here, above the Send that gave them.
+  const refusal = useRefusal()
   const pending = sending || held
   const [page, setPage] = useState(oneAtATime ? askedPage : 0)
   const card = useRef<HTMLDivElement>(null)
@@ -328,9 +331,7 @@ export function QuestionCard({
   const send = async (given: ClarifyAnswers = answers) => {
     setPending(true)
     try {
-      await onAnswer(given)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't send your answer.")
+      await refusal.write("send your answer", () => onAnswer(given))
     } finally {
       setPending(false)
     }
@@ -419,6 +420,7 @@ export function QuestionCard({
           />
         </CardContent>
       )}
+      <Refusal hold={refusal} className="mx-(--card-spacing)" />
       <CardFooter ref={foot} className="shrink-0 gap-2">
         <Button
           type="button"

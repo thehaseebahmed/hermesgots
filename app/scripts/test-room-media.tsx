@@ -583,20 +583,24 @@ test(
         const tile = document.querySelector("[data-refused]") as HTMLElement
         assert.equal(tile.getAttribute("aria-invalid"), "true", "the tile is marked invalid")
         assert.equal(tile.getAttribute("title"), REFUSED, "and carries the Host's sentence")
-        assert.deepEqual(said, [REFUSED], "the refusal is a toast, in the Host's own words")
+        assert.deepEqual(said, [], "and nothing is said in passing")
         assert.ok(
           missing('[role="alert"]'),
-          "a refused file is a toast and its own tile, not a banner over the composer",
+          "a refused file is its own tile, not a banner over the composer",
         )
         assert.ok(
           document.querySelector('[aria-label="Remove deck.zip"]'),
           "the file can be taken off the message",
         )
-        // Sending again asks the Host again, and says the same words again.
+        // Sending again asks the Host again, and the tile says the same words again.
         await click(sendButton() ?? null)
         await until(async () => attempts.length === 2, "the second upload")
-        await until(async () => said.length === 2, "the refusal said again")
-        assert.deepEqual(said, [REFUSED, REFUSED], "a retry says it again")
+        await until(
+          async () =>
+            document.querySelector("[data-refused]")?.getAttribute("title") === REFUSED,
+          "the refusal said again",
+        )
+        assert.deepEqual(said, [], "a retry says it again on the tile, and nowhere else")
       })
     } finally {
       toast.error = original

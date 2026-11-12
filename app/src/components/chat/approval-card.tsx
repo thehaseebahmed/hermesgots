@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { ShieldAlertIcon } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { useCodeFace } from "@/components/chat/code-face"
 import { CodeBlock } from "@/components/chat/code-block"
 import { CARD_BASE } from "@/components/chat/session-cards"
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { answerApproval } from "@/lib/chat"
 import type { ApprovalChoice, Message } from "@/lib/db"
-import { tell } from "@/lib/tell"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 const LABELS: Record<ApprovalChoice, string> = {
@@ -40,6 +41,8 @@ export function ApprovalCard({
   const face = useCodeFace()
   const approval = message.approval!
   const [pending, setPending] = useState<ApprovalChoice | null>(null)
+  // The answer waits on the host, so a refusal is drawn here, under the buttons it was given from.
+  const refusal = useRefusal()
   const resolved = approval.resolved
   // Hermes doesn't name the tool in the approval payload; the tool still running is the asker.
   const tool = (message.tools?.findLast((t) => t.status === "running") ?? message.tools?.at(-1))
@@ -48,9 +51,7 @@ export function ApprovalCard({
   const answer = async (choice: ApprovalChoice) => {
     setPending(choice)
     try {
-      await onAnswer(choice)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't send your answer.")
+      await refusal.write("send your answer", () => onAnswer(choice))
     } finally {
       setPending(null)
     }
@@ -89,6 +90,7 @@ export function ApprovalCard({
         )}
         {/* The block's own label already names the tool where there is a command to label. */}
         {tool && !approval.command && <p className="text-xs text-muted-foreground">Tool: {tool}</p>}
+        <Refusal hold={refusal} />
       </CardContent>
       {!resolved && (
         <CardFooter className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">

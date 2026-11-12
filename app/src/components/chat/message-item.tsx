@@ -17,7 +17,7 @@ import { UserBubble } from "@/components/chat/user-bubble"
 import { AgentCards } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { Compacted } from "@/components/chat/model-change"
-import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
+import { ClarifyCard, PlanApprovedCard, useThreadRefusal } from "@/components/chat/session-cards"
 import { LineRow } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
@@ -32,7 +32,6 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ProgressReminder, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
 import type { Compaction } from "@/lib/hermes"
-import { tell } from "@/lib/tell"
 import type { FootLine } from "@/lib/thinking"
 import { describeActivity, formatCount, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
@@ -377,6 +376,8 @@ function HeldActions({
   onSend?: (message: Message) => void
   onDismiss?: (message: Message) => void
 }) {
+  // The row stands in the thread, so its refusal is the thread's, drawn where the chat says the rest.
+  const refusal = useThreadRefusal()
   return (
     <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
       {lead}
@@ -387,9 +388,7 @@ function HeldActions({
           className="min-h-11 text-xs"
           onClick={() => {
             if (onSend) return onSend(message)
-            void sendQueued(message).catch((error) =>
-              tell.error(error instanceof Error ? error.message : "Couldn't send your message."),
-            )
+            void refusal.write("send your message", () => sendQueued(message))
           }}
         >
           {send.icon}
@@ -403,9 +402,7 @@ function HeldActions({
         aria-label={dismiss}
         onClick={() => {
           if (onDismiss) return onDismiss(message)
-          void removeQueued(message).catch((error) =>
-            tell.error(error instanceof Error ? error.message : "Couldn't remove your message."),
-          )
+          void refusal.write("remove your message", () => removeQueued(message))
         }}
       >
         <XIcon />
@@ -783,11 +780,7 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow
-                conversationId={message.conversationId}
-                busy={busy}
-                parts={parts}
-              >
+              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
                 {last && footer}
               </AssistantRow>
             )}

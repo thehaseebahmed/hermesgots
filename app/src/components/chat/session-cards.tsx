@@ -11,6 +11,7 @@ import {
   ZapIcon,
 } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { StatusLine } from "@/components/chat/status-line"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Button } from "@/components/ui/button"
@@ -30,7 +31,8 @@ import {
   rowLine,
   type PendingRow,
 } from "@/lib/pending"
-import { tell } from "@/lib/tell"
+import type { RefusalHold } from "@/lib/refusal"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 /**
@@ -65,15 +67,13 @@ export function PlanReadyCard({
   onKeepPlanning: () => Promise<void>
 }) {
   const [pending, setPending] = useState<"auto" | "accept_edits" | "keep" | null>(null)
-  const run = async (which: NonNullable<typeof pending>, action: () => Promise<void>) => {
+  // The pick waits on the host, so a refusal is drawn here, above the buttons it was given from.
+  const refusal = useRefusal()
+  const run = (which: NonNullable<typeof pending>, action: () => Promise<void>) => {
     setPending(which)
-    try {
-      await action()
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't update the session.")
-    } finally {
-      setPending(null)
-    }
+    void refusal
+      .write(which === "keep" ? "keep planning" : "approve that plan", action)
+      .finally(() => setPending(null))
   }
   const button = (which: NonNullable<typeof pending>) => ({
     size: "lg" as const,
@@ -96,6 +96,7 @@ export function PlanReadyCard({
             : "Approve it to let the agent make the changes, or keep planning."}
         </p>
       </CardContent>
+      <Refusal hold={refusal} className="mx-(--card-spacing)" />
       <CardFooter className="flex flex-col items-stretch gap-2">
         {model}
         {autoAvailable ? (
@@ -208,12 +209,19 @@ export function QueuePausedCard({
   discarding: boolean
   /** The host stopped answering: the queue may still be held, so the card stays, saying why it can't act. */
   stale?: boolean
-  onDiscard: () => void
+  /** Acknowledges the lost turn, refusing by throwing: the card says the host's words where it asked. */
+  onDiscard: () => Promise<unknown>
 }) {
+  // The card stands where the composer would, so its refusal is drawn in it, above the button.
+  const refusal = useRefusal()
   return (
     <Card size="sm" className={CARD}>
       <CardContent className="space-y-3">
-        <NoticeHead icon={<TimerOffIcon className="text-warning" />} title={PAUSED_TITLE} body={PAUSED_BODY} />
+        <NoticeHead
+          icon={<TimerOffIcon className="text-warning" />}
+          title={PAUSED_TITLE}
+          body={PAUSED_BODY}
+        />
         <ul className="space-y-1.5">
           {rows.map((row) => (
             <li key={row.id} className="rounded-2xl bg-muted/50 px-3 py-2 text-sm">
@@ -224,9 +232,15 @@ export function QueuePausedCard({
             </li>
           ))}
         </ul>
+        <Refusal hold={refusal} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{stale ? STALE_NOTE : PAUSED_NOTE}</p>
-          <Button className="h-11 rounded-full px-4" onClick={onDiscard} disabled={discarding || stale} data-discard-lost>
+          <Button
+            className="h-11 rounded-full px-4"
+            onClick={() => void refusal.write("discard the lost turn", onDiscard)}
+            disabled={discarding || stale}
+            data-discard-lost
+          >
             {DISCARD_LABEL}
           </Button>
         </div>
@@ -288,6 +302,22 @@ export const AskAgainContext = createContext<((text: string) => Promise<void>) |
   undefined,
 )
 
+/**
+ * The one refusal the thread above a row holds. A card or a row drawn inside a chat's scrolled thread
+ * hands its write to the chat that owns it, the way a settings row hands one to its `Screen`: the
+ * words stand where the thread says them rather than a scroll away from the control that caused
+ * them. Nothing above a row leaves it holding its own, so a row drawn on its own still refuses where
+ * it stands.
+ */
+export const ThreadRefusal = createContext<RefusalHold | null>(null)
+
+/** The refusal the thread above this row holds, or one of its own. */
+export function useThreadRefusal(): RefusalHold {
+  const slot = useContext(ThreadRefusal)
+  const own = useRefusal()
+  return slot ?? own
+}
+
 /** What a question left without an answer reads as, drawn like any answer. */
 const SKIPPED = "Skipped"
 
@@ -328,12 +358,15 @@ export function ClarifyCard({
   // again. Nothing resumes the expired call — the agent asks afresh, in a new turn.
   const missed = !running && !answered && ended.owed
   const title = answered ? "Answered" : ended.title
+  // The card stands in the thread, so its refusal is the thread's: the chat says the words where it
+  // says everything else about this turn.
+  const refusal = useThreadRefusal()
   const askAgain = async () => {
     setAsking(true)
     try {
-      await (send ?? ((text: string) => sendMessage(conversationId, text)))(ASK_AGAIN)
-    } catch (error) {
-      tell.error(error instanceof Error ? error.message : "Couldn't ask that again.")
+      await refusal.write("ask that again", () =>
+        (send ?? ((text: string) => sendMessage(conversationId, text)))(ASK_AGAIN),
+      )
     } finally {
       setAsking(false)
     }

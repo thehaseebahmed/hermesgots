@@ -12,6 +12,7 @@ import {
 } from "react"
 import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { AttachMenu } from "@/components/chat/attach-menu"
 import { PointChip, useCanvasPoints } from "@/components/chat/canvas-points"
 import { useCodeFace } from "@/components/chat/code-face"
@@ -41,6 +42,7 @@ import type { PluginFeatureAnswer } from "@/lib/features"
 import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
 import { quietly } from "@/lib/report"
 import { AttachmentError } from "@/lib/send-turn"
+import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import type { HermesConfig } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
@@ -229,6 +231,9 @@ export function Composer({
    * send that keeps a refused file says it again, because the Host is asked again.
    */
   const [refused, setRefused] = useState<Record<string, string>>({})
+  // The send waits on the host, so a refusal is drawn here — above the field it was typed in — rather
+  // than in passing, where it says nothing about which message it was about.
+  const refusal = useRefusal()
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
   // Files taken moments ago, so a paste and the drop it can also fire add one copy.
@@ -449,6 +454,9 @@ export function Composer({
     setAttachments([])
     if (carried.length) setPoints([])
     setPointing(false)
+    // The write starts here, so the words of the last refusal go with it: a second refusal replaces
+    // the first rather than standing beside it.
+    refusal.clear()
     const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(marked, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
     void Promise.resolve(go()).then(
@@ -458,15 +466,21 @@ export function Composer({
         setAttachments((current) => (current.length ? current : sent))
         setPoints((current) => (current.length ? current : carried))
         // A file the Host refused is the one thing here worth interrupting for: the tile that
-        // carries it turns red, and the Host's own sentence — the limit it names — is a toast on
-        // the phone and the page's own toaster on the web. A send refused for another reason keeps
-        // its place in the screen's own words, as it always has.
-        if (!(error instanceof AttachmentError)) return
-        const message =
-          error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
-        if (error.attachmentId)
-          setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
-        tell.error(message)
+        // carries it turns red, and the Host's own sentence — the limit it names — is drawn on it.
+        // The notice above the field is not asked to repeat what the tile already says.
+        if (error instanceof AttachmentError) {
+          const message =
+            error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
+          if (error.attachmentId)
+            setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
+          return
+        }
+        // Anything else is about the send itself, and is drawn above the field it was typed in.
+        refusal.refuse({
+          ok: false,
+          said: error instanceof Error ? error.message : undefined,
+          alone: "Couldn't send your message.",
+        })
       },
     )
   }
@@ -854,6 +868,7 @@ export function Composer({
           ))}
         </div>
       )}
+      <Refusal hold={refusal} className="mb-2" />
       <InputGroup
         className={cn(
           "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",

@@ -8,19 +8,21 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { toast } from "sonner"
 
 import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
   chatScreen,
   click,
+  find,
   findAll,
   json,
   mount,
   seedChat,
   text,
   until,
+  withToasts,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const CHAT = "chat-attachments"
@@ -56,20 +58,8 @@ const source = (label: string) =>
 /** `disabled` would eat the tap, so a source nothing can carry is marked unavailable and stays live. */
 const shut = (label: string) => source(label)?.getAttribute("aria-disabled") === "true"
 
-/** Taps a source and answers what it said: the refusal is a toast, and the sheet is left open. */
-async function tapped(label: string) {
-  const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
-  try {
-    await click(source(label))
-  } finally {
-    toast.error = original
-  }
-  return said
-}
+/** The sheet's own words for a source that can't be picked: drawn in it, not said in passing. */
+const refusal = () => find('[role="alert"]')
 
 async function openMenu() {
   await until(async () => Boolean(addContext()), "the + button")
@@ -77,21 +67,26 @@ async function openMenu() {
   await until(async () => Boolean(source("Files")), "the menu's sources")
 }
 
-test("a host that advertises no attachments refuses Files at the menu, with its reason", async () => {
+test("a host that advertises no attachments refuses Files at the menu, in the sheet's own words", async () => {
   await seed("attach-menu-old")
   const asked: string[] = []
   host(["media"], "attach-menu-old", asked)
-  await mount(chatScreen(CHAT), async () => {
-    await openMenu()
-    assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files stays tappable")
-    assert.equal(shut("Files"), true, "and reads as unavailable")
-    assert.equal(shut("Camera"), false, "Camera is untouched")
-    assert.deepEqual(
-      await tapped("Files"),
-      ["File uploads need a newer Gots plugin."],
-      "a tap says why, in the rule's own sentence",
-    )
-    assert.ok(source("Files"), "and the sheet is still open")
+  await withToasts(async (said) => {
+    await mount(chatScreen(CHAT), async () => {
+      await openMenu()
+      assert.equal(source("Files")?.hasAttribute("disabled"), false, "Files stays tappable")
+      assert.equal(shut("Files"), true, "and reads as unavailable")
+      assert.equal(shut("Camera"), false, "Camera is untouched")
+      await click(source("Files"))
+      await until(async () => Boolean(refusal()), "the sheet's refusal")
+      assert.equal(
+        wordsOf(refusal()),
+        "File uploads need a newer Gots plugin.",
+        "a tap says why, in the rule's own sentence",
+      )
+      assert.deepEqual(said, [], "and nothing said in passing")
+      assert.ok(source("Files"), "and the sheet is still open")
+    })
   })
 })
 

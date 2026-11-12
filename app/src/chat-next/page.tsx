@@ -12,11 +12,14 @@ import {
 } from "react"
 import { useSearchParams } from "react-router"
 
+import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
+import { ThreadRefusal } from "@/components/chat/session-cards"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
+import { attempt } from "@/lib/attempt"
 import { readPace, sendTimeoutMs } from "@/lib/away"
 import type { SummaryRows } from "@/lib/compaction-seam"
 import { connectionKey } from "@/lib/connection"
@@ -24,6 +27,7 @@ import { usePluginFeatureOn } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
 import { onlineNow } from "@/lib/online"
 import { LOADING_ACTIVITY } from "@/lib/format"
+import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
@@ -740,6 +744,9 @@ export function ChatNextThread({
   // says what the page is doing.
   const store = useMemo(() => storeFor(database, session ?? ""), [database, session])
   const doing = useSyncExternalStore(store.subscribe, store.doing)
+  // What the host said about a write made from this screen, drawn above the composer: the Stop is
+  // there, and a screen that turned to another session carries none of the last one's words.
+  const refusal = useRefusal(session ?? undefined)
   const dispatch = useCallback((event: ThreadEvent) => void store.apply(event), [store])
   // The question just answered holds the card's place until the call's next one is asked; a host
   // that never asks it hands the place back to the composer after `BETWEEN_MS`.
@@ -1487,23 +1494,24 @@ export function ChatNextThread({
         })
         return
       }
-      // Why it didn't go is said where the reader is. Every other request this screen makes that
-      // comes back with an error is a toast, while the thread's own line for one was the first child
-      // of a scroller pinned to the newest row — above the viewport on any chat long enough to
-      // scroll, which is the placement ADR 0071 took away. The row keeps the message and the "Not
-      // sent" mark, and the words go with it: the host's own where it gave them, and what is known
-      // where a send got no answer at all (the reads still land, so this is not "away"). The files go
-      // as the host saved them where it already had them, so sending it again uploads nothing twice.
+      // Why it didn't go is said where the reader is: the thread's own notice, which stands until the
+      // next send clears it. Every other request this screen makes that comes back with an error is a
+      // toast, while the thread's own line for one was the first child of a scroller pinned to the
+      // newest row — above the viewport on any chat long enough to scroll, which is the placement ADR
+      // 0071 took away. The row keeps the message and the "Not sent" mark, and the words go with it:
+      // the host's own where it gave them, and what is known where a send got no answer at all (the
+      // reads still land, so this is not "away"). The files go as the host saved them where it already
+      // had them, so sending it again uploads nothing twice.
       const said =
         error instanceof HostAway
           ? "This host didn't take the message."
           : error instanceof Error
             ? error.message
             : String(error)
-      tell.error(said)
       dispatch({
         type: "unsent",
         row: { id, text: words, at, attachments: prepared?.sent ?? attachments },
+        error: said,
       })
       return
     }
@@ -1587,32 +1595,45 @@ export function ChatNextThread({
     const stops: Promise<boolean>[] = []
     if (run)
       stops.push(
-        stopRun({ server, key }, run).then(
-          () => true,
-          (error) => {
-            if (!(error instanceof RunGone)) {
-              // A refused stop leaves the run where it was, so it is not a turn that failed: the run
-              // is read again now, and the button says Stop for it rather than waiting for a poll.
-              tell.error(error instanceof Error ? error.message : "Couldn't stop the run.")
-              void joinLive()
+        (async () => {
+          let gone = false
+          const answer = await attempt("stop the run", async () => {
+            try {
+              await stopRun({ server, key }, run)
+            } catch (error) {
+              // A run the host no longer holds has already stopped: there is nothing to refuse.
+              if (error instanceof RunGone) gone = true
+              else throw error
             }
+          })
+          if (!answer.ok) {
+            // A refused stop leaves the run where it was, so it is not a turn that failed: the run
+            // is read again now, and the button says Stop for it rather than waiting for a poll.
+            refusal.refuse(answer)
+            void joinLive()
             return false
-          },
-        ),
+          }
+          return !gone
+        })(),
       )
     // Passed on whether or not this device read a child: `stopSubagents` decides what is worth a
     // request (lib/agents.ts).
     if (session)
       stops.push(
-        stopSubagents({ baseUrl: server, apiKey: key }, session, agents.map(delegated), {
-          stopAll: hostStopsAll,
-        }).then(
-          (answer) => answer.rows.some((row) => row.stopped),
-          (error) => {
-            tell.error(error instanceof Error ? error.message : "Couldn't stop the subagents.")
-            return false
-          },
-        ),
+        (async () => {
+          let took = false
+          const answer = await attempt("stop the subagents", async () => {
+            const stopped = await stopSubagents(
+              { baseUrl: server, apiKey: key },
+              session,
+              agents.map(delegated),
+              { stopAll: hostStopsAll },
+            )
+            took = stopped.rows.some((row) => row.stopped)
+          })
+          if (!answer.ok) refusal.refuse(answer)
+          return answer.ok && took
+        })(),
       )
     return (await Promise.all(stops)).some(Boolean)
   }
@@ -1699,83 +1720,91 @@ export function ChatNextThread({
         onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
       />
     ) : null
-  const composer = Composer ? (
-    <Composer
-      controls={{
-        // A run the host works that this page has not joined yet is a turn running all the same.
-        // The plugin naming a run makes a send wait; the thread's rows queue on nothing.
-        busy: doing.running || Boolean(hostRunId && !last?.done && !last?.failed),
-        send: sendTurn,
-        queue: queueMessage,
-        steer: steerMessage,
-        // What this screen can do, never what is running: `busy` above is the liveness half.
-        canSteer: Boolean(steerTurn),
-        subagents,
-        stop,
-        runId: currentRun,
-      }}
-    />
-  ) : (
-    <form
-      className="flex gap-2"
-      onSubmit={(event) => {
-        event.preventDefault()
-        void send()
-      }}
-    >
-      <textarea
-        data-composer
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
-      />
-      <button
-        data-send
-        type="submit"
-        className="rounded-md bg-primary px-4 text-primary-foreground"
-      >
-        Send
-      </button>
-    </form>
+  const composer = (
+    <div className="flex flex-col gap-2">
+      {/* The Stop stands in the composer, so what the host said about a refused one is read here. */}
+      <Refusal hold={refusal} />
+      {Composer ? (
+        <Composer
+          controls={{
+            // A run the host works that this page has not joined yet is a turn running all the same.
+            // The plugin naming a run makes a send wait; the thread's rows queue on nothing.
+            busy: doing.running || Boolean(hostRunId && !last?.done && !last?.failed),
+            send: sendTurn,
+            queue: queueMessage,
+            steer: steerMessage,
+            // What this screen can do, never what is running: `busy` above is the liveness half.
+            canSteer: Boolean(steerTurn),
+            subagents,
+            stop,
+            runId: currentRun,
+          }}
+        />
+      ) : (
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send()
+          }}
+        >
+          <textarea
+            data-composer
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
+          />
+          <button
+            data-send
+            type="submit"
+            className="rounded-md bg-primary px-4 text-primary-foreground"
+          >
+            Send
+          </button>
+        </form>
+      )}
+    </div>
   )
 
   return (
-    <View
-      server={{ server, key }}
-      session={session}
-      turns={turns}
-      streaming={doing.running || following}
-      cards={cards}
-      goals={goals}
-      agents={agents}
-      // A refusal's reason is the chat's own error: said above the thread until the next send clears
-      // it, never repeated under the row it kept (that row says "Not sent" alone, ADR 0071).
-      failure={doing.error}
-      firstReadOut={doing.status === "loading" && !away}
-      older={older === "idle" ? undefined : { state: older, retry }}
-      origin={origin}
-      earlier={
-        !held?.archived && offersEarlier && earlier !== "spent"
-          ? { state: earlier, load: () => void loadEarlier() }
-          : undefined
-      }
-      queue={
-        held?.queue?.items.length
-          ? { items: held.queue.items, paused: held.queue.paused, act: onQueued }
-          : undefined
-      }
-      unsent={unsentView}
-      child={
-        opened && openedRows?.id === opened.id
-          ? { goal: opened.goal, rows: openedRows.rows, close: () => setOpened(undefined) }
-          : undefined
-      }
-      onOpenCard={open}
-      waiting={waitingCard}
-      inFlight={inFlight}
-      composer={composer}
-      stats={held?.stats}
-      send={sendTurn}
-    />
+    <ThreadRefusal.Provider value={refusal}>
+      <View
+        server={{ server, key }}
+        session={session}
+        turns={turns}
+        streaming={doing.running || following}
+        cards={cards}
+        goals={goals}
+        agents={agents}
+        // A refusal's reason is the chat's own error: said above the thread until the next send clears
+        // it, never repeated under the row it kept (that row says "Not sent" alone, ADR 0071).
+        failure={doing.error}
+        firstReadOut={doing.status === "loading" && !away}
+        older={older === "idle" ? undefined : { state: older, retry }}
+        origin={origin}
+        earlier={
+          !held?.archived && offersEarlier && earlier !== "spent"
+            ? { state: earlier, load: () => void loadEarlier() }
+            : undefined
+        }
+        queue={
+          held?.queue?.items.length
+            ? { items: held.queue.items, paused: held.queue.paused, act: onQueued }
+            : undefined
+        }
+        unsent={unsentView}
+        child={
+          opened && openedRows?.id === opened.id
+            ? { goal: opened.goal, rows: openedRows.rows, close: () => setOpened(undefined) }
+            : undefined
+        }
+        onOpenCard={open}
+        waiting={waitingCard}
+        inFlight={inFlight}
+        composer={composer}
+        stats={held?.stats}
+        send={sendTurn}
+      />
+    </ThreadRefusal.Provider>
   )
 }
