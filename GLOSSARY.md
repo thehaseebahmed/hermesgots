@@ -189,6 +189,10 @@ _Avoid_: repo skill, repository skill
 One skill's own panel, opened by its row: its SKILL.md, its linked files, and where it came from, with the host's Readiness and Setup where it has them. No URL of its own — it is about one skill, not a place.
 _Avoid_: skill page, skill detail screen, editor
 
+**Skill category**:
+The `category` a skill's SKILL.md frontmatter names — `review`, `devops`, `media` — which the Skills tab groups its rows by and names its **filters** after, alphabetically, with the skills that name none standing last under _No category_. A category held by both of the tab's sections is one category, so it gets one pill and keeps both sections' rows; a skill that names no category is under All alone.
+_Avoid_: group, folder, tag; section (the tab's sections are where a skill came from, not what it is about)
+
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
@@ -423,8 +427,8 @@ The bar of floating controls a list keeps at the foot of its scroll, above the s
 _Avoid_: bottom bar, FAB row, dock
 
 **Filter**:
-One of the pills that narrow a bot's chat list: All, Unread, Chats, Rooms or Routines. They stand in the bar under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on. A filter only narrows and never re-orders, Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads.
-_Avoid_: tab, segment, tag, category
+One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
+_Avoid_: tab, segment, tag
 
 **Tell**:
 What the app says in passing: one line near the foot of the screen, about something that has just happened and needs no answer. Inside the Android app it is the phone's own toast; on the web it is the toaster. Every screen asks `lib/tell`, so the words are the same on both roads and the app's four tones are decided in one place: error, info, success and note (ADR 0147).
@@ -732,6 +736,10 @@ _Avoid_: update, diff, override
 The page that shows every component the library offers — a live drawing, its source and its props. A reader's document, not the model's.
 _Avoid_: gallery, component gallery, library page, showcase
 
+**Diagram**:
+A closed `mermaid` fence in a reply's text, drawn as the picture it describes where the fence stood. It is drawn from a fence that already arrived: one still streaming, one set into a list and one mermaid cannot parse each stay the code they are. A tap opens it larger.
+_Avoid_: chart, graph, mermaid block, visual
+
 ## Canvases
 
 **Canvas**:
@@ -757,6 +765,18 @@ _Avoid_: revision, snapshot, draft
 **Canvas data**:
 What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Ask**:
+The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app
+replaces with that library's source. A name the app doesn't carry leaves nothing, and a name the
+canvas's host doesn't carry refuses the write.
+_Avoid_: library tag, import, include, library request
+
+**Catalogue**:
+The libraries a canvas may ask for by name: the app's one list of them, holding each one's source,
+global, size and any stylesheet or setup, which the host's refusal list and the guide's library block
+are both generated from.
+_Avoid_: library list, manifest, registry, SDK list
 
 **Point**:
 Tapping an element of a canvas while editing it, so the message you send names that element.

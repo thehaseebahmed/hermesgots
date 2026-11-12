@@ -24,14 +24,6 @@ export { SUBMIT_IN_PLACE }
 
 export type CanvasMode = "light" | "dark"
 
-/**
- * The libraries a page may ask for by name: the ones the app carries a source for, so a page reads
- * them with the app's own copy rather than a CDN the policy wouldn't allow anyway. A name outside
- * this list is dropped, which is how a page asking for something the app doesn't have still draws.
- */
-export const LIBRARIES = ["chart", "date", "icons"] as const
-export type CanvasLibrary = (typeof LIBRARIES)[number]
-
 export const CANVAS_CSP = SANDBOX_CSP
 
 /**
@@ -104,30 +96,216 @@ export function themeVariables(tokens: Record<string, string>, mode: CanvasMode)
   return `:root{${declared}color-scheme: ${mode};}`
 }
 
-/**
- * A page's ask for a library, as the guide writes it: an empty script naming one. Other attributes
- * may ride the tag — quoted values included — and both quote styles count, since a bot writes
- * markup, not a spec.
- */
-const LIBRARY_TAG =
-  /<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/script>/gi
+/** One ask a page makes: the name it names, and the offsets its `<script>` fills. */
+interface LibraryAsk {
+  name: string
+  /** Where the ask's `<script>` opens. */
+  start: number
+  /** Just past its `</script>`. */
+  end: number
+}
 
 /**
- * Every ask taken out, the ones the app can answer replaced by the library's own source where the
- * page put it. A name it doesn't know, a known one the caller gave no source for, and a second ask
- * for one already inlined, leave nothing behind: the page draws without the library rather than
- * carrying a tag for one it never got, or the same source twice.
+ * A page's asks, in the order it makes them, read in one walk over its markup: `<script`, the tag to
+ * its closing `>` — a `>` inside a quoted attribute is the quote's, not the tag's — the
+ * `data-canvas-lib` it carries, and an empty body right after it. A body with anything in it is the
+ * page's own script, not an ask.
+ *
+ * A walk rather than a regex on purpose: the tag grammar is ambiguous enough that a backtracking
+ * pattern took minutes over a page of unterminated `<script` openers, and the page cap admits that
+ * markup. The plan, the inline and the stylesheet all need one pass over the same page.
  */
-function inlineLibraries(html: string, libraries: Partial<Record<CanvasLibrary, string>>): string {
+function libraryAsks(html: string): LibraryAsk[] {
+  const asks: LibraryAsk[] = []
+  const opener = /<script(?=[\s/>])/gi
+  while (opener.exec(html)) {
+    const start = opener.lastIndex - "<script".length
+    const close = tagEnd(html, opener.lastIndex)
+    // No closing `>` before the document ends, or a `<` where a tag cannot be: this opener never
+    // closed, so nothing after it is a tag either.
+    if (close === -1) break
+    const name = askName(html.slice(start, close + 1))
+    if (name !== null) {
+      const body = /^\s*<\/script\s*>/i.exec(html.slice(close + 1))
+      if (body) asks.push({ name, start, end: close + 1 + body[0].length })
+    }
+    opener.lastIndex = close + 1
+  }
+  return asks
+}
+
+/** Where the tag opened at `at` closes: its first `>` outside a quoted value, or -1 for never. */
+function tagEnd(html: string, at: number): number {
+  let quote: string | null = null
+  for (let i = at; i < html.length; i += 1) {
+    const ch = html[i]
+    if (quote) {
+      if (ch === quote) quote = null
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === ">") {
+      return i
+    } else if (ch === "<") {
+      return -1
+    }
+  }
+  return -1
+}
+
+/** The name a tag asks for, or null when it carries no quoted `data-canvas-lib`. */
+function askName(tag: string): string | null {
+  const attribute = /data-canvas-lib\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag)
+  return attribute ? (attribute[1] ?? attribute[2] ?? null) : null
+}
+
+/**
+ * The spans the page's comments cover, in the order they open: what a rule that works in offsets
+ * needs, since a tag inside one is no tag. An unterminated comment runs to the end of the document,
+ * as the host reads it.
+ */
+function commentSpans(html: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  const lower = html.toLowerCase()
+  let at = 0
+  for (;;) {
+    const opened = html.indexOf("<!--", at)
+    if (opened === -1) return spans
+    // `<!-->` and `<!--->` are complete comments, not openers: a parser closes them at once, and
+    // reading them as an unterminated comment would swallow every ask after them.
+    const next = html[opened + 4]
+    if (next === ">") {
+      spans.push([opened, opened + 5])
+      at = opened + 5
+      continue
+    }
+    if (next === "-" && html[opened + 5] === ">") {
+      spans.push([opened, opened + 6])
+      at = opened + 6
+      continue
+    }
+    // A `<!--` inside a script's or a style's own text is that element's text, not a comment the
+    // parser sees, so it opens nothing here either.
+    if (rawTextAt(lower, opened)) {
+      at = opened + 4
+      continue
+    }
+    const closed = html.indexOf("-->", opened + 4)
+    const end = closed === -1 ? html.length : closed + 3
+    spans.push([opened, end])
+    at = end
+  }
+}
+
+/** Whether `at` falls inside a `<script>` or `<style>` element's own text, where markup is text. */
+function rawTextAt(lower: string, at: number): boolean {
+  for (const [open, close] of [
+    ["<script", "</script"],
+    ["<style", "</style"],
+  ]) {
+    const opened = lower.lastIndexOf(open, at)
+    if (opened === -1) continue
+    if (lower.lastIndexOf(close, at) < opened) return true
+  }
+  return false
+}
+
+/**
+ * The names a page asks for, in the order it asks: what a caller fetches sources for before it can
+ * draw anything, so a page that names no library costs no fetch and one that names three is read
+ * once. A name is repeated where the page asks twice — the ask is what the page said, and the
+ * sources decide what to do about a repeat (`inlineLibraries` below inlines one once).
+ */
+export function canvasLibraryPlan(html: string): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const ask of liveAsks(html))
+    if (!seen.has(ask.name)) {
+      seen.add(ask.name)
+      names.push(ask.name)
+    }
+  return names
+}
+
+/** Whether an offset falls inside one of the page's comments. */
+function within(spans: ReadonlyArray<readonly [number, number]>, at: number): boolean {
+  return spans.some(([from, to]) => at >= from && at < to)
+}
+
+/** A page's asks that count — the ones no comment holds, in document order. */
+function liveAsks(html: string): LibraryAsk[] {
+  const spans = commentSpans(html)
+  return libraryAsks(html).filter((ask) => !within(spans, ask.start))
+}
+
+/**
+ * A library as the page is given it (`canvas-library-sources.ts` is what hands one over): the source
+ * that takes the ask's place, and what only that library needs — a stylesheet whose URLs are the
+ * page's, and a prelude that runs once its source has.
+ */
+export interface CanvasLibrarySource {
+  /** The library's source: a global by the time the page's own scripts run. */
+  script: string
+  /** A stylesheet it ships with, hoisted into the page's head rather than put where the ask was. */
+  css?: string
+  /** What its own JavaScript expects and no stylesheet can say, run right after the source. */
+  setup?: string
+}
+
+/** A source, as the `<script>` that carries it can hold it: `</script` would end the element. */
+function scripted(source: string): string {
+  return `<script>${source.replace(/<\/script/gi, "<\\/script")}</script>`
+}
+
+/**
+ * Every ask taken out, the ones the caller handed a source for replaced by that source where the
+ * page put it, with the library's setup right after it. Which names exist is the caller's to know —
+ * this rule answers with what it was given, so a name it has no source for, and a second ask for one
+ * already inlined, leave nothing behind: the page draws without the library rather than carrying a
+ * tag for one it never got, or the same source twice.
+ *
+ * A tag inside a comment is no ask (`canvasLibraryPlan` reads the page the same way): the comment is
+ * what the page's author wrote, so it is left whole, and a page that documents the ask above the one
+ * it makes still gets its library.
+ */
+function inlineLibraries(
+  html: string,
+  libraries: Readonly<Record<string, CanvasLibrarySource>>,
+  asks: readonly LibraryAsk[],
+): string {
   const placed = new Set<string>()
-  return html.replace(LIBRARY_TAG, (_tag, name: string) => {
-    const known = (LIBRARIES as readonly string[]).includes(name)
-    const source = known ? libraries[name as CanvasLibrary] : undefined
-    if (!source || placed.has(name)) return ""
-    placed.add(name)
-    // `</script` inside the source would end the element it is in; the escape spells the same string.
-    return `<script>${source.replace(/<\/script/gi, "<\\/script")}</script>`
-  })
+  let out = ""
+  let at = 0
+  for (const ask of asks) {
+    out += html.slice(at, ask.start)
+    // A handed record is a plain object, so a name it merely inherits (`constructor`) is no source.
+    const library = Object.hasOwn(libraries, ask.name) ? libraries[ask.name] : undefined
+    if (library && !placed.has(ask.name)) {
+      placed.add(ask.name)
+      out += scripted(library.script) + (library.setup ? scripted(library.setup) : "")
+    }
+    at = ask.end
+  }
+  return out + html.slice(at)
+}
+
+/**
+ * The stylesheets the page's asks need, each once and in the order the page asked for them: a
+ * library's CSS is a floor under the page's own look, so it is hoisted into the head ahead of
+ * anything the page wrote, and the page's own `<style>` still comes last and wins.
+ */
+function libraryStyles(
+  asks: readonly LibraryAsk[],
+  libraries: Readonly<Record<string, CanvasLibrarySource>>,
+): string {
+  const seen = new Set<string>()
+  let styles = ""
+  for (const { name } of asks) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    const css = Object.hasOwn(libraries, name) ? libraries[name].css : undefined
+    if (css) styles += `<style>${escapeStyle(css)}</style>`
+  }
+  return styles
 }
 
 /**
@@ -162,12 +340,16 @@ function escapeStyle(css: string): string {
 
 /**
  * The document a frame is given: the page, with the app's own head ahead of anything it wrote — the
- * policy, the theme, the compiled classes and the scripts a page is handed, the data bridge last
- * since the page's own scripts are what call it. `scroll` is the position the bridge last reported,
- * so a page rebuilt at a new version opens where the reader left the one before it; `libraries` are
- * the sources an ask for one is answered with, and `css` the Tailwind the page's own classes
- * compiled to. A page with no head can't be drawn — the plugin's scan refuses one, so this is a bug
- * rather than a page, and it throws instead of drawing something unstyled.
+ * policy, the theme, the compiled classes, each library's stylesheet and the scripts a page is
+ * handed, the data bridge last since the page's own scripts are what call it. `scroll` is the
+ * position the bridge last reported, so a page rebuilt at a new version opens where the reader left
+ * the one before it; `libraries` are the sources an ask for one is answered with, by name, and an
+ * ask it holds no source for is dropped — `canvasLibraryPlan` is what says which names to fetch
+ * before drawing; `css` is the Tailwind the page's own classes compiled to. A library's stylesheet
+ * is hoisted rather than put where the ask was, and lands before the page's own `<style>`, so the
+ * page's look still wins; its setup runs right after its source, where the ask was. A page with no
+ * head can't be drawn — the plugin's scan refuses one, so this is a bug rather than a page, and it
+ * throws instead of drawing something unstyled.
  */
 export function canvasDocument(
   html: string,
@@ -181,16 +363,22 @@ export function canvasDocument(
     mode: CanvasMode
     tokens: Record<string, string>
     scroll?: number
-    libraries?: Partial<Record<CanvasLibrary, string>>
+    libraries?: Readonly<Record<string, CanvasLibrarySource>>
     css?: string
   },
 ): string {
-  const page = withMode(inlineLibraries(html, libraries), mode)
+  const asks = liveAsks(html)
+  const page = withMode(inlineLibraries(html, libraries, asks), mode)
   const head = findHead(page)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
   return sandboxedDocument(page, {
     policy: CANVAS_CSP,
-    afterPolicy: `<style>${themeVariables(tokens, mode)}</style>` + (css ? `<style>${escapeStyle(css)}</style>` : ""),
+    // The theme, then each library's own stylesheet, then the page's compiled classes: a floor under
+    // the page's look, so a page that styles a library's element itself still wins.
+    afterPolicy:
+      `<style>${themeVariables(tokens, mode)}</style>` +
+      libraryStyles(asks, libraries) +
+      (css ? `<style>${escapeStyle(css)}</style>` : ""),
     afterSafety: `<script>${scrollBridge(scroll)}</script>` + `<script>${BRIDGE_SCRIPT}</script>`,
   })
 }

@@ -1,6 +1,9 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 
+import { Chip, ChipRow } from "@/components/chip"
+import { FootSearch, FootSearchClose } from "@/components/foot-search"
+import { SearchField } from "@/components/search-field"
 import { SkillDetail } from "@/components/skill-detail-sheet"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
@@ -17,11 +20,14 @@ import type { Profile } from "@/lib/db"
 import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
 import {
+  ALL_SKILLS_KEY,
   canRemove,
   categoryHeader,
   categoryWrites,
   skillHealth,
+  skillPills,
   skillSections,
+  skillsKept,
   switchableControls,
   type CategoryHeader,
   type RowControls,
@@ -32,6 +38,20 @@ import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
+import { useXLarge } from "@/lib/media"
+
+/** What a read that hasn't answered holds: one array, so the derivation below isn't rebuilt. */
+const NO_SKILLS: Skill[] = []
+
+/**
+ * The field's own name, for the control that shows and hides it: the tab's field at a laptop's width
+ * and the foot's below it are one field in two places, and only one of the two is ever in the tree
+ * (ADR 0145).
+ */
+const SKILLS_SEARCH_FIELD_ID = "skills-search"
+
+/** The key a section's category is known by: the one a header is busy under, and its full group's. */
+const groupKey = (section: string, category: string | null) => `${section}:${category ?? ""}`
 
 export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const answers = useSkillFeatureAnswers(profile)
@@ -42,6 +62,34 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [flipping, setFlipping] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  // The pill the reader pressed, by its key: the tab's own, gone when it remounts.
+  const [chosen, setChosen] = useState(ALL_SKILLS_KEY)
+  // Whether the foot's field is up, which is the only thing the foot holds: the words are the tab's
+  // own `query`, since it is the tab's rows they narrow.
+  const [seeking, setSeeking] = useState(false)
+  // From a laptop's width up the field stands over the pills, and the foot draws no search at all
+  // there — one field, in the one place the width puts it (ADR 0145).
+  const wide = useXLarge()
+  const skills = state.status === "ok" ? state.skills : NO_SKILLS
+  // Narrowed before it is grouped, so the sections and their captions describe what is drawn, and
+  // memorised so a switch's own state changing does not rebuild them. Each drawn group is matched to
+  // the whole category it came from, which is what its header counts and what its tap writes.
+  const { pills, kept, sections, whole } = useMemo(() => {
+    const pills = skillPills(skills)
+    const kept = skillsKept(skills, chosen, query)
+    const whole = new Map(
+      skillSections(skills).flatMap((section) =>
+        section.groups.map((group) => [groupKey(section.id, group.category), group] as const),
+      ),
+    )
+    return { pills, kept, sections: skillSections(kept), whole }
+  }, [skills, chosen, query])
+  // A category leaves with the last skill in it, and a category that comes back must not be pressed
+  // again without a tap: the press is handed back to All as soon as no pill offers it.
+  useEffect(() => {
+    if (!pills.some((pill) => pill.key === chosen)) setChosen(ALL_SKILLS_KEY)
+  }, [pills, chosen])
   if (answer !== "yes") return null
   if (state.status === "loading") return null
 
@@ -127,18 +175,73 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
     )
   }
 
+  // The only emptiness this tab words is the search's: a bot holding no skills draws the field over an
+  // empty tab and says nothing, since nothing was searched.
+  const missed = kept.length === 0 && query.trim() !== ""
+
   return (
-    <div className="flex flex-col gap-4" data-skills-tab>
-      {skillSections(state.skills).map((section) => (
+    <div className="flex flex-1 flex-col gap-4" data-skills-tab>
+      <div className="flex flex-col gap-2">
+        {/* The pills stand at the top at every width; the field is there only where the width has room
+            for it to stand always — below a laptop's it is the foot's. */}
+        {wide && (
+          <SearchField
+            id={SKILLS_SEARCH_FIELD_ID}
+            value={query}
+            onChange={setQuery}
+            label="Search skills"
+          />
+        )}
+        {pills.length > 1 && (
+          <ChipRow label="Filter skills">
+            {pills.map((pill) => (
+              <Chip
+                key={pill.key}
+                active={pill.key === chosen}
+                onClick={() => setChosen(pill.key)}
+              >
+                {pill.label}
+              </Chip>
+            ))}
+          </ChipRow>
+        )}
+      </div>
+      {missed && <p className="py-8 text-center text-sm text-muted-foreground">No skills match.</p>}
+      {sections.map((section) => (
         <Section
           key={section.id}
           section={section}
+          whole={whole}
           controls={controls}
           onOpen={open}
           onFlip={flip}
           flipping={flipping}
         />
       ))}
+      {/* The foot, in the chat list's own arrangement: sticky to the foot of the scroll rather than
+          fixed, a gradient out of the background so the rows end under it, and the safe area beneath.
+          The wrapper is the tab's because a Settings page scrolls as one column (`Screen`), so the bar
+          has to be that column's last child; this div's `flex-1` is what lets the foot's `mt-auto` put
+          it at the bottom of a tab whose rows stop short of the screen. */}
+      {!wide && (
+        <div
+          data-skills-foot
+          className="pointer-events-none sticky bottom-0 z-20 -mx-4 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        >
+          <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+            <FootSearch
+              open={seeking}
+              onOpen={() => setSeeking(true)}
+              onClose={() => setSeeking(false)}
+              query={query}
+              onQueryChange={setQuery}
+              label="Search skills"
+              fieldId={SKILLS_SEARCH_FIELD_ID}
+            />
+            {seeking && <FootSearchClose onClose={() => setSeeking(false)} />}
+          </div>
+        </div>
+      )}
       {confirmation}
     </div>
   )
@@ -146,12 +249,15 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
 
 function Section({
   section,
+  whole,
   controls,
   onOpen,
   onFlip,
   flipping,
 }: {
   section: SkillSection
+  /** The whole category each drawn group came from, by the key its header is busy under. */
+  whole: Map<string, SkillGroup>
   controls?: RowControls
   onOpen?: (name: string) => void
   onFlip?: (key: string, group: SkillGroup) => void
@@ -164,7 +270,10 @@ function Section({
       {section.heading && <Caption>{section.heading}</Caption>}
       <div className="flex flex-col gap-3">
         {section.groups.map((group, index) => {
-          const key = `${section.id}:${group.category ?? ""}`
+          const key = groupKey(section.id, group.category)
+          // The rows are the ones the words kept; the header over them, and the tap that header takes,
+          // speak for the category they belong to.
+          const full = whole.get(key) ?? group
           return (
             <div
               key={group.category ?? ""}
@@ -174,10 +283,10 @@ function Section({
               <Group>
                 <CategoryRow
                   id={`skill-category-${section.id}-${index}`}
-                  header={categoryHeader(group)}
+                  header={categoryHeader(full)}
                   writable={controls !== undefined}
                   busy={flipping === key}
-                  onFlip={() => onFlip?.(key, group)}
+                  onFlip={() => onFlip?.(key, full)}
                 />
                 {group.skills.map((skill) => (
                   <SkillItem
