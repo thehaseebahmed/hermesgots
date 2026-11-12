@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import html
+import ipaddress
 import json
 import logging
 import re
@@ -42,6 +43,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -53,10 +55,10 @@ logger = logging.getLogger(__name__)
 # The plugin context, kept by wire() so llm_gate can see whether the host offers ctx.llm.
 ctx: Any = None
 
-TYPES = ("learn", "compare")
 FORMATS = ("guide", "quiz", "glossary")
 # A comparison delivers one thing, the memo; there are no other formats to make.
 COMPARE_FORMAT = "memo"
+VERIFY_FORMAT = "verdict"
 MIN_OPTIONS = 2
 MAX_OPTIONS = 5
 MIN_CRITERIA = 2
@@ -76,12 +78,15 @@ SOURCE_NAMES = {
     "forums": "forums",
 }
 SESSION_PREFIX = "research-"
+ONE_LANE = ""
 MAX_INPUT = 2000
 MAX_GOAL = 600
 MAX_AUDIENCE = 160
 MAX_TITLE = 120
 MAX_POINTS = 6
 MAX_POINT = 200
+MAX_PARTS = 4
+MAX_TERMS = 8
 # A follow-up round adds at most this many questions, each a section of its own, and the outline
 # grows to at most MAX_OUTLINE points that way.
 MAX_FOLLOWUPS = 3
@@ -91,6 +96,9 @@ MAX_MODEL = 200
 MAX_CLAIMS = 120
 MAX_CLAIM = 600
 MIN_SNIPPET = 20
+# What a lane searched is kept for the reader, up to this many queries a lane, each cut this short.
+MAX_SEARCHES = 40
+MAX_QUERY = 300
 MAX_SNIPPET = 1200
 # Fewer than this and there is nothing worth writing from.
 MIN_CLAIMS = 3
@@ -99,6 +107,8 @@ FETCH_MAX_BYTES = 6 * 1024 * 1024
 PAGE_CACHE = 24
 MONITOR_SECONDS = 2.0
 ACTIVE = {"queued", "running", "waiting_for_approval", "stopping"}
+INCOMPLETE_ENDS = ("failed", "cancelled", "interrupted")
+VERIFY_STANCES = ("supports", "refutes", "context")
 TOOL = "claim_add"
 
 # Set by register() and _wire_api_server.
@@ -193,6 +203,11 @@ def _summary(row: Any, conn: Any) -> Dict[str, Any]:
         "options": _loads(row["options"], []),
         "criteria": _loads(row["criteria"], []),
         "judge": _loads(row["judge"], None),
+        "restatement": row["restatement"],
+        "parts": _loads(row["parts"], []),
+        "terms": _loads(row["terms"], []),
+        "uncheckable": row["uncheckable"],
+        "strictness": row["strictness"],
         "found": counts[0],
         "claims": counts[1],
         "created_at": row["created_at"],
@@ -207,7 +222,7 @@ def _row(conn: Any, mission_id: str) -> Any:
 def _update(path: Path, mission_id: str, **fields: Any) -> None:
     for key in (
         "outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer", "researcher",
-        "options", "criteria", "judge",
+        "options", "criteria", "judge", "parts", "terms",
     ):
         if key in fields and fields[key] is not None and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -251,8 +266,9 @@ def mission(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
                 "SELECT format, content FROM research_outputs WHERE mission_id = ?", (mission_id,)
             )
         }
-        if found["type"] == "compare":
-            found["decision"] = decide(found["options"], found["criteria"], found["outputs"].get(COMPARE_FORMAT))
+        found.update(type_of(found).derived_fields(found))
+        if type_of(found).keeps_searches:
+            found["searches"] = _searches(conn, found)
         found["revisions"] = [
             {
                 "number": rev["number"],
@@ -272,14 +288,46 @@ def mission(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
+def _searches(conn: Any, found: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Each lane's searches, in the order it made them."""
+    rows = conn.execute(
+        "SELECT lane, query FROM research_searches WHERE mission_id = ? ORDER BY rowid", (found["id"],)
+    ).fetchall()
+    return {lane.name: [row["query"] for row in rows if row["lane"] == lane.name] for lane in lanes(found)}
+
+
+def note_search(path: Path, mission_id: str, lane: str, query: Any) -> None:
+    """Keeps a query a lane searched, once, while the lane has room for it, in a type that keeps them."""
+    if not isinstance(query, str) or not query.strip() or not path.exists():
+        return
+    query = query.strip()[:MAX_QUERY]
+    conn = _open(path)
+    try:
+        row = _row(conn, mission_id)
+        if row is None or not MISSION_TYPES[row["type"]].keeps_searches:
+            return
+        if lane not in {each.name for each in MISSION_TYPES[row["type"]].lanes}:
+            return
+        held = conn.execute(
+            "SELECT COUNT(*) FROM research_searches WHERE mission_id = ? AND lane = ?", (mission_id, lane)
+        ).fetchone()[0]
+        if held < MAX_SEARCHES:
+            conn.execute(
+                "INSERT OR IGNORE INTO research_searches (mission_id, lane, query) VALUES (?, ?, ?)",
+                (mission_id, lane, query),
+            )
+    finally:
+        conn.close()
+
+
 def _ledger(conn: Any, mission_id: str) -> Dict[str, List[Dict[str, Any]]]:
     sources = conn.execute(
         "SELECT id, title, url, kind FROM research_sources WHERE mission_id = ? ORDER BY at, rowid",
         (mission_id,),
     ).fetchall()
     claims = conn.execute(
-        """SELECT id, text, source_id, snippet, confidence, option_id, criterion_id FROM research_claims
-           WHERE mission_id = ? ORDER BY at, rowid""",
+        """SELECT id, text, source_id, snippet, confidence, option_id, criterion_id, stance, part_id,
+                  lane FROM research_claims WHERE mission_id = ? ORDER BY at, rowid""",
         (mission_id,),
     ).fetchall()
     return {
@@ -292,6 +340,7 @@ def _ledger(conn: Any, mission_id: str) -> Dict[str, List[Dict[str, Any]]]:
                 "snippet": row["snippet"],
                 "confidence": row["confidence"],
                 **({"option": row["option_id"], "criterion": row["criterion_id"]} if row["option_id"] or row["criterion_id"] else {}),
+                **({"stance": row["stance"], "part": row["part_id"], "lane": row["lane"]} if row["stance"] else {}),
             }
             for row in claims
         ],
@@ -313,8 +362,8 @@ def create(path: Path, profile: Optional[str], text: Any, kind: Any = "learn") -
     """A new mission at the brief, whose read-back is still being worked out."""
     text = _text(text, MAX_INPUT, "The question")
     kind = kind or "learn"
-    if kind not in TYPES:
-        raise ResearchError("Only Learn & understand and Compare & decide missions can be started so far.")
+    if kind not in MISSION_TYPES:
+        raise ResearchError("Only Learn & understand, Compare & decide and Verify a claim missions can be started so far.")
     mission_id = f"r_{uuid.uuid4().hex[:16]}"
     now = _now()
     conn = _open(path)
@@ -326,7 +375,7 @@ def create(path: Path, profile: Optional[str], text: Any, kind: Any = "learn") -
                        ?, ?)""",
             (
                 mission_id, profile, kind, text, _title_from(text),
-                COMPARE_FORMAT if kind == "compare" else "guide", json.dumps(list(SOURCE_KINDS[:3])), now, now,
+                MISSION_TYPES[kind].default_format, json.dumps(list(SOURCE_KINDS[:3])), now, now,
             ),
         )
     finally:
@@ -353,8 +402,10 @@ def _need(path: Path, mission_id: str, stages: Tuple[str, ...]) -> Dict[str, Any
 def confirm_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """The user's brief: the outline is proposed next, from it."""
     found = _need(path, mission_id, ("brief",))
-    if found["type"] == "compare":
-        return _confirm_compare_brief(path, mission_id, body)
+    return type_of(found).confirm_brief(path, mission_id, body)
+
+
+def _confirm_learn_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     fields = {
         "goal": _text(body.get("goal"), MAX_GOAL, "The goal"),
         "audience": _text(body.get("audience"), MAX_AUDIENCE, "The audience"),
@@ -430,6 +481,57 @@ def _confirm_compare_brief(path: Path, mission_id: str, body: Dict[str, Any]) ->
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
+def _confirm_verify_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    found = mission(path, mission_id)
+    if found and found["uncheckable"]:
+        raise ResearchError("This claim can't be checked; start another.", 409)
+    restatement = _text(body.get("restatement"), MAX_GOAL, "The restatement")
+    parts = verify_parts(body.get("parts"))
+    if not parts:
+        raise ResearchError(f"Check 1 to {MAX_PARTS} parts.")
+    terms = verify_terms(body.get("terms"))
+    # The parts are what gets researched, so they are the Scope Gate's outline: no model call.
+    _update(
+        path, mission_id, restatement=restatement, parts=parts, terms=terms, stage="scope", busy=None,
+        outline=[part["text"] for part in parts], error=None,
+    )
+    _tell(path, "research_scope", mission_id)
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
+def verify_parts(raw: Any) -> List[Dict[str, str]]:
+    """A claim's parts as given, blank ones dropped, numbered p1.. in order; more than
+    ``MAX_PARTS`` is refused."""
+    if not isinstance(raw, list):
+        raise ResearchError("The parts are required.")
+    texts = []
+    for item in raw:
+        text = item.get("text") if isinstance(item, dict) else item
+        if isinstance(text, str) and text.strip():
+            texts.append(_text(text, MAX_POINT, "A part"))
+    if len(texts) > MAX_PARTS:
+        raise ResearchError(f"Check 1 to {MAX_PARTS} parts.")
+    return [{"id": f"p{i + 1}", "text": text} for i, text in enumerate(texts)]
+
+
+def verify_terms(raw: Any) -> List[str]:
+    """The words a claim takes literally, as edited: trimmed, blank ones and repeats (whatever their
+    case) dropped; more than ``MAX_TERMS`` is refused."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ResearchError("The terms are a list.")
+    terms: List[str] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            term = _text(item, MAX_NAME, "A term")
+            if term.casefold() not in {other.casefold() for other in terms}:
+                terms.append(term)
+    if len(terms) > MAX_TERMS:
+        raise ResearchError(f"Take {MAX_TERMS} terms at most literally.")
+    return terms
+
+
 def edit_brief(path: Path, mission_id: str) -> Dict[str, Any]:
     """Back from the Scope Gate to the brief."""
     _need(path, mission_id, ("scope",))
@@ -440,8 +542,19 @@ def edit_brief(path: Path, mission_id: str) -> Dict[str, Any]:
 def approve_scope(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """The Scope Gate passed: clears any earlier reading and puts the mission at reading."""
     found = _need(path, mission_id, ("scope",))
-    if found["type"] == "compare":
-        return _approve_compare_scope(path, found, body)
+    return type_of(found).approve_scope(path, found, body)
+
+
+def _source_kinds(body: Dict[str, Any]) -> List[str]:
+    """The Scope Gate's kinds of source, each known, repeats dropped; none is refused."""
+    kinds = body.get("source_kinds")
+    if not isinstance(kinds, list) or not kinds or any(kind not in SOURCE_KINDS for kind in kinds):
+        raise ResearchError("Pick the kinds of source.")
+    return list(dict.fromkeys(kinds))
+
+
+def _approve_learn_scope(path: Path, found: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+    mission_id = found["id"]
     points = body.get("outline")
     if not isinstance(points, list):
         raise ResearchError("The outline is required.")
@@ -450,19 +563,16 @@ def approve_scope(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str
         raise ResearchError("The outline needs a point.")
     if len(outline) > MAX_POINTS:
         raise ResearchError(f"The outline can have {MAX_POINTS} points at most.")
-    kinds = body.get("source_kinds")
-    if not isinstance(kinds, list) or not kinds or any(kind not in SOURCE_KINDS for kind in kinds):
-        raise ResearchError("Pick the kinds of source.")
+    kinds = _source_kinds(body)
     _clear(path, mission_id)
     _update(
         path,
         mission_id,
         outline=outline,
-        source_kinds=list(dict.fromkeys(kinds)),
+        source_kinds=kinds,
         stage="reading",
         busy=None,
         error=None,
-        run_id=None,
     )
     return mission(path, mission_id)  # type: ignore[return-value]
 
@@ -483,20 +593,39 @@ def pick_model(body: Dict[str, Any]) -> Optional[Dict[str, str]]:
 
 
 def _approve_compare_scope(path: Path, found: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
-    kinds = body.get("source_kinds")
-    if not isinstance(kinds, list) or not kinds or any(kind not in SOURCE_KINDS for kind in kinds):
-        raise ResearchError("Pick the kinds of source.")
+    kinds = _source_kinds(body)
     judge = pick_model(body.get("judge") if isinstance(body.get("judge"), dict) else {})
     mission_id = found["id"]
     _clear(path, mission_id)
     _update(
-        path, mission_id, source_kinds=list(dict.fromkeys(kinds)), judge=judge, stage="reading", busy=None,
-        error=None, run_id=None,
+        path, mission_id, source_kinds=kinds, judge=judge, stage="reading", busy=None,
+        error=None,
     )
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
-RESEARCH_TABLES = ("research_sources", "research_claims", "research_outputs", "research_revisions")
+# How strict a verification's lanes are about their sources: any source, or primary and reputable only.
+STRICTNESS = ("any", "reputable")
+
+
+def _approve_verify_scope(path: Path, found: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+    kinds = _source_kinds(body)
+    strictness = body.get("strictness")
+    if strictness not in STRICTNESS:
+        raise ResearchError(f"strictness must be one of: {', '.join(STRICTNESS)}.")
+    mission_id = found["id"]
+    _clear(path, mission_id)
+    _update(
+        path, mission_id, source_kinds=kinds, strictness=strictness, stage="reading",
+        busy=None, error=None,
+    )
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
+RESEARCH_TABLES = (
+    "research_sources", "research_claims", "research_outputs", "research_revisions", "research_runs",
+    "research_searches",
+)
 
 
 def _clear(path: Path, mission_id: str) -> None:
@@ -512,8 +641,7 @@ def _clear(path: Path, mission_id: str) -> None:
 def make_format(path: Path, mission_id: str, fmt: Any) -> Dict[str, Any]:
     """Another format from the same ledger: no new reading, only writing."""
     found = _need(path, mission_id, ("delivered",))
-    if found["type"] != "learn":
-        raise ResearchError("A comparison has one format, the memo.")
+    _refuse(type_of(found).formats_refused)
     if fmt not in FORMATS:
         raise ResearchError("Pick a format.")
     if fmt in found["formats"] or found["making"]:
@@ -526,8 +654,7 @@ def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any
     """Questions the delivered mission missed: the researcher reads for them in the same session and
     ledger, then the outline is planned again around them and everything made is written again."""
     found = _need(path, mission_id, ("delivered",))
-    if found["type"] != "learn":
-        raise ResearchError("Questions can only be added to a Learn & understand mission so far.")
+    _refuse(type_of(found).followup_refused)
     if found["making"]:
         raise ResearchError("Wait for the format being made.", 409)
     raw = body.get("questions")
@@ -562,8 +689,8 @@ def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any
         stage="reading",
         busy=None,
         error=None,
-        run_id=None,
     )
+    _clear_runs(path, mission_id)
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
@@ -573,8 +700,7 @@ def rewrite(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]
     found = mission(path, mission_id)
     if found is None:
         raise ResearchError("No such mission.", 404)
-    if found["type"] != "learn":
-        raise ResearchError("Only a Learn & understand mission can be rewritten with another model.")
+    _refuse(type_of(found).rewrite_refused)
     failed = found["error"] and (found["pending"] or {}).get("reason") == "rewrite"
     if found["stage"] != "delivered" and not failed:
         raise ResearchError("The mission isn't delivered yet.", 409)
@@ -626,6 +752,7 @@ def remove(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
     found = mission(path, mission_id)
     if found is None:
         return None
+    runs = runs_of(path, mission_id)
     conn = _open(path)
     try:
         row = _row(conn, mission_id)
@@ -636,25 +763,64 @@ def remove(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
     _forget(path, mission_id)
     events.note("research", mission_id, path, True)
-    found["run_id"] = row["run_id"] if row is not None else None
+    found["runs"] = runs
     found["profile"] = row["profile"] if row is not None else None
     return found
 
 
-def set_run(path: Path, mission_id: str, run_id: Optional[str], error: Optional[str] = None) -> None:
-    _update(path, mission_id, run_id=run_id, error=error)
+def set_run(
+    path: Path, mission_id: str, run_id: Optional[str], error: Optional[str] = None, lane: str = ONE_LANE
+) -> None:
+    """Keeps the run a lane was started on, or forgets it (None), with the mission's error."""
+    conn = _open(path)
+    try:
+        if run_id is None:
+            conn.execute("DELETE FROM research_runs WHERE mission_id = ? AND lane = ?", (mission_id, lane))
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO research_runs (mission_id, lane, run_id, ended) VALUES (?, ?, ?, NULL)",
+                (mission_id, lane, run_id),
+            )
+    finally:
+        conn.close()
+    _update(path, mission_id, error=error)
+
+
+def _clear_runs(path: Path, mission_id: str) -> None:
+    conn = _open(path)
+    try:
+        conn.execute("DELETE FROM research_runs WHERE mission_id = ?", (mission_id,))
+    finally:
+        conn.close()
 
 
 def retry(path: Path, mission_id: str) -> Dict[str, Any]:
-    """Clears a mission's error, so its step runs again. Reading starts over from the scope."""
+    """Clears a mission's error, so its step runs again. A failed reading restarts the lanes whose
+    run didn't complete and isn't still going, or every lane where each completed, keeping what
+    they recorded."""
     found = mission(path, mission_id)
     if found is None:
         raise ResearchError("No such mission.", 404)
     if not found["error"]:
         raise ResearchError("Nothing failed.", 409)
+    if found["stage"] == "reading":
+        # The runs being restarted are let go of before the error is, so the watcher never reads
+        # an old run's end as the new reading's.
+        # A lane whose run is still going keeps it (one that failed to start beside it left it
+        # running), so no lane is ever posted twice and Delete still stops every run.
+        ends = ends_of(path, mission_id)
+        going = {lane for lane, run_id in runs_of(path, mission_id).items() if _run_status(run_id) in ACTIVE}
+        names = [lane.name for lane in lanes(found)]
+        again = [name for name in names if ends.get(name) != "completed" and name not in going]
+        conn = _open(path)
+        try:
+            for lane in again or ([] if going else names):
+                conn.execute("DELETE FROM research_runs WHERE mission_id = ? AND lane = ?", (mission_id, lane))
+        finally:
+            conn.close()
     if found["stage"] == "brief":
         _update(path, mission_id, busy="brief", error=None)
-    elif found["stage"] == "scope" and found["type"] == "learn":
+    elif found["stage"] == "scope" and type_of(found).outline_call:
         _update(path, mission_id, busy="outline", error=None)
     else:
         _update(path, mission_id, error=None)
@@ -670,13 +836,51 @@ def profile_of(path: Path, mission_id: str) -> Optional[str]:
         conn.close()
 
 
-def run_id_of(path: Path, mission_id: str) -> Optional[str]:
+def runs_of(path: Path, mission_id: str) -> Dict[str, str]:
+    """The run each of the mission's lanes was started on, by lane; a lane still being started
+    has none."""
     conn = _open(path)
     try:
-        row = _row(conn, mission_id)
-        return row["run_id"] if row is not None else None
+        return {
+            row["lane"]: row["run_id"]
+            for row in conn.execute("SELECT lane, run_id FROM research_runs WHERE mission_id = ?", (mission_id,))
+        }
     finally:
         conn.close()
+
+
+def ends_of(path: Path, mission_id: str) -> Dict[str, Optional[str]]:
+    """How each started lane's run ended, by lane: None while it hasn't, or where the watcher never
+    saw its end."""
+    conn = _open(path)
+    try:
+        return {
+            row["lane"]: row["ended"]
+            for row in conn.execute("SELECT lane, ended FROM research_runs WHERE mission_id = ?", (mission_id,))
+        }
+    finally:
+        conn.close()
+
+
+def _note_ends(path: Path, mission_id: str, ends: Dict[str, str]) -> None:
+    if not ends:
+        return
+    conn = _open(path)
+    try:
+        for lane, ended in ends.items():
+            conn.execute(
+                "UPDATE research_runs SET ended = ? WHERE mission_id = ? AND lane = ? AND ended IS NULL",
+                (ended, mission_id, lane),
+            )
+    finally:
+        conn.close()
+
+
+def unstarted_lanes(path: Path, found: Dict[str, Any]) -> List["Lane"]:
+    """The mission's lanes that have no run: all of them at the start of a reading, and the ones a
+    retry let go of."""
+    runs = runs_of(path, found["id"])
+    return [lane for lane in lanes(found) if lane.name not in runs]
 
 
 # --- model calls --------------------------------------------------------------------------------
@@ -827,9 +1031,63 @@ def _compare_brief(path: Path, row: Dict[str, Any]) -> None:
     _tell(path, "research_brief", row["id"], fields["title"])
 
 
+VERIFY_BRIEF_SYSTEM = (
+    "You read back a claim someone wants checked, so they can correct it before any research "
+    "starts. Never judge whether it is true, and never carry over its tone: loaded words, "
+    "exaggeration and emphasis are dropped, not repeated."
+)
+VERIFY_BRIEF_INSTRUCTIONS = (
+    f"Read the claim below and fill in the brief. title: what the claim is about in at most six "
+    f"words, neutral, no trailing punctuation. restatement: the claim in one plain, neutral "
+    f"sentence that says what it asserts and no more or less, leaning neither way. parts: 1 to "
+    f"{MAX_PARTS} separate assertions the claim makes, each a short statement that can be found "
+    f"true or false on its own. terms: the words in it that are taken literally, as the claim uses "
+    f"them (a number, a name, a word like always or every). checkable: false when the claim is an "
+    f"opinion, a matter of taste, a prediction or otherwise can't be settled by evidence, with "
+    f"reason saying why in one short sentence; otherwise true and reason empty."
+)
+VERIFY_BRIEF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "restatement": {"type": "string"},
+        "parts": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_PARTS},
+        "terms": {"type": "array", "items": {"type": "string"}},
+        "checkable": {"type": "boolean"},
+        "reason": {"type": "string"},
+    },
+    "required": ["title", "restatement", "parts", "terms", "checkable", "reason"],
+}
+UNCHECKABLE = "It can't be settled by evidence."
+
+
+def _verify_brief(path: Path, row: Dict[str, Any]) -> None:
+    answer = _structured(
+        "brief", VERIFY_BRIEF_SYSTEM, VERIFY_BRIEF_INSTRUCTIONS, row["input"], VERIFY_BRIEF_SCHEMA, 1500
+    )
+    texts = [_clip(p, MAX_POINT) for p in answer.get("parts") or [] if isinstance(p, str)]
+    texts = list(dict.fromkeys(t for t in texts if t))[:MAX_PARTS]
+    restatement = _clip(answer.get("restatement"), MAX_GOAL)
+    checkable = answer.get("checkable") is not False
+    if checkable and (not restatement or not texts):
+        raise ResearchError("The model couldn't read a claim in that. Try again.", 502)
+    terms = [_clip(t, MAX_NAME) for t in answer.get("terms") or [] if isinstance(t, str)]
+    fields = {
+        "title": _clip(answer.get("title"), MAX_TITLE) or row["title"],
+        "restatement": restatement or _clip(row["input"], MAX_GOAL),
+        "parts": [{"id": f"p{i + 1}", "text": text} for i, text in enumerate(texts)],
+        "terms": list(dict.fromkeys(t for t in terms if t))[:MAX_TERMS],
+        "uncheckable": None if checkable else (_clip(answer.get("reason"), MAX_GOAL) or UNCHECKABLE),
+    }
+    _update(path, row["id"], **fields, busy=None)
+    _tell(path, "research_brief", row["id"], fields["title"])
+
+
 def _brief(path: Path, row: Dict[str, Any]) -> None:
-    if row["type"] == "compare":
-        return _compare_brief(path, row)
+    type_of(row).read_brief(path, row)
+
+
+def _learn_brief(path: Path, row: Dict[str, Any]) -> None:
     answer = _structured("brief", BRIEF_SYSTEM, BRIEF_INSTRUCTIONS, row["input"], BRIEF_SCHEMA, 1500)
     fields = {
         "title": _clip(answer.get("title"), MAX_TITLE) or row["title"],
@@ -862,13 +1120,19 @@ def _clip(value: Any, limit: int) -> str:
 
 
 def _brief_text(row: Dict[str, Any]) -> str:
-    if row["type"] == "compare":
-        return (
-            f"Request: {row['input']}\nTitle: {row['title']}\nDecision: {row['goal']}\n"
-            f"Audience: {row['audience']}\n"
-            + "".join(f"Option {o['id']}: {o['name']}\n" for o in row["options"])
-            + "".join(f"Criterion {k['id']} (weight {k['weight']}): {k['name']}\n" for k in row["criteria"])
-        )
+    return type_of(row).brief_text(row)
+
+
+def _compare_brief_text(row: Dict[str, Any]) -> str:
+    return (
+        f"Request: {row['input']}\nTitle: {row['title']}\nDecision: {row['goal']}\n"
+        f"Audience: {row['audience']}\n"
+        + "".join(f"Option {o['id']}: {o['name']}\n" for o in row["options"])
+        + "".join(f"Criterion {k['id']} (weight {k['weight']}): {k['name']}\n" for k in row["criteria"])
+    )
+
+
+def _learn_brief_text(row: Dict[str, Any]) -> str:
     return (
         f"Request: {row['input']}\nTitle: {row['title']}\nGoal: {row['goal']}\n"
         f"Audience: {row['audience']}\nDepth: {'in depth' if row['depth'] == 'deep' else 'overview'}"
@@ -903,9 +1167,56 @@ def _compare_prompt(found: Dict[str, Any]) -> str:
     )
 
 
-def researcher_prompt(found: Dict[str, Any]) -> str:
-    if found["type"] == "compare":
-        return _compare_prompt(found)
+_VERIFY_RULES = """
+- Call claim_add once for every fact that bears on the claim: the fact in your own plain words, the page's URL and title, the kind of source, the id of the part it bears on, its stance on that part (supports, refutes or context), and the passage that says so copied word for word from the page (one to three whole sentences, no ellipses, no paraphrase). The tool fetches the page and refuses a passage it can't find there; copy it again exactly, or pick another passage.
+- Record what you find whichever way it points: a source that cuts the other way is recorded with that stance, and background that settles neither way is context. Take the terms the claim names literally. Mark a claim uncertain when the source is weak or hedges.
+- Never use the terminal, write files or ask the user anything. When every part is covered, reply with one line saying how many claims you recorded."""
+
+
+def _lane_instructions(side: str) -> str:
+    """A lane's instructions, which differ only in the side it looks for."""
+    return (
+        "You are the researcher of a Gots claim check. Your output is the evidence ledger, not a verdict: a judge "
+        "works from the claims you record, and from nothing else.\n"
+        f"- Find the strongest evidence that the claim is {side}, part by part: search with web_search for the "
+        "sources that would show it, and read the best ones in full with web_extract."
+        + _VERIFY_RULES
+    )
+
+
+VERIFY_FOR_INSTRUCTIONS = _lane_instructions("true")
+VERIFY_AGAINST_INSTRUCTIONS = _lane_instructions("false")
+
+STRICTNESS_WORDS = {
+    "any": "Any source will do, but prefer the primary one where you can find it.",
+    "reputable": "Use only primary and reputable sources: the study, dataset, record or statement itself, "
+    "or an outlet known for checking its facts. Skip the rest.",
+}
+
+
+def _claim_text(found: Dict[str, Any]) -> str:
+    """The claim as the user confirmed it: restated, its parts, and the terms it takes literally."""
+    parts = "\n".join(f"- {p['id']}: {p['text']}" for p in found["parts"])
+    terms = ", ".join(found["terms"])
+    return f"Claim: {found['restatement']}\nParts:\n{parts}\n" + (f"Take literally: {terms}\n" if terms else "")
+
+
+def _verify_prompt(found: Dict[str, Any]) -> str:
+    # Only what the user confirmed: their own wording can steer a search as surely as a judge.
+    kinds = ", ".join(SOURCE_NAMES[kind] for kind in found["source_kinds"] if kind in SOURCE_NAMES)
+    return (
+        _claim_text(found)
+        + f"Prefer: {kinds}\n{STRICTNESS_WORDS[found['strictness'] or 'any']}\n\n"
+        "Record 2 to 4 claims for each part."
+    )
+
+
+def researcher_prompt(found: Dict[str, Any], lane: Optional["Lane"] = None) -> str:
+    """What a lane's researcher is asked; with no lane named, the type's first."""
+    return (lane or lanes(found)[0]).prompt(found)
+
+
+def _learn_prompt(found: Dict[str, Any]) -> str:
     per_point = "6 to 10" if found["depth"] == "deep" else "3 to 6"
     if found["followups"]:
         latest = found["followups"][-1]
@@ -926,18 +1237,34 @@ def researcher_prompt(found: Dict[str, Any]) -> str:
     )
 
 
-def run_body(found: Dict[str, Any]) -> Dict[str, Any]:
+def run_body(found: Dict[str, Any], lane: Optional["Lane"] = None) -> Dict[str, Any]:
+    """The run a lane's researcher is started with; with no lane named, the type's first."""
+    lane = lane or lanes(found)[0]
     return {
-        "session_id": f"{SESSION_PREFIX}{found['id']}",
-        "instructions": COMPARE_RESEARCHER_INSTRUCTIONS if found["type"] == "compare" else RESEARCHER_INSTRUCTIONS,
-        "input": [{"role": "user", "content": researcher_prompt(found)}],
+        "session_id": session_of(found["id"], lane.name),
+        "instructions": lane.instructions,
+        "input": [{"role": "user", "content": researcher_prompt(found, lane)}],
     }
 
 
-def mission_of_session(session_id: Optional[str]) -> Optional[str]:
+def session_of(mission_id: str, lane: str) -> str:
+    """A lane's Hermes session: ``research-<mission>``, and ``-<lane>`` after it for a named lane."""
+    return f"{SESSION_PREFIX}{mission_id}-{lane}" if lane else f"{SESSION_PREFIX}{mission_id}"
+
+
+def lane_of_session(session_id: Optional[str]) -> Optional[Tuple[str, str]]:
+    """The mission and the lane a researcher's session belongs to, or None for any other session.
+    A mission's id has no hyphen, so the first one after it starts the lane's name."""
     if isinstance(session_id, str) and session_id.startswith(SESSION_PREFIX):
-        return session_id[len(SESSION_PREFIX) :]
+        mission_id, _, lane = session_id[len(SESSION_PREFIX) :].partition("-")
+        if mission_id:
+            return mission_id, lane
     return None
+
+
+def mission_of_session(session_id: Optional[str]) -> Optional[str]:
+    found = lane_of_session(session_id)
+    return found[0] if found else None
 
 
 _page_lock = threading.Lock()
@@ -1005,9 +1332,42 @@ def _clean_url(value: Any) -> str:
     return url
 
 
+def _no_bearing(row: Any, args: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    return {}
+
+
+def _compare_bearing(row: Any, args: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    # A claim says which option and criterion it bears on, so the advocates and the judge can
+    # find it; an id the mission doesn't have is refused rather than guessed at.
+    options = {o["id"] for o in _loads(row["options"], [])}
+    criteria = {k["id"] for k in _loads(row["criteria"], [])}
+    option_id = args.get("option") or None
+    criterion_id = args.get("criterion") or None
+    if option_id not in options and option_id is not None:
+        raise ResearchError(f"option must be one of: {', '.join(sorted(options))}.")
+    if criterion_id not in criteria and criterion_id is not None:
+        raise ResearchError(f"criterion must be one of: {', '.join(sorted(criteria))}.")
+    if option_id is None:
+        raise ResearchError(f"Say which option the claim is about with option ({', '.join(sorted(options))}).")
+    return {"option_id": option_id, "criterion_id": criterion_id}
+
+
+def _verify_bearing(row: Any, args: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    # Either lane may record any stance: what a page says is not the lane's to choose.
+    parts = [p["id"] for p in _loads(row["parts"], [])]
+    stance = args.get("stance")
+    part = args.get("part")
+    if stance not in VERIFY_STANCES:
+        raise ResearchError(f"stance must be one of: {', '.join(VERIFY_STANCES)}.")
+    if part not in parts:
+        raise ResearchError(f"part must be one of: {', '.join(parts)}.")
+    return {"stance": stance, "part_id": part}
+
+
 def record(path: Path, mission_id: str, args: Dict[str, Any],
-           fetch: Callable[[str], Optional[str]] = _fetch_words) -> Dict[str, Any]:
-    """Adds a claim and its source to the ledger, once the page is seen to hold the passage."""
+           fetch: Optional[Callable[[str], Optional[str]]] = None, lane: str = ONE_LANE) -> Dict[str, Any]:
+    """Adds a claim and its source to the ledger, once the page is seen to hold the passage, under the
+    lane whose researcher recorded it."""
     conn = _open(path)
     try:
         row = _row(conn, mission_id)
@@ -1015,6 +1375,8 @@ def record(path: Path, mission_id: str, args: Dict[str, Any],
         conn.close()
     if row is None or row["stage"] != "reading":
         raise ResearchError("This mission isn't reading sources now, so it takes no claims.")
+    if lane not in {each.name for each in lanes(row)}:
+        raise ResearchError("claim_add only works in this mission's researcher sessions.")
     text = _text(args.get("claim"), MAX_CLAIM, "claim")
     url = _clean_url(args.get("url"))
     snippet = _text(args.get("snippet"), MAX_SNIPPET, "snippet")
@@ -1022,21 +1384,9 @@ def record(path: Path, mission_id: str, args: Dict[str, Any],
         raise ResearchError("snippet must be the whole passage, a full sentence at least.")
     title = _clip(args.get("title"), 300) or urllib.parse.urlparse(url).netloc
     kind = args.get("kind") if args.get("kind") in SOURCE_KINDS else "articles"
-    option_id = criterion_id = None
-    if row["type"] == "compare":
-        # A claim says which option and criterion it bears on, so the advocates and the judge can
-        # find it; an id the mission doesn't have is refused rather than guessed at.
-        options = {o["id"] for o in _loads(row["options"], [])}
-        criteria = {k["id"] for k in _loads(row["criteria"], [])}
-        option_id = args.get("option") or None
-        criterion_id = args.get("criterion") or None
-        if option_id not in options and option_id is not None:
-            raise ResearchError(f"option must be one of: {', '.join(sorted(options))}.")
-        if criterion_id not in criteria and criterion_id is not None:
-            raise ResearchError(f"criterion must be one of: {', '.join(sorted(criteria))}.")
-        if option_id is None:
-            raise ResearchError(f"Say which option the claim is about with option ({', '.join(sorted(options))}).")
-    held = check_passage(fetch(url), snippet)
+    bearing = {"option_id": None, "criterion_id": None, "stance": None, "part_id": None}
+    bearing.update(type_of(row).bearing(row, args))
+    held = check_passage((fetch or _fetch_words)(url), snippet)
     if held is False:
         raise ResearchError(
             "That passage isn't on the page. Copy it word for word from the page, or pick another one."
@@ -1071,8 +1421,12 @@ def record(path: Path, mission_id: str, args: Dict[str, Any],
         claim_id = f"c{count + 1}"
         conn.execute(
             """INSERT INTO research_claims (mission_id, id, source_id, text, snippet, confidence, at,
-                   option_id, criterion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (mission_id, claim_id, source_id, text, snippet, confidence, now, option_id, criterion_id),
+                   option_id, criterion_id, stance, part_id, lane)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                mission_id, claim_id, source_id, text, snippet, confidence, now, bearing["option_id"],
+                bearing["criterion_id"], bearing["stance"], bearing["part_id"], lane or None,
+            ),
         )
         conn.execute("COMMIT")
     finally:
@@ -1102,6 +1456,12 @@ SCHEMA = {
             "confidence": {"type": "string", "enum": ["supported", "uncertain"]},
             "option": {"type": "string", "description": "Comparisons only: the id of the option the claim is about (o1, o2, ...)."},
             "criterion": {"type": "string", "description": "Comparisons only: the id of the criterion it bears on (k1, k2, ...)."},
+            "part": {"type": "string", "description": "Claim checks only: the id of the part of the claim it bears on (p1, p2, ...)."},
+            "stance": {
+                "type": "string",
+                "enum": list(VERIFY_STANCES),
+                "description": "Claim checks only: whether the passage supports or refutes that part, or is context that settles neither.",
+            },
         },
         "required": ["claim", "url", "title", "snippet"],
     },
@@ -1113,12 +1473,13 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     from . import sessions
 
     args = args if isinstance(args, dict) else {}
-    mission_id = mission_of_session(task_id) or mission_of_session(session_id)
-    if not mission_id:
+    found = lane_of_session(task_id) or lane_of_session(session_id)
+    if not found:
         return json.dumps({"error": "claim_add only works in a research mission."})
+    mission_id, lane = found
     path, _home = sessions._paths()
     try:
-        return json.dumps(record(path, mission_id, args))
+        return json.dumps(record(path, mission_id, args, lane=lane))
     except ResearchError as error:
         return json.dumps({"error": str(error)})
 
@@ -1141,13 +1502,24 @@ BLOCKED_TOOLS = {
 
 
 def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
-    """The ``pre_tool_call`` hook: keeps a researcher to reading and recording."""
+    """The ``pre_tool_call`` hook: keeps a researcher to reading and recording, and keeps what a
+    lane searched where its type shows it."""
     session = kwargs.get("task_id") or kwargs.get("session_id")
-    if mission_of_session(session) and kwargs.get("tool_name") in BLOCKED_TOOLS:
+    found = lane_of_session(session)
+    if found and kwargs.get("tool_name") in BLOCKED_TOOLS:
         return {
             "action": "block",
             "message": "This is a research mission: search, read and record claims with claim_add only.",
         }
+    if found and kwargs.get("tool_name") == "web_search":
+        try:
+            from . import sessions
+
+            args = kwargs.get("args")
+            note_search(sessions._paths()[0], *found, args.get("query") if isinstance(args, dict) else None)
+        except Exception:
+            # A trail that can't be kept must never cost the researcher its search.
+            logger.debug("gots: couldn't keep a research search", exc_info=True)
     return None
 
 
@@ -1433,8 +1805,10 @@ def _replan(found: Dict[str, Any], questions: List[str]) -> List[str]:
 
 
 def _draft(path: Path, found: Dict[str, Any]) -> None:
-    if found["type"] == "compare":
-        return _draft_compare(path, found)
+    type_of(found).draft(path, found)
+
+
+def _draft_learn(path: Path, found: Dict[str, Any]) -> None:
     mission_id = found["id"]
     pending = found["pending"]
     if found["stage"] == "drafting":
@@ -1558,6 +1932,147 @@ def decide(options: List[Dict[str, Any]], criteria: List[Dict[str, Any]], memo: 
         "leader": eligible[0]["option"] if judged and eligible else None,
         "margin": margin if judged else None,
         "close": judged and margin is not None and margin <= CLOSE_POINTS,
+    }
+
+
+# Second-level labels under a two-letter TLD that a site registers beneath (bbc.co.uk, not co.uk).
+GENERIC_SECOND = {"co", "com", "org", "net", "gov", "ac", "edu", "gob", "mil", "nic", "ltd", "plc", "sch", "nhs"}
+VERDICT_LABELS = ("supported", "partly_supported", "disputed", "not_supported", "refuted", "cant_tell", "thin")
+
+
+def registrable_domain(url: str) -> str:
+    """The site a page belongs to, by a rule that under-counts rather than over-counts: the last two
+    labels of the host, or three under a two-letter TLD with a generic second level. An IP is its
+    own site."""
+    try:
+        host = (urllib.parse.urlsplit(url or "").hostname or "").rstrip(".")
+    except ValueError:
+        host = ""
+    if not host:
+        return (url or "").strip().lower()
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        pass
+    if host.startswith("www."):
+        host = host[4:]
+    labels = host.split(".")
+    keep = 3 if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in GENERIC_SECOND else 2
+    return ".".join(labels[-keep:])
+
+
+def _part_stance(s: int, r: int, bearing: bool) -> Tuple[str, Optional[str]]:
+    if s and r:
+        return "disputed", None
+    if s >= 2:
+        return "supported", None
+    if r >= 2:
+        return "refuted", None
+    if s == 1:
+        return "thin", "supports"
+    if r == 1:
+        return "thin", "refutes"
+    return ("cant_tell", None) if bearing else ("not_supported", None)
+
+
+def _label(stances: List[str]) -> str:
+    if "refuted" in stances:
+        return "refuted"
+    if "disputed" in stances:
+        return "disputed"
+    if all(stance == "supported" for stance in stances):
+        return "supported"
+    if "supported" in stances:
+        return "partly_supported"
+    if "thin" in stances:
+        return "thin"
+    if all(stance == "not_supported" for stance in stances):
+        return "not_supported"
+    return "cant_tell"
+
+
+def _why(label: str, parts: List[Dict[str, Any]], sites: int, unchecked: set) -> str:
+    """One plain sentence of why, from the label, the parts' stances, the independent sources
+    counted and the parts whose only evidence couldn't be checked, never from a model."""
+    total = len(parts)
+
+    def of(stance: str) -> str:
+        count = sum(part["stance"] == stance for part in parts)
+        return "it" if total == 1 else f"{count} of {total} parts"
+
+    if label == "supported":
+        return ("Two or more independent sources back it and none refute it." if total == 1
+                else f"Two or more independent sources back all {total} parts and none refute them.")
+    if label == "partly_supported":
+        return f"Two or more independent sources back {of('supported')}, but not the rest."
+    if label == "disputed":
+        return f"Independent sources disagree on {of('disputed')}."
+    if label == "refuted":
+        return f"Two or more independent sources refute {of('refuted')}, with none backing that."
+    if label == "thin":
+        leans = {part["direction"] for part in parts if part["stance"] == "thin"}
+        way = {frozenset({"supports"}): "toward support", frozenset({"refutes"}): "against"}.get(
+            frozenset(leans), "different ways"
+        )
+        if sites <= 1:
+            return f"Only one source bears on it, and it leans {way}."
+        thin = sum(part["stance"] == "thin" for part in parts)
+        return f"Only one source bears on each of {thin} parts, and they lean {way}."
+    if label == "not_supported":
+        return "No evidence was found for or against it."
+    bearing = {part["part"] for part in parts if part["stance"] == "cant_tell"}
+    if bearing and bearing <= unchecked:
+        return "Evidence was found, but none of it could be checked."
+    if bearing & unchecked:
+        return "Evidence was found, but it takes no side or could not be checked."
+    return "Evidence was found, but none of it takes a side."
+
+
+def verdict(parts: List[Dict[str, Any]], ledger: Dict[str, Any], tags: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """A verification's verdict, by code and never by a model. A claim counts for a side on a part
+    only when it is verified and both the researcher and the judge put it on that side; sides are
+    counted in independent sites; each part takes a stance and the claim its label by a fixed
+    precedence."""
+    domains = {source["id"]: registrable_domain(source.get("url") or "") for source in ledger.get("sources") or []}
+    claims = {claim["id"]: claim for claim in ledger.get("claims") or []}
+    judged: Dict[Tuple[str, str], set] = {}
+    for tag in tags or []:
+        if tag.get("claim") in claims:
+            judged.setdefault((tag["claim"], tag.get("part")), set()).add(tag.get("stance"))
+    rows = []
+    sites: set = set()
+    unchecked: set = set()
+    for part in parts:
+        pid = part["id"]
+        on = [claim for claim in claims.values() if claim.get("part") == pid or (claim["id"], pid) in judged]
+        bearing = bool(on)
+        if on and all(claim.get("confidence") == "uncertain" for claim in on):
+            unchecked.add(pid)
+        sides: Dict[str, List[str]] = {"supports": [], "refutes": []}
+        for claim in claims.values():
+            stance = claim.get("stance")
+            if (
+                claim.get("confidence") == "supported"
+                and claim.get("part") == pid
+                and stance in sides
+                and judged.get((claim["id"], pid)) == {stance}
+            ):
+                sides[stance].append(claim["id"])
+        found = {side: {domains.get(claims[cid]["source"], "") for cid in ids} for side, ids in sides.items()}
+        sites |= found["supports"] | found["refutes"]
+        s, r = len(found["supports"]), len(found["refutes"])
+        stance, direction = _part_stance(s, r, bearing)
+        rows.append(
+            {"part": pid, "stance": stance, "direction": direction, "supporting": s, "refuting": r,
+             "for": sides["supports"], "against": sides["refutes"]}
+        )
+    label = _label([row["stance"] for row in rows])
+    return {
+        "label": label,
+        "why": _why(label, rows, len(sites), unchecked),
+        "parts": rows,
+        "sources": len(sites),
+        "leads": sum(claim.get("confidence") == "uncertain" for claim in claims.values()),
     }
 
 
@@ -1771,6 +2286,220 @@ def _draft_compare(path: Path, found: Dict[str, Any]) -> None:
     _tell(path, "research_done", mission_id, found["title"])
 
 
+# --- a verification's verdict --------------------------------------------------------------------
+
+VERDICT_SYSTEM = (
+    "You weigh evidence about a claim, impartially. For each part of the claim you say which "
+    "claims in the evidence ledger bear on it and how: one that shows the part is true supports "
+    "it, one that shows it is false refutes it, and one that is only background settles neither "
+    "way and is context. Judge each claim by its own words and passage, never by who found it."
+)
+VERDICT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "parts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "part": {"type": "string"},
+                    "claims": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"claim": {"type": "string"}, "stance": {"type": "string", "enum": list(VERIFY_STANCES)}},
+                            "required": ["claim", "stance"],
+                        },
+                    },
+                },
+                "required": ["part", "claims"],
+            },
+        },
+        "change": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+    },
+    "required": ["parts", "change"],
+}
+
+
+def _verify_ledger_text(found: Dict[str, Any]) -> str:
+    """The claim as confirmed, with the terms it takes literally, and the ledger as evidence alone:
+    each claim's words, its source and its passage, with nothing of the reading that found it."""
+    sources = {source["id"]: source for source in found["ledger"]["sources"]}
+    lines = []
+    for claim in found["ledger"]["claims"]:
+        source = sources.get(claim["source"]) or {}
+        note = " (uncertain)" if claim["confidence"] == "uncertain" else ""
+        lines.append(
+            f"[{claim['id']}]{note} {claim['text']}\n    Source: {source.get('title', '')} "
+            f"({source.get('url', '')})\n    Passage: \"{claim['snippet']}\""
+        )
+    return _claim_text(found) + "\nLedger:\n" + "\n".join(lines)
+
+
+def judge_claim(found: Dict[str, Any]) -> Dict[str, Any]:
+    """One judge tags the claims that bear on each part, and says what would change the answer.
+    The label is not its to give."""
+    known = {claim["id"] for claim in found["ledger"]["claims"]}
+    parts = {p["id"] for p in found["parts"]}
+    instructions = (
+        "For every part, list the ids of the claims that bear on it, each with supports, refutes or "
+        "context. Read every claim by the terms the claim takes literally, where it names any: a "
+        "passage that does not meet a term's plain meaning does not support the part. Leave out a claim that has nothing to do with a part. Then write change in 1 or 2 "
+        f"sentences saying what evidence would change the answer. In change: {CITE_RULE}"
+    )
+    answer = _structured("verdict", VERDICT_SYSTEM, instructions, _verify_ledger_text(found), VERDICT_SCHEMA, 4000)
+    tags: List[Dict[str, str]] = []
+    for item in answer.get("parts") or []:
+        if not isinstance(item, dict) or item.get("part") not in parts:
+            continue
+        for tag in item.get("claims") or []:
+            if not isinstance(tag, dict) or tag.get("claim") not in known or tag.get("stance") not in VERIFY_STANCES:
+                continue
+            kept = {"claim": tag["claim"], "part": item["part"], "stance": tag["stance"]}
+            if kept not in tags:
+                tags.append(kept)
+    if not tags:
+        raise ResearchError("The judge tagged nothing.", 502)
+    change = [spans(text, known) for text in answer.get("change") or [] if isinstance(text, str) and text.strip()]
+    return {"tags": tags, "change": [paragraph for paragraph in change if paragraph]}
+
+
+def _draft_verify(path: Path, found: Dict[str, Any]) -> None:
+    """The judge's tags, and the verdict worked out from them once, here: what a reader was shown is
+    what a later read shows, whatever the rule becomes."""
+    mission_id = found["id"]
+    if found["stage"] == "drafting":
+        judged = judge_claim(found)
+        content = {
+            "tags": judged["tags"],
+            "verdict": verdict(found["parts"], found["ledger"], judged["tags"]),
+            "change": judged["change"],
+            "checked_at": _now(),
+        }
+        _save_output(path, mission_id, VERIFY_FORMAT, content)
+        _update(path, mission_id, written=1, stage="reviewing")
+    found = mission(path, mission_id) or found
+    found["formats"] = [VERIFY_FORMAT]
+    if not found["revisions"]:
+        _revision(path, found, "first")
+    _update(path, mission_id, stage="delivered", formats=[VERIFY_FORMAT], pending=None)
+    _tell(path, "research_done", mission_id, found["title"])
+
+
+@dataclass(frozen=True)
+class Lane:
+    """One researcher of a mission: its session (named by the lane), what it is told and what it is
+    asked. Its run, and how that run ended, are kept per lane by the store and the watcher."""
+
+    name: str
+    instructions: str
+    prompt: Callable[[Dict[str, Any]], str]
+
+
+@dataclass(frozen=True)
+class MissionType:
+    """What one type of mission does at each step the shared paths take. A refusal is the
+    sentence a delivered mission of the type is refused with, or None where the type allows it."""
+
+    default_format: str
+    read_brief: Callable[[Path, Dict[str, Any]], None]
+    confirm_brief: Callable[[Path, str, Dict[str, Any]], Dict[str, Any]]
+    brief_text: Callable[[Dict[str, Any]], str]
+    approve_scope: Callable[[Path, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
+    # Whether the Scope Gate's outline comes from a model call, which a retry there runs again.
+    outline_call: bool
+    lanes: Tuple[Lane, ...]
+    # What a claim bears on (an option and criterion, or a part and stance), checked against the
+    # mission, as the claim's columns.
+    bearing: Callable[[Any, Dict[str, Any]], Dict[str, Optional[str]]]
+    min_claims: Callable[[Dict[str, Any]], int]
+    draft: Callable[[Path, Dict[str, Any]], None]
+    derived_fields: Callable[[Dict[str, Any]], Dict[str, Any]]
+    # Whether a lane that stopped short fails the reading whatever was recorded: a verdict read in
+    # one direction is the bias the lanes are there to remove.
+    every_lane_completes: bool = False
+    keeps_searches: bool = False
+    formats_refused: Optional[str] = None
+    followup_refused: Optional[str] = None
+    rewrite_refused: Optional[str] = None
+
+
+# What a delivered mission of a type other than Learn & understand is refused.
+FOLLOWUP_LEARN_ONLY = "Questions can only be added to a Learn & understand mission so far."
+REWRITE_LEARN_ONLY = "Only a Learn & understand mission can be rewritten with another model."
+
+MISSION_TYPES: Dict[str, MissionType] = {
+    "learn": MissionType(
+        default_format="guide",
+        read_brief=_learn_brief,
+        confirm_brief=_confirm_learn_brief,
+        brief_text=_learn_brief_text,
+        approve_scope=_approve_learn_scope,
+        outline_call=True,
+        lanes=(Lane(ONE_LANE, RESEARCHER_INSTRUCTIONS, _learn_prompt),),
+        bearing=_no_bearing,
+        min_claims=lambda found: MIN_CLAIMS,
+        draft=_draft_learn,
+        derived_fields=lambda found: {},
+    ),
+    "compare": MissionType(
+        default_format=COMPARE_FORMAT,
+        read_brief=_compare_brief,
+        confirm_brief=_confirm_compare_brief,
+        brief_text=_compare_brief_text,
+        approve_scope=_approve_compare_scope,
+        outline_call=False,
+        lanes=(Lane(ONE_LANE, COMPARE_RESEARCHER_INSTRUCTIONS, _compare_prompt),),
+        bearing=_compare_bearing,
+        min_claims=lambda found: max(MIN_CLAIMS, 2 * len(found["options"])),
+        draft=_draft_compare,
+        derived_fields=lambda found: {
+            "decision": decide(found["options"], found["criteria"], found["outputs"].get(COMPARE_FORMAT))
+        },
+        formats_refused="A comparison has one format, the memo.",
+        followup_refused=FOLLOWUP_LEARN_ONLY,
+        rewrite_refused=REWRITE_LEARN_ONLY,
+    ),
+    "verify": MissionType(
+        default_format=VERIFY_FORMAT,
+        read_brief=_verify_brief,
+        confirm_brief=_confirm_verify_brief,
+        brief_text=lambda row: f"Claim: {row['restatement']}\n"
+        + "".join(f"Part {p['id']}: {p['text']}\n" for p in row["parts"]),
+        approve_scope=_approve_verify_scope,
+        outline_call=False,
+        lanes=(
+            Lane("for", VERIFY_FOR_INSTRUCTIONS, _verify_prompt),
+            Lane("against", VERIFY_AGAINST_INSTRUCTIONS, _verify_prompt),
+        ),
+        bearing=_verify_bearing,
+        # One claim is something to judge; none is the empty reading.
+        min_claims=lambda found: 1,
+        draft=_draft_verify,
+        # The verdict as it was worked out at delivery, never again on a read.
+        derived_fields=lambda found: {"verdict": (found["outputs"].get(VERIFY_FORMAT) or {}).get("verdict")},
+        every_lane_completes=True,
+        keeps_searches=True,
+        formats_refused="A verification has one format, the verdict.",
+        followup_refused=FOLLOWUP_LEARN_ONLY,
+        rewrite_refused=REWRITE_LEARN_ONLY,
+    ),
+}
+
+
+def type_of(found: Any) -> MissionType:
+    return MISSION_TYPES[found["type"]]
+
+
+def lanes(found: Any) -> Tuple[Lane, ...]:
+    return type_of(found).lanes
+
+
+def _refuse(reason: Optional[str]) -> None:
+    if reason:
+        raise ResearchError(reason)
+
+
 def _make(path: Path, found: Dict[str, Any]) -> None:
     fmt = found["making"]
     _write(path, found, fmt, False)
@@ -1896,12 +2625,15 @@ def _run_status(run_id: Optional[str]) -> Optional[str]:
     return status.get("status") if isinstance(status, dict) else None
 
 
-def _record_researcher(path: Path, mission_id: str) -> None:
-    """Notes the model the researcher ran on, from its Hermes session once it has stopped. Best
-    effort: a session the store can't be read for leaves the mission without one."""
+def _record_researcher(path: Path, found: Dict[str, Any]) -> None:
+    """Notes the model the researcher ran on, from its lanes' Hermes sessions once they stopped
+    (the first lane whose session names one). Best effort: a session the store can't be read for
+    leaves the mission without one."""
+    mission_id = found["id"]
     state = home_of(path) / "state.db"
     if not state.exists():
         return
+    row = None
     try:
         # Read-only, so a lookup can never lock the gateway out of its own store.
         with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
@@ -1909,10 +2641,13 @@ def _record_researcher(path: Path, mission_id: str) -> None:
             if "model" not in columns:
                 return
             provider = "billing_provider" if "billing_provider" in columns else "NULL"
-            row = conn.execute(
-                f"SELECT model, {provider} FROM sessions WHERE id = ?",
-                (f"{SESSION_PREFIX}{mission_id}",),
-            ).fetchone()
+            for lane in lanes(found):
+                row = conn.execute(
+                    f"SELECT model, {provider} FROM sessions WHERE id = ?",
+                    (session_of(mission_id, lane.name),),
+                ).fetchone()
+                if row and row[0]:
+                    break
     except sqlite3.Error:
         logger.debug("gots: couldn't read mission %s's researcher", mission_id, exc_info=True)
         return
@@ -1932,11 +2667,9 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
     if rounds:
         enough = found["claims"] > (rounds[-1].get("claims") or 0)
     else:
-        enough = found["claims"] >= (
-            max(MIN_CLAIMS, 2 * len(found["options"])) if found["type"] == "compare" else MIN_CLAIMS
-        )
-    if not enough:
-        stopped = status in ("failed", "cancelled", "interrupted")
+        enough = found["claims"] >= type_of(found).min_claims(found)
+    stopped = status in INCOMPLETE_ENDS
+    if not enough or (stopped and type_of(found).every_lane_completes):
         if stopped:
             reason = "The researcher stopped before recording enough sources."
         elif rounds:
@@ -1946,7 +2679,7 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
         _update(path, mission_id, error=reason)
         _tell(path, "research_failed", mission_id, found["title"])
         return True
-    _record_researcher(path, mission_id)
+    _record_researcher(path, found)
     # A follow-up round's write-up stays on show until drafting starts it again.
     _update(path, mission_id, stage="drafting", **({} if found["pending"] else {"written": 0}))
     return True
@@ -1961,20 +2694,47 @@ def _check_watched() -> List[Tuple[Path, str, Optional[str]]]:
         if found is None or found["stage"] != "reading" or found["error"]:
             _forget(path, mission_id)
             continue
-        run_id = run_id_of(path, mission_id)
-        if run_id is None:
+        runs = runs_of(path, mission_id)
+        if any(lane.name not in runs for lane in lanes(found)):
             # Still being started.
             continue
-        status = _run_status(run_id)
-        if status in ACTIVE:
-            _seen.add(run_id)
-        elif status is None and run_id not in _seen and time.monotonic() - since < UNSEEN_GRACE_S:
+        statuses = {run_id: _run_status(run_id) for run_id in runs.values()}
+        _note_ends(
+            path,
+            mission_id,
+            {lane: statuses[run_id] for lane, run_id in runs.items() if statuses[run_id] not in ACTIVE and statuses[run_id]},
+        )
+        for run_id, status in statuses.items():
+            if status in ACTIVE:
+                _seen.add(run_id)
+        unseen = any(status is None and run_id not in _seen for run_id, status in statuses.items())
+        if unseen and time.monotonic() - since < UNSEEN_GRACE_S:
             continue
-        if finished_reading(path, mission_id, status):
+        # Past here a run Hermes doesn't list is gone: forgotten an hour after it ended, or lost in a
+        # restart. A lane whose end was recorded keeps it; one with none was interrupted. Only a type
+        # whose every lane must complete reads it so; the others move on as they always have.
+        gone = {lane for lane, run_id in runs.items() if statuses[run_id] is None}
+        _note_ends(path, mission_id, {lane: "interrupted" for lane in gone})
+        if gone and type_of(found).every_lane_completes:
+            ends = ends_of(path, mission_id)
+            statuses.update({runs[lane]: ends.get(lane) or "interrupted" for lane in gone})
+        if finished_reading(path, mission_id, _reading_status(list(statuses.values()))):
             _forget(path, mission_id)
-            _seen.discard(run_id)
+            _seen.difference_update(runs.values())
             moved.append((path, mission_id, profile))
     return moved
+
+
+def _reading_status(statuses: List[Optional[str]]) -> Optional[str]:
+    """How a reading went, from how each lane's run went: going while any lane's run is, and
+    stopped short where any lane's stopped short."""
+    for status in statuses:
+        if status in ACTIVE:
+            return status
+    for status in statuses:
+        if status in INCOMPLETE_ENDS:
+            return status
+    return statuses[0] if statuses else None
 
 
 async def run(home: Path) -> None:

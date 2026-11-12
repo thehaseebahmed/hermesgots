@@ -4261,7 +4261,13 @@ http
           "afk_prompt",
           "afk_picks",
           ...(RESEARCH
-            ? ["research", "research_followup", "research_rewrite", "research_compare"]
+            ? [
+                "research",
+                "research_followup",
+                "research_rewrite",
+                "research_compare",
+                "research_verify",
+              ]
             : []),
           ...(CANVAS ? ["canvas"] : []),
           ...(MEETINGS ? ["meetings", "meetings_ask"] : []),
