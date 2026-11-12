@@ -1,45 +1,51 @@
-// Reads the build: run it after `pnpm build`.
+/**
+ * Mermaid's chunks, as the build emitted them: every chunk carrying mermaid under `MERMAID`,
+ * nothing else under that path, none of them in the worker's precache manifest, exactly one route
+ * answering that path, and the entry chunk carrying none of it. The naming rule is the app's own
+ * (`src/lib/mermaid-chunks.ts`), the same one `vite.config.ts` names the chunks with, and the build
+ * is read through `chunks.mjs`. Reads the build, so run it after `pnpm build`:
+ *
+ *   node scripts/check-mermaid-chunks.mjs
+ */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { dirname, join, normalize, relative } from "node:path"
+import { dirname, join, normalize } from "node:path"
 
-import { chunks, DIST, entry as entryChunk, read, size } from "./dist.mjs"
+import { buildOf } from "./chunks.mjs"
 import { MERMAID, mermaidChunks } from "../src/lib/mermaid-chunks.ts"
 
 // mermaid's bundle names its API and nothing the app builds does; the chunk carrying it is the door
 // the shared rule walks from.
 const ROOT = "mermaidAPI"
 
+// Read deep: mermaid's chunks are the only ones below `dist/assets`, and the reader's default corpus
+// is the top level the other two chunk checks are about.
+const { chunks: files, read, entry, carriersOf, pathOf, size } = buildOf("dist/assets", {
+  deep: true,
+})
+assert.ok(entry, "dist/index.html names the script the app starts on")
+
 const failures = []
 function check(ok, message) {
-  if (ok) return true
-  failures.push(message)
-  return false
+  if (!ok) failures.push(message)
 }
-
-const files = chunks()
 
 const known = new Set(files)
-const name = new Map(files.map((file) => [file, named(file)]))
-const imports = new Map(files.map((file) => [file, [...name.get(file).static, ...name.get(file).lazy]]))
-const statics = new Map(files.map((file) => [file, name.get(file).static]))
 
-function named(file) {
-  const source = read(file)
-  const path = join(DIST, file)
-  const of = (pattern) =>
-    [...source.matchAll(pattern)]
-      .map(([, specifier]) =>
-        relative(DIST, normalize(join(dirname(path), specifier)))
-          .split("\\")
-          .join("/"),
-      )
-      .filter((chunk) => known.has(chunk))
-  return {
-    static: of(/(?:from|import)\s*["'](\.{1,2}\/[^"']+\.js)["']/g),
-    lazy: of(/import\s*\(\s*["'`](\.{1,2}\/[^"'`]+\.js)["'`]\s*\)/g),
-  }
+/**
+ * The chunks one chunk names, read off the specifiers it wrote: each resolved beside the chunk that
+ * wrote it, since a chunk below `assets/` names its neighbours one directory closer.
+ */
+function named(file, pattern) {
+  const beside = dirname(file)
+  return [...read(file).matchAll(pattern)]
+    .map(([, specifier]) => normalize(join(beside, specifier)).split("\\").join("/"))
+    .filter((chunk) => known.has(chunk))
 }
+const STATIC = /(?:from|import)\s*["'](\.{1,2}\/[^"']+\.js)["']/g
+const LAZY = /import\s*\(\s*["'`](\.{1,2}\/[^"'`]+\.js)["'`]\s*\)/g
+const statics = new Map(files.map((file) => [file, named(file, STATIC)]))
+const imports = new Map(files.map((file) => [file, [...statics.get(file), ...named(file, LAZY)]]))
 
 function reachable(roots, graph) {
   const seen = new Set(roots)
@@ -54,11 +60,7 @@ function reachable(roots, graph) {
   return seen
 }
 
-const entry = entryChunk()
-assert.ok(entry, "dist/index.html names the script the app starts on")
-const starts = entry
-
-const roots = files.filter((file) => read(file).includes(ROOT))
+const roots = carriersOf(ROOT)
 assert.equal(
   roots.length,
   1,
@@ -71,11 +73,11 @@ const { mine: mermaid } = mermaidChunks({
   reaches: (file) => imports.get(file) ?? [],
   carries: (file) => read(file).includes(ROOT),
   door: roots[0],
-  entry: [starts],
+  entry: [entry],
 })
 const bytes = files.filter((file) => mermaid.has(file)).reduce((total, file) => total + size(file), 0)
 
-const loose = [...mermaid].filter((file) => !file.startsWith(MERMAID))
+const loose = [...mermaid].filter((file) => !pathOf(file).startsWith(MERMAID))
 check(
   loose.length === 0,
   `${loose.length} of mermaid's ${mermaid.size} chunks sit outside ${MERMAID} (${(
@@ -84,11 +86,11 @@ check(
     loose.length > 6 ? ", …" : ""
   }`,
 )
-const strangers = files.filter((file) => file.startsWith(MERMAID) && !mermaid.has(file))
+const strangers = files.filter((file) => pathOf(file).startsWith(MERMAID) && !mermaid.has(file))
 check(strangers.length === 0, `${MERMAID} holds chunks nothing of mermaid reaches: ${strangers.join(", ")}`)
 
-const onStartup = [...reachable([starts], statics)].filter((file) => mermaid.has(file))
-check(!mermaid.has(starts), `the entry chunk ${starts} is mermaid's own`)
+const onStartup = [...reachable([entry], statics)].filter((file) => mermaid.has(file))
+check(!mermaid.has(entry), `the entry chunk ${pathOf(entry)} is mermaid's own`)
 check(
   onStartup.length === 0,
   `${onStartup.length} of mermaid's chunks load with the app, before any diagram asks: ${onStartup.join(", ")}`,
@@ -101,7 +103,7 @@ check(
   `${pulled.length} chunks load mermaid with them rather than asking for it: ${pulled.slice(0, 4).join(", ")}`,
 )
 
-const sw = readFileSync(join(DIST, "sw.js"), "utf8")
+const sw = readFileSync("dist/sw.js", "utf8")
 
 /**
  * A call's argument list, found by its own brackets: from the `(` that opens it to the `)` that
@@ -146,7 +148,7 @@ const precached = callsOf(sw, "precacheAndRoute").flatMap((manifest) =>
   [...manifest.matchAll(/url:\s*["']([^"']+)["']/g)].map(([, url]) => `/${url}`),
 )
 check(precached.length > 0, "the built service worker precaches the install")
-const installed = [...mermaid].filter((file) => precached.includes(`/${file}`))
+const installed = [...mermaid].filter((file) => precached.includes(`/${pathOf(file)}`))
 check(
   installed.length === 0,
   `${installed.length} of mermaid's chunks are precached, so every reader pays for them at install: ${installed
@@ -177,5 +179,7 @@ if (failures.length) {
 }
 
 console.log(`mermaid: ${mermaid.size} chunks (${(bytes / 1024).toFixed(0)} KiB) under ${MERMAID}`)
-console.log(`entry ${starts} carries none of it; precache ${precached.length} entries, none of mermaid's`)
+console.log(
+  `entry ${pathOf(entry)} carries none of it; precache ${precached.length} entries, none of mermaid's`,
+)
 console.log(`cached on request by one route: ${holding[0].slice(0, 160).replace(/\s+/g, " ")}…`)
