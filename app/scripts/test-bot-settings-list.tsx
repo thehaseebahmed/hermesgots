@@ -327,9 +327,12 @@ test("a page still holds what its page held, each setting over its value", async
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(titles(), ["A bot"], "the bot's own page, named by its own name")
-    for (const label of ["Enabled", "Name", "Image", "Plugin"])
+    for (const label of ["Enabled", "Image", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
-    assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
+    assert.ok(
+      missing('[data-setting="name"]'),
+      "and no Name: the bot's name is its host's, with no field to write another (ADR 0149)",
+    )
     absent('[data-setting="subagent-model"]', "and nothing of the Hermes side is forced on it")
   })
   await seed("pages-models", CHAT, { hostId: "host-1" })
@@ -345,14 +348,14 @@ test("a page still holds what its page held, each setting over its value", async
 
 test("a page's own edit is a screen the list's page pushes, with the list under it", async () => {
   await seed("pages-edit", ALL)
-  await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
+  await mount(settings("/settings/bots/bot-1/bot/base-url"), async () => {
     assert.deepEqual(
       titles(),
-      ["Edit Name"],
+      ["Edit API base URL"],
       "the screen says what it does, not what the field says",
     )
-    assert.ok(find("#edit-name"), "holding the bot's name in a field")
-    assert.equal(path(), "/settings/bots/bot-1/bot/name", "at an address of its own")
+    assert.ok(find("#edit-api-base-url"), "holding the bot's address in a field")
+    assert.equal(path(), "/settings/bots/bot-1/bot/base-url", "at an address of its own")
     await click(back())
     assert.equal(path(), "/settings/bots/bot-1", "and Back returns to the page it came from")
     assert.deepEqual(titles(), ["A bot"], "which is the bot's own name")
@@ -392,9 +395,9 @@ test(
   "an edit drawn as a card is a pop-up: closing it asks nothing",
   laptop(async () => {
     await seed("wide-edit", ALL)
-    await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
-      await until(async () => Boolean(find("#edit-name")), "the card's field")
-      await type(find("#edit-name"), "Renamed")
+    await mount(settings("/settings/bots/bot-1/bot/base-url"), async () => {
+      await until(async () => Boolean(find("#edit-api-base-url")), "the card's field")
+      await type(find("#edit-api-base-url"), "http://typed-and-abandoned.test/v1")
       // Clicking out of the card — Escape here — is the whole of saying no.
       await shutSheet(() => find('[role="dialog"]'))
       assert.equal(
@@ -406,7 +409,11 @@ test(
         missing('[role="alertdialog"]'),
         "with nothing asked: closing a pop-up is the whole of saying no",
       )
-      assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "and nothing was written")
+      assert.equal(
+        (await db.profiles.get("bot-1"))?.baseUrl,
+        botProfile("wide-edit").baseUrl,
+        "and nothing was written",
+      )
     })
   }),
 )

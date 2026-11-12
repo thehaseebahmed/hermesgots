@@ -33,7 +33,6 @@ import {
   path,
   refuseFirst,
   seedSettings,
-  settle,
   type,
   until,
   wordsOf,
@@ -304,8 +303,8 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
     )
     assert.deepEqual(
       rowsIn("Bot Profile"),
-      ["name", "image", "reminders"],
-      "what the bot is called, how it looks, and how often it says what it is doing",
+      ["image", "reminders"],
+      "how it looks, and how often it says what it is doing — its name is its host's, and no row edits it",
     )
     assert.ok(
       !caption("Hermes"),
@@ -321,7 +320,6 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
       "Mute notifications",
       "Plugin",
       "Bot Profile",
-      "Name",
       "Image",
     ]
     assert.ok(
@@ -339,8 +337,10 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
 test("every setting is a title over the line saying what it is for, and the value it holds", async () => {
   await seed("general-values", { botId: "tri" })
   await mount(general(), async () => {
-    assert.equal(rowText("name"), "NameA bot", "Name is the bot's own name, with no line under it")
-    assert.equal(accent("name"), "A bot", "and its value sits in the accent colour")
+    assert.ok(
+      missing('[data-setting="name"]'),
+      "no Name row: the name is the host's, so there is no field to write another",
+    )
 
     assert.equal(rowText("image"), "ImageTri", "Image is the character the bot wears")
     assert.equal(accent("image"), "Tri")
@@ -437,46 +437,31 @@ test("a disabled bot still reads as hidden in Gots", async () => {
   })
 })
 
-test("the Name row opens the Name edit, and Save writes the bot's name", async () => {
+test("the address that named the Name edit now draws the page, with no field to write a name", async () => {
   await seed("general-name-edit")
-  await mount(general(), async () => {
-    await click(row("name"))
-    assert.equal(path(), "/settings/bots/bot-1/bot/name", "the edit has an address of its own")
-    assert.doesNotMatch(wordsOf(page()), /Mute notifications/, "and the page under it is not drawn")
-
-    const field = find("#edit-name") as HTMLInputElement | null
-    assert.ok(field, "a labelled field holding the current value")
-    assert.equal(field?.value, "A bot", "which is the bot's name")
-    assert.equal(
-      wordsOf(find("[data-general-page] label")),
-      "Name",
-      "and the field names what is edited",
-    )
-    assert.equal(
-      (button("Save") as HTMLButtonElement | null)?.disabled,
-      true,
-      "and nothing is saved until the value moves",
-    )
-
-    await type(field, "Renamed")
-    await click(button("Save"))
+  await mount(general("/settings/bots/bot-1/bot/name"), async () => {
+    assert.ok(missing("#edit-name"), "no field: the app does not name a bot (ADR 0149)")
+    assert.ok(page(), "the page the address opened under is what is drawn")
+    assert.equal(path(), "/settings/bots/bot-1/bot/name", "at the address it was asked for")
     assert.equal(
       (await db.profiles.get("bot-1"))?.name,
-      "Renamed",
-      "the write lands on the profile",
+      "A bot",
+      "and the name the link wrote is untouched",
     )
-    assert.equal(path(), "/settings/bots/bot-1", "and the page comes back")
-    assert.equal(accent("name"), "Renamed", "showing the name the bot now holds")
   })
 })
 
 test("Cancel writes nothing at all, and returns to the page", async () => {
   await seed("general-name-cancel")
   await mount(general(), async () => {
-    await click(row("name"))
-    await type(find("#edit-name"), "Typed and abandoned")
+    await click(row("base-url"))
+    await type(find("#edit-api-base-url"), "http://typed-and-abandoned.test/v1")
     await click(button("Cancel"))
-    assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "the profile is untouched")
+    assert.equal(
+      (await db.profiles.get("bot-1"))?.baseUrl,
+      botProfile("general-name-cancel").baseUrl,
+      "the profile is untouched",
+    )
     assert.equal(path(), "/settings/bots/bot-1", "and the page is back")
   })
 })

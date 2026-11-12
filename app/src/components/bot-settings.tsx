@@ -563,12 +563,6 @@ type BotEdit = {
 }
 
 const BOT_EDITS = {
-  name: {
-    read: (profile) => profile.name,
-    placeholder: "Hermes profile name",
-    kind: "text",
-    patch: (value) => ({ name: value.trim() || "Hermes" }),
-  },
   "base-url": {
     read: (profile) => profile.baseUrl,
     placeholder: "http://localhost:8642/v1",
@@ -1066,12 +1060,6 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
 
       <Caption>Bot Profile</Caption>
       <Group>
-        <ValueRow
-          title="Name"
-          value={profile.name}
-          onClick={() => onOpen("name")}
-          data-setting="name"
-        />
         <ValueRow
           title="Image"
           value={character?.name ?? ""}
