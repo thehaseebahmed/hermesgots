@@ -404,7 +404,6 @@ test(
         for (const look of ["border-border", "bg-background/80", "backdrop-blur", "rounded-full"]) {
           assert.ok(button.className.includes(look), `Undo wears the Project's ${look}`)
         }
-        // The options left the actions with the ellipsis: the header's title is their only door.
         assert.ok(
           missing('button[aria-label="Canvas options"]'),
           "no ellipsis offers the canvas's options",
@@ -417,9 +416,6 @@ test(
 test(
   "a tap on the canvas's header opens its options, and no header offers an ellipsis",
   atWidth(390, async () => {
-    // The header's title is the only door to a canvas's options (ADR 0130), on the page's screen and
-    // on the chat's alike: the heading's own control, a real button a keyboard can reach, as tall as
-    // the heading band and as wide as the middle slot gives it — and the title still the heading.
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat(CANVAS.id)
     const press = async (where: string) => {
@@ -438,6 +434,10 @@ test(
       assert.ok(
         control!.className.includes("min-h-11"),
         "tall enough for a thumb, where the ellipsis was (min-h-11)",
+      )
+      assert.ok(
+        control!.classList.contains("w-full"),
+        "and as wide as the middle slot gives it, so no press on the title line is dead (w-full)",
       )
       assert.ok(missing('button[aria-label="Canvas options"]'), "the header offers no ellipsis")
       await click(control)
@@ -633,7 +633,6 @@ test(
         "the frame is the page's, not the lane's",
       )
       assert.ok(!page!.contains(head), "the page column carries no header of its own")
-      // The order the reader walks down the lane: the head, then the chat, then the page beside them.
       assert.ok(
         head!.compareDocumentPosition(field!) & Node.DOCUMENT_POSITION_FOLLOWING,
         "the head is drawn before the chat's field",
@@ -729,6 +728,32 @@ test(
     await drawCanvas(["/canvas/c8"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing("[data-canvas-flip]"), "and no Edit for a canvas that isn't there")
+    })
+  }),
+)
+
+test(
+  "a canvas the host called gone keeps its options once its list names a record",
+  atWidth(390, async () => {
+    const GONE_ID = "c3"
+    const host: Host = { version: 3, undos: 0, listed: [] }
+    serveCanvases(host)
+    await seedCanvasChat(GONE_ID)
+    // No record anywhere: the address is called gone, and there is nothing to manage.
+    await drawCanvas([`/canvas/${GONE_ID}`], async () => {
+      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
+      assert.ok(missing("[data-canvas-options-open]"), "no record, so no control to open them with")
+    })
+    // The host answered gone for the record, and its list names one all the same: a record exists to
+    // rename, pin, archive or delete, so the body's sentence is not the whole of what the header knows.
+    host.listed = [GONE_ID]
+    await refreshCanvases()
+    await drawCanvas([`/canvas/${GONE_ID}`], async () => {
+      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
+      const control = find("[data-canvas-options-open]")
+      assert.ok(control, "a record's options are still offered")
+      await click(control)
+      await until(() => Boolean(find("[data-canvas-options]")), "the options to open")
     })
   }),
 )
@@ -1330,7 +1355,6 @@ test(
     await drawCanvas(["/canvas/c5/edit"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing('[data-canvas-flip="preview"]'), "with nothing to flip to")
-      // No record means no options to open: the heading is a heading, with no control to press.
       assert.equal(find('[data-slot="header-title"]')?.tagName, "H1", "the title is still the heading")
       assert.ok(
         missing("[data-canvas-options-open]"),
