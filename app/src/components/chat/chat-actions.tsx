@@ -56,8 +56,10 @@ import {
   resetsInText,
 } from "@/lib/provider-usage"
 import { setThreadMuted } from "@/lib/push"
+import { labelOf } from "@/lib/bot-name"
 import { quietly } from "@/lib/report"
 import { cn } from "@/lib/utils"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { closeSessionWork } from "@/lib/workspace"
 
 /**
@@ -254,6 +256,7 @@ export function ChatActions({
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
+  const labels = useBotLabels()
   const configured = Boolean(profile?.baseUrl.trim())
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -275,7 +278,7 @@ export function ChatActions({
         {listPath && (
           <Link
             to={listPath}
-            aria-label={`Chats with ${profile?.name ?? "the bot"}${unread ? ", unread chats" : ""}`}
+            aria-label={`Chats with ${profile ? labelOf(labels, profile) : "the bot"}${unread ? ", unread chats" : ""}`}
             className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
           >
             <span className="relative flex items-center justify-center">

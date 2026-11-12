@@ -222,6 +222,12 @@ export async function flow(
       ...(touch ? { hasTouch: true } : {}),
     }),
   )
+  // The bot's named host answers as the mock does: the request goes to `mock` with its path, and the
+  // browser keeps the address it asked for — the same protocol, so the address can be swapped.
+  await page.route(TEST_HOST, async (route) => {
+    const url = new URL(route.request().url())
+    await route.continue({ url: `${mock}${url.pathname}${url.search}` })
+  })
   // The component library mounts a devtools bunny of its own in a development build, in a root of
   // its own over the bottom-right of every page — where a screen's Send sits. Its own opt-out is
   // the flag it checks before mounting, so no flow has to click around a widget no user has.
@@ -268,6 +274,16 @@ export async function flow(
   }
 }
 
+/**
+ * The address a flow's bot answers at, as the app reads it. A bot is named by its host (ADR 0148),
+ * and a lane's port would land in every assertion about a row, so the mock is reached under a name
+ * of its own: every request to it is handed to the mock by `flow`.
+ */
+export const botHost = "http://test-bot.test"
+
+/** Any name under `.test` is a bot's host in a flow, and every one of them answers as the mock. */
+const TEST_HOST = /^http:\/\/[a-z0-9.-]+\.test\//
+
 const botPatch = (baseUrl) => ({
   baseUrl: `${baseUrl}/v1`,
   apiKey: "mock-key",
@@ -285,7 +301,7 @@ export async function setUpBot(page) {
     await db.profiles.update(profile.id, { ...patch, name: "Test bot" })
     await db.settings.put({ id: "settings", activeProfileId: profile.id, onboarded: true })
     return profile.id
-  }, botPatch(mock))
+  }, botPatch(botHost))
 }
 
 const hostAuth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }

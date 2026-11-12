@@ -28,7 +28,7 @@ await flow(
       )
     /** The chat's own control, and the list it opens with every row of it drawn. */
     const openList = async (why) => {
-      await page.getByRole("link", { name: "Chats with Test bot" }).click()
+      await page.getByRole("link", { name: "Chats with test-bot" }).click()
       await page.waitForURL(`**${list}`, { timeout: 20_000 })
       await until(async () => (await rows()).length === expected.length, 20_000, why)
     }
@@ -267,7 +267,7 @@ await flow(
     await page.locator(`main ul a[href="${roomRow}"]`).click()
     await page.waitForURL(`**${roomRow}`, { timeout: 20_000 })
     assert.equal(await rung(page), roomRung + 1, "the room stands above the list it was picked from")
-    await page.getByRole("button", { name: "Back to Test bot" }).click()
+    await page.getByRole("button", { name: "Back to test-bot" }).click()
     await page.waitForURL(`**${list}`, { timeout: 20_000 })
     assert.equal(await rung(page), roomRung, "and the room's own way back lands that list")
     pass("a room picked from a pushed list keeps the list as its way back")
