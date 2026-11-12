@@ -137,10 +137,21 @@ class GhFallbackTests(unittest.TestCase):
     def test_gh_reads_the_homes_own_login_when_it_keeps_one(self):
         config = self.home / ".config" / "gh"
         config.mkdir(parents=True)
+        (config / "hosts.yml").write_text("github.com:\n  oauth_token: ghp_home\n")
 
         env = self._ask()
 
         self.assertEqual(env["GH_CONFIG_DIR"], str(config))
+
+    def test_a_config_directory_with_no_login_is_not_one(self):
+        """`gh config set` makes the directory without a login, which the machine's still serves."""
+        (self.home / ".config" / "gh").mkdir(parents=True)
+        (self.home / ".config" / "gh" / "config.yml").write_text("editor: vim\n")
+
+        with patch.dict(os.environ, {"GH_CONFIG_DIR": "/home/someone/.config/gh"}):
+            env = self._ask()
+
+        self.assertEqual(env["GH_CONFIG_DIR"], "/home/someone/.config/gh")
 
     def test_gh_keeps_the_machines_login_when_the_home_has_none(self):
         with patch.dict(os.environ, {"GH_CONFIG_DIR": "/home/someone/.config/gh"}):

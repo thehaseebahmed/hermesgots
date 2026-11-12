@@ -97,8 +97,8 @@ def _gh_cli_token(hermes_home: Path) -> Optional[str]:
     for every home but the launch profile's own, whose exported token is the fallback it always was.
 
     ``gh`` keeps one login for the whole machine, so a profile that keeps its own — ``.config/gh``
-    under its home, made by ``GH_CONFIG_DIR=<home>/.config/gh gh auth login`` — is asked as itself,
-    and every other profile keeps the login ``hermes`` itself would use.
+    under its home holding a ``hosts.yml``, made by ``GH_CONFIG_DIR=<home>/.config/gh gh auth login``
+    — is asked as itself, and every other profile keeps the login ``hermes`` itself would use.
     """
     if not shutil.which("gh"):
         return None
@@ -108,7 +108,7 @@ def _gh_cli_token(hermes_home: Path) -> Optional[str]:
         for name in TOKEN_ENV_VARS:
             env.pop(name, None)
     own = Path(hermes_home) / ".config" / "gh"
-    if own.is_dir():
+    if (own / "hosts.yml").is_file():
         env["GH_CONFIG_DIR"] = str(own)
     try:
         result = subprocess.run(
