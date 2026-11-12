@@ -190,6 +190,10 @@ app() {
   # because it reads what the build wrote.
   gate node scripts/check-openui-chunks.mjs
 
+  # Mermaid's own tier: every chunk carrying it under its own path, none of them precached, one
+  # route answering that path, and the entry carrying none of it. Reads the build above.
+  gate node scripts/check-mermaid-chunks.mjs
+
   # The same tier for the canvas's libraries: each one a chunk of its own, reached only by a
   # dynamic import from the canvas route's chunk, which carries none of them. This is the build's
   # half of the claim `pnpm e2e canvas` counts on the other side — what a visit actually fetches.

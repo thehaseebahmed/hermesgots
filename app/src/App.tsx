@@ -10,6 +10,7 @@ import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
 import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
+import { toHex } from "@/lib/theme"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { ChatPage } from "@/routes/chat"
@@ -66,16 +67,6 @@ const MarkdownDemoPage = lazy(() =>
 const OpenUIReferencePage = lazy(() =>
   import("@/routes/docs/open-ui").then((m) => ({ default: m.OpenUIReferencePage })),
 )
-
-/** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
-function toHex(color: string) {
-  const context = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
-  if (!context) return color
-  context.fillStyle = color
-  context.fillRect(0, 0, 1, 1)
-  const [r, g, b] = context.getImageData(0, 0, 1, 1).data
-  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`
-}
 
 /** Keeps the browser/OS chrome colour in step with the active theme. */
 function ThemeColor() {

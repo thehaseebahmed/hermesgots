@@ -506,6 +506,11 @@ export const FLOWS = {
     script: "regression-submission.mjs",
     about: "Concurrent sends start one run and get one reply",
   },
+  mermaid: {
+    script: "e2e/mermaid.mjs",
+    about:
+      "A reply's closed ```mermaid fence draws its frame where the fence stood — labelled mermaid, the copy control in it, no code block left — and the same fence, watched state by state as the reply arrives, draws as code with no frame until the closing fence lands, after which the frame is the only thing drawn",
+  },
 }
 
 const HELP = `Usage: pnpm e2e <command> [options]      (or .agents/skills/e2e-testing/e2e from the repo root)
