@@ -14,35 +14,64 @@ from __future__ import annotations
 import contextvars
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator, Optional
+
+
+def same_home(first: Any, second: Any) -> bool:
+    """Do both name the same directory? A host can hand one path written two ways."""
+    try:
+        return Path(first).resolve() == Path(second).resolve()
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 @contextmanager
 def profile_scope(hermes_home: Path) -> Iterator[None]:
-    """Installs ``hermes_home``'s profile scope unless a scope is already active.
+    """Installs ``hermes_home``'s profile scope unless one already names it.
 
-    A Hermes too old to offer ``agent.secret_scope`` reads as it always did: no scope, no failure.
+    Two halves make a home's scope, and every read that depends on it needs both: the secret scope
+    decides whose secrets ``get_secret`` answers, and the home override decides which ``.env`` and
+    ``config.yaml`` a read that opens the files sees. ``get_env_prefer_dotenv`` prefers the dotenv,
+    so a scope built without the override still answers the launch profile's ``.env`` — which is how
+    a project clone for a secondary profile ran with the launch profile's GitHub token.
+
+    A scope already bound to another home is replaced and put back afterwards: work that arrived
+    carrying the launch profile's context (a resume on the gateway's thread) must not read that
+    profile's credentials for this one. A host with no ``agent.secret_scope`` reads unscoped, as it
+    always did; one without the override still gets the secret scope, which is what it used to do.
     """
     try:
-        from agent.secret_scope import (
-            build_profile_secret_scope,
-            current_secret_scope,
-            reset_secret_scope,
-            set_secret_scope,
-        )
+        import agent.secret_scope as secrets
     except ImportError:
         yield
         return
-    if current_secret_scope() is not None:
-        yield
-        return
-    reset = set_secret_scope(
-        build_profile_secret_scope(Path(hermes_home)), profile_home=str(hermes_home)
-    )
+    constants: Optional[Any]
+    try:
+        import hermes_constants as constants
+    except ImportError:  # a Hermes old enough to have no home override at all
+        constants = None
+
+    home = Path(hermes_home)
+    scope_token: Optional[Any] = None
+    bound = getattr(secrets, "current_secret_scope_home", lambda: None)()
+    if secrets.current_secret_scope() is None or (bound and not same_home(bound, home)):
+        scope_token = secrets.set_secret_scope(
+            secrets.build_profile_secret_scope(home), profile_home=str(home)
+        )
+    override_token: Optional[Any] = None
+    set_override = getattr(constants, "set_hermes_home_override", None)
+    reset_override = getattr(constants, "reset_hermes_home_override", None)
+    if callable(set_override) and callable(reset_override):
+        current = getattr(constants, "get_hermes_home_override", lambda: None)()
+        if current is None or not same_home(current, home):
+            override_token = set_override(str(home))
     try:
         yield
     finally:
-        reset_secret_scope(reset)
+        if override_token is not None:
+            reset_override(override_token)
+        if scope_token is not None:
+            secrets.reset_secret_scope(scope_token)
 
 
 def thread_scope() -> contextvars.Context:
