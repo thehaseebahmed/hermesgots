@@ -59,12 +59,14 @@ words where it refused the source, and one plain sentence where the chunk never 
 trace, and never mermaid's error graphic, which is switched off (`suppressErrorRendering`). The block is
 the one `CodeBlock` the fence would have been, on the tone it stands on.
 
-**The chunk is a path, not a name.** The build names every chunk carrying a module of mermaid's packages
-under `assets/mermaid/` (`app/vite.config.ts`), the service worker leaves that path out of the precache
-and holds it in one cache-first route with a bounded lifetime, and `app/scripts/check-mermaid-chunks.mjs`
-— run from `.github/scripts/checks.sh` — asserts that the entry chunk carries none of mermaid, that every
-chunk of mermaid's is under that path and nothing else is, that the precache manifest names none of them,
-and that exactly one route answers them. A hashed file name changes with every mermaid release and could
+**The chunk is a path, not a name.** One rule says which chunks are mermaid's — a chunk carrying a module
+of mermaid's own packages, or one the module `import("mermaid")` names reaches and the app's own code
+does not (`app/src/lib/mermaid-chunks.ts`) — and both halves of the build ask it: `app/vite.config.ts`
+names those chunks under `assets/mermaid/`, the service worker leaves that path out of the precache and
+holds it in one cache-first route with a bounded lifetime, and `app/scripts/check-mermaid-chunks.mjs` —
+run from `.github/scripts/checks.sh` — asks the same rule of the built chunks and asserts that the entry
+chunk carries none of mermaid, that every chunk of mermaid's is under that path and nothing else is, that
+the precache manifest names none of them, and that exactly one route answers them. A hashed file name changes with every mermaid release and could
 be matched by neither the exclusion nor the route; they cannot be forced into one chunk either, since each
 diagram type is a lazy import of its own.
 

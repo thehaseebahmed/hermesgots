@@ -4,9 +4,10 @@ import { readFileSync } from "node:fs"
 import { dirname, join, normalize, relative } from "node:path"
 
 import { chunks, DIST, entry as entryChunk, read, size } from "./dist.mjs"
-import { MERMAID } from "../src/lib/mermaid-chunks.ts"
+import { MERMAID, mermaidChunks } from "../src/lib/mermaid-chunks.ts"
 
-// mermaid's bundle names its API and nothing the app builds does; the chunk matching it is its door.
+// mermaid's bundle names its API and nothing the app builds does; the chunk carrying it is the door
+// the shared rule walks from.
 const ROOT = "mermaidAPI"
 
 const failures = []
@@ -40,12 +41,12 @@ function named(file) {
   }
 }
 
-function reachable(roots, graph, drop = new Set()) {
+function reachable(roots, graph) {
   const seen = new Set(roots)
   const queue = [...roots]
   while (queue.length) {
     for (const next of graph.get(queue.pop()) ?? []) {
-      if (seen.has(next) || drop.has(next)) continue
+      if (seen.has(next)) continue
       seen.add(next)
       queue.push(next)
     }
@@ -63,8 +64,15 @@ assert.equal(
   1,
   `exactly one chunk carries mermaid itself, found ${roots.length}: ${roots.join(", ") || "none"}`,
 )
-const appOnly = reachable([starts], imports, new Set(roots))
-const mermaid = new Set([...reachable(roots, imports)].filter((file) => !appOnly.has(file)))
+// The naming rule itself, asked of the built chunks: the build named them with it, and the gate reads
+// the same rule here so a chunk the build got wrong cannot pass by agreeing with a second opinion.
+const { mine: mermaid } = mermaidChunks({
+  nodes: files,
+  reaches: (file) => imports.get(file) ?? [],
+  carries: (file) => read(file).includes(ROOT),
+  door: roots[0],
+  entry: [starts],
+})
 const bytes = files.filter((file) => mermaid.has(file)).reduce((total, file) => total + size(file), 0)
 
 const loose = [...mermaid].filter((file) => !file.startsWith(MERMAID))
@@ -94,8 +102,48 @@ check(
 )
 
 const sw = readFileSync(join(DIST, "sw.js"), "utf8")
-const precached = [...sw.matchAll(/precacheAndRoute\(\[(.*?)\](?:,\{\})?\)/gs)].flatMap(([, list]) =>
-  [...list.matchAll(/url:"([^"]+)"/g)].map(([, url]) => `/${url}`),
+
+/**
+ * A call's argument list, found by its own brackets: from the `(` that opens it to the `)` that
+ * closes it, with the strings and the comments between stepped over, since a bracket inside one is
+ * no bracket of the code. Reading the worker this way — rather than from one call's start to the
+ * next one's — is what keeps a change of formatting from quietly changing what is asserted about it:
+ * a route chained with commas and one ended with a semicolon read the same.
+ */
+function argumentsOf(source, open) {
+  let depth = 0
+  for (let i = open; i < source.length; i++) {
+    const char = source[i]
+    if (char === '"' || char === "'" || char === "`") {
+      for (i += 1; i < source.length && source[i] !== char; i += 1) if (source[i] === "\\") i += 1
+      continue
+    }
+    if (char === "/" && source[i + 1] === "/") {
+      i = source.indexOf("\n", i)
+      if (i < 0) return ""
+      continue
+    }
+    if (char === "/" && source[i + 1] === "*") {
+      i = source.indexOf("*/", i)
+      if (i < 0) return ""
+      i += 1
+      continue
+    }
+    if (char === "(") depth += 1
+    else if (char === ")" && --depth === 0) return source.slice(open + 1, i)
+  }
+  return ""
+}
+
+/** Every call of one name in the worker, as the text between its own parentheses. */
+function callsOf(worker, name) {
+  return [...worker.matchAll(new RegExp(`\\b${name}\\(`, "g"))].map((match) =>
+    argumentsOf(worker, match.index + match[0].length - 1),
+  )
+}
+
+const precached = callsOf(sw, "precacheAndRoute").flatMap((manifest) =>
+  [...manifest.matchAll(/url:\s*["']([^"']+)["']/g)].map(([, url]) => `/${url}`),
 )
 check(precached.length > 0, "the built service worker precaches the install")
 const installed = [...mermaid].filter((file) => precached.includes(`/${file}`))
@@ -106,17 +154,18 @@ check(
     .join(", ")}${installed.length > 6 ? ", …" : ""}`,
 )
 
-// Each route runs to the next one: the generated worker chains them with commas.
-const cuts = [...sw.matchAll(/registerRoute\(/g)].map((match) => match.index)
-const routes = cuts.map((at, index) => sw.slice(at, cuts[index + 1] ?? sw.length))
-// The path arrives as a regular expression's source, its slashes escaped (`\/assets\/mermaid\/`).
-const holding = routes.filter((route) => /assets\\?\/mermaid\\?\//.test(route))
+// The path arrives as a regular expression's source, its slashes escaped (`\/assets\/mermaid\/`), so
+// each of its slashes may wear a backslash in the worker.
+const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const PATH = new RegExp(MERMAID.split("/").filter(Boolean).map(escape).join("\\\\?/"))
+const routes = callsOf(sw, "registerRoute")
+const holding = routes.filter((route) => PATH.test(route))
 check(holding.length === 1, `exactly one route answers ${MERMAID}, found ${holding.length}`)
 if (holding.length === 1) {
   const [route] = holding
   check(/CacheFirst/.test(route), `the route holding ${MERMAID} answers from the cache first`)
-  const entries = /maxEntries:(\d+)/.exec(route)
-  const age = /maxAgeSeconds:([\d.]+(?:e\d+)?)/.exec(route)
+  const entries = /maxEntries:\s*(\d+)/.exec(route)
+  const age = /maxAgeSeconds:\s*([\d.]+(?:e\d+)?)/.exec(route)
   check(entries && Number(entries[1]) > 0, "the route holds a bounded number of files (maxEntries)")
   check(age && Number(age[1]) > 0, "and lets them go after a while (maxAgeSeconds)")
 }

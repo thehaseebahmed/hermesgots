@@ -50,6 +50,9 @@
 // default); it is noted into the events ledger like the plugin's watcher notes it (stream.py), so a
 // stream that was away replays it from its cursor. POST /__mock/events closes the open change
 // streams, as a connection dying does; a flow holds the next one back with page.route.
+// Say "draw a diagram" and the reply's mermaid fence is held open, its closer released by one POST
+// /__mock/diagram and the words after it by a second: the code-before-frame state is one a flow
+// reads rather than one it has to be quick enough to see.
 // Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
 // Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
@@ -1887,15 +1890,31 @@ const OPENUI_MAP = [
 ].join("\n")
 
 const DIAGRAM_INTRO = "Here's the flow as a diagram.\n\n"
+// The fence's opener and body. Its closer is held back by `diagramGate` until a flow lets it go, so
+// the reply stands with a diagram arriving as the code it is — no frame, nothing fetched — for as
+// long as the flow needs to read that state, rather than for as long as the mock's pace holds it.
 const DIAGRAM_FENCE = [
   "```mermaid",
   "flowchart LR",
   "  Fence[The fence arrives] -->|at the margin| Closed[Closed, so it draws]",
   "  Closed -->|a tap| Sheet[Filled, at its own width]",
   "  Closed -->|a flip| Again[Drawn again, in the other mode]",
-  "```",
 ].join("\n")
+const DIAGRAM_CLOSE = "```"
 const DIAGRAM_OUTRO = "\n\nThat's every step the app takes, from the fence to the picture."
+
+// The diagram turn's two gates (POST /__mock/diagram): releases asked for ahead of the turn are
+// latched, so a flow never has to beat the stream to the gate it means to open.
+let diagramReleased = 0
+const diagramWaiting = []
+
+function diagramGate() {
+  if (diagramReleased > 0) {
+    diagramReleased -= 1
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => diagramWaiting.push(resolve))
+}
 
 const DIAGRAM_BROKEN = [
   "Here's that flow as a diagram, as far as I got with it.\n\n",
@@ -2991,7 +3010,13 @@ async function playTurn(req, body, last, out) {
     await say(DIAGRAM_BROKEN, 40)
   } else if (/\bdraw a diagram\b/i.test(last)) {
     await say(DIAGRAM_INTRO, 40)
-    await say(`${DIAGRAM_FENCE}\n\n`, 90)
+    await say(`${DIAGRAM_FENCE}\n`, 90)
+    // Held with the fence open: what the flow reads off the screen is the state it means to assert.
+    await diagramGate()
+    await say(DIAGRAM_CLOSE, 40)
+    // Held again with the frame drawn and the reply unfinished, so the flow can tell that the frame
+    // stood while more words were still coming rather than after them.
+    await diagramGate()
     await say(DIAGRAM_OUTRO, 40)
   } else if (/image|chart/i.test(last)) {
     await say(
@@ -6201,6 +6226,15 @@ http
       const wait = Number(ms)
       titleDelayMs = Number.isFinite(wait) && wait >= 0 ? wait : TITLE_DELAY_MS
       return json(res, 200, { ok: true, ms: titleDelayMs })
+    }
+    // Dev only: POST lets the diagram reply past one of its two gates — the fence's closer, then the
+    // words after it — so a flow reads the states it asserts instead of racing the stream's pace.
+    // A release asked for before the turn reaches a gate is latched for it.
+    if (url.pathname === "/__mock/diagram" && req.method === "POST") {
+      const next = diagramWaiting.shift()
+      if (next) next()
+      else diagramReleased += 1
+      return json(res, 200, { ok: true, waiting: diagramWaiting.length })
     }
     // Dev only: POST closes every open change stream, as a connection dying does. The changes are
     // logged all the same, so a stream that opens again replays them from the client's own cursor;

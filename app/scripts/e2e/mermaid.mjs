@@ -1,4 +1,4 @@
-import { app, assert, flow, long, pass, settled } from "./lib.mjs"
+import { app, assert, flow, long, mockPost, pass, settled } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const FRAME = "[data-slot=diagram]"
@@ -271,11 +271,34 @@ await flow(
     const reply = page.locator(REPLY).last()
     const frame = reply.locator(FRAME)
 
+    // The mock holds the reply with its diagram fence open until this flow lets it go, so what is
+    // read here is the state it was given rather than the state a pace happened to leave behind.
     await until(
-      () => frame.count().then((count) => count === 1),
+      () => reply.locator(FENCE_CODE).count().then((count) => count === 1),
       30_000,
-      "the fence's frame to draw",
+      "the fence to stand on screen as the code it is",
     )
+    assert.equal(await frame.count(), 0, "a fence still arriving draws no frame")
+    const held = await page.evaluate(() => window.__chunkRead())
+    assert.equal(held.chunks.length, 0, `and mermaid's chunk was not asked for (${held.chunks.length})`)
+    assert.equal(chunks.length, 0, "nor requested by the page at all")
+    pass("a fence held open on screen stayed the code it is: no frame, and nothing fetched for it")
+
+    // The closer, then the frame — and the reply held again before its last words, so that the frame
+    // standing while more words were still to come is read off the page, not off a clock.
+    await mockPost("/__mock/diagram")
+    await until(() => frame.count().then((count) => count === 1), 30_000, "the fence's frame to draw")
+    const before = await reply.evaluate((row) => row.textContent ?? "")
+    assert.match(before, /Closed, so it draws/, "the fence's own words had arrived")
+    assert.doesNotMatch(before, /from the fence to the picture/, "and the reply had more to say")
+    assert.equal(
+      await reply.locator(FENCE_CODE).count(),
+      0,
+      "the fence that closed draws no code block",
+    )
+    pass("the frame drew where the fence stood while the reply was still being written")
+
+    await mockPost("/__mock/diagram")
     await until(
       async () => (await lastReply(chatId))?.status === "done",
       60_000,
@@ -283,12 +306,6 @@ await flow(
     )
     const said = await lastReply(chatId)
     assert.match(said.content, /from the fence to the picture\./, "the reply reached its last words")
-
-    assert.equal(
-      await reply.locator(FENCE_CODE).count(),
-      0,
-      "the fence that closed draws no code block",
-    )
 
     const order = await reply.evaluate((row) => {
       const drawn = row.querySelector("[data-slot=diagram]")

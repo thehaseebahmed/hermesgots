@@ -8,49 +8,60 @@ import { defineConfig, type Plugin } from "vite"
 import { VitePWA } from "vite-plugin-pwa"
 
 import pkg from "./package.json" with { type: "json" }
-import { MERMAID } from "./src/lib/mermaid-chunks.ts"
-
-const MERMAID_PACKAGE = /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(?:mermaid|@mermaid-js)\//
+import {
+  MERMAID,
+  MERMAID_PACKAGE,
+  mermaidChunks,
+  type MermaidSplit,
+} from "./src/lib/mermaid-chunks.ts"
 
 /**
- * A chunk is mermaid's if it carries one of its packages, or if nothing in the entry reaches it
- * without passing through one — the question `chunkFileNames` cannot ask, one chunk at a time.
+ * Names mermaid's chunks with the one rule in `src/lib/mermaid-chunks.ts`: a chunk carrying a module
+ * of mermaid's own packages, or reached by the module `import("mermaid")` names, lands under
+ * `MERMAID` — outside the precache and behind the one cache-first route. The gate asks the same rule
+ * of the built worker, which is what makes the two of them one rule rather than two opinions.
  */
-function mermaidChunks() {
-  const only = new Set<string>()
+function mermaidChunksPlugin() {
+  let split: MermaidSplit | undefined
 
   const plugin: Plugin = {
     name: "gots:mermaid-chunks",
     buildEnd() {
-      only.clear()
       const ids = Array.from(this.getModuleIds())
-      const reached = new Set<string>()
-      const queue: string[] = []
-      for (const id of ids) {
-        if (!this.getModuleInfo(id)?.isEntry) continue
-        reached.add(id)
-        queue.push(id)
+      const reaches = (id: string) => {
+        const info = this.getModuleInfo(id)
+        return info ? [...info.importedIds, ...info.dynamicallyImportedIds] : []
       }
-      while (queue.length) {
-        const info = this.getModuleInfo(queue.pop() as string)
-        if (!info) continue
-        for (const next of [...info.importedIds, ...info.dynamicallyImportedIds]) {
-          if (reached.has(next) || MERMAID_PACKAGE.test(next)) continue
-          reached.add(next)
-          queue.push(next)
-        }
-      }
-      for (const id of ids) if (!reached.has(id)) only.add(id)
+      // The door is what `import("mermaid")` names: the module of mermaid's packages that a module
+      // outside them imports. There is one, and a second would have to be named here.
+      const doors = [
+        ...new Set(
+          ids
+            .filter((id) => !MERMAID_PACKAGE.test(id))
+            .flatMap((id) => reaches(id).filter((next) => MERMAID_PACKAGE.test(next))),
+        ),
+      ]
+      if (doors.length !== 1)
+        this.error(
+          `one module imports mermaid, found ${doors.length}: ${doors.join(", ") || "none"}`,
+        )
+      split = mermaidChunks({
+        nodes: ids,
+        reaches,
+        carries: (id) => MERMAID_PACKAGE.test(id),
+        door: doors[0],
+        entry: ids.filter((id) => this.getModuleInfo(id)?.isEntry),
+      })
     },
   }
 
   return {
     plugin,
-    fileNames: (chunk: { moduleIds: string[] }) =>
-      chunk.moduleIds.some((id) => MERMAID_PACKAGE.test(id)) ||
-      (chunk.moduleIds.length > 0 && chunk.moduleIds.every((id) => only.has(id)))
-        ? `${MERMAID}[name]-[hash].js`
-        : "assets/[name]-[hash].js",
+    fileNames: (chunk: { moduleIds: string[] }) => {
+      // A chunk is named once the graph is whole, which is what `buildEnd` is for.
+      if (!split) throw new Error("mermaid's chunks are named before buildEnd ran")
+      return split.names(chunk.moduleIds) ? `${MERMAID}[name]-[hash].js` : "assets/[name]-[hash].js"
+    },
   }
 }
 
@@ -73,7 +84,7 @@ const version = `${pkg.version} · ${commit()}`
 const uploads = Boolean(process.env.SENTRY_AUTH_TOKEN)
 
 export default defineConfig(({ mode }) => {
-  const mermaid = mermaidChunks()
+  const mermaid = mermaidChunksPlugin()
 
   return {
     define: {
@@ -119,7 +130,12 @@ export default defineConfig(({ mode }) => {
           icons: [
             { src: "pwa-192x192.png", sizes: "192x192", type: "image/png" },
             { src: "pwa-512x512.png", sizes: "512x512", type: "image/png" },
-            { src: "maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+            {
+              src: "maskable-512x512.png",
+              sizes: "512x512",
+              type: "image/png",
+              purpose: "maskable",
+            },
           ],
           // Android's share sheet (Chrome, once installed) takes any file here; see share-sw.js.
           share_target: {
