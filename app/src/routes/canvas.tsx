@@ -42,7 +42,7 @@ import { librarySource, loadLibraries } from "@/lib/canvas-library-sources"
 import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
   callCanvasCall,
-  canvasData,
+  canvasReader,
   deleteCanvas,
   grantCanvasTool,
   hasVersion,
@@ -736,13 +736,14 @@ export function CanvasView() {
     setRedrawn({ key: frameKey, document })
   }
 
-  // The page's own data and its calls through the app: a data read is answered from the copy this
-  // device holds and a data write goes to the host's one route (ADR 0113); the host's four reads
-  // are asked freely, and a declared tool's call waits here while the reader is asked (ADR 0114).
+  // The page's own data and its calls through the app: a data read is the reader's, which answers from
+  // the copy this device holds, and a data write goes to the host's one route (ADR 0113); the host's
+  // four reads are asked freely, and a declared tool's call waits here while the reader is asked
+  // (ADR 0114).
   useEffect(() => {
     const hear = bridgeHandler({
       frame: () => frame.current?.contentWindow ?? null,
-      copy: () => canvasData(id),
+      read: canvasReader(id),
       write: (call) => writeCanvasData(id, call),
       call: (call) => callCanvasCall(id, call),
       consent: (tool) => askRef.current(tool),

@@ -2,8 +2,8 @@
  * The one door between a canvas's page and the app (ADR 0114).
  *
  * The page is drawn in a frame with an opaque origin, so it reaches nothing of the app's and the
- * parent is its only door. Reads are answered from this device's copy of the canvas's data — the
- * copy a read of the canvas carries — so a page opens and lists what it holds with the host away
+ * parent is its only door. A read is asked of the reader the screen hands this bridge — today one over
+ * this device's copy of the canvas's data — so a page opens and lists what it holds with the host away
  * (ADR 0113); writes go to the host's one route, `POST canvases/<id>/call`, and the answer it
  * gives is what the copy keeps.
  *
@@ -211,8 +211,10 @@ export function readCall(data: unknown): BridgeCall | null {
 }
 
 /**
- * What a data read answers, from the device's copy alone: the collection's documents in copy order,
- * or the one document, or null. No data read reaches the host.
+ * What a data read answers, from the copy it is given: the collection's documents in copy order, or
+ * the one document, or null. No data read reaches the host. This is the rule and nothing else — the
+ * reader a screen hands the bridge applies it to the copy this device holds (`canvasReader` in
+ * `canvases.ts`), so where that copy lives is the reader's to change and the answer's is not.
  */
 export function answerRead(call: BridgeDataCall, copy: CanvasDoc[]): unknown {
   if (call.method === "list") return copy.filter((row) => row.collection === call.collection)
@@ -436,8 +438,11 @@ export const BRIDGE_SCRIPT =
 export interface BridgeHost {
   /** The frame as it is now: a message is heard only when this is its source. */
   frame(): Window | null
-  /** The device's copy of the canvas's data, as the last read or write left it. */
-  copy(): CanvasDoc[]
+  /**
+   * One read of the canvas's data, answered: what the page is told, or the error whose words it is
+   * told instead. Which copy the answer comes from is the reader's — today the one this device holds.
+   */
+  read(call: BridgeDataCall): Promise<unknown>
   /** A write through the host's route; its answer, or its error, is what the page is told. */
   write(call: BridgeWriteCall): Promise<unknown>
   /** A host read or a tool call; its answer, or its error, is what the page is told. */
@@ -485,12 +490,13 @@ function once(
 }
 
 /**
- * The parent's listener: a read of the canvas's data is answered at once from the device's copy, a
- * write is the host's, and a host read or a tool call is the host's too — a tool call held until the
- * reader allows it. A link the page's reader tapped is opened through the app's own way out, once
- * per call. Nothing from another window is answered or posted — a message is the canvas talking only
- * when it comes from this screen's own frame — and a call this rule cannot read is answered with the
- * reason rather than dropped, since the page's promise is waiting on it.
+ * The parent's listener: a read of the canvas's data is the reader's, and whatever it answers — a
+ * value or an error — is what the page is told; a write is the host's, and a host read or a tool call
+ * is the host's too — a tool call held until the reader allows it. A link the page's reader tapped is
+ * opened through the app's own way out, once per call. Nothing from another window is answered or
+ * posted — a message is the canvas talking only when it comes from this screen's own frame — and a
+ * call this rule cannot read is answered with the reason rather than dropped, since the page's
+ * promise is waiting on it.
  *
  * A tool refused for consent is asked about once, however many calls are waiting on it: the second
  * call waits on the same answer rather than opening a second dialog. Allow retries the call once and
@@ -560,7 +566,10 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
       return
     }
     if (call.method === "list" || call.method === "get") {
-      reply(call.call, true, { value: answerRead(call, host.copy()) })
+      void host.read(call).then(
+        (value) => reply(call.call, true, { value }),
+        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
+      )
       return
     }
     if (call.method === "put" || call.method === "remove") {

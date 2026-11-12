@@ -3,9 +3,11 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { wireContent } from "@/lib/attachments"
 import {
+  answerRead,
   applyWrite,
   mergeGrants,
   storedDoc,
+  type BridgeDataCall,
   type BridgeHostCall,
   type BridgeToolCall,
   type BridgeWriteCall,
@@ -329,6 +331,17 @@ function keepCopy(profile: Profile, id: string, copy: CanvasDoc[]) {
 /** The device's copy of a canvas's data, as the last read or write left it. */
 export function canvasData(id: string): CanvasDoc[] {
   return store.get().details[id]?.data ?? []
+}
+
+/**
+ * The reader a canvas's page asks its data of: the one rule for what a read answers (`answerRead`),
+ * applied to the copy this device holds for that canvas as the call arrives — read at call time, so a
+ * read landing never replaces the reader under a running page. The rule is the bridge's and the copy
+ * is this store's, so where the copy lives (today this canvas's own data, tomorrow its rows a page at
+ * a time) is a change here and nowhere else.
+ */
+export function canvasReader(id: string): (call: BridgeDataCall) => Promise<unknown> {
+  return async (call) => answerRead(call, canvasData(id))
 }
 
 /** The bot a canvas belongs to, from what this device already holds. */

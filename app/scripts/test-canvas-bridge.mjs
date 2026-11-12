@@ -70,7 +70,7 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
   let copy = COPY
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => copy,
+    read: async (call) => answerRead(call, copy),
     write: async (call) => {
       writes.push(call)
       return call.method === "put"
@@ -82,6 +82,7 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
 
   // A read never goes to the host: the device's copy is what the page reads.
   message({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
+  await settled()
   assert.deepEqual(frame.posted, [
     {
       type: BRIDGE_MESSAGE,
@@ -91,8 +92,10 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
     },
   ])
   message({ type: BRIDGE_MESSAGE, call: 2, method: "get", collection: "items", id: "b" })
+  await settled()
   assert.deepEqual(frame.posted[1].value, doc("items", "b", { n: 2 }, 20))
   message({ type: BRIDGE_MESSAGE, call: 3, method: "get", collection: "items", id: "zzz" })
+  await settled()
   assert.equal(frame.posted[2].value, null)
   assert.deepEqual(writes, [], "no read is a write")
 
@@ -119,7 +122,7 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
   // A host that refuses says why, in the words the page gets.
   const refusing = bridgeHandler({
     frame: () => frame,
-    copy: () => copy,
+    read: async (call) => answerRead(call, copy),
     write: async () => {
       throw new Error("A canvas's data is capped at 1 MB; this write would make it 1025 KB.")
     },
@@ -140,7 +143,7 @@ test("a message from another source is ignored", async () => {
   let writes = 0
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, COPY),
     write: async () => {
       writes += 1
     },
@@ -324,7 +327,7 @@ test("a host read and a tool call reach the host, and a tool is asked about once
   let allow = false
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, COPY),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -392,7 +395,7 @@ test("a tool the host refuses for any other reason is not put to the reader", as
   let asked = 0
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, COPY),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -537,7 +540,7 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   const opened = []
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, COPY),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -716,7 +719,7 @@ test("a call the app cannot read is answered rather than dropped", async () => {
   const frame = fakeFrame()
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, COPY),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -742,6 +745,7 @@ test("a call the app cannot read is answered rather than dropped", async () => {
   assert.equal(frame.posted.length, 3)
   // A reply carries the epoch of the call it answers, so the page can tell whose it is.
   hear({ source: frame, data: { type: BRIDGE_MESSAGE, call: 4, epoch: "p1", method: "list", collection: "items" } })
+  await settled()
   assert.equal(frame.posted[3].epoch, "p1")
   assert.equal(frame.posted[3].ok, true)
 })
@@ -899,7 +903,7 @@ test("a point from another window is not the canvas talking", () => {
   const points = []
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, COPY),
     write: async () => {
       throw new Error("a write this case never makes")
     },
