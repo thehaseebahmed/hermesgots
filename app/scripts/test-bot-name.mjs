@@ -121,6 +121,39 @@ test("a bare host keeps its port, the only thing telling two of them apart", () 
   )
 })
 
+test("a base URL with no scheme names its host, rather than reading as no host at all", () => {
+  const pair = [bot("a", "hermes.domain.com:8642"), bot("b", "hermes.example.com:8642")]
+  assert.deepEqual(
+    pair.map((one) => botLabel(one, pair)),
+    ["domain", "example"],
+    "a hand-typed address is read for its host, not floored to a bot",
+  )
+  const one = bot("c", "localhost:8642")
+  assert.equal(botLabel(one, [one]), "localhost:8642", "and a bare one keeps its port")
+})
+
+test("an address is read whole, port and all", () => {
+  const lan = [bot("a", "http://192.168.1.50:8642/v1"), bot("b", "http://192.168.1.51:8642/v1")]
+  assert.deepEqual(lan.map((one) => botLabel(one, lan)), [
+    "192.168.1.50:8642",
+    "192.168.1.51:8642",
+  ])
+  const mixed = [bot("c", "http://127.0.0.1:8642/v1"), bot("d", "http://localhost:8642/v1")]
+  assert.deepEqual(
+    mixed.map((one) => botLabel(one, mixed)),
+    ["127.0.0.1:8642", "localhost:8642"],
+    "and two loopback hosts are told apart by the little that differs",
+  )
+})
+
+test("a profile reached at /p/ with a query is still that profile", () => {
+  const pair = [
+    bot("a", "https://h.example.com/v1"),
+    bot("b", "https://h.example.com/p/work/v1?tenant=1"),
+  ]
+  assert.deepEqual(pair.map((one) => botLabel(one, pair)), ["h", "h/work"])
+})
+
 test("a base URL that does not parse is its own host", () => {
   const odd = bot("a", "hermes.local/gateway")
   assert.equal(botLabel(odd, [odd]), "hermes")

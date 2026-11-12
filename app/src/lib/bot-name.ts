@@ -8,9 +8,10 @@
  * - where two hosts wear one short name, they read as the domain part instead, `domain` and `example`;
  * - a host holding more than one bot appends the Hermes profile it is reached at, `hermes/work`.
  *
- * Import-free, like `host-url.ts` beside it, so the unit tier reads it as a pure rule. The `/p/<name>`
- * and `/v1` rules are that file's, repeated here to keep the module readable on its own.
+ * `host-url.ts` holds the one rule for where a bot's routes live; this reads its `/p/<profile>` from
+ * there rather than keeping a second copy that could drift.
  */
+import { multiplexedProfile } from "./host-url.ts"
 
 /** The three fields a label is read from: `Profile` carries them and so does a list's row. */
 export interface NamedBot {
@@ -22,27 +23,43 @@ export interface NamedBot {
 /** The app's own name for a host's default profile, which is no bot's label. */
 const APP_NAME = "Hermes"
 
+/**
+ * A bot's address with any scheme and path taken off, for the strings `new URL` reads as no host: a
+ * hand-typed `hermes.domain.com:8642` parses with a scheme of its own and an empty host.
+ */
+const withoutPath = (baseUrl: string) =>
+  baseUrl
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    .replace(/\/+$/, "")
+
 /** A host as a bot's address names it: its name and, where one is given, its port. */
 function hostOf(baseUrl: string) {
   const trimmed = baseUrl.trim()
   if (!trimmed) return ""
   try {
     const url = new URL(trimmed)
-    return url.port ? `${url.hostname}:${url.port}` : url.hostname
+    if (url.hostname) return url.port ? `${url.hostname}:${url.port}` : url.hostname
   } catch {
     // A base URL that doesn't parse is its own host, which is what `hostKey` says of it too.
-    return trimmed.replace(/\/+$/, "")
   }
+  return withoutPath(trimmed)
 }
 
 const nameOf = (host: string) => host.replace(/:\d+$/, "")
+
+/** An address is nobody's name: `192.168.1.50` and `[::1]` are read whole, their port and all. */
+const isAddress = (name: string) => /^\d+(\.\d+)*$/.test(name) || name.includes(":")
+
 const labelsOf = (host: string) => nameOf(host).split(".").filter(Boolean)
 
 /**
- * The name a host goes by: its first DNS label. A single-label host — `localhost`, an address — has
- * only its whole self to be called, its port included, since that is all that tells two apart.
+ * The name a host goes by: its first DNS label. A single-label host — `localhost` — and an address
+ * have only their whole selves to be called, the port included, since that is all that tells two
+ * apart.
  */
 function shortOf(host: string) {
+  if (isAddress(nameOf(host))) return host
   const labels = labelsOf(host)
   return labels.length > 1 ? labels[0] : host
 }
@@ -53,15 +70,13 @@ function shortOf(host: string) {
  * `undefined` where there is nothing between the two, as `localhost` has not.
  */
 function domainOf(host: string) {
+  if (isAddress(nameOf(host))) return undefined
   const labels = labelsOf(host)
   return labels.length > 2 ? labels.slice(1, -1).join(".") : undefined
 }
 
 /** The Hermes profile a bot is, where its host serves it under `/p/<profile>`; else the default one. */
-function placeOf(baseUrl: string) {
-  const root = baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
-  return root.match(/\/p\/([^/?#]+)$/)?.[1]
-}
+const placeOf = (baseUrl: string) => multiplexedProfile(baseUrl)
 
 /** A bot with no server to be named by keeps its own name, unless that is only the app's. */
 function ownName(bot: NamedBot) {
