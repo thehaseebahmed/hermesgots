@@ -1,15 +1,19 @@
 /**
  * The copy of a bot's canvases this device keeps (`db.canvasCache`, ADR 0113): the list its host
- * answered, and per canvas the page its record points at with the version, the tools it declared and
- * its own data. Every read and write the host answers writes it, so a canvas opens at once with the
- * host away, and it goes with the bot that answered it.
+ * answered, and per canvas the page its record points at with the version and the tools it declared.
+ * Every read and write the host answers writes it, so a canvas opens at once with the host away, and
+ * it goes with the bot that answered it.
+ *
+ * A canvas's own documents are not part of this copy: they are rows of their own (`canvas-docs.ts`), a
+ * sweep fills them a page at a time, and a page may be 5000 documents — never one row here.
  *
  * A module of its own for the reason `canvas-css.ts` keeps its own table: this is the device's side
  * of the copy — its keys, its rows and the prune — while `canvases.ts` is the store the screens draw
- * from. The two share the row shapes here (`recordOf`, `copyOf`, `upsert`), and nothing in it syncs.
+ * from. The two share the row shapes here (`recordOf`, `upsert`), and nothing in it syncs.
  */
 
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
+import { forgetDocs } from "@/lib/canvas-docs"
 import { connectionKey } from "@/lib/connection"
 import { db, type Profile } from "@/lib/db"
 import { equal } from "@/lib/equal"
@@ -26,41 +30,29 @@ function without<T, K extends keyof T>(value: T, drop: K[]): Omit<T, K> {
   return copy as Omit<T, K>
 }
 
-/** A canvas as a list keeps it: its record, and not the page, its tools or this session's count. */
-export const recordOf = (canvas: Canvas): CanvasRecord =>
-  without(canvas, ["html", "data", "tools", "dataWrites"])
-
-/**
- * A copy leaves this session's write count behind: it counts reads against writes in one device's
- * memory, so a copy carrying an old one would outrank the host's next answer.
- */
-const copyOf = (canvas: Canvas): Canvas => without(canvas, ["dataWrites"])
+/** A canvas as a list keeps it: its record, and not the page or the tools. */
+export const recordOf = (canvas: Canvas): CanvasRecord => without(canvas, ["html", "tools"])
 
 export const upsert = <T extends { id: string }>(rows: T[], row: T) =>
   rows.some((one) => one.id === row.id)
     ? rows.map((one) => (one.id === row.id ? row : one))
     : [row, ...rows]
 
-/** The newest clock among a canvas's documents, which is how old its data is. */
-const newestData = (data?: Canvas["data"]) =>
-  data?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0
-
 /** The host's clock for the newest answer the user gave about a canvas's tools. */
 const newestGrant = (grants?: Canvas["grants"]) =>
   grants?.reduce((newest, row) => Math.max(newest, row.at), 0) ?? 0
 
 /**
- * Whether `one` is newer than `other`: the record's clock first, then the version it points at, then
- * the clock of the newest document, and last the clock of the newest answer about a tool. A read and
- * a write's answer can arrive in either order, so the row keeps the newer of the two rather than the
- * later to land — and an answer about a tool moves neither clock nor version, so its own clock is
- * what says whether the copy that carries it is the newer one.
+ * Whether `one` is newer than `other`: the record's clock first, then the version it points at, and
+ * last the clock of the newest answer about a tool. A read and a write's answer can arrive in either
+ * order, so the row keeps the newer of the two rather than the later to land — and an answer about a
+ * tool moves neither clock nor version, so its own clock is what says whether the copy that carries it
+ * is the newer one. A canvas's documents are not compared here: they are rows with a clock each, and a
+ * sweep is what says how fresh they are.
  */
 function newer(one: Canvas, other: Canvas) {
   if (one.at !== other.at) return one.at > other.at
   if (one.version !== other.version) return one.version > other.version
-  if (newestData(one.data) !== newestData(other.data))
-    return newestData(one.data) > newestData(other.data)
   return newestGrant(one.grants) > newestGrant(other.grants)
 }
 
@@ -117,7 +109,7 @@ export function keepRecord(profile: Profile, canvas: Canvas) {
     .catch(quietly("Keeping a bot's canvases"))
 }
 
-/** Keeps one canvas with the page it points at, its tools and its data, unless it already holds a newer one. */
+/** Keeps one canvas with the page it points at and its tools, unless it already holds a newer one. */
 export function keepCanvas(profile: Profile, canvas: Canvas) {
   const key = canvasCacheKey(profile, canvas.id)
   void db
@@ -131,7 +123,7 @@ export function keepCanvas(profile: Profile, canvas: Canvas) {
         key,
         connection: connectionKey(profile),
         canvasId: canvas.id,
-        canvas: copyOf(canvas),
+        canvas,
       })
     })
     .catch(quietly("Keeping a canvas's copy"))
@@ -155,7 +147,8 @@ export async function keptBot(id: string) {
 /**
  * Drops a copy the host says it no longer holds, and its record with it: a listing would prune the
  * record too, but a device that opens with the host away never runs one, and the list it draws would
- * name a canvas the host has already said is gone.
+ * name a canvas the host has already said is gone. The documents the device kept for it go with it —
+ * they are rows of their own — so a canvas deleted on the host is not drawn from them either.
  */
 export async function forgetCanvas(profile: Profile, id: string) {
   const key = canvasListKey(profile)
@@ -171,4 +164,5 @@ export async function forgetCanvas(profile: Profile, id: string) {
       await db.canvasCache.delete(canvasCacheKey(profile, id))
     })
     .catch(quietly("Letting a canvas's copy go"))
+  await forgetDocs(profile, id).catch(quietly("Letting a canvas's documents go"))
 }

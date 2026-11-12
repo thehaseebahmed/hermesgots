@@ -19,6 +19,7 @@ import {
   keepCanvas,
   recordOf,
 } from "@/lib/canvas-cache"
+import { cachedDocs, keepDocs } from "@/lib/canvas-docs"
 import { CANVAS_AWAY, canvasData, refreshCanvas, undoCanvas, writeCanvasData } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
 import { db, deleteProfile, updateProfile } from "@/lib/db"
@@ -53,7 +54,6 @@ const KEPT = {
   canUndo: true,
   html: PAGE,
   tools: ["files.search"],
-  data: [DOC],
 }
 
 /** The bot, its canvas's chat, and no copy left over from another case. */
@@ -201,6 +201,8 @@ test(
       canvasId: KEPT.id,
       canvas: KEPT,
     })
+    // The documents this device last read, as rows: the host is away, so nothing fills them again.
+    await keepDocs(bot, KEPT.id, [DOC])
     const asked: string[] = []
     serveNothing(asked)
     await mount(screen, async () => {
@@ -243,7 +245,7 @@ test(
         "the write was asked of the host once, and never queued for a second try",
       )
       assert.deepEqual(
-        (await db.canvasCache.get(canvasCacheKey(bot, KEPT.id)))?.canvas?.data,
+        await cachedDocs(bot, KEPT.id),
         [DOC],
         "the copy still holds what the host last answered",
       )
@@ -283,7 +285,7 @@ test(
       assert.equal(kept.version, 3)
       assert.match(kept.html ?? "", /<h1>Tip<\/h1>/, "the page its record points at")
       assert.deepEqual(kept.tools, ["files.search"], "the tools it declared")
-      assert.deepEqual(kept.data, [DOC], "and its own data")
+      assert.deepEqual(await cachedDocs(bot, KEPT.id), [DOC], "and its own data")
 
       // The list keeps the record and not the page: a listing answers records alone.
       const list = (await db.canvasCache.get(canvasListKey(bot)))!.canvases!
@@ -309,8 +311,7 @@ test(
       const stored = { collection: "items", id: "one", doc: { n: 7 }, at: 100 }
       await until(
         async () =>
-          JSON.stringify((await db.canvasCache.get(canvasCacheKey(bot, KEPT.id)))?.canvas?.data) ===
-          JSON.stringify([stored]),
+          JSON.stringify(await cachedDocs(bot, KEPT.id)) === JSON.stringify([stored]),
         "the write to be kept",
       )
     })
@@ -348,7 +349,7 @@ test(
         ["data.put", "data.remove"],
         "and the two are asked in the order the page wrote them",
       )
-      assert.deepEqual(canvasData("c1"), [], "the copy holds what the host kept")
+      assert.deepEqual(await canvasData("c1"), [], "the copy holds what the host kept")
     })
   }),
 )
@@ -448,7 +449,7 @@ test("a copy is never replaced by an older one", async () => {
   keepCanvas(bot, older)
   await settle()
   assert.equal((await cachedCanvas(bot, KEPT.id))?.version, 4, "the newer copy stands")
-  assert.deepEqual((await cachedCanvas(bot, KEPT.id))?.data, newer.data)
+  assert.equal((await cachedCanvas(bot, KEPT.id))?.at, newer.at, "and its clock with it")
 })
 
 test(

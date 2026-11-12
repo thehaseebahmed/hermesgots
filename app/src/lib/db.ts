@@ -6,6 +6,7 @@ import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { carriesPart } from "@/lib/attachment-caps"
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
+import type { CanvasDoc } from "@/lib/canvas-bridge"
 import type { ChatFilter } from "@/lib/chat-list"
 import { connectionKey, hasServer } from "@/lib/connection"
 import { equal } from "@/lib/equal"
@@ -1107,12 +1108,57 @@ export interface CanvasCacheRow {
    * list row.
    */
   canvasId?: string
-  /** The list's records, as the host answered them: no page, no tools and no data, which a listing
-   * omits — the shape a list keeps (`CanvasRecord`). */
+  /** The list's records, as the host answered them: no page and no tools, which a listing omits — the
+   * shape a list keeps (`CanvasRecord`). */
   canvases?: CanvasRecord[]
-  /** One canvas with the page, the tools and the data its last read or write left. */
+  /** One canvas with the page and the tools its last read or write left. Its documents are rows of
+   * their own (`canvasDocs`), so a canvas of five thousand is never one row of the cache. */
   canvas?: Canvas
 }
+
+/**
+ * One document of a canvas's data, as this device keeps it (`canvas-docs.ts`): a row of its own, so a
+ * canvas of five thousand documents is five thousand rows read a page at a time rather than one array
+ * read whole.
+ *
+ * `key` is `<connection>\n<canvasId>\n<collection>\n<id>` — the host's own order, a collection and
+ * then an id — so a canvas's rows are a range of the primary key and no read has to filter one.
+ * `generation` names the sweep that last wrote the row: only a completed sweep prunes, and it prunes
+ * what it did not write, so a document this sweep saw keeps the generation it was written under.
+ */
+export interface CanvasDocRow {
+  key: string
+  connection: string
+  canvasId: string
+  collection: string
+  id: string
+  doc: unknown
+  at: number
+  generation: number
+}
+
+/**
+ * What a canvas's sweeps left (`canvas-docs.ts`): the generation the last one wrote under, when one
+ * last reached its last page, and how fresh the data it saw was. `completeAt` is the one thing that
+ * says a canvas is wholly read — a sweep that was cut leaves it where it was.
+ */
+export interface CanvasSweepRow {
+  key: string
+  connection: string
+  canvasId: string
+  generation: number
+  completeAt?: number
+  /** The newest clock among the documents the completed sweep saw, which is the record's `docs_at`. */
+  docsAt?: number
+}
+
+/** The key one document's row is filed under, which is also the order a canvas's rows are read in. */
+export const canvasDocKey = (
+  connection: string,
+  canvasId: string,
+  collection: string,
+  id: string,
+) => `${connection}\n${canvasId}\n${collection}\n${id}`
 
 export const db = new Dexie("gots") as Dexie & {
   settings: EntityTable<Settings, "id">
@@ -1140,6 +1186,8 @@ export const db = new Dexie("gots") as Dexie & {
   roomLog: Table<RoomLogRow, [string, number]>
   canvasCss: EntityTable<CanvasCssRow, "key">
   canvasCache: EntityTable<CanvasCacheRow, "key">
+  canvasDocs: EntityTable<CanvasDocRow, "key">
+  canvasSweeps: EntityTable<CanvasSweepRow, "key">
 }
 
 /** The messages store as this device declares it, so a test can stand a database up at an old version. */
@@ -1541,6 +1589,49 @@ db.version(40).stores({ messages: MESSAGE_STORES })
 db.version(41).stores({ hostCache: "key" })
 
 /**
+ * v42: a canvas's documents as rows of their own, and the mark its sweeps leave, so a canvas of five
+ * thousand documents is swept a page at a time rather than answered as one array — the cap a canvas's
+ * whole data had to stay under was the size of one answer.
+ *
+ * The copy this device already kept held each canvas's documents as an array. The upgrade moves each
+ * document into a row of its own, filed under the host's own order, and the array goes: a row per
+ * document is what a page reads and a sweep writes, and a field holding both would be two copies of
+ * the same documents drifting apart. The moved rows are written under generation 0 and no sweep mark
+ * is made — the array a device kept was cut at the old 1 MB cap, so it is no evidence that a canvas
+ * was ever read whole, and its first completed sweep is what may treat a document as gone.
+ */
+db.version(42)
+  .stores({
+    canvasDocs: "key, connection, canvasId, [canvasId+collection]",
+    canvasSweeps: "key, canvasId",
+  })
+  .upgrade(async (tx) => {
+    const cache = tx.table<CanvasCacheRow>("canvasCache")
+    const docs = tx.table<CanvasDocRow>("canvasDocs")
+    const rows: CanvasDocRow[] = []
+    const canvases: CanvasCacheRow[] = []
+    for (const row of await cache.toArray()) {
+      if (!row.canvas) continue
+      const { data, ...canvas } = row.canvas as Canvas & { data?: CanvasDoc[] }
+      const canvasId = row.canvasId ?? row.canvas.id
+      for (const one of data ?? [])
+        rows.push({
+          key: canvasDocKey(row.connection, canvasId, one.collection, one.id),
+          connection: row.connection,
+          canvasId,
+          collection: one.collection,
+          id: one.id,
+          doc: one.doc,
+          at: one.at,
+          generation: 0,
+        })
+      canvases.push({ ...row, canvasId, canvas: canvas as Canvas })
+    }
+    if (rows.length) await docs.bulkPut(rows)
+    if (canvases.length) await cache.bulkPut(canvases)
+  })
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
@@ -1677,7 +1768,14 @@ async function forgetCanvases(key: string, except: string) {
   const twins = await db.profiles
     .filter((other) => other.id !== except && connectionKey(other) === key)
     .count()
-  if (!twins) await db.canvasCache.where("connection").equals(key).delete()
+  if (twins) return
+  await db.canvasCache.where("connection").equals(key).delete()
+  // The documents are rows of their own, filed under the same connection: they go with the copies
+  // that pointed at them, and a canvas read again fills them from the host.
+  await db.canvasDocs.where("connection").equals(key).delete()
+  // A sweep's mark is keyed by the connection first, so it is a range rather than an index — one
+  // fewer index to keep, since nothing else reads a mark by its bot.
+  await db.canvasSweeps.where("key").startsWith(`${key}\n`).delete()
 }
 
 const RECENT_MODELS = 3
@@ -1716,6 +1814,8 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.netLog,
     db.roomLog,
     db.canvasCache,
+    db.canvasDocs,
+    db.canvasSweeps,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -1958,6 +2058,8 @@ export async function clearAllData() {
     db.roomLog,
     db.canvasCss,
     db.canvasCache,
+    db.canvasDocs,
+    db.canvasSweeps,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))
