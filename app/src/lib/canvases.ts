@@ -566,6 +566,21 @@ export async function deleteCanvas(id: string) {
 }
 
 /**
+ * The write's network half, and only that: one round-trip through the host's `call` route, which
+ * stores or removes the document and answers what it kept. A refusal or a request that never landed
+ * is thrown and nothing is folded into this device's copy, so a caller says what a failure means —
+ * the page's own write is refused in the away words, and a write kept for when the host returns is
+ * sent by this same route when it does.
+ */
+async function sendWrite(profile: Profile, id: string, call: BridgeWriteCall): Promise<unknown> {
+  const args =
+    call.method === "put"
+      ? { collection: call.collection, id: call.id, doc: call.doc }
+      : { collection: call.collection, id: call.id }
+  return callCanvas(profile, id, `data.${call.method}`, args)
+}
+
+/**
  * A page's write, through the host's one route: the host stores (or removes) the document and the
  * answer replaces the copy this device keeps, so the page reads back what the host kept rather than
  * what it sent. A refusal is thrown, which is the sentence the page's promise gets.
@@ -573,17 +588,13 @@ export async function deleteCanvas(id: string) {
 const writing = new Map<string, Promise<unknown>>()
 
 export async function writeCanvasData(id: string, call: BridgeWriteCall) {
-  const args =
-    call.method === "put"
-      ? { collection: call.collection, id: call.id, doc: call.doc }
-      : { collection: call.collection, id: call.id }
   // One write at a time per canvas. The host handles them in the order it is asked, so the answers
   // come back in that order; two in flight could apply a remove before a put the host handled first,
   // and the copy would hold a document the host doesn't — or lose one it does.
   const previous = writing.get(id) ?? Promise.resolve()
-  const asked = previous.catch(() => undefined).then(() =>
-    withHost(id, (profile) => callCanvas(profile, id, `data.${call.method}`, args), CANVAS_AWAY),
-  )
+  const asked = previous
+    .catch(() => undefined)
+    .then(() => withHost(id, (profile) => sendWrite(profile, id, call), CANVAS_AWAY))
   writing.set(id, asked)
   const answer = await asked.finally(() => {
     if (writing.get(id) === asked) writing.delete(id)
