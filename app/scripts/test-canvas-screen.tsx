@@ -566,6 +566,44 @@ test(
 )
 
 test(
+  "a wide screen puts the header and the chat in the left lane, and the page beside them",
+  atWidth(1440, async () => {
+    // The structure a DOM without layout can see; the pixels are `pnpm e2e canvas`'s wide pass. The
+    // head and the chat share one column, that column is the page's previous sibling, and the frame
+    // is drawn beside it rather than inside it — which is the shape a header spanning both panes
+    // cannot have, whatever it measures.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+      const lane = find("[data-canvas-lane]")
+      const page = find("[data-canvas-page]")
+      assert.ok(lane, "the wide screen draws the chat's lane as a column of its own")
+      assert.ok(page, "and the page as the column beside it")
+      const head = find("header")
+      const field = composerField()
+      assert.ok(head && lane!.contains(head), "the canvas's head is drawn in the lane")
+      assert.ok(field && lane!.contains(field), "and the chat's field under it, in that same column")
+      assert.equal(lane!.nextElementSibling, page, "the lane is the page's previous sibling")
+      assert.ok(
+        !lane!.contains(find("iframe[data-canvas-frame]")),
+        "the frame is the page's, not the lane's",
+      )
+      assert.ok(!page!.contains(head), "the page column carries no header of its own")
+      // The order the reader walks down the lane: the head, then the chat, then the page beside them.
+      assert.ok(
+        head!.compareDocumentPosition(field!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the head is drawn before the chat's field",
+      )
+      assert.ok(
+        lane!.compareDocumentPosition(page!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and the lane before the page",
+      )
+    })
+  }),
+)
+
+test(
   "the flip draws the page even when the list is the screen behind it",
   atWidth(390, async () => {
     // A canvas the list made opens on its edit screen with the list behind it, and so does one whose

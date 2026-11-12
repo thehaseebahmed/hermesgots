@@ -7,13 +7,17 @@
 // and drawn again, and the chat's Point row sends the reader to the page and takes the element
 // they tap back as the field's chip — and a visit costs only what its page asked: a page that asks
 // for no library fetches none of one, and one that asks for three fetches each of those chunks once.
+// A wide screen is the same canvas with room for both panes: the chat is the lane on the left, the
+// canvas's head at its top, and the page fills the right pane with no header of its own — measured
+// as boxes, since no DOM without layout can say which pane a header spans.
+
 // A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque
 // origin of its own, the refusal of an outside navigation is the browser's own policy, the outline
 // and the tap that answer a point are that document's own script, a library's source is a chunk
 // only the browser runs (the component tier loads the sources, but no page makes a request), what a visit
 // fetches is the browser's own request log rather than anything the build's output says, and the
 // versions land from the mock's clock rather than a component test's single step.
-import { app, assert, flow, mockJson, pass, SEND_CHORD } from "./lib.mjs"
+import { app, assert, flow, mockJson, pass, SEND_CHORD, settled } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
 const EDIT = "Make it say the deck is done."
@@ -260,3 +264,132 @@ await flow(
   },
   { viewport: { width: 390, height: 844 }, touch: true },
 )
+
+/** A box as the flow's log writes one — `x,y w×h` — or `none` where no such part is drawn: the red
+ * run's whole job is to say which arrangement the screen is in today. */
+const at = (box) => (box ? `${box.x},${box.y} ${box.width}×${box.height}` : "none")
+
+await flow(
+  "canvas-wide",
+  async ({ page, shot }) => {
+    await page.goto(`${app}/canvas`)
+    await page.getByRole("textbox", { name: "What the canvas should be" }).fill(PROMPT)
+    await page.getByRole("button", { name: "Make it", exact: true }).click()
+    // A wide screen has room for both panes, so a start lands on the canvas's own address and nothing
+    // forwards it to the chat's: the lane is already drawn there.
+    await page.waitForURL(/\/canvas\/c_[^/]+$/, { timeout: 20_000 })
+    // The page is drawn with its first version, which is the moment both panes are up.
+    await page.locator(FRAME).waitFor({ timeout: 40_000 })
+    await settled(page)
+    // One read of the screen, so no two boxes are measured a reflow apart.
+    const measured = await page.evaluate((selector) => {
+      const box = (node) => {
+        if (!node) return null
+        const { x, y, width, height, right, bottom } = node.getBoundingClientRect()
+        return {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(width),
+          height: Math.round(height),
+          right: Math.round(right),
+          bottom: Math.round(bottom),
+        }
+      }
+      const ownedLane = document.querySelector("[data-canvas-lane]")
+      const ownedPage = document.querySelector("[data-canvas-page]")
+      const frame = document.querySelector(selector)
+      // The head's row and the chat's own field say which column each of them stands in, whichever
+      // arrangement the screen is built in; and where a screen draws no pane of its own, the page is
+      // where the frame is and the chat's column is the other one in that row. So a screen with no
+      // lane still says which side its chat stands on.
+      const head = document.querySelector("header")
+      const field = document.querySelector('textarea[aria-label="Message"]')
+      const pane = ownedPage ?? frame?.parentElement ?? null
+      const lane =
+        ownedLane ??
+        (pane
+          ? ([...(pane.parentElement?.children ?? [])].find((one) => one !== pane) ?? null)
+          : null)
+      return {
+        lane: box(lane),
+        page: box(pane),
+        head: box(head),
+        field: box(field),
+        frame: box(frame),
+        owned: Boolean(ownedLane && ownedPage),
+        laneHoldsHead: Boolean(lane && head && lane.contains(head)),
+        laneHoldsField: Boolean(lane && field && lane.contains(field)),
+        laneHoldsFrame: Boolean(lane && frame && lane.contains(frame)),
+        pageHoldsHead: Boolean(pane && head && pane.contains(head)),
+        pageHeaders: pane ? pane.querySelectorAll("header").length : 0,
+      }
+    }, FRAME)
+    console.log(
+      `wide 1440 — head ${at(measured.head)}, lane ${at(measured.lane)}, ` +
+        `page ${at(measured.page)}, frame ${at(measured.frame)}, chat ${at(measured.field)}`,
+    )
+
+    // The two panes: the chat's lane is a column of its own on the left, and the page fills the pane
+    // to its right. Relationships rather than x values, so a wider screen moves both and neither
+    // claim breaks.
+    assert.ok(measured.lane && measured.page, "the wide screen draws two columns")
+    assert.ok(measured.laneHoldsHead, "the canvas's head stands in the chat's column, as its lane")
+    assert.ok(measured.laneHoldsField, "and the chat's field is drawn under it")
+    assert.equal(measured.laneHoldsFrame, false, "the frame is the page's, never the lane's")
+    assert.equal(measured.pageHoldsHead, false, "the page pane carries no header")
+    assert.equal(measured.pageHeaders, 0, "and draws none of its own")
+    assert.ok(
+      measured.lane.x < measured.page.x,
+      `the lane is the left pane (lane x=${measured.lane.x}, page x=${measured.page.x})`,
+    )
+    assert.ok(
+      Math.abs(measured.lane.right - measured.page.x) <= 1,
+      `the lane's right edge is the page's left edge (lane right=${measured.lane.right}, page x=${measured.page.x})`,
+    )
+    assert.ok(
+      Math.abs(measured.lane.width - 412) <= 1,
+      `the lane is the house's 412px list lane where there is room (${measured.lane.width})`,
+    )
+    assert.ok(
+      measured.page.width >= 412,
+      `the page is never narrower than the lane's floor (${measured.page.width})`,
+    )
+    assert.ok(
+      measured.head.right <= measured.lane.right + 1,
+      `the head spans the lane and no more (head right=${measured.head.right}, lane right=${measured.lane.right})`,
+    )
+    // The page is the screen's full height with no header above it, and the frame keeps its 8px
+    // inset inside it on all four sides — the top one is what says the header moved out.
+    assert.ok(
+      measured.page.y <= 1,
+      `the page pane starts at the screen's top (${measured.page.y})`,
+    )
+    const inset = {
+      left: measured.frame.x - measured.page.x,
+      top: measured.frame.y - measured.page.y,
+      right: measured.page.right - measured.frame.right,
+      bottom: measured.page.bottom - measured.frame.bottom,
+    }
+    assert.deepEqual(
+      inset,
+      { left: 8, top: 8, right: 8, bottom: 8 },
+      "the frame keeps its 8px inset on all four sides of the page",
+    )
+    assert.ok(
+      Math.abs(measured.frame.width - 692) <= 1,
+      `the frame keeps the width today's 1440 screen gave it (${measured.frame.width})`,
+    )
+    assert.ok(
+      measured.frame.height >= measured.page.height - 2 * 8 - 1,
+      `and the pane's whole height less its gutters (${measured.frame.height} of ${measured.page.height})`,
+    )
+    assert.ok(
+      measured.owned,
+      "and the two panes are the screen's own, named for this flow ([data-canvas-lane], [data-canvas-page])",
+    )
+    await shot("wide-two-panes")
+    pass("a wide screen: the chat's lane is the left pane, and the page fills the right with no header")
+  },
+  { viewport: { width: 1440, height: 900 } },
+)
+

@@ -83,11 +83,20 @@ import { useNow } from "@/lib/threads"
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
 /**
- * The lane a canvas's chat reads in beside its page: the house's list lane, 412px, which is the width
- * the app already asks its text to read in (`w-103`, `LIST_LANE` in `components/app-shell.tsx`), and
- * never so wide that the page beside it is narrower than that.
+ * The lane a canvas reads in beside its page: the house's list lane, 412px — the width the app already
+ * asks its text to read in (`w-103`, `LIST_LANE` in `components/app-shell.tsx`) — and never so wide
+ * that the page beside it is narrower than that. The chat used to carry these classes, but the lane is
+ * what holds the canvas's head too, so the width and the hairline between the panes are the lane's.
+ * From `lg` only: below 1024px the screen is one pane, with the head over the page and no lane at all.
  */
-const CHAT_LANE = "flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l"
+const LANE = "flex min-h-0 flex-col lg:w-103 lg:max-w-[calc(100%_-_412px)] lg:shrink-0 lg:border-r"
+
+/**
+ * What a chat needs wherever a screen hands it a column: the body fills it and scrolls inside it. The
+ * width is the column's — here the lane the canvas draws for its chat, and on the edit screen the whole
+ * screen.
+ */
+const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
 
 /** What a page that asks for no library is drawn with: nothing, and no state to wait for. */
 const NO_LIBRARIES: Record<string, CanvasLibrarySource> = {}
@@ -453,7 +462,10 @@ function CanvasPagePane({
   onCancelPick: () => void
 }) {
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div
+      data-canvas-page
+      className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pt-2"
+    >
       {picking && versioned && !large && !missing ? (
         <div
           data-point-banner
@@ -759,80 +771,83 @@ export function CanvasView() {
   if (canvas && !versioned && !large) return <Navigate to={`/canvas/${id}/edit`} replace />
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130),
-          and a canvas no bot holds has no chat to open: there is no Edit for either. */}
-      <CanvasHead
-        canvas={canvas}
-        profile={profile}
-        awayWords={awayWords}
-        leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
-        actions={
-          <>
-            {canvas && !missing && !large ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                data-canvas-flip="edit"
-                aria-label={FLIP.edit.label}
-                onClick={() => navigate(`/canvas/${id}/edit`)}
-              >
-                <PencilIcon />
-              </Button>
-            ) : null}
-            {/* A host that isn't answering can't be asked to walk the record back. */}
-            {canvas?.canUndo && !awayNow ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Undo"
-                disabled={undoing}
-                onClick={() => void undoVersion()}
-              >
-                <Undo2Icon />
-              </Button>
-            ) : null}
-            {canvas ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Canvas options"
-                onClick={() => setOptionsOpen(true)}
-              >
-                <EllipsisIcon />
-              </Button>
-            ) : null}
-          </>
-        }
-      />
-
-      <div className="flex min-h-0 flex-1">
-        <CanvasPagePane
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      {/* One column from 1024px: the canvas's head at its top and the chat under it, with the page in
+          the pane beside it — and below that, one pane, the head over the page, as it always was. The
+          head is the lane's, so the page a reader scrolls is the screen's full height. A wide screen
+          draws the chat there, so there is nothing to flip to (ADR 0130), and a canvas no bot holds has
+          no chat to open: there is no Edit for either. */}
+      <div data-canvas-lane className={LANE}>
+        <CanvasHead
           canvas={canvas}
-          drawn={drawn}
-          escaped={escaped}
-          picking={picking}
-          versioned={versioned}
-          large={large}
-          missing={missing}
-          awayNow={awayNow}
-          loaded={loaded}
-          html={html}
-          frameKey={frameKey}
-          frameAgain={redrawn?.key === frameKey}
-          shownDocument={shownDocument}
-          frame={frame}
-          onFrameLoad={frameLoaded}
-          onCancelPick={cancelPick}
+          profile={profile}
+          awayWords={awayWords}
+          leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
+          actions={
+            <>
+              {canvas && !missing && !large ? (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className={HEADER_BUTTON}
+                  data-canvas-flip="edit"
+                  aria-label={FLIP.edit.label}
+                  onClick={() => navigate(`/canvas/${id}/edit`)}
+                >
+                  <PencilIcon />
+                </Button>
+              ) : null}
+              {/* A host that isn't answering can't be asked to walk the record back. */}
+              {canvas?.canUndo && !awayNow ? (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className={HEADER_BUTTON}
+                  aria-label="Undo"
+                  disabled={undoing}
+                  onClick={() => void undoVersion()}
+                >
+                  <Undo2Icon />
+                </Button>
+              ) : null}
+              {canvas ? (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className={HEADER_BUTTON}
+                  aria-label="Canvas options"
+                  onClick={() => setOptionsOpen(true)}
+                >
+                  <EllipsisIcon />
+                </Button>
+              ) : null}
+            </>
+          }
         />
-        {/* The chat reads in the house's list lane beside the page (`CHAT_LANE`). */}
+        {/* The chat reads in the lane the head opened, and the page fills the pane beside it. */}
         {large && (
           <CanvasChat canvas={canvas} bot={profile} points={points} className={CHAT_LANE} />
         )}
       </div>
+
+      <CanvasPagePane
+        canvas={canvas}
+        drawn={drawn}
+        escaped={escaped}
+        picking={picking}
+        versioned={versioned}
+        large={large}
+        missing={missing}
+        awayNow={awayNow}
+        loaded={loaded}
+        html={html}
+        frameKey={frameKey}
+        frameAgain={redrawn?.key === frameKey}
+        shownDocument={shownDocument}
+        frame={frame}
+        onFrameLoad={frameLoaded}
+        onCancelPick={cancelPick}
+      />
 
       <CanvasConsentDialog
         canvasTitle={canvas?.title ?? "Canvas"}
