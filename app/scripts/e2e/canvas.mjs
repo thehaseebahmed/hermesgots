@@ -9,7 +9,9 @@
 // for no library fetches none of one, and one that asks for three fetches each of those chunks once.
 // A wide screen is the same canvas with room for both panes: the chat is the lane on the left, the
 // canvas's head at its top, and the page fills the right pane with no header of its own — measured
-// as boxes, since no DOM without layout can say which pane a header spans.
+// as boxes, since no DOM without layout can say which pane a header spans — and its document, grown
+// past its viewport, keeps the platform's own scrollbar, with no `overflow`, no `scrollbar-gutter`
+// and no reserved gutter that the app could have forced.
 
 // A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque
 // origin of its own, the refusal of an outside navigation is the browser's own policy, the outline
@@ -424,6 +426,52 @@ await flow(
     )
     await shot("wide-two-panes")
     pass("a wide screen: the chat's lane is the left pane, and the page fills the right with no header")
+
+    // The scrollbar is the platform's own, and it is pinned here rather than styled: the page's
+    // document is grown past its own viewport, and what is read is what the app does NOT force —
+    // no `overflow` rule, no `scrollbar-gutter`, no reserved gutter. Nothing in the canvas path sets
+    // one (the screen, `canvas-document.ts` and the shell alike), so this is green on the code as it
+    // stands; its value is that whoever next tries to "fix" the scrollbar by hand meets a failure.
+    const scrolled = await page
+      .frameLocator(FRAME)
+      .locator("body")
+      .evaluate(() => {
+        document.body.style.minHeight = "3000px"
+        const root = getComputedStyle(document.documentElement)
+        return {
+          grown: document.documentElement.scrollHeight,
+          viewport: window.innerHeight,
+          overflowY: root.overflowY,
+          gutter: root.scrollbarGutter,
+          reserved: window.innerWidth - document.documentElement.clientWidth,
+        }
+      })
+    console.log(
+      `wide 1440 — frame document ${scrolled.grown}px in a ${scrolled.viewport}px viewport: ` +
+        `overflow-y ${scrolled.overflowY}, scrollbar-gutter ${scrolled.gutter}, ` +
+        `gutter reserved ${scrolled.reserved}px`,
+    )
+    assert.ok(
+      scrolled.grown > scrolled.viewport,
+      `the frame's document is grown past its viewport (${scrolled.grown} > ${scrolled.viewport})`,
+    )
+    assert.equal(
+      scrolled.overflowY,
+      "visible",
+      `the app forces no overflow on the page's document (overflow-y ${scrolled.overflowY})`,
+    )
+    assert.equal(
+      scrolled.gutter,
+      "auto",
+      `and no scrollbar-gutter either (scrollbar-gutter ${scrolled.gutter})`,
+    )
+    assert.equal(
+      scrolled.reserved,
+      0,
+      `the platform reserves no gutter of its own (${scrolled.reserved}px of ` +
+        `${scrolled.viewport}px viewport width)`,
+    )
+    pass("a wide screen: the page's document keeps the platform's own scrollbar, unstyled and unpinned")
   },
   { viewport: { width: 1440, height: 900 } },
 )
