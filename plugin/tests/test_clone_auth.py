@@ -6,11 +6,16 @@ the literal string ``***`` or any truncated form.
 """
 
 import base64
+import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from plugin import github
+from plugin.tests import GH_CLI_TOKEN
 from plugin.tests._helpers import make_fake_agent
 
 
@@ -76,6 +81,59 @@ class CloneAuthTests(unittest.TestCase):
                 with self.assertRaises(github.GitHubError) as ctx:
                     github.clone(self.home, "owner/repo", "/tmp/fake-clone")
                 self.assertEqual(ctx.exception.status, 403)
+
+
+class GhFallbackTests(unittest.TestCase):
+    """Which login `gh` is asked for when the home's own `.env` holds no token.
+
+    `gh auth token` answers with its config's login or, failing that, with ``GITHUB_TOKEN`` from its
+    environment — the launch process's own value, which a second profile was never given. So the
+    fallback asks gh for its own login: the home's config where it keeps one, and never the
+    process's exported token.
+    """
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="gots-gh-"))
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.home = self.root / "lobsterink"
+        self.home.mkdir()
+
+    def _ask(self):
+        """Run _gh_cli_token over a faked `gh`, and hand back the environment it was given."""
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=0, stdout="ghp_gh_login\n")
+
+        with patch.object(github.shutil, "which", return_value="/usr/bin/gh"), patch.object(
+            github.subprocess, "run", run
+        ), patch.object(github, "_gh_cli_token", GH_CLI_TOKEN):
+            value = github._gh_cli_token(self.home)
+        self.assertEqual(value, "ghp_gh_login")
+        self.assertEqual(len(calls), 1)
+        return calls[0][1]["env"]
+
+    def test_gh_is_never_handed_the_processes_token(self):
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_launch", "GH_TOKEN": "ghp_launch"}):
+            env = self._ask()
+
+        self.assertNotIn("GITHUB_TOKEN", env)
+        self.assertNotIn("GH_TOKEN", env)
+
+    def test_gh_reads_the_homes_own_login_when_it_keeps_one(self):
+        config = self.home / ".config" / "gh"
+        config.mkdir(parents=True)
+
+        env = self._ask()
+
+        self.assertEqual(env["GH_CONFIG_DIR"], str(config))
+
+    def test_gh_keeps_the_machines_login_when_the_home_has_none(self):
+        with patch.dict(os.environ, {"GH_CONFIG_DIR": "/home/someone/.config/gh"}):
+            env = self._ask()
+
+        self.assertEqual(env["GH_CONFIG_DIR"], "/home/someone/.config/gh")
 
 
 if __name__ == "__main__":

@@ -72,12 +72,28 @@ class GitHubBusy(GitHubError):
         super().__init__("GitHub is busy on this host; try again in a moment.", 503)
 
 
-def _gh_cli_token() -> Optional[str]:
+def _gh_cli_token(hermes_home: Path) -> Optional[str]:
+    """``gh``'s own login, and never the process's exported token.
+
+    ``gh auth token`` answers with its config's login or, failing that, with ``GITHUB_TOKEN`` from
+    its environment — which for a background thread is the launch process's value, a token the
+    profile being read was never given. The credential pool has already consulted that (a single
+    profile's ``get_secret`` reads ``os.environ`` itself), so it is taken out of the child's.
+
+    ``gh`` keeps one login for the whole machine, so a profile that keeps its own — ``.config/gh``
+    under its home, made by ``GH_CONFIG_DIR=<home>/.config/gh gh auth login`` — is asked as itself,
+    and every other profile keeps the login ``hermes`` itself would use.
+    """
     if not shutil.which("gh"):
         return None
+    env = {name: value for name, value in os.environ.items() if name not in TOKEN_ENV_VARS}
+    own = Path(hermes_home) / ".config" / "gh"
+    if own.is_dir():
+        env["GH_CONFIG_DIR"] = str(own)
     try:
         result = subprocess.run(
-            ["gh", "auth", "token"], capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL
+            ["gh", "auth", "token"], capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -103,7 +119,7 @@ def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
             if value:
                 return value, "env"
 
-    value = _gh_cli_token()
+    value = _gh_cli_token(hermes_home)
     return (value, "gh") if value else (None, None)
 
 def _request(path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Any:
