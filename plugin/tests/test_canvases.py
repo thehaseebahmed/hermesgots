@@ -755,17 +755,17 @@ class LibraryTest(unittest.TestCase):
 
     The ask grammar is the app's, in two languages: `tests/fixtures/canvas-library-asks.json` is the
     table both suites read, so the host can never refuse a tag the app would have answered. The table
-    itself is read once and cached, and a file this install can't read leaves the rule unenforced —
+    itself is read once and cached, a read that fails is tried again on the next write, and a file this install can't read leaves the rule unenforced —
     a build that lost an artifact must not lose its canvas routes with it.
     """
 
     def setUp(self) -> None:
         self.path = store_of(self)
         self.canvas = make_canvas(self.path)
-        canvases._libraries.cache_clear()
+        canvases._LIBRARIES = None
 
     def tearDown(self) -> None:
-        canvases._libraries.cache_clear()
+        canvases._LIBRARIES = None
 
     def test_the_host_reads_the_asks_the_app_reads(self) -> None:
         # One grammar, both sides: every case in the table — an empty ask, other attributes, a quoted
@@ -857,11 +857,18 @@ class LibraryTest(unittest.TestCase):
         for number, unusable in enumerate((folder / "absent-libraries.json", broken), start=1):
             with self.subTest(file=unusable.name):
                 with mock.patch.object(canvases, "LIBRARIES_FILE", unusable):
-                    canvases._libraries.cache_clear()
+                    canvases._LIBRARIES = None
                     self.assertEqual(canvases._libraries(), {})
                     self.assertEqual(
                         canvases.write(self.path, self.canvas["id"], page)["version"], number
                     )
+        # A read that failed is tried again rather than remembered: the next write, with the table
+        # back in place, is refused as it should be — one bad read must not leave the rule off for
+        # the life of the process.
+        canvases._LIBRARIES = None
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, self.canvas["id"], page)
+        self.assertIn("plotly", str(refused.exception))
 
 
 class SessionTest(unittest.TestCase):

@@ -247,14 +247,14 @@ await flow(
     await shot("no-libraries")
     pass("the preview screen: a canvas that asks for no library fetches none of one")
 
-    const three = await visit("three")
+    const many = await visit("many")
     assert.deepEqual(
-      [...three.fetched].sort(),
+      [...many.fetched].sort(),
       ["chart.umd.min.js", "d3.min.js", "dayjs.min.js"],
       `a page that asks for three libraries fetches each of those chunks once, fetched ` +
-        `${three.fetched.join(", ") || "none"}`,
+        `${many.fetched.join(", ") || "none"}`,
     )
-    assert.equal(three.drew, "chart d3 date", "and the page drew with all three inside the frame")
+    assert.equal(many.drew, "chart d3 date", "and the page drew with all three inside the frame")
     await shot("three-libraries")
     pass("the preview screen: a canvas that asks for three libraries fetches each chunk once")
   },

@@ -137,8 +137,9 @@ function page(prompt, title, version, edited) {
 const FIXTURES = {
   // A page that asks for no library at all, drawn from the platform alone.
   plain: { title: "No libraries", asks: [] },
-  // Three asks by name, each one used below, so what arrived is proved by what the page drew.
-  three: { title: "Three libraries", asks: ["chart", "d3", "date"] },
+  // Three asks by name, each one used below, so what arrived is proved by what the page drew. Named
+  // for how many, not for one of them: `three` is itself a library a canvas may ask for.
+  many: { title: "Three libraries", asks: ["chart", "d3", "date"] },
 }
 
 /**

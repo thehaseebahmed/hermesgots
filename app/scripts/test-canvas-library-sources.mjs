@@ -43,6 +43,25 @@ test("no source is imported ahead of its ask", () => {
   }
 })
 
+test("each thunk reads the file the catalogue names", () => {
+  // The catalogue says where a library's bytes come from and the thunk says what to import: two
+  // statements of one fact, and only the specifier decides what the page is given. A specifier that
+  // drifted from the entry would pass the size check (it measures the entry) while the app inlined
+  // another file.
+  const specifier = (file) =>
+    file.startsWith("src/lib/")
+      ? `./${file.slice("src/lib/".length)}`
+      : file.startsWith("node_modules/")
+        ? `../../${file}`
+        : file
+  for (const one of CATALOGUE)
+    for (const file of [one.source, one.css, one.setup].filter(Boolean))
+      assert.ok(
+        code.includes(`import("${specifier(file)}?raw")`),
+        `${one.name} says ${file}, and no thunk imports it`,
+      )
+})
+
 test("every library the catalogue names has a thunk of its own", () => {
   assert.deepEqual(Object.keys(LIBRARY_SOURCES).sort(), [...LIBRARIES].sort())
 })

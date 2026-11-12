@@ -118,7 +118,7 @@ export const CATALOGUE = [
     name: "leaflet",
     label: "Leaflet",
     package: "leaflet",
-    source: "node_modules/leaflet/dist/leaflet.js",
+    source: "leaflet/dist/leaflet.js",
     global: "L",
     bytes: 147_552,
     css: "src/lib/generated/leaflet.css",

@@ -55,7 +55,6 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
@@ -248,9 +247,20 @@ def _markup(html: str) -> str:
 LIBRARIES_FILE = Path(__file__).parent / "canvas" / "libraries.json"
 
 
-@lru_cache(maxsize=1)
+_LIBRARIES: Optional[Dict[str, Any]] = None
+
+
 def _libraries() -> Dict[str, Any]:
-    """The library names this build carries, in the guide's order, with what each of them defines."""
+    """The library names this build carries, in the guide's order, with what each of them defines.
+
+    Read once when it works, and tried again on the next write when it doesn't: a file caught half
+    written, or read while the disk hiccups, must not leave the rule off for the life of the process
+    — that would be a page refused nothing and drawn with a hole, which is the failure this table
+    exists to stop.
+    """
+    global _LIBRARIES
+    if _LIBRARIES is not None:
+        return _LIBRARIES
     try:
         found = json.loads(LIBRARIES_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -259,6 +269,7 @@ def _libraries() -> Dict[str, Any]:
     if not isinstance(found, dict):
         logger.warning("gots: %s is not a table of libraries", LIBRARIES_FILE.name)
         return {}
+    _LIBRARIES = found
     return found
 
 
@@ -284,11 +295,13 @@ def _library_asks(markup: str) -> List[str]:
     return _LIBRARY_ASK.findall(markup)
 
 
-def _and(names: List[str]) -> str:
-    """Names as a sentence names them: ``a``, ``a and b``, ``a, b and c``."""
-    if len(names) <= 1:
-        return "".join(names)
-    return ", ".join(names[:-1]) + " and " + names[-1]
+def _and(names: List[str], quoted: bool = False) -> str:
+    """Names as a sentence names them: ``a``, ``a and b``, ``a, b and c`` — in quotes where the
+    sentence is naming what the document asked for rather than what this host carries."""
+    spelled = [f'"{name}"' for name in names] if quoted else list(names)
+    if len(spelled) <= 1:
+        return "".join(spelled)
+    return ", ".join(spelled[:-1]) + " and " + spelled[-1]
 
 
 def scan(html: Any) -> None:
@@ -347,9 +360,9 @@ def scan(html: Any) -> None:
     carried = _libraries()
     unknown = list(dict.fromkeys(name for name in _library_asks(markup) if name not in carried))
     if carried and unknown:
-        asked = " and ".join(f'"{name}"' for name in unknown)
         raise CanvasError(
-            f"The canvas asks for the {'library' if len(unknown) == 1 else 'libraries'} {asked}, "
+            f"The canvas asks for the {'library' if len(unknown) == 1 else 'libraries'} "
+            f"{_and(unknown, quoted=True)}, "
             f"which this host doesn't carry: it carries {_and(list(carried))}. Ask for one of those "
             "instead."
         )

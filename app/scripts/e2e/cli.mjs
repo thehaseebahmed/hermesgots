@@ -594,11 +594,16 @@ async function serve(name, port, command, args, env = {}) {
   }
   throw new Error(`${name} didn't start on ${port}; see ${join(logs, `${name}.log`)}`)
 }
-const serveApp = () =>
-  appUrl ??
+const serveApp = () => {
+  if (appUrl) return appUrl
+  // The canvas route imports the libraries' generated sources as text, so a clean checkout has none
+  // of them until the build script makes them (ADR 0146): run it before Vite, which fails a literal
+  // `?raw` import it cannot resolve.
+  const built = spawnSync("pnpm", ["build:canvas-libraries"], { cwd: appDir, stdio: "inherit" })
+  if (built.status !== 0) throw new Error("the canvas libraries didn't build; see app/src/lib/generated")
   // Bound to 127.0.0.1 so the URL every probe and flow uses reaches it whatever `localhost` means
   // here (the e2e-testing skill's gotcha).
-  serve("app", APP_PORT, "pnpm", [
+  return serve("app", APP_PORT, "pnpm", [
     "exec",
     "vite",
     "--port",
@@ -607,6 +612,7 @@ const serveApp = () =>
     "--host",
     "127.0.0.1",
   ])
+}
 const serveMock = (name) =>
   serve(`mock-${name}`, MOCKS[name].port, "node", ["scripts/mock-hermes.mjs"], MOCKS[name].env)
 function stopStarted() {

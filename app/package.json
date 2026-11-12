@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:netlify": "pnpm --package=netlify-cli dlx netlify dev",
     "prebuild": "pnpm build:canvas-libraries",
+    "predev": "pnpm build:canvas-libraries",
     "build": "pnpm typecheck && vite build",
     "prebuild:android": "pnpm build:canvas-libraries",
     "build:android": "pnpm typecheck && vite build --mode native && cap sync android",

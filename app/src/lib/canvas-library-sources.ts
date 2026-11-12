@@ -82,7 +82,11 @@ export async function loadLibraries(
     asked.map(async (name) => {
       try {
         return [name, await load(name)] as const
-      } catch {
+      } catch (error) {
+        // The page draws without this library, so the console is the only trace a reader's device
+        // can leave: a chunk a deploy moved, or a phone that went offline mid-open, would otherwise
+        // look like a library the build never carried.
+        console.warn(`canvas: ${name} didn't load`, error)
         return null
       }
     }),

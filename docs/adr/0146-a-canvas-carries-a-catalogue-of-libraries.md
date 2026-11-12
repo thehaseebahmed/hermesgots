@@ -13,7 +13,7 @@ any stylesheet or setup prelude it needs — and generates from it the guide's l
 asks for nothing pays nothing, and a name the host does not carry refuses the write, naming it, while
 a version stored before that still draws.
 
-Three ships no browser build as of 0.170 (`build/three.min.js` is a 404), so the build bundles it to
+Three ships no browser build as of 0.187 (`build/three.min.js` is a 404), so the build bundles it to
 one IIFE under `THREE` rather than widening `script-src`. Leaflet's stylesheet and marker images
 become `data:` URIs, which `img-src data:` already allows and `about:srcdoc` requires, and its entry
 carries the setup prelude that points the default marker at them.

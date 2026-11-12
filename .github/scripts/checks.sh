@@ -160,6 +160,11 @@ app() {
   # start until it is done.
   gate pnpm install --frozen-lockfile
 
+  # Then the canvas libraries every later gate can need: the route imports their sources as text, and
+  # a clean checkout has none of them (ADR 0146). It writes source, so it runs alone, before the
+  # gates that read the tree.
+  gate pnpm build:canvas-libraries
+
   # Then the gates that share nothing run together. They are independent by construction — lint reads
   # the source, `tsc -b` writes only its own build info, neither test tier writes anything, and the
   # build writes `dist/` — and one after another they were the job's whole wall clock. The two test
