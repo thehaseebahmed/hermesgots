@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { byBotLabel, labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import {
   createProject,
@@ -92,9 +92,7 @@ function ProjectForm({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const labels = useBotLabels()
-  // The bots one someone is looking for, by their own names (ADR 0149), never the order they were
-  // linked in.
-  const listed = useMemo(() => [...profiles].sort(byBotLabel(labels)), [profiles, labels])
+  const listed = useMemo(() => botsByLabel(profiles, labels), [profiles, labels])
 
   useEffect(() => {
     let cancelled = false

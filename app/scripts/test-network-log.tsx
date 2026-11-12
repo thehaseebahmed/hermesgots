@@ -100,7 +100,6 @@ test("All draws every bot and a bot's pill shows only its own", async () => {
   await seedLog()
   await mount(<NetworkLogScreen />, async () => {
     assert.equal(findAll("tbody tr").length, 3, "All is every bot")
-    // A pill names the bot by its own name, in the order every list runs (ADR 0149).
     assert.deepEqual(
       findAll("button")
         .map((button) => button.textContent)

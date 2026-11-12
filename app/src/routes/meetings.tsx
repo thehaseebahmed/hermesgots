@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
@@ -63,6 +63,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { createConversation, db } from "@/lib/db"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { startBlocked } from "@/lib/code"
 import { usePluginFeatureOn } from "@/lib/features"
 import { canRecord } from "@/lib/dictation"
@@ -608,6 +610,9 @@ type Target = ReturnType<typeof useTarget>
 
 function TargetFields({ target }: { target: Target }) {
   const { bots, profile, setBotId, setProjectId } = target
+  // A list of bots like any other: their own names, and the order every list runs in (ADR 0149).
+  const labels = useBotLabels()
+  const listed = useMemo(() => botsByLabel(bots, labels), [bots, labels])
   return (
     <>
       {bots.length > 1 && (
@@ -616,7 +621,7 @@ function TargetFields({ target }: { target: Target }) {
           role="group"
           aria-label="Bot"
         >
-          {bots.map((option) => {
+          {listed.map((option) => {
             const on = option.id === profile?.id
             return (
               <button
@@ -633,7 +638,7 @@ function TargetFields({ target }: { target: Target }) {
                 )}
               >
                 <Bot id={option.botId} className="size-10" />
-                <span className="w-full truncate text-center">{option.name}</span>
+                <span className="w-full truncate text-center">{labelOf(labels, option)}</span>
               </button>
             )
           })}

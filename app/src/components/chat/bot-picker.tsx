@@ -11,7 +11,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { byBotLabel, labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { listEnabledProfiles, setActiveProfile, type Profile } from "@/lib/db"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -31,7 +31,7 @@ export function BotPicker({
 }) {
   const answering = useLiveQuery(listEnabledProfiles, [])
   const labels = useBotLabels()
-  const profiles = useMemo(() => [...(answering ?? [])].sort(byBotLabel(labels)), [answering, labels])
+  const profiles = useMemo(() => botsByLabel(answering ?? [], labels), [answering, labels])
 
   return (
     <DropdownMenu>

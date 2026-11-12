@@ -5,9 +5,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { botLabel, botLabels, byBotLabel, labelOf } from "../src/lib/bot-name.ts"
+import { botLabel, botLabels, botsByLabel, byBotLabel, labelOf } from "../src/lib/bot-name.ts"
 
-/** A bot as a list hands it over: an id, the address it answers at, and the name its host sealed. */
 const bot = (id, baseUrl, name = "Hermes") => ({ id, baseUrl, name })
 
 test("a bot alone in a list reads its own name, and no host", () => {
@@ -136,5 +135,23 @@ test("a list of bots runs by its labels, case-blind and numeric, ties by id", ()
     [...twins].sort(byBotLabel(twinLabels)).map((one) => one.id),
     ["a", "z"],
     "rows that read alike keep one order between them, so no list flickers",
+  )
+})
+
+test("a whole list comes back in that order, and the list it was read from is untouched", () => {
+  const bots = [
+    bot("c", "https://three.example.com/v1", "zulu"),
+    bot("a", "https://one.example.com/v1", "Alpha"),
+    bot("b", "https://two.example.com/v1", "beta"),
+  ]
+  const labels = botLabels(bots)
+  assert.deepEqual(
+    botsByLabel(bots, labels).map((one) => one.id),
+    ["a", "b", "c"],
+  )
+  assert.deepEqual(
+    bots.map((one) => one.id),
+    ["c", "a", "b"],
+    "the array handed in is not the one sorted, since a query's own array would not survive it",
   )
 })

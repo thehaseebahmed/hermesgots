@@ -401,7 +401,6 @@ test(
         const lane = find('[data-slot="list-lane"]')
         assert.ok(lane, "the bot's list keeps its lane")
         assert.ok(
-          // The lane's row is named by the bot's own name (ADR 0149).
           lane.textContent?.includes("Mainly"),
           "the list of the bot whose routines these are",
         )

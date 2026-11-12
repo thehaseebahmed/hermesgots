@@ -90,22 +90,19 @@ function hostAgainst(host: string, rivals: string[]): string {
 }
 
 /** The name a bot reads as: what its host sealed, or `Bot` where it sealed nothing. */
-const nameOfBot = (bot: NamedBot) => bot.name.trim() || ANONYMOUS
-
-/** Where a bot answers, read once: its label is built from this and its peers'. */
-const hostOfBot = (bot: NamedBot) => hostOf(bot.baseUrl)
+const labelName = (bot: NamedBot) => bot.name.trim() || ANONYMOUS
 
 /**
  * The label a list gives `bot`, among the bots that list holds: its own name, and — only where another
  * bot of that name answers at a different host — the host that tells the two apart.
  */
 export function botLabel(bot: NamedBot, peers: NamedBot[]): string {
-  const name = nameOfBot(bot)
-  const host = hostOfBot(bot)
+  const name = labelName(bot)
+  const host = hostOf(bot.baseUrl)
   if (!host) return name
   const rivals = peers
-    .filter((peer) => peer.id !== bot.id && byName(nameOfBot(peer), name) === 0)
-    .map(hostOfBot)
+    .filter((peer) => peer.id !== bot.id && byName(labelName(peer), name) === 0)
+    .map((peer) => hostOf(peer.baseUrl))
     // A peer with no server has no host to draw, so it is no namesake a list has to answer for.
     .filter((other) => other && other !== host)
   if (!rivals.length) return name
@@ -122,7 +119,7 @@ export function botLabels(bots: NamedBot[]) {
  * a bot the list never saw reads as, since a host is only ever drawn against a namesake.
  */
 export function labelOf(labels: Map<string, string> | undefined, bot: NamedBot) {
-  return labels?.get(bot.id) ?? botLabel(bot, [])
+  return labels?.get(bot.id) ?? labelName(bot)
 }
 
 /**
@@ -133,4 +130,9 @@ export function labelOf(labels: Map<string, string> | undefined, bot: NamedBot) 
 export function byBotLabel(labels: Map<string, string> | undefined) {
   return (one: NamedBot, other: NamedBot) =>
     byName(labelOf(labels, one), labelOf(labels, other)) || one.id.localeCompare(other.id)
+}
+
+/** A list of bots in that order — a copy, so no query's own array is the one sorted. */
+export function botsByLabel<T extends NamedBot>(bots: readonly T[], labels?: Map<string, string>) {
+  return [...bots].sort(byBotLabel(labels))
 }

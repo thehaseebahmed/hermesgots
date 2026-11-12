@@ -39,7 +39,6 @@ const ANSWER = "Checked the feeds: three things worth reading."
 const AT = 1_767_225_600_000
 
 const bot = botProfile("routine-chat", { name: "Mainly" })
-/** What the app calls it: its own name, the one its host sealed (ADR 0149). */
 const LABEL = "Mainly"
 
 /** The run's transcript, as the host serves a session's rows. */

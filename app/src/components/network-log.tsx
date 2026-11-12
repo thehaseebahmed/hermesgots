@@ -7,7 +7,7 @@ import { Chip, ChipRow } from "@/components/chip"
 import { Group, useHeaderAction } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/copied"
-import { byBotLabel, labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { db, listProfiles, type NetRequest } from "@/lib/db"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { clockText, DRAWN, endingLabel, figuresOf, formatNetLog, waitText } from "@/lib/net-log"
@@ -25,12 +25,12 @@ export function NetworkLogScreen() {
   const bots = useLiveQuery(listProfiles, [])
   const [chosen, setChosen] = useState<string>()
 
-  // This screen is exactly where a slow host is told apart from a fast one, so a pill and a row name
-  // the bot the way every list does, host and all where two namesakes live apart (ADR 0149).
   const labels = useBotLabels()
   const all = rows ?? []
-  const heard = (bots ?? []).filter((bot) => all.some((row) => row.bots.includes(bot.id)))
-  heard.sort(byBotLabel(labels))
+  const heard = botsByLabel(
+    (bots ?? []).filter((bot) => all.some((row) => row.bots.includes(bot.id))),
+    labels,
+  )
   // A pick only holds while its bot is still in the log: a cleared log leaves no filter to get stuck in.
   const picked = chosen && heard.some((bot) => bot.id === chosen) ? chosen : undefined
   const shown = picked ? all.filter((row) => row.bots.includes(picked)) : all

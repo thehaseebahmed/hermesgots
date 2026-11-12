@@ -43,7 +43,6 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
-/** What the app calls it: its own name, the one its host sealed (ADR 0149). */
 const LABEL = "Mainly"
 
 /**
