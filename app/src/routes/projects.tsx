@@ -11,7 +11,7 @@ import {
 import { Navigate } from "react-router"
 
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
-import { Banner } from "@/components/banner"
+import { Banner, Dismiss } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
 import { NewProjectPopup } from "@/components/new-project"
@@ -313,17 +313,7 @@ const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 function PluginNotice({ names: bots, onDismiss }: { names: string[]; onDismiss: () => void }) {
   return (
     <Banner
-      action={
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-        >
-          <XIcon />
-        </Button>
-      }
+      action={<Dismiss onDismiss={onDismiss} />}
     >
       Projects need the Gots plugin, installed on the bot's Hermes server and turned on in its
       settings. It's missing for {names.format(bots)}, so {bots.length === 1 ? "its" : "their"}{" "}

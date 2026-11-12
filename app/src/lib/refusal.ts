@@ -61,7 +61,8 @@ export function refuse(result: Attempted): RefusalWords {
  * answered where it was made — and `dismiss` is the reader's control; both leave nothing to draw.
  */
 export type RefusalHold = {
-  words?: string
+  /** The host's sentence while one is held, and `undefined` once nothing stands to draw. */
+  words: string | undefined
   /** The answer `attempt` gave, drawn or said, as `refuse` decides. */
   refuse: (result: Attempted) => void
   /** Runs one write of this surface's, answering whether it landed. */

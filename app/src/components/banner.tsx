@@ -3,6 +3,7 @@ import { CircleAlertIcon, InfoIcon, RotateCwIcon, TriangleAlertIcon, XIcon } fro
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import type { RefusalHold } from "@/lib/refusal"
 import { cn } from "@/lib/utils"
 
 const TONES = {
@@ -73,8 +74,11 @@ export function Refusal({
   hold,
   className,
 }: {
-  /** The words a surface holds, and the way the reader asks for them to go. */
-  hold: { words?: string; dismiss: () => void }
+  /**
+   * The words a surface holds, and the way the reader asks for them to go: the hold's own type, so a
+   * field renamed there is a compile error here rather than a notice that quietly draws nothing.
+   */
+  hold: Pick<RefusalHold, "words" | "dismiss"> & { words: string | undefined }
   className?: string
 }) {
   if (!hold.words) return null
