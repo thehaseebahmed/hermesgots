@@ -1596,24 +1596,16 @@ export function ChatNextThread({
     if (run)
       stops.push(
         (async () => {
-          let gone = false
-          const answer = await attempt("stop the run", async () => {
-            try {
-              await stopRun({ server, key }, run)
-            } catch (error) {
-              // A run the host no longer holds has already stopped: there is nothing to refuse.
-              if (error instanceof RunGone) gone = true
-              else throw error
-            }
-          })
-          if (!answer.ok) {
-            // A refused stop leaves the run where it was, so it is not a turn that failed: the run
-            // is read again now, and the button says Stop for it rather than waiting for a poll.
-            refusal.refuse(answer)
-            void joinLive()
-            return false
-          }
-          return !gone
+          const answer = await attempt("stop the run", () => stopRun({ server, key }, run))
+          if (answer.ok) return true
+          // A run the host no longer holds has already stopped, so there is nothing to refuse: the
+          // failure is read for the error it carries rather than a flag kept beside the call.
+          if (answer.caught instanceof RunGone) return false
+          // A refused stop leaves the run where it was, so it is not a turn that failed: the run is
+          // read again now, and the button says Stop for it rather than waiting for a poll.
+          refusal.refuse(answer)
+          void joinLive()
+          return false
         })(),
       )
     // Passed on whether or not this device read a child: `stopSubagents` decides what is worth a
