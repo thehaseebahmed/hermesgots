@@ -1080,6 +1080,73 @@ class ResearcherRunTest(unittest.TestCase):
         self.assertEqual(self.ask("retry").status, 200)
         self.assertEqual([body["session_id"] for _url, body in self.posts[2:]], [f"research-{mission_id}-against"])
 
+    def test_a_completed_lane_stays_completed_when_hermes_forgets_its_run(self) -> None:
+        self.start_verify()
+        mission_id = self.mission["id"]
+        self.lane_claim("for", "supports", "p1")
+        self.lane_claim("against", "refutes", "p2")
+        with mock.patch.object(research, "UNSEEN_GRACE_S", 0.0):
+            self.statuses(run_1="completed", run_2="running")
+            self.assertEqual(self.moved(), [])
+            # Hermes prunes a finished run's status after an hour, while the other lane still reads.
+            del self.adapter._run_statuses["run_1"]
+            self.assertEqual(self.moved(), [])
+            self.statuses(run_2="completed")
+            self.assertEqual(self.moved(), [mission_id])
+        found = research.mission(self.path, mission_id)
+        self.assertEqual((found["stage"], found["error"]), ("drafting", None))
+        self.assertEqual(research.ends_of(self.path, mission_id), {"for": "completed", "against": "completed"})
+
+    def test_try_again_after_a_broken_lane_moves_on_once_the_restarted_lane_completes(self) -> None:
+        self.start_verify()
+        mission_id = self.mission["id"]
+        self.lane_claim("for", "supports", "p1")
+        self.lane_claim("against", "refutes", "p2")
+        self.statuses(run_1="completed", run_2="running")
+        self.assertEqual(self.moved(), [])
+        del self.adapter._run_statuses["run_2"]
+        self.assertEqual(self.moved(), [mission_id])
+        self.assertEqual(research.ends_of(self.path, mission_id), {"for": "completed", "against": "interrupted"})
+        # A restart later: Hermes lists no run at all.
+        self.adapter._run_statuses.clear()
+        research._seen.clear()
+        self.assertEqual(self.ask("retry").status, 200)
+        self.assertEqual([body["session_id"] for _url, body in self.posts[2:]], [f"research-{mission_id}-against"])
+        with mock.patch.object(research, "UNSEEN_GRACE_S", 0.0):
+            self.statuses(run_3="completed")
+            self.assertEqual(self.moved(), [mission_id])
+        found = research.mission(self.path, mission_id)
+        self.assertEqual((found["stage"], found["error"]), ("drafting", None))
+
+    def test_a_lane_that_failed_to_start_does_not_leave_its_sibling_running_twice(self) -> None:
+        count = {"runs": 0}
+
+        async def post(_adapter, _profile, url, body, authorization=None):
+            self.posts.append((url, body))
+            if url != "/v1/runs":
+                return {}
+            count["runs"] += 1
+            if count["runs"] == 2:
+                raise plugin.outbox.StartError("busy", False)
+            return {"run_id": f"run_{count['runs']}"}
+
+        with mock.patch.object(plugin.outbox, "post", post):
+            self.start_verify()
+            mission_id = self.mission["id"]
+            self.assertIn("Couldn't start the research", research.mission(self.path, mission_id)["error"])
+            self.statuses(run_1="running")
+            self.assertEqual(self.moved(), [])
+            self.assertEqual(self.ask("retry").status, 200)
+            sessions = [body["session_id"] for url, body in self.posts if url == "/v1/runs"]
+            self.assertEqual(
+                sessions, [f"research-{mission_id}-for", f"research-{mission_id}-against", f"research-{mission_id}-against"]
+            )
+            self.assertEqual(research.runs_of(self.path, mission_id), {"for": "run_1", "against": "run_3"})
+            self.statuses(run_3="running")
+            self.posts.clear()
+            self.ask("remove")
+        self.assertEqual(sorted(url for url, _body in self.posts), ["/v1/runs/run_1/stop", "/v1/runs/run_3/stop"])
+
     def search(self, session: str, query, tool: str = "web_search"):
         return research.before_tool(tool_name=tool, args={"query": query}, task_id=session, session_id=session)
 

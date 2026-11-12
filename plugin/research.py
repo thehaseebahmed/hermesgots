@@ -799,7 +799,8 @@ def _clear_runs(path: Path, mission_id: str) -> None:
 
 def retry(path: Path, mission_id: str) -> Dict[str, Any]:
     """Clears a mission's error, so its step runs again. A failed reading restarts the lanes whose
-    run didn't complete, or every lane where each did, keeping what they recorded."""
+    run didn't complete and isn't still going, or every lane where each completed, keeping what
+    they recorded."""
     found = mission(path, mission_id)
     if found is None:
         raise ResearchError("No such mission.", 404)
@@ -808,11 +809,15 @@ def retry(path: Path, mission_id: str) -> Dict[str, Any]:
     if found["stage"] == "reading":
         # The runs being restarted are let go of before the error is, so the watcher never reads
         # an old run's end as the new reading's.
+        # A lane whose run is still going keeps it (one that failed to start beside it left it
+        # running), so no lane is ever posted twice and Delete still stops every run.
         ends = ends_of(path, mission_id)
-        again = [lane.name for lane in lanes(found) if ends.get(lane.name) != "completed"]
+        going = {lane for lane, run_id in runs_of(path, mission_id).items() if _run_status(run_id) in ACTIVE}
+        names = [lane.name for lane in lanes(found)]
+        again = [name for name in names if ends.get(name) != "completed" and name not in going]
         conn = _open(path)
         try:
-            for lane in again or [lane.name for lane in lanes(found)]:
+            for lane in again or ([] if going else names):
                 conn.execute("DELETE FROM research_runs WHERE mission_id = ? AND lane = ?", (mission_id, lane))
         finally:
             conn.close()
@@ -1169,7 +1174,6 @@ _VERIFY_RULES = """
 - Call claim_add once for every fact that bears on the claim: the fact in your own plain words, the page's URL and title, the kind of source, the id of the part it bears on, its stance on that part (supports, refutes or context), and the passage that says so copied word for word from the page (one to three whole sentences, no ellipses, no paraphrase). The tool fetches the page and refuses a passage it can't find there; copy it again exactly, or pick another passage.
 - Record what you find whichever way it points: a source that cuts the other way is recorded with that stance, and background that settles neither way is context. Take the terms the claim names literally. Mark a claim uncertain when the source is weak or hedges.
 - Never use the terminal, write files or ask the user anything. When every part is covered, reply with one line saying how many claims you recorded."""
-
 
 
 def _lane_instructions(side: str) -> str:
@@ -1990,8 +1994,9 @@ def _label(stances: List[str]) -> str:
     return "cant_tell"
 
 
-def _why(label: str, parts: List[Dict[str, Any]]) -> str:
-    """One plain sentence of why, from the label and the parts' stances, never from a model."""
+def _why(label: str, parts: List[Dict[str, Any]], sites: int, unchecked: set) -> str:
+    """One plain sentence of why, from the label, the parts' stances, the independent sources
+    counted and the parts whose only evidence couldn't be checked, never from a model."""
     total = len(parts)
 
     def of(stance: str) -> str:
@@ -2009,13 +2014,20 @@ def _why(label: str, parts: List[Dict[str, Any]]) -> str:
         return f"Two or more independent sources refute {of('refuted')}, with none backing that."
     if label == "thin":
         leans = {part["direction"] for part in parts if part["stance"] == "thin"}
-        if leans == {"supports"}:
-            return "Only one source bears on it, and it leans toward support."
-        if leans == {"refutes"}:
-            return "Only one source bears on it, and it leans against."
-        return "Only single sources bear on it, and they lean different ways."
+        way = {frozenset({"supports"}): "toward support", frozenset({"refutes"}): "against"}.get(
+            frozenset(leans), "different ways"
+        )
+        if sites <= 1:
+            return f"Only one source bears on it, and it leans {way}."
+        thin = sum(part["stance"] == "thin" for part in parts)
+        return f"Only one source bears on each of {thin} parts, and they lean {way}."
     if label == "not_supported":
         return "No evidence was found for or against it."
+    bearing = {part["part"] for part in parts if part["stance"] == "cant_tell"}
+    if bearing and bearing <= unchecked:
+        return "Evidence was found, but none of it could be checked."
+    if bearing & unchecked:
+        return "Evidence was found, but it takes no side or could not be checked."
     return "Evidence was found, but none of it takes a side."
 
 
@@ -2032,9 +2044,13 @@ def verdict(parts: List[Dict[str, Any]], ledger: Dict[str, Any], tags: List[Dict
             judged.setdefault((tag["claim"], tag.get("part")), set()).add(tag.get("stance"))
     rows = []
     sites: set = set()
+    unchecked: set = set()
     for part in parts:
         pid = part["id"]
-        bearing = any(claim.get("part") == pid for claim in claims.values()) or any(key[1] == pid for key in judged)
+        on = [claim for claim in claims.values() if claim.get("part") == pid or (claim["id"], pid) in judged]
+        bearing = bool(on)
+        if on and all(claim.get("confidence") == "uncertain" for claim in on):
+            unchecked.add(pid)
         sides: Dict[str, List[str]] = {"supports": [], "refutes": []}
         for claim in claims.values():
             stance = claim.get("stance")
@@ -2056,7 +2072,7 @@ def verdict(parts: List[Dict[str, Any]], ledger: Dict[str, Any], tags: List[Dict
     label = _label([row["stance"] for row in rows])
     return {
         "label": label,
-        "why": _why(label, rows),
+        "why": _why(label, rows, len(sites), unchecked),
         "parts": rows,
         "sources": len(sites),
         "leads": sum(claim.get("confidence") == "uncertain" for claim in claims.values()),
@@ -2698,12 +2714,14 @@ def _check_watched() -> List[Tuple[Path, str, Optional[str]]]:
         unseen = any(status is None and run_id not in _seen for run_id, status in statuses.items())
         if unseen and time.monotonic() - since < UNSEEN_GRACE_S:
             continue
-        # Past here a run Hermes doesn't list is gone (a restart): that lane was interrupted. Only a
-        # type whose every lane must complete reads it so; the others move on as they always have.
+        # Past here a run Hermes doesn't list is gone: forgotten an hour after it ended, or lost in a
+        # restart. A lane whose end was recorded keeps it; one with none was interrupted. Only a type
+        # whose every lane must complete reads it so; the others move on as they always have.
         gone = {lane for lane, run_id in runs.items() if statuses[run_id] is None}
         _note_ends(path, mission_id, {lane: "interrupted" for lane in gone})
         if gone and type_of(found).every_lane_completes:
-            statuses.update({runs[lane]: "interrupted" for lane in gone})
+            ends = ends_of(path, mission_id)
+            statuses.update({runs[lane]: ends.get(lane) or "interrupted" for lane in gone})
         if finished_reading(path, mission_id, _reading_status(list(statuses.values()))):
             _forget(path, mission_id)
             _seen.difference_update(runs.values())

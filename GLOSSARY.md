@@ -359,7 +359,7 @@ _Avoid_: backlog, queue, ready list, board
 
 **Claim**:
 Taking a task so nothing else picks it up. A claimed task is out of the frontier.
-_Avoid_: assign, lock, pickup
+_Avoid_: assign, lock, pickup; and claim for what research checks or records, which is a **checked claim** or an **evidence claim**
 
 **Hold**:
 One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back.
@@ -790,12 +790,20 @@ _Avoid_: Memento, memento plugin, the Hermes plugin
 
 ## Research
 
+**Checked claim**:
+The one assertion the user pasted into a verify mission, and the neutral restatement of it they confirmed, which is what the lanes and the judge are given.
+_Avoid_: claim (alone), statement, assertion, rumour
+
+**Evidence claim**:
+One fact a researcher recorded in a mission's ledger, in its own words, with the source it came from and the passage on that page that says it; it is verified where the passage was found on the page and uncertain where it couldn't be checked.
+_Avoid_: claim (alone), finding, fact, citation
+
 **Verify mission**:
-A research mission that takes one claim the user pasted and answers whether the evidence supports it, with a verdict the user can audit back to its sources. It is checked as a neutral restatement split into parts, never in the user's own wording.
+A research mission that takes one checked claim the user pasted and answers whether the evidence supports it, with a verdict the user can audit back to its sources. It is checked as a neutral restatement split into parts, never in the user's own wording.
 _Avoid_: fact check, verification task, claim check
 
 **Part**:
-One separate assertion a claim makes, short enough that evidence can bear on it alone; a claim has one to four, and the user confirms them before anything is read.
+One separate assertion a checked claim makes, short enough that evidence can bear on it alone; a checked claim has one to four, and the user confirms them before anything is read.
 _Avoid_: sub-claim, aspect, criterion, outline point
 
 **Lane**:
@@ -815,5 +823,5 @@ One site, as its registrable domain names it: two pages of the same site are one
 _Avoid_: unique source, distinct URL, citation
 
 **Verdict**:
-A verify mission's answer, worked out by a fixed rule from the parts' evidence when the mission is delivered, and kept as it was then. Its label is one of seven: Supported (every part backed by two or more independent sources, none against), Partly supported (some parts backed so, not the rest), Disputed (independent sources disagree on a part), Not supported (no evidence either way), Refuted (two or more independent sources against a part, none for), Thin evidence (only one source bears on a part, with the way it leans) and Can't tell (evidence was found, but none of it takes a side).
+A verify mission's answer, worked out by a fixed rule from the parts' evidence when the mission is delivered, and kept as it was then. Its label is one of seven: Supported (every part backed by two or more independent sources, none against), Partly supported (some parts backed so, not the rest), Disputed (independent sources disagree on a part), Not supported (no evidence either way), Refuted (two or more independent sources against a part, none for), Thin evidence (only one source bears on a part, with the way it leans) and Can't tell (evidence was found, but none of it takes a side, or none of it could be checked).
 _Avoid_: rating, score, conclusion, fact-check result

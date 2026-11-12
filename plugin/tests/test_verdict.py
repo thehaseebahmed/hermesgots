@@ -154,6 +154,28 @@ class VerdictTests(unittest.TestCase):
         against.side("p1", "refutes", 1)
         self.assertIn("against", against.verdict(["p1"])["why"])
 
+    def test_evidence_that_could_not_be_checked_is_not_said_to_take_no_side(self) -> None:
+        ledger = Ledger()
+        ledger.claim("p1", "supports", confidence="uncertain")
+        ledger.claim("p1", "supports", confidence="uncertain")
+        result = ledger.verdict(["p1"])
+        self.assertEqual(result["label"], "cant_tell")
+        self.assertNotIn("takes a side", result["why"])
+        self.assertIn("checked", result["why"])
+        neutral = Ledger()
+        neutral.claim("p1", "context")
+        self.assertIn("takes a side", neutral.verdict(["p1"])["why"])
+
+    def test_thin_evidence_from_several_sources_is_not_said_to_be_one_source(self) -> None:
+        ledger = Ledger()
+        ledger.claim("p1", "supports")
+        ledger.claim("p2", "supports")
+        result = ledger.verdict(["p1", "p2"])
+        self.assertEqual((result["label"], result["sources"]), ("thin", 2))
+        self.assertNotIn("Only one source bears on it", result["why"])
+        self.assertIn("support", result["why"])
+        self.assertEqual(result["why"].count("."), 1)
+
     def test_a_tag_the_researcher_did_not_record_does_not_count(self) -> None:
         ledger = Ledger()
         # The researcher recorded refutes; the judge tagged supports.
