@@ -29,7 +29,6 @@ import {
 /** What the host says when it refuses the removal: its own sentence, which the question must draw. */
 const SAID = "That mission is being written right now, so it can't be deleted yet."
 
-/** A delivered mission, as the plugin lists it and reads it back. */
 const mission = (id: string, title: string) => ({
   id,
   type: "learn",
@@ -77,7 +76,6 @@ function host(missions: Record<string, unknown>[], refusal?: string) {
   return { fetch, calls }
 }
 
-/** The one bot whose plugin these missions live on, and the screens' way in. */
 async function seed(plugin: ReturnType<typeof host>) {
   await seedSettings({ developer: true, activeProfileId: "bot-1" })
   await db.profiles.clear()

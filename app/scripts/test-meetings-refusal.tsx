@@ -39,7 +39,6 @@ Welcome to the retro.
 What went well this sprint?
 `
 
-/** A meeting as the plugin lists it, before its transcript and notes are read. */
 const row = (id: string, title: string, patch: Record<string, unknown> = {}) => ({
   id,
   title,
@@ -85,7 +84,6 @@ function host(rows: Record<string, unknown>[], refusal?: string) {
   return { fetch, calls, allow: () => void (refuses = undefined) }
 }
 
-/** The one bot whose plugin these meetings live on, and the screen's way in. */
 async function seed(plugin: ReturnType<typeof host>) {
   await seedSettings({ developer: true, meetings: true, activeProfileId: "bot-1" })
   await db.profiles.clear()

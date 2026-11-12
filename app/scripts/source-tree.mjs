@@ -14,7 +14,6 @@ import ts from "typescript"
 
 const asPath = (dir) => (dir instanceof URL ? fileURLToPath(dir) : dir)
 
-/** Every file under a directory, as a path relative to it. */
 export function sourceFiles(dir, prefix = "", pattern = /\.(ts|tsx)$/) {
   const found = []
   for (const entry of readdirSync(asPath(dir), { withFileTypes: true })) {
@@ -28,7 +27,6 @@ export function sourceFiles(dir, prefix = "", pattern = /\.(ts|tsx)$/) {
 /** The dialect a file is written in: a `.tsx` file's `<T>` is an element, and a `.ts` file's is a type. */
 const kindOf = (name) => (/\.(tsx|jsx)$/.test(name) ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
 
-/** A source text as a tree, or the parse error that stopped it, named where it sits. */
 export function parseSource(source, name) {
   const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true, kindOf(name))
   const errors = file.parseDiagnostics ?? []
@@ -41,7 +39,6 @@ export function parseSource(source, name) {
   return file
 }
 
-/** The file at `path`, under `root`, as a tree. */
 export function parsed(path, root) {
   return parseSource(readFileSync(join(asPath(root), path), "utf8"), path)
 }

@@ -20,7 +20,6 @@ const OWNERS = new Set(["components/ui/sonner.tsx", "lib/tell.ts"])
 
 const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 
-/** The module a parsed file names. */
 function modulesIn(path) {
   const file = parsed(path, SRC)
   const named = []

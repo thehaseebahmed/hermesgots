@@ -592,7 +592,6 @@ test(
           document.querySelector('[aria-label="Remove deck.zip"]'),
           "the file can be taken off the message",
         )
-        // Sending again asks the Host again, and the tile says the same words again.
         await click(sendButton() ?? null)
         await until(async () => attempts.length === 2, "the second upload")
         await until(

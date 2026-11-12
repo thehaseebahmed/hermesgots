@@ -67,7 +67,6 @@ export function PlanReadyCard({
   onKeepPlanning: () => Promise<void>
 }) {
   const [pending, setPending] = useState<"auto" | "accept_edits" | "keep" | null>(null)
-  // The pick waits on the host, so a refusal is drawn here, above the buttons it was given from.
   const refusal = useRefusal()
   const run = (which: NonNullable<typeof pending>, action: () => Promise<void>) => {
     setPending(which)
@@ -212,7 +211,6 @@ export function QueuePausedCard({
   /** Acknowledges the lost turn, refusing by throwing: the card says the host's words where it asked. */
   onDiscard: () => Promise<unknown>
 }) {
-  // The card stands where the composer would, so its refusal is drawn in it, above the button.
   const refusal = useRefusal()
   return (
     <Card size="sm" className={CARD}>
@@ -358,8 +356,6 @@ export function ClarifyCard({
   // again. Nothing resumes the expired call — the agent asks afresh, in a new turn.
   const missed = !running && !answered && ended.owed
   const title = answered ? "Answered" : ended.title
-  // The card stands in the thread, so its refusal is the thread's: the chat says the words where it
-  // says everything else about this turn.
   const refusal = useThreadRefusal()
   const askAgain = async () => {
     setAsking(true)

@@ -201,7 +201,7 @@ test("the brief keeps at least two options and two criteria", async () => {
 
 test("a refused brief says the host's words at the form, and no toast", async () => {
   // The host refuses the write in its own words: the form is where the reader is, so that is where
-  // the sentence stands — the toast it used to be is gone before a reader looking at Save sees it.
+  // the sentence stands.
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile("research"))

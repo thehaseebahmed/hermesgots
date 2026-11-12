@@ -118,8 +118,8 @@ const run = async ({ page, profileId, shot, until }) => {
       "Save to be enabled once a value is typed",
     )
     await save.click()
-    // The toast that said "Saved." is gone: the block the save redraws is the evidence, and Save is
-    // offered again only once the form matches what the Host now holds.
+    // The block the save redraws is the evidence, and Save is offered again only once the form
+    // matches what the Host now holds.
     await until(
       () => save.isDisabled().then((disabled) => disabled),
       15_000,

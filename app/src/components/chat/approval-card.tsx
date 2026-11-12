@@ -41,7 +41,6 @@ export function ApprovalCard({
   const face = useCodeFace()
   const approval = message.approval!
   const [pending, setPending] = useState<ApprovalChoice | null>(null)
-  // The answer waits on the host, so a refusal is drawn here, under the buttons it was given from.
   const refusal = useRefusal()
   const resolved = approval.resolved
   // Hermes doesn't name the tool in the approval payload; the tool still running is the asker.

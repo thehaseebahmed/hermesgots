@@ -989,7 +989,6 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
 function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }) {
   const delivered = mission.stage === "delivered"
   const [format, setFormat] = useState<OutputFormat>(mission.formats[0] ?? mission.format)
-  // This screen's own writes: a format it makes, and the brief it folds open again.
   const refusal = useRefusal(mission.id)
   // The Sources drawer, and the claim a tapped citation opened it on.
   const [sources, setSources] = useState<{ cited?: string }>()

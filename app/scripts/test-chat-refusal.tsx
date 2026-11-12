@@ -81,8 +81,6 @@ test("a card's refusal goes when the same answer lands", async () => {
       await until(async () => Boolean(notice()), "the card's refusal")
       refuses = false
       await click(allowOnce())
-      // The words are about the attempt that caused them, so they go on the answer that lands —
-      // not as the next one starts, which is the moment this case used to be satisfied by.
       await until(async () => landed, "the answer to land")
       await until(async () => missing('[role="alert"]'), "the refusal to go")
     },

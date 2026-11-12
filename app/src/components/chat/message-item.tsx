@@ -376,7 +376,6 @@ function HeldActions({
   onSend?: (message: Message) => void
   onDismiss?: (message: Message) => void
 }) {
-  // The row stands in the thread, so its refusal is the thread's, drawn where the chat says the rest.
   const refusal = useThreadRefusal()
   return (
     <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">

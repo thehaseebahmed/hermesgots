@@ -102,7 +102,6 @@ function LivePage() {
   const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  // The chrome a bot's page is drawn in: the page's one refusal is the Screen's to hold.
   // The bot's page is the entry itself; its edits are addressed under its own segment.
   if (!tab)
     return (

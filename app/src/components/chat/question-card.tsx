@@ -212,7 +212,6 @@ export function QuestionCard({
   const askedPage = askedId ? questions.findIndex((one) => one.id === askedId) : -1
   const oneAtATime = askedPage >= 0
   const [sending, setPending] = useState(false)
-  // The answers wait on the host, so a refusal is drawn here, above the Send that gave them.
   const refusal = useRefusal()
   const pending = sending || held
   const [page, setPage] = useState(oneAtATime ? askedPage : 0)
